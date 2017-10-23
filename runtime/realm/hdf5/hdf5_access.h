@@ -18,7 +18,7 @@
 #ifndef REALM_HDF5_ACCESS_H
 #define REALM_HDF5_ACCESS_H
 
-#include <realm/inst_layout.h>
+#include "realm/inst_layout.h"
 #include <string>
 
 #include <hdf5.h>
@@ -50,6 +50,6 @@ namespace Realm {
 
 }; // namespace Realm
 
-#include <realm/hdf5/hdf5_access.inl>
+#include "realm/hdf5/hdf5_access.inl"
 
 #endif // ifndef REALM_HDF5_ACCESS_H

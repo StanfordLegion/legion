@@ -15,10 +15,11 @@
  */
 
 #include "realm/realm_config.h"
-#include <realm/runtime_impl.h>
-#include <realm/deppart/inst_helper.h>
-#include <realm/mem_impl.h>
-#include <realm/inst_impl.h>
+#include "realm/runtime_impl.h"
+#include "realm/deppart/inst_helper.h"
+#include "realm/mem_impl.h"
+#include "realm/inst_impl.h"
+
 #include <sys/types.h>
 #include <time.h>
 #include <unistd.h>

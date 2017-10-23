@@ -20,7 +20,6 @@
 #include <unistd.h>
 #include <queue>
 #include "legion.h"
-#include "arrays.h"
 
 #include "cgsolver.h"
 #include "cgtasks.h"

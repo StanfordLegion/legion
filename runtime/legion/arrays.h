@@ -23,14 +23,14 @@
 #include <map>
 #include <ostream>
 
-#include <cassert>
+#include <assert.h>
 #ifndef __GNUC__
-#include <legion/atomics.h> // for __sync_fetch_and_add
+#include "legion/atomics.h" // for __sync_fetch_and_add
 #endif
 
 #include <stdint.h>
 
-#include <legion/legion_config.h>
+#include "legion/legion_config.h"
 
 #ifdef __CUDACC__
 #define CUDAPREFIX __host__ __device__

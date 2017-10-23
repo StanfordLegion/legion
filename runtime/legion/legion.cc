@@ -15,12 +15,12 @@
 
 
 #include "legion.h"
-#include "runtime.h"
-#include "legion_ops.h"
-#include "legion_tasks.h"
-#include "legion_context.h"
-#include "legion_profiling.h"
-#include "legion_allocation.h"
+#include "legion/runtime.h"
+#include "legion/legion_ops.h"
+#include "legion/legion_tasks.h"
+#include "legion/legion_context.h"
+#include "legion/legion_profiling.h"
+#include "legion/legion_allocation.h"
 
 namespace Legion {
 #ifndef DISABLE_PARTITION_SHIM

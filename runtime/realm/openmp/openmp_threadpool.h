@@ -17,7 +17,7 @@
 #ifndef REALM_OPENMP_THREADPOOL_H
 #define REALM_OPENMP_THREADPOOL_H
 
-#include "../threads.h"
+#include "realm/threads.h"
 
 namespace Realm {
 
@@ -84,6 +84,6 @@ namespace Realm {
 
 }; // namespace Realm
 
-#include "openmp_threadpool.inl"
+#include "realm/openmp/openmp_threadpool.inl"
 
 #endif

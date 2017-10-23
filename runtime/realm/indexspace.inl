@@ -16,13 +16,13 @@
 // index spaces for Realm
 
 // nop, but helps IDEs
-#include "indexspace.h"
+#include "realm/indexspace.h"
 
-//include "instance.h"
-//include "inst_layout.h"
+//include "realm/instance.h"
+//include "realm/inst_layout.h"
 
-#include "serialize.h"
-#include "logging.h"
+#include "realm/serialize.h"
+#include "realm/logging.h"
 
 TEMPLATE_TYPE_IS_SERIALIZABLE2(int N, typename T, Realm::Point<N,T>);
 TEMPLATE_TYPE_IS_SERIALIZABLE2(int N, typename T, Realm::Rect<N,T>);

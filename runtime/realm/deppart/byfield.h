@@ -18,7 +18,7 @@
 #ifndef REALM_DEPPART_BYFIELD_H
 #define REALM_DEPPART_BYFIELD_H
 
-#include "partitions.h"
+#include "realm/deppart/partitions.h"
 
 namespace Realm {
 

@@ -15,10 +15,11 @@
  */
 
 #include "realm/realm_config.h"
-#include "lowlevel_dma.h"
-#include "channel.h"
+#include "realm/transfer/lowlevel_dma.h"
+#include "realm/transfer/channel.h"
 #include "realm/threads.h"
-#include <realm/transfer/transfer.h>
+#include "realm/transfer/transfer.h"
+
 #include <errno.h>
 // included for file memory data transfer
 #include <unistd.h>
@@ -30,7 +31,7 @@
 #endif
 
 #ifdef USE_CUDA
-#include <realm/cuda/cuda_module.h>
+#include "realm/cuda/cuda_module.h"
 #endif
 
 #include <queue>

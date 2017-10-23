@@ -15,8 +15,8 @@
 
 // Layout descriptors for Realm RegionInstances
 
-#include "inst_layout.h"
-#include <realm/deppart/inst_helper.h>
+#include "realm/inst_layout.h"
+#include "realm/deppart/inst_helper.h"
 
 namespace Realm {
 

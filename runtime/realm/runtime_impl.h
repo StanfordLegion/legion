@@ -18,28 +18,28 @@
 #ifndef REALM_RUNTIME_IMPL_H
 #define REALM_RUNTIME_IMPL_H
 
-#include "runtime.h"
-#include "id.h"
+#include "realm/runtime.h"
+#include "realm/id.h"
 
-#include <realm/activemsg.h>
-#include "operation.h"
-#include "profiling.h"
+#include "realm/activemsg.h"
+#include "realm/operation.h"
+#include "realm/profiling.h"
 
-#include "dynamic_table.h"
-#include "proc_impl.h"
-#include "deppart/partitions.h"
+#include "realm/dynamic_table.h"
+#include "realm/proc_impl.h"
+#include "realm/deppart/partitions.h"
 
 // event and reservation impls are included directly in the node's dynamic tables,
 //  so we need their definitions here (not just declarations)
-#include "event_impl.h"
-#include "rsrv_impl.h"
+#include "realm/event_impl.h"
+#include "realm/rsrv_impl.h"
 
-#include "machine_impl.h"
+#include "realm/machine_impl.h"
 
-#include "threads.h"
-#include "sampling.h"
+#include "realm/threads.h"
+#include "realm/sampling.h"
 
-#include "module.h"
+#include "realm/module.h"
 
 #if __cplusplus >= 201103L
 #define typeof decltype

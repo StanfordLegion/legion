@@ -16,7 +16,7 @@
 // custom field serialization/deserialization for instance fields in Realm
 
 // this is a nop, but it's for the benefit of IDEs trying to parse this file
-#include "custom_serdez.h"
+#include "realm/custom_serdez.h"
 
 namespace Realm {
 

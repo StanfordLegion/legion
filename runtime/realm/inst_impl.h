@@ -18,14 +18,14 @@
 #ifndef REALM_INST_IMPL_H
 #define REALM_INST_IMPL_H
 
-#include "instance.h"
-#include "id.h"
-#include "inst_layout.h"
+#include "realm/instance.h"
+#include "realm/id.h"
+#include "realm/inst_layout.h"
 
-#include <realm/activemsg.h>
+#include "realm/activemsg.h"
 
-#include "rsrv_impl.h"
-#include "metadata.h"
+#include "realm/rsrv_impl.h"
+#include "realm/metadata.h"
 
 namespace Realm {
 

@@ -18,7 +18,7 @@
 #define __LEGION_CONFIG_H__
 
 #ifdef LEGION_USE_CMAKE
-#include "legion_defines.h"
+#include "legion/legion_defines.h"
 #endif
 
 // for UINT_MAX, INT_MAX, INT_MIN
@@ -35,7 +35,7 @@
 //
 // ******************** IMPORTANT **************************
 
-#include <realm/realm_c.h>
+#include "realm/realm_c.h"
 
 //==========================================================================
 //                                Constants

@@ -17,12 +17,12 @@
 #ifndef __LEGION_REGION_TREE_H__
 #define __LEGION_REGION_TREE_H__
 
-#include "legion_types.h"
-#include "legion_utilities.h"
-#include "legion_allocation.h"
-#include "legion_analysis.h"
-#include "garbage_collection.h"
-#include "field_tree.h"
+#include "legion/legion_types.h"
+#include "legion/legion_utilities.h"
+#include "legion/legion_allocation.h"
+#include "legion/legion_analysis.h"
+#include "legion/garbage_collection.h"
+#include "legion/field_tree.h"
 
 namespace Legion {
   namespace Internal {

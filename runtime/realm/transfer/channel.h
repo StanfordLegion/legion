@@ -28,12 +28,12 @@
 #include <assert.h>
 #include <pthread.h>
 #include <string.h>
-#include "lowlevel_dma.h"
+#include "realm/transfer/lowlevel_dma.h"
 
-#include <realm/id.h>
-#include <realm/runtime_impl.h>
-#include <realm/mem_impl.h>
-#include <realm/inst_impl.h>
+#include "realm/id.h"
+#include "realm/runtime_impl.h"
+#include "realm/mem_impl.h"
+#include "realm/inst_impl.h"
 
 #ifdef USE_CUDA
 #include "realm/cuda/cuda_module.h"

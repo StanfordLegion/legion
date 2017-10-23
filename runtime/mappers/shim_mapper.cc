@@ -14,10 +14,10 @@
  */
 
 #include "legion.h"
-#include "shim_mapper.h"
+#include "mappers/shim_mapper.h"
 
-#include <cstdlib>
-#include <cassert>
+#include <stdlib.h>
+#include <assert.h>
 #include <algorithm>
 
 #define STATIC_MAX_PERMITTED_STEALS   4

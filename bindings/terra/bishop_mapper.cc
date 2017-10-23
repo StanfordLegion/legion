@@ -14,10 +14,10 @@
  */
 
 #include "bishop_mapper.h"
-#include "legion_c_util.h"
+#include "legion/legion_c_util.h"
 
 extern "C" {
-#include "legion_c.h"
+#include "legion/legion_c.h"
 }
 
 using namespace std;

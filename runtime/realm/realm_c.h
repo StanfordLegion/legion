@@ -19,7 +19,7 @@
 #ifndef REALM_C_H
 #define REALM_C_H
 
-#include <realm/realm_config.h>
+#include "realm/realm_config.h"
 
 // for size_t
 #include <stddef.h>

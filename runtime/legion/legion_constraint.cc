@@ -13,8 +13,8 @@
  * limitations under the License.
  */
 
-#include "legion_utilities.h"
-#include "legion_constraint.h"
+#include "legion/legion_utilities.h"
+#include "legion/legion_constraint.h"
 
 namespace Legion {
   

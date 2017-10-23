@@ -120,7 +120,7 @@ namespace Realm {
 
 }; // namespace Realm
 
-#include "circ_queue.inl"
+#include "realm/circ_queue.inl"
 
 #endif // ifndef REALM_CIRC_QUEUE_H
 

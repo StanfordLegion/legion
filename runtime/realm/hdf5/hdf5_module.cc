@@ -13,16 +13,16 @@
  * limitations under the License.
  */
 
-#include "hdf5_module.h"
+#include "realm/hdf5/hdf5_module.h"
 
-#include "hdf5_internal.h"
+#include "realm/hdf5/hdf5_internal.h"
 
-#include "logging.h"
-#include "cmdline.h"
-#include "threads.h"
-#include "runtime_impl.h"
-#include "utils.h"
-#include "inst_impl.h"
+#include "realm/logging.h"
+#include "realm/cmdline.h"
+#include "realm/threads.h"
+#include "realm/runtime_impl.h"
+#include "realm/utils.h"
+#include "realm/inst_impl.h"
 
 namespace Realm {
 

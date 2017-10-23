@@ -17,10 +17,10 @@
 
 #include <string>
 #include <stdio.h>
-#include "legion_profiling.h"
+#include "legion/legion_profiling.h"
 
 #ifdef USE_ZLIB
-#include "zlib.h"
+#include <zlib.h>
 // lp_fopen expects filename to be a std::string
 #define lp_fopen(filename, mode)      gzopen(filename.c_str(),mode)
 #define lp_fwrite(f, data, num_bytes) gzwrite(f,data,num_bytes)

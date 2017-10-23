@@ -18,10 +18,10 @@
 #define __TEST_MAPPER_H__
 
 #include "legion.h"
-#include "default_mapper.h"
+#include "mappers/default_mapper.h"
 
-#include <cstdlib>
-#include <cassert>
+#include <stdlib.h>
+#include <assert.h>
 #include <algorithm>
 
 namespace Legion {

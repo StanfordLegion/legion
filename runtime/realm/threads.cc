@@ -15,11 +15,11 @@
 
 // generic Realm interface to threading libraries (e.g. pthreads)
 
-#include "threads.h"
+#include "realm/threads.h"
 
-#include "logging.h"
-#include "faults.h"
-#include "operation.h"
+#include "realm/logging.h"
+#include "realm/faults.h"
+#include "realm/operation.h"
 
 #ifdef DEBUG_USWITCH
 #include <stdio.h>

@@ -16,9 +16,9 @@
 // processors for Realm
 
 // nop, but helps IDEs
-#include "processor.h"
+#include "realm/processor.h"
 
-#include "serialize.h"
+#include "realm/serialize.h"
 TYPE_IS_SERIALIZABLE(Realm::Processor);
 TYPE_IS_SERIALIZABLE(Realm::Processor::Kind);
 

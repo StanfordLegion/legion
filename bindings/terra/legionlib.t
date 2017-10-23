@@ -24,7 +24,7 @@ require 'legionlib-terra'
 -- require 'legionlib-mapper'
 require 'legionlib-util'
 
-local legion_c = terralib.includec("legion_c.h")
+local legion_c = terralib.includec("legion/legion_c.h")
 local legion_terra = terralib.includecstring([[
 #include "legion_terra.h"
 #include "legion_terra_tasks.h"

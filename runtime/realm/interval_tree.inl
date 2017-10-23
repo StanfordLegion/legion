@@ -16,7 +16,7 @@
 // templated interval tree
 
 // nop, but helps IDEs
-#include "interval_tree.h"
+#include "realm/interval_tree.h"
 
 namespace Realm {
 

@@ -16,7 +16,7 @@
 #ifndef REALM_PYTHON_SOURCE_H
 #define REALM_PYTHON_SOURCE_H
 
-#include "codedesc.h"
+#include "realm/codedesc.h"
 
 namespace Realm {
 
@@ -50,6 +50,6 @@ namespace Realm {
 
 }; // namespace Realm
 
-#include "python_source.inl"
+#include "realm/python/python_source.inl"
 
 #endif

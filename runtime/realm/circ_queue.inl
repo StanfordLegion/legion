@@ -16,7 +16,7 @@
 // templated circular queue
 
 // nop, but helps IDEs
-#include "circ_queue.h"
+#include "realm/circ_queue.h"
 
 namespace Realm {
 

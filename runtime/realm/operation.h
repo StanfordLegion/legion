@@ -19,7 +19,7 @@
 #include "realm/profiling.h"
 #include "realm/event_impl.h"
 
-#include <realm/activemsg.h>
+#include "realm/activemsg.h"
 
 #include <set>
 #include <iostream>
@@ -171,6 +171,6 @@ namespace Realm {
 
 };
 
-#include "operation.inl"
+#include "realm/operation.inl"
 
 #endif // REALM_OPERATION_H

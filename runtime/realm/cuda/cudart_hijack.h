@@ -21,7 +21,7 @@
 // so that we get types and stuff right
 #include <cuda_runtime.h>
 
-#include <realm/activemsg.h>
+#include "realm/activemsg.h"
 
 #include <set>
 #include <vector>

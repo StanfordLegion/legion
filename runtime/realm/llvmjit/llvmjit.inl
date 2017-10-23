@@ -14,7 +14,7 @@
  */
 
 // NOP, but helpful for IDEs
-#include "llvmjit.h"
+#include "realm/llvmjit/llvmjit.h"
 
 namespace Realm {
 

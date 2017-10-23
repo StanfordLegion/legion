@@ -16,7 +16,7 @@
 // Layout descriptors for Realm RegionInstances
 
 // NOP but useful for IDE's
-#include "indexspace.h"
+#include "realm/indexspace.h"
 
 namespace Realm {
 

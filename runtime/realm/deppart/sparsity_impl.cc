@@ -15,14 +15,14 @@
 
 // implementation of sparsity maps
 
-#include "sparsity_impl.h"
+#include "realm/deppart/sparsity_impl.h"
 
-#include "../runtime_impl.h"
-#include "partitions.h"
-#include "deppart_config.h"
-#include "rectlist.h"
-#include "inst_helper.h"
-#include "../logging.h"
+#include "realm/runtime_impl.h"
+#include "realm/deppart/partitions.h"
+#include "realm/deppart/deppart_config.h"
+#include "realm/deppart/rectlist.h"
+#include "realm/deppart/inst_helper.h"
+#include "realm/logging.h"
 
 namespace Realm {
 

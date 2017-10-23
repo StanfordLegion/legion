@@ -15,11 +15,11 @@
 
 // Realm object metadata base implementation
 
-#include "metadata.h"
+#include "realm/metadata.h"
 
-#include "event_impl.h"
-#include "inst_impl.h"
-#include "runtime_impl.h"
+#include "realm/event_impl.h"
+#include "realm/inst_impl.h"
+#include "realm/runtime_impl.h"
 
 namespace Realm {
 

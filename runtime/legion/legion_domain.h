@@ -17,7 +17,7 @@
 #define __LEGION_DOMAIN_H__
 
 #include "realm.h"
-#include "legion_types.h"
+#include "legion/legion_types.h"
 
 /**
  * \file legion_domain.h
@@ -361,7 +361,7 @@ namespace Legion {
 
 }; // namespace Legion
 
-#include "legion_domain.inl"
+#include "legion/legion_domain.inl"
 
 #endif // __LEGION_DOMAIN_H__
 

@@ -18,11 +18,11 @@
 #ifndef REALM_CODEDESC_H
 #define REALM_CODEDESC_H
 
-#include "realm_config.h"
+#include "realm/realm_config.h"
 
-#include "serialize.h"
+#include "realm/serialize.h"
 
-#include <cstddef>
+#include <stddef.h>
 #include <vector>
 #include <iostream>
 
@@ -493,7 +493,7 @@ namespace Realm {
 
 }; // namespace Realm
 
-#include "codedesc.inl"
+#include "realm/codedesc.inl"
 
 #undef REALM_TYPE_KINDS
 

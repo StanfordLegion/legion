@@ -21,8 +21,8 @@
 #include <vector>
 
 #include "legion.h"
-#include "legion_c.h"
-#include "legion_c_util.h"
+#include "legion/legion_c.h"
+#include "legion/legion_c_util.h"
 
 #include "legion_terra.h"
 

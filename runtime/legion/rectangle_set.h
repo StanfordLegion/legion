@@ -21,10 +21,10 @@
 #include <list>
 #include <vector>
 
-#include <cstdio>
-#include <cassert>
+#include <stdio.h>
+#include <assert.h>
 
-#include "legion_config.h"
+#include "legion/legion_config.h"
 
 namespace Legion {
   namespace Internal {

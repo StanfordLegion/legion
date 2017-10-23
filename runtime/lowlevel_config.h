@@ -16,9 +16,9 @@
 #ifndef RUNTIME_LOWLEVEL_CONFIG_H
 #define RUNTIME_LOWLEVEL_CONFIG_H
 
-#warning This file is deprecated - include <realm/realm_c.h> instead (and rename legion_lowlevel_* to realm_*).
+#warning This file is deprecated - include "realm/realm_c.h" instead (and rename legion_lowlevel_* to realm_*).
 
-#include <realm/realm_c.h>
+#include "realm/realm_c.h"
 
 typedef realm_id_t legion_lowlevel_id_t;
 typedef realm_address_space_t legion_lowlevel_address_space_t;

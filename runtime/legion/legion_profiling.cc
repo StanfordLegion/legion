@@ -14,14 +14,14 @@
  */
 
 #include "legion.h"
-#include "cmdline.h"
-#include "legion_ops.h"
-#include "legion_tasks.h"
-#include "legion_profiling.h"
-#include "legion_profiling_serializer.h"
+#include "realm/cmdline.h"
+#include "legion/legion_ops.h"
+#include "legion/legion_tasks.h"
+#include "legion/legion_profiling.h"
+#include "legion/legion_profiling_serializer.h"
 
-#include <cstring>
-#include <cstdlib>
+#include <string.h>
+#include <stdlib.h>
 
 namespace Legion {
   namespace Internal {

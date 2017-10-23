@@ -12,7 +12,7 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
-local legion_c = terralib.includec("legion_c.h")
+local legion_c = terralib.includec("legion/legion_c.h")
 local legion_terra = terralib.includecstring([[
 #include "legion_terra.h"
 #include "legion_terra_tasks.h"

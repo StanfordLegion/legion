@@ -14,10 +14,10 @@
  */
 
 #include "legion.h"
-#include "default_mapper.h"
+#include "mappers/default_mapper.h"
 
-#include <cstdlib>
-#include <cassert>
+#include <stdlib.h>
+#include <assert.h>
 #include <limits.h>
 #include <algorithm>
 

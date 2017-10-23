@@ -13,5 +13,5 @@
  * limitations under the License.
  */
 
-#warning This file is deprecated - include <legion/arrays.h> instead.
-#include <legion/arrays.h>
+#warning This file is deprecated - include "legion/arrays.h" instead.
+#include "legion/arrays.h"

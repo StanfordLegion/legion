@@ -17,11 +17,11 @@
 #define __LEGION_PROFILING_H__
 
 #include "realm.h"
-#include "legion_types.h"
-#include "legion_utilities.h"
+#include "legion/legion_types.h"
+#include "legion/legion_utilities.h"
 #include "realm/profiling.h"
 
-#include <cassert>
+#include <assert.h>
 #include <deque>
 #include <algorithm>
 #include <sstream>

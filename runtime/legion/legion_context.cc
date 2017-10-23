@@ -13,12 +13,12 @@
  * limitations under the License.
  */
 
-#include "runtime.h"
-#include "legion_tasks.h"
-#include "legion_trace.h"
-#include "legion_context.h"
-#include "legion_instances.h"
-#include "legion_views.h"
+#include "legion/runtime.h"
+#include "legion/legion_tasks.h"
+#include "legion/legion_trace.h"
+#include "legion/legion_context.h"
+#include "legion/legion_instances.h"
+#include "legion/legion_views.h"
 
 namespace Legion {
   namespace Internal {

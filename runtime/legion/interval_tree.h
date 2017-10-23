@@ -17,10 +17,10 @@
 #ifndef __LEGION_INTERVAL_TREE_H__
 #define __LEGION_INTERVAL_TREE_H__
 
-#include <cassert>
-#include <cstdlib>
+#include <assert.h>
+#include <stdlib.h>
 
-#include "legion_config.h"
+#include "legion/legion_config.h"
 
 namespace Legion {
   namespace Internal {

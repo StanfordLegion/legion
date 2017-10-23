@@ -15,13 +15,13 @@
 
 // data transfer (a.k.a. dma) engine for Realm
 
-#include <realm/transfer/transfer.h>
+#include "realm/transfer/transfer.h"
 
-#include <realm/transfer/lowlevel_dma.h>
-#include <realm/mem_impl.h>
-#include <realm/inst_layout.h>
+#include "realm/transfer/lowlevel_dma.h"
+#include "realm/mem_impl.h"
+#include "realm/inst_layout.h"
 #ifdef USE_HDF
-#include <realm/hdf5/hdf5_access.h>
+#include "realm/hdf5/hdf5_access.h"
 #endif
 
 namespace Realm {

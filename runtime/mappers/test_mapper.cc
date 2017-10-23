@@ -13,7 +13,7 @@
  * limitations under the License.
  */
 
-#include "test_mapper.h"
+#include "mappers/test_mapper.h"
 #include <sys/time.h>
 
 #define INLINE_RATIO    100 // 1 in 100

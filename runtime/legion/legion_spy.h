@@ -18,8 +18,8 @@
 #define __LEGION_SPY_H__
 
 #include "realm.h"
-#include "legion_types.h"
-#include "legion_utilities.h"
+#include "legion/legion_types.h"
+#include "legion/legion_utilities.h"
 
 /**
  * This file contains calls for logging that are consumed by 

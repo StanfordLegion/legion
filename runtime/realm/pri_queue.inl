@@ -16,7 +16,7 @@
 // templated priority queue
 
 // nop, but helps IDEs
-#include "pri_queue.h"
+#include "realm/pri_queue.h"
 
 namespace Realm {
 

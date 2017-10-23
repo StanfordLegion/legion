@@ -18,12 +18,12 @@
 #define __LEGION_TASKS_H__
 
 #include "legion.h"
-#include "runtime.h"
-#include "legion_ops.h"
-#include "region_tree.h"
-#include "legion_mapping.h"
-#include "legion_utilities.h"
-#include "legion_allocation.h"
+#include "legion/runtime.h"
+#include "legion/legion_ops.h"
+#include "legion/region_tree.h"
+#include "legion/legion_mapping.h"
+#include "legion/legion_utilities.h"
+#include "legion/legion_allocation.h"
 
 namespace Legion {
   namespace Internal {

@@ -18,20 +18,20 @@
 #ifndef REALM_PROC_IMPL_H
 #define REALM_PROC_IMPL_H
 
-#include "processor.h"
-#include "id.h"
+#include "realm/processor.h"
+#include "realm/id.h"
 
-#include <realm/activemsg.h>
-#include "operation.h"
-#include "profiling.h"
-#include "sampling.h"
+#include "realm/activemsg.h"
+#include "realm/operation.h"
+#include "realm/profiling.h"
+#include "realm/sampling.h"
 
-#include "event_impl.h"
-#include "rsrv_impl.h"
+#include "realm/event_impl.h"
+#include "realm/rsrv_impl.h"
 
-#include "tasks.h"
-#include "threads.h"
-#include "codedesc.h"
+#include "realm/tasks.h"
+#include "realm/threads.h"
+#include "realm/codedesc.h"
 
 namespace Realm {
 

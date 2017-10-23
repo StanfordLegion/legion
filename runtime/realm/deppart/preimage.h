@@ -18,7 +18,7 @@
 #ifndef REALM_DEPPART_PREIMAGE_H
 #define REALM_DEPPART_PREIMAGE_H
 
-#include "partitions.h"
+#include "realm/deppart/partitions.h"
 
 namespace Realm {
 

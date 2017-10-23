@@ -15,20 +15,20 @@
 
 // Runtime implementation for Realm
 
-#include "runtime_impl.h"
+#include "realm/runtime_impl.h"
 
-#include "proc_impl.h"
-#include "mem_impl.h"
-#include "inst_impl.h"
+#include "realm/proc_impl.h"
+#include "realm/mem_impl.h"
+#include "realm/inst_impl.h"
 
-#include <realm/activemsg.h>
-#include "deppart/preimage.h"
+#include "realm/activemsg.h"
+#include "realm/deppart/preimage.h"
 
-#include "cmdline.h"
+#include "realm/cmdline.h"
 
-#include "codedesc.h"
+#include "realm/codedesc.h"
 
-#include "utils.h"
+#include "realm/utils.h"
 
 // For doing backtraces
 #include <execinfo.h> // symbols
@@ -49,10 +49,10 @@ static const void *ignore_gasnet_warning1 __attribute__((unused)) = (void *)_gas
 #endif
 
 // remote copy active messages from from lowlevel_dma.h for now
-#include <realm/transfer/lowlevel_dma.h>
+#include "realm/transfer/lowlevel_dma.h"
 
 // create xd message and update bytes read/write messages
-#include <realm/transfer/channel.h>
+#include "realm/transfer/channel.h"
 
 #include <unistd.h>
 #include <signal.h>

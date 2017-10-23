@@ -17,10 +17,10 @@
 #define __LEGION_CONTEXT_H__
 
 #include "legion.h"
-#include "legion_tasks.h"
-#include "legion_mapping.h"
-#include "legion_instances.h"
-#include "legion_allocation.h"
+#include "legion/legion_tasks.h"
+#include "legion/legion_mapping.h"
+#include "legion/legion_instances.h"
+#include "legion/legion_allocation.h"
 
 namespace Legion {
   namespace Internal {

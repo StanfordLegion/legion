@@ -18,8 +18,8 @@
 #ifndef REALM_DEPPART_INST_HELPER_H
 #define REALM_DEPPART_INST_HELPER_H
 
-#include "../indexspace.h"
-#include "../dynamic_templates.h"
+#include "realm/indexspace.h"
+#include "realm/dynamic_templates.h"
 
 namespace Realm {
 

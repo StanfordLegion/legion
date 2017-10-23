@@ -16,9 +16,9 @@
 // helper templates for dynamically packing/unpacking template parameters
 
 // nop, but helps IDEs
-#include "dynamic_templates.h"
+#include "realm/dynamic_templates.h"
 
-#include <cassert>
+#include <assert.h>
 
 namespace Realm {
 

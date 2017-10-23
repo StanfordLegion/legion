@@ -14,7 +14,7 @@
  */
 
 // nop, but helps IDEs
-#include "runtime.h"
+#include "realm/runtime.h"
 
 namespace Realm {
 

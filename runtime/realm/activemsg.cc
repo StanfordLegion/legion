@@ -13,7 +13,7 @@
  * limitations under the License.
  */
 
-#include <realm/realm_config.h>
+#include "realm/realm_config.h"
 
 // include gasnet header files before activemsg.h to make sure we have
 //  definitions for gasnet_hsl_t and gasnett_cond_t
@@ -52,10 +52,10 @@ static const void *ignore_gasnet_warning2 __attribute__((unused)) = (void *)_gas
 
 #endif
 
-#include <realm/activemsg.h>
+#include "realm/activemsg.h"
 
 #include <queue>
-#include <cassert>
+#include <assert.h>
 #ifdef REALM_PROFILE_AM_HANDLERS
 #include <math.h>
 #endif
@@ -65,7 +65,7 @@ static const void *ignore_gasnet_warning2 __attribute__((unused)) = (void *)_gas
 #include <fcntl.h>
 #endif
 
-#include <realm/threads.h>
+#include "realm/threads.h"
 #include "realm/timers.h"
 #include "realm/logging.h"
 

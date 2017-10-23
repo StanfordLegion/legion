@@ -18,13 +18,13 @@
 #define __RUNTIME_H__
 
 #include "legion.h"
-#include "legion_spy.h"
-#include "region_tree.h"
-#include "mapper_manager.h"
-#include "legion_utilities.h"
-#include "legion_profiling.h"
-#include "legion_allocation.h"
-#include "garbage_collection.h"
+#include "legion/legion_spy.h"
+#include "legion/region_tree.h"
+#include "legion/mapper_manager.h"
+#include "legion/legion_utilities.h"
+#include "legion/legion_profiling.h"
+#include "legion/legion_allocation.h"
+#include "legion/garbage_collection.h"
 
 #define REPORT_LEGION_FATAL(code, fmt, ...)               \
 {                                                         \

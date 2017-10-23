@@ -16,9 +16,9 @@
 // constructs for describing code blobs to Realm
 
 // nop, but helps IDEs
-#include "codedesc.h"
+#include "realm/codedesc.h"
 
-#include "serialize.h"
+#include "realm/serialize.h"
 TYPE_IS_SERIALIZABLE(Realm::Type::Kind);
 
 namespace Realm {

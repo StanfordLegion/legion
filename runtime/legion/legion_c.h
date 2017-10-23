@@ -28,7 +28,7 @@
 //
 // ******************** IMPORTANT **************************
 
-#include "legion_config.h"
+#include "legion/legion_config.h"
 
 #include <stdbool.h>
 #include <stddef.h>

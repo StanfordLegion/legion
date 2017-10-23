@@ -19,7 +19,7 @@
 // NOTE: let's try to keep LLVM include files/etc. out of here, because they bring
 //  a bunch of C++11 baggage
 
-#include <realm/realm_config.h>
+#include "realm/realm_config.h"
 #include "realm/codedesc.h"
 #include "realm/bytearray.h"
 
@@ -66,6 +66,6 @@ namespace Realm {
 
 }; // namespace Realm
 
-#include "llvmjit.inl"
+#include "realm/llvmjit/llvmjit.inl"
 
 #endif

@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-#include "channel_disk.h"
+#include "realm/transfer/channel_disk.h"
 
 namespace Realm {
 

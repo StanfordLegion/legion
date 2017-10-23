@@ -19,8 +19,8 @@
 #define REALM_NODESET_H
 
 // currently just using the HLR's version
-#include "legion_types.h"
-#include "legion_utilities.h"
+#include "legion/legion_types.h"
+#include "legion/legion_utilities.h"
 
 namespace Realm {
   typedef Legion::Internal::NodeSet NodeSet;

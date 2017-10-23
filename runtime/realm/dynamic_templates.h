@@ -412,6 +412,6 @@ namespace Realm {
 
 }; // namespace Realm
 
-#include "dynamic_templates.inl"
+#include "realm/dynamic_templates.inl"
 
 #endif

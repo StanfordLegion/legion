@@ -13,15 +13,15 @@
  * limitations under the License.
  */
 
-#include "mem_impl.h"
+#include "realm/mem_impl.h"
 
-#include "proc_impl.h"
-#include "logging.h"
-#include "serialize.h"
-#include "inst_impl.h"
-#include "runtime_impl.h"
-#include "profiling.h"
-#include "utils.h"
+#include "realm/proc_impl.h"
+#include "realm/logging.h"
+#include "realm/serialize.h"
+#include "realm/inst_impl.h"
+#include "realm/runtime_impl.h"
+#include "realm/profiling.h"
+#include "realm/utils.h"
 
 #ifdef USE_GASNET
 #ifndef GASNET_PAR

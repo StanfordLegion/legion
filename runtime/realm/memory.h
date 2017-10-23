@@ -18,7 +18,7 @@
 #ifndef REALM_MEMORY_H
 #define REALM_MEMORY_H
 
-#include <realm/realm_c.h>
+#include "realm/realm_c.h"
 
 #include <stddef.h>
 #include <iostream>

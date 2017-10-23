@@ -18,7 +18,7 @@
 #ifndef REALM_EVENT_H
 #define REALM_EVENT_H
 
-#include <realm/realm_c.h>
+#include "realm/realm_c.h"
 
 #include <vector>
 #include <set>
@@ -126,7 +126,7 @@ namespace Realm {
 
 }; // namespace Realm
 
-#include "event.inl"
+#include "realm/event.inl"
 
 #endif // ifndef REALM_EVENT_H
 

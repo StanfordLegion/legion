@@ -14,9 +14,9 @@
  * limitations under the License.
  */
 
-#include "channel.h"
-#include "channel_disk.h"
-#include <realm/transfer/transfer.h>
+#include "realm/transfer/channel.h"
+#include "realm/transfer/channel_disk.h"
+#include "realm/transfer/transfer.h"
 
 TYPE_IS_SERIALIZABLE(Realm::XferOrder::Type);
 TYPE_IS_SERIALIZABLE(Realm::XferDes::XferKind);

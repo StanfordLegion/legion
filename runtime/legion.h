@@ -30,9 +30,9 @@
  * Legion C++ API
  */
 
-#include "legion_types.h"
-#include "legion_domain.h"
-#include "legion_constraint.h"
+#include "legion/legion_types.h"
+#include "legion/legion_domain.h"
+#include "legion/legion_constraint.h"
 
 // temporary helper macro to turn link errors into runtime errors
 #define UNIMPLEMENTED_METHOD(retval) do { assert(0); return retval; } while(0)
@@ -6980,7 +6980,7 @@ namespace Legion {
 
 }; // namespace Legion
 
-#include "legion.inl"
+#include "legion/legion.inl"
 
 #endif // __LEGION_RUNTIME_H__
 

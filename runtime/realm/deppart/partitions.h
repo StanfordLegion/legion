@@ -18,19 +18,19 @@
 #ifndef REALM_PARTITIONS_H
 #define REALM_PARTITIONS_H
 
-#include "indexspace.h"
-#include "sparsity.h"
-#include <realm/activemsg.h>
-#include "id.h"
-#include "operation.h"
-#include "threads.h"
-#include "cmdline.h"
-#include "pri_queue.h"
-#include "nodeset.h"
+#include "realm/indexspace.h"
+#include "realm/sparsity.h"
+#include "realm/activemsg.h"
+#include "realm/id.h"
+#include "realm/operation.h"
+#include "realm/threads.h"
+#include "realm/cmdline.h"
+#include "realm/pri_queue.h"
+#include "realm/nodeset.h"
 #include "realm/interval_tree.h"
-#include "dynamic_templates.h"
-#include "deppart/sparsity_impl.h"
-#include "deppart/inst_helper.h"
+#include "realm/dynamic_templates.h"
+#include "realm/deppart/sparsity_impl.h"
+#include "realm/deppart/inst_helper.h"
 
 namespace Realm {
 

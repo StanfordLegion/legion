@@ -28,7 +28,7 @@
 extern "C" {
 #endif
 
-#include "legion_c.h"
+#include "legion/legion_c.h"
 
 typedef struct legion_terra_index_cross_product_t {
   legion_index_partition_t partition;

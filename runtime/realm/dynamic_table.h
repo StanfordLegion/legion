@@ -94,7 +94,7 @@ namespace Realm {
 	
 }; // namespace Realm
 
-#include "dynamic_table.inl"
+#include "realm/dynamic_table.inl"
 
 #endif // ifndef REALM_DYNAMIC_TABLE_H
 

@@ -13,19 +13,19 @@
  * limitations under the License.
  */
 
-#include "cuda_module.h"
+#include "realm/cuda/cuda_module.h"
 
 #include "realm/tasks.h"
 #include "realm/logging.h"
 #include "realm/cmdline.h"
 #include "realm/event_impl.h"
 
-#include <realm/transfer/lowlevel_dma.h>
-#include <realm/transfer/channel.h>
+#include "realm/transfer/lowlevel_dma.h"
+#include "realm/transfer/channel.h"
 
 #include "realm/cuda/cudart_hijack.h"
 
-#include <realm/activemsg.h>
+#include "realm/activemsg.h"
 #include "realm/utils.h"
 
 #include <stdio.h>

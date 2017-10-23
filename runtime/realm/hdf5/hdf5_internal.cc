@@ -13,9 +13,9 @@
  * limitations under the License.
  */
 
-#include "hdf5_internal.h"
+#include "realm/hdf5/hdf5_internal.h"
 
-#include "logging.h"
+#include "realm/logging.h"
 
 namespace Realm {
 

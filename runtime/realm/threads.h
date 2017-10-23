@@ -18,8 +18,8 @@
 #ifndef REALM_THREADS_H
 #define REALM_THREADS_H
 
-#include "realm_config.h"
-#include <realm/activemsg.h>
+#include "realm/realm_config.h"
+#include "realm/activemsg.h"
 
 #ifdef REALM_USE_USER_THREADS
 #ifdef __MACH__
@@ -553,6 +553,6 @@ namespace Realm {
 
 } // namespace Realm
 
-#include "threads.inl"
+#include "realm/threads.inl"
 
 #endif // REALM_THREADS_H

@@ -62,7 +62,7 @@ namespace Legion {
 
 }; // namespace Legion
 
-#include "legion_agency.inl"
+#include "legion/legion_agency.inl"
 
 #endif // __LEGION_AGENCY_H__
 

@@ -18,9 +18,9 @@
 #ifndef REALM_PROCESSOR_H
 #define REALM_PROCESSOR_H
 
-#include <realm/realm_c.h>
+#include "realm/realm_c.h"
 
-#include "event.h"
+#include "realm/event.h"
 
 #include <vector>
 #include <map>
@@ -121,7 +121,7 @@ namespace Realm {
 	
 }; // namespace Realm
 
-#include "processor.inl"
+#include "realm/processor.inl"
 
 #endif // ifndef REALM_PROCESSOR_H
 

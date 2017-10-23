@@ -23,12 +23,12 @@
  */
 
 #include "legion.h"
-#include "legion_c.h"
-#include "legion_mapping.h"
-#include "mapping_utilities.h"
+#include "legion/legion_c.h"
+#include "legion/legion_mapping.h"
+#include "mappers/mapping_utilities.h"
 
-#include <cstdlib>
-#include <cstring>
+#include <stdlib.h>
+#include <string.h>
 #include <algorithm>
 
 namespace Legion {

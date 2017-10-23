@@ -16,7 +16,7 @@
 // include this _before_ anything below to deal with weird ordering 
 //  constraints w.r.t. Legion's other definitions
 // (it will actually turn around and include this file when it's ready)
-#include <legion/legion_types.h>
+#include "legion/legion_types.h"
 
 #ifndef RUNTIME_ACCESSOR_H
 #define RUNTIME_ACCESSOR_H
@@ -27,12 +27,12 @@
 #define CUDAPREFIX
 #endif
 
-#include <legion/arrays.h>
-#include <realm/instance.h>
-#include <legion/legion_domain.h>
+#include "legion/arrays.h"
+#include "realm/instance.h"
+#include "legion/legion_domain.h"
 
 #ifndef __GNUC__
-#include <legion/atomics.h> // for __sync_fetch_and_add
+#include "legion/atomics.h" // for __sync_fetch_and_add
 #endif
 
 // for fprintf

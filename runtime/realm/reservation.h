@@ -18,9 +18,9 @@
 #ifndef REALM_RESERVATION_H
 #define REALM_RESERVATION_H
 
-#include <realm/realm_c.h>
+#include "realm/realm_c.h"
 
-#include "event.h"
+#include "realm/event.h"
 
 namespace Realm {
 

@@ -16,7 +16,7 @@
 // generic Realm interface to threading libraries (e.g. pthreads)
 
 // nop, but helps IDEs
-#include "threads.h"
+#include "realm/threads.h"
 
 #include <assert.h>
 

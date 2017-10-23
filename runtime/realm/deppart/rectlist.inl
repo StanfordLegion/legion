@@ -18,7 +18,7 @@
 #ifndef REALM_DEPPART_RECTLIST_INL
 #define REALM_DEPPART_RECTLIST_INL
 
-#include "rectlist.h"
+#include "realm/deppart/rectlist.h"
 
 namespace Realm {
 

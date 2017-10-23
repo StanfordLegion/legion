@@ -18,7 +18,7 @@
 // INCLDUED FROM sampling.h - DO NOT INCLUDE THIS DIRECTLY
 
 // this is a nop, but it's for the benefit of IDEs trying to parse this file
-#include "sampling.h"
+#include "realm/sampling.h"
 
 namespace Realm {
 

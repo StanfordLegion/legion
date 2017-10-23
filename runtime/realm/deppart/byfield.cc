@@ -15,12 +15,12 @@
 
 // byfield (filter) operations for Realm dependent partitioning
 
-#include "byfield.h"
+#include "realm/deppart/byfield.h"
 
-#include "deppart_config.h"
-#include "rectlist.h"
-#include "inst_helper.h"
-#include "../logging.h"
+#include "realm/deppart/deppart_config.h"
+#include "realm/deppart/rectlist.h"
+#include "realm/deppart/inst_helper.h"
+#include "realm/logging.h"
 
 namespace Realm {
 

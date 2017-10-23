@@ -11,7 +11,7 @@
 //  by any other parts of Realm, or it will mess up the ability to let an app link
 //  against the real libcudart.so
 
-#include "cudart_hijack.h"
+#include "realm/cuda/cudart_hijack.h"
 
 #include "realm/cuda/cuda_module.h"
 #include "realm/logging.h"

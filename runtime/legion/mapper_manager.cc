@@ -14,11 +14,11 @@
  */
 
 #include "legion.h"
-#include "legion_ops.h"
-#include "legion_tasks.h"
-#include "mapper_manager.h"
-#include "legion_instances.h"
-#include "garbage_collection.h"
+#include "legion/legion_ops.h"
+#include "legion/legion_tasks.h"
+#include "legion/mapper_manager.h"
+#include "legion/legion_instances.h"
+#include "legion/garbage_collection.h"
 
 namespace Legion {
   namespace Internal {

@@ -18,12 +18,12 @@
 #ifndef REALM_DEPPART_SPARSITY_IMPL_H
 #define REALM_DEPPART_SPARSITY_IMPL_H
 
-#include <realm/indexspace.h>
-#include <realm/sparsity.h>
-#include <realm/id.h>
+#include "realm/indexspace.h"
+#include "realm/sparsity.h"
+#include "realm/id.h"
 
-#include <realm/activemsg.h>
-#include "nodeset.h"
+#include "realm/activemsg.h"
+#include "realm/nodeset.h"
 
 namespace Realm {
 
@@ -196,4 +196,4 @@ namespace Realm {
 
 #endif // REALM_DEPPART_SPARSITY_IMPL_H
 
-#include "sparsity_impl.inl"
+#include "realm/deppart/sparsity_impl.inl"

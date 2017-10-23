@@ -13,7 +13,7 @@
  * limitations under the License.
  */
 
-#include "llvmjit_internal.h"
+#include "realm/llvmjit/llvmjit_internal.h"
 
 #include "realm/logging.h"
 

@@ -18,25 +18,25 @@
 #ifndef REALM_INDEXSPACE_H
 #define REALM_INDEXSPACE_H
 
-#include "event.h"
-#include "memory.h"
+#include "realm/event.h"
+#include "realm/memory.h"
 #define REALM_SKIP_INLINES
-#include "instance.h"
+#include "realm/instance.h"
 #undef REALM_SKIP_INLINES
 
-#include <realm/realm_c.h>
-#include "realm_config.h"
-#include "sparsity.h"
-#include "dynamic_templates.h"
+#include "realm/realm_c.h"
+#include "realm/realm_config.h"
+#include "realm/sparsity.h"
+#include "realm/dynamic_templates.h"
 
 // we need intptr_t - make it if needed
 #if __cplusplus >= 201103L
-#include <cstdint>
+#include <stdint.h>
 #else
 typedef ptrdiff_t intptr_t;
 #endif
 
-#include "custom_serdez.h"
+#include "realm/custom_serdez.h"
 
 namespace Realm {
   // NOTE: all these interfaces are templated, which means partitions.cc is going
@@ -722,6 +722,6 @@ namespace std {
   };
 };
 
-#include "indexspace.inl"
+#include "realm/indexspace.inl"
 
 #endif // ifndef REALM_INDEXSPACE_H

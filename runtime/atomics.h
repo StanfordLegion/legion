@@ -13,5 +13,5 @@
  * limitations under the License.
  */
 
-#warning This file is deprecated - include <legion/atomics.h> instead.
-#include <legion/atomics.h>
+#warning This file is deprecated - include "legion/atomics.h" instead.
+#include "legion/atomics.h"

@@ -14,20 +14,20 @@
  */
 
 #include "legion.h"
-#include "runtime.h"
-#include "legion_ops.h"
-#include "legion_tasks.h"
-#include "region_tree.h"
-#include "legion_spy.h"
-#include "legion_context.h"
-#include "legion_profiling.h"
-#include "legion_instances.h"
-#include "legion_views.h"
-#include "legion_analysis.h"
-#include "interval_tree.h"
-#include "rectangle_set.h"
+#include "legion/runtime.h"
+#include "legion/legion_ops.h"
+#include "legion/legion_tasks.h"
+#include "legion/region_tree.h"
+#include "legion/legion_spy.h"
+#include "legion/legion_context.h"
+#include "legion/legion_profiling.h"
+#include "legion/legion_instances.h"
+#include "legion/legion_views.h"
+#include "legion/legion_analysis.h"
+#include "realm/interval_tree.h"
+#include "legion/rectangle_set.h"
 
-#include "region_tree.inl"
+#include "legion/region_tree.inl"
 
 namespace Legion {
   namespace Internal {

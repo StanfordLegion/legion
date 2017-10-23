@@ -15,11 +15,11 @@
 
 
 #include "legion.h"
-#include "legion_ops.h"
-#include "legion_spy.h"
-#include "legion_trace.h"
-#include "legion_tasks.h"
-#include "legion_context.h"
+#include "legion/legion_ops.h"
+#include "legion/legion_spy.h"
+#include "legion/legion_trace.h"
+#include "legion/legion_tasks.h"
+#include "legion/legion_context.h"
 
 namespace Legion {
   namespace Internal {

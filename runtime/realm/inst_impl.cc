@@ -13,15 +13,15 @@
  * limitations under the License.
  */
 
-#include "inst_impl.h"
+#include "realm/inst_impl.h"
 
-#include "event_impl.h"
-#include "mem_impl.h"
-#include "logging.h"
-#include "runtime_impl.h"
-#include <realm/deppart/inst_helper.h>
+#include "realm/event_impl.h"
+#include "realm/mem_impl.h"
+#include "realm/logging.h"
+#include "realm/runtime_impl.h"
+#include "realm/deppart/inst_helper.h"
 #ifdef USE_HDF
-#include <realm/hdf5/hdf5_access.h>
+#include "realm/hdf5/hdf5_access.h"
 #endif
 
 TYPE_IS_SERIALIZABLE(Realm::InstanceLayoutGeneric::FieldLayout);

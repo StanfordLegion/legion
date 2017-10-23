@@ -15,23 +15,20 @@
 
 // index space partitioning for Realm
 
-#include "partitions.h"
+#include "realm/deppart/partitions.h"
 
-#include "profiling.h"
+#include "realm/profiling.h"
 
-#include "runtime_impl.h"
-#include "deppart/inst_helper.h"
-#include "deppart/rectlist.h"
+#include "realm/runtime_impl.h"
+#include "realm/deppart/inst_helper.h"
+#include "realm/deppart/rectlist.h"
 
-#include "deppart/image.h"
-#include "deppart/preimage.h"
-#include "deppart/byfield.h"
-#include "deppart/setops.h"
-
-//include <typeinfo>
+#include "realm/deppart/image.h"
+#include "realm/deppart/preimage.h"
+#include "realm/deppart/byfield.h"
+#include "realm/deppart/setops.h"
 
 namespace Realm {
-
 
   Logger log_part("part");
   Logger log_uop_timing("uop_timing");

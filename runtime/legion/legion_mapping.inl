@@ -16,7 +16,7 @@
 // Included from legion_mapping.h - do not include this directly
 
 // Useful for IDEs 
-#include "legion_mapping.h"
+#include "legion/legion_mapping.h"
 
 namespace Legion {
   namespace Mapping {

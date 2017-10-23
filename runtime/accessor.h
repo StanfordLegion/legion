@@ -13,5 +13,5 @@
  * limitations under the License.
  */
 
-#warning This file is deprecated - include <legion/accessor.h> instead.
-#include <legion/accessor.h>
+#warning This file is deprecated - include "legion/accessor.h" instead.
+#include "legion/accessor.h"

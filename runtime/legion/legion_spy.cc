@@ -15,9 +15,9 @@
 
 
 #include "legion.h"
-#include "region_tree.h"
-#include "legion_spy.h"
-#include "runtime.h"
+#include "legion/region_tree.h"
+#include "legion/legion_spy.h"
+#include "legion/runtime.h"
 
 namespace Legion {
   namespace Internal {

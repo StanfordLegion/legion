@@ -140,7 +140,7 @@ namespace Realm {
 
 }; // namespace Realm
 
-#include "cmdline.inl"
+#include "realm/cmdline.inl"
 
 #endif // ifndef REALM_CMDLINE_H
 

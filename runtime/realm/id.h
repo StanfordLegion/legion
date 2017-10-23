@@ -297,7 +297,7 @@ namespace Realm {
 
 }; // namespace Realm
 
-#include "id.inl"
+#include "realm/id.inl"
 
 #endif // ifndef REALM_ID_H
 
