@@ -3363,12 +3363,68 @@ namespace Legion {
       std::map<Processor::Kind, std::vector<const Task *> > tasks_by_kind;
       for(unsigned i = 0; i < input.tasks.size(); i++) {
 	// see which processor kinds are preferred, but filter by which ones 
-        // have available variants
+        // have available variants and available processors
 	std::vector<Processor::Kind> ranking;
 	default_policy_rank_processor_kinds(ctx, *(input.tasks[i]), ranking);
 	std::vector<Processor::Kind>::iterator it = ranking.begin();
 	while(true) {
 	  assert(it != ranking.end());
+          // Check to see if we actually have processors of this kind
+          switch (*it)
+          {
+            case Processor::TOC_PROC:
+              {
+                if (local_gpus.empty())
+                {
+                  ++it;
+                  continue;
+                }
+                break;
+              }
+            case Processor::OMP_PROC:
+              {
+                if (local_omps.empty())
+                {
+                  ++it;
+                  continue;
+                }
+                break;
+              }
+            case Processor::PROC_SET:
+              {
+                if (local_procsets.empty())
+                {
+                  ++it;
+                  continue;
+                }
+                break;
+              }
+            case Processor::LOC_PROC:
+              {
+                assert(!local_cpus.empty());
+                break;
+              }
+            case Processor::IO_PROC:
+              {
+                if (local_ios.empty())
+                {
+                  ++it;
+                  continue;
+                }
+                break;
+              }
+            case Processor::PY_PROC:
+              {
+                if (local_pys.empty())
+                {
+                  ++it;
+                  continue;
+                }
+                break;
+              }
+            default:
+              assert(false); // unknown processor kind
+          }
 	  if(have_proc_kind_variant(ctx, input.tasks[i]->task_id, *it)) {
 	    tasks_by_kind[*it].push_back(input.tasks[i]);
 	    break;

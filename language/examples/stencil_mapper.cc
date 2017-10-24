@@ -29,14 +29,7 @@ class StencilMapper : public DefaultMapper
 public:
   StencilMapper(MapperRuntime *rt, Machine machine, Processor local,
                 const char *mapper_name,
-                std::vector<Processor>* procs_list,
-                std::vector<Memory>* sysmems_list,
-                std::map<Memory, std::vector<Processor> >* sysmem_local_procs,
-#if SPMD_SHARD_USE_IO_PROC
-                std::map<Memory, std::vector<Processor> >* sysmem_local_io_procs,
-#endif
-                std::map<Processor, Memory>* proc_sysmems,
-                std::map<Processor, Memory>* proc_regmems);
+                std::vector<Processor>* procs_list);
   virtual void select_task_options(const MapperContext    ctx,
                                    const Task&            task,
                                          TaskOptions&     output);
@@ -69,34 +62,13 @@ public:
                                     std::vector<PhysicalInstance> &instances);
 private:
   std::vector<Processor>& procs_list;
-  // std::vector<Memory>& sysmems_list;
-  std::map<Memory, std::vector<Processor> >& sysmem_local_procs;
-#if SPMD_SHARD_USE_IO_PROC
-  std::map<Memory, std::vector<Processor> >& sysmem_local_io_procs;
-#endif
-  // std::map<Processor, Memory>& proc_sysmems;
-  // std::map<Processor, Memory>& proc_regmems;
 };
 
 StencilMapper::StencilMapper(MapperRuntime *rt, Machine machine, Processor local,
                              const char *mapper_name,
-                             std::vector<Processor>* _procs_list,
-                             std::vector<Memory>* _sysmems_list,
-                             std::map<Memory, std::vector<Processor> >* _sysmem_local_procs,
-#if SPMD_SHARD_USE_IO_PROC
-                             std::map<Memory, std::vector<Processor> >* _sysmem_local_io_procs,
-#endif
-                             std::map<Processor, Memory>* _proc_sysmems,
-                             std::map<Processor, Memory>* _proc_regmems)
+                             std::vector<Processor>* _procs_list)
   : DefaultMapper(rt, machine, local, mapper_name)
   , procs_list(*_procs_list)
-  // , sysmems_list(*_sysmems_list)
-  , sysmem_local_procs(*_sysmem_local_procs)
-#if SPMD_SHARD_USE_IO_PROC
-  , sysmem_local_io_procs(*_sysmem_local_io_procs)
-#endif
-  // , proc_sysmems(*_proc_sysmems)
-  // , proc_regmems(*_proc_regmems)
 {
 }
 
@@ -303,63 +275,19 @@ void StencilMapper::stencil_create_copy_instance(MapperContext ctx,
 static void create_mappers(Machine machine, HighLevelRuntime *runtime, const std::set<Processor> &local_procs)
 {
   std::vector<Processor>* procs_list = new std::vector<Processor>();
-  std::vector<Memory>* sysmems_list = new std::vector<Memory>();
-  std::map<Memory, std::vector<Processor> >* sysmem_local_procs =
-    new std::map<Memory, std::vector<Processor> >();
-#if SPMD_SHARD_USE_IO_PROC
-  std::map<Memory, std::vector<Processor> >* sysmem_local_io_procs =
-    new std::map<Memory, std::vector<Processor> >();
-#endif
-  std::map<Processor, Memory>* proc_sysmems = new std::map<Processor, Memory>();
-  std::map<Processor, Memory>* proc_regmems = new std::map<Processor, Memory>();
 
-
-  std::vector<Machine::ProcessorMemoryAffinity> proc_mem_affinities;
-  machine.get_proc_mem_affinity(proc_mem_affinities);
-
-  for (unsigned idx = 0; idx < proc_mem_affinities.size(); ++idx) {
-    Machine::ProcessorMemoryAffinity& affinity = proc_mem_affinities[idx];
-    if (affinity.p.kind() == Processor::LOC_PROC) {
-      if (affinity.m.kind() == Memory::SYSTEM_MEM) {
-        (*proc_sysmems)[affinity.p] = affinity.m;
-        if (proc_regmems->find(affinity.p) == proc_regmems->end())
-          (*proc_regmems)[affinity.p] = affinity.m;
-      }
-      else if (affinity.m.kind() == Memory::REGDMA_MEM)
-        (*proc_regmems)[affinity.p] = affinity.m;
-    }
-  }
-
-  for (std::map<Processor, Memory>::iterator it = proc_sysmems->begin();
-       it != proc_sysmems->end(); ++it) {
-    if (it->first.kind() == Processor::LOC_PROC) {
-      procs_list->push_back(it->first);
-      (*sysmem_local_procs)[it->second].push_back(it->first);
-    }
-#if SPMD_SHARD_USE_IO_PROC
-    else if (it->first.kind() == Processor::IO_PROC) {
-      (*sysmem_local_io_procs)[it->second].push_back(it->first);
-    }
-#endif
-  }
-
-  for (std::map<Memory, std::vector<Processor> >::iterator it =
-        sysmem_local_procs->begin(); it != sysmem_local_procs->end(); ++it)
-    sysmems_list->push_back(it->first);
+  Machine::ProcessorQuery procs_query(machine);
+  procs_query.only_kind(Processor::LOC_PROC);
+  for (Machine::ProcessorQuery::iterator it = procs_query.begin();
+        it != procs_query.end(); it++)
+    procs_list->push_back(*it);
 
   for (std::set<Processor>::const_iterator it = local_procs.begin();
         it != local_procs.end(); it++)
   {
     StencilMapper* mapper = new StencilMapper(runtime->get_mapper_runtime(),
                                               machine, *it, "stencil_mapper",
-                                              procs_list,
-                                              sysmems_list,
-                                              sysmem_local_procs,
-#if SPMD_SHARD_USE_IO_PROC
-                                              sysmem_local_io_procs,
-#endif
-                                              proc_sysmems,
-                                              proc_regmems);
+                                              procs_list);
     runtime->replace_default_mapper(mapper, *it);
   }
 }
