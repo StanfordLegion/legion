@@ -532,6 +532,9 @@ namespace Legion {
     public:
       // Override this so we can exchange reduction results
       virtual void trigger_task_complete(void);
+      // Have to override this too for doing output in the
+      // case that we misspeculate
+      virtual void resolve_false(bool speculated, bool launched);
     public:
       void initialize_replication(ReplicateContext *ctx, IndexSpace launch_sp);
       virtual FutureMapImpl* create_future_map(TaskContext *ctx);

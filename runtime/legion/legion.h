@@ -3045,7 +3045,7 @@ namespace Legion {
     public:
       virtual ShardID shard(const DomainPoint &point,
                             const Domain &full_space,
-                            const ShardID max_shard/*inclusive*/) const = 0;
+                            const size_t total_shards) const = 0;
     };
 
     /**

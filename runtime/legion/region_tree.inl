@@ -3223,11 +3223,12 @@ namespace Legion {
       get_realm_index_space(local_space, true/*tight*/);
       const Domain full_space = local_space;
       std::vector<Realm::Point<DIM,T> > shard_points; 
+      size_t total_points = 0;
       for (Realm::IndexSpaceIterator<DIM,T> rect_itr(realm_index_space); 
             rect_itr.valid; rect_itr.step())
       {
         for (Realm::PointInRectIterator<DIM,T> itr(rect_itr.rect);
-              itr.valid; itr.step())
+              itr.valid; itr.step(), total_points++)
         {
           const ShardID point_shard = 
             func->find_owner(DomainPoint(Point<DIM,T>(itr.p)), full_space);
@@ -3237,6 +3238,10 @@ namespace Legion {
       }
       if (shard_points.empty())
         return IndexSpace::NO_SPACE;
+      // Another useful case is if all the points are in the shard then
+      // we can return ourselves as the result
+      if (shard_points.size() == total_points)
+        return handle;
       Realm::IndexSpace<DIM,T> realm_is(shard_points);
       const Domain domain((DomainT<DIM,T>(realm_is)));
       return context->runtime->find_or_create_index_launch_space(domain, 

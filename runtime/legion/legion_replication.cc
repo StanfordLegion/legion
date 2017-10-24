@@ -570,6 +570,33 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ReplIndexTask::resolve_false(bool speculated, bool launched)
+    //--------------------------------------------------------------------------
+    {
+      // If we already launched then we can just return
+      if (launched)
+        return;
+      // Otherwise, we need to update the internal space so we only set
+      // our local points with the predicate false result
+      if (redop == 0)
+      {
+#ifdef DEBUG_LEGION
+        ReplicateContext *repl_ctx = 
+          dynamic_cast<ReplicateContext*>(parent_ctx);
+        assert(repl_ctx != NULL);
+#else
+        ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+        // Compute the local index space of points for this shard
+        internal_space =
+          sharding_function->find_shard_space(repl_ctx->owner_shard->shard_id,
+                                              launch_space);
+      }
+      // Now continue through and do the base case
+      IndexTask::resolve_false(speculated, launched);
+    }
+
+    //--------------------------------------------------------------------------
     void ReplIndexTask::initialize_replication(ReplicateContext *ctx,
                                                IndexSpace launch_sp)
     //--------------------------------------------------------------------------

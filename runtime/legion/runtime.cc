@@ -9375,7 +9375,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     ShardID CyclicShardingFunctor::shard(const DomainPoint &point,
                                          const Domain &full_space,
-                                         const ShardID max_shard) const
+                                         const size_t total_shards) const
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -9387,19 +9387,19 @@ namespace Legion {
           {
             const DomainT<1,coord_t> is = full_space;  
             const Point<1,coord_t> p1 = point;
-            return (linearize_point<1>(is, p1) % (max_shard+1));
+            return (linearize_point<1>(is, p1) % total_shards);
           }
         case 2:
           {
             const DomainT<2,coord_t> is = full_space;  
             const Point<2,coord_t> p2 = point;
-            return (linearize_point<2>(is, p2) % (max_shard+1));
+            return (linearize_point<2>(is, p2) % total_shards);
           }
         case 3:
           {
             const DomainT<3,coord_t> is = full_space;  
             const Point<3,coord_t> p3 = point;
-            return (linearize_point<3>(is, p3) % (max_shard+1));
+            return (linearize_point<3>(is, p3) % total_shards);
           }
         default:
           assert(false);

@@ -7701,47 +7701,56 @@ namespace Legion {
       // Fill in the index task map with the default future value
       if (redop == 0)
       {
-        // Handling the future map case
-        if (predicate_false_future.impl != NULL)
+        // Only need to do this if the internal domain exists, it
+        // might not in a control replication context
+        if (internal_space.exists())
         {
-          ApEvent wait_on = predicate_false_future.impl->get_ready_event();
-          if (wait_on.has_triggered())
+          // Get the domain that we will have to iterate over
+          Domain local_domain;
+          runtime->forest->find_launch_space_domain(internal_space, 
+                                                    local_domain);
+          // Handling the future map case
+          if (predicate_false_future.impl != NULL)
           {
-            const size_t result_size = 
-              check_future_size(predicate_false_future.impl);
-            const void *result = 
-              predicate_false_future.impl->get_untyped_result(true);
-            for (Domain::DomainPointIterator itr(index_domain); itr; itr++)
+            ApEvent wait_on = predicate_false_future.impl->get_ready_event();
+            if (wait_on.has_triggered())
             {
-              Future f = future_map.get_future(itr.p);
-              if (result_size > 0)
-                f.impl->set_result(result, result_size, false/*own*/);
+              const size_t result_size = 
+                check_future_size(predicate_false_future.impl);
+              const void *result = 
+                predicate_false_future.impl->get_untyped_result(true);
+              for (Domain::DomainPointIterator itr(local_domain); itr; itr++)
+              {
+                Future f = future_map.get_future(itr.p);
+                if (result_size > 0)
+                  f.impl->set_result(result, result_size, false/*own*/);
+              }
+            }
+            else
+            {
+              // Add references so things won't be prematurely collected
+              future_map.impl->add_base_resource_ref(DEFERRED_TASK_REF);
+              predicate_false_future.impl->add_base_gc_ref(DEFERRED_TASK_REF,
+                                                           this);
+              Runtime::DeferredFutureMapSetArgs args;
+              args.future_map = future_map.impl;
+              args.result = predicate_false_future.impl;
+              args.domain = local_domain;
+              args.task_op = this;
+              execution_condition = 
+                runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY,this,
+                                               Runtime::protect_event(wait_on));
             }
           }
           else
           {
-            // Add references so things won't be prematurely collected
-            future_map.impl->add_base_resource_ref(DEFERRED_TASK_REF);
-            predicate_false_future.impl->add_base_gc_ref(DEFERRED_TASK_REF,
-                                                         this);
-            Runtime::DeferredFutureMapSetArgs args;
-            args.future_map = future_map.impl;
-            args.result = predicate_false_future.impl;
-            args.domain = index_domain;
-            args.task_op = this;
-            execution_condition = 
-              runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY, this, 
-                                               Runtime::protect_event(wait_on));
-          }
-        }
-        else
-        {
-          for (Domain::DomainPointIterator itr(index_domain); itr; itr++)
-          {
-            Future f = future_map.get_future(itr.p);
-            if (predicate_false_size > 0)
-              f.impl->set_result(predicate_false_result,
-                                 predicate_false_size, false/*own*/);
+            for (Domain::DomainPointIterator itr(local_domain); itr; itr++)
+            {
+              Future f = future_map.get_future(itr.p);
+              if (predicate_false_size > 0)
+                f.impl->set_result(predicate_false_result,
+                                   predicate_false_size, false/*own*/);
+            }
           }
         }
       }
