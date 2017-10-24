@@ -15,11 +15,10 @@
 
 // meta-header for Realm - includes all the individual pieces
 
-#ifndef REALM_H
-#define REALM_H
-
-// decide whether we want C and/or C++ bindings (default matches
-//  host language)
+// decide whether we want C and/or C++ bindings (default matches host language)
+//
+// each set of bindings has its own include-once ifdef armor, allowing the
+//  second set of bindings to be loaded even if the first already has been
 #if !defined(REALM_ENABLE_C_BINDINGS) && !defined(REALM_DISABLE_C_BINDINGS)
   #ifndef __cplusplus
     #define REALM_ENABLE_C_BINDINGS
@@ -36,6 +35,9 @@
 #endif
 
 #ifdef REALM_ENABLE_CXX_BINDINGS
+#ifndef REALM_H
+#define REALM_H
+
 #include "realm/realm_config.h"
 
 #include "realm/profiling.h"
@@ -49,6 +51,7 @@
 #include "realm/runtime.h"
 #include "realm/indexspace.h"
 #include "realm/codedesc.h"
-#endif // ifdef REALM_ENABLE_CXX_BINDINGS
 
 #endif // ifndef REALM_H
+#endif // ifdef REALM_ENABLE_CXX_BINDINGS
+
