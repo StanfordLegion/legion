@@ -625,8 +625,7 @@ namespace Legion {
       const ProjectionEpochID epoch_id;
       FieldMask valid_fields;
     public:
-      ShardingFunction *sharding_function;
-      std::map<ProjectionFunction*,std::set<IndexSpaceNode*> > projections;
+      std::set<ProjectionSummary> projections;
     };
 
     /**
@@ -749,9 +748,8 @@ namespace Legion {
                                    FieldMask &non_dominated_mask) const;
     protected:
       void filter_dominated_projection_fields(FieldMask &non_dominated_mask,
-          const std::map<std::pair<ProjectionFunction*,ShardingFunction*>,
-             LegionMap<IndexSpaceNode*,
-                       FieldMask>::aligned> &new_projections) const;
+          const LegionMap<ProjectionSummary,
+                          FieldMask>::aligned &new_projections) const;
       void filter_dominated_children(FieldMask &non_dominated_mask,
           const std::map<RegionTreeNode*,ClosedNode*> &new_children) const;
     public:
@@ -768,8 +766,7 @@ namespace Legion {
       FieldMask reduced_fields; // Fields purely reduced to at this node
       std::map<RegionTreeNode*,ClosedNode*> children;
       // For tracking index space projections 
-      std::map<std::pair<ProjectionFunction*,ShardingFunction*>,
-               LegionMap<IndexSpaceNode*,FieldMask>::aligned> projections;
+      LegionMap<ProjectionSummary,FieldMask>::aligned projections;
     };
  
     /**

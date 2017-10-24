@@ -2381,7 +2381,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ProjectionEpoch::ProjectionEpoch(ProjectionEpochID id, const FieldMask &m)
-      : epoch_id(id), valid_fields(m), sharding_function(NULL)
+      : epoch_id(id), valid_fields(m)
     //--------------------------------------------------------------------------
     {
     }
@@ -2415,17 +2415,10 @@ namespace Legion {
                                  IndexSpaceNode* node, ShardingFunction *shard)
     //--------------------------------------------------------------------------
     {
-      if (sharding_function == NULL)
-        sharding_function = shard;
 #ifdef DEBUG_LEGION
-      // There should only ever be one sharding function for a single
-      // projection epoch, if there is more than one then the logical
-      // analysis has really messed up
-      else
-        assert(sharding_function == shard);
       assert(!!valid_fields);
 #endif
-      projections[function].insert(node);
+      projections.insert(ProjectionSummary(node, function, shard));
     }
 
     /////////////////////////////////////////////////////////////
@@ -3431,18 +3424,18 @@ namespace Legion {
       assert(children.empty()); // should never have any children here
 #endif
       ClosedNode *result = new ClosedNode(child_node);
-      for (std::map<std::pair<ProjectionFunction*,ShardingFunction*>,
-            LegionMap<IndexSpaceNode*,FieldMask>::aligned>::const_iterator pit =
-            projections.begin(); pit != projections.end(); pit++)
+      for (LegionMap<ProjectionSummary,FieldMask>::aligned::const_iterator 
+            pit = projections.begin(); pit != projections.end(); pit++)
       {
-        for (LegionMap<IndexSpaceNode*,FieldMask>::aligned::const_iterator it = 
-              pit->second.begin(); it != pit->second.end(); it++)
-        {
-          FieldMask overlap = it->second & close_mask;
-          if (!overlap)
-            continue;
-          result->record_projection(pit->first.first, it->first, overlap);
-        }
+        const FieldMask overlap = pit->second & close_mask;
+        if (!overlap)
+          continue;
+#ifdef DEBUG_LEGION
+        // Shouldn't be doing this in a control replication context
+        assert(pit->first.sharding == NULL);
+#endif
+        result->record_projection(pit->first.projection, 
+                                  pit->first.domain, overlap);
       }
       return result;
     }
@@ -3452,8 +3445,8 @@ namespace Legion {
                                    IndexSpaceNode *space, const FieldMask &mask)
     //--------------------------------------------------------------------------
     {
-      std::pair<ProjectionFunction*,ShardingFunction*> key(function, NULL);
-      projections[key][space] |= mask;
+      ProjectionSummary key(space, function, NULL);
+      projections[key] |= mask;
     }
 
     //--------------------------------------------------------------------------
@@ -3497,37 +3490,15 @@ namespace Legion {
                                         const FieldMask &fields)
     //--------------------------------------------------------------------------
     {
-      for (std::map<ProjectionFunction*,std::set<IndexSpaceNode*> >::
-            const_iterator pit = epoch->projections.begin(); 
-            pit != epoch->projections.end(); pit++)
+      for (std::set<ProjectionSummary>::const_iterator pit = 
+            epoch->projections.begin(); pit != epoch->projections.end(); pit++)
       {
-        const std::pair<ProjectionFunction*,ShardingFunction*> 
-          key(pit->first, epoch->sharding_function);
-        std::map<std::pair<ProjectionFunction*,ShardingFunction*>,
-                 LegionMap<IndexSpaceNode*,FieldMask>::aligned>::iterator 
-                   finder = projections.find(key);
+        LegionMap<ProjectionSummary,FieldMask>::aligned::iterator finder = 
+          projections.find(*pit);
         if (finder != projections.end())
-        {
-          for (std::set<IndexSpaceNode*>::const_iterator it = 
-                pit->second.begin(); it != pit->second.end(); it++)
-          {
-            LegionMap<IndexSpaceNode*,FieldMask>::aligned::iterator finder2 = 
-              finder->second.find(*it);
-            if (finder2 == finder->second.end())
-              finder->second[*it] = fields;
-            else
-              finder2->second |= fields;
-          }
-        }
-        else
-        {
-          // Didn't exist before so we can just insert 
-          LegionMap<IndexSpaceNode*,FieldMask>::aligned &spaces = 
-            projections[key];
-          for (std::set<IndexSpaceNode*>::const_iterator it = 
-                pit->second.begin(); it != pit->second.end(); it++)
-            spaces[*it] = fields;
-        }
+          finder->second |= fields;
+        else // Didn't exist before so we can just insert it
+          projections[*pit] = fields;
       }
     }
 
@@ -3543,32 +3514,29 @@ namespace Legion {
       // See if we have any projections that we need to find other shards for
       if (!projections.empty())
       {
-        for (std::map<std::pair<ProjectionFunction*,ShardingFunction*>,
-                 LegionMap<IndexSpaceNode*,FieldMask>::aligned>::const_iterator
+        for (LegionMap<ProjectionSummary,FieldMask>::aligned::const_iterator
               pit = projections.begin(); pit != projections.end(); pit++)
         {
-          if (pit->first.second == NULL)
+#ifdef DEBUG_LEGION
+          // Should always have a sharding function
+          assert(pit->first.sharding != NULL);
+#endif
+          if (pit->second * mask)
             continue;
-          for (LegionMap<IndexSpaceNode*,FieldMask>::aligned::const_iterator 
-                it = pit->second.begin(); it != pit->second.end(); it++)
+          Domain full_space;
+          pit->first.domain->get_launch_space_domain(full_space);
+          // Invert the projection function to find the interfering points
+          std::set<DomainPoint> interfering_points;
+          pit->first.projection->find_interfering_points(target->context, node,
+            pit->first.domain->handle, full_space, target, interfering_points);
+          if (!interfering_points.empty())
           {
-            if (it->second * mask)
-              continue;
-            Domain full_space;
-            it->first->get_launch_space_domain(full_space);
-            // Invert the projection function to find the interfering points
-            std::set<DomainPoint> interfering_points;
-            pit->first.first->find_interfering_points(target->context, node, 
-                  it->first->handle, full_space, target, interfering_points);
-            if (!interfering_points.empty())
+            for (std::set<DomainPoint>::const_iterator dit = 
+                  interfering_points.begin(); dit != 
+                  interfering_points.end(); dit++)
             {
-              for (std::set<DomainPoint>::const_iterator dit = 
-                    interfering_points.begin(); dit != 
-                    interfering_points.end(); dit++)
-              {
-                ShardID shard = pit->first.second->find_owner(*dit, full_space);
-                needed_shards.insert(shard);
-              }
+              ShardID shard = pit->first.sharding->find_owner(*dit, full_space);
+              needed_shards.insert(shard);
             }
           }
         }
@@ -3625,14 +3593,9 @@ namespace Legion {
       // Finally update our valid fields based on any projections
       if (!projections.empty())
       {
-        for (std::map<std::pair<ProjectionFunction*,ShardingFunction*>,
-                  LegionMap<IndexSpaceNode*,FieldMask>::aligned>::const_iterator
-              pit = projections.begin(); pit != projections.end(); pit++) 
-        {
-          for (LegionMap<IndexSpaceNode*,FieldMask>::aligned::const_iterator 
-                it = pit->second.begin(); it != pit->second.end(); it++)
-            valid_fields |= it->second;
-        }
+        for (LegionMap<ProjectionSummary,FieldMask>::aligned::const_iterator
+              pit = projections.begin(); pit != projections.end(); pit++)
+          valid_fields |= pit->second;
       }
     }
 
@@ -3668,65 +3631,53 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void ClosedNode::filter_dominated_projection_fields(
         FieldMask &non_dominated_mask,
-        const std::map<std::pair<ProjectionFunction*,ShardingFunction*>,
-          LegionMap<IndexSpaceNode*,FieldMask>::aligned> &new_projections) const
+        const LegionMap<ProjectionSummary,
+                        FieldMask>::aligned &new_projections) const
     //--------------------------------------------------------------------------
     {
       // In order to remove a dominated field, for each of our projection
       // operations, we need to find one in the new set that dominates it
       FieldMask dominated_mask = non_dominated_mask;
-      for (std::map<std::pair<ProjectionFunction*,ShardingFunction*>,
-              LegionMap<IndexSpaceNode*,FieldMask>::aligned>::const_iterator 
+      for (LegionMap<ProjectionSummary,FieldMask>::aligned::const_iterator
             pit = projections.begin(); pit != projections.end(); pit++)
       {
-        // Set this iterator to the begining to start
-        // Use it later to find domains with the same projection function
-        std::map<std::pair<ProjectionFunction*,ShardingFunction*>,
-                 LegionMap<IndexSpaceNode*,FieldMask>::aligned>::const_iterator
-                   finder = new_projections.begin();
-        for (LegionMap<IndexSpaceNode*,FieldMask>::aligned::const_iterator dit =
-              pit->second.begin(); dit != pit->second.end(); dit++)
+        // Find the set of fields that are still dominated for everything
+        // that overlap with this projection so we can check that they
+        // are still dominated
+        const FieldMask need_dominated = pit->second & dominated_mask;
+        if (!need_dominated)
+          continue;
+        FieldMask actually_dominated;
+        // See if we can find one in the new set that dominates 
+        for (LegionMap<ProjectionSummary,FieldMask>::aligned::const_iterator
+              it = new_projections.begin(); it != new_projections.end(); it++)
         {
-          FieldMask overlap = dit->second & dominated_mask;
+          // If the projection functions don't match then we can't
+          // do anything about dominance
+          if (pit->first.projection != it->first.projection)
+            continue;
+          // The overlap are fields that can be dominated
+          FieldMask overlap = it->second & need_dominated;
           if (!overlap)
             continue;
-          // If it's still at the beginning try to find it
-          if (finder == new_projections.begin())
-            finder = new_projections.find(pit->first);
-          // If we found it then we can try to find overlapping domains
-          if (finder != new_projections.end())
+          // Now check to see if the index space dominates
+          // Types have to match, if they don't we don't care
+          if (it->first.domain->handle.get_type_tag() !=
+              pit->first.domain->handle.get_type_tag())
+            continue;
+          if (it->first.domain->dominates(pit->first.domain))
           {
-            for (LegionMap<IndexSpaceNode*,FieldMask>::aligned::const_iterator 
-                  it = finder->second.begin(); it != finder->second.end(); it++)
-            {
-              FieldMask dom_overlap = overlap & it->second;
-              if (!dom_overlap)
-                continue; 
-              // Types don't have to match, if they don't we don't care
-              if (it->first->handle.get_type_tag() !=
-                  dit->first->handle.get_type_tag())
-                continue;
-              // See if the domain dominates
-              if (it->first->dominates(dit->first))
-              {
-                overlap -= dom_overlap;
-                if (!overlap)
-                  break;
-              }
-            }
-          }
-          // Any fields still in overlap are not dominated
-          if (!!overlap)
-          {
-            dominated_mask -= overlap;
-            if (!dominated_mask)
+            actually_dominated |= overlap;
+            if (actually_dominated == need_dominated)
               break;
           }
         }
-        // Didn't find any dominated fields so we are done
+        // Remove any fields that should have been dominated that weren't
+        dominated_mask -= (need_dominated - actually_dominated);
         if (!dominated_mask)
           break;
       }
+      // Remove the dominated fields from the set
       if (!!dominated_mask)
         non_dominated_mask -= dominated_mask;
     }
@@ -3752,26 +3703,17 @@ namespace Legion {
         IndexSpaceNode *color_space = node->row_source->color_space;
         // Iterate over the projections and look for anything with an 
         // identity projection function for which we can do something
-        for (std::map<std::pair<ProjectionFunction*,ShardingFunction*>,
-              LegionMap<IndexSpaceNode*,FieldMask>::aligned>::const_iterator
-              pit = it->second->projections.begin(); 
+        for (LegionMap<ProjectionSummary,FieldMask>::aligned::const_iterator
+              pit = it->second->projections.begin();
               pit != it->second->projections.end(); pit++)
         {
-          if (pit->first.first != identity)
+          if (pit->first.projection != identity)
             continue;
-          FieldMask new_child_dominated;
-          for (LegionMap<IndexSpaceNode*,FieldMask>::aligned::const_iterator 
-                dit = pit->second.begin(); dit != pit->second.end(); dit++)
-          {
-            FieldMask overlap = non_dominated_mask & dit->second;
-            if (!overlap)
-              continue;
-            if ((color_space->get_num_dims() == dit->first->get_num_dims()) &&
-                dit->first->dominates(color_space))
-              new_child_dominated |= overlap;
-          }
-          // See if we have any dominated fields
+          FieldMask new_child_dominated = non_dominated_mask & pit->second;
           if (!new_child_dominated)
+            continue;
+          if ((color_space->get_num_dims() != pit->first.domain->get_num_dims())
+              || ! pit->first.domain->dominates(color_space))
             continue;
           // If there are any reduction fields they can't be dominated
           if (!!it->second->reduced_fields)
@@ -3793,20 +3735,15 @@ namespace Legion {
       // TODO: make this analysis more precise
       if (!projections.empty())
       {
-        for (std::map<std::pair<ProjectionFunction*,ShardingFunction*>,
-                LegionMap<IndexSpaceNode*,FieldMask>::aligned>::const_iterator
+        for (LegionMap<ProjectionSummary,FieldMask>::aligned::const_iterator
               pit = projections.begin(); pit != projections.end(); pit++)
         {
-          for (LegionMap<IndexSpaceNode*,FieldMask>::aligned::const_iterator 
-                it = pit->second.begin(); it != pit->second.end(); it++)
-          {
-            const FieldMask overlap = it->second & dominated_fields;
-            if (!overlap)
-              continue;
-            dominated_fields -= overlap;
-            if (!dominated_fields)
-              return;
-          }
+          const FieldMask overlap = pit->second & dominated_fields;
+          if (!overlap)
+            continue;
+          dominated_fields -= overlap;
+          if (!dominated_fields)
+            return;
         }
       }
       FieldMask not_dominated_by_all;
@@ -3844,25 +3781,19 @@ namespace Legion {
       rez.serialize(valid_fields);
       rez.serialize(covered_fields);
       rez.serialize<size_t>(projections.size());
-      for (std::map<std::pair<ProjectionFunction*,ShardingFunction*>,
-              LegionMap<IndexSpaceNode*,FieldMask>::aligned>::const_iterator 
+      for (LegionMap<ProjectionSummary,FieldMask>::aligned::const_iterator
             pit = projections.begin(); pit != projections.end(); pit++)
       {
-        rez.serialize(pit->first.first->projection_id);
-        if (pit->first.second != NULL)
+        rez.serialize(pit->first.projection->projection_id);
+        if (pit->first.sharding!= NULL)
         {
           rez.serialize<bool>(true);
-          rez.serialize(pit->first.second->sharding_id);
+          rez.serialize(pit->first.sharding->sharding_id);
         }
         else
           rez.serialize<bool>(false);
-        rez.serialize<size_t>(pit->second.size());
-        for (LegionMap<IndexSpaceNode*,FieldMask>::aligned::const_iterator it =
-              pit->second.begin(); it != pit->second.end(); it++)
-        {
-          rez.serialize(it->first->handle);
-          rez.serialize(it->second);
-        }
+        rez.serialize(pit->first.domain->handle);
+        rez.serialize(pit->second);
       }
       rez.serialize<size_t>(children.size());
       for (std::map<RegionTreeNode*,ClosedNode*>::const_iterator it = 
@@ -3881,29 +3812,22 @@ namespace Legion {
       derez.deserialize(num_projections);
       for (unsigned idx = 0; idx < num_projections; idx++)
       {
+        ProjectionSummary summary;
         ProjectionID pid;
         derez.deserialize(pid);
-        std::pair<ProjectionFunction*,ShardingFunction*> key(
-            runtime->find_projection_function(pid), NULL);
+        summary.projection = runtime->find_projection_function(pid);
         bool has_sharding_function;
         derez.deserialize(has_sharding_function);
         if (has_sharding_function)
         {
           ShardingID sid;
           derez.deserialize(sid);
-          key.second = ctx->find_sharding_function(sid);
+          summary.sharding = ctx->find_sharding_function(sid);
         }
-        LegionMap<IndexSpaceNode*,FieldMask>::aligned &spaces = 
-          projections[key];
-        size_t num_doms;
-        derez.deserialize(num_doms);
-        for (unsigned idx2 = 0; idx2 < num_doms; idx2++)
-        {
-          IndexSpace handle;
-          derez.deserialize(handle);
-          IndexSpaceNode *node = runtime->forest->get_node(handle);
-          derez.deserialize(spaces[node]);
-        }
+        IndexSpace handle;
+        derez.deserialize(handle);
+        summary.domain = runtime->forest->get_node(handle);
+        derez.deserialize(projections[summary]);
       }
       size_t num_children;
       derez.deserialize(num_children);

@@ -11648,15 +11648,12 @@ namespace Legion {
           rez.serialize((*pit)->epoch_id);
           rez.serialize((*pit)->valid_fields);
           rez.serialize<size_t>((*pit)->projections.size());
-          for (std::map<ProjectionFunction*,std::set<IndexSpaceNode*> >::
-                const_iterator fit = (*pit)->projections.begin(); 
-                fit != (*pit)->projections.end(); fit++)
+          for (std::set<ProjectionSummary>::const_iterator fit = 
+                (*pit)->projections.begin(); fit != 
+                (*pit)->projections.end(); fit++)
           {
-            rez.serialize(fit->first->projection_id);
-            rez.serialize<size_t>(fit->second.size());
-            for (std::set<IndexSpaceNode*>::const_iterator it = 
-                  fit->second.begin(); it != fit->second.end(); it++)
-              rez.serialize((*it)->handle);
+            rez.serialize(fit->projection->projection_id);
+            rez.serialize(fit->domain->handle);
           }
         }
         rez.serialize<size_t>(state.field_states.size());
@@ -11728,19 +11725,15 @@ namespace Legion {
         derez.deserialize(num_projections);
         for (unsigned idx2 = 0; idx2 < num_projections; idx2++)
         {
+          ProjectionSummary summary;
           ProjectionID proj_id;
           derez.deserialize(proj_id);
-          ProjectionFunction *function = 
+          summary.projection = 
             context->runtime->find_projection_function(proj_id);
-          std::set<IndexSpaceNode*> &spaces = epoch->projections[function];
-          size_t num_doms;
-          derez.deserialize(num_doms);
-          for (unsigned idx3 = 0; idx3 < num_doms; idx3++)
-          {
-            IndexSpace handle;
-            derez.deserialize(handle);
-            spaces.insert(context->get_node(handle));
-          }
+          IndexSpace handle;
+          derez.deserialize(handle);
+          summary.domain = context->get_node(handle);
+          epoch->projections.insert(summary);
         }
       }
       size_t num_field_states;
