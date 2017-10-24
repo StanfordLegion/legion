@@ -24,6 +24,10 @@
 // for size_t
 #include <stddef.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 typedef unsigned long long realm_id_t;
 #define IDFMT "%llx"
 
@@ -88,5 +92,9 @@ typedef
     const void * /*userdata*/,
     size_t /*userlen*/,
     realm_id_t /*proc_id*/);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif // ifndef REALM_C_H

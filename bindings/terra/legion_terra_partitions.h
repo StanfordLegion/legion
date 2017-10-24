@@ -24,11 +24,12 @@
 //
 // ******************** IMPORTANT **************************
 
+#define LEGION_ENABLE_C_BINDINGS
+#include "legion.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-#include "legion/legion_c.h"
 
 typedef struct legion_terra_index_cross_product_t {
   legion_index_partition_t partition;

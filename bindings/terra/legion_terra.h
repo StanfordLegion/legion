@@ -16,7 +16,7 @@
 #ifndef __LEGION_TERRA_H__
 #define __LEGION_TERRA_H__
 
-#include "legion/legion_c.h"
+#include "legion.h"
 
 #ifdef __cplusplus
 extern "C" {

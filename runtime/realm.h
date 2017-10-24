@@ -18,6 +18,24 @@
 #ifndef REALM_H
 #define REALM_H
 
+// decide whether we want C and/or C++ bindings (default matches
+//  host language)
+#if !defined(REALM_ENABLE_C_BINDINGS) && !defined(REALM_DISABLE_C_BINDINGS)
+  #ifndef __cplusplus
+    #define REALM_ENABLE_C_BINDINGS
+  #endif
+#endif
+#if !defined(REALM_ENABLE_CXX_BINDINGS) && !defined(REALM_DISABLE_CXX_BINDINGS)
+  #ifdef __cplusplus
+    #define REALM_ENABLE_CXX_BINDINGS
+  #endif
+#endif
+
+#ifdef REALM_ENABLE_C_BINDINGS
+#include "realm/realm_c.h"
+#endif
+
+#ifdef REALM_ENABLE_CXX_BINDINGS
 #include "realm/realm_config.h"
 
 #include "realm/profiling.h"
@@ -31,5 +49,6 @@
 #include "realm/runtime.h"
 #include "realm/indexspace.h"
 #include "realm/codedesc.h"
+#endif // ifdef REALM_ENABLE_CXX_BINDINGS
 
 #endif // ifndef REALM_H

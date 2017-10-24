@@ -20,8 +20,8 @@
 #include <limits>
 #include <vector>
 
+#define LEGION_ENABLE_C_BINDINGS
 #include "legion.h"
-#include "legion/legion_c.h"
 #include "legion/legion_c_util.h"
 
 #include "legion_terra.h"

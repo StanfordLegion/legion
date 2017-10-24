@@ -16,9 +16,8 @@
 #include "bishop_mapper.h"
 #include "legion/legion_c_util.h"
 
-extern "C" {
-#include "legion/legion_c.h"
-}
+#define LEGION_ENABLE_C_BINDINGS
+#include "legion.h"
 
 using namespace std;
 

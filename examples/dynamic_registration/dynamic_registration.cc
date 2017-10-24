@@ -17,8 +17,8 @@
 #include <cstdio>
 #include <cassert>
 #include <cstdlib>
+#define LEGION_ENABLE_C_BINDINGS
 #include "legion.h"
-#include "legion/legion_c.h"
 #include "mappers/default_mapper.h"
 
 using namespace Legion;

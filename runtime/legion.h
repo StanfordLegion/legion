@@ -17,6 +17,24 @@
 #ifndef __LEGION_RUNTIME_H__
 #define __LEGION_RUNTIME_H__
 
+// decide whether we want C and/or C++ bindings (default matches
+//  host language)
+#if !defined(LEGION_ENABLE_C_BINDINGS) && !defined(LEGION_DISABLE_C_BINDINGS)
+  #ifndef __cplusplus
+    #define LEGION_ENABLE_C_BINDINGS
+  #endif
+#endif
+#if !defined(LEGION_ENABLE_CXX_BINDINGS) && !defined(LEGION_DISABLE_CXX_BINDINGS)
+  #ifdef __cplusplus
+    #define LEGION_ENABLE_CXX_BINDINGS
+  #endif
+#endif
+
+#ifdef LEGION_ENABLE_C_BINDINGS
+#include "legion/legion_c.h"
+#endif
+
+#ifdef LEGION_ENABLE_CXX_BINDINGS
 /**
  * \mainpage Legion Runtime Documentation
  *
@@ -6981,6 +6999,8 @@ namespace Legion {
 }; // namespace Legion
 
 #include "legion/legion.inl"
+
+#endif // defined LEGION_ENABLE_CXX_BINDINGS
 
 #endif // __LEGION_RUNTIME_H__
 

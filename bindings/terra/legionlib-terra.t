@@ -12,9 +12,9 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
-local legion_c = terralib.includec("legion/legion_c.h")
+local legion_c = terralib.includec("legion.h")
 
--- imports opaque types in legion_c.h to the global table
+-- imports opaque types in legion.h to the global table
 function legion:import_types()
   for k, v in pairs(legion_c)
     do
