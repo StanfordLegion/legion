@@ -10,9 +10,9 @@ export DEBUG=0
 for branch in master deppart; do
     if [[ -d _legion_$branch ]]; then
         pushd _legion_$branch
-        git reset --hard HEAD
         git clean -fdx
-        git pull --ff-only
+        git fetch
+        git reset --hard origin/$branch
         git submodule update --init
         popd
     else
