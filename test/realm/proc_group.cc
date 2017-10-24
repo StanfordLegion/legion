@@ -6,7 +6,7 @@
 
 #include <time.h>
 
-#include "realm/realm.h"
+#include "realm.h"
 
 using namespace Realm;
 
