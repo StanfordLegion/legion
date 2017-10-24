@@ -1307,7 +1307,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplDeletionOp::trigger_ready(void)
+    void ReplDeletionOp::trigger_complete(void)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -1316,16 +1316,11 @@ namespace Legion {
 #else
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
-      // Shard 0 will hold all the deletions
+      // Shard 0 will handle all the deletions
       if (repl_ctx->owner_shard->shard_id == 0)
-      {
-        // We don't own it, so we can pretend like we
-        // mapped and executed this deletion already 
-        complete_mapping();
-        complete_execution();
-      }
-      else // We own it, so enqueue it
-        enqueue_ready_operation();
+        DeletionOp::trigger_complete();
+      else // We own it, so we can just mark ourselves done
+        complete_operation();
     }
 
     /////////////////////////////////////////////////////////////

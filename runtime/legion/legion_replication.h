@@ -692,7 +692,7 @@ namespace Legion {
       virtual void activate(void);
       virtual void deactivate(void);
     public:
-      virtual void trigger_ready(void);
+      virtual void trigger_complete(void);
     };
 
     /**
