@@ -126,11 +126,10 @@ macro(_GASNet_parse_flags INVAR FLAG OUTVAR)
   endforeach()
 endmacro()
 
-function(_GASNet_create_component_target _GASNet_MAKEFILE COMPONENT_NAME
-  COMPONENT_LIB)
+function(_GASNet_create_component_target _GASNet_MAKEFILE COMPONENT_NAME)
   string(REGEX MATCH "^([^\\-]*)-([^\\-]*)$" COMPONENT_NAME "${COMPONENT_NAME}")
   _GASNet_parse_conduit_makefile(${_GASNet_MAKEFILE} ${CMAKE_MATCH_2})
-  get_filename_component(LDIRS "${COMPONENT_LIB}" DIRECTORY)
+
   foreach(V _GASNet_CFLAGS _GASNet_CXXFLAGS _GASNet_LDFLAGS _GASNet_LIBS)
     _GASNet_parse_flags(${V} "-I" IDIRS)
     _GASNet_parse_flags(${V} "-D" DEFS)
@@ -141,7 +140,6 @@ function(_GASNet_create_component_target _GASNet_MAKEFILE COMPONENT_NAME
     message(WARNING "Unable to find link libraries for gasnet-${COMPONENT_NAME}")
     return()
   endif()
-  list(REMOVE_ITEM LIBS gasnet-${COMPONENT_NAME})
 
   foreach(L IN LISTS LIBS)
     find_library(GASNet_${L}_LIBRARY ${L} PATHS ${LDIRS})
@@ -161,7 +159,7 @@ function(_GASNet_create_component_target _GASNet_MAKEFILE COMPONENT_NAME
   endif()
   add_library(GASNet::${COMPONENT_NAME} UNKNOWN IMPORTED)
   set_target_properties(GASNet::${COMPONENT_NAME} PROPERTIES
-    IMPORTED_LOCATION "${COMPONENT_LIB}"
+    IMPORTED_LOCATION "${GASNet_gasnet-${COMPONENT_NAME}_LIBRARY}"
   )
   if(DEFS)
     set_target_properties(GASNet::${COMPONENT_NAME} PROPERTIES
@@ -257,16 +255,9 @@ if(NOT GASNet_FOUND AND NOT TARGET GASNet::GASNet)
         GASNet_CONDUITS GASNet_THREADING_OPTS
       )
 
-      # Look for the conduit specific library
-      find_library(GASNet_${_COMPONENT}_LIBRARY gasnet-${_COMPONENT}
-        ${_GASNet_FIND_LIBRARY_OPTS}
-      )
-      mark_as_advanced(GASNet_${_COMPONENT}_LIBRARY)
-
       # Create the component imported target
-      _GASNet_create_component_target("${CMF}" ${_COMPONENT}
-        "${GASNet_${_COMPONENT}_LIBRARY}"
-      )
+      _GASNet_create_component_target("${CMF}" ${_COMPONENT})
+
       if(NOT TARGET GASNet::${_COMPONENT})
         message(WARNING "Unable to create GASNet::${_COMPONENT} target")
       endif()
