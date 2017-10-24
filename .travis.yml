@@ -15,6 +15,7 @@ env:
   - REALM_SYNTHETIC_CORE_MAP=""
   - REALM_BACKTRACE=1
   - TEST_FUZZER=0
+  - SHORT=1
   matrix:
   - CC_FLAGS="-std=c++98" DEBUG=0 USE_CMAKE=1 TEST_REGENT=0 TEST_CTEST=1
   - CC_FLAGS="-std=c++98" DEBUG=0 TEST_LEGION_CXX=0 TEST_REALM=0
@@ -71,8 +72,4 @@ before_install:
       popd
     fi
 script:
-  - |
-    if [[ "$(uname)" = "Darwin" ]]; then
-      export SHORT=1 # FIXME: macOS tests take too long, workaround by running short tests
-    fi
   - ./test.py -j2

@@ -216,7 +216,7 @@ class Counter:
         self.passed = 0
         self.failed = 0
 
-def get_test_specs(use_run, use_spy, use_hdf5, use_openmp, extra_flags):
+def get_test_specs(use_run, use_spy, use_hdf5, use_openmp, short, extra_flags):
     base = [
         # FIXME: Move this flag into a per-test parameter so we don't use it everywhere.
         # Don't include backtraces on those expected to fail
@@ -224,6 +224,8 @@ def get_test_specs(use_run, use_spy, use_hdf5, use_openmp, extra_flags):
          (os.path.join('tests', 'regent', 'compile_fail'),
           os.path.join('tests', 'bishop', 'compile_fail'),
          )),
+    ]
+    pretty = [
         ('pretty', (test_run_pass, (['-fpretty', '1'] + extra_flags, {})),
          (os.path.join('tests', 'regent', 'run_pass'),
           os.path.join('tests', 'regent', 'perf'),
@@ -265,6 +267,8 @@ def get_test_specs(use_run, use_spy, use_hdf5, use_openmp, extra_flags):
     result = []
     if not use_run and not use_spy and not use_hdf5:
         result.extend(base)
+        if not short:
+            result.extend(pretty)
         result.extend(run)
     if use_run:
         result.extend(run)
@@ -282,7 +286,7 @@ def run_all_tests(thread_count, debug, run, spy, hdf5, openmp, extra_flags, verb
     results = []
 
     # Run tests asynchronously.
-    tests = get_test_specs(run, spy, hdf5, openmp, extra_flags)
+    tests = get_test_specs(run, spy, hdf5, openmp, short, extra_flags)
     for test_name, test_fn, test_dirs in tests:
         test_paths = []
         for test_dir in test_dirs:

@@ -10,9 +10,10 @@ export DEBUG=0
 for branch in master deppart; do
     if [[ -d _legion_$branch ]]; then
         pushd _legion_$branch
-        git pull --ff-only
-        git reset --hard HEAD
         git clean -fdx
+        git fetch
+        git reset --hard origin/$branch
+        git submodule update --init
         popd
     else
         git clone -b $branch https://github.com/StanfordLegion/legion.git _legion_$branch
