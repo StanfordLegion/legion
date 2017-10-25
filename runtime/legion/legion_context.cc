@@ -9458,17 +9458,12 @@ namespace Legion {
     {
       ReplInterCloseOp *result = 
         runtime->get_available_repl_inter_close_op(false/*need continuation*/);
-      // Get the next barriers for the close operations
-      RtBarrier &mapped_bar = 
-        close_mapped_barriers[next_close_mapped_bar_index++];
-      if (next_close_mapped_bar_index == close_mapped_barriers.size())
-        next_close_mapped_bar_index = 0;
+      // Get the next view barrier for the close operations
       RtBarrier &view_bar = view_close_barriers[next_view_close_bar_index++];
       if (next_view_close_bar_index == view_close_barriers.size())
         next_view_close_bar_index = 0;
-      result->set_close_barriers(mapped_bar, view_bar);
+      result->set_view_barrier(view_bar);
       // Advance the phase for the next time through
-      Runtime::advance_barrier(mapped_bar);
       Runtime::advance_barrier(view_bar);
       return result;
     }

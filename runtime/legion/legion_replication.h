@@ -589,11 +589,10 @@ namespace Legion {
       virtual void activate(void);
       virtual void deactivate(void);
     public:
-      void set_close_barriers(RtBarrier mapped_barrier, RtBarrier view_barrier);
+      void set_view_barrier(RtBarrier view_barrier);
       virtual void complete_close_mapping(CompositeView *view,
                     RtEvent precondition = RtEvent::NO_RT_EVENT);
     protected:
-      RtBarrier mapped_barrier;
       RtBarrier view_barrier;
     };
 

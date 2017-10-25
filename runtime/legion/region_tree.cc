@@ -5624,6 +5624,7 @@ namespace Legion {
       // Go up first so we know those nodes will be there
       if (up && (parent != NULL))
         parent->send_node(target, true/*up*/);
+      if (!has_remote_instance(target))
       {
         AutoLock n_lock(node_lock);
         if (!remote_instances.contains(target))
@@ -6696,6 +6697,7 @@ namespace Legion {
       // Always send the color space ahead of this 
       color_space->send_node(target, false/*up*/);
       std::map<LegionColor,IndexSpaceNode*> valid_copy;
+      if (!has_remote_instance(target))
       {
         // Make sure we know if this is disjoint or not yet
         bool disjoint_result = is_disjoint();
