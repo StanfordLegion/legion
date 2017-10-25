@@ -6589,7 +6589,7 @@ namespace Legion {
                                    UniqueID ctx_uid, ShardManager *manager)
       : InnerContext(rt, owner, full, reqs, parent_indexes, virt_mapped, 
           ctx_uid), owner_shard(owner), shard_manager(manager),
-        next_close_bar_index(0), 
+        next_close_mapped_bar_index(0), next_view_close_bar_index(0), 
         index_space_allocator_shard(0), index_partition_allocator_shard(0),
         field_space_allocator_shard(0), field_allocator_shard(0),
         logical_region_allocator_shard(0), next_available_collective_index(0)
@@ -6624,10 +6624,18 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // We delete the barriers that we created
-      for (unsigned idx = owner_shard->shard_id;
-          idx < inter_close_barriers.size(); idx += shard_manager->total_shards)
+      for (unsigned idx = owner_shard->shard_id; 
+            idx < close_mapped_barriers.size(); 
+            idx += shard_manager->total_shards)
       {
-        Realm::Barrier bar = inter_close_barriers[idx];
+        Realm::Barrier bar = close_mapped_barriers[idx];
+        bar.destroy_barrier();
+      }
+      for (unsigned idx = owner_shard->shard_id;
+            idx < view_close_barriers.size(); 
+            idx += shard_manager->total_shards)
+      {
+        Realm::Barrier bar = view_close_barriers[idx];
         bar.destroy_barrier();
       }
     }
@@ -9442,7 +9450,7 @@ namespace Legion {
                     "control replicated task %s (UID %lld)",
                     get_task_name(), get_unique_id());
       assert(false);
-    }
+    } 
 
     //--------------------------------------------------------------------------
     InterCloseOp* ReplicateContext::get_inter_close_op(void)
@@ -9450,13 +9458,18 @@ namespace Legion {
     {
       ReplInterCloseOp *result = 
         runtime->get_available_repl_inter_close_op(false/*need continuation*/);
-      // Get the next barrier for the close operations
-      RtBarrier &bar = inter_close_barriers[next_close_bar_index++];
-      if (next_close_bar_index == inter_close_barriers.size())
-        next_close_bar_index = 0;
-      result->set_close_barrier(bar);
+      // Get the next barriers for the close operations
+      RtBarrier &mapped_bar = 
+        close_mapped_barriers[next_close_mapped_bar_index++];
+      if (next_close_mapped_bar_index == close_mapped_barriers.size())
+        next_close_mapped_bar_index = 0;
+      RtBarrier &view_bar = view_close_barriers[next_view_close_bar_index++];
+      if (next_view_close_bar_index == view_close_barriers.size())
+        next_view_close_bar_index = 0;
+      result->set_close_barriers(mapped_bar, view_bar);
       // Advance the phase for the next time through
-      Runtime::advance_barrier(bar);
+      Runtime::advance_barrier(mapped_bar);
+      Runtime::advance_barrier(view_bar);
       return result;
     }
 
@@ -9469,6 +9482,23 @@ namespace Legion {
       // for control replication contexts
       assert(false);
       return NULL;
+    }
+
+    //--------------------------------------------------------------------------
+    ReadCloseOp* ReplicateContext::get_read_only_close_op(void)
+    //--------------------------------------------------------------------------
+    {
+      ReplReadCloseOp *result = 
+        runtime->get_available_repl_read_close_op(false/*need continuation*/);
+      // Get the next barriers for the close operations
+      RtBarrier &mapped_bar = 
+        close_mapped_barriers[next_close_mapped_bar_index++];
+      if (next_close_mapped_bar_index == close_mapped_barriers.size())
+        next_close_mapped_bar_index = 0;
+      result->set_mapped_barrier(mapped_bar);
+      // Advance the phase for the next time through
+      Runtime::advance_barrier(mapped_bar);
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -9592,12 +9622,18 @@ namespace Legion {
     void ReplicateContext::exchange_common_resources(void)
     //--------------------------------------------------------------------------
     {
+      // Exchange close map barriers across all the shards
+      BarrierExchangeCollective mapped_collective(this,
+          CONTROL_REPLICATION_COMMUNICATION_BARRIERS,
+          close_mapped_barriers, COLLECTIVE_LOC_50);
+      mapped_collective.exchange_barriers_async();
       // Exchange the close operation barriers across all the shards
       BarrierExchangeCollective close_collective(this, 
           CONTROL_REPLICATION_COMMUNICATION_BARRIERS, 
-          inter_close_barriers, COLLECTIVE_LOC_50);
+          view_close_barriers, COLLECTIVE_LOC_51);
       close_collective.exchange_barriers_async();
       // Wait for everything to be done
+      mapped_collective.wait_for_barrier_exchange();
       close_collective.wait_for_barrier_exchange();
     }
 

@@ -1362,6 +1362,7 @@ namespace Legion {
     public:
       virtual InterCloseOp* get_inter_close_op(void);
       virtual IndexCloseOp* get_index_close_op(void);
+      virtual ReadCloseOp*  get_read_only_close_op(void);
     public:
       virtual void pack_remote_context(Serializer &rez, 
                                        AddressSpaceID target,
@@ -1403,9 +1404,12 @@ namespace Legion {
       ShardTask *const owner_shard;
       ShardManager *const shard_manager;
     protected:
-      // These are barriers used to identify composite views for close ops
-      std::vector<RtBarrier>  inter_close_barriers;
-      unsigned                next_close_bar_index;
+      // These barriers are used to identify when close operations are mapped
+      std::vector<RtBarrier>  close_mapped_barriers;
+      unsigned                next_close_mapped_bar_index;
+      // These are barriers used to identify composite views for inter close ops
+      std::vector<RtBarrier>  view_close_barriers;
+      unsigned                next_view_close_bar_index;
     protected:
       ShardID index_space_allocator_shard;
       ShardID index_partition_allocator_shard;

@@ -647,6 +647,79 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
+    // Repl Read Close Op 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    ReplReadCloseOp::ReplReadCloseOp(Runtime *rt)
+      : ReadCloseOp(rt)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    ReplReadCloseOp::ReplReadCloseOp(const ReplReadCloseOp &rhs)
+      : ReadCloseOp(rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    ReplReadCloseOp::~ReplReadCloseOp(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    ReplReadCloseOp& ReplReadCloseOp::operator=(const ReplReadCloseOp &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplReadCloseOp::activate(void)
+    //--------------------------------------------------------------------------
+    {
+      ReadCloseOp::activate();
+      mapped_barrier = RtBarrier::NO_RT_BARRIER;
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplReadCloseOp::deactivate(void)
+    //--------------------------------------------------------------------------
+    {
+      ReadCloseOp::deactivate();
+      runtime->free_repl_read_close_op(this);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplReadCloseOp::set_mapped_barrier(RtBarrier mapped)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!mapped_barrier.exists());
+#endif
+      mapped_barrier = mapped;
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplReadCloseOp::trigger_mapping(void)
+    //--------------------------------------------------------------------------
+    {
+      // Now trigger our phase barrier contingent on the precondition and then
+      // complete the operation contingent on the phase barrier triggering
+      Runtime::phase_barrier_arrive(mapped_barrier, 1/*count*/);
+      complete_operation(mapped_barrier);
+      // Then we can do the normal execution
+      complete_execution();
+    }
+
+    /////////////////////////////////////////////////////////////
     // Repl Inter Close Op 
     /////////////////////////////////////////////////////////////
 
@@ -686,7 +759,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       activate_inter_close();
-      close_barrier = RtBarrier::NO_RT_BARRIER;
+      mapped_barrier = RtBarrier::NO_RT_BARRIER;
+      view_barrier = RtBarrier::NO_RT_BARRIER;
     }
 
     //--------------------------------------------------------------------------
@@ -698,17 +772,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplInterCloseOp::set_close_barrier(RtBarrier close_bar)
+    void ReplInterCloseOp::set_close_barriers(RtBarrier mapped, RtBarrier view)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(!close_barrier.exists());
+      assert(!mapped_barrier.exists());
+      assert(!view_barrier.exists());
 #endif
-      close_barrier = close_bar;
+      mapped_barrier = mapped;
+      view_barrier = view;
     }
 
     //--------------------------------------------------------------------------
-    void ReplInterCloseOp::post_process_composite_view(CompositeView *view)
+    void ReplInterCloseOp::complete_close_mapping(CompositeView *view,
+                                                  RtEvent precondition)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -717,8 +794,12 @@ namespace Legion {
 #else
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
-      view->set_shard_invalid_barrier(close_barrier, 
+      view->set_shard_invalid_barrier(view_barrier, 
           repl_ctx->owner_shard->shard_id, true/*original view*/);
+      // Now trigger our phase barrier contingent on the precondition and then
+      // complete the operation contingent on the phase barrier triggering
+      Runtime::phase_barrier_arrive(mapped_barrier, 1/*count*/, precondition);
+      complete_mapping(mapped_barrier);
     }
 
     /////////////////////////////////////////////////////////////

@@ -2756,6 +2756,8 @@ namespace Legion {
                                                   bool has_lock = false);
       ReplIndexTask*        get_available_repl_index_task(bool need_cont,
                                                   bool has_lock = false);
+      ReplReadCloseOp*      get_available_repl_read_close_op(bool need_cont,
+                                                  bool has_lock = false);
       ReplInterCloseOp*     get_available_repl_inter_close_op(bool need_cont,
                                                   bool has_lock = false);
       ReplIndexFillOp*      get_available_repl_index_fill_op(bool need_cont,
@@ -2818,6 +2820,7 @@ namespace Legion {
     public: // Control replication operations
       void free_repl_individual_task(ReplIndividualTask *task);
       void free_repl_index_task(ReplIndexTask *task);
+      void free_repl_read_close_op(ReplReadCloseOp *op);
       void free_repl_inter_close_op(ReplInterCloseOp *op);
       void free_repl_index_fill_op(ReplIndexFillOp *op);
       void free_repl_copy_op(ReplCopyOp *op);
@@ -3148,6 +3151,7 @@ namespace Legion {
     protected: // Control replication operations
       std::deque<ReplIndividualTask*>   available_repl_individual_tasks;
       std::deque<ReplIndexTask*>        available_repl_index_tasks;
+      std::deque<ReplReadCloseOp*>      available_repl_read_close_ops;
       std::deque<ReplInterCloseOp*>     available_repl_inter_close_ops;
       std::deque<ReplIndexFillOp*>      available_repl_index_fill_ops;
       std::deque<ReplCopyOp*>           available_repl_copy_ops;

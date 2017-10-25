@@ -17888,6 +17888,25 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    ReplReadCloseOp* Runtime::get_available_repl_read_close_op(bool need_cont,
+                                                               bool has_lock)
+    //--------------------------------------------------------------------------
+    {
+      if (need_cont)
+      {
+#ifdef DEBUG_LEGION
+        assert(!has_lock);
+#endif
+        GetAvailableContinuation<ReplReadCloseOp*,
+                        &Runtime::get_available_repl_read_close_op>
+                          continuation(this, read_close_op_lock);
+        return continuation.get_result();
+      }
+      return get_available(read_close_op_lock,
+                           available_repl_read_close_ops, has_lock);
+    }
+
+    //--------------------------------------------------------------------------
     ReplInterCloseOp* Runtime::get_available_repl_inter_close_op(bool need_cont,
                                                                  bool has_lock)
     //--------------------------------------------------------------------------
@@ -18394,6 +18413,14 @@ namespace Legion {
     {
       AutoLock i_lock(index_task_lock);
       release_operation<false>(available_repl_index_tasks, task);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::free_repl_read_close_op(ReplReadCloseOp *op)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock i_lock(read_close_op_lock);
+      release_operation<false>(available_repl_read_close_ops, op);
     }
 
     //--------------------------------------------------------------------------

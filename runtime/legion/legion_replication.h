@@ -552,6 +552,28 @@ namespace Legion {
     };
 
     /**
+     * \class ReplReadCloseOp
+     * A read-only close operation that is aware that it
+     * is being executed in a control replication context
+     */
+    class ReplReadCloseOp : public ReadCloseOp {
+    public:
+      ReplReadCloseOp(Runtime *runtime);
+      ReplReadCloseOp(const ReplReadCloseOp &rhs);
+      virtual ~ReplReadCloseOp(void);
+    public:
+      ReplReadCloseOp& operator=(const ReplReadCloseOp &rhs);
+    public:
+      virtual void activate(void);
+      virtual void deactivate(void);
+    public:
+      void set_mapped_barrier(RtBarrier mapped_barrier);
+      virtual void trigger_mapping(void);
+    protected:
+      RtBarrier mapped_barrier;
+    };
+
+    /**
      * \class ReplInterCloseOp
      * A close operation that is aware that it is being
      * executed in a control replication context.
@@ -567,10 +589,12 @@ namespace Legion {
       virtual void activate(void);
       virtual void deactivate(void);
     public:
-      void set_close_barrier(RtBarrier close_barrier);
-      virtual void post_process_composite_view(CompositeView *view);
+      void set_close_barriers(RtBarrier mapped_barrier, RtBarrier view_barrier);
+      virtual void complete_close_mapping(CompositeView *view,
+                    RtEvent precondition = RtEvent::NO_RT_EVENT);
     protected:
-      RtBarrier close_barrier;
+      RtBarrier mapped_barrier;
+      RtBarrier view_barrier;
     };
 
     /**

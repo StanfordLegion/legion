@@ -6826,9 +6826,6 @@ namespace Legion {
                                                   , unique_op_id
 #endif
                                                   );
-      // This is a virtual method call back in case we need to do something
-      // extra with the view (i.e. in the case of control replication)
-      post_process_composite_view(view);
       // The physical perform close call took ownership
       closed_tree = NULL;
       if (Runtime::legion_spy_enabled)
@@ -6843,12 +6840,23 @@ namespace Legion {
           profiling_reported.exists())
         Runtime::trigger_event(profiling_reported);
       if (!map_applied_conditions.empty())
-        complete_mapping(Runtime::merge_events(map_applied_conditions));
+        complete_close_mapping(view, 
+            Runtime::merge_events(map_applied_conditions));
       else
-        complete_mapping();
+        complete_close_mapping(view);
       if (!acquired_instances.empty())
         release_acquired_instances(acquired_instances);
       complete_execution();
+    }
+
+    //--------------------------------------------------------------------------
+    void InterCloseOp::complete_close_mapping(CompositeView *view,
+                                              RtEvent precondition)
+    //--------------------------------------------------------------------------
+    {
+      // All we have to do here is the normal complete
+      // A control replication close op will do something more
+      complete_mapping(precondition);
     }
 
     //--------------------------------------------------------------------------

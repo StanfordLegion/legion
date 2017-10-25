@@ -1312,8 +1312,9 @@ namespace Legion {
                                           Realm::ProfilingRequestSet &reqeusts);
       virtual void handle_profiling_response(
                                     const Realm::ProfilingResponse &response);
-      // Do nothing for now, but used by control replication close operation
-      virtual void post_process_composite_view(CompositeView *view) { } 
+      // A callback to help out control replication
+      virtual void complete_close_mapping(CompositeView *view,
+                    RtEvent precondition = RtEvent::NO_RT_EVENT);
     protected:
       friend class PointCloseOp;
       FieldMask close_mask;
