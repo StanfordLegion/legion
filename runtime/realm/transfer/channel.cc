@@ -3546,28 +3546,49 @@ namespace Realm {
 #ifdef USE_CUDA
         // num_threads ++;
 #endif
+	RuntimeImpl *r = get_runtime();
         int idx = 0;
         dma_threads = (DMAThread**) calloc(count, sizeof(DMAThread*));
         // dma thread #1: memcpy
         std::vector<Channel*> channels;
         MemcpyChannel* memcpy_channel = channel_manager->create_memcpy_channel(max_nr);
+	GASNetChannel* gasnet_read_channel = channel_manager->create_gasnet_read_channel(max_nr);
+	GASNetChannel* gasnet_write_channel = channel_manager->create_gasnet_write_channel(max_nr);
         channels.push_back(memcpy_channel);
-        channels.push_back(channel_manager->create_gasnet_read_channel(max_nr));
-        channels.push_back(channel_manager->create_gasnet_write_channel(max_nr));
+        channels.push_back(gasnet_read_channel);
+        channels.push_back(gasnet_write_channel);
+	r->add_dma_channel(memcpy_channel);
+	r->add_dma_channel(gasnet_read_channel);
+	r->add_dma_channel(gasnet_write_channel);
+
         if (count > 1) {
           dma_threads[idx++] = new DMAThread(max_nr, xferDes_queue, channels);
           channels.clear();
           count --;
         }
         // dma thread #2: async xfer
-        channels.push_back(channel_manager->create_remote_write_channel(max_nr));
-        channels.push_back(channel_manager->create_disk_read_channel(max_nr));
-        channels.push_back(channel_manager->create_disk_write_channel(max_nr));
-        channels.push_back(channel_manager->create_file_read_channel(max_nr));
-        channels.push_back(channel_manager->create_file_write_channel(max_nr));
+	RemoteWriteChannel *remote_channel = channel_manager->create_remote_write_channel(max_nr);
+	DiskChannel *disk_read_channel = channel_manager->create_disk_read_channel(max_nr);
+	DiskChannel *disk_write_channel = channel_manager->create_disk_write_channel(max_nr);
+	FileChannel *file_read_channel = channel_manager->create_file_read_channel(max_nr);
+	FileChannel *file_write_channel = channel_manager->create_file_write_channel(max_nr);
+        channels.push_back(remote_channel);
+	channels.push_back(disk_read_channel);
+	channels.push_back(disk_write_channel);
+	channels.push_back(file_read_channel);
+	channels.push_back(file_write_channel);
+        r->add_dma_channel(remote_channel);
+	r->add_dma_channel(disk_read_channel);
+	r->add_dma_channel(disk_write_channel);
+	r->add_dma_channel(file_read_channel);
+	r->add_dma_channel(file_write_channel);
 #ifdef USE_HDF
-        channels.push_back(channel_manager->create_hdf_read_channel(max_nr));
-        channels.push_back(channel_manager->create_hdf_write_channel(max_nr));
+	HDFChannel *hdf_read_channel = channel_manager->create_hdf_read_channel(max_nr);
+	HDFChannel *hdf_write_channel = channel_manager->create_hdf_write_channel(max_nr);
+        channels.push_back(hdf_read_channel);
+        channels.push_back(hdf_write_channel);
+	r->add_dma_channel(hdf_read_channel);
+	r->add_dma_channel(hdf_write_channel);
 #endif
         if (count > 1) {
           dma_threads[idx++] = new DMAThread(max_nr, xferDes_queue, channels);
@@ -3577,19 +3598,20 @@ namespace Realm {
 #ifdef USE_CUDA
         std::vector<Cuda::GPU*>::iterator it;
         for (it = dma_all_gpus.begin(); it != dma_all_gpus.end(); it ++) {
-          channels.push_back(channel_manager->create_gpu_to_fb_channel(max_nr, *it));
-          channels.push_back(channel_manager->create_gpu_from_fb_channel(max_nr, *it));
-          channels.push_back(channel_manager->create_gpu_in_fb_channel(max_nr, *it));
-          channels.push_back(channel_manager->create_gpu_peer_fb_channel(max_nr, *it));
+	  GPUChannel *gpu_to_fb_channel = channel_manager->create_gpu_to_fb_channel(max_nr, *it);
+	  GPUChannel *gpu_from_fb_channel = channel_manager->create_gpu_from_fb_channel(max_nr, *it);
+	  GPUChannel *gpu_in_fb_channel = channel_manager->create_gpu_in_fb_channel(max_nr, *it);
+	  GPUChannel *gpu_peer_fb_channel = channel_manager->create_gpu_peer_fb_channel(max_nr, *it);
+          channels.push_back(gpu_to_fb_channel);
+          channels.push_back(gpu_from_fb_channel);
+          channels.push_back(gpu_in_fb_channel);
+          channels.push_back(gpu_peer_fb_channel);
+          r->add_dma_channel(gpu_to_fb_channel);
+          r->add_dma_channel(gpu_from_fb_channel);
+          r->add_dma_channel(gpu_in_fb_channel);
+          r->add_dma_channel(gpu_peer_fb_channel);
         }
 #endif
-
-	// tell the runtime about all the channels we created
-	RuntimeImpl *r = get_runtime();
-	for(std::vector<Channel *>::const_iterator it = channels.begin();
-	    it != channels.end();
-	    ++it)
-	  r->add_dma_channel(*it);
 
         dma_threads[idx++] = new DMAThread(max_nr, xferDes_queue, channels);
         num_threads = idx;
