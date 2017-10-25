@@ -714,7 +714,7 @@ namespace Legion {
       // Now trigger our phase barrier contingent on the precondition and then
       // complete the operation contingent on the phase barrier triggering
       Runtime::phase_barrier_arrive(mapped_barrier, 1/*count*/);
-      complete_operation(mapped_barrier);
+      complete_mapping(mapped_barrier);
       // Then we can do the normal execution
       complete_execution();
     }
