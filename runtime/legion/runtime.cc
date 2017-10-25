@@ -9250,6 +9250,7 @@ namespace Legion {
       RegionTreeForest *context = root->context;
       ProjectionTree *result = new ProjectionTree(row_source);
       std::map<IndexTreeNode*,ProjectionTree*> node_map;
+      node_map[row_source] = result;
       // Iterate over the points, compute the projections, and build the tree   
       Domain launch_domain;
       launch_space->get_launch_space_domain(launch_domain);
@@ -9259,6 +9260,8 @@ namespace Legion {
         for (Domain::DomainPointIterator itr(launch_domain); itr; itr++)
         {
           LogicalRegion result = functor->project(region->handle, itr.p);
+          if (!result.exists())
+            continue;
           if (sharding_function != NULL)
           {
             ShardID owner = sharding_function->find_owner(itr.p, launch_domain);
@@ -9274,6 +9277,8 @@ namespace Legion {
         for (Domain::DomainPointIterator itr(launch_domain); itr; itr++)
         {
           LogicalRegion result = functor->project(partition->handle, itr.p);
+          if (!result.exists())
+            continue;
           if (sharding_function != NULL)
           {
             ShardID owner = sharding_function->find_owner(itr.p, launch_domain);
