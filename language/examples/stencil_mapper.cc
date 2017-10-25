@@ -232,7 +232,8 @@ void StencilMapper::stencil_create_copy_instance(MapperContext ctx,
   // ELLIOTT: Get the remote node here.
   Color index = runtime->get_logical_region_color(ctx, copy.src_requirements[idx].region);
   Memory target_memory = default_policy_select_target_memory(ctx,
-                           procs_list[index % procs_list.size()]);
+                           procs_list[index % procs_list.size()],
+                           req);
   log_stencil.warning("Building instance for copy of a region with index %u to be in memory %llx",
                       index, target_memory.id);
   bool force_new_instances = false;

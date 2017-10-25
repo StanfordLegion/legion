@@ -338,7 +338,8 @@ namespace Legion {
                                     const TaskLayoutConstraintSet &layout1,
                                     const TaskLayoutConstraintSet &layout2);
       virtual Memory default_policy_select_target_memory(MapperContext ctx, 
-                                    Processor target_proc);
+                                    Processor target_proc,
+                                    const RegionRequirement &req);
       virtual LayoutConstraintID default_policy_select_layout_constraints(
                                     MapperContext ctx, Memory target_memory,
                                     const RegionRequirement &req,
