@@ -5570,7 +5570,7 @@ namespace Legion {
           runtime->address_space, logical_node, version_info, closed_tree, 
           owner_context, true/*register now*/);
       if (shard_invalid_barrier.exists())
-        result->set_shard_invalid_barrier(shard_invalid_barrier, 
+        result->set_shard_invalid_barrier(shard_invalid_barrier, origin_shard,
                                           false/*original composite view*/);
       // Clone the children
       for (LegionMap<CompositeNode*,FieldMask>::aligned::const_iterator it = 
@@ -6148,6 +6148,9 @@ namespace Legion {
           for (std::set<ShardID>::const_iterator it = needed_shards.begin();
                 it != needed_shards.end(); it++)
           {
+            // We can always skip the shard on which we were made
+            if ((*it) == origin_shard)
+              continue;
             RtUserEvent shard_ready;
             {
               AutoLock v_lock(view_lock);
@@ -6176,8 +6179,12 @@ namespace Legion {
             wait_on.insert(shard_ready);
           }
           // Wait for the result to be valid
-          RtEvent wait_for = Runtime::merge_events(wait_on);
-          wait_for.lg_wait();
+          if (!wait_on.empty())
+          {
+            RtEvent wait_for = Runtime::merge_events(wait_on);
+            if (wait_for.exists())
+              wait_for.lg_wait();
+          }
         }
         // Now we can add this to the set of checks that we've performed
         AutoLock v_lock(view_lock);
@@ -6518,6 +6525,7 @@ namespace Legion {
         rez.serialize(it->second);
       }
       rez.serialize(shard_invalid_barrier);
+      rez.serialize(origin_shard);
     }
 
     //--------------------------------------------------------------------------
@@ -6581,6 +6589,7 @@ namespace Legion {
         derez.deserialize(children[child]);
       }
       derez.deserialize(shard_invalid_barrier);
+      derez.deserialize(origin_shard);
     }
 
     //--------------------------------------------------------------------------
@@ -6616,13 +6625,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void CompositeView::set_shard_invalid_barrier(RtBarrier shard_invalid,
-                                                  bool original_shard)
+                                            ShardID origin, bool original_shard)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(!shard_invalid_barrier.exists());
 #endif
       shard_invalid_barrier = shard_invalid;
+      origin_shard = origin;
       original_shard_view = original_shard;
       if (original_shard_view)
       {

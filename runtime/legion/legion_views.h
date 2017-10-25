@@ -1338,6 +1338,7 @@ namespace Legion {
     public:
       // For control replication
       void set_shard_invalid_barrier(RtBarrier shard_invalid_barrier,
+                                     ShardID origin_shard,
                                      bool original_shard_view);
       void handle_sharding_update_request(Deserializer &derez,
                                           Runtime *runtime);
@@ -1364,6 +1365,7 @@ namespace Legion {
       // Used for composite instances created during control replication
       // to know when the whole composite view is invalid
       RtBarrier shard_invalid_barrier;
+      ShardID origin_shard;
       bool original_shard_view;
     protected:
       // For control replication to determine which shard checks

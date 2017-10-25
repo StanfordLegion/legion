@@ -711,7 +711,14 @@ namespace Legion {
     void ReplInterCloseOp::post_process_composite_view(CompositeView *view)
     //--------------------------------------------------------------------------
     {
-      view->set_shard_invalid_barrier(close_barrier, true/*original view*/);
+#ifdef DEBUG_LEGION
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+      view->set_shard_invalid_barrier(close_barrier, 
+          repl_ctx->owner_shard->shard_id, true/*original view*/);
     }
 
     /////////////////////////////////////////////////////////////
