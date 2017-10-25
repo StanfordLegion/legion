@@ -176,7 +176,8 @@ namespace Legion {
       // We clearly need to take a guess, let's see if we can find
       // one of our instances to use.
       Memory target_memory = default_policy_select_target_memory(ctx,
-                                        copy.parent_task->current_proc);
+                                        copy.parent_task->current_proc,
+                                        req);
       bool force_new_instances = false;
       LayoutConstraintID our_layout_id = 
        default_policy_select_layout_constraints(ctx, target_memory, 
