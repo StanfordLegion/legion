@@ -9479,12 +9479,18 @@ namespace Legion {
     {
       ReplInterCloseOp *result = 
         runtime->get_available_repl_inter_close_op(false/*need continuation*/);
-      // Get the next view barrier for the close operations
+      // Get the mapped barrier for the close operation
+      RtBarrier &mapped_bar = 
+        close_mapped_barriers[next_close_mapped_bar_index++];
+      if (next_close_mapped_bar_index == close_mapped_barriers.size())
+        next_close_mapped_bar_index = 0;
+      // Get the next view barrier for the close operation
       RtBarrier &view_bar = view_close_barriers[next_view_close_bar_index++];
       if (next_view_close_bar_index == view_close_barriers.size())
         next_view_close_bar_index = 0;
 #ifdef DEBUG_LEGION_COLLECTIVES
-      CloseCheckReduction::RHS barrier(user, view_bar, node,false/*read only*/);
+      CloseCheckReduction::RHS barrier(user, mapped_bar, 
+                                       node, false/*read only*/);
       Runtime::phase_barrier_arrive(close_check_barrier, 1/*count*/,
                               RtEvent::NO_RT_EVENT, &barrier, sizeof(barrier));
       close_check_barrier.lg_wait();
@@ -9495,8 +9501,9 @@ namespace Legion {
       assert(actual_barrier == barrier);
       Runtime::advance_barrier(close_check_barrier);
 #endif
-      result->set_view_barrier(view_bar);
+      result->set_close_barriers(mapped_bar, view_bar);
       // Advance the phase for the next time through
+      Runtime::advance_barrier(mapped_bar);
       Runtime::advance_barrier(view_bar);
       return result;
     }

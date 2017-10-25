@@ -861,6 +861,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       activate_inter_close();
+      mapped_barrier = RtBarrier::NO_RT_BARRIER;
       view_barrier = RtBarrier::NO_RT_BARRIER;
     }
 
@@ -873,12 +874,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplInterCloseOp::set_view_barrier(RtBarrier view)
+    void ReplInterCloseOp::set_close_barriers(RtBarrier mapped, RtBarrier view)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
+      assert(!mapped_barrier.exists());
       assert(!view_barrier.exists());
 #endif
+      mapped_barrier = mapped;
       view_barrier = view;
     }
 
@@ -895,7 +898,10 @@ namespace Legion {
 #endif
       view->set_shard_invalid_barrier(view_barrier, 
           repl_ctx->owner_shard->shard_id, true/*original view*/);
-      complete_mapping(precondition);
+      // Arrive on our barrier with the precondition
+      Runtime::phase_barrier_arrive(mapped_barrier, 1/*count*/, precondition);
+      // Then complete the mapping once the barrier has triggered
+      complete_mapping(mapped_barrier);
     }
 
     /////////////////////////////////////////////////////////////
