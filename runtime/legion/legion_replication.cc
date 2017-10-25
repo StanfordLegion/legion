@@ -94,6 +94,108 @@ namespace Legion {
           temp = __sync_val_compare_and_swap(ptr, temp, rhs2);
       }
     }
+
+    /////////////////////////////////////////////////////////////
+    // Check Reduction
+    /////////////////////////////////////////////////////////////
+    
+    /*static*/ const CloseCheckReduction::CloseCheckValue 
+      CloseCheckReduction::IDENTITY = CloseCheckReduction::CloseCheckValue();
+    /*static*/ const CloseCheckReduction::CloseCheckValue
+      CloseCheckReduction::identity = IDENTITY;
+    /*static*/ const ReductionOpID CloseCheckReduction::REDOP = 
+                                              MAX_APPLICATION_REDUCTION_ID + 1;
+
+    //--------------------------------------------------------------------------
+    CloseCheckReduction::CloseCheckValue::CloseCheckValue(void)
+      : operation_index(0), region_requirement_index(0),
+        barrier(RtBarrier::NO_RT_BARRIER), region(LogicalRegion::NO_REGION), 
+        partition(LogicalPartition::NO_PART), is_region(true), read_only(false)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    CloseCheckReduction::CloseCheckValue::CloseCheckValue(
+        const LogicalUser &user, RtBarrier bar, RegionTreeNode *node, bool read)
+      : operation_index(user.op->get_ctx_index()), 
+        region_requirement_index(user.idx), barrier(bar),
+        is_region(node->is_region()), read_only(read)
+    //--------------------------------------------------------------------------
+    {
+      if (is_region)
+        region = node->as_region_node()->handle;
+      else
+        partition = node->as_partition_node()->handle;
+    }
+
+    //--------------------------------------------------------------------------
+    bool CloseCheckReduction::CloseCheckValue::operator==(const
+                                                     CloseCheckValue &rhs) const
+    //--------------------------------------------------------------------------
+    {
+      if (operation_index != rhs.operation_index)
+        return false;
+      if (region_requirement_index != rhs.region_requirement_index)
+        return false;
+      if (barrier != rhs.barrier)
+        return false;
+      if (read_only != rhs.read_only)
+        return false;
+      if (is_region != rhs.is_region)
+        return false;
+      if (is_region)
+      {
+        if (region != rhs.region)
+          return false;
+      }
+      else
+      {
+        if (partition != rhs.partition)
+          return false;
+      }
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    template<>
+    /*static*/ void CloseCheckReduction::apply<true>(LHS &lhs, RHS rhs)
+    //--------------------------------------------------------------------------
+    {
+      // Only copy over if LHS is the identity
+      // This will effectively do a broadcast of one value
+      if (lhs == IDENTITY)
+        lhs = rhs;
+    }
+
+    //--------------------------------------------------------------------------
+    template<>
+    /*static*/ void CloseCheckReduction::apply<false>(LHS &lhs, RHS rhs)
+    //--------------------------------------------------------------------------
+    {
+      // Not supported at the moment
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    template<>
+    /*static*/ void CloseCheckReduction::fold<true>(RHS &rhs1, RHS rhs2)
+    //--------------------------------------------------------------------------
+    {
+      // Only copy over if RHS1 is the identity
+      // This will effectively do a broadcast of one value
+      if (rhs1 == IDENTITY)
+        rhs1 = rhs2;
+    }
+
+    //--------------------------------------------------------------------------
+    template<>
+    /*static*/ void CloseCheckReduction::fold<false>(RHS &rhs1, RHS rhs2)
+    //--------------------------------------------------------------------------
+    {
+      // Not supported at the moment
+      assert(false);
+    }
 #endif // DEBUG_LEGION_COLLECTIVES
 
     /////////////////////////////////////////////////////////////
@@ -2480,6 +2582,11 @@ namespace Legion {
                 CollectiveCheckReduction::REDOP,
                 &CollectiveCheckReduction::IDENTITY, 
                 sizeof(CollectiveCheckReduction::IDENTITY)));
+        close_check_barrier = 
+          RtBarrier(Realm::Barrier::create_barrier(total_shards,
+                CloseCheckReduction::REDOP,
+                &CloseCheckReduction::IDENTITY,
+                sizeof(CloseCheckReduction::IDENTITY)));
 #endif
       }
 #ifdef DEBUG_LEGION
@@ -2522,6 +2629,7 @@ namespace Legion {
           creation_barrier.destroy_barrier();
 #ifdef DEBUG_LEGION_COLLECTIVES
           collective_check_barrier.destroy_barrier();
+          close_check_barrier.destroy_barrier();
 #endif
         }
         // Send messages to all the remote spaces to remove the manager
@@ -2655,6 +2763,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION_COLLECTIVES
           assert(collective_check_barrier.exists());
           rez.serialize(collective_check_barrier);
+          assert(close_check_barrier.exists());
+          rez.serialize(close_check_barrier);
 #endif
         }
         rez.serialize<size_t>(shards.size());
@@ -2688,6 +2798,7 @@ namespace Legion {
         derez.deserialize(creation_barrier);
 #ifdef DEBUG_LEGION_COLLECTIVES
         derez.deserialize(collective_check_barrier);
+        derez.deserialize(close_check_barrier);
 #endif
       }
       size_t num_shards;

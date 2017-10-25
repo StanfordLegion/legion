@@ -5324,21 +5324,36 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+#ifdef DEBUG_LEGION_COLLECTIVES
+    InterCloseOp* InnerContext::get_inter_close_op(const LogicalUser &user,
+                                                   RegionTreeNode *node)
+#else
     InterCloseOp* InnerContext::get_inter_close_op(void)
+#endif
     //--------------------------------------------------------------------------
     {
       return runtime->get_available_inter_close_op(false/*need continuation*/);
     }
 
     //--------------------------------------------------------------------------
+#ifdef DEBUG_LEGION_COLLECTIVES
+    IndexCloseOp* InnerContext::get_index_close_op(const LogicalUser &user,
+                                                   RegionTreeNode *node)
+#else
     IndexCloseOp* InnerContext::get_index_close_op(void)
+#endif
     //--------------------------------------------------------------------------
     {
       return runtime->get_available_index_close_op(false/*need continuation*/);
     }
 
     //--------------------------------------------------------------------------
+#ifdef DEBUG_LEGION_COLLECTIVES
+    ReadCloseOp* InnerContext::get_read_only_close_op(const LogicalUser &user,
+                                                      RegionTreeNode *node)
+#else
     ReadCloseOp* InnerContext::get_read_only_close_op(void)
+#endif
     //--------------------------------------------------------------------------
     {
       return runtime->get_available_read_close_op(false/*needs continuation*/);
@@ -6601,6 +6616,7 @@ namespace Legion {
       creation_barrier = manager->get_creation_barrier();
 #ifdef DEBUG_LEGION_COLLECTIVES
       collective_check_barrier = manager->get_collective_check_barrier();
+      close_check_barrier = manager->get_close_check_barrier();
 #endif
       // Configure our collective settings
       shard_collective_radix = Runtime::legion_collective_radix;
@@ -9453,7 +9469,12 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
+#ifdef DEBUG_LEGION_COLLECTIVES
+    InterCloseOp* ReplicateContext::get_inter_close_op(const LogicalUser &user,
+                                                       RegionTreeNode *node)
+#else
     InterCloseOp* ReplicateContext::get_inter_close_op(void)
+#endif
     //--------------------------------------------------------------------------
     {
       ReplInterCloseOp *result = 
@@ -9462,6 +9483,18 @@ namespace Legion {
       RtBarrier &view_bar = view_close_barriers[next_view_close_bar_index++];
       if (next_view_close_bar_index == view_close_barriers.size())
         next_view_close_bar_index = 0;
+#ifdef DEBUG_LEGION_COLLECTIVES
+      CloseCheckReduction::RHS barrier(user, view_bar, node,false/*read only*/);
+      Runtime::phase_barrier_arrive(close_check_barrier, 1/*count*/,
+                              RtEvent::NO_RT_EVENT, &barrier, sizeof(barrier));
+      close_check_barrier.lg_wait();
+      CloseCheckReduction::RHS actual_barrier;
+      bool ready = Runtime::get_barrier_result(close_check_barrier,
+                                      &actual_barrier, sizeof(actual_barrier));
+      assert(ready);
+      assert(actual_barrier == barrier);
+      Runtime::advance_barrier(close_check_barrier);
+#endif
       result->set_view_barrier(view_bar);
       // Advance the phase for the next time through
       Runtime::advance_barrier(view_bar);
@@ -9469,7 +9502,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+#ifdef DEBUG_LEGION_COLLECTIVES
+    IndexCloseOp* ReplicateContext::get_index_close_op(const LogicalUser &user,
+                                                       RegionTreeNode *node)
+#else
     IndexCloseOp* ReplicateContext::get_index_close_op(void)
+#endif
     //--------------------------------------------------------------------------
     {
       // Should never get this call for replicate contexts
@@ -9480,7 +9518,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+#ifdef DEBUG_LEGION_COLLECTIVES
+    ReadCloseOp* ReplicateContext::get_read_only_close_op(
+              const LogicalUser &user, RegionTreeNode *node)
+#else
     ReadCloseOp* ReplicateContext::get_read_only_close_op(void)
+#endif
     //--------------------------------------------------------------------------
     {
       ReplReadCloseOp *result = 
@@ -9490,6 +9533,19 @@ namespace Legion {
         close_mapped_barriers[next_close_mapped_bar_index++];
       if (next_close_mapped_bar_index == close_mapped_barriers.size())
         next_close_mapped_bar_index = 0;
+#ifdef DEBUG_LEGION_COLLECTIVES
+      CloseCheckReduction::RHS barrier(user, mapped_bar, 
+                                       node, true/*read only*/);
+      Runtime::phase_barrier_arrive(close_check_barrier, 1/*count*/,
+                              RtEvent::NO_RT_EVENT, &barrier, sizeof(barrier));
+      close_check_barrier.lg_wait();
+      CloseCheckReduction::RHS actual_barrier;
+      bool ready = Runtime::get_barrier_result(close_check_barrier,
+                                      &actual_barrier, sizeof(actual_barrier));
+      assert(ready);
+      assert(actual_barrier == barrier);
+      Runtime::advance_barrier(close_check_barrier);
+#endif
       result->set_mapped_barrier(mapped_bar);
       // Advance the phase for the next time through
       Runtime::advance_barrier(mapped_bar);
@@ -11566,7 +11622,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+#ifdef DEBUG_LEGION_COLLECTIVES
+    InterCloseOp* LeafContext::get_inter_close_op(const LogicalUser &user,
+                                                  RegionTreeNode *node)
+#else
     InterCloseOp* LeafContext::get_inter_close_op(void)
+#endif
     //--------------------------------------------------------------------------
     {
       assert(false);
@@ -11574,7 +11635,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+#ifdef DEBUG_LEGION_COLLECTIVES
+    IndexCloseOp* LeafContext::get_index_close_op(const LogicalUser &user,
+                                                  RegionTreeNode *node)
+#else
     IndexCloseOp* LeafContext::get_index_close_op(void)
+#endif
     //--------------------------------------------------------------------------
     {
       assert(false);
@@ -11582,7 +11648,12 @@ namespace Legion {
     }
     
     //--------------------------------------------------------------------------
+#ifdef DEBUG_LEGION_COLLECTIVES
+    ReadCloseOp* LeafContext::get_read_only_close_op(const LogicalUser &user,
+                                                     RegionTreeNode *node)
+#else
     ReadCloseOp* LeafContext::get_read_only_close_op(void)
+#endif
     //--------------------------------------------------------------------------
     {
       assert(false);
@@ -12722,24 +12793,51 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+#ifdef DEBUG_LEGION_COLLECTIVES
+    InterCloseOp* InlineContext::get_inter_close_op(const LogicalUser &user,
+                                                    RegionTreeNode *node)
+#else
     InterCloseOp* InlineContext::get_inter_close_op(void)
+#endif
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION_COLLECTIVES
+      return enclosing->get_inter_close_op(user, node);
+#else
       return enclosing->get_inter_close_op();
+#endif
     }
 
     //--------------------------------------------------------------------------
+#ifdef DEBUG_LEGION_COLLECTIVES
+    IndexCloseOp* InlineContext::get_index_close_op(const LogicalUser &user,
+                                                    RegionTreeNode *node)
+#else
     IndexCloseOp* InlineContext::get_index_close_op(void)
+#endif
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION_COLLECTIVES
+      return enclosing->get_index_close_op(user, node);
+#else
       return enclosing->get_index_close_op();
+#endif
     }
 
     //--------------------------------------------------------------------------
+#ifdef DEBUG_LEGION_COLLECTIVES
+    ReadCloseOp* InlineContext::get_read_only_close_op(const LogicalUser &user,
+                                                       RegionTreeNode *node)
+#else
     ReadCloseOp* InlineContext::get_read_only_close_op(void)
+#endif
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION_COLLECTIVES
+      return enclosing->get_read_only_close_op(user, node);
+#else
       return enclosing->get_read_only_close_op();
+#endif
     }
 
     //--------------------------------------------------------------------------

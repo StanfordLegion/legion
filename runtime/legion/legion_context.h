@@ -334,9 +334,18 @@ namespace Legion {
       virtual void increment_frame(void) = 0;
       virtual void decrement_frame(void) = 0;
     public:
+#ifdef DEBUG_LEGION_COLLECTIVES
+      virtual InterCloseOp* get_inter_close_op(const LogicalUser &user,
+                                               RegionTreeNode *node) = 0;
+      virtual IndexCloseOp* get_index_close_op(const LogicalUser &user,
+                                               RegionTreeNode *node) = 0;
+      virtual ReadCloseOp*  get_read_only_close_op(const LogicalUser &user,
+                                                   RegionTreeNode *node) = 0;
+#else
       virtual InterCloseOp* get_inter_close_op(void) = 0;
       virtual IndexCloseOp* get_index_close_op(void) = 0;
       virtual ReadCloseOp*  get_read_only_close_op(void) = 0;
+#endif
     public:
       virtual InnerContext* find_parent_logical_context(unsigned index) = 0;
       virtual InnerContext* find_parent_physical_context(unsigned index) = 0;
@@ -910,9 +919,18 @@ namespace Legion {
       virtual void increment_frame(void);
       virtual void decrement_frame(void);
     public:
+#ifdef DEBUG_LEGION_COLLECTIVES
+      virtual InterCloseOp* get_inter_close_op(const LogicalUser &user,
+                                               RegionTreeNode *node);
+      virtual IndexCloseOp* get_index_close_op(const LogicalUser &user,
+                                               RegionTreeNode *node);
+      virtual ReadCloseOp*  get_read_only_close_op(const LogicalUser &user,
+                                                   RegionTreeNode *node);
+#else
       virtual InterCloseOp* get_inter_close_op(void);
       virtual IndexCloseOp* get_index_close_op(void);
       virtual ReadCloseOp*  get_read_only_close_op(void);
+#endif
     public:
       virtual InnerContext* find_parent_logical_context(unsigned index);
       virtual InnerContext* find_parent_physical_context(unsigned index);
@@ -1360,9 +1378,18 @@ namespace Legion {
       virtual void find_collective_contributions(DynamicCollective dc,
                                        std::vector<Future> &contributions);
     public:
+#ifdef DEBUG_LEGION_COLLECTIVES
+      virtual InterCloseOp* get_inter_close_op(const LogicalUser &user,
+                                               RegionTreeNode *node);
+      virtual IndexCloseOp* get_index_close_op(const LogicalUser &user,
+                                               RegionTreeNode *node);
+      virtual ReadCloseOp*  get_read_only_close_op(const LogicalUser &user,
+                                                   RegionTreeNode *node);
+#else
       virtual InterCloseOp* get_inter_close_op(void);
       virtual IndexCloseOp* get_index_close_op(void);
       virtual ReadCloseOp*  get_read_only_close_op(void);
+#endif
     public:
       virtual void pack_remote_context(Serializer &rez, 
                                        AddressSpaceID target,
@@ -1423,6 +1450,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION_COLLECTIVES
     protected:
       RtBarrier collective_check_barrier;
+      RtBarrier close_check_barrier;
 #endif
     protected:
       int shard_collective_radix;
@@ -1801,9 +1829,18 @@ namespace Legion {
       virtual void increment_frame(void);
       virtual void decrement_frame(void);
     public:
+#ifdef DEBUG_LEGION_COLLECTIVES
+      virtual InterCloseOp* get_inter_close_op(const LogicalUser &user,
+                                               RegionTreeNode *node);
+      virtual IndexCloseOp* get_index_close_op(const LogicalUser &user,
+                                               RegionTreeNode *node);
+      virtual ReadCloseOp*  get_read_only_close_op(const LogicalUser &user,
+                                                   RegionTreeNode *node);
+#else
       virtual InterCloseOp* get_inter_close_op(void);
       virtual IndexCloseOp* get_index_close_op(void);
       virtual ReadCloseOp*  get_read_only_close_op(void);
+#endif
     public:
       virtual InnerContext* find_parent_logical_context(unsigned index);
       virtual InnerContext* find_parent_physical_context(unsigned index);
@@ -2112,9 +2149,18 @@ namespace Legion {
       virtual void increment_frame(void);
       virtual void decrement_frame(void);
     public:
+#ifdef DEBUG_LEGION_COLLECTIVES
+      virtual InterCloseOp* get_inter_close_op(const LogicalUser &user,
+                                               RegionTreeNode *node);
+      virtual IndexCloseOp* get_index_close_op(const LogicalUser &user,
+                                               RegionTreeNode *node);
+      virtual ReadCloseOp*  get_read_only_close_op(const LogicalUser &user,
+                                                   RegionTreeNode *node);
+#else
       virtual InterCloseOp* get_inter_close_op(void);
       virtual IndexCloseOp* get_index_close_op(void);
       virtual ReadCloseOp*  get_read_only_close_op(void);
+#endif
     public:
       virtual InnerContext* find_parent_logical_context(unsigned index);
       virtual InnerContext* find_parent_physical_context(unsigned index);

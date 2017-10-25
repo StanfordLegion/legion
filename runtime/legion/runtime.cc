@@ -19831,6 +19831,9 @@ namespace Legion {
         red_table[CollectiveCheckReduction::REDOP] =
           Realm::ReductionOpUntyped::create_reduction_op<
                                   CollectiveCheckReduction>();
+        red_table[CloseCheckReduction::REDOP]=
+          Realm::ReductionOpUntyped::create_reduction_op<
+                                  CloseCheckReduction>();
 #else
 	const ReductionOpTable& red_table = get_reduction_table();
 #endif

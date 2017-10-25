@@ -40,6 +40,40 @@ namespace Legion {
       template<bool EXCLUSIVE> static void apply(LHS &lhs, RHS rhs);
       template<bool EXCLUSIVE> static void fold(RHS &rhs1, RHS rhs2);
     }; 
+
+    /**
+     * \class CloseCheckReduction
+     * Another helper reduction for comparing the phase barriers
+     * used by close operations which should be ordered
+     */
+    class CloseCheckReduction {
+    public:
+      struct CloseCheckValue {
+      public:
+        CloseCheckValue(void);
+        CloseCheckValue(const LogicalUser &user, RtBarrier barrier,
+                        RegionTreeNode *node, bool read_only);
+      public:
+        bool operator==(const CloseCheckValue &rhs) const;
+      public:
+        unsigned operation_index;
+        unsigned region_requirement_index;
+        RtBarrier barrier;
+        LogicalRegion region;
+        LogicalPartition partition;
+        bool is_region;
+        bool read_only;
+      };
+    public:
+      typedef CloseCheckValue RHS;
+      typedef CloseCheckValue LHS;
+      static const CloseCheckValue IDENTITY;
+      static const CloseCheckValue identity;
+      static const ReductionOpID REDOP;
+
+      template<bool EXCLUSIVE> static void apply(LHS &lhs, RHS rhs);
+      template<bool EXCLUSIVE> static void fold(RHS &rhs1, RHS rhs2);
+    };
 #endif
 
     /**
@@ -982,6 +1016,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION_COLLECTIVES
       inline RtBarrier get_collective_check_barrier(void) const
         { return collective_check_barrier; }
+      inline RtBarrier get_close_check_barrier(void) const
+        { return close_check_barrier; }
 #endif
     public:
       inline ShardMapping* get_mapping(void) const
@@ -1069,6 +1105,7 @@ namespace Legion {
       RtBarrier creation_barrier;
 #ifdef DEBUG_LEGION_COLLECTIVES
       RtBarrier collective_check_barrier;
+      RtBarrier close_check_barrier;
 #endif
     protected:
       std::map<ShardingID,ShardingFunction*> sharding_functions;

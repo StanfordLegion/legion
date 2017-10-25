@@ -4039,7 +4039,11 @@ namespace Legion {
       TaskContext *ctx = creator->get_context(); 
       if (!!normal_close_mask)
       {
+#ifdef DEBUG_LEGION_COLLECTIVES
+        normal_close_op = ctx->get_inter_close_op(user, root_node);
+#else
         normal_close_op = ctx->get_inter_close_op();
+#endif
         normal_close_gen = normal_close_op->get_generation();
         // Compute the set of fields that we need
         root_node->column_source->get_field_set(normal_close_mask,
@@ -4059,7 +4063,11 @@ namespace Legion {
       }
       if (!!disjoint_close_mask)
       {
+#ifdef DEBUG_LEGION_COLLECTIVES
+        index_close_op = ctx->get_index_close_op(user, root_node);
+#else
         index_close_op = ctx->get_index_close_op();
+#endif
         // Compute the set of fields that we need
         req.privilege_fields.clear();
         root_node->column_source->get_field_set(disjoint_close_mask,
@@ -4083,7 +4091,11 @@ namespace Legion {
       }
       if (!!read_only_close_mask)
       {
+#ifdef DEBUG_LEGION_COLLECTIVES
+        read_only_close_op = ctx->get_read_only_close_op(user, root_node);
+#else
         read_only_close_op = ctx->get_read_only_close_op(); 
+#endif
         read_only_close_gen = read_only_close_op->get_generation();
         req.privilege_fields.clear();
         root_node->column_source->get_field_set(read_only_close_mask,
@@ -4097,7 +4109,11 @@ namespace Legion {
       // make a close operation for them and add it to force close
       if (!!flush_only_close_mask)
       {
+#ifdef DEBUG_LEGION_COLLECTIVES
+        flush_only_close_op = ctx->get_inter_close_op(user, root_node);
+#else
         flush_only_close_op = ctx->get_inter_close_op();
+#endif
         flush_only_close_gen = flush_only_close_op->get_generation();
         req.privilege_fields.clear();
         // Compute the set of fields that we need
