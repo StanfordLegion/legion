@@ -1447,6 +1447,7 @@ namespace Legion {
       ApBarrier pending_partition_barrier;
       ApBarrier future_map_barrier;
       RtBarrier creation_barrier;
+      RtBarrier deletion_barrier;
 #ifdef DEBUG_LEGION_COLLECTIVES
     protected:
       RtBarrier collective_check_barrier;

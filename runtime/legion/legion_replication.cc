@@ -1513,6 +1513,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       activate_deletion();
+      mapped_barrier = RtBarrier::NO_RT_BARRIER;
     }
 
     //--------------------------------------------------------------------------
@@ -1521,6 +1522,31 @@ namespace Legion {
     {
       deactivate_deletion();
       runtime->free_repl_deletion_op(this);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplDeletionOp::trigger_mapping(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(mapped_barrier.exists());
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+      // Shard 0 will handle all the deletions
+      if (repl_ctx->owner_shard->shard_id != 0)
+      {
+        // Everyone else can arrive on the barrier and map like normal
+        // since they are not going to do anything
+        Runtime::phase_barrier_arrive(mapped_barrier, 1/*count*/);
+        complete_mapping();
+      }
+      else // shard 0 maps when everyone has mapped
+        complete_mapping(mapped_barrier);
+      // We don't do anything for execution so we are executed
+      complete_execution();
     }
 
     //--------------------------------------------------------------------------
@@ -1538,6 +1564,16 @@ namespace Legion {
         DeletionOp::trigger_complete();
       else // We own it, so we can just mark ourselves done
         complete_operation();
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplDeletionOp::set_mapped_barrier(RtBarrier mapped)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!mapped_barrier.exists());
+#endif
+      mapped_barrier = mapped;
     }
 
     /////////////////////////////////////////////////////////////
@@ -2582,6 +2618,9 @@ namespace Legion {
         // to signal from all the non-creator shards to the creator shard
         creation_barrier = 
           RtBarrier(Realm::Barrier::create_barrier(total_shards-1));
+        // Same thing as above for deletion barriers
+        deletion_barrier = 
+          RtBarrier(Realm::Barrier::create_barrier(total_shards-1));
 #ifdef DEBUG_LEGION_COLLECTIVES
         collective_check_barrier = 
           RtBarrier(Realm::Barrier::create_barrier(total_shards,
@@ -2633,6 +2672,7 @@ namespace Legion {
           pending_partition_barrier.destroy_barrier();
           future_map_barrier.destroy_barrier();
           creation_barrier.destroy_barrier();
+          deletion_barrier.destroy_barrier();
 #ifdef DEBUG_LEGION_COLLECTIVES
           collective_check_barrier.destroy_barrier();
           close_check_barrier.destroy_barrier();
@@ -2762,10 +2802,12 @@ namespace Legion {
           assert(pending_partition_barrier.exists());
           assert(future_map_barrier.exists());
           assert(creation_barrier.exists());
+          assert(deletion_barrier.exists());
 #endif
           rez.serialize(pending_partition_barrier);
           rez.serialize(future_map_barrier);
           rez.serialize(creation_barrier);
+          rez.serialize(deletion_barrier);
 #ifdef DEBUG_LEGION_COLLECTIVES
           assert(collective_check_barrier.exists());
           rez.serialize(collective_check_barrier);
@@ -2802,6 +2844,7 @@ namespace Legion {
         derez.deserialize(pending_partition_barrier);
         derez.deserialize(future_map_barrier);
         derez.deserialize(creation_barrier);
+        derez.deserialize(deletion_barrier);
 #ifdef DEBUG_LEGION_COLLECTIVES
         derez.deserialize(collective_check_barrier);
         derez.deserialize(close_check_barrier);

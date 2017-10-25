@@ -753,7 +753,12 @@ namespace Legion {
       virtual void activate(void);
       virtual void deactivate(void);
     public:
+      virtual void trigger_mapping(void);
       virtual void trigger_complete(void);
+    public:
+      void set_mapped_barrier(RtBarrier mapped_barrier);
+    protected:
+      RtBarrier mapped_barrier;
     };
 
     /**
@@ -1014,6 +1019,8 @@ namespace Legion {
         { return future_map_barrier; }
       inline RtBarrier get_creation_barrier(void) const
         { return creation_barrier; }
+      inline RtBarrier get_deletion_barrier(void) const
+        { return deletion_barrier; }
 #ifdef DEBUG_LEGION_COLLECTIVES
       inline RtBarrier get_collective_check_barrier(void) const
         { return collective_check_barrier; }
@@ -1104,6 +1111,7 @@ namespace Legion {
       ApBarrier pending_partition_barrier;
       ApBarrier future_map_barrier;
       RtBarrier creation_barrier;
+      RtBarrier deletion_barrier;
 #ifdef DEBUG_LEGION_COLLECTIVES
       RtBarrier collective_check_barrier;
       RtBarrier close_check_barrier;

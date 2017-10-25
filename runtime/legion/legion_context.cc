@@ -6614,6 +6614,7 @@ namespace Legion {
       pending_partition_barrier = manager->get_pending_partition_barrier();
       future_map_barrier = manager->get_future_map_barrier();
       creation_barrier = manager->get_creation_barrier();
+      deletion_barrier = manager->get_deletion_barrier();
 #ifdef DEBUG_LEGION_COLLECTIVES
       collective_check_barrier = manager->get_collective_check_barrier();
       close_check_barrier = manager->get_close_check_barrier();
@@ -6962,7 +6963,9 @@ namespace Legion {
 #endif
       ReplDeletionOp *op = runtime->get_available_repl_deletion_op(true);
       op->initialize_index_space_deletion(this, handle);
+      op->set_mapped_barrier(deletion_barrier);
       runtime->add_to_dependence_queue(this, executing_processor, op);
+      Runtime::advance_barrier(deletion_barrier);
     }
 
     //--------------------------------------------------------------------------
@@ -6977,7 +6980,9 @@ namespace Legion {
 #endif
       ReplDeletionOp *op = runtime->get_available_repl_deletion_op(true);
       op->initialize_index_part_deletion(this, handle);
+      op->set_mapped_barrier(deletion_barrier);
       runtime->add_to_dependence_queue(this, executing_processor, op);
+      Runtime::advance_barrier(deletion_barrier);
     }
 
     //--------------------------------------------------------------------------
@@ -8703,7 +8708,9 @@ namespace Legion {
 #endif
       ReplDeletionOp *op = runtime->get_available_repl_deletion_op(true);
       op->initialize_field_space_deletion(this, handle);
+      op->set_mapped_barrier(deletion_barrier);
       runtime->add_to_dependence_queue(this, executing_processor, op);
+      Runtime::advance_barrier(deletion_barrier);
     }
 
     //--------------------------------------------------------------------------
@@ -8765,7 +8772,9 @@ namespace Legion {
       AutoRuntimeCall call(this);
       ReplDeletionOp *op = runtime->get_available_repl_deletion_op(true);
       op->initialize_field_deletion(this, space, fid);
+      op->set_mapped_barrier(deletion_barrier);
       runtime->add_to_dependence_queue(this, executing_processor, op);
+      Runtime::advance_barrier(deletion_barrier);
     }
 
     //--------------------------------------------------------------------------
@@ -8792,7 +8801,9 @@ namespace Legion {
       AutoRuntimeCall call(this);
       ReplDeletionOp *op = runtime->get_available_repl_deletion_op(true);
       op->initialize_field_deletions(this, space, to_free);
+      op->set_mapped_barrier(deletion_barrier);
       runtime->add_to_dependence_queue(this, executing_processor, op);
+      Runtime::advance_barrier(deletion_barrier);
     }
 
     //--------------------------------------------------------------------------
@@ -8860,7 +8871,9 @@ namespace Legion {
 #endif
       ReplDeletionOp *op = runtime->get_available_repl_deletion_op(true);
       op->initialize_logical_region_deletion(this, handle);
+      op->set_mapped_barrier(deletion_barrier);
       runtime->add_to_dependence_queue(this, executing_processor, op);
+      Runtime::advance_barrier(deletion_barrier);
     }
 
     //--------------------------------------------------------------------------
@@ -8877,7 +8890,9 @@ namespace Legion {
 #endif
       ReplDeletionOp *op = runtime->get_available_repl_deletion_op(true);
       op->initialize_logical_partition_deletion(this, handle);
+      op->set_mapped_barrier(deletion_barrier);
       runtime->add_to_dependence_queue(this, executing_processor, op);
+      Runtime::advance_barrier(deletion_barrier);
     }
 
     //--------------------------------------------------------------------------
