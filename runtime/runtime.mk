@@ -50,9 +50,6 @@ LEGION_LIBS     := -L. -llegion -lrealm
 
 # Handle some of the common machines we frequent
 
-# machine architecture (generally "native" unless cross-compiling)
-MARCH ?= native
-
 ifeq ($(shell uname -n),sapling)
 CONDUIT=ibv
 GPU_ARCH=fermi
@@ -89,13 +86,12 @@ endif
 ifeq ($(findstring titan,$(shell uname -n)),titan)
 # without this, lapack stuff will link, but generate garbage output - thanks Cray!
 LAPACK_LIBS=-L/opt/acml/5.3.1/gfortran64_fma4/lib -Wl,-rpath=/opt/acml/5.3.1/gfortran64_fma4/lib -lacml
-MARCH=bdver1
+MARCH ?= bdver1
 CUDA=${CUDATOOLKIT_HOME}
 CONDUIT=gemini
 GPU_ARCH=k20
 endif
 ifeq ($(findstring daint,$(shell uname -n)),daint)
-MARCH=corei7-avx
 CUDA=${CUDATOOLKIT_HOME}
 CONDUIT=aries
 GPU_ARCH=k20
@@ -117,6 +113,9 @@ LEGION_LD_FLAGS += ${CRAY_UGNI_POST_LINK_OPTS}
 LEGION_LD_FLAGS += ${CRAY_UDREG_POST_LINK_OPTS}
 LEGION_LD_FLAGS += ${CRAY_PMI_POST_LINK_OPTS}
 endif
+
+# machine architecture (generally "native" unless cross-compiling)
+MARCH ?= native
 
 ifneq (${MARCH},)
   CC_FLAGS += -march=${MARCH}
