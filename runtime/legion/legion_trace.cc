@@ -1433,19 +1433,22 @@ namespace Legion {
         events.clear();
         events.resize(num_events);
         events[fence_completion_id] = fence_completion;
+        Realm::UserEvent no_event = Realm::UserEvent::create_user_event();
+        events[no_event_id] = ApEvent(no_event);
+        no_event.trigger();
         pending_events.clear();
         pending_events.resize(num_events);
-        for (std::map<TraceLocalId, unsigned>::iterator it =
-             task_entries.begin(); it !=
-             task_entries.end(); ++it)
+        for (unsigned idx = 0; idx < instructions.size(); ++idx)
         {
-#ifdef DEBUG_LEGION
-          assert(instructions[it->second]->get_kind() == GET_TERM_EVENT ||
-                 instructions[it->second]->get_kind() == GET_COPY_TERM_EVENT);
-#endif
-          ApUserEvent e = ApUserEvent(Realm::UserEvent::create_user_event());
-          events[it->second] = e;
-          pending_events[it->second] = e;
+          if (instructions[idx]->get_kind() == GET_TERM_EVENT ||
+              instructions[idx]->get_kind() == GET_COPY_TERM_EVENT ||
+              instructions[idx]->get_kind() == ISSUE_COPY ||
+              instructions[idx]->get_kind() == ISSUE_FILL)
+          {
+            ApUserEvent e = ApUserEvent(Realm::UserEvent::create_user_event());
+            events[idx] = e;
+            pending_events[idx] = e;
+          }
         }
 #ifdef DEBUG_LEGION
         for (std::map<TraceLocalId, Operation*>::iterator it =
@@ -1870,22 +1873,25 @@ namespace Legion {
             {
               if (generate[idx] == idx)
               {
-#ifdef DEBUG_LEGION
-                //assert(simplified[idx].size() > 1);
-#endif
-                std::set<unsigned> rhs;
-                for (std::set<unsigned>::iterator it = simplified[idx].begin();
-                     it != simplified[idx].end(); ++it)
+                if (simplified[idx].size() > 1)
                 {
+                  std::set<unsigned> rhs;
+                  for (std::set<unsigned>::iterator it =
+                       simplified[idx].begin(); it !=
+                       simplified[idx].end(); ++it)
+                  {
 #ifdef DEBUG_LEGION
-                  assert(rewrite.find(*it) != rewrite.end());
+                    assert(rewrite.find(*it) != rewrite.end());
 #endif
-                  rhs.insert(rewrite[*it]);
+                    rhs.insert(rewrite[*it]);
+                  }
+                  rewrite[idx] = count;
+                  new_instructions.push_back(new MergeEvent(*this, count, rhs));
+                  suppressed.push_back(false);
+                  ++count;
                 }
-                rewrite[idx] = count;
-                new_instructions.push_back(new MergeEvent(*this, count, rhs));
-                suppressed.push_back(false);
-                ++count;
+                else
+                  rewrite[idx] = rewrite[*simplified[idx].begin()];
               }
               else
                 rewrite[idx] = rewrite[generate[idx]];
@@ -3140,7 +3146,7 @@ namespace Legion {
         }
       }
 #endif
-      events[lhs] = result;
+      Runtime::trigger_event(pending_events[lhs], result);
     }
 
     //--------------------------------------------------------------------------
@@ -3299,7 +3305,7 @@ namespace Legion {
         LegionSpy::log_fill_field(result, fields[idx].field_id,
                                   fields[idx].inst.id);
 #endif
-      events[lhs] = result;
+      Runtime::trigger_event(pending_events[lhs], result);
     }
 
     //--------------------------------------------------------------------------
