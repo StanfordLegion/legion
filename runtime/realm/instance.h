@@ -18,20 +18,20 @@
 #ifndef REALM_INSTANCE_H
 #define REALM_INSTANCE_H
 
-#include <realm/realm_config.h>
+#include "realm/realm_config.h"
 
-#include "lowlevel_config.h"
+#include "realm/realm_c.h"
 
-#include "event.h"
-#include "memory.h"
+#include "realm/event.h"
+#include "realm/memory.h"
 
-#include "custom_serdez.h"
+#include "realm/custom_serdez.h"
 
 #include <vector>
 
 // we need intptr_t - make it if needed
 #if __cplusplus >= 201103L
-#include <cstdint>
+#include <stdint.h>
 #else
 typedef ptrdiff_t intptr_t;
 #endif
@@ -58,7 +58,7 @@ namespace Realm {
 
   class RegionInstance {
   public:
-    typedef ::legion_lowlevel_id_t id_t;
+    typedef ::realm_id_t id_t;
     id_t id;
     bool operator<(const RegionInstance &rhs) const;
     bool operator==(const RegionInstance &rhs) const;
@@ -159,7 +159,7 @@ namespace Realm {
 				      const IndexSpace<N,T>& space,
 				      const std::vector<FieldID> &field_ids,
 				      const std::vector<size_t> &field_sizes,
-				      legion_lowlevel_file_mode_t file_mode,
+				      realm_file_mode_t file_mode,
 				      const ProfilingRequestSet& prs,
 				      Event wait_on = Event::NO_EVENT);
 
@@ -224,7 +224,7 @@ namespace Realm {
 #endif // ifndef REALM_INSTANCE_H
 
 #ifndef REALM_SKIP_INLINES
-#include "instance.inl"
+#include "realm/instance.inl"
 #endif
 
 

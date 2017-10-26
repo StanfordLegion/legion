@@ -26,7 +26,7 @@ install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/
 
 # Realm runtime
 list(APPEND REALM_SRC
-  lowlevel_config.h
+  realm/realm_c.h
   realm/transfer/lowlevel_disk.cc
   realm/transfer/channel.h                 realm/transfer/channel.cc
   realm/transfer/channel_disk.h            realm/transfer/channel_disk.cc
@@ -43,7 +43,6 @@ list(APPEND REALM_SRC
   realm/deppart/setops.h                   realm/deppart/setops.cc
   realm/deppart/sparsity_impl.h            realm/deppart/sparsity_impl.cc
   realm/deppart/sparsity_impl.inl
-  lowlevel.h
   realm/event_impl.h        realm/event_impl.cc
   realm/event_impl.inl
   realm/faults.h            realm/faults.cc
@@ -115,10 +114,8 @@ if (Legion_USE_Python)
 endif()
 
 list(APPEND REALM_SRC
+  realm.h
   realm/activemsg.h realm/activemsg.cc
-  accessor.h
-  arrays.h
-  atomics.h
   realm/bytearray.h
   realm/bytearray.inl
   realm/circ_queue.h
@@ -148,7 +145,6 @@ list(APPEND REALM_SRC
   realm/profiling.h        realm/profiling.cc
   realm/profiling.inl
   realm/realm_config.h
-  realm/realm.h
   realm/redop.h
   realm/reservation.h
   realm/runtime.h
@@ -205,18 +201,14 @@ set_target_properties(RealmRuntime PROPERTIES OUTPUT_NAME realm)
 target_include_directories(RealmRuntime
   INTERFACE
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/legion>
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/realm>
     $<INSTALL_INTERFACE:include>
-    $<INSTALL_INTERFACE:include/legion>
-    $<INSTALL_INTERFACE:include/realm>
-  PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} legion realm
+  PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
 
   # Include paths for generated header files.
   INTERFACE
-    $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/runtime/realm>
+    $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/runtime>
   PRIVATE
-    ${PROJECT_BINARY_DIR}/runtime/realm
+    ${PROJECT_BINARY_DIR}/runtime
 )
 
 install(TARGETS RealmRuntime EXPORT LegionTargets
@@ -237,6 +229,10 @@ list(APPEND MAPPER_SRC
 
 # Legion runtime
 list(APPEND LEGION_SRC
+  legion.h
+  legion/accessor.h
+  legion/arrays.h
+  legion/atomics.h
   legion/field_tree.h
   legion/garbage_collection.h             legion/garbage_collection.cc
   legion/interval_tree.h                 
@@ -247,7 +243,7 @@ list(APPEND LEGION_SRC
   legion/legion_constraint.h              legion/legion_constraint.cc
   legion/legion_context.h                 legion/legion_context.cc
   legion/legion_c_util.h                 
-  legion/legion.h                         legion/legion.cc
+  legion/legion.cc
   legion/legion.inl                      
   legion/legion_domain.h
   legion/legion_domain.inl
@@ -280,21 +276,17 @@ target_compile_definitions(LegionRuntime PRIVATE ASSUME_UNALLOCABLE)
 
 target_include_directories(LegionRuntime
   INTERFACE
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/legion>
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/realm>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/mappers>
-    $<INSTALL_INTERFACE:include/legion>
-    $<INSTALL_INTERFACE:include/realm>
+    $<INSTALL_INTERFACE:include>
     $<INSTALL_INTERFACE:include/mappers>
-  PRIVATE legion realm mappers
+  PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
 
   # Include paths for generated header files.
   INTERFACE
-    $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/runtime/legion>
-    $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/runtime/realm>
+    $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/runtime>
   PRIVATE
-    ${PROJECT_BINARY_DIR}/runtime/legion
-    ${PROJECT_BINARY_DIR}/runtime/realm
+    ${PROJECT_BINARY_DIR}/runtime
 )
 
 install(TARGETS LegionRuntime EXPORT LegionTargets

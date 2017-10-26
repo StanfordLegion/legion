@@ -20,7 +20,7 @@
  * \file legion_constraint.h
  */
 
-#include "legion_types.h"
+#include "legion/legion_types.h"
 
 namespace Legion {
 

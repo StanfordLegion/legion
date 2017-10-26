@@ -1,8 +1,7 @@
-#include "legion_profiling_serializer.h"
-#include "runtime.h"
-//#include "legion_ops.h"
-//#include "legion_tasks.h"
-#include "lowlevel_config.h"
+#include "legion/legion_profiling_serializer.h"
+#include "legion/runtime.h"
+//#include "legion/legion_ops.h"
+//#include "legion/legion_tasks.h"
 
 #include <sstream>
 #include <string>

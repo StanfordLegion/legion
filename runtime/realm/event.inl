@@ -16,9 +16,9 @@
 // events for Realm
 
 // nop, but helps IDEs
-#include "event.h"
+#include "realm/event.h"
 
-#include "serialize.h"
+#include "realm/serialize.h"
 TYPE_IS_SERIALIZABLE(Realm::Event);
 TYPE_IS_SERIALIZABLE(Realm::UserEvent);
 TYPE_IS_SERIALIZABLE(Realm::Barrier);

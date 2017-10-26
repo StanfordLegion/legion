@@ -21,9 +21,9 @@
 #include <set>
 #include <time.h>
 
-#include "lowlevel.h"
+#include <realm.h>
 
-using namespace LegionRuntime::LowLevel;
+using namespace Realm;
 
 // TASK IDs
 enum {

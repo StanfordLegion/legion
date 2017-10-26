@@ -20,6 +20,7 @@
 #include <map>
 #include <string>
 
+#define LEGION_ENABLE_C_BINDINGS
 #include "legion.h"
 #include "default_mapper.h"
 

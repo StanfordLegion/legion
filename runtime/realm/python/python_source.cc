@@ -13,7 +13,7 @@
  * limitations under the License.
  */
 
-#include "python_source.h"
+#include "realm/python/python_source.h"
 
 namespace Realm {
 

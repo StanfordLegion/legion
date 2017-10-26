@@ -13,7 +13,26 @@
  * limitations under the License.
  */
 
+// decide whether we want C and/or C++ bindings (default matches host language)
+//
+// each set of bindings has its own include-once ifdef armor, allowing the
+//  second set of bindings to be loaded even if the first already has been
+#if !defined(LEGION_ENABLE_C_BINDINGS) && !defined(LEGION_DISABLE_C_BINDINGS)
+  #ifndef __cplusplus
+    #define LEGION_ENABLE_C_BINDINGS
+  #endif
+#endif
+#if !defined(LEGION_ENABLE_CXX_BINDINGS) && !defined(LEGION_DISABLE_CXX_BINDINGS)
+  #ifdef __cplusplus
+    #define LEGION_ENABLE_CXX_BINDINGS
+  #endif
+#endif
 
+#ifdef LEGION_ENABLE_C_BINDINGS
+#include "legion/legion_c.h"
+#endif
+
+#ifdef LEGION_ENABLE_CXX_BINDINGS
 #ifndef __LEGION_RUNTIME_H__
 #define __LEGION_RUNTIME_H__
 
@@ -30,9 +49,9 @@
  * Legion C++ API
  */
 
-#include "legion_types.h"
-#include "legion_domain.h"
-#include "legion_constraint.h"
+#include "legion/legion_types.h"
+#include "legion/legion_domain.h"
+#include "legion/legion_constraint.h"
 
 // temporary helper macro to turn link errors into runtime errors
 #define UNIMPLEMENTED_METHOD(retval) do { assert(0); return retval; } while(0)
@@ -7110,9 +7129,10 @@ namespace Legion {
 
 }; // namespace Legion
 
-#include "legion.inl"
+#include "legion/legion.inl"
 
 #endif // __LEGION_RUNTIME_H__
+#endif // defined LEGION_ENABLE_CXX_BINDINGS
 
 // EOF
 

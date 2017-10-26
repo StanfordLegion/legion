@@ -108,6 +108,6 @@ namespace Realm {
 
 }; // namespace Realm
 
-#include "bytearray.inl"
+#include "realm/bytearray.inl"
 
 #endif

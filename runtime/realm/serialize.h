@@ -18,9 +18,9 @@
 #ifndef REALM_SERIALIZE_H
 #define REALM_SERIALIZE_H
 
-#include "bytearray.h"
+#include "realm/bytearray.h"
 
-#include <cstddef>
+#include <stddef.h>
 #include <vector>
 #include <list>
 #include <set>
@@ -316,6 +316,6 @@ namespace Realm {
 }; // namespace Realm
 
 // inlined method definitions
-#include "serialize.inl"
+#include "realm/serialize.inl"
 
 #endif // ifndef REALM_SERIALIZE_H

@@ -20,7 +20,7 @@
 #define REALM_CONFIG_H
 
 #ifdef REALM_USE_CMAKE
-#include "realm_defines.h"
+#include "realm/realm_defines.h"
 #endif
 
 // if set, uses ucontext.h for user level thread switching, otherwise falls
@@ -58,6 +58,7 @@
 #define REALM_USE_OPERATION_TABLE
 #endif
 
+#ifdef __cplusplus
 // runtime configuration settings
 namespace Realm {
   namespace Config {
@@ -70,5 +71,6 @@ namespace Realm {
     extern bool force_kernel_threads;
   };
 };
+#endif
 
 #endif

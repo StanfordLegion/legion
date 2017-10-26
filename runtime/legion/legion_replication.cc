@@ -13,9 +13,9 @@
  * limitations under the License.
  */
 
-#include "legion_views.h"
-#include "legion_context.h"
-#include "legion_replication.h"
+#include "legion/legion_views.h"
+#include "legion/legion_context.h"
+#include "legion/legion_replication.h"
 
 namespace Legion {
   namespace Internal {

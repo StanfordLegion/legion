@@ -16,7 +16,7 @@
 // inlined methods for Realm logging
 
 // nop, but helps IDEs
-#include "logging.h"
+#include "realm/logging.h"
 
 #include <assert.h>
 #include <stdio.h>

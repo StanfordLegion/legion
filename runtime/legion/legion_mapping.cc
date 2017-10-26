@@ -14,10 +14,10 @@
  */
 
 #include "legion.h"
-#include "region_tree.h"
-#include "legion_mapping.h"
-#include "mapper_manager.h"
-#include "legion_instances.h"
+#include "legion/region_tree.h"
+#include "legion/legion_mapping.h"
+#include "legion/mapper_manager.h"
+#include "legion/legion_instances.h"
 
 namespace Legion {
   namespace Mapping {

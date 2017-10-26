@@ -21,12 +21,13 @@
 #include <set>
 #include <time.h>
 
-#include "lowlevel.h"
-#include "accessor.h"
-#include "indexspace.h"
+#include <realm.h>
+#include <legion/accessor.h>
 
 using namespace Realm;
 using namespace LegionRuntime::Accessor;
+
+typedef long long coord_t;
 
 // TASK IDs
 enum {

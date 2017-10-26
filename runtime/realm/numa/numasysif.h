@@ -21,9 +21,9 @@
 #ifndef NUMASYSIF_H
 #define NUMASYSIF_H
 
-#include <realm/realm_config.h>
+#include "realm/realm_config.h"
 
-#include <cstdlib>
+#include <stdlib.h>
 #include <map>
 
 namespace Realm {

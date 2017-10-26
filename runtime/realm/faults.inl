@@ -16,7 +16,7 @@
 // helper defines/data structures for fault reporting/handling in Realm
 
 // nop, but helps IDEs
-#include "faults.h"
+#include "realm/faults.h"
 
 namespace Realm {
 

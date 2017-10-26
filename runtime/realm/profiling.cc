@@ -15,7 +15,7 @@
 
 // implementation of profiling stuff for Realm
 
-#include "profiling.h"
+#include "realm/profiling.h"
 
 namespace Realm {
 

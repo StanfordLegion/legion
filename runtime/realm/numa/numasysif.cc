@@ -18,7 +18,7 @@
 // NOTE: this is nowhere near a full libnuma-style interface - it's just the
 //  calls that Realm's NUMA module needs
 
-#include "numasysif.h"
+#include "realm/numa/numasysif.h"
 
 #include <stdio.h>
 #include <string.h>

@@ -17,7 +17,7 @@
 #define __LEGION_DOMAIN_H__
 
 #include "realm.h"
-#include "legion_types.h"
+#include "legion/legion_types.h"
 
 /**
  * \file legion_domain.h
@@ -202,9 +202,9 @@ namespace Legion {
    */
   class Domain {
   public:
-    typedef ::legion_lowlevel_id_t IDType;
-    // Keep this in sync with legion_lowlevel_domain_max_rect_dim_t
-    // in lowlevel_config.h
+    typedef ::realm_id_t IDType;
+    // Keep this in sync with legion_domain_max_rect_dim_t
+    // in legion_config.h
     enum { MAX_RECT_DIM = ::MAX_RECT_DIM };
     Domain(void);
     Domain(const Domain& other);
@@ -361,7 +361,7 @@ namespace Legion {
 
 }; // namespace Legion
 
-#include "legion_domain.inl"
+#include "legion/legion_domain.inl"
 
 #endif // __LEGION_DOMAIN_H__
 

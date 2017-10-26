@@ -21,10 +21,10 @@
 
 #include <time.h>
 
-#include "lowlevel.h"
-#include "realm/timers.h"
+#include <realm.h>
+#include <realm/timers.h>
 
-using namespace LegionRuntime::LowLevel;
+using namespace Realm;
 
 #define DEFAULT_DEPTH 1024 
 

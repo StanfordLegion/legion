@@ -16,7 +16,7 @@
 #ifndef LOWLEVEL_CHANNEL_DISK
 #define LOWLEVEL_CHANNEL_DISK
 
-#include "channel.h"
+#include "realm/transfer/channel.h"
 
 namespace Realm {
 

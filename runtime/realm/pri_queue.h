@@ -21,7 +21,7 @@
 #include <deque>
 #include <map>
 
-#include "sampling.h"
+#include "realm/sampling.h"
 
 namespace Realm {
 
@@ -106,7 +106,7 @@ namespace Realm {
 
 }; // namespace Realm
 
-#include "pri_queue.inl"
+#include "realm/pri_queue.inl"
 
 #endif // ifndef REALM_PRI_QUEUE_H
 

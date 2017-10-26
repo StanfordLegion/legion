@@ -51,12 +51,12 @@
 #define __WRAPPER_MAPPER_h__
 
 #include "legion.h"
-#include "legion_mapping.h"
+#include "legion/legion_mapping.h"
 
 
 
-#include <cstdlib>
-#include <cassert>
+#include <stdlib.h>
+#include <assert.h>
 #include <algorithm>
 
 namespace Legion {

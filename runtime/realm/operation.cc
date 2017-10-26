@@ -13,10 +13,10 @@
  * limitations under the License.
  */
 
-#include "operation.h"
+#include "realm/operation.h"
 
-#include "faults.h"
-#include "runtime_impl.h"
+#include "realm/faults.h"
+#include "realm/runtime_impl.h"
 
 namespace Realm {
 

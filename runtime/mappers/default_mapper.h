@@ -18,11 +18,11 @@
 #define __DEFAULT_MAPPER_H__
 
 #include "legion.h"
-#include "legion_mapping.h"
-#include "mapping_utilities.h"
+#include "legion/legion_mapping.h"
+#include "mappers/mapping_utilities.h"
 
-#include <cstdlib>
-#include <cassert>
+#include <stdlib.h>
+#include <assert.h>
 #include <algorithm>
 
 namespace Legion {
@@ -586,7 +586,7 @@ namespace LegionRuntime {
 };
 
 // Include template definitions
-#include "default_mapper.inl"
+#include "mappers/default_mapper.inl"
 
 #endif // __DEFAULT_MAPPER_H__
 

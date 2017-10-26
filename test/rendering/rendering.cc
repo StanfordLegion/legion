@@ -24,7 +24,6 @@
 
 #include "legion.h"
 #include "shim_mapper.h"
-#include "custom_serdez.h"
 
 using namespace LegionRuntime::HighLevel;
 using namespace LegionRuntime::Accessor;

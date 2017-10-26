@@ -13,7 +13,7 @@
  * limitations under the License.
  */
 
-#include "debug_mapper.h"
+#include "mappers/debug_mapper.h"
 
 namespace Legion {
   namespace Mapping {

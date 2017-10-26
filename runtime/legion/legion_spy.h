@@ -18,8 +18,8 @@
 #define __LEGION_SPY_H__
 
 #include "realm.h"
-#include "legion_types.h"
-#include "legion_utilities.h"
+#include "legion/legion_types.h"
+#include "legion/legion_utilities.h"
 
 /**
  * This file contains calls for logging that are consumed by 
@@ -31,7 +31,7 @@ namespace Legion {
   namespace Internal {
     namespace LegionSpy {
 
-      typedef ::legion_lowlevel_id_t IDType;
+      typedef ::realm_id_t IDType;
 
       extern Realm::Logger log_spy;
 

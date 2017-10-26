@@ -17,9 +17,8 @@
 #include "legion_terra_partitions_cxx.h"
 
 #include "legion.h"
-#include "legion_c_util.h"
-#include "legion_utilities.h"
-#include "lowlevel.h"
+#include "legion/legion_c_util.h"
+#include "legion/legion_utilities.h"
 
 // Disable deprecated warnings in this file since we are also
 // trying to maintain backwards compatibility support for older

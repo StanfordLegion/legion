@@ -17,7 +17,7 @@
 #ifndef __LEGION_FIELD_TREE_H__
 #define __LEGION_FIELD_TREE_H__
 
-#include "legion_types.h"
+#include "legion/legion_types.h"
 
 namespace Legion {
   namespace Internal {

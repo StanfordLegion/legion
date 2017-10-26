@@ -13,9 +13,9 @@
  * limitations under the License.
  */
 
-#include "llvmjit.h"
-#include "llvmjit_module.h"
-#include "llvmjit_internal.h"
+#include "realm/llvmjit/llvmjit.h"
+#include "realm/llvmjit/llvmjit_module.h"
+#include "realm/llvmjit/llvmjit_internal.h"
 
 #include "realm/runtime_impl.h"
 #include "realm/logging.h"

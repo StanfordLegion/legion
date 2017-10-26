@@ -16,7 +16,7 @@
 // OpenMP (or similar) thread pool for Realm
 
 // NOP, but helps IDEs
-#include "openmp_threadpool.h"
+#include "realm/openmp/openmp_threadpool.h"
 
 namespace Realm {
 

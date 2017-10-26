@@ -17,12 +17,11 @@
 #define __LEGION_PROFILING_H__
 
 #include "realm.h"
-#include "legion_types.h"
-#include "legion_utilities.h"
+#include "legion/legion_types.h"
+#include "legion/legion_utilities.h"
 #include "realm/profiling.h"
-#include "lowlevel_config.h"
 
-#include <cassert>
+#include <assert.h>
 #include <deque>
 #include <algorithm>
 #include <sstream>
@@ -40,12 +39,12 @@ namespace Legion {
   namespace Internal { 
 
     // XXX: Make sure these typedefs are consistent with Realm
-    typedef ::legion_lowlevel_barrier_timestamp_t timestamp_t;
+    typedef ::realm_barrier_timestamp_t timestamp_t;
     typedef Realm::Processor::Kind ProcKind;
     typedef Realm::Memory::Kind MemKind;
-    typedef ::legion_lowlevel_id_t ProcID;
-    typedef ::legion_lowlevel_id_t MemID;
-    typedef ::legion_lowlevel_id_t InstID;
+    typedef ::realm_id_t ProcID;
+    typedef ::realm_id_t MemID;
+    typedef ::realm_id_t InstID;
 
     class LegionProfSerializer; // forward declaration
 

@@ -13,13 +13,13 @@
  * limitations under the License.
  */
 
-#include "event_impl.h"
+#include "realm/event_impl.h"
 
-#include "proc_impl.h"
-#include "runtime_impl.h"
-#include "logging.h"
-#include "threads.h"
-#include "profiling.h"
+#include "realm/proc_impl.h"
+#include "realm/runtime_impl.h"
+#include "realm/logging.h"
+#include "realm/threads.h"
+#include "realm/profiling.h"
 
 namespace Realm {
 

@@ -15,12 +15,12 @@
 
 // Realm modules
 
-#include "realm_config.h"
+#include "realm/realm_config.h"
 
 #define REALM_MODULE_REGISTRATION_STATIC
-#include "module.h"
+#include "realm/module.h"
 
-#include "logging.h"
+#include "realm/logging.h"
 
 #include <assert.h>
 #include <string.h>

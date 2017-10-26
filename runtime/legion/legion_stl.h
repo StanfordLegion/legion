@@ -1188,6 +1188,6 @@ namespace Legion {
   }; // namespace STL
 }; // namespace Legion
 
-#include "legion_stl.inl"
+#include "legion/legion_stl.inl"
 
 #endif // __LEGION_STL_H__

@@ -18,7 +18,7 @@
 #ifndef REALM_DEPPART_SETOPS_H
 #define REALM_DEPPART_SETOPS_H
 
-#include "partitions.h"
+#include "realm/deppart/partitions.h"
 
 namespace Realm {
 

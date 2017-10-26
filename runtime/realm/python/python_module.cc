@@ -13,16 +13,16 @@
  * limitations under the License.
  */
 
-#include "python_module.h"
-#include "python_internal.h"
+#include "realm/python/python_module.h"
+#include "realm/python/python_internal.h"
 
-#include "../numa/numasysif.h"
-#include "logging.h"
-#include "cmdline.h"
-#include "proc_impl.h"
-#include "threads.h"
-#include "runtime_impl.h"
-#include "utils.h"
+#include "realm/numa/numasysif.h"
+#include "realm/logging.h"
+#include "realm/cmdline.h"
+#include "realm/proc_impl.h"
+#include "realm/threads.h"
+#include "realm/runtime_impl.h"
+#include "realm/utils.h"
 
 #include <dlfcn.h>
 #include <link.h>

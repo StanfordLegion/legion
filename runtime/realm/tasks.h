@@ -18,15 +18,15 @@
 #ifndef REALM_TASKS_H
 #define REALM_TASKS_H
 
-#include "processor.h"
-#include "id.h"
+#include "realm/processor.h"
+#include "realm/id.h"
 
-#include "operation.h"
-#include "profiling.h"
+#include "realm/operation.h"
+#include "realm/profiling.h"
 
-#include "threads.h"
-#include "pri_queue.h"
-#include "bytearray.h"
+#include "realm/threads.h"
+#include "realm/pri_queue.h"
+#include "realm/bytearray.h"
 
 namespace Realm {
 

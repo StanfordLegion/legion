@@ -16,8 +16,8 @@
 #ifndef __MAPPER_MANAGER_H__
 #define __MAPPER_MANAGER_H__
 
-#include "legion_types.h"
-#include "legion_mapping.h"
+#include "legion/legion_types.h"
+#include "legion/legion_mapping.h"
 
 namespace Legion {
   namespace Internal {

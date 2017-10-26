@@ -13,8 +13,8 @@
  * limitations under the License.
  */
 
-#include "replay_mapper.h"
-#include "legion_utilities.h"
+#include "mappers/replay_mapper.h"
+#include "legion/legion_utilities.h"
 
 namespace Legion {
   namespace Mapping {

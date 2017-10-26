@@ -16,9 +16,9 @@
 // clocks, timers for Realm
 
 // nop, but helps IDEs
-#include "timers.h"
+#include "realm/timers.h"
 
-#include "logging.h"
+#include "realm/logging.h"
 
 #ifdef __MACH__
 #include <mach/clock.h>

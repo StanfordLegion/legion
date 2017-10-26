@@ -13,14 +13,14 @@
  * limitations under the License.
  */
 
-#include "proc_impl.h"
+#include "realm/proc_impl.h"
 
-#include "timers.h"
-#include "runtime_impl.h"
-#include "logging.h"
-#include "serialize.h"
-#include "profiling.h"
-#include "utils.h"
+#include "realm/timers.h"
+#include "realm/runtime_impl.h"
+#include "realm/logging.h"
+#include "realm/serialize.h"
+#include "realm/profiling.h"
+#include "realm/utils.h"
 
 #include <sys/types.h>
 #include <dirent.h>

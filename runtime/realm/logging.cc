@@ -15,11 +15,11 @@
 
 // Realm logging infrastructure
 
-#include "logging.h"
+#include "realm/logging.h"
 
-#include <realm/activemsg.h>
+#include "realm/activemsg.h"
 
-#include "cmdline.h"
+#include "realm/cmdline.h"
 
 #include <stdio.h>
 #include <string.h>

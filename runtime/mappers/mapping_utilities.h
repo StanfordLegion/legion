@@ -19,8 +19,8 @@
 
 #include "legion.h"
 
-#include <cstdlib>
-#include <cassert>
+#include <stdlib.h>
+#include <assert.h>
 
 namespace Legion {
   namespace Mapping {

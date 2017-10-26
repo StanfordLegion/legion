@@ -15,9 +15,9 @@
 
 // tasks and task scheduling for Realm
 
-#include "tasks.h"
+#include "realm/tasks.h"
 
-#include "runtime_impl.h"
+#include "realm/runtime_impl.h"
 
 namespace Realm {
 

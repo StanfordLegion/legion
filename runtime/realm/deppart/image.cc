@@ -15,13 +15,13 @@
 
 // image operations for Realm dependent partitioning
 
-#include "image.h"
+#include "realm/deppart/image.h"
 
-#include "deppart_config.h"
-#include "rectlist.h"
-#include "inst_helper.h"
-#include "preimage.h"
-#include "../logging.h"
+#include "realm/deppart/deppart_config.h"
+#include "realm/deppart/rectlist.h"
+#include "realm/deppart/inst_helper.h"
+#include "realm/deppart/preimage.h"
+#include "realm/logging.h"
 
 namespace Realm {
 

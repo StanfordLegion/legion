@@ -14,9 +14,9 @@
  */
 
 // OpenMP (or similar) thread pool for Realm
-#include "openmp_threadpool.h"
+#include "realm/openmp/openmp_threadpool.h"
 
-#include "../logging.h"
+#include "realm/logging.h"
 
 namespace Realm {
 

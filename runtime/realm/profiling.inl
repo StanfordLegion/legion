@@ -16,8 +16,8 @@
 // INCLDUED FROM profiling.h - DO NOT INCLUDE THIS DIRECTLY
 
 // this is a nop, but it's for the benefit of IDEs trying to parse this file
-#include "profiling.h"
-#include "serialize.h"
+#include "realm/profiling.h"
+#include "realm/serialize.h"
 
 TYPE_IS_SERIALIZABLE(Realm::ProfilingMeasurementID);
 TYPE_IS_SERIALIZABLE(Realm::ProfilingMeasurements::OperationTimeline);
@@ -33,7 +33,7 @@ TYPE_IS_SERIALIZABLE(Realm::ProfilingMeasurements::IPCPerfCounters);
 TYPE_IS_SERIALIZABLE(Realm::ProfilingMeasurements::TLBPerfCounters);
 TYPE_IS_SERIALIZABLE(Realm::ProfilingMeasurements::BranchPredictionPerfCounters);
 
-#include "timers.h"
+#include "realm/timers.h"
 
 namespace Realm {
 

@@ -18,10 +18,10 @@
 #define __SHIM_MAPPER_H__
 
 #include "legion.h"
-#include "mapping_utilities.h"
-#include "default_mapper.h"
-#include <cstdlib>
-#include <cassert>
+#include "mappers/mapping_utilities.h"
+#include "mappers/default_mapper.h"
+#include <stdlib.h>
+#include <assert.h>
 #include <algorithm>
 
 namespace Legion {

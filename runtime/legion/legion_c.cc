@@ -14,8 +14,8 @@
  */
 
 #include "legion.h"
-#include "legion_c.h"
-#include "legion_c_util.h"
+#include "legion/legion_c.h"
+#include "legion/legion_c_util.h"
 #ifdef REALM_USE_LLVM
 #include "realm/llvmjit/llvmjit.h"
 #endif
@@ -4232,7 +4232,7 @@ void
 legion_task_preamble(
   const void *data,
   size_t datalen,
-  legion_lowlevel_id_t proc_id,
+  legion_proc_id_t proc_id,
   legion_task_t *taskptr,
   const legion_physical_region_t **regionptr,
   unsigned * num_regions_ptr,

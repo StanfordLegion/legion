@@ -13,15 +13,15 @@
  * limitations under the License.
  */
 
-#include "machine_impl.h"
+#include "realm/machine_impl.h"
 
-#include "logging.h"
-#include "proc_impl.h"
-#include "mem_impl.h"
-#include "runtime_impl.h"
+#include "realm/logging.h"
+#include "realm/proc_impl.h"
+#include "realm/mem_impl.h"
+#include "realm/runtime_impl.h"
 
-#include <realm/activemsg.h>
-#include <realm/transfer/channel.h>
+#include "realm/activemsg.h"
+#include "realm/transfer/channel.h"
 
 TYPE_IS_SERIALIZABLE(Realm::NodeAnnounceTag);
 TYPE_IS_SERIALIZABLE(Realm::Memory);

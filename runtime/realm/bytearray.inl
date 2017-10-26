@@ -16,7 +16,7 @@
 // INCLDUED FROM bytearray.h - DO NOT INCLUDE THIS DIRECTLY
 
 // this is a nop, but it's for the benefit of IDEs trying to parse this file
-#include "bytearray.h"
+#include "realm/bytearray.h"
 
 #include <string.h>
 #include <stdlib.h>

@@ -18,15 +18,15 @@
 #ifndef REALM_RSRV_IMPL_H
 #define REALM_RSRV_IMPL_H
 
-#include "reservation.h"
+#include "realm/reservation.h"
 
-#include "id.h"
-#include <realm/activemsg.h>
-#include "nodeset.h"
+#include "realm/id.h"
+#include "realm/activemsg.h"
+#include "realm/nodeset.h"
 
 #define REALM_RSRV_USE_CIRCQUEUE
 #ifdef REALM_RSRV_USE_CIRCQUEUE
-#include "circ_queue.h"
+#include "realm/circ_queue.h"
 #endif
 
 namespace Realm {
@@ -257,7 +257,7 @@ namespace Realm {
 
 }; // namespace Realm
 
-#include "rsrv_impl.inl"
+#include "realm/rsrv_impl.inl"
 
 #endif // ifndef REALM_RSRV_IMPL_H
 

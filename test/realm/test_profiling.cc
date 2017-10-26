@@ -7,7 +7,7 @@
 #include <time.h>
 #include <unistd.h>
 
-#include "realm/realm.h"
+#include "realm.h"
 #include "realm/profiling.h"
 
 using namespace Realm;

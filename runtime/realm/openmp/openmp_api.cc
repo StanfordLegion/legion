@@ -13,9 +13,9 @@
  * limitations under the License.
  */
 
-#include "openmp_threadpool.h"
+#include "realm/openmp/openmp_threadpool.h"
 
-#include "../logging.h"
+#include "realm/logging.h"
 
 #include <stdio.h>
 #include <stdint.h>

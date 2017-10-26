@@ -17,14 +17,14 @@
 #ifndef __LEGION_UTILITIES_H__
 #define __LEGION_UTILITIES_H__
 
-#include <cassert>
-#include <cstdlib>
-#include <cstring>
+#include <assert.h>
+#include <stdlib.h>
+#include <string.h>
 
-#include "legion_types.h"
+#include "legion/legion_types.h"
 #include "legion.h"
-#include "legion_profiling.h"
-#include "legion_allocation.h"
+#include "legion/legion_profiling.h"
+#include "legion/legion_allocation.h"
 
 // Apple can go screw itself
 #ifndef __MACH__

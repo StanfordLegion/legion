@@ -18,8 +18,8 @@
 #ifndef REALM_SAMPLING_IMPL_H
 #define REALM_SAMPLING_IMPL_H
 
-#include "sampling.h"
-#include "threads.h"
+#include "realm/sampling.h"
+#include "realm/threads.h"
 
 namespace Realm {
 

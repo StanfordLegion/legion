@@ -18,10 +18,8 @@
 #ifndef REALM_MACHINE_H
 #define REALM_MACHINE_H
 
-#include "lowlevel_config.h"
-
-#include "processor.h"
-#include "memory.h"
+#include "realm/processor.h"
+#include "realm/memory.h"
 
 #include <iterator>
 
@@ -287,7 +285,7 @@ namespace Realm {
 	
 }; // namespace Realm
 
-#include "machine.inl"
+#include "realm/machine.inl"
 
 #endif // ifndef REALM_MACHINE_H
 

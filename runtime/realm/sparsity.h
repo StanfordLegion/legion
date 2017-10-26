@@ -23,7 +23,7 @@
 #ifndef REALM_SPARSITY_H
 #define REALM_SPARSITY_H
 
-#include "indexspace.h"
+#include "realm/indexspace.h"
 
 namespace Realm {
 
@@ -55,7 +55,7 @@ namespace Realm {
   template <int N, typename T>
   class SparsityMap {
   public:
-    typedef ::legion_lowlevel_id_t id_t;
+    typedef ::realm_id_t id_t;
     id_t id;
     bool operator<(const SparsityMap<N,T> &rhs) const;
     bool operator==(const SparsityMap<N,T> &rhs) const;
@@ -120,7 +120,7 @@ namespace Realm {
 
 }; // namespace Realm
 
-#include "sparsity.inl"
+#include "realm/sparsity.inl"
 
 #endif // ifndef REALM_SPARSITY_H
 

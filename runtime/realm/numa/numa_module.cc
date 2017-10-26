@@ -13,15 +13,15 @@
  * limitations under the License.
  */
 
-#include "numa_module.h"
+#include "realm/numa/numa_module.h"
 
-#include "numasysif.h"
-#include "logging.h"
-#include "cmdline.h"
-#include "proc_impl.h"
-#include "threads.h"
-#include "runtime_impl.h"
-#include "utils.h"
+#include "realm/numa/numasysif.h"
+#include "realm/logging.h"
+#include "realm/cmdline.h"
+#include "realm/proc_impl.h"
+#include "realm/threads.h"
+#include "realm/runtime_impl.h"
+#include "realm/utils.h"
 
 namespace Realm {
 

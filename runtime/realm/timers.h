@@ -18,7 +18,7 @@
 #ifndef REALM_TIMERS_H
 #define REALM_TIMERS_H
 
-#include <realm/activemsg.h>
+#include "realm/activemsg.h"
 
 #include <stdio.h>
 #include <map>
@@ -184,7 +184,7 @@ namespace Realm {
   
 }; // namespace Realm
 
-#include "timers.inl"
+#include "realm/timers.inl"
 
 #endif // ifndef REALM_TIMERS_H
 

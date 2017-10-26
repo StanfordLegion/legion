@@ -16,8 +16,8 @@
 #ifndef __LEGION_REPLICATION_H__
 #define __LEGION_REPLICATION_H__
 
-#include "legion_ops.h"
-#include "legion_tasks.h"
+#include "legion/legion_ops.h"
+#include "legion/legion_tasks.h"
 
 namespace Legion {
   namespace Internal { 

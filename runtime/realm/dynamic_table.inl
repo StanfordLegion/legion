@@ -16,7 +16,7 @@
 // INCLDUED FROM dynamic_table.h - DO NOT INCLUDE THIS DIRECTLY
 
 // this is a nop, but it's for the benefit of IDEs trying to parse this file
-#include "dynamic_table.h"
+#include "realm/dynamic_table.h"
 
 namespace Realm {
 

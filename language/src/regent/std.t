@@ -3657,7 +3657,7 @@ local function make_task_wrapper(task_body)
   if return_type == terralib.types.unit then
     return terra(data : &opaque, datalen : c.size_t,
                  userdata : &opaque, userlen : c.size_t,
-                 proc_id : c.legion_lowlevel_id_t)
+                 proc_id : c.legion_proc_id_t)
       var task : c.legion_task_t,
           regions : &c.legion_physical_region_t,
           num_regions : uint32,
@@ -3670,7 +3670,7 @@ local function make_task_wrapper(task_body)
   else
     return terra(data : &opaque, datalen : c.size_t,
                  userdata : &opaque, userlen : c.size_t,
-                 proc_id : c.legion_lowlevel_id_t)
+                 proc_id : c.legion_proc_id_t)
       var task : c.legion_task_t,
           regions : &c.legion_physical_region_t,
           num_regions : uint32,

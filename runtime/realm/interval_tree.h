@@ -104,7 +104,7 @@ namespace Realm {
       
 };
 
-#include "interval_tree.inl"
+#include "realm/interval_tree.inl"
 
 #endif // ifndef REALM_INTERVAL_TREE_H
 

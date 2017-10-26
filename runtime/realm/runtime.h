@@ -18,11 +18,9 @@
 #ifndef REALM_RUNTIME_H
 #define REALM_RUNTIME_H
 
-#include "processor.h"
-#include "redop.h"
-#include "custom_serdez.h"
-
-#include "lowlevel_config.h"
+#include "realm/processor.h"
+#include "realm/redop.h"
+#include "realm/custom_serdez.h"
 
 namespace Realm {
 

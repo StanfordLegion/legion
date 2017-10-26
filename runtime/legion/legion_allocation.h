@@ -24,14 +24,14 @@
 #include <deque>
 #include <vector>
 #include <limits>
-#include <cstddef>
+#include <stddef.h>
 #include <functional>
 #include <stdlib.h>
 #ifndef __MACH__
 #include <malloc.h>
 #endif
-#include "legion_config.h"
-#include "legion_template_help.h" // StaticAssert
+#include "legion/legion_config.h"
+#include "legion/legion_template_help.h" // StaticAssert
 #if __cplusplus >= 201103L
 #include <utility>
 #endif

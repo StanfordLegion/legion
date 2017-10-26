@@ -19,11 +19,11 @@
 #define REALM_INSTANCE_INL
 
 // nop, but helps IDEs
-#include "instance.h"
+#include "realm/instance.h"
 
-#include "indexspace.h"
-#include "inst_layout.h"
-#include "serialize.h"
+#include "realm/indexspace.h"
+#include "realm/inst_layout.h"
+#include "realm/serialize.h"
 
 TYPE_IS_SERIALIZABLE(Realm::RegionInstance);
 

@@ -18,35 +18,33 @@
 #ifndef REALM_INDEXSPACE_H
 #define REALM_INDEXSPACE_H
 
-#include "event.h"
-#include "memory.h"
+#include "realm/event.h"
+#include "realm/memory.h"
 #define REALM_SKIP_INLINES
-#include "instance.h"
+#include "realm/instance.h"
 #undef REALM_SKIP_INLINES
 
-#include "lowlevel_config.h"
-#include "realm_config.h"
-#include "sparsity.h"
-#include "dynamic_templates.h"
+#include "realm/realm_c.h"
+#include "realm/realm_config.h"
+#include "realm/sparsity.h"
+#include "realm/dynamic_templates.h"
 
 // we need intptr_t - make it if needed
 #if __cplusplus >= 201103L
-#include <cstdint>
+#include <stdint.h>
 #else
 typedef ptrdiff_t intptr_t;
 #endif
 
-#include "custom_serdez.h"
+#include "realm/custom_serdez.h"
 
 namespace Realm {
-  typedef ::legion_lowlevel_coord_t coord_t;
-
   // NOTE: all these interfaces are templated, which means partitions.cc is going
   //  to have to somehow know which ones to instantiate - this is controlled by the
   //  following type lists, using a bunch of helper stuff from dynamic_templates.h
 
   typedef DynamicTemplates::IntList<1, 3> DIMCOUNTS;
-  typedef DynamicTemplates::TypeList<int, unsigned int, long long, coord_t>::TL DIMTYPES;
+  typedef DynamicTemplates::TypeList<int, unsigned int, long long>::TL DIMTYPES;
   typedef DynamicTemplates::TypeList<int, bool>::TL FLDTYPES;
 
   class ProfilingRequestSet;
@@ -724,6 +722,6 @@ namespace std {
   };
 };
 
-#include "indexspace.inl"
+#include "realm/indexspace.inl"
 
 #endif // ifndef REALM_INDEXSPACE_H

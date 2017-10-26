@@ -18,9 +18,9 @@
 #ifndef REALM_TRANSFER_H
 #define REALM_TRANSFER_H
 
-#include "event.h"
-#include "memory.h"
-#include "indexspace.h"
+#include "realm/event.h"
+#include "realm/memory.h"
+#include "realm/indexspace.h"
 
 #ifdef USE_HDF
 #include "realm/hdf5/hdf5_internal.h"

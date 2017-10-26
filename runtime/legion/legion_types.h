@@ -20,13 +20,12 @@
  * \file legion_types.h
  */
 
-#include <cstdio>
-#include <cstdlib>
-#include <cassert>
-#include <cstring>
+#include <stdio.h>
+#include <stdlib.h>
+#include <assert.h>
+#include <string.h>
 #include <stdint.h>
-
-#include "limits.h"
+#include <limits.h>
 
 #include <map>
 #include <set>
@@ -35,14 +34,14 @@
 #include <vector>
 #include <typeinfo>
 
-#include "legion_config.h"
-#include "legion_template_help.h"
+#include "legion/legion_config.h"
+#include "legion/legion_template_help.h"
 
 // Make sure we have the appropriate defines in place for including realm
 // SJT: too late to define this here...
 //define REALM_USE_LEGION_LAYOUT_CONSTRAINTS
 #include "realm.h"
-#include "dynamic_templates.h"
+#include "realm/dynamic_templates.h"
 
 // this may be set before including legion.h to eliminate deprecation warnings
 //  for just the Legion API
@@ -140,9 +139,9 @@ namespace Legion {
   struct SerdezRedopFns;
   // Some typedefs for making things nicer for users with C++11 support
 #if __cplusplus >= 201103L
-  template<typename FT, int N, typename T = ::legion_lowlevel_coord_t>
+  template<typename FT, int N, typename T = ::legion_coord_t>
   using GenericAccessor = Realm::GenericAccessor<FT,N,T>;
-  template<typename FT, int N, typename T = ::legion_lowlevel_coord_t>
+  template<typename FT, int N, typename T = ::legion_coord_t>
   using AffineAccessor = Realm::AffineAccessor<FT,N,T>;
 #endif
 
@@ -1726,7 +1725,7 @@ namespace Legion {
   typedef Realm::Machine::MemoryMemoryAffinity MemoryMemoryAffinity;
   typedef Realm::DynamicTemplates::TagType TypeTag;
   typedef Realm::Logger Logger;
-  typedef ::legion_lowlevel_coord_t coord_t;
+  typedef ::legion_coord_t coord_t;
   typedef std::map<CustomSerdezID, 
                    const Realm::CustomSerdezUntyped *> SerdezOpTable;
   typedef std::map<Realm::ReductionOpID, 
@@ -2139,7 +2138,7 @@ namespace Legion {
 
 // now that we have things like LgEvent defined, we can include accessor.h to
 // pick up ptr_t, which is used for compatibility-mode Coloring and friends
-#include "accessor.h"
+#include "legion/accessor.h"
 
 namespace Legion {
   typedef LegionRuntime::Accessor::ByteOffset ByteOffset;

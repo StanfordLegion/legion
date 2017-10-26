@@ -16,7 +16,8 @@
 #ifndef __BISHOP_C_H__
 #define __BISHOP_C_H__
 
-#include "legion_c.h"
+#define LEGION_ENABLE_C_BINDINGS
+#include "legion.h"
 
 #ifdef __cplusplus
 extern "C" {

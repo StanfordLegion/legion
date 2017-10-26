@@ -18,11 +18,11 @@
 #ifndef REALM_METADATA_H
 #define REALM_METADATA_H
 
-#include "event.h"
-#include "id.h"
-#include "nodeset.h"
+#include "realm/event.h"
+#include "realm/id.h"
+#include "realm/nodeset.h"
 
-#include <realm/activemsg.h>
+#include "realm/activemsg.h"
 
 namespace Realm {
 

@@ -121,7 +121,7 @@ ifneq (${MARCH},)
   CC_FLAGS += -march=${MARCH}
 endif
 
-INC_FLAGS	+= -I$(LG_RT_DIR) -I$(LG_RT_DIR)/realm -I$(LG_RT_DIR)/legion -I$(LG_RT_DIR)/mappers
+INC_FLAGS	+= -I$(LG_RT_DIR) -I$(LG_RT_DIR)/mappers
 ifneq ($(shell uname -s),Darwin)
 LEGION_LD_FLAGS	+= -lrt -lpthread
 else

@@ -17,10 +17,10 @@
 #define __LEGION_CONTEXT_H__
 
 #include "legion.h"
-#include "legion_tasks.h"
-#include "legion_mapping.h"
-#include "legion_instances.h"
-#include "legion_allocation.h"
+#include "legion/legion_tasks.h"
+#include "legion/legion_mapping.h"
+#include "legion/legion_instances.h"
+#include "legion/legion_allocation.h"
 
 namespace Legion {
   namespace Internal {
@@ -955,6 +955,7 @@ namespace Legion {
           std::set<ApEvent> &preconditions,
           std::set<RtEvent> &applied_events);
       virtual void invalidate_region_tree_contexts(void);
+      virtual void invalidate_remote_tree_contexts(Deserializer &derez);
       virtual void send_back_created_state(AddressSpaceID target);
     public:
       virtual InstanceView* create_instance_top_view(PhysicalManager *manager,
@@ -1000,7 +1001,6 @@ namespace Legion {
       void free_remote_contexts(void);
       void send_remote_context(AddressSpaceID remote_instance, 
                                RemoteContext *target);
-      void unpack_remote_invalidates(Deserializer &derez);
     protected:
       void execute_task_launch(TaskOp *task, bool index, 
                                LegionTrace *current_trace, 
@@ -1542,6 +1542,7 @@ namespace Legion {
       virtual InstanceView* create_instance_top_view(PhysicalManager *manager,
                                                      AddressSpaceID source);
       virtual void invalidate_region_tree_contexts(void);
+      virtual void invalidate_remote_tree_contexts(Deserializer &derez);
     public:
       virtual ShardingFunction* find_sharding_function(ShardingID sid);
       virtual ShardManager* find_shard_manager(void) const;

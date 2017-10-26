@@ -18,7 +18,7 @@
 #ifndef REALM_DEPPART_RECTLIST_H
 #define REALM_DEPPART_RECTLIST_H
 
-#include "indexspace.h"
+#include "realm/indexspace.h"
 
 namespace Realm {
 
@@ -86,4 +86,4 @@ namespace Realm {
 
 #endif // REALM_DEPPART_RECTLIST_H
 
-#include "rectlist.inl"
+#include "realm/deppart/rectlist.inl"

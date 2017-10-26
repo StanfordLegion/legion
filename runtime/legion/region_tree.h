@@ -17,12 +17,12 @@
 #ifndef __LEGION_REGION_TREE_H__
 #define __LEGION_REGION_TREE_H__
 
-#include "legion_types.h"
-#include "legion_utilities.h"
-#include "legion_allocation.h"
-#include "legion_analysis.h"
-#include "garbage_collection.h"
-#include "field_tree.h"
+#include "legion/legion_types.h"
+#include "legion/legion_utilities.h"
+#include "legion/legion_allocation.h"
+#include "legion/legion_analysis.h"
+#include "legion/garbage_collection.h"
+#include "legion/field_tree.h"
 
 namespace Legion {
   namespace Internal {
@@ -1001,7 +1001,7 @@ namespace Legion {
       virtual PhysicalInstance create_file_instance(const char *file_name,
 				   const std::vector<Realm::FieldID> &field_ids,
                                    const std::vector<size_t> &field_sizes,
-                                   legion_lowlevel_file_mode_t file_mode) = 0;
+                                   legion_file_mode_t file_mode) = 0;
       virtual PhysicalInstance create_hdf5_instance(const char *file_name,
                                    const std::vector<Realm::FieldID> &field_ids,
                                    const std::vector<size_t> &field_sizes,
@@ -1256,7 +1256,7 @@ namespace Legion {
       virtual PhysicalInstance create_file_instance(const char *file_name,
                                    const std::vector<Realm::FieldID> &field_ids,
                                    const std::vector<size_t> &field_sizes,
-                                   legion_lowlevel_file_mode_t file_mode);
+                                   legion_file_mode_t file_mode);
       virtual PhysicalInstance create_hdf5_instance(const char *file_name,
                                    const std::vector<Realm::FieldID> &field_ids,
                                    const std::vector<size_t> &field_sizes,

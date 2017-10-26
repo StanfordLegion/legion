@@ -16,7 +16,7 @@
 // INCLDUED FROM operation.h - DO NOT INCLUDE THIS DIRECTLY
 
 // this is a nop, but it's for the benefit of IDEs trying to parse this file
-#include "operation.h"
+#include "realm/operation.h"
 
 namespace Realm {
 

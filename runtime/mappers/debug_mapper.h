@@ -16,7 +16,7 @@
 #ifndef __DEBUG_MAPPER_H__
 #define __DEBUG_MAPPER_H__
 
-#include "replay_mapper.h"
+#include "mappers/replay_mapper.h"
 
 namespace Legion {
   namespace Mapping {

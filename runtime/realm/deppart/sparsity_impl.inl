@@ -19,9 +19,9 @@
 #define REALM_DEPPART_SPARSITY_IMPL_INL
 
 // NOP, but useful for IDEs
-#include "sparsity_impl.h"
+#include "realm/deppart/sparsity_impl.h"
 
-#include "../runtime_impl.h"
+#include "realm/runtime_impl.h"
 
 namespace Realm {
 

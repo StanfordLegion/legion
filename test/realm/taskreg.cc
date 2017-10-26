@@ -1,4 +1,4 @@
-#include "realm/realm.h"
+#include "realm.h"
 #ifdef REALM_USE_LLVM
 #include "realm/llvmjit/llvmjit.h"
 #endif

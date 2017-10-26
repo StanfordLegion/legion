@@ -16,8 +16,8 @@
 #ifndef __LEGION_MAPPING_H__
 #define __LEGION_MAPPING_H__
 
-#include "legion_types.h"
-#include "legion_constraint.h"
+#include "legion/legion_types.h"
+#include "legion/legion_constraint.h"
 #include "legion.h"
 #include "realm/profiling.h"
 
@@ -2160,7 +2160,7 @@ namespace Legion {
   }; // namespace Mapping
 }; // namespace Legion
 
-#include "legion_mapping.inl"
+#include "legion/legion_mapping.inl"
 
 #endif // __LEGION_MAPPING_H__
 

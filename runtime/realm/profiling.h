@@ -18,16 +18,16 @@
 #ifndef REALM_PROFILING_H
 #define REALM_PROFILING_H
 
-#include <climits>
+#include <limits.h>
 #include <vector>
 #include <set>
 #include <map>
 
-#include "bytearray.h"
-#include "processor.h"
-#include "memory.h"
-#include "instance.h"
-#include "faults.h"
+#include "realm/bytearray.h"
+#include "realm/processor.h"
+#include "realm/memory.h"
+#include "realm/instance.h"
+#include "realm/faults.h"
 
 namespace Realm {
 
@@ -367,6 +367,6 @@ namespace Realm {
   };
 }; // namespace Realm
 
-#include "profiling.inl"
+#include "realm/profiling.inl"
 
 #endif // ifdef REALM_PROFILING_H

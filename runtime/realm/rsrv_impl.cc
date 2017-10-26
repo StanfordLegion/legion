@@ -13,11 +13,11 @@
  * limitations under the License.
  */
 
-#include "rsrv_impl.h"
+#include "realm/rsrv_impl.h"
 
-#include "logging.h"
-#include "event_impl.h"
-#include "runtime_impl.h"
+#include "realm/logging.h"
+#include "realm/event_impl.h"
+#include "realm/runtime_impl.h"
 
 namespace Realm {
 

@@ -19,7 +19,7 @@
 #define REALM_MEMORY_IMPL_INL
 
 // nop, but helpful for IDEs
-#include "mem_impl.h"
+#include "realm/mem_impl.h"
 
 namespace Realm {
 

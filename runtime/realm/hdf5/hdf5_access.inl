@@ -16,7 +16,7 @@
 // HDF5-specific instance layouts and accessors
 
 // NOP but useful for IDE's
-#include <realm/hdf5/hdf5_access.h>
+#include "realm/hdf5/hdf5_access.h"
 
 namespace Realm {
 

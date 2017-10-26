@@ -15,8 +15,8 @@
 
 // helper defines/data structures for fault reporting/handling in Realm
 
-#include "faults.h"
-#include "profiling.h"
+#include "realm/faults.h"
+#include "realm/profiling.h"
 
 #include <alloca.h>
 #include <assert.h>

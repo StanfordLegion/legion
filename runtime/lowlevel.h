@@ -16,6 +16,8 @@
 #ifndef RUNTIME_LOWLEVEL_H
 #define RUNTIME_LOWLEVEL_H
 
+#warning This file is deprecated - include "realm/realm.h" instead (and use namespace Realm instead of LegionRuntime::LowLevel).
+
 ///////////////////////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////////
 //
@@ -25,9 +27,8 @@
 ///////////////////////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////////
 
-#include "arrays.h"
-//#include "layouts.h"
-#include "lowlevel_config.h"
+#include "legion/arrays.h"
+#include "realm/realm_c.h"
 #ifdef USE_HDF
 #include <hdf5.h>
 #endif
@@ -54,7 +55,7 @@ namespace LegionRuntime {
     typedef Realm::Machine Machine;
     typedef Realm::Runtime Runtime;
 
-    typedef ::legion_lowlevel_id_t IDType;
+    typedef ::realm_id_t IDType;
 
   }; // namespace LowLevel
 }; // namespace LegionRuntime

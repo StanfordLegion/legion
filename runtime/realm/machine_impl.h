@@ -18,11 +18,11 @@
 #ifndef REALM_MACHINE_IMPL_H
 #define REALM_MACHINE_IMPL_H
 
-#include "machine.h"
+#include "realm/machine.h"
 
-#include "legion_types.h"
-#include "legion_utilities.h"
-#include <realm/activemsg.h>
+#include "legion/legion_types.h"
+#include "legion/legion_utilities.h"
+#include "realm/activemsg.h"
 
 #include <vector>
 #include <set>

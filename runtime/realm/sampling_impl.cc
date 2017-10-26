@@ -15,9 +15,9 @@
 
 // sampling profiler implementation for Realm
 
-#include "sampling_impl.h"
-#include "cmdline.h"
-#include "timers.h"
+#include "realm/sampling_impl.h"
+#include "realm/cmdline.h"
+#include "realm/timers.h"
 
 #include <unistd.h>
 #include <errno.h>

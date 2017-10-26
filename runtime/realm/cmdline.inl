@@ -16,7 +16,7 @@
 // command-line processing helpers
 
 // nop, but helps IDEs
-#include "cmdline.h"
+#include "realm/cmdline.h"
 
 namespace Realm {
 

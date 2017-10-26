@@ -18,7 +18,7 @@
 
 #include "realm/mem_impl.h"
 
-#include <realm/transfer/lowlevel_dma.h>
+#include "realm/transfer/lowlevel_dma.h"
 
 #include <hdf5.h>
 

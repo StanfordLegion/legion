@@ -21,9 +21,9 @@
 
 #include <time.h>
 
-#include "lowlevel.h"
+#include <realm.h>
 
-using namespace LegionRuntime::LowLevel;
+using namespace Realm;
 
 #define DEFAULT_LEVELS 32 
 #define DEFAULT_TRACKS 32 

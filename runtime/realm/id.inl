@@ -16,7 +16,7 @@
 // INCLDUED FROM id.h - DO NOT INCLUDE THIS DIRECTLY
 
 // this is a nop, but it's for the benefit of IDEs trying to parse this file
-#include "id.h"
+#include "realm/id.h"
 
 namespace Realm {
 

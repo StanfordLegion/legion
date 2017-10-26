@@ -15,9 +15,9 @@
 
 // HDF5-specific instance layouts and accessors
 
-#include <realm/hdf5/hdf5_access.h>
-#include <realm/deppart/inst_helper.h>
-#include <realm/machine.h>
+#include "realm/hdf5/hdf5_access.h"
+#include "realm/deppart/inst_helper.h"
+#include "realm/machine.h"
 
 namespace Realm {
 

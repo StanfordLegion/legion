@@ -26,24 +26,24 @@
 #endif
 
 #include "legion.h"
-#include "runtime.h"
-#include "legion_ops.h"
-#include "legion_tasks.h"
-#include "legion_trace.h"
-#include "legion_utilities.h"
-#include "region_tree.h"
-#include "legion_spy.h"
-#include "legion_profiling.h"
-#include "legion_instances.h"
-#include "legion_views.h"
-#include "legion_context.h"
-#include "legion_replication.h"
-#include "mapper_manager.h"
-#include "garbage_collection.h"
-#include "default_mapper.h"
-#include "test_mapper.h"
-#include "replay_mapper.h"
-#include "debug_mapper.h"
+#include "legion/runtime.h"
+#include "legion/legion_ops.h"
+#include "legion/legion_tasks.h"
+#include "legion/legion_trace.h"
+#include "legion/legion_utilities.h"
+#include "legion/region_tree.h"
+#include "legion/legion_spy.h"
+#include "legion/legion_profiling.h"
+#include "legion/legion_instances.h"
+#include "legion/legion_views.h"
+#include "legion/legion_context.h"
+#include "legion/legion_replication.h"
+#include "legion/mapper_manager.h"
+#include "legion/garbage_collection.h"
+#include "mappers/default_mapper.h"
+#include "mappers/test_mapper.h"
+#include "mappers/replay_mapper.h"
+#include "mappers/debug_mapper.h"
 
 #include <unistd.h> // sleep for warnings
 
@@ -15805,8 +15805,7 @@ namespace Legion {
       UniqueID context_uid;
       derez.deserialize(context_uid);
       InnerContext *context = find_context(context_uid);
-      context->unpack_remote_invalidates(derez);
-      context->invalidate_region_tree_contexts();
+      context->invalidate_remote_tree_contexts(derez);
     }
     
     //--------------------------------------------------------------------------
