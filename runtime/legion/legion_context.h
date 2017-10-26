@@ -992,9 +992,10 @@ namespace Legion {
       static void handle_version_owner_response(Deserializer &derez,
                                                 Runtime *runtime);
     public:
-      void invalidate_remote_contexts(void);
+      void free_remote_contexts(void);
       void send_remote_context(AddressSpaceID remote_instance, 
                                RemoteContext *target);
+      void unpack_remote_invalidates(Deserializer &derez);
     protected:
       void execute_task_launch(TaskOp *task, bool index, 
                                LegionTrace *current_trace, 

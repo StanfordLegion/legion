@@ -1997,7 +1997,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (!remote_instances.empty())
-        invalidate_remote_contexts();
+        free_remote_contexts();
       for (std::map<TraceID,DynamicTrace*>::const_iterator it = traces.begin();
             it != traces.end(); it++)
       {
@@ -5607,6 +5607,42 @@ namespace Legion {
         {
           RezCheck z(rez);
           rez.serialize(local_uid);
+          // If we have created requirements figure out what invalidations
+          // we have to send to the remote context
+          if (!created_requirements.empty())
+          {
+            std::map<LogicalRegion,bool/*top*/> to_invalidate;
+            for (unsigned idx = 0; idx < created_requirements.size(); idx++)
+            {
+              if (!returnable_privileges[idx])
+              {
+                const LogicalRegion region = created_requirements[idx].region;
+#ifdef DEBUG_LEGION
+                assert((to_invalidate.find(region) == to_invalidate.end()) ||
+                    (!to_invalidate[region]));
+#endif
+                to_invalidate[region] = false; 
+              }
+              else if (
+                  was_created_requirement_deleted(created_requirements[idx]))
+              {
+                const LogicalRegion region = created_requirements[idx].region;
+#ifdef DEBUG_LEGION
+                assert(to_invalidate.find(region) == to_invalidate.end());
+#endif
+                to_invalidate[region] = true;
+              }
+            }
+            rez.serialize<size_t>(to_invalidate.size());
+            for (std::map<LogicalRegion,bool>::const_iterator it = 
+                  to_invalidate.begin(); it != to_invalidate.end(); it++)
+            {
+              rez.serialize(it->first);
+              rez.serialize<bool>(it->second);
+            }
+          }
+          else
+            rez.serialize<size_t>(0);
         }
         for (std::map<AddressSpaceID,RemoteContext*>::const_iterator it = 
               remote_instances.begin(); it != remote_instances.end(); it++)
@@ -5627,8 +5663,9 @@ namespace Legion {
       if (!created_requirements.empty())
       {
         TaskContext *outermost = find_outermost_local_context();
-        RegionTreeContext outermost_ctx = outermost->get_context();
         const bool is_outermost = (outermost == this);
+        RegionTreeContext outermost_ctx = outermost->get_context();
+        RegionTreeContext top_ctx = find_top_context()->get_context();
         for (unsigned idx = 0; idx < created_requirements.size(); idx++)
         {
           // See if we're a returnable privilege or not
@@ -5637,14 +5674,29 @@ namespace Legion {
             // If we're the outermost context or the requirement was
             // deleted, then we can invalidate everything
             // Otherwiswe we only invalidate the users
-            const bool users_only = !is_outermost &&
-              !was_created_requirement_deleted(created_requirements[idx]);
+            const bool was_deleted = 
+              was_created_requirement_deleted(created_requirements[idx]);
+            const bool users_only = !is_outermost && !was_deleted;
             runtime->forest->invalidate_current_context(outermost_ctx,
                         users_only, created_requirements[idx].region);
+            // If it was deleted then we need to invalidate the versions
+            // in the outermost context
+            if (was_deleted)
+              runtime->forest->invalidate_versions(top_ctx,
+                                      created_requirements[idx].region);
           }
           else // Not returning so invalidate the full thing 
+          {
             runtime->forest->invalidate_current_context(tree_context,
                 false/*users only*/, created_requirements[idx].region);
+            // Little tricky here, this is safe to invaliate the whole
+            // tree even if we only had privileges on a field because
+            // if we had privileges on the whole region in this context
+            // it would have merged the created_requirement and we wouldn't
+            // have a non returnable privilege requirement in this context
+            runtime->forest->invalidate_versions(tree_context,
+                                     created_requirements[idx].region);
+          }
         }
       }
       // Clean up our instance top views
@@ -5662,6 +5714,31 @@ namespace Legion {
       } 
       // Now we can free our region tree context
       runtime->free_region_tree_context(tree_context);
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::unpack_remote_invalidates(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      size_t num_invalidates;
+      derez.deserialize(num_invalidates);
+      InnerContext *top_context = NULL;
+      for (unsigned idx = 0; idx < num_invalidates; idx++)
+      {
+        LogicalRegion handle;
+        derez.deserialize(handle);
+        bool top;
+        derez.deserialize(top);
+        if (top)
+        {
+          if (top_context == NULL)
+            top_context = find_top_context();
+          runtime->forest->invalidate_versions(top_context->get_context(), 
+                                               handle);
+        }
+        else
+          runtime->forest->invalidate_versions(tree_context, handle);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -6104,7 +6181,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InnerContext::invalidate_remote_contexts(void)
+    void InnerContext::free_remote_contexts(void)
     //--------------------------------------------------------------------------
     {
       UniqueID local_uid = get_unique_id();
@@ -10442,6 +10519,8 @@ namespace Legion {
       }
       else
         runtime->forest->invalidate_all_versions(tree_context);
+      // Now we can free our region tree context
+      runtime->free_region_tree_context(tree_context);
     }
 
     //--------------------------------------------------------------------------
