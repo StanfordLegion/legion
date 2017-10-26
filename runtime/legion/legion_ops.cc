@@ -13841,6 +13841,7 @@ namespace Legion {
         free(const_cast<char*>(it->second));
       }
       field_map.clear();
+      field_pointers_map.clear();
       region = PhysicalRegion();
       privilege_path.clear();
       version_info.clear();
