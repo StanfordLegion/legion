@@ -24,8 +24,6 @@
 #include "legion/legion_instances.h"
 #include "legion/legion_views.h"
 #include "legion/legion_analysis.h"
-#include "realm/interval_tree.h"
-#include "legion/rectangle_set.h"
 
 #include "legion/region_tree.inl"
 
