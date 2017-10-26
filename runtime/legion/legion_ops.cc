@@ -4108,13 +4108,13 @@ namespace Legion {
         complete_mapping();
       if (!acquired_instances.empty())
         release_acquired_instances(acquired_instances);
+      if (memoizing)
+        trace_info.tpl->record_trigger_copy_completion(trace_info, this,
+            copy_complete_event);
       // Handle the case for marking when the copy completes
       Runtime::trigger_event(completion_event, copy_complete_event);
       need_completion_trigger = false;
       complete_execution(Runtime::protect_event(copy_complete_event));
-      if (memoizing)
-        trace_info.tpl->record_trigger_copy_completion(trace_info, this,
-            copy_complete_event);
     }
 
     //--------------------------------------------------------------------------
