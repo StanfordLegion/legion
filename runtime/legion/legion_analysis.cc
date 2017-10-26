@@ -2482,7 +2482,7 @@ namespace Legion {
         return other->all_same_shard(owner_shard);
       }
       // If we have children and the other one doesn't then we don't
-      if (!other->children.empty())
+      if (other->children.empty())
         return false;
       // Check to see if we have a child that dominates each of the
       // other trees children
