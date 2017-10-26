@@ -9292,6 +9292,57 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ProjectionFunction::construct_projection_tree(RegionTreeNode *root,
+          IndexSpaceNode *launch_space, ShardingFunction *sharding_function,
+          std::map<IndexTreeNode*,ProjectionTree*> &node_map)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(is_functional);
+      assert(is_exclusive);
+#endif
+      IndexTreeNode *row_source = root->get_row_source();
+      RegionTreeForest *context = root->context;
+      // Iterate over the points, compute the projections, and build the tree   
+      Domain launch_domain;
+      launch_space->get_launch_space_domain(launch_domain);
+      if (root->is_region())
+      {
+        RegionNode *region = root->as_region_node();
+        for (Domain::DomainPointIterator itr(launch_domain); itr; itr++)
+        {
+          LogicalRegion result = functor->project(region->handle, itr.p);
+          if (!result.exists())
+            continue;
+          if (sharding_function != NULL)
+          {
+            ShardID owner = sharding_function->find_owner(itr.p, launch_domain);
+            add_to_projection_tree(result, row_source, context, node_map,owner);
+          }
+          else
+            add_to_projection_tree(result, row_source, context, node_map);
+        }
+      }
+      else
+      {
+        PartitionNode *partition = root->as_partition_node();
+        for (Domain::DomainPointIterator itr(launch_domain); itr; itr++)
+        {
+          LogicalRegion result = functor->project(partition->handle, itr.p);
+          if (!result.exists())
+            continue;
+          if (sharding_function != NULL)
+          {
+            ShardID owner = sharding_function->find_owner(itr.p, launch_domain);
+            add_to_projection_tree(result, row_source, context, node_map,owner);
+          }
+          else
+            add_to_projection_tree(result, row_source, context, node_map);
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ void ProjectionFunction::add_to_projection_tree(LogicalRegion r,
                              IndexTreeNode *root, RegionTreeForest *context,
                              std::map<IndexTreeNode*,ProjectionTree*> &node_map,

@@ -1498,8 +1498,13 @@ namespace Legion {
       void record_elide_close_result(const ProjectionInfo &info,
                   const std::set<ProjectionSummary> &projections,
                   RegionTreeNode *node, bool result);
+      // From scratch
       ProjectionTree* construct_projection_tree(RegionTreeNode *root,
                   IndexSpaceNode *launch_domain, ShardingFunction *sharding);
+      // Contribute to an existing tree
+      void construct_projection_tree(RegionTreeNode *root,
+                  IndexSpaceNode *launch_domain, ShardingFunction *sharding,
+                  std::map<IndexTreeNode*,ProjectionTree*> &node_map);
       static void add_to_projection_tree(LogicalRegion region,
                   IndexTreeNode *root, RegionTreeForest *context, 
                   std::map<IndexTreeNode*,ProjectionTree*> &node_map,

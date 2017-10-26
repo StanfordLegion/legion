@@ -3265,37 +3265,30 @@ namespace Legion {
       // every access is independent of the prior writes then 
       // we know that we can safely add this to the epoch without
       // needing to do a close operation
-      bool has_mapping = true; 
-      bool all_disjoint = !reduction; // no disjoint reductions
+      IndexTreeNode *root_source = node->get_row_source();
+      ProjectionTree *prev = new ProjectionTree(root_source);
+      // Construct the previous projection tree from all prior projections
+      {
+        std::map<IndexTreeNode*,ProjectionTree*> node_map;
+        node_map[root_source] = prev;
+        for (std::set<ProjectionSummary>::const_iterator it = 
+              projections.begin(); it != projections.end(); it++)
+          it->projection->construct_projection_tree(node, it->domain, 
+                                                    it->sharding, node_map);
+      }
+      // Then construct the new projection tree
       ProjectionTree *next = 
         info.projection->construct_projection_tree(node, info.projection_space,
                                                    info.sharding_function);
-      for (std::set<ProjectionSummary>::const_iterator it =
-            projections.begin(); it != projections.end(); it++)
-      {
-        ProjectionTree *prev = 
-          it->projection->construct_projection_tree(node, it->domain,
-                                                    it->sharding);
-        if (has_mapping && !prev->dominates(next))
-        {
-          has_mapping = false;
-          if (!all_disjoint)
-          {
-            delete prev;
-            break;
-          }
-        }
-        if (all_disjoint && !prev->disjoint(next))
-        {
-          all_disjoint = false;
-          if (!has_mapping)
-          {
-            delete prev;
-            break;
-          }
-        }
-        delete prev;
-      }
+      // First check to see if the previous dominates
+      bool has_mapping = false;
+      if (prev->dominates(next))
+        has_mapping = true;
+      bool all_disjoint = false;
+      if (!has_mapping && !reduction) // no disjoint reductions
+        all_disjoint = prev->disjoint(next);
+      // Clean up our data structures
+      delete prev;
       delete next;
 #ifdef DEBUG_LEGION
       assert(!has_mapping || !all_disjoint); // can't both be true
