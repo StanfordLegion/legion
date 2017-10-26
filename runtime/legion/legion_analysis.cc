@@ -6417,9 +6417,6 @@ namespace Legion {
 #endif
     //--------------------------------------------------------------------------
     {
-      // If we are not the owner, add a valid reference
-      if (!is_owner())
-        add_base_valid_ref(REMOTE_DID_REF);
 #ifdef LEGION_GC
       log_garbage.info("GC Version State %lld %d", 
           LEGION_DISTRIBUTED_ID_FILTER(did), local_space);
@@ -6848,8 +6845,13 @@ namespace Legion {
     {
       // Views have their valid references added when they are inserted 
 #ifdef DEBUG_LEGION
-      assert(currently_valid); // should be monotonic
+      if (is_owner())
+        assert(currently_valid); // should be monotonic on the owner
+      else
+        currently_valid = true;
 #endif
+      if (!is_owner())
+        send_remote_valid_update(owner_space, mutator, 1/*count*/, true/*add*/);
     }
 
     //--------------------------------------------------------------------------
@@ -6858,7 +6860,6 @@ namespace Legion {
     {
       AutoLock s_lock(state_lock,1,false/*exclusive*/);
 #ifdef DEBUG_LEGION
-      // Should be monotonic
       assert(currently_valid);
       currently_valid = false;
 #endif
@@ -7357,9 +7358,6 @@ namespace Legion {
       // We should have had a request for this already
       assert(!has_remote_instance(target));
 #endif
-      // Add a remote valid did reference to ourselves that will be
-      // removed when the remote copy is no longer valid
-      add_base_valid_ref(REMOTE_DID_REF);
       Serializer rez;
       {
         RezCheck z(rez);
