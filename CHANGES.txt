@@ -11,6 +11,9 @@ Version 17.10.0 (October ??, 2017)
     - Point/Rect types moved to Realm namespace
     - Instance creation allows caller to choose precise memory layout
     - Accessors moved to Realm namespace, changed to match new instance layouts
+  * C API
+    - The C API is now accessed via the `legion.h` header file. Note that this
+        is still a redirect back to the current `legion/legion_c.h` header
   * Legion Prof
     - Added support for minimally invasive dumping of intermediate
         profiling data while the application is still running for long runs
