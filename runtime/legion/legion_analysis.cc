@@ -6417,6 +6417,11 @@ namespace Legion {
 #endif
     //--------------------------------------------------------------------------
     {
+      // If we're not the owner then add a remove gc ref that will
+      // be removed by the owner once no copy of this version state
+      // is valid anywhere in the system
+      if (!is_owner())
+        add_base_gc_ref(REMOTE_DID_REF);
 #ifdef LEGION_GC
       log_garbage.info("GC Version State %lld %d", 
           LEGION_DISTRIBUTED_ID_FILTER(did), local_space);
@@ -6829,47 +6834,34 @@ namespace Legion {
     void VersionState::notify_active(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
-      // Do nothing 
+      // This is a little weird, but we track validity in active
+      // for VersionStates so that we can use the valid references
+      // to track if any copy of a VersionState is valid anywhere
+      // The owner then holds gc references to all remote version
+      // state and can remove them when no copy of the version 
+      // state is valid anywhere else
+#ifdef DEBUG_LEGION
+      // This should be monotonic on all instances of the version state
+      assert(currently_valid);
+#endif
     }
 
     //--------------------------------------------------------------------------
     void VersionState::notify_inactive(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
-      // Do nothing 
-    }
-
-    //--------------------------------------------------------------------------
-    void VersionState::notify_valid(ReferenceMutator *mutator)
-    //--------------------------------------------------------------------------
-    {
-      // Views have their valid references added when they are inserted 
-#ifdef DEBUG_LEGION
-      if (is_owner())
-        assert(currently_valid); // should be monotonic on the owner
-      else
-        currently_valid = true;
-#endif
-      if (!is_owner())
-        send_remote_valid_update(owner_space, mutator, 1/*count*/, true/*add*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void VersionState::notify_invalid(ReferenceMutator *mutator)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock s_lock(state_lock,1,false/*exclusive*/);
 #ifdef DEBUG_LEGION
       assert(currently_valid);
       currently_valid = false;
 #endif
-      // When we are no longer valid we have to send a reference back
-      // to our owner to indicate that we are no longer valid
-      // This reference was given to us by the owner when it sent the
-      // information to create this version state object
-      // (see VersionState::send_version_state')
-      if (!is_owner())
-        send_remote_valid_update(owner_space, mutator, 1/*count*/,false/*add*/);
+      // If we're the owner remove the gc references that are held by 
+      // each remote copy of the version state object, see the constructor
+      // of the VersionState to see where this was added
+      if (is_owner() && has_remote_instances())
+      {
+        UpdateReferenceFunctor<GC_REF_KIND,false/*add*/> functor(this, mutator);
+        map_over_remote_instances(functor);
+      }
       // We can clear out our open children since we don't need them anymore
       // which will also remove the valid references
       open_children.clear();
@@ -6885,6 +6877,25 @@ namespace Legion {
         if (it->first->remove_nested_valid_ref(did, mutator))
           delete it->first;
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void VersionState::notify_valid(ReferenceMutator *mutator)
+    //--------------------------------------------------------------------------
+    {
+      // If we are not the owner, then we have to tell the owner we're valid
+      if (!is_owner())
+        send_remote_valid_update(owner_space, mutator, 1/*count*/, true/*add*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void VersionState::notify_invalid(ReferenceMutator *mutator)
+    //--------------------------------------------------------------------------
+    {
+      // When we are no longer valid we have to send a reference back
+      // to our owner to indicate that we are no longer valid
+      if (!is_owner())
+        send_remote_valid_update(owner_space, mutator, 1/*count*/,false/*add*/);
     }
 
     //--------------------------------------------------------------------------
