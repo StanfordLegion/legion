@@ -179,6 +179,8 @@ before_script:
       fi
     - git config --global user.name "Legion Testing Automation"
     - git config --global user.email "legion-testing@googlegroups.com"
+    - export PERF_MIN_NODES=1
+    - export PERF_MAX_NODES=1
     - ./test.py --test=perf
 
 ###

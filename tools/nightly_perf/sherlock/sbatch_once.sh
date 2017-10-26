@@ -8,4 +8,7 @@
 
 git pull --ff-only
 
+export PERF_MIN_NODES=1
+export PERF_MAX_NODES=1
+
 srun ./nightly.sh
