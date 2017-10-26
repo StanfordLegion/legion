@@ -5644,13 +5644,14 @@ namespace Legion {
     {
       size_t num_invalidates;
       derez.deserialize(num_invalidates);
-      InnerContext *top_context = NULL;
+      //InnerContext *top_context = NULL;
       for (unsigned idx = 0; idx < num_invalidates; idx++)
       {
         LogicalRegion handle;
         derez.deserialize(handle);
         bool top;
         derez.deserialize(top);
+#if 0
         if (top)
         {
           if (top_context == NULL)
@@ -5659,7 +5660,10 @@ namespace Legion {
                                                handle);
         }
         else
+#else
+        if (!top)
           runtime->forest->invalidate_versions(tree_context, handle);
+#endif
       }
     }
 
