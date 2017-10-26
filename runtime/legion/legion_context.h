@@ -916,6 +916,7 @@ namespace Legion {
           std::set<ApEvent> &preconditions,
           std::set<RtEvent> &applied_events);
       virtual void invalidate_region_tree_contexts(void);
+      virtual void invalidate_remote_tree_contexts(Deserializer &derez);
       virtual void send_back_created_state(AddressSpaceID target);
     public:
       virtual InstanceView* create_instance_top_view(PhysicalManager *manager,
@@ -958,7 +959,6 @@ namespace Legion {
       void free_remote_contexts(void);
       void send_remote_context(AddressSpaceID remote_instance, 
                                RemoteContext *target);
-      void unpack_remote_invalidates(Deserializer &derez);
     protected:
       // Find an index space name for a concrete launch domain
       IndexSpace find_index_launch_space(const Domain &launch_domain);
@@ -1139,6 +1139,7 @@ namespace Legion {
                   VersionInfo &version_info, std::set<RtEvent> &ready_events);
       virtual InnerContext* find_parent_physical_context(unsigned index);
       virtual void invalidate_region_tree_contexts(void);
+      virtual void invalidate_remote_tree_contexts(Deserializer &derez);
     public:
       void unpack_local_field_update(Deserializer &derez);
       static void handle_local_field_update(Deserializer &derez);

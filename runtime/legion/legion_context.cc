@@ -5534,34 +5534,20 @@ namespace Legion {
           // we have to send to the remote context
           if (!created_requirements.empty())
           {
-            std::map<LogicalRegion,bool/*top*/> to_invalidate;
+            std::map<unsigned,LogicalRegion> to_invalidate;
             for (unsigned idx = 0; idx < created_requirements.size(); idx++)
             {
-              if (!returnable_privileges[idx])
-              {
-                const LogicalRegion region = created_requirements[idx].region;
-#ifdef DEBUG_LEGION
-                assert((to_invalidate.find(region) == to_invalidate.end()) ||
-                    (!to_invalidate[region]));
-#endif
-                to_invalidate[region] = false; 
-              }
-              else if (
+              if (!returnable_privileges[idx] || 
                   was_created_requirement_deleted(created_requirements[idx]))
-              {
-                const LogicalRegion region = created_requirements[idx].region;
-#ifdef DEBUG_LEGION
-                assert(to_invalidate.find(region) == to_invalidate.end());
-#endif
-                to_invalidate[region] = true;
-              }
+                to_invalidate[idx] = created_requirements[idx].region;
             }
             rez.serialize<size_t>(to_invalidate.size());
-            for (std::map<LogicalRegion,bool>::const_iterator it = 
+            for (std::map<unsigned,LogicalRegion>::const_iterator it = 
                   to_invalidate.begin(); it != to_invalidate.end(); it++)
             {
-              rez.serialize(it->first);
-              rez.serialize<bool>(it->second);
+              // Add the size of the original regions to the index
+              rez.serialize<unsigned>(it->first + regions.size());
+              rez.serialize(it->second);
             }
           }
           else
@@ -5639,33 +5625,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InnerContext::unpack_remote_invalidates(Deserializer &derez)
+    void InnerContext::invalidate_remote_tree_contexts(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      size_t num_invalidates;
-      derez.deserialize(num_invalidates);
-      //InnerContext *top_context = NULL;
-      for (unsigned idx = 0; idx < num_invalidates; idx++)
-      {
-        LogicalRegion handle;
-        derez.deserialize(handle);
-        bool top;
-        derez.deserialize(top);
-#if 0
-        if (top)
-        {
-          if (top_context == NULL)
-            top_context = find_top_context();
-          runtime->forest->invalidate_versions(top_context->get_context(), 
-                                               handle);
-        }
-        else
-#else
-        if (!top)
-          runtime->forest->invalidate_versions(tree_context, handle);
-#endif
-      }
-    }
+      // Should only be called on RemoteContext
+      assert(false);
+    } 
 
     //--------------------------------------------------------------------------
     InstanceView* InnerContext::create_instance_top_view(
@@ -6992,6 +6957,29 @@ namespace Legion {
         runtime->forest->invalidate_all_versions(tree_context);
       // Now we can free our region tree context
       runtime->free_region_tree_context(tree_context);
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteContext::invalidate_remote_tree_contexts(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      size_t num_invalidates;
+      derez.deserialize(num_invalidates);
+      for (unsigned idx = 0; idx < num_invalidates; idx++)
+      {
+        unsigned index;
+        derez.deserialize(index);
+        LogicalRegion handle;
+        derez.deserialize(handle);
+        // Check to see if we actually looked this up
+        std::map<unsigned,InnerContext*>::const_iterator finder = 
+          physical_contexts.find(index);
+        if (finder != physical_contexts.end())
+          runtime->forest->invalidate_versions(finder->second->get_context(),
+                                               handle);
+      }
+      // Then do our normal tree invalidation
+      invalidate_region_tree_contexts();
     }
 
     //--------------------------------------------------------------------------

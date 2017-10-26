@@ -14483,8 +14483,7 @@ namespace Legion {
       UniqueID context_uid;
       derez.deserialize(context_uid);
       InnerContext *context = find_context(context_uid);
-      context->unpack_remote_invalidates(derez);
-      context->invalidate_region_tree_contexts();
+      context->invalidate_remote_tree_contexts(derez);
     }
     
     //--------------------------------------------------------------------------
