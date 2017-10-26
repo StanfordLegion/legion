@@ -14425,7 +14425,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(!manager->is_reduction_manager()); 
 #endif
-      InstanceManager *inst_manager = manager->as_instance_manager(); 
+      //InstanceManager *inst_manager = manager->as_instance_manager(); 
       /*if (!inst_manager->is_attached_file())
         REPORT_LEGION_ERROR(ERROR_ILLEGAL_DETACH_OPERATION,
                       "Illegal detach operation on a physical region which "
