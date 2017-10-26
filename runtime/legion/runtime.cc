@@ -14483,6 +14483,7 @@ namespace Legion {
       UniqueID context_uid;
       derez.deserialize(context_uid);
       InnerContext *context = find_context(context_uid);
+      context->unpack_remote_invalidates(derez);
       context->invalidate_region_tree_contexts();
     }
     
@@ -19540,7 +19541,7 @@ namespace Legion {
             TopFinishArgs *fargs = (TopFinishArgs*)args; 
             // Do this before deleting remote contexts
             fargs->ctx->invalidate_region_tree_contexts();
-            fargs->ctx->invalidate_remote_contexts();
+            fargs->ctx->free_remote_contexts();
             if (fargs->ctx->remove_reference())
               delete fargs->ctx;
             Runtime *runtime = Runtime::get_runtime(p);

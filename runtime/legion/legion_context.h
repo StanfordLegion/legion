@@ -955,9 +955,10 @@ namespace Legion {
       static void handle_version_owner_response(Deserializer &derez,
                                                 Runtime *runtime);
     public:
-      void invalidate_remote_contexts(void);
+      void free_remote_contexts(void);
       void send_remote_context(AddressSpaceID remote_instance, 
                                RemoteContext *target);
+      void unpack_remote_invalidates(Deserializer &derez);
     protected:
       // Find an index space name for a concrete launch domain
       IndexSpace find_index_launch_space(const Domain &launch_domain);
