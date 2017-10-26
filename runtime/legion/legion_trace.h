@@ -537,14 +537,14 @@ namespace Legion {
 
     enum InstructionKind
     {
-      GET_TERM_EVENT,
+      GET_TERM_EVENT = 0,
+      GET_COPY_TERM_EVENT,
       MERGE_EVENT,
-      ASSIGN_FENCE_COMPLETION,
       ISSUE_COPY,
       ISSUE_FILL,
-      SET_READY_EVENT,
-      GET_COPY_TERM_EVENT,
       SET_COPY_SYNC_EVENT,
+      ASSIGN_FENCE_COMPLETION,
+      SET_READY_EVENT,
       TRIGGER_COPY_COMPLETION,
     };
 

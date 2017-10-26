@@ -1440,10 +1440,7 @@ namespace Legion {
         pending_events.resize(num_events);
         for (unsigned idx = 0; idx < instructions.size(); ++idx)
         {
-          if (instructions[idx]->get_kind() == GET_TERM_EVENT ||
-              instructions[idx]->get_kind() == GET_COPY_TERM_EVENT ||
-              instructions[idx]->get_kind() == ISSUE_COPY ||
-              instructions[idx]->get_kind() == ISSUE_FILL)
+          if (instructions[idx]->get_kind() <= SET_COPY_SYNC_EVENT)
           {
             ApUserEvent e = ApUserEvent(Realm::UserEvent::create_user_event());
             events[idx] = e;
@@ -2990,10 +2987,8 @@ namespace Legion {
 #endif
         to_merge.insert(events[*it]);
       }
-      events[lhs] = Runtime::merge_events(to_merge);
-#ifdef LEGION_SPY
-      assert(events[lhs].exists());
-#endif
+      ApEvent result = Runtime::merge_events(to_merge);
+      Runtime::trigger_event(pending_events[lhs], result);
     }
 
     //--------------------------------------------------------------------------
@@ -3505,8 +3500,9 @@ namespace Legion {
       assert(operations.find(rhs) != operations.end());
       assert(operations.find(rhs)->second != NULL);
 #endif
-      events[lhs] =
+      ApEvent sync_condition =
         dynamic_cast<CopyOp*>(operations[rhs])->compute_sync_precondition();
+      Runtime::trigger_event(pending_events[lhs], sync_condition);
     }
 
     //--------------------------------------------------------------------------
