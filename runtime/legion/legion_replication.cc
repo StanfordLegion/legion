@@ -1560,10 +1560,59 @@ namespace Legion {
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
       // Shard 0 will handle all the deletions
-      if (repl_ctx->owner_shard->shard_id == 0)
-        DeletionOp::trigger_complete();
-      else // We own it, so we can just mark ourselves done
+      if (repl_ctx->owner_shard->shard_id > 0)
+      {
+        // The other shards still have to tell the parent context that it
+        // has actually been deleted
+        switch (kind)
+        {
+          case INDEX_SPACE_DELETION:
+            {
+              // Only need to tell our parent if it is a top-level index space
+              if (runtime->forest->is_top_level_index_space(index_space))
+                parent_ctx->register_index_space_deletion(index_space,
+                                                          false/*finalize*/);
+              break;
+            }
+          case INDEX_PARTITION_DELETION:
+            {
+              parent_ctx->register_index_partition_deletion(index_part,
+                                                            false/*finalize*/);
+              break;
+            }
+          case FIELD_SPACE_DELETION:
+            {
+              parent_ctx->register_field_space_deletion(field_space,
+                                                        false/*finalize*/);
+              break;
+            }
+          case FIELD_DELETION:
+            {
+              parent_ctx->register_field_deletions(field_space, free_fields,
+                                                   false/*finalize*/);
+              break;
+            }
+          case LOGICAL_REGION_DELETION:
+            {
+              // Only need to tell our parent if it is a top-level region
+              if (runtime->forest->is_top_level_region(logical_region))
+                parent_ctx->register_region_deletion(logical_region,
+                                                    false/*finalize*/);
+              break;
+            }
+          case LOGICAL_PARTITION_DELETION:
+            {
+              // We don't need to register partition deletions explicitly
+              break;
+            }
+          default:
+            assert(false); // should never get here
+        }
+        // We still need to 
         complete_operation();
+      }
+      else // Shard 0 does the actual deletion
+        DeletionOp::trigger_complete();
     }
 
     //--------------------------------------------------------------------------

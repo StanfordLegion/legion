@@ -254,7 +254,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TaskContext::register_region_deletion(LogicalRegion handle)
+    void TaskContext::register_region_deletion(LogicalRegion handle,
+                                               bool do_finalize)
     //--------------------------------------------------------------------------
     {
       bool finalize = false;
@@ -274,7 +275,7 @@ namespace Legion {
         else
           deleted_regions.insert(handle);
       }
-      if (finalize)
+      if (finalize && do_finalize)
         runtime->finalize_logical_region_destroy(handle);
     }
 
@@ -309,7 +310,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void TaskContext::register_field_deletions(FieldSpace handle,
-                                         const std::set<FieldID> &to_free)
+                                         const std::set<FieldID> &to_free,
+                                               bool do_finalize)
     //--------------------------------------------------------------------------
     {
       std::set<FieldID> to_finalize;
@@ -330,7 +332,7 @@ namespace Legion {
             deleted_fields.insert(key);
         }
       }
-      if (!to_finalize.empty())
+      if (!to_finalize.empty() && do_finalize)
         runtime->finalize_field_destroy(handle, to_finalize);
     }
 
@@ -346,7 +348,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TaskContext::register_field_space_deletion(FieldSpace space)
+    void TaskContext::register_field_space_deletion(FieldSpace space,
+                                                    bool do_finalize)
     //--------------------------------------------------------------------------
     {
       bool finalize = false;
@@ -374,7 +377,7 @@ namespace Legion {
         else
           deleted_field_spaces.insert(space);
       }
-      if (finalize)
+      if (finalize && do_finalize)
         runtime->finalize_field_space_destroy(space);
     }
 
@@ -398,7 +401,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TaskContext::register_index_space_deletion(IndexSpace space)
+    void TaskContext::register_index_space_deletion(IndexSpace space,
+                                                    bool do_finalize)
     //--------------------------------------------------------------------------
     {
       bool finalize = false;
@@ -414,7 +418,7 @@ namespace Legion {
         else
           deleted_index_spaces.insert(space);
       }
-      if (finalize)
+      if (finalize && do_finalize)
         runtime->finalize_index_space_destroy(space);
     }
 
@@ -431,7 +435,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TaskContext::register_index_partition_deletion(IndexPartition handle)
+    void TaskContext::register_index_partition_deletion(IndexPartition handle,
+                                                        bool do_finalize)
     //--------------------------------------------------------------------------
     {
       bool finalize = false;
@@ -447,7 +452,7 @@ namespace Legion {
         else
           deleted_index_partitions.insert(handle);
       }
-      if (finalize)
+      if (finalize && do_finalize)
         runtime->finalize_index_partition_destroy(handle);
     }
 
@@ -10207,21 +10212,6 @@ namespace Legion {
         }
         local_fields.clear();
       }
-      // Invalidate our context if necessary before deactivating
-      // the wrapper as it will release the context
-      if (!top_level_context)
-      {
-#ifdef DEBUG_LEGION
-        assert(regions.size() == virtual_mapped.size());
-#endif
-        // Deactivate any region trees that we didn't virtually map
-        for (unsigned idx = 0; idx < regions.size(); idx++)
-          if (!virtual_mapped[idx])
-            runtime->forest->invalidate_versions(tree_context, 
-                                                 regions[idx].region);
-      }
-      else
-        runtime->forest->invalidate_all_versions(tree_context);
     }
 
     //--------------------------------------------------------------------------

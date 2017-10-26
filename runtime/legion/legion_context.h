@@ -429,23 +429,28 @@ namespace Legion {
                           const std::set<IndexPartition> &parts);
     public:
       void register_region_creation(LogicalRegion handle);
-      void register_region_deletion(LogicalRegion handle);
+      void register_region_deletion(LogicalRegion handle,
+                                    bool do_finalize = true);
     public:
       void register_field_creation(FieldSpace space, FieldID fid, bool local);
       void register_field_creations(FieldSpace space, bool local,
                                     const std::vector<FieldID> &fields);
       void register_field_deletions(FieldSpace space,
-                                    const std::set<FieldID> &to_free);
+                                    const std::set<FieldID> &to_free,
+                                    bool do_finalize = true);
     public:
       void register_field_space_creation(FieldSpace space);
-      void register_field_space_deletion(FieldSpace space);
+      void register_field_space_deletion(FieldSpace space,
+                                         bool do_finalize = true);
     public:
       bool has_created_index_space(IndexSpace space) const;
       void register_index_space_creation(IndexSpace space);
-      void register_index_space_deletion(IndexSpace space);
+      void register_index_space_deletion(IndexSpace space, 
+                                         bool do_finalize = true);
     public:
       void register_index_partition_creation(IndexPartition handle);
-      void register_index_partition_deletion(IndexPartition handle);
+      void register_index_partition_deletion(IndexPartition handle,
+                                             bool do_finalize = true);
     public:
       bool was_created_requirement_deleted(const RegionRequirement &req) const;
     public:
