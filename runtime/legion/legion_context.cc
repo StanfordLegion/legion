@@ -9986,8 +9986,6 @@ namespace Legion {
                                                    RtEvent close_done)
     //--------------------------------------------------------------------------
     {
-      // Add a GC reference prior to registering it
-      view->add_base_gc_ref(CONTEXT_REF);
       std::vector<std::pair<void*,size_t> > to_perform;
       {
         AutoLock ctx_lock(context_lock);
@@ -10055,9 +10053,6 @@ namespace Legion {
 #endif
         live_composite_views.erase(finder);
       }
-      // Now we can remove our GC reference
-      if (view->remove_base_gc_ref(CONTEXT_REF))
-        delete view;
     }
 
     /////////////////////////////////////////////////////////////
