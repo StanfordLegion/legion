@@ -90,7 +90,7 @@ def regent(args, env = {}, **kwargs):
         terra_exe = os.path.join(terra_dir, 'bin', 'terra')
 
     if 'TERRA_PATH' in os.environ:
-        terra_path = [os.path.realpath(os.environ['TERRA_PATH'])]
+        terra_path = os.environ['TERRA_PATH'].split(';')
     else:
         terra_path = []
 
