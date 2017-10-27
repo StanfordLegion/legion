@@ -323,6 +323,7 @@ def run_test_perf_one_configuration(launcher, root_dir, tmp_dir, bin_dir, env, t
     metadata = {
         'host': (os.environ['CI_RUNNER_DESCRIPTION']
                  if 'CI_RUNNER_DESCRIPTION' in os.environ else hostname()),
+        'nodes': nodes,
         'commit': (os.environ['CI_BUILD_REF'] if 'CI_BUILD_REF' in os.environ
                    else git_commit_id(root_dir)),
         'branch': (os.environ['CI_BUILD_REF_NAME'] if 'CI_BUILD_REF_NAME' in os.environ
