@@ -16604,6 +16604,36 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    DistributedCollectable* Runtime::find_distributed_collectable(
+                                              DistributedID did, RtEvent &ready)
+    //--------------------------------------------------------------------------
+    {
+      const DistributedID to_find = LEGION_DISTRIBUTED_ID_FILTER(did);
+      AutoLock d_lock(distributed_collectable_lock,1,false/*exclusive*/);
+      std::map<DistributedID,DistributedCollectable*>::const_iterator finder = 
+        dist_collectables.find(to_find);
+      if (finder == dist_collectables.end())
+      {
+        // Check to see if it is in the pending set too
+        std::map<DistributedID,
+          std::pair<DistributedCollectable*,RtUserEvent> >::const_iterator
+            pending_finder = pending_collectables.find(to_find);
+        if (pending_finder != pending_collectables.end())
+        {
+          ready = pending_finder->second.second;
+          return pending_finder->second.first;
+        }
+      }
+#ifdef DEBUG_LEGION
+      if (finder == dist_collectables.end())
+        log_run.error("Unable to find distributed collectable %llx "
+                    "with type %lld", did, LEGION_DISTRIBUTED_HELP_DECODE(did));
+      assert(finder != dist_collectables.end());
+#endif
+      return finder->second;
+    }
+
+    //--------------------------------------------------------------------------
     DistributedCollectable* Runtime::weak_find_distributed_collectable(
                                                               DistributedID did)
     //--------------------------------------------------------------------------
