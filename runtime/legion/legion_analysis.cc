@@ -6977,7 +6977,7 @@ namespace Legion {
 #endif
     //--------------------------------------------------------------------------
     {
-      // If we're not the owner then add a remove gc ref that will
+      // If we're not the owner then add a remote gc ref that will
       // be removed by the owner once no copy of this version state
       // is valid anywhere in the system
       if (!is_owner())
@@ -8811,7 +8811,7 @@ namespace Legion {
           FieldMask overlap = it->second & dirty_overlap;
           if (!overlap)
             continue;
-          target->record_valid_view(it->first, overlap);
+          target->record_valid_view(it->first, overlap, mutator);
         }
       }
       FieldMask reduction_overlap = reduction_mask & capture_mask;
@@ -8824,7 +8824,7 @@ namespace Legion {
           FieldMask overlap = it->second & reduction_overlap;
           if (!overlap)
             continue;
-          target->record_reduction_view(it->first, overlap);
+          target->record_reduction_view(it->first, overlap, mutator);
         }
       }
       for (LegionMap<LegionColor,StateVersions>::aligned::const_iterator cit =

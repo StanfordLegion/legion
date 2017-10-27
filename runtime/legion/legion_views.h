@@ -1372,6 +1372,10 @@ namespace Legion {
       // we've performed for different sub-nodes
       LegionMap<RegionTreeNode*,FieldMask>::aligned shard_checks; 
       std::map<ShardID,RtEvent> requested_shards;
+#ifdef DEBUG_LEGION
+    protected:
+      bool currently_valid;
+#endif
     };
 
     /**
@@ -1392,15 +1396,6 @@ namespace Legion {
       public:
         VersionState *state;
         DistributedID owner_did;
-        bool valid;
-      };
-      struct DeferCompositeNodeValidArgs : 
-        public LgTaskArgs<DeferCompositeNodeValidArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_DEFER_COMPOSITE_NODE_VALID_TASK_ID;
-      public:
-        CompositeNode *node;
-        bool root;
       };
       struct DeferCaptureArgs : public LgTaskArgs<DeferCaptureArgs> {
       public:
@@ -1440,22 +1435,19 @@ namespace Legion {
       static CompositeNode* unpack_composite_node(Deserializer &derez,
                  CompositeBase *parent, Runtime *runtime,
                  DistributedID owner_did, std::set<RtEvent> &preconditions,
-                 const LegionMap<CompositeNode*,FieldMask>::aligned &existing,
-                 const bool currently_valid, const bool root);
+                 const LegionMap<CompositeNode*,FieldMask>::aligned &existing);
       static void handle_deferred_node_ref(const void *args);
-      static void handle_deferred_valid(const void *args);
-    public:
-      void notify_valid(ReferenceMutator *mutator, bool root);
-      void notify_invalid(ReferenceMutator *mutator, bool root);
     public:
       void record_dirty_fields(const FieldMask &dirty_mask);
-      void record_valid_view(LogicalView *view, const FieldMask &mask);
+      void record_valid_view(LogicalView *view, const FieldMask &mask,
+                             ReferenceMutator *mutator);
       void record_reduction_fields(const FieldMask &reduction_fields);
-      void record_reduction_view(ReductionView *view, const FieldMask &mask);
+      void record_reduction_view(ReductionView *view, const FieldMask &mask,
+                                 ReferenceMutator *mutator);
       void record_child_version_state(const LegionColor child_color, 
          VersionState *state, const FieldMask &mask, ReferenceMutator *mutator);
       void record_version_state(VersionState *state, const FieldMask &mask, 
-                                ReferenceMutator *mutator, bool root);
+                                ReferenceMutator *mutator);
     public:
       void capture_field_versions(FieldVersions &versions,
                                   const FieldMask &capture_mask) const;
@@ -1472,13 +1464,6 @@ namespace Legion {
       // Keep track of the fields that are valid because we've captured them
       FieldMask valid_fields;
       LegionMap<RtUserEvent,FieldMask>::aligned pending_captures;
-    protected:
-      // Track whether we are currently valid or not, we start off
-      // currently valid so we can add as many views as we want before
-      // we are first made valid, but then if we become no longer
-      // valid (e.g. on a remote node) then we have to remove our
-      // references and possibly add them again
-      bool currently_valid;
     }; 
 
     /**

@@ -345,7 +345,6 @@ namespace Legion {
       LG_DEFER_COMPOSITE_VIEW_REGISTRATION_TASK_ID,
       LG_DEFER_COMPOSITE_VIEW_INVALIDATION_TASK_ID,
       LG_DEFER_COMPOSITE_NODE_REF_TASK_ID,
-      LG_DEFER_COMPOSITE_NODE_VALID_TASK_ID,
       LG_DEFER_COMPOSITE_NODE_CAPTURE_TASK_ID,
       LG_CONVERT_VIEW_TASK_ID,
       LG_UPDATE_VIEW_REFERENCES_TASK_ID,
@@ -446,7 +445,6 @@ namespace Legion {
         "Deferred Composite View Registration",                   \
         "Deferred Composite View Invalidation",                   \
         "Deferred Composite Node Ref",                            \
-        "Deferred Composite Node Valid",                          \
         "Deferred Composite Node Capture",                        \
         "Convert View for Version State",                         \
         "Update View References for Version State",               \
