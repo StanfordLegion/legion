@@ -8,6 +8,10 @@ cd $PBS_O_WORKDIR
 
 git pull --ff-only
 
+# Submit the job to run again
+qsub -a $(date -d 'now+1day' +%Y%m%d%H%M.%S) qsub_daily.sh
+
+# Run job
 export PERF_MIN_NODES=1
 export PERF_MAX_NODES=8
 
