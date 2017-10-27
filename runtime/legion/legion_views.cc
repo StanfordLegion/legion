@@ -7081,11 +7081,8 @@ namespace Legion {
         break;
       }
       // If we didn't find it then we get to make it
-      bool created = true;
       if (result == NULL)
         result = new CompositeNode(node, parent, owner_did);
-      else
-        created = false;
       size_t num_versions;
       derez.deserialize(num_versions);
       std::vector<VersionState*> new_states;
@@ -7101,9 +7098,6 @@ namespace Legion {
           result->version_states.find(state);
         if (finder != result->version_states.end())
         {
-#ifdef DEBUG_LEGION
-          assert(!created);
-#endif
           FieldMask state_mask;
           derez.deserialize(state_mask);
           result->version_states[state] |= state_mask;
