@@ -1397,7 +1397,6 @@ namespace Legion {
       public:
         VersionState *state;
         DistributedID owner_did;
-        bool valid;
       };
       struct DeferCaptureArgs : public LgTaskArgs<DeferCaptureArgs> {
       public:
@@ -1408,7 +1407,7 @@ namespace Legion {
       };
     public:
       CompositeNode(RegionTreeNode *node, CompositeBase *parent,
-                    DistributedID owner_did);
+                    DistributedID owner_did, bool root_owner);
       CompositeNode(const CompositeNode &rhs);
       virtual ~CompositeNode(void);
     public:
@@ -1450,6 +1449,7 @@ namespace Legion {
          VersionState *state, const FieldMask &mask, ReferenceMutator *mutator);
       void record_version_state(VersionState *state, const FieldMask &mask, 
                                 ReferenceMutator *mutator);
+      void release_valid_references(ReferenceMutator *mutator);
     public:
       void capture_field_versions(FieldVersions &versions,
                                   const FieldMask &capture_mask) const;
@@ -1457,6 +1457,7 @@ namespace Legion {
       RegionTreeNode *const logical_node;
       CompositeBase *const parent;
       const DistributedID owner_did;
+      const bool root_owner;
     protected:
       Reservation node_lock;
       // No need to hold references in general, but we do have to hold

@@ -5704,6 +5704,11 @@ namespace Legion {
               nested_composite_views.begin(); it != 
               nested_composite_views.end(); it++)
           it->first->remove_nested_valid_ref(did, mutator);
+        // Also tell the same to the composite nodes so they 
+        // can inform their version states
+        for (LegionMap<CompositeNode*,FieldMask>::aligned::const_iterator it = 
+              children.begin(); it != children.end(); it++)
+          it->first->release_valid_references(mutator);
       }
       else
         send_remote_valid_update(owner_space, mutator, 1/*count*/,false/*add*/);
@@ -6404,9 +6409,12 @@ namespace Legion {
           return;
         }
       }
+#ifdef DEBUG_LEGION
+      assert(is_owner());
+#endif
       // Didn't find it so make it
       CompositeNode *child = 
-        new CompositeNode(child_node, this, did); 
+        new CompositeNode(child_node, this, did, true/*root owner*/); 
       child->record_version_state(state, mask, mutator);
       children[child] = mask;
     }
@@ -6704,16 +6712,18 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     CompositeNode::CompositeNode(RegionTreeNode* node, CompositeBase *p,
-                                 DistributedID own_did)
+                                 DistributedID own_did, bool root_own)
       : CompositeBase(node_lock), logical_node(node), parent(p), 
-        owner_did(own_did), node_lock(Reservation::create_reservation())
+        owner_did(own_did), root_owner(root_own),
+        node_lock(Reservation::create_reservation())
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     CompositeNode::CompositeNode(const CompositeNode &rhs)
-      : CompositeBase(node_lock), logical_node(NULL), parent(NULL), owner_did(0)
+      : CompositeBase(node_lock), logical_node(NULL), parent(NULL), 
+        owner_did(0), root_owner(false)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -6729,7 +6739,7 @@ namespace Legion {
       for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it = 
             version_states.begin(); it != version_states.end(); it++)
       {
-        if (it->first->remove_nested_valid_ref(owner_did))
+        if (it->first->remove_nested_gc_ref(owner_did))
           delete (it->first);
       }
       version_states.clear();
@@ -7027,7 +7037,7 @@ namespace Legion {
         node = runtime->forest->get_node(handle);
       }
       CompositeNode *result = 
-        new CompositeNode(node, parent, owner_did);
+        new CompositeNode(node, parent, owner_did, false/*root owner*/);
       size_t num_versions;
       derez.deserialize(num_versions);
       WrapperReferenceMutator mutator(preconditions);
@@ -7050,7 +7060,9 @@ namespace Legion {
           preconditions.insert(precondition);
         }
         else
-          state->add_nested_valid_ref(owner_did, &mutator);
+        {
+          state->add_nested_gc_ref(owner_did, &mutator);
+        }
       }
       return result;
     }
@@ -7089,7 +7101,7 @@ namespace Legion {
       }
       // If we didn't find it then we get to make it
       if (result == NULL)
-        result = new CompositeNode(node, parent, owner_did);
+        result = new CompositeNode(node, parent, owner_did,false/*root owner*/);
       size_t num_versions;
       derez.deserialize(num_versions);
       std::vector<VersionState*> new_states;
@@ -7124,7 +7136,7 @@ namespace Legion {
           preconditions.insert(precondition);
         }
         else
-          state->add_nested_valid_ref(owner_did, &mutator);
+          state->add_nested_gc_ref(owner_did, &mutator);
       }
       return result;
     }
@@ -7136,7 +7148,7 @@ namespace Legion {
       const DeferCompositeNodeRefArgs *nargs = 
         (const DeferCompositeNodeRefArgs*)args;
       LocalReferenceMutator mutator;
-      nargs->state->add_nested_valid_ref(nargs->owner_did, &mutator);
+      nargs->state->add_nested_gc_ref(nargs->owner_did, &mutator);
     }
 
     //--------------------------------------------------------------------------
@@ -7210,7 +7222,7 @@ namespace Legion {
       }
       // Didn't find it so make it
       CompositeNode *child = 
-        new CompositeNode(child_node, this, owner_did); 
+        new CompositeNode(child_node, this, owner_did, false/*root owner*/);
       child->record_version_state(state, mask, mutator);
       children[child] = mask;
     }
@@ -7225,11 +7237,27 @@ namespace Legion {
       if (finder == version_states.end())
       {
         version_states[state] = mask;
-        state->add_nested_valid_ref(owner_did, mutator);
+        state->add_nested_gc_ref(owner_did, mutator);
+        // If we're the root owner, we also add a valid reference
+        if (root_owner)
+          state->add_nested_valid_ref(owner_did, mutator);
       }
       else
         finder->second |= mask;
     } 
+
+    //--------------------------------------------------------------------------
+    void CompositeNode::release_valid_references(ReferenceMutator *mutator)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(root_owner); // should only be called on the root owner
+#endif
+      // No need to check for deletion, we know we're also holding gc refs
+      for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it =
+            version_states.begin(); it != version_states.end(); it++)
+        it->first->remove_nested_valid_ref(owner_did, mutator);
+    }
 
     //--------------------------------------------------------------------------
     void CompositeNode::capture_field_versions(FieldVersions &versions,
