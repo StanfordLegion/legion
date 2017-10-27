@@ -3103,7 +3103,12 @@ namespace Legion {
       Operation *op = operations[op_key];
       Realm::ProfilingRequestSet requests;
       if (op->runtime->profiler != NULL)
+      {
         op->runtime->profiler->add_copy_request(requests, op);
+        if (src_fields.size() > 1)
+          op->runtime->profiler->increment_total_outstanding_requests(
+              src_fields.size()-1);
+      }
       ApEvent precondition = events[precondition_idx];
       ApEvent result = ApEvent(domain.copy(src_fields, dst_fields, requests,
             precondition, redop, reduction_fold));
