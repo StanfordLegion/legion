@@ -6509,6 +6509,7 @@ namespace Legion {
       derez.deserialize(dirty_mask);
       size_t num_mat_views;
       derez.deserialize(num_mat_views);
+      WrapperReferenceMutator mutator(preconditions);
       for (unsigned idx = 0; idx < num_mat_views; idx++)
       {
         DistributedID view_did;
@@ -6518,9 +6519,9 @@ namespace Legion {
             runtime->find_or_request_logical_view(view_did, ready));
         derez.deserialize(valid_views[view]);
         if (ready.exists() && !ready.has_triggered())
-          preconditions.insert(defer_add_reference(view, ready));
+          preconditions.insert(defer_add_reference(view, ready, true/*valid*/));
         else // Otherwise we can add the reference now
-          view->add_nested_valid_ref(did);
+          view->add_nested_valid_ref(did, &mutator);
       }
       size_t num_nested_views;
       derez.deserialize(num_nested_views);
@@ -6533,9 +6534,9 @@ namespace Legion {
             runtime->find_or_request_logical_view(view_did, ready));
         derez.deserialize(nested_composite_views[view]);
         if (ready.exists() && !ready.has_triggered())
-          preconditions.insert(defer_add_reference(view, ready));
+          preconditions.insert(defer_add_reference(view, ready,false/*valid*/));
         else
-          view->add_nested_valid_ref(did);
+          view->add_nested_gc_ref(did, &mutator);
       }
       derez.deserialize(reduction_mask);
       size_t num_reduc_views;
@@ -6549,9 +6550,10 @@ namespace Legion {
             runtime->find_or_request_logical_view(view_did, ready));
         derez.deserialize(reduction_views[reduc_view]);
         if (ready.exists() && !ready.has_triggered())
-          preconditions.insert(defer_add_reference(reduc_view, ready));
+          preconditions.insert(defer_add_reference(reduc_view, ready, 
+                                                   true/*valid*/));
         else
-          reduc_view->add_nested_valid_ref(did);
+          reduc_view->add_nested_valid_ref(did, &mutator);
       }
       size_t num_children;
       derez.deserialize(num_children);
@@ -6567,12 +6569,13 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     RtEvent CompositeView::defer_add_reference(DistributedCollectable *dc, 
-                                               RtEvent precondition) const
+                                         RtEvent precondition, bool valid) const
     //--------------------------------------------------------------------------
     {
       DeferCompositeViewRefArgs args;
       args.dc = dc;
       args.did = did;
+      args.valid = valid;
       return context->runtime->issue_runtime_meta_task(args, 
           LG_LATENCY_PRIORITY, NULL/*op*/, precondition);
     }
@@ -6583,7 +6586,11 @@ namespace Legion {
     {
       const DeferCompositeViewRefArgs *ref_args = 
         (const DeferCompositeViewRefArgs*)args;
-      ref_args->dc->add_nested_valid_ref(ref_args->did);
+      LocalReferenceMutator mutator;
+      if (ref_args->valid)
+        ref_args->dc->add_nested_valid_ref(ref_args->did, &mutator);
+      else
+        ref_args->dc->add_nested_gc_ref(ref_args->did, &mutator);
     }
 
     //--------------------------------------------------------------------------

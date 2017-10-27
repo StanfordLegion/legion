@@ -1221,6 +1221,7 @@ namespace Legion {
       public:
         DistributedCollectable *dc;
         DistributedID did;
+        bool valid;
       };
       struct DeferCompositeViewRegistrationArgs : 
         public LgTaskArgs<DeferCompositeViewRegistrationArgs> {
@@ -1333,7 +1334,7 @@ namespace Legion {
       void unpack_composite_view(Deserializer &derez,
                                  std::set<RtEvent> &preconditions);
       RtEvent defer_add_reference(DistributedCollectable *dc, 
-                                  RtEvent precondition) const;
+                                  RtEvent precondition, bool valid) const;
       static void handle_deferred_view_ref(const void *args);
     public:
       // For control replication
@@ -1396,6 +1397,7 @@ namespace Legion {
       public:
         VersionState *state;
         DistributedID owner_did;
+        bool valid;
       };
       struct DeferCaptureArgs : public LgTaskArgs<DeferCaptureArgs> {
       public:
