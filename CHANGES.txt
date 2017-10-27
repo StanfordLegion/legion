@@ -1,7 +1,7 @@
 This file lists the major changes as they appear in the stable branch.  No
 attempt is made to keep this list accurate for the master branch.
 
-Version 17.10.0 (October ??, 2017)
+Version 17.10.0 (October 27, 2017)
   * Legion
     - Introduction of new partitioning API based on dependent partitioning
     - Deprecation of old partitioning API, LegionRuntime::{Arrays,Accessors}
