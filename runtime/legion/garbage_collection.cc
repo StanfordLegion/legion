@@ -1320,6 +1320,7 @@ namespace Legion {
         RezCheck z(rez);
         rez.serialize(did);
         rez.serialize(signed_count);
+        rez.serialize<bool>(target == owner_space);
         if (add)
           rez.serialize(done_event);
       }
@@ -1348,6 +1349,7 @@ namespace Legion {
         RezCheck z(rez);
         rez.serialize(did);
         rez.serialize(signed_count);
+        rez.serialize<bool>(target == owner_space);
         if (add)
           rez.serialize(done_event);
       }
@@ -1373,6 +1375,7 @@ namespace Legion {
         RezCheck z(rez);
         rez.serialize(did);
         rez.serialize(signed_count);
+        rez.serialize<bool>(target == owner_space);
       }
       runtime->send_did_remote_resource_update(target, rez);
     }
@@ -1469,8 +1472,18 @@ namespace Legion {
       derez.deserialize(did);
       int count;
       derez.deserialize(count);
-      DistributedCollectable *target = 
-        runtime->find_distributed_collectable(did);
+      bool is_owner;
+      derez.deserialize(is_owner);
+      DistributedCollectable *target = NULL;
+      if (!is_owner)
+      {
+        RtEvent ready;
+        target = runtime->find_distributed_collectable(did, ready);
+        if (ready.exists() && !ready.has_triggered())
+          ready.lg_wait();
+      }
+      else
+        target = runtime->find_distributed_collectable(did);
       if (count > 0)
       {
         std::set<RtEvent> mutator_events;
@@ -1499,8 +1512,18 @@ namespace Legion {
       derez.deserialize(did);
       int count;
       derez.deserialize(count);
-      DistributedCollectable *target = 
-        runtime->find_distributed_collectable(did);
+      bool is_owner;
+      derez.deserialize(is_owner);
+      DistributedCollectable *target = NULL;
+      if (!is_owner)
+      {
+        RtEvent ready;
+        target = runtime->find_distributed_collectable(did, ready);
+        if (ready.exists() && !ready.has_triggered())
+          ready.lg_wait();
+      }
+      else
+        target = runtime->find_distributed_collectable(did);
       if (count > 0)
       {
         std::set<RtEvent> mutator_events;
@@ -1529,8 +1552,18 @@ namespace Legion {
       derez.deserialize(did);
       int count;
       derez.deserialize(count);
-      DistributedCollectable *target = 
-        runtime->find_distributed_collectable(did);
+      bool is_owner;
+      derez.deserialize(is_owner);
+      DistributedCollectable *target = NULL;
+      if (!is_owner)
+      {
+        RtEvent ready;
+        target = runtime->find_distributed_collectable(did, ready);
+        if (ready.exists() && !ready.has_triggered())
+          ready.lg_wait();
+      }
+      else
+        target = runtime->find_distributed_collectable(did);
       if (count > 0)
         target->add_base_resource_ref(REMOTE_DID_REF, unsigned(count));
       else if (target->remove_base_resource_ref(REMOTE_DID_REF, 
