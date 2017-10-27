@@ -2120,7 +2120,19 @@ namespace Legion {
         for (std::vector<unsigned>::iterator it = worklist.begin();
             it != worklist.end(); ++it)
           if (*it != fence_completion_id)
-            insts.push_back(instructions[*it]);
+          {
+            Instruction *inst = instructions[*it];
+            TraceLocalId owner = inst->get_owner(key);
+            if (owner == key)
+              insts.push_back(inst);
+            else
+            {
+#ifdef DEBUG_LEGION
+              assert(inst_map.find(owner) != inst_map.end());
+#endif
+              inst_map[owner].push_back(inst);
+            }
+          }
       }
     }
 

@@ -4642,10 +4642,6 @@ namespace Legion {
                                         completion_event);    
         }
       }
-      // Remove our profiling guard and trigger the profiling event if necessary
-      if ((__sync_add_and_fetch(&outstanding_profiling_requests, -1) == 0) &&
-          profiling_reported.exists())
-        Runtime::trigger_event(profiling_reported);
       // Mark that we completed mapping
       complete_mapping();
 
