@@ -498,7 +498,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (is_owner() && registered_with_runtime)
-        unregister_with_runtime(MANAGER_VIRTUAL_CHANNEL);
+        unregister_with_runtime(REFERENCE_VIRTUAL_CHANNEL);
       if (region_node != NULL)
       {
         region_node->unregister_physical_manager(this);
