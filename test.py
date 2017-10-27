@@ -96,7 +96,8 @@ def get_legion_cxx_perf_tests(nodes, cores_per_node):
     return [
         # Circuit: Heavy Compute
         ['examples/circuit/circuit',
-         ['-l', '10', '-p', str(cores_per_node * nodes), '-npp', '2500', '-wpp', '10000', '-ll:cpu', str(cores_per_node)]],
+         ['-l', '10', '-p', str(cores_per_node * nodes), '-npp', '2500', '-wpp', '10000',
+          '-ll:csize', '8192', '-ll:cpu', str(cores_per_node)]],
 
         # Circuit: Light Compute
         ['examples/circuit/circuit',
@@ -107,8 +108,8 @@ def get_regent_perf_tests(nodes, cores_per_node):
     return [
         # Circuit: Heavy Compute
         ['language/examples/circuit_sparse.rg',
-         ['-l', '10', '-p', str(nodes * cores_per_node), '-npp', '2500', '-wpp', '10000', '-ll:cpu', str(cores_per_node),
-          '-fflow-spmd-shardsize', str(cores_per_node)]],
+         ['-l', '10', '-p', str(nodes * cores_per_node), '-npp', '2500', '-wpp', '10000',
+          '-ll:csize', '8192', '-ll:cpu', str(cores_per_node), '-fflow-spmd-shardsize', str(cores_per_node)]],
 
         # Circuit: Light Compute
         ['language/examples/circuit_sparse.rg',
