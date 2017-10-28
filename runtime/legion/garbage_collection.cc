@@ -138,6 +138,8 @@ namespace Legion {
       assert(valid_references == 0);
       assert(resource_references == 0);
 #endif
+      if (is_owner() && registered_with_runtime)
+        unregister_with_runtime();
       gc_lock.destroy_reservation();
       gc_lock = Reservation::NO_RESERVATION;
 #ifdef LEGION_GC
@@ -1209,8 +1211,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtEvent DistributedCollectable::unregister_with_runtime(
-                                                    VirtualChannelKind vc) const
+    RtEvent DistributedCollectable::unregister_with_runtime(void) const
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -1219,11 +1220,9 @@ namespace Legion {
 #endif
       runtime->unregister_distributed_collectable(did);
       registered_with_runtime = false;
-      // If the virtual channel is MAX_NUM_VIRTUAL_CHANNELS we'll use
-      // that as a signal to avoid sending any messages
-      if (!remote_instances.empty() && (vc != MAX_NUM_VIRTUAL_CHANNELS))
+      if (!remote_instances.empty())
         return runtime->recycle_distributed_id(did, 
-                                               send_unregister_messages(vc));
+                     send_unregister_messages(REFERENCE_VIRTUAL_CHANNEL));
       else
         return runtime->recycle_distributed_id(did, RtEvent::NO_RT_EVENT);
     }

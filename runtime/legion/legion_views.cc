@@ -55,8 +55,6 @@ namespace Legion {
     LogicalView::~LogicalView(void)
     //--------------------------------------------------------------------------
     {
-      if (is_owner() && registered_with_runtime)
-        unregister_with_runtime(REFERENCE_VIRTUAL_CHANNEL);
 #ifdef LEGION_GC
       if (logical_node->remove_base_resource_ref(LOGICAL_VIEW_REF))
 #else

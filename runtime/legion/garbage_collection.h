@@ -373,7 +373,8 @@ namespace Legion {
       // This is for the owner node only
       void register_with_runtime(ReferenceMutator *mutator,
                                  bool notify_remote = true);
-      RtEvent unregister_with_runtime(VirtualChannelKind vc) const;
+    protected:
+      RtEvent unregister_with_runtime(void) const;
       RtEvent send_unregister_messages(VirtualChannelKind vc) const;
     public:
       // This for remote nodes only

@@ -7003,8 +7003,6 @@ namespace Legion {
     VersionState::~VersionState(void)
     //--------------------------------------------------------------------------
     {
-      if (is_owner() && registered_with_runtime)
-        unregister_with_runtime(REFERENCE_VIRTUAL_CHANNEL);
       state_lock.destroy_reservation();
       state_lock = Reservation::NO_RESERVATION;
 #ifdef DEBUG_LEGION
