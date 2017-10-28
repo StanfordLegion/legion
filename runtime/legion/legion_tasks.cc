@@ -7531,15 +7531,17 @@ namespace Legion {
             const std::map<DomainPoint,std::vector<LogicalRegion> > &point_reqs)
     //--------------------------------------------------------------------------
     {
+      std::set<std::pair<unsigned,unsigned> > local_interfering = 
+        interfering_requirements;
       // Handle any region requirements that interfere with itself
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
         if (!IS_WRITE(regions[idx]))
           continue;
-        interfering_requirements.insert(std::pair<unsigned,unsigned>(idx,idx));
+        local_interfering.insert(std::pair<unsigned,unsigned>(idx,idx));
       }
       // Nothing to do if there are no interfering requirements
-      if (interfering_requirements.empty())
+      if (local_interfering.empty())
         return;
       std::map<DomainPoint,std::vector<LogicalRegion> > point_requirements;
       for (std::map<DomainPoint,std::vector<LogicalRegion> >::const_iterator 
@@ -7556,8 +7558,8 @@ namespace Legion {
           const bool same_point = (pit->first == oit->first);
           // Now check for interference with any other points
           for (std::set<std::pair<unsigned,unsigned> >::const_iterator it =
-                interfering_requirements.begin(); it !=
-                interfering_requirements.end(); it++)
+                local_interfering.begin(); it !=
+                local_interfering.end(); it++)
           {
             // Skip same region requireemnt for same point
             if (same_point && (it->first == it->second))
