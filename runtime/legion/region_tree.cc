@@ -89,13 +89,13 @@ namespace Legion {
             continue;
           if (it->second->destroyed)
             continue;
-          regions_to_delete.push_back(it->second);
+          if (it->second->destroy_node(runtime->address_space, true/*root*/))
+            regions_to_delete.push_back(it->second);
         }
       }
       for (std::vector<RegionNode*>::const_iterator it = 
             regions_to_delete.begin(); it != regions_to_delete.end(); it++)
-        if ((*it)->destroy_node(runtime->address_space, true/*root*/))
-          delete (*it);
+        delete (*it);
       // Then do field space nodes
       std::vector<FieldSpaceNode*> fields_to_delete;
       {
@@ -109,13 +109,13 @@ namespace Legion {
           // If we can actively delete it then it isn't valid
           if (it->second->destroyed)
             continue;
-          fields_to_delete.push_back(it->second);
+          if (it->second->destroy_node(runtime->address_space))
+            fields_to_delete.push_back(it->second);
         }
       }
       for (std::vector<FieldSpaceNode*>::const_iterator it =
             fields_to_delete.begin(); it != fields_to_delete.end(); it++)
-        if ((*it)->destroy_node(runtime->address_space))
-          delete (*it);
+        delete (*it);
       // Then do index space nodes
       std::vector<IndexSpaceNode*> indexes_to_delete;
       {
@@ -132,13 +132,14 @@ namespace Legion {
           // If we can actively delete it then it isn't valid
           if (it->second->destroyed)
             continue;
-          indexes_to_delete.push_back(it->second);
+          IndexSpaceNode *node = it->second;
+          if (node->destroy_node(runtime->address_space))
+            indexes_to_delete.push_back(node);
         }
       }
       for (std::vector<IndexSpaceNode*>::const_iterator it = 
             indexes_to_delete.begin(); it != indexes_to_delete.end(); it++)
-        if ((*it)->destroy_node(runtime->address_space))
-          delete (*it);
+        delete (*it);
     }
 
     //--------------------------------------------------------------------------
@@ -3225,7 +3226,10 @@ namespace Legion {
         color_space->add_nested_resource_ref(did);
       }
       else
+      {
         result->add_base_gc_ref(REMOTE_DID_REF, &mutator);
+        color_space->add_nested_resource_ref(did);
+      }
       result->register_with_runtime(&mutator);
       if (parent != NULL)
         parent->add_child(result);
@@ -3282,7 +3286,10 @@ namespace Legion {
         color_space->add_nested_resource_ref(did);
       }
       else
+      {
         result->add_base_gc_ref(REMOTE_DID_REF, &mutator);
+        color_space->add_nested_resource_ref(did);
+      }
       result->register_with_runtime(&mutator);
       if (parent != NULL)
         parent->add_child(result);
