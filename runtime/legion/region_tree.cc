@@ -4834,6 +4834,7 @@ namespace Legion {
     void IndexSpaceNode::notify_invalid(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
+      std::vector<IndexPartNode*> to_delete;
       if (is_owner())
       {
         // Need read-only lock while accessing these structures, 
@@ -4845,14 +4846,22 @@ namespace Legion {
           DestructionFunctor functor(this, mutator);
           remote_instances.map(functor);
         }
-        // Remove valid references from our children
-        // No need to check for deletion since we have resource references
         for (std::map<LegionColor,IndexPartNode*>::const_iterator it = 
               color_map.begin(); it != color_map.end(); it++)
-          it->second->destroy_node(runtime->address_space);
+          if (it->second->destroy_node(runtime->address_space))
+            to_delete.push_back(it->second);
+        if (!to_delete.empty())
+        {
+          for (std::vector<IndexPartNode*>::const_iterator it = 
+                to_delete.begin(); it != to_delete.end(); it++)
+            color_map.erase((*it)->color);
+        }
       }
       else // Remove the valid reference that we have on the owner
         send_remote_valid_update(owner_space, mutator, 1/*count*/,false/*add*/);
+      for (std::vector<IndexPartNode*>::const_iterator it = 
+            to_delete.begin(); it != to_delete.end(); it++)
+        delete (*it);
     }
 
     //--------------------------------------------------------------------------
@@ -5722,6 +5731,7 @@ namespace Legion {
     void IndexPartNode::notify_invalid(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
+      std::vector<IndexSpaceNode*> to_delete;
       if (is_owner())
       {
         // Remove the valid reference that we hold on the color space
@@ -5736,14 +5746,22 @@ namespace Legion {
           DestructionFunctor functor(this, mutator);
           remote_instances.map(functor);
         }
-        // Remove valid references from our children
-        // No need to check for deletion since we have resource references
         for (std::map<LegionColor,IndexSpaceNode*>::const_iterator it = 
               color_map.begin(); it != color_map.end(); it++)
-          it->second->destroy_node(runtime->address_space);
+          if (it->second->destroy_node(runtime->address_space))
+            to_delete.push_back(it->second);
+        if (!to_delete.empty())
+        {
+          for (std::vector<IndexSpaceNode*>::const_iterator it = 
+                to_delete.begin(); it != to_delete.end(); it++)
+            color_map.erase((*it)->color);
+        }
       }
       else // Remove the valid reference that we have on the owner
         send_remote_valid_update(owner_space, mutator, 1/*count*/,false/*add*/);
+      for (std::vector<IndexSpaceNode*>::const_iterator it = 
+            to_delete.begin(); it != to_delete.end(); it++)
+        delete (*it);
     }
 
     //--------------------------------------------------------------------------
