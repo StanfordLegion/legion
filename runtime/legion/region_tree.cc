@@ -89,13 +89,26 @@ namespace Legion {
             continue;
           if (it->second->destroyed)
             continue;
-          if (it->second->destroy_node(runtime->address_space, true/*root*/))
-            regions_to_delete.push_back(it->second);
+#ifdef LEGION_GC
+          it->second->add_base_resource_ref(REGION_TREE_REF);
+#else
+          it->second->add_reference();
+#endif
+          regions_to_delete.push_back(it->second);
         }
       }
       for (std::vector<RegionNode*>::const_iterator it = 
             regions_to_delete.begin(); it != regions_to_delete.end(); it++)
-        delete (*it);
+      {
+        if (!(*it)->destroyed)
+          (*it)->destroy_node(runtime->address_space, true/*root*/);
+#ifdef LEGION_GC
+        if ((*it)->remove_base_resource_ref(REGION_TREE_REF))
+#else
+        if ((*it)->remove_reference())
+#endif
+          delete (*it);
+      }
       // Then do field space nodes
       std::vector<FieldSpaceNode*> fields_to_delete;
       {
@@ -109,13 +122,18 @@ namespace Legion {
           // If we can actively delete it then it isn't valid
           if (it->second->destroyed)
             continue;
-          if (it->second->destroy_node(runtime->address_space))
-            fields_to_delete.push_back(it->second);
+          it->second->add_base_resource_ref(REGION_TREE_REF);
+          fields_to_delete.push_back(it->second);
         }
       }
       for (std::vector<FieldSpaceNode*>::const_iterator it =
             fields_to_delete.begin(); it != fields_to_delete.end(); it++)
-        delete (*it);
+      {
+        if (!(*it)->destroyed)
+          (*it)->destroy_node(runtime->address_space);
+        if ((*it)->remove_base_resource_ref(REGION_TREE_REF))
+          delete (*it);
+      }
       // Then do index space nodes
       std::vector<IndexSpaceNode*> indexes_to_delete;
       {
@@ -132,14 +150,18 @@ namespace Legion {
           // If we can actively delete it then it isn't valid
           if (it->second->destroyed)
             continue;
-          IndexSpaceNode *node = it->second;
-          if (node->destroy_node(runtime->address_space))
-            indexes_to_delete.push_back(node);
+          it->second->add_base_resource_ref(REGION_TREE_REF);
+          indexes_to_delete.push_back(it->second);
         }
       }
       for (std::vector<IndexSpaceNode*>::const_iterator it = 
             indexes_to_delete.begin(); it != indexes_to_delete.end(); it++)
-        delete (*it);
+      {
+        if (!(*it)->destroyed)
+          (*it)->destroy_node(runtime->address_space);
+        if ((*it)->remove_base_resource_ref(REGION_TREE_REF))
+          delete (*it);
+      }
     }
 
     //--------------------------------------------------------------------------
