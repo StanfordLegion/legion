@@ -1211,7 +1211,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtEvent DistributedCollectable::unregister_with_runtime(void) const
+    void DistributedCollectable::unregister_with_runtime(void) const
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -1219,12 +1219,11 @@ namespace Legion {
       assert(registered_with_runtime);
 #endif
       runtime->unregister_distributed_collectable(did);
-      registered_with_runtime = false;
       if (!remote_instances.empty())
-        return runtime->recycle_distributed_id(did, 
+        runtime->recycle_distributed_id(did, 
                      send_unregister_messages(REFERENCE_VIRTUAL_CHANNEL));
       else
-        return runtime->recycle_distributed_id(did, RtEvent::NO_RT_EVENT);
+        runtime->recycle_distributed_id(did, RtEvent::NO_RT_EVENT);
     }
 
     //--------------------------------------------------------------------------
@@ -1264,7 +1263,6 @@ namespace Legion {
       assert(registered_with_runtime);
 #endif
       runtime->unregister_distributed_collectable(did);
-      registered_with_runtime = false;
     }
 
     //--------------------------------------------------------------------------

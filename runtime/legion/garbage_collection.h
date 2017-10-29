@@ -374,7 +374,7 @@ namespace Legion {
       void register_with_runtime(ReferenceMutator *mutator,
                                  bool notify_remote = true);
     protected:
-      RtEvent unregister_with_runtime(void) const;
+      void unregister_with_runtime(void) const;
       RtEvent send_unregister_messages(VirtualChannelKind vc) const;
     public:
       // This for remote nodes only
