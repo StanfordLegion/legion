@@ -659,6 +659,8 @@ namespace Legion {
       DISTRIBUTED_VALID_UPDATE,
       DISTRIBUTED_GC_UPDATE,
       DISTRIBUTED_RESOURCE_UPDATE,
+      DISTRIBUTED_INVALIDATE,
+      DISTRIBUTED_DEACTIVATE,
       DISTRIBUTED_CREATE_ADD,
       DISTRIBUTED_CREATE_REMOVE,
       DISTRIBUTED_UNREGISTER,
@@ -790,6 +792,8 @@ namespace Legion {
         "Distributed Valid Update",                                   \
         "Distributed GC Update",                                      \
         "Distributed Resource Update",                                \
+        "Distributed Invalidate",                                     \
+        "Distributed Deactivate",                                     \
         "Distributed Create Add",                                     \
         "Distributed Create Remove",                                  \
         "Distributed Unregister",                                     \

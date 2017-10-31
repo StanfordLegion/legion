@@ -258,6 +258,28 @@ namespace Legion {
         ReferenceMutator *const mutator;
         unsigned count;
       };
+      class RemoteInvalidateFunctor {
+      public:
+        RemoteInvalidateFunctor(DistributedCollectable *dc,
+                                ReferenceMutator *m)
+          : source(dc), mutator(m) { }
+      public:
+        inline void apply(AddressSpaceID target);
+      protected:
+        DistributedCollectable *const source;
+        ReferenceMutator *const mutator;
+      };
+      class RemoteDeactivateFunctor {
+      public:
+        RemoteDeactivateFunctor(DistributedCollectable *dc,
+                                ReferenceMutator *m)
+          : source(dc), mutator(m) { }
+      public:
+        inline void apply(AddressSpaceID target);
+      protected:
+        DistributedCollectable *const source;
+        ReferenceMutator *const mutator;
+      };
       class UnregisterFunctor {
       public:
         UnregisterFunctor(Runtime *rt, const DistributedID d,
@@ -357,6 +379,9 @@ namespace Legion {
       virtual void notify_inactive(ReferenceMutator *mutator) = 0;
       virtual void notify_valid(ReferenceMutator *mutator) = 0;
       virtual void notify_invalid(ReferenceMutator *mutator) = 0;
+      // For explicit remote messages
+      virtual void notify_remote_inactive(ReferenceMutator *mutator);
+      virtual void notify_remote_invalid(ReferenceMutator *mutator);
     public:
       inline bool is_owner(void) const { return (owner_space == local_space); }
       inline bool is_registered(void) const { return registered_with_runtime; }
@@ -387,6 +412,10 @@ namespace Legion {
                                  unsigned count, bool add);
       void send_remote_resource_update(AddressSpaceID target,
                                        unsigned count, bool add);
+      void send_remote_invalidate(AddressSpaceID target,
+                                  ReferenceMutator *mutator);
+      void send_remote_deactivate(AddressSpaceID target,
+                                  ReferenceMutator *mutator);
 #ifdef USE_REMOTE_REFERENCES
     public:
       ReferenceKind send_create_reference(AddressSpaceID target);
@@ -403,6 +432,10 @@ namespace Legion {
                                               Deserializer &derez);
       static void handle_did_remote_resource_update(Runtime *runtime,
                                                     Deserializer &derez);
+      static void handle_did_remote_invalidate(Runtime *runtime,
+                                               Deserializer &derez);
+      static void handle_did_remote_deactivate(Runtime *runtime,
+                                               Deserializer &derez);
     public:
       static void handle_did_add_create(Runtime *runtime, 
                                         Deserializer &derez);
@@ -523,6 +556,22 @@ namespace Legion {
     {
       AutoLock gc(gc_lock,1,false/*exclusive*/); 
       remote_instances.map(functor); 
+    }
+
+    //--------------------------------------------------------------------------
+    inline void DistributedCollectable::RemoteInvalidateFunctor::apply(
+                                                          AddressSpaceID target)
+    //--------------------------------------------------------------------------
+    {
+      source->send_remote_invalidate(target, mutator);
+    }
+
+    //--------------------------------------------------------------------------
+    inline void DistributedCollectable::RemoteDeactivateFunctor::apply(
+                                                          AddressSpaceID target)
+    //--------------------------------------------------------------------------
+    {
+      source->send_remote_deactivate(target, mutator);
     }
 
     //--------------------------------------------------------------------------

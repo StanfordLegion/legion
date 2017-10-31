@@ -5956,6 +5956,16 @@ namespace Legion {
               runtime->handle_did_remote_resource_update(derez);
               break;
             }
+          case DISTRIBUTED_INVALIDATE:
+            {
+              runtime->handle_did_remote_invalidate(derez);
+              break;
+            }
+          case DISTRIBUTED_DEACTIVATE:
+            {
+              runtime->handle_did_remote_deactivate(derez);
+              break;
+            }
           case DISTRIBUTED_CREATE_ADD:
             {
               runtime->handle_did_create_add(derez);
@@ -13021,6 +13031,24 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_did_remote_invalidate(AddressSpaceID target,
+                                             Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, DISTRIBUTED_INVALIDATE,
+                                    REFERENCE_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_did_remote_deactivate(AddressSpaceID target,
+                                             Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, DISTRIBUTED_DEACTIVATE,
+                                    REFERENCE_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_did_add_create_reference(AddressSpaceID target,
                                                  Serializer &rez)
     //--------------------------------------------------------------------------
@@ -14079,6 +14107,20 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DistributedCollectable::handle_did_remote_resource_update(this, derez); 
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_did_remote_invalidate(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DistributedCollectable::handle_did_remote_invalidate(this, derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_did_remote_deactivate(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DistributedCollectable::handle_did_remote_deactivate(this, derez);
     }
 
     //--------------------------------------------------------------------------
