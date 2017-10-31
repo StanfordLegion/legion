@@ -180,7 +180,7 @@ void record_activemsg_profiling(int msgid,
 NodeID get_message_source(token_t token)
 {
   gasnet_node_t src;
-  CHECK_GASNET( gasnet_AMGetMsgSource(token, &src) );
+  CHECK_GASNET( gasnet_AMGetMsgSource(reinterpret_cast<gasnet_token_t>(token), &src) );
 #ifdef DEBUG_AMREQUESTS
   printf("%d: source = %d\n", gasnet_mynode(), src);
 #endif
@@ -189,7 +189,7 @@ NodeID get_message_source(token_t token)
 
 void send_srcptr_release(token_t token, uint64_t srcptr)
 {
-  CHECK_GASNET( gasnet_AMReplyShort2(token, MSGID_RELEASE_SRCPTR, (handlerarg_t)srcptr, (handlerarg_t)(srcptr >> 32)) );
+  CHECK_GASNET( gasnet_AMReplyShort2(reinterpret_cast<gasnet_token_t>(token), MSGID_RELEASE_SRCPTR, (handlerarg_t)srcptr, (handlerarg_t)(srcptr >> 32)) );
 }
 
 #ifdef DEBUG_MEM_REUSE
