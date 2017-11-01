@@ -21671,9 +21671,9 @@ namespace Legion {
             VersionState::process_convert_view(args);
             break;
           }
-        case LG_UPDATE_VIEW_REFERENCES_TASK_ID:
+        case LG_UPDATE_PENDING_VIEW_TASK_ID:
           {
-            VersionState::process_view_references(args);
+            VersionState::process_pending_view(args);
             break;
           }
         case LG_UPDATE_VERSION_STATE_REDUCE_TASK_ID:

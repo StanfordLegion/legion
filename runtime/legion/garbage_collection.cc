@@ -1642,7 +1642,6 @@ namespace Legion {
                                           Runtime *runtime, Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      DerezCheck z(derez);
       DistributedID did;
       derez.deserialize(did);
       RtUserEvent done;
@@ -1672,7 +1671,6 @@ namespace Legion {
                                           Runtime *runtime, Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      DerezCheck z(derez);
       DistributedID did;
       derez.deserialize(did);
       RtUserEvent done;

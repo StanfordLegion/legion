@@ -154,12 +154,8 @@ namespace Legion {
     public:
       iterator begin(void) const;
       inline iterator end(void) const { return iterator(this, NULL, single); }
-    public:
-      template<ReferenceSource ARG_KIND>
-      void reduce(const FieldMask &reduce_mask, 
-                  VersioningSet<ARG_KIND> &new_states,
-                  ReferenceMutator *mutator);
 #ifdef DEBUG_LEGION
+    public:
       void sanity_check(void) const;
 #endif
     protected:
@@ -1201,12 +1197,13 @@ namespace Legion {
         PhysicalManager *manager;
         InnerContext *context;
       };
-      struct UpdateViewReferences : public LgTaskArgs<UpdateViewReferences> {
+      struct UpdatePendingView : public LgTaskArgs<UpdatePendingView> {
       public:
-        static const LgTaskID TASK_ID = LG_UPDATE_VIEW_REFERENCES_TASK_ID;
+        static const LgTaskID TASK_ID = LG_UPDATE_PENDING_VIEW_TASK_ID;
       public:
-        DistributedID did;
+        VersionState *proxy_this;
         LogicalView *view;
+        FieldMask *view_mask;
       }; 
       struct RemoveVersionStateRefArgs : 
         public LgTaskArgs<RemoveVersionStateRefArgs> {
@@ -1260,6 +1257,21 @@ namespace Legion {
                                 std::set<RtEvent> &applied_conditions,
                                 bool need_lock, bool local_update);
     public:
+      // Must be holding lock from caller when calling these methods
+      void insert_materialized_view(MaterializedView *view,
+          const FieldMask &view_mask, ReferenceMutator *mutator);
+      void insert_reduction_view(ReductionView *view,
+          const FieldMask &view_mask, ReferenceMutator *mutator);
+      void insert_deferred_view(DeferredView *view,
+          const FieldMask &view_mask, ReferenceMutator *mutator);
+      void insert_valid_view(LogicalView *view,
+          const FieldMask &view_mask, ReferenceMutator *mutator);
+      void insert_child_version(VersioningSet<> &child_states, 
+          VersionState *state, const FieldMask &state_mask, 
+          ReferenceMutator *mutator);
+      void remove_child_version(VersioningSet<> &child_states, 
+          VersionState *state, ReferenceMutator *mutator);
+    public:
       void send_valid_notification(std::set<RtEvent> &applied_events) const;
       void handle_version_state_valid_notification(AddressSpaceID source);
       static void process_version_state_valid_notification(Deserializer &derez,
@@ -1267,8 +1279,13 @@ namespace Legion {
     public:
       virtual void notify_active(ReferenceMutator *mutator);
       virtual void notify_inactive(ReferenceMutator *mutator);
+      virtual void notify_remote_inactive(ReferenceMutator *mutator);
+      void notify_local_inactive(ReferenceMutator *mutator);
+    public:
       virtual void notify_valid(ReferenceMutator *mutator);
       virtual void notify_invalid(ReferenceMutator *mutator);
+      virtual void notify_remote_invalid(ReferenceMutator *mutator);
+      void notify_local_invalid(ReferenceMutator *mutator);
     public:
       // This method is not currently used, but it is probably
       // not dead code because we're likely going to need it 
@@ -1328,7 +1345,9 @@ namespace Legion {
       void convert_view(PhysicalManager *manager, InnerContext *context,
                         ReferenceMutator *mutator);
       static void process_convert_view(const void *args);
-      static void process_view_references(const void *args);
+      void insert_pending_view(LogicalView *view, const FieldMask &view_mask,
+                               ReferenceMutator *mutator);
+      static void process_pending_view(const void *args);
     public:
       static void process_version_state_update_request(Runtime *rt, 
                                                 Deserializer &derez);
@@ -1352,21 +1371,14 @@ namespace Legion {
       FieldMask dirty_mask;
       // Fields which have reductions
       FieldMask reduction_mask;
-      // Note that we make the StateVersions type is not local which
-      // is how we keep the distributed version state tree live
-      typedef VersioningSet<VERSION_STATE_TREE_REF> StateVersions;
-      LegionMap<LegionColor,StateVersions>::aligned open_children;
+      // References to open children that we have
+      LegionMap<LegionColor,VersioningSet<> >::aligned open_children;
       // The valid instance views
       LegionMap<LogicalView*, FieldMask,
                 VALID_VIEW_ALLOC>::track_aligned valid_views;
       // The valid reduction veiws
       LegionMap<ReductionView*, FieldMask,
                 VALID_REDUCTION_ALLOC>::track_aligned reduction_views;
-#ifdef DEBUG_LEGION
-      // Track our current state 
-      bool currently_active;
-      bool currently_valid;
-#endif
     protected:
       // Fields which we have applied updates to
       FieldMask update_fields;
@@ -1382,6 +1394,12 @@ namespace Legion {
     protected:
       LegionMap<PhysicalManager*,
                 std::pair<RtEvent,FieldMask> >::aligned pending_instances;
+    protected:
+#ifdef DEBUG_LEGION
+      // Track our current state 
+      bool currently_active;
+#endif
+      bool currently_valid;
     };
 
     /**

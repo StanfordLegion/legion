@@ -986,10 +986,15 @@ namespace Legion {
       virtual bool has_space(const FieldMask &space_mask) const
         { return false; }
     public:
-      virtual void notify_active(ReferenceMutator *mutator) = 0;
-      virtual void notify_inactive(ReferenceMutator *mutator) = 0;
-      virtual void notify_valid(ReferenceMutator *mutator) = 0;
-      virtual void notify_invalid(ReferenceMutator *mutator) = 0;
+      virtual void notify_active(ReferenceMutator *mutator);
+      virtual void notify_inactive(ReferenceMutator *mutator);
+      virtual void notify_owner_inactive(ReferenceMutator *mutator) 
+        { assert(false); }
+    public:
+      virtual void notify_valid(ReferenceMutator *mutator);
+      virtual void notify_invalid(ReferenceMutator *mutator);
+      virtual void notify_owner_invalid(ReferenceMutator *mutator)
+        { assert(false); }
     public:
       virtual void send_view(AddressSpaceID target) = 0; 
     public:
@@ -1016,6 +1021,11 @@ namespace Legion {
                           LegionMap<ApEvent,FieldMask>::aligned &postconditions,
                                          PredEvent pred_guard,
                                          CopyAcrossHelper *helper = NULL) = 0; 
+#ifdef DEBUG_LEGION
+    protected:
+      bool currently_active;
+      bool currently_valid;
+#endif
     };
 
     /**
@@ -1221,7 +1231,6 @@ namespace Legion {
       public:
         DistributedCollectable *dc;
         DistributedID did;
-        bool valid;
       };
       struct DeferCompositeViewRegistrationArgs : 
         public LgTaskArgs<DeferCompositeViewRegistrationArgs> {
@@ -1257,23 +1266,22 @@ namespace Legion {
       CompositeView& operator=(const CompositeView &rhs);
     public:
       CompositeView* clone(const FieldMask &clone_mask,
-        const LegionMap<CompositeView*,FieldMask>::aligned &replacements) const;
+        const LegionMap<CompositeView*,FieldMask>::aligned &replacements,
+                           ReferenceMutator *mutator) const;
     public:
       virtual bool has_parent(void) const { return false; }
       virtual LogicalView* get_parent(void) const 
         { assert(false); return NULL; }
       virtual LogicalView* get_subview(const LegionColor c);
     public:
-      virtual void notify_active(ReferenceMutator *mutator);
-      virtual void notify_inactive(ReferenceMutator *mutator);
-      virtual void notify_valid(ReferenceMutator *mutator);
-      virtual void notify_invalid(ReferenceMutator *mutator);
+      virtual void notify_owner_inactive(ReferenceMutator *mutator);
+      virtual void notify_owner_invalid(ReferenceMutator *mutator);
     public:
       virtual void send_view(AddressSpaceID target); 
     public:
       void prune(ClosedNode *closed_tree, FieldMask &valid_mask,
                  LegionMap<CompositeView*,FieldMask>::aligned &replacements,
-                 unsigned prune_depth);
+                 unsigned prune_depth, ReferenceMutator *mutator);
       virtual void issue_deferred_copies(const TraversalInfo &info,
                                          MaterializedView *dst,
                                          FieldMask copy_mask,
@@ -1323,18 +1331,20 @@ namespace Legion {
       static void handle_deferred_view_invalidation(const void *args);
     public:
       void record_dirty_fields(const FieldMask &dirty_mask);
-      void record_valid_view(LogicalView *view, const FieldMask &mask);
+      void record_valid_view(LogicalView *view, const FieldMask &mask,
+                             ReferenceMutator *mutator);
       void record_reduction_fields(const FieldMask &reduction_fields);
-      void record_reduction_view(ReductionView *view, const FieldMask &mask);
+      void record_reduction_view(ReductionView *view, const FieldMask &mask,
+                                 ReferenceMutator *mutator);
       void record_child_version_state(const LegionColor child_color, 
          VersionState *state, const FieldMask &mask, ReferenceMutator *mutator);
-      void finalize_capture(bool need_prune);
+      void finalize_capture(bool need_prune, ReferenceMutator *mutator);
     public:
       void pack_composite_view(Serializer &rez) const;
       void unpack_composite_view(Deserializer &derez,
                                  std::set<RtEvent> &preconditions);
       RtEvent defer_add_reference(DistributedCollectable *dc, 
-                                  RtEvent precondition, bool valid) const;
+                                  RtEvent precondition) const;
       static void handle_deferred_view_ref(const void *args);
     public:
       // For control replication
@@ -1373,10 +1383,6 @@ namespace Legion {
       // we've performed for different sub-nodes
       LegionMap<RegionTreeNode*,FieldMask>::aligned shard_checks; 
       std::map<ShardID,RtEvent> requested_shards;
-#ifdef DEBUG_LEGION
-    protected:
-      bool currently_valid;
-#endif
     };
 
     /**
@@ -1427,7 +1433,8 @@ namespace Legion {
       void capture(RtUserEvent capture_event, ReferenceMutator *mutator);
       static void handle_deferred_capture(const void *args);
     public:
-      void clone(CompositeView *target, const FieldMask &clone_mask) const;
+      void clone(CompositeView *target, const FieldMask &clone_mask,
+                 ReferenceMutator *mutator) const;
       void pack_composite_node(Serializer &rez) const;
       static CompositeNode* unpack_composite_node(Deserializer &derez,
                      CompositeView *parent, Runtime *runtime, 
@@ -1440,15 +1447,14 @@ namespace Legion {
       static void handle_deferred_node_ref(const void *args);
     public:
       void record_dirty_fields(const FieldMask &dirty_mask);
-      void record_valid_view(LogicalView *view, const FieldMask &mask,
-                             ReferenceMutator *mutator);
+      void record_valid_view(LogicalView *view, const FieldMask &mask);
       void record_reduction_fields(const FieldMask &reduction_fields);
-      void record_reduction_view(ReductionView *view, const FieldMask &mask,
-                                 ReferenceMutator *mutator);
+      void record_reduction_view(ReductionView *view, const FieldMask &mask);
       void record_child_version_state(const LegionColor child_color, 
-         VersionState *state, const FieldMask &mask, ReferenceMutator *mutator);
+                                VersionState *state, const FieldMask &mask);
       void record_version_state(VersionState *state, const FieldMask &mask, 
                                 ReferenceMutator *mutator);
+      void release_gc_references(ReferenceMutator *mutator);
       void release_valid_references(ReferenceMutator *mutator);
     public:
       void capture_field_versions(FieldVersions &versions,
@@ -1591,10 +1597,8 @@ namespace Legion {
         { assert(false); return NULL; }
       virtual LogicalView* get_subview(const LegionColor c);
     public:
-      virtual void notify_active(ReferenceMutator *mutator);
-      virtual void notify_inactive(ReferenceMutator *mutator);
-      virtual void notify_valid(ReferenceMutator *mutator);
-      virtual void notify_invalid(ReferenceMutator *mutator);
+      virtual void notify_owner_inactive(ReferenceMutator *mutator);
+      virtual void notify_owner_invalid(ReferenceMutator *mutator);
     public:
       virtual void send_view(AddressSpaceID target);
     public:
@@ -1635,8 +1639,10 @@ namespace Legion {
                         LegionMap<ApEvent,FieldMask>::aligned &postconditions,
                                        CopyAcrossHelper *helper = NULL);
     public:
-      void record_true_view(LogicalView *view, const FieldMask &view_mask);
-      void record_false_view(LogicalView *view, const FieldMask &view_mask);
+      void record_true_view(LogicalView *view, const FieldMask &view_mask,
+                            ReferenceMutator *mutator);
+      void record_false_view(LogicalView *view, const FieldMask &view_mask,
+                             ReferenceMutator *mutator);
     public:
       void pack_phi_view(Serializer &rez);
       void unpack_phi_view(Deserializer &derez,std::set<RtEvent> &ready_events);

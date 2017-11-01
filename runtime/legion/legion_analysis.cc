@@ -524,91 +524,6 @@ namespace Legion {
               &(*(versions.multi_versions->begin()))), false); 
     }
 
-    //--------------------------------------------------------------------------
-    template<ReferenceSource REF_KIND> template<ReferenceSource ARG_KIND>
-    void VersioningSet<REF_KIND>::reduce(const FieldMask &merge_mask, 
-                                         VersioningSet<ARG_KIND> &new_states,
-                                         ReferenceMutator *mutator)
-    //--------------------------------------------------------------------------
-    {
-      // If you are looking for the magical reduce function that allows
-      // us to know which are the most recent version state objects, well
-      // you can congratulate yourself because you've found it
-#ifdef DEBUG_LEGION
-      sanity_check();
-      new_states.sanity_check();
-#endif
-      std::vector<VersionState*> to_erase_new;
-      for (typename VersioningSet<ARG_KIND>::iterator nit = 
-            new_states.begin(); nit != new_states.end(); nit++)
-      {
-        LegionMap<VersionState*,FieldMask>::aligned to_add; 
-        std::vector<VersionState*> to_erase_local;
-        FieldMask overlap = merge_mask & nit->second;
-        // This VersionState doesn't apply locally if there are no fields
-        if (!overlap)
-          continue;
-        // We can remove these fields from the new states because
-        // we know that we are going to handle it
-        nit->second -= overlap;
-        if (!nit->second)
-          to_erase_new.push_back(nit->first);
-        // Iterate over our states and see which ones interfere
-        for (typename VersioningSet<REF_KIND>::iterator it = begin();
-              it != end(); it++)
-        {
-          FieldMask local_overlap = it->second & overlap;
-          if (!local_overlap)
-            continue;
-          // Overlapping fields to two different version states, compare
-          // the version numbers to see which one we should keep
-          if (it->first->version_number < nit->first->version_number)
-          {
-            // Take the next one, throw away this one
-            to_add[nit->first] |= local_overlap;
-            it->second -= local_overlap;
-            if (!it->second)
-              to_erase_local.push_back(it->first);
-          }
-#ifdef DEBUG_LEGION
-          else if (it->first->version_number == nit->first->version_number)
-            // better be the same object with overlapping fields 
-            // and the same version number
-            assert(it->first == nit->first);
-#endif  
-          // Otherwise we keep the old one and throw away the new one
-          overlap -= local_overlap;
-          if (!overlap)
-            break;
-        }
-        // If we still have fields for this version state, then
-        // we just have to insert it locally
-        if (!!overlap)
-          insert(nit->first, overlap, mutator);
-        if (!to_erase_local.empty())
-        {
-          for (std::vector<VersionState*>::const_iterator it = 
-                to_erase_local.begin(); it != to_erase_local.end(); it++)
-            erase(*it);
-        }
-        if (!to_add.empty())
-        {
-          for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator
-                it = to_add.begin(); it != to_add.end(); it++)
-            insert(it->first, it->second, mutator);
-        }
-      }
-      if (!to_erase_new.empty())
-      {
-        for (std::vector<VersionState*>::const_iterator it = 
-              to_erase_new.begin(); it != to_erase_new.end(); it++)
-          new_states.erase(*it);
-      }
-#ifdef DEBUG_LEGION
-      sanity_check();
-#endif
-    }
-
 #ifdef DEBUG_LEGION
     //--------------------------------------------------------------------------
     template<ReferenceSource REF_KIND>
@@ -4498,7 +4413,7 @@ namespace Legion {
       // Finally record any valid above views
       for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it = 
             valid_above.begin(); it != valid_above.end(); it++)
-        composite_view->record_valid_view(it->first, it->second);
+        composite_view->record_valid_view(it->first, it->second, mutator);
     }
 
     //--------------------------------------------------------------------------
@@ -5912,6 +5827,7 @@ namespace Legion {
                 DirtyUpdateArgs args;
                 args.previous = mit->first;
                 args.target = it->first;
+                // Have to use new here for alignment
                 args.capture_mask = new FieldMask(overlap);
                 RtEvent done = 
                   runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY,
@@ -6971,17 +6887,13 @@ namespace Legion {
           LEGION_DISTRIBUTED_HELP_ENCODE(id, VERSION_STATE_DC), 
           own_sp, register_now),
         version_number(vid), logical_node(node), 
-        state_lock(Reservation::create_reservation())
+        state_lock(Reservation::create_reservation()),
 #ifdef DEBUG_LEGION
-        , currently_active(true), currently_valid(true)
+        currently_active(true), 
 #endif
+        currently_valid(true)
     //--------------------------------------------------------------------------
     {
-      // If we're not the owner then add a remote gc ref that will
-      // be removed by the owner once no copy of this version state
-      // is valid anywhere in the system
-      if (!is_owner())
-        add_base_gc_ref(REMOTE_DID_REF);
 #ifdef LEGION_GC
       log_garbage.info("GC Version State %lld %d", 
           LEGION_DISTRIBUTED_ID_FILTER(did), local_space);
@@ -7006,8 +6918,8 @@ namespace Legion {
       state_lock.destroy_reservation();
       state_lock = Reservation::NO_RESERVATION;
 #ifdef DEBUG_LEGION
-      if (is_owner())
-        assert(!currently_valid);
+      assert(!currently_active);
+      assert(!currently_valid);
 #endif 
     }
 
@@ -7050,30 +6962,15 @@ namespace Legion {
           if (inst_view->is_reduction_view())
           {
             ReductionView *view = inst_view->as_reduction_view();
-            LegionMap<ReductionView*,FieldMask,VALID_REDUCTION_ALLOC>::
-              track_aligned::iterator finder = reduction_views.find(view); 
-            if (finder == reduction_views.end())
-            {
-              new_view->add_nested_valid_ref(did, &mutator);
-              reduction_views[view] = view_mask;
-            }
-            else
-              finder->second |= view_mask;
+            insert_reduction_view(view, view_mask, &mutator);
             reduction_mask |= view_mask;
             inst_view->add_initial_user(term_event, usage, view_mask,
                                         init_op_id, init_index);
           }
           else
           {
-            LegionMap<LogicalView*,FieldMask,VALID_VIEW_ALLOC>::
-              track_aligned::iterator finder = valid_views.find(new_view);
-            if (finder == valid_views.end())
-            {
-              new_view->add_nested_valid_ref(did, &mutator);
-              valid_views[new_view] = view_mask;
-            }
-            else
-              finder->second |= view_mask;
+            insert_materialized_view(
+                new_view->as_materialized_view(), view_mask, &mutator);
             if (HAS_WRITE(usage))
               dirty_mask |= view_mask;
             inst_view->add_initial_user(term_event, usage, view_mask,
@@ -7085,15 +6982,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
           assert(!term_event.exists());
 #endif
-          LegionMap<LogicalView*,FieldMask,VALID_VIEW_ALLOC>::
-              track_aligned::iterator finder = valid_views.find(new_view);
-          if (finder == valid_views.end())
-          {
-            new_view->add_nested_valid_ref(did, &mutator);
-            valid_views[new_view] = view_mask;
-          }
-          else
-            finder->second |= view_mask;
+          insert_deferred_view(new_view->as_deferred_view(),
+                               view_mask, &mutator);
           if (HAS_WRITE(usage))
             dirty_mask |= view_mask;
           // Don't add a user since this is a deferred view and
@@ -7210,18 +7100,7 @@ namespace Legion {
         FieldMask overlap = it->second & merge_mask;
         if (!overlap)
           continue;
-        LegionMap<LogicalView*,FieldMask,VALID_VIEW_ALLOC>::
-          track_aligned::iterator finder = valid_views.find(it->first);
-        if (finder == valid_views.end())
-        {
-#ifdef DEBUG_LEGION
-          assert(currently_valid);
-#endif
-          it->first->add_nested_valid_ref(did, &mutator);
-          valid_views[it->first] = overlap;
-        }
-        else
-          finder->second |= overlap;
+        insert_valid_view(it->first, overlap, &mutator);
       }
       if (!!reduction_merge)
       {
@@ -7236,9 +7115,6 @@ namespace Legion {
             track_aligned::iterator finder = reduction_views.find(it->first);
           if (finder == reduction_views.end())
           {
-#ifdef DEBUG_LEGION
-            assert(currently_valid);
-#endif
             it->first->add_nested_valid_ref(did, &mutator);
             reduction_views[it->first] = overlap;
           }
@@ -7269,28 +7145,107 @@ namespace Legion {
         return;
       }
       WrapperReferenceMutator mutator(applied_events);
-      LegionMap<LegionColor,StateVersions>::aligned::iterator finder =
+      LegionMap<LegionColor,VersioningSet<> >::aligned::iterator finder =
         open_children.find(child_color);
       // We only have to do insertions if the entry didn't exist before
       // or its fields are disjoint with the update mask
       if ((finder == open_children.end()) || 
           (finder->second.get_valid_mask() * update_mask))
       {
+        VersioningSet<> &current_states = (finder == open_children.end()) ?
+          open_children[child_color] : finder->second;
         // Otherwise we can just insert these
         // but we only insert the ones for our fields
-        StateVersions &local_states = (finder == open_children.end()) ? 
-          open_children[child_color] : finder->second;
         for (VersioningSet<>::iterator it = new_states.begin();
               it != new_states.end(); it++)
         {
           FieldMask overlap = it->second & update_mask;
           if (!overlap)
             continue;
-          local_states.insert(it->first, overlap, &mutator);
+          insert_child_version(current_states, it->first, overlap, &mutator);
         }
       }
       else
-        finder->second.reduce(update_mask, new_states, &mutator);
+      {
+        // If you are looking for the magical reduce function that allows
+        // us to know which are the most recent version state objects, well
+        // you can congratulate yourself because you've found it
+        VersioningSet<> &current_states = finder->second;
+#ifdef DEBUG_LEGION
+        current_states.sanity_check();
+        new_states.sanity_check();
+#endif
+        std::vector<VersionState*> to_erase_new;
+        for (VersioningSet<>::iterator nit = new_states.begin();
+              nit != new_states.end(); nit++)
+        {
+          LegionMap<VersionState*,FieldMask>::aligned to_add; 
+          std::vector<VersionState*> to_erase_current;
+          FieldMask overlap = update_mask & nit->second;
+          // If there are no fields if this version state doesn't apply locally
+          if (!overlap)
+            continue;
+          // We can remove these fields from the new states because
+          // we know that we are going to handle it
+          nit->second -= overlap;
+          if (!nit->second)
+            to_erase_new.push_back(nit->first);
+          // Iterate over the current states and see which ones are interfering
+          for (VersioningSet<>::iterator cit = current_states.begin();
+                cit != current_states.end(); cit++)
+          {
+            const FieldMask current_overlap = cit->second & overlap;
+            if (!current_overlap)
+              continue;
+            // Overlapping fields to two different version states, compare
+            // the version numbers to see which one we should keep
+            if (cit->first->version_number < nit->first->version_number)
+            {
+              // Take the next one, throw away this one
+              to_add[nit->first] |= current_overlap;
+              cit->second -= current_overlap;
+              if (!cit->second)
+                to_erase_current.push_back(cit->first);
+            }
+#ifdef DEBUG_LEGION
+            else if (cit->first->version_number == nit->first->version_number)
+              // better be the same object with overlapping fields 
+              // and the same version number
+              assert(cit->first == nit->first);
+#endif
+            // Otherwise we keep the old one and throw away the new one
+            overlap -= current_overlap;
+            if (!overlap)
+              break;
+          }
+          // If we still have fields for this version state, then
+          // we just have to insert it locally
+          if (!!overlap)
+            insert_child_version(current_states, nit->first, overlap, &mutator);
+          if (!to_erase_current.empty())
+          {
+            for (std::vector<VersionState*>::const_iterator it = 
+                  to_erase_current.begin(); it != to_erase_current.end(); it++)
+              remove_child_version(current_states, *it, &mutator);
+          }
+          if (!to_add.empty())
+          {
+            for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator
+                  it = to_add.begin(); it != to_add.end(); it++)
+              insert_child_version(current_states, it->first, 
+                                   it->second, &mutator);
+          }
+        }
+        if (!to_erase_new.empty())
+        {
+          for (std::vector<VersionState*>::const_iterator it = 
+                to_erase_new.begin(); it != to_erase_new.end(); it++)
+            new_states.erase(*it);
+        }
+#ifdef DEBUG_LEGION
+        current_states.sanity_check();
+#endif
+      }
       if (local_update)
       {
         // Tell our owner node that we have valid data
@@ -7299,6 +7254,117 @@ namespace Legion {
         // Update the valid fields
         update_fields |= update_mask;
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void VersionState::insert_materialized_view(MaterializedView *view,
+                          const FieldMask &view_mask, ReferenceMutator *mutator)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(currently_active);
+#endif
+      LegionMap<LogicalView*,FieldMask>::aligned::iterator finder = 
+        valid_views.find(view);
+      if (finder == valid_views.end())
+      {
+        // Materialized views only get valid references
+        valid_views[view] = view_mask;
+        view->add_nested_valid_ref(did, mutator);
+      }
+      else
+        finder->second |= view_mask;
+    }
+
+    //--------------------------------------------------------------------------
+    void VersionState::insert_reduction_view(ReductionView *view,
+                          const FieldMask &view_mask, ReferenceMutator *mutator)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(currently_active);
+#endif
+      LegionMap<ReductionView*,FieldMask>::aligned::iterator finder = 
+        reduction_views.find(view);
+      if (finder == reduction_views.end())
+      {
+        reduction_views[view] = view_mask;
+        view->add_nested_valid_ref(did, mutator);
+      }
+      else
+        finder->second |= view_mask;
+    }
+
+    //--------------------------------------------------------------------------
+    void VersionState::insert_deferred_view(DeferredView *view,
+                          const FieldMask &view_mask, ReferenceMutator *mutator)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(currently_active);
+#endif
+      LegionMap<LogicalView*,FieldMask>::aligned::iterator finder = 
+        valid_views.find(view);
+      if (finder == valid_views.end())
+      {
+        // Deferred views get GC refs and a valid ref if we're valid
+        valid_views[view] = view_mask;
+        view->add_nested_gc_ref(did, mutator);
+        // If we're currently valid then we need a valid reference too
+        if (currently_valid)
+          view->add_nested_valid_ref(did, mutator);
+      }
+      else
+        finder->second |= view_mask;
+    }
+
+    //--------------------------------------------------------------------------
+    void VersionState::insert_valid_view(LogicalView *view,
+                          const FieldMask &view_mask, ReferenceMutator *mutator)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!view->is_reduction_view());
+#endif
+      if (view->is_deferred_view())
+        insert_deferred_view(view->as_deferred_view(), view_mask, mutator);
+      else
+        insert_materialized_view(view->as_materialized_view(), 
+                                 view_mask, mutator);
+    }
+
+    //--------------------------------------------------------------------------
+    void VersionState::insert_child_version(VersioningSet<> &child_states,
+                         VersionState *state, const FieldMask &state_mask, 
+                         ReferenceMutator *mutator)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(currently_active);
+#endif
+      if (child_states.insert(state, state_mask, mutator))
+      {
+        // Always add a gc reference
+        state->add_nested_gc_ref(did, mutator);
+        // If we're valid then we need a valid reference too
+        if (currently_valid)
+          state->add_nested_valid_ref(did, mutator);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void VersionState::remove_child_version(VersioningSet<> &child_states,
+                                 VersionState *state, ReferenceMutator *mutator)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(currently_active);
+#endif
+      child_states.erase(state);
+      if (currently_valid)
+        state->remove_nested_valid_ref(did, mutator);
+      if (state->remove_nested_gc_ref(did, mutator))
+        delete state;
     }
 
     //--------------------------------------------------------------------------
@@ -7355,16 +7421,12 @@ namespace Legion {
     void VersionState::notify_active(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
-      // This is a little weird, but we track validity in active
-      // for VersionStates so that we can use the valid references
-      // to track if any copy of a VersionState is valid anywhere
-      // The owner then holds gc references to all remote version
-      // state and can remove them when no copy of the version 
-      // state is valid anywhere else
 #ifdef DEBUG_LEGION
       // This should be monotonic on all instances of the version state
-      assert(currently_valid);
+      assert(currently_active);
 #endif
+      if (!is_owner())
+        send_remote_gc_update(owner_space, mutator, 1/*count*/, true/*add*/);
     }
 
     //--------------------------------------------------------------------------
@@ -7372,38 +7434,85 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(currently_valid);
-      currently_valid = false;
+      assert(currently_active);
 #endif
-      // If we're the owner remove the gc references that are held by 
-      // each remote copy of the version state object, see the constructor
-      // of the VersionState to see where this was added
-      if (is_owner() && has_remote_instances())
+      if (is_owner())
       {
-        UpdateReferenceFunctor<GC_REF_KIND,false/*add*/> functor(this, mutator);
-        map_over_remote_instances(functor);
+        // Send our remote deactivate messages if we have any
+        if (has_remote_instances())
+        {
+          RemoteDeactivateFunctor functor(this, mutator);
+          map_over_remote_instances(functor);
+        }
+        // Perform our local deactivate
+        notify_local_inactive(mutator);
       }
-      // We can clear out our open children since we don't need them anymore
-      // which will also remove the valid references
+      else
+        send_remote_gc_update(owner_space, mutator, 1/*count*/, false/*add*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void VersionState::notify_remote_inactive(ReferenceMutator *mutator)
+    //--------------------------------------------------------------------------
+    {
+      notify_local_inactive(mutator);
+    }
+
+    //--------------------------------------------------------------------------
+    void VersionState::notify_local_inactive(ReferenceMutator *mutator)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(currently_active); // This should be monotonic
+      currently_active = false;
+#endif
+      // Remove active references from our open children
+      for (LegionMap<LegionColor,VersioningSet<> >::aligned::const_iterator 
+            cit = open_children.begin(); cit != open_children.end(); cit++)
+      {
+        for (VersioningSet<>::iterator it = cit->second.begin();
+              it != cit->second.end(); it++)
+          if (it->first->remove_nested_gc_ref(did, mutator))
+            delete it->first;
+      }
       open_children.clear();
+      // Remove active references from our deferred views
+      // Remove valid references from our materialized views
       for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it = 
             valid_views.begin(); it != valid_views.end(); it++)
       {
-        if (it->first->remove_nested_valid_ref(did, mutator))
-          delete it->first;
+        if (it->first->is_deferred_view())
+        {
+          if (it->first->remove_nested_gc_ref(did, mutator))
+            delete it->first;
+        }
+        else
+        {
+#ifdef DEBUG_LEGION
+          assert(it->first->is_materialized_view());
+#endif
+          if (it->first->remove_nested_valid_ref(did, mutator))
+            delete it->first;
+        }
       }
+      valid_views.clear();
+      // Remove valid references from our reduction views
       for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it = 
             reduction_views.begin(); it != reduction_views.end(); it++)
       {
         if (it->first->remove_nested_valid_ref(did, mutator))
           delete it->first;
       }
+      reduction_views.clear();
     }
 
     //--------------------------------------------------------------------------
     void VersionState::notify_valid(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(currently_valid);
+#endif
       // If we are not the owner, then we have to tell the owner we're valid
       if (!is_owner())
         send_remote_valid_update(owner_space, mutator, 1/*count*/, true/*add*/);
@@ -7413,10 +7522,65 @@ namespace Legion {
     void VersionState::notify_invalid(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(currently_valid);
+#endif
       // When we are no longer valid we have to send a reference back
       // to our owner to indicate that we are no longer valid
-      if (!is_owner())
+      if (is_owner())
+      {
+        // Send our remote invalidate messages 
+        if (has_remote_instances())
+        {
+          RemoteInvalidateFunctor functor(this, mutator);
+          map_over_remote_instances(functor);
+        }
+        // Then do our local invalidate
+        notify_local_invalid(mutator);
+      }
+      else
         send_remote_valid_update(owner_space, mutator, 1/*count*/,false/*add*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void VersionState::notify_remote_invalid(ReferenceMutator *mutator)
+    //--------------------------------------------------------------------------
+    {
+      notify_local_invalid(mutator);
+    }
+
+    //--------------------------------------------------------------------------
+    void VersionState::notify_local_invalid(ReferenceMutator *mutator)
+    //--------------------------------------------------------------------------
+    {
+      std::vector<DeferredView*> to_remove;
+      {
+        AutoLock s_lock(state_lock);
+#ifdef DEBUG_LEGION
+        assert(currently_valid); // This should always be monotonic
+#endif
+        currently_valid = false;
+        // Remove valid references on all our open child views  
+        for (LegionMap<LegionColor,VersioningSet<> >::aligned::const_iterator 
+              cit = open_children.begin(); cit != open_children.end(); cit++)
+        {
+          for (VersioningSet<>::iterator it = cit->second.begin();
+                it != cit->second.end(); it++)
+            it->first->remove_nested_valid_ref(did, mutator);
+        } 
+        // Remove valid references on all our deferred views
+        for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it = 
+              valid_views.begin(); it != valid_views.end(); it++)
+        {
+          if (!it->first->is_deferred_view())
+            continue;
+          to_remove.push_back(it->first->as_deferred_view());
+        }
+      }
+      // No need to check for deletion since we know we have gc refs
+      for (std::vector<DeferredView*>::const_iterator it = 
+            to_remove.begin(); it != to_remove.end(); it++)
+        (*it)->remove_nested_valid_ref(did, mutator);
     }
 
     //--------------------------------------------------------------------------
@@ -7651,12 +7815,13 @@ namespace Legion {
           if (request_kind != INITIAL_VERSION_REQUEST)
           {
             rez.serialize<size_t>(open_children.size());
-            for (LegionMap<LegionColor,StateVersions>::aligned::const_iterator 
-                 cit = open_children.begin(); cit != open_children.end(); cit++)
+            for (LegionMap<LegionColor,
+                           VersioningSet<> >::aligned::const_iterator cit =
+                  open_children.begin(); cit != open_children.end(); cit++)
             {
               rez.serialize(cit->first);
               rez.serialize<size_t>(cit->second.size());
-              for (StateVersions::iterator it = cit->second.begin();
+              for (VersioningSet<>::iterator it = cit->second.begin();
                     it != cit->second.end(); it++)
               {
                 rez.serialize(it->first->did);
@@ -7727,9 +7892,9 @@ namespace Legion {
             {
               Serializer child_rez;
               size_t count = 0;
-              for (LegionMap<LegionColor,StateVersions>::aligned::const_iterator
-                    cit = open_children.begin(); 
-                    cit != open_children.end(); cit++)
+              for (LegionMap<LegionColor,
+                             VersioningSet<> >::aligned::const_iterator cit =
+                    open_children.begin(); cit != open_children.end(); cit++)
               {
                 FieldMask overlap = cit->second.get_valid_mask() & request_mask;
                 if (!overlap)
@@ -7737,7 +7902,7 @@ namespace Legion {
                 child_rez.serialize(cit->first);
                 Serializer state_rez;
                 size_t state_count = 0;
-                for (StateVersions::iterator it = cit->second.begin();
+                for (VersioningSet<>::iterator it = cit->second.begin();
                       it != cit->second.end(); it++)
                 {
                   FieldMask state_overlap = it->second & overlap;
@@ -7870,6 +8035,7 @@ namespace Legion {
       args.proxy_this = this;
       args.target = target;
       args.context = context;
+      // Have to use new here for alignment
       args.request_mask = new FieldMask(request_mask);
       args.request_kind = request_kind;
       args.to_trigger = to_trigger;
@@ -7886,7 +8052,7 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(is_owner());
-      assert(currently_valid); // Must be currently valid
+      assert(currently_active); // Must be currently active
       // We should have had a request for this already
       assert(!has_remote_instance(target));
 #endif
@@ -7975,7 +8141,7 @@ namespace Legion {
       DETAILED_PROFILER(logical_node->context->runtime,
                         VERSION_STATE_HANDLE_REQUEST_CALL);
 #ifdef DEBUG_LEGION
-      assert(currently_valid);
+      assert(currently_active);
 #endif
       // If we are the not the owner, the same thing happens no matter what
       if (!is_owner())
@@ -7991,7 +8157,7 @@ namespace Legion {
         {
           // See if we have any children we need to send
           bool has_children = false;
-          for (LegionMap<LegionColor,StateVersions>::aligned::const_iterator 
+          for (LegionMap<LegionColor,VersioningSet<> >::aligned::const_iterator
                 it = open_children.begin(); it != open_children.end(); it++)
           {
             if (it->second.get_valid_mask() * overlap)
@@ -8157,31 +8323,28 @@ namespace Legion {
     {
       DETAILED_PROFILER(context->runtime, VERSION_STATE_HANDLE_RESPONSE_CALL);
 #ifdef DEBUG_LEGION
-      assert(currently_valid);
+      assert(currently_active);
 #endif
       std::set<RtEvent> preconditions;
-      std::map<LogicalView*,RtEvent> pending_views;
+      LegionMap<LogicalView*,
+                std::pair<RtEvent,FieldMask> >::aligned pending_views;
       WrapperReferenceMutator mutator(preconditions);
       {
         // Hold the lock when touching the data structures because we might
         // be getting multiple updates from different locations
         AutoLock s_lock(state_lock); 
-        // Check to see what state we are generating, if it is the initial
-        // one then we can just do our unpack in-place, otherwise we have
-        // to unpack separately and then do a merge.
-        const bool in_place = !dirty_mask && !reduction_mask &&
-                              open_children.empty() && valid_views.empty() && 
-                              reduction_views.empty();
         if (request_kind != CHILD_VERSION_REQUEST)
         {
           // Unpack the dirty and reduction fields
-          if (in_place)
+          if (!dirty_mask && !reduction_mask)
           {
+            // In-place
             derez.deserialize(dirty_mask);
             derez.deserialize(reduction_mask);
           }
           else
           {
+            // Not in-place
             FieldMask dirty_update;
             derez.deserialize(dirty_update);
             dirty_mask |= dirty_update;
@@ -8194,15 +8357,15 @@ namespace Legion {
         if (request_kind != INITIAL_VERSION_REQUEST)
         {
           // Unpack the open children
-          if (in_place)
+          if (open_children.empty())
           {
+            // in-place
             size_t num_children;
             derez.deserialize(num_children);
             for (unsigned idx = 0; idx < num_children; idx++)
             {
               LegionColor child;
               derez.deserialize(child);
-              StateVersions &versions = open_children[child]; 
               size_t num_states;
               derez.deserialize(num_states);
               if (num_states == 0)
@@ -8228,7 +8391,8 @@ namespace Legion {
                   deferred_children_events.insert(state_ready);
                 }
                 else
-                  versions.insert(state, state_mask, &mutator); 
+                  insert_child_version(open_children[child], state, 
+                                       state_mask, &mutator);
               }
               if (deferred_children != NULL)
               {
@@ -8270,6 +8434,7 @@ namespace Legion {
           }
           else
           {
+            // Not in-place
             size_t num_children;
             derez.deserialize(num_children);
             for (unsigned idx = 0; idx < num_children; idx++)
@@ -8381,140 +8546,68 @@ namespace Legion {
               preconditions.insert(finder->second.first);
             }
           }
-          if (in_place)
+          // Don't both with in-place for valid views
+          size_t num_valid_views;
+          derez.deserialize(num_valid_views);
+          for (unsigned idx = 0; idx < num_valid_views; idx++)
           {
-            size_t num_valid_views;
-            derez.deserialize(num_valid_views);
-            for (unsigned idx = 0; idx < num_valid_views; idx++)
-            {
-              DistributedID view_did;
-              derez.deserialize(view_did);
-              RtEvent ready;
-              LogicalView *view = 
-                runtime->find_or_request_logical_view(view_did, ready);
-#ifdef DEBUG_LEGION
-              assert(valid_views.find(view) == valid_views.end());
-#endif
-              FieldMask &mask = valid_views[view];
-              derez.deserialize(mask);
-              if (ready.exists())
-              {
-                pending_views[view] = ready;
-                continue;
-              }
-              view->add_nested_valid_ref(did, &mutator);
-            }
-            size_t num_reduction_views;
-            derez.deserialize(num_reduction_views);
-            for (unsigned idx = 0; idx < num_reduction_views; idx++)
-            {
-              DistributedID view_did;
-              derez.deserialize(view_did);
-              RtEvent ready;
-              LogicalView *view =
-                runtime->find_or_request_logical_view(view_did, ready);
-              ReductionView *red_view = static_cast<ReductionView*>(view); 
-#ifdef DEBUG_LEGION
-              assert(reduction_views.find(red_view) == reduction_views.end());
-#endif
-              FieldMask &mask = reduction_views[red_view];
-              derez.deserialize(mask);
-              if (ready.exists())
-              {
-                pending_views[view] = ready;
-                continue;
-              }
-#ifdef DEBUG_LEGION
-              assert(view->is_instance_view());
-              assert(view->as_instance_view()->is_reduction_view());
-#endif
-              view->add_nested_valid_ref(did, &mutator);
-            }
+            DistributedID view_did;
+            derez.deserialize(view_did);
+            RtEvent ready;
+            LogicalView *view =
+              runtime->find_or_request_logical_view(view_did, ready);
+            FieldMask update_mask;
+            derez.deserialize(update_mask);
+            if (ready.exists())
+              pending_views[view] = 
+                std::pair<RtEvent,FieldMask>(ready, update_mask);
+            else
+              insert_valid_view(view, update_mask, &mutator);
           }
-          else
+          // Reduction views
+          size_t num_reduction_views;
+          derez.deserialize(num_reduction_views);
+          for (unsigned idx = 0; idx < num_reduction_views; idx++)
           {
-            size_t num_valid_views;
-            derez.deserialize(num_valid_views);
-            for (unsigned idx = 0; idx < num_valid_views; idx++)
-            {
-              DistributedID view_did;
-              derez.deserialize(view_did);
-              RtEvent ready;
-              LogicalView *view =
-                runtime->find_or_request_logical_view(view_did, ready);
-              LegionMap<LogicalView*,FieldMask>::aligned::iterator finder = 
-                valid_views.find(view);
-              if (finder != valid_views.end())
-              {
-                FieldMask update_mask;
-                derez.deserialize(update_mask);
-                finder->second |= update_mask;
-                if (ready.exists())
-                  preconditions.insert(ready);
-              }
-              else
-              {
-                FieldMask &mask = valid_views[view];
-                derez.deserialize(mask);
-                if (ready.exists())
-                {
-                  pending_views[view] = ready;
-                  continue;
-                }
-                view->add_nested_valid_ref(did, &mutator);
-              }
-            }
-            size_t num_reduction_views;
-            derez.deserialize(num_reduction_views);
-            for (unsigned idx = 0; idx < num_reduction_views; idx++)
-            {
-              DistributedID view_did;
-              derez.deserialize(view_did);
-              RtEvent ready;
-              LogicalView *view =
-                runtime->find_or_request_logical_view(view_did, ready);
-              ReductionView *red_view = static_cast<ReductionView*>(view);
-              LegionMap<ReductionView*,FieldMask>::aligned::iterator finder =
-                reduction_views.find(red_view);
-              if (finder != reduction_views.end())
-              {
-                FieldMask update_mask;
-                derez.deserialize(update_mask);
-                finder->second |= update_mask;
-                if (ready.exists())
-                  preconditions.insert(ready);
-              }
-              else
-              {
-                FieldMask &mask = reduction_views[red_view];
-                derez.deserialize(mask);
-                if (ready.exists())
-                {
-                  pending_views[view] = ready;
-                  continue;
-                }
-                view->add_nested_valid_ref(did, &mutator);
-              }
-            }
+            DistributedID view_did;
+            derez.deserialize(view_did);
+            RtEvent ready;
+            LogicalView *view =
+              runtime->find_or_request_logical_view(view_did, ready);
+            ReductionView *red_view = static_cast<ReductionView*>(view);
+            FieldMask update_mask;
+            derez.deserialize(update_mask);
+            if (ready.exists())
+              pending_views[view] = 
+                std::pair<RtEvent,FieldMask>(ready, update_mask);
+            else
+              insert_reduction_view(red_view, update_mask, &mutator);
           }
         }
       }
       if (!pending_views.empty())
       {
-        UpdateViewReferences args;
-        args.did = this->did;
-        for (std::map<LogicalView*,RtEvent>::const_iterator it = 
-              pending_views.begin(); it != pending_views.end(); it++)
+        UpdatePendingView args;
+        args.proxy_this = this;
+        for (LegionMap<LogicalView*,std::pair<RtEvent,FieldMask> >::aligned::
+              const_iterator it = pending_views.begin(); 
+              it != pending_views.end(); it++)
         {
-          if (it->second.has_triggered())
+          if (it->second.first.has_triggered())
           {
-            it->first->add_nested_valid_ref(did, &mutator);
+            if (it->first->is_reduction_view())
+              insert_reduction_view(it->first->as_reduction_view(), 
+                                    it->second.second, &mutator);
+            else
+              insert_valid_view(it->first, it->second.second, &mutator);
             continue;
           }
           args.view = it->first;
+          // Have to new this so we can guarantee alignment
+          args.view_mask = new FieldMask(it->second.second);
           preconditions.insert(
               runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY,
-                                               NULL, it->second));
+                                               NULL, it->second.first));
         }
       }
       if (!preconditions.empty())
@@ -8591,16 +8684,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(finder != pending_instances.end());
 #endif
-      // See if it is already in our list of valid views
-      LegionMap<LogicalView*,FieldMask>::aligned::iterator view_finder = 
-        valid_views.find(view);
-      if (view_finder == valid_views.end())
-      {
-        view->add_nested_valid_ref(did, mutator);
-        valid_views[view] = finder->second.second;
-      }
-      else
-        view_finder->second |= finder->second.second;
+      insert_valid_view(view, finder->second.second, mutator);
       // Remove the entry 
       pending_instances.erase(finder);
     }
@@ -8616,12 +8700,26 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void VersionState::process_view_references(const void *args)
+    void VersionState::insert_pending_view(LogicalView *view, 
+                          const FieldMask &view_mask, ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
-      const UpdateViewReferences *view_args = (const UpdateViewReferences*)args;
+      AutoLock s_lock(state_lock);
+      if (view->is_reduction_view())
+        insert_reduction_view(view->as_reduction_view(), view_mask, mutator);
+      else
+        insert_valid_view(view, view_mask, mutator);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void VersionState::process_pending_view(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const UpdatePendingView *view_args = (const UpdatePendingView*)args;
       LocalReferenceMutator mutator;
-      view_args->view->add_nested_valid_ref(view_args->did, &mutator);
+      view_args->proxy_this->insert_pending_view(view_args->view,
+                                   *view_args->view_mask, &mutator);
+      delete view_args->view_mask;
     }
 
     //--------------------------------------------------------------------------
@@ -8696,7 +8794,7 @@ namespace Legion {
           return;
       }
       // Any dirty children also require a close
-      for (LegionMap<LegionColor,StateVersions>::aligned::const_iterator it =
+      for (LegionMap<LegionColor,VersioningSet<> >::aligned::const_iterator it =
             open_children.begin(); it != open_children.end(); it++)
       {
         FieldMask overlap = it->second.get_valid_mask() & test_mask;
@@ -8722,12 +8820,12 @@ namespace Legion {
       {
         // Only need this in read only mode since we're just reading
         AutoLock s_lock(state_lock,1,false/*exclusive*/);
-        for (LegionMap<LegionColor,StateVersions>::aligned::const_iterator cit =
-              open_children.begin(); cit != open_children.end(); cit++)
+        for (LegionMap<LegionColor,VersioningSet<> >::aligned::const_iterator 
+              cit = open_children.begin(); cit != open_children.end(); cit++)
         {
           if (cit->second.get_valid_mask() * capture_mask)
             continue;
-          for (StateVersions::iterator it = cit->second.begin();
+          for (VersioningSet<>::iterator it = cit->second.begin();
                 it != cit->second.end(); it++)
           {
             FieldMask overlap = it->second & capture_mask;
@@ -8749,7 +8847,7 @@ namespace Legion {
               continue;
             if (!it->first->is_composite_view())
             {
-              target->record_valid_view(it->first, overlap);
+              target->record_valid_view(it->first, overlap, mutator);
               non_composite_capture |= overlap;
             }
             else
@@ -8766,7 +8864,7 @@ namespace Legion {
             FieldMask overlap = it->second & reduction_overlap;
             if (!overlap)
               continue;
-            target->record_reduction_view(it->first, overlap);
+            target->record_reduction_view(it->first, overlap, mutator);
           }
         }
       }
@@ -8779,14 +8877,14 @@ namespace Legion {
           {
             it->second -= non_composite_capture;
             if (!!it->second)
-              target->record_valid_view(it->first, it->second);
+              target->record_valid_view(it->first, it->second, mutator);
           }
         }
         else
         {
           for (LegionMap<CompositeView*,FieldMask>::aligned::const_iterator it =
                 composite_views.begin(); it != composite_views.end(); it++)
-            target->record_valid_view(it->first, it->second);
+            target->record_valid_view(it->first, it->second, mutator);
         }
       }
     }
@@ -8809,7 +8907,7 @@ namespace Legion {
           FieldMask overlap = it->second & dirty_overlap;
           if (!overlap)
             continue;
-          target->record_valid_view(it->first, overlap, mutator);
+          target->record_valid_view(it->first, overlap);
         }
       }
       FieldMask reduction_overlap = reduction_mask & capture_mask;
@@ -8822,22 +8920,21 @@ namespace Legion {
           FieldMask overlap = it->second & reduction_overlap;
           if (!overlap)
             continue;
-          target->record_reduction_view(it->first, overlap, mutator);
+          target->record_reduction_view(it->first, overlap);
         }
       }
-      for (LegionMap<LegionColor,StateVersions>::aligned::const_iterator cit =
-            open_children.begin(); cit != open_children.end(); cit++)
+      for (LegionMap<LegionColor,VersioningSet<> >::aligned::const_iterator 
+            cit = open_children.begin(); cit != open_children.end(); cit++)
       {
         if (cit->second.get_valid_mask() * capture_mask)
           continue;
-        for (StateVersions::iterator it = cit->second.begin();
+        for (VersioningSet<>::iterator it = cit->second.begin();
               it != cit->second.end(); it++)
         {
           FieldMask overlap = it->second & capture_mask;
           if (!overlap)
             continue;
-          target->record_child_version_state(cit->first, it->first, 
-                                             overlap, mutator);
+          target->record_child_version_state(cit->first, it->first, overlap);
         }
       }
     }
@@ -8866,19 +8963,8 @@ namespace Legion {
           FieldMask overlap = it->second & dirty_overlap;
           if (!overlap)
             continue;
-          LegionMap<LogicalView*,FieldMask,VALID_VIEW_ALLOC>::
-           track_aligned::iterator finder = target->valid_views.find(it->first);
-          if (finder == target->valid_views.end())
-          {
-#ifdef DEBUG_LEGION
-            assert(target->currently_valid);
-#endif
-            // No need for a mutator here, it is already valid
-            it->first->add_nested_valid_ref(target->did);
-            target->valid_views[it->first] = overlap;
-          }
-          else
-            finder->second |= overlap;
+          // No need for a mutator here, it is already valid
+          target->insert_valid_view(it->first, overlap, NULL);
         }
       }
       FieldMask reduction_overlap = reduction_mask & capture_mask;

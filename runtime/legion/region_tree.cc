@@ -12038,7 +12038,7 @@ namespace Legion {
       WrapperReferenceMutator mutator(ready_events);
       state->capture_composite_root(result, composite_mask, 
                                     &mutator, valid_above);
-      result->finalize_capture(true/*prune*/);
+      result->finalize_capture(true/*prune*/, &mutator);
       // Clear out any reductions
       invalidate_reduction_views(state, composite_mask);
       // Update the valid views to reflect the new valid instance
@@ -14885,15 +14885,16 @@ namespace Legion {
                                         view_info, this, true_guard, 
                                         false_guard,
                                         true/*register now*/);
+        WrapperReferenceMutator mutator(map_applied_events);
         // Record the true and false views
-        phi_view->record_true_view(fill_view, fill_mask);
+        phi_view->record_true_view(fill_view, fill_mask, &mutator);
         LegionMap<LogicalView*,FieldMask>::aligned current_views;
         find_valid_instance_views(ctx, state, fill_mask, fill_mask,
                                   version_info, false/*needs space*/, 
                                   current_views);
         for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it = 
               current_views.begin(); it != current_views.end(); it++)
-          phi_view->record_false_view(it->first, it->second);
+          phi_view->record_false_view(it->first, it->second, &mutator);
         // Update the state with the phi view
         update_valid_views(state, fill_mask, true/*dirty*/, phi_view);
       }
