@@ -336,7 +336,7 @@ namespace Realm {
 	    this->entries.resize(n + count - 1);
 	    assert(!this->entries[n - 1].sparsity.exists());
 	    assert(this->entries[n - 1].bitmap == 0);
-	    this->entries[n - 1].bounds.hi = rects[0].lo;
+	    this->entries[n - 1].bounds.hi = rects[0].hi;
 	    for(size_t i = 1; i < count; i++) {
 	      this->entries[n - 1 + i].bounds = rects[i];
 	      this->entries[n - 1 + i].sparsity.id = 0; // no sparsity map
