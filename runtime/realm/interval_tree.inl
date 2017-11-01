@@ -272,7 +272,7 @@ namespace Realm {
       // our split point isn't covered, but test our intervals against the highest test inverval
       //  below and the lowest test interval above
       if(hi >= 0) {
-	IT last_end = iv_ranges.end(hi);
+	IT last_end = iv_ranges.end(hi + offset);
 	for(size_t i = 0; i < sorted_by_start.size(); i++) {
 	  if(starts[sorted_by_start[i]] > last_end)
 	    break;  // no more will match either
@@ -282,7 +282,7 @@ namespace Realm {
 	}
       }
       if(lo < count) {
-	IT first_start = iv_ranges.start(lo);
+	IT first_start = iv_ranges.start(lo + offset);
 	for(size_t i = 0; i < sorted_by_end.size(); i++) {
 	  if(ends[sorted_by_end[i]] < first_start) 
 	    break;  // no more will match either
