@@ -81,6 +81,9 @@ namespace Legion {
 	// should this task be assigned to a processor in the same address
 	//  space as the parent task
 	SAME_ADDRESS_SPACE = (1 << 2),
+
+	// should this instance be placed in an RDMA-able memory if possible?
+	PREFER_RDMA_MEMORY = (1 << 3),
       };
     protected: // Internal types
       struct VariantInfo {
@@ -515,7 +518,8 @@ namespace Legion {
                LayoutConstraintID>             layout_constraint_cache;
       std::map<std::pair<Memory::Kind,ReductionOpID>,
                LayoutConstraintID>             reduction_constraint_cache;
-      std::map<Processor,Memory>               cached_target_memory;
+      std::map<Processor,Memory>               cached_target_memory,
+	                                       cached_rdma_target_memory;
     protected:
       // The maximum number of tasks a mapper will allow to be stolen at a time
       // Controlled by -dm:thefts
