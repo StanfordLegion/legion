@@ -1796,8 +1796,8 @@ class State(object):
             self.last_time = stop 
         proc.add_task(user)
 
-    def log_task_wait_info(self, op_id, variant_id, wait_start, wait_ready, wait_end):
-        variant = self.find_variant(variant_id)
+    def log_task_wait_info(self, op_id, task_id, variant_id, wait_start, wait_ready, wait_end):
+        variant = self.find_variant(task_id, variant_id)
         task = self.find_task(op_id, variant)
         assert wait_ready >= wait_start
         assert wait_end >= wait_ready
