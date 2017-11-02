@@ -7514,13 +7514,20 @@ namespace Legion {
     {
       activate_close();
     }
+
+    //--------------------------------------------------------------------------
+    void ReadCloseOp::deactivate_read_only(void)
+    //--------------------------------------------------------------------------
+    {
+      deactivate_close();
+      close_mask.clear();
+    }
     
     //--------------------------------------------------------------------------
     void ReadCloseOp::deactivate(void)
     //--------------------------------------------------------------------------
     {
-      deactivate_close();
-      close_mask.clear();
+      deactivate_read_only();
       runtime->free_read_close_op(this);
     }
 

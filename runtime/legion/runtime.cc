@@ -9924,6 +9924,7 @@ namespace Legion {
       {
         delete (*it);
       }
+      available_read_close_ops.clear();
       read_close_op_lock.destroy_reservation();
       read_close_op_lock = Reservation::NO_RESERVATION;
       for (std::deque<PostCloseOp*>::const_iterator it = 

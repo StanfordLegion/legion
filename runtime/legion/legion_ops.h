@@ -1432,6 +1432,8 @@ namespace Legion {
     public:
       virtual unsigned find_parent_index(unsigned idx);
     protected:
+      void deactivate_read_only(void);
+    protected:
       unsigned parent_req_index; 
     protected:
       FieldMask close_mask;

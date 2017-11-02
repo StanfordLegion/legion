@@ -795,7 +795,7 @@ namespace Legion {
     void ReplReadCloseOp::deactivate(void)
     //--------------------------------------------------------------------------
     {
-      ReadCloseOp::deactivate();
+      deactivate_read_only();
       runtime->free_repl_read_close_op(this);
     }
 
