@@ -6690,6 +6690,10 @@ namespace Legion {
           shard_collective_radix, shard_collective_log_radix,
           shard_collective_stages, shard_collective_participating_shards,
           shard_collective_last_radix, shard_collective_last_log_radix);
+      // Set up some other data structures we might need
+      clone_close_creators.resize(CONTROL_REPLICATION_COMMUNICATION_BARRIERS);
+      for (unsigned idx = 0; idx < clone_close_creators.size(); idx++)
+        clone_close_creators[idx] = idx % shard_manager->total_shards;
     }
 
     //--------------------------------------------------------------------------
@@ -9694,8 +9698,35 @@ namespace Legion {
         const unsigned clone_index = close->get_next_clone_index();
         if (clone_index >= clone_close_barriers[close_index].size())
         {
-          // Bad news
-          assert(false);
+          // This should be a very rare path where we come down here
+          // and need to make a new barrier to be used for cloning
+#ifdef DEBUG_LEGION
+          // Should be just one bigger
+          assert(clone_index == clone_close_barriers[close_index].size());
+          assert(close_index < clone_close_creators.size());
+#endif
+          // See if we are the shard to make the new barrier and 
+          // broadcast or find it and wait for it
+          if (owner_shard->shard_id == clone_close_creators[close_index])
+          {
+            // We're the one to make it and broadcast it
+            RtBarrier bar(
+                Realm::Barrier::create_barrier(shard_manager->total_shards));  
+            // Broadcast it
+            shard_manager->broadcast_clone_barrier(close_index, clone_index, 
+                bar, runtime->address_space);
+          }
+          // Update for the next time around
+          clone_close_creators[close_index]++;
+          // Reset back to shard 0 if we wrap around
+          if (clone_close_creators[close_index] == shard_manager->total_shards)
+            clone_close_creators[close_index] = 0;
+          // No matter if we made it or not we should be able to get it now
+          RtBarrier bar = find_clone_barrier(close_index, clone_index);
+          clone_close_barriers[close_index].push_back(bar);
+#ifdef DEBUG_LEGION
+          assert(clone_index < clone_close_barriers[close_index].size());
+#endif
         }
         RtBarrier &bar = clone_close_barriers[close_index][clone_index];
         close_bar = bar;
@@ -10142,6 +10173,65 @@ namespace Legion {
 #endif
         live_composite_views.erase(finder);
       }
+    }
+
+    //--------------------------------------------------------------------------
+    RtBarrier ReplicateContext::find_clone_barrier(unsigned close_index,
+                                                   unsigned clone_index)
+    //--------------------------------------------------------------------------
+    {
+      RtUserEvent wait_on;
+      const std::pair<unsigned,unsigned> key(close_index, clone_index);
+      // Take the lock and see if we can find one that already exists
+      {
+        AutoLock ctx_lock(context_lock);
+        std::map<std::pair<unsigned,unsigned>,RtBarrier>::iterator finder = 
+          ready_clone_barriers.find(key);
+        if (finder != ready_clone_barriers.end())
+        {
+          RtBarrier result = finder->second;
+          ready_clone_barriers.erase(finder);
+          return result;
+        }
+        // Otherwise make a user event to wait on
+        wait_on = Runtime::create_rt_user_event();
+        pending_clone_barriers[key] = wait_on;
+      }
+      wait_on.lg_wait();
+      // Retake the lock and it better be there
+      AutoLock ctx_lock(context_lock);
+      std::map<std::pair<unsigned,unsigned>,RtBarrier>::iterator finder = 
+          ready_clone_barriers.find(key);
+#ifdef DEBUG_LEGION
+      assert(finder != ready_clone_barriers.end());
+#endif
+      RtBarrier result = finder->second;
+      ready_clone_barriers.erase(finder);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplicateContext::record_clone_barrier(unsigned close_index,
+                                            unsigned clone_index, RtBarrier bar)
+    //--------------------------------------------------------------------------
+    {
+      RtUserEvent to_trigger;
+      const std::pair<unsigned,unsigned> key(close_index, clone_index);
+      {
+        AutoLock ctx_lock(context_lock);
+#ifdef DEBUG_LEGION
+        assert(ready_clone_barriers.find(key) == ready_clone_barriers.end());
+#endif
+        ready_clone_barriers[key] = bar;
+        // See if we have any events to trigger
+        std::map<std::pair<unsigned,unsigned>,RtUserEvent>::iterator finder = 
+          pending_clone_barriers.find(key);
+        if (finder == pending_clone_barriers.end())
+          return;
+        to_trigger = finder->second;
+        pending_clone_barriers.erase(finder);
+      }
+      Runtime::trigger_event(to_trigger);
     }
 
     /////////////////////////////////////////////////////////////

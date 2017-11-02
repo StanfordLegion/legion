@@ -877,6 +877,8 @@ namespace Legion {
       void handle_collective_message(Deserializer &derez);
       void handle_future_map_request(Deserializer &derez);
       void handle_composite_view_request(Deserializer &derez);
+      void handle_clone_barrier_broadcast(unsigned close_index, 
+                          unsigned clone_index, RtBarrier bar);
     public:
       InstanceView* create_instance_top_view(PhysicalManager *manager,
                                              AddressSpaceID source);

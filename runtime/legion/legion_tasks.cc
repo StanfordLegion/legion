@@ -7217,6 +7217,23 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ShardTask::handle_clone_barrier_broadcast(unsigned close_index,
+                                            unsigned clone_index, RtBarrier bar)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(execution_context != NULL);
+      ReplicateContext *repl_ctx = 
+        dynamic_cast<ReplicateContext*>(execution_context);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = 
+        static_cast<ReplicateContext*>(execution_context);
+#endif
+      repl_ctx->record_clone_barrier(close_index, clone_index, bar);
+    }
+
+    //--------------------------------------------------------------------------
     InstanceView* ShardTask::create_instance_top_view(PhysicalManager *manager,
                                                       AddressSpaceID source)
     //--------------------------------------------------------------------------

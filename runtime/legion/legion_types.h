@@ -721,6 +721,7 @@ namespace Legion {
       SEND_REPL_COMPOSITE_VIEW_RESPONSE,
       SEND_REPL_TOP_VIEW_REQUEST,
       SEND_REPL_TOP_VIEW_RESPONSE,
+      SEND_REPL_CLONE_BARRIER,
       SEND_MAPPER_MESSAGE,
       SEND_MAPPER_BROADCAST,
       SEND_TASK_IMPL_SEMANTIC_REQ,
@@ -872,6 +873,7 @@ namespace Legion {
         "Send Replicate Composite View Response",                     \
         "Send Replicate Top View Request",                            \
         "Send Replicate Top View Response",                           \
+        "Send Replicate Clone Barrier",                               \
         "Send Mapper Message",                                        \
         "Send Mapper Broadcast",                                      \
         "Send Task Impl Semantic Req",                                \

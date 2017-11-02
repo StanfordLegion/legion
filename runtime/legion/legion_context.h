@@ -1444,6 +1444,11 @@ namespace Legion {
       CompositeView* find_or_buffer_composite_view_request(Deserializer &derez);
       void unregister_composite_view(CompositeView *view, RtEvent close_done);
     public:
+      // Clone barrier methods
+      RtBarrier find_clone_barrier(unsigned close_index, unsigned clone_index);
+      void record_clone_barrier(unsigned close_index, unsigned clone_index,
+                                RtBarrier bar);
+    public:
       ShardTask *const owner_shard;
       ShardManager *const shard_manager;
     protected:
@@ -1458,6 +1463,8 @@ namespace Legion {
       // infinite nested composite view problem, the outer vector is the
       // same size as view_close_barriers
       std::vector<std::vector<RtBarrier> > clone_close_barriers;
+      // The next shard to make any dynamic clone close barriers if necessary
+      std::vector<ShardID> clone_close_creators;
     protected:
       ShardID index_space_allocator_shard;
       ShardID index_partition_allocator_shard;
@@ -1498,6 +1505,9 @@ namespace Legion {
     protected:
       // Different from pending_top_views as this applies to our requests
       std::map<PhysicalManager*,RtUserEvent> pending_request_views;
+    protected:
+      std::map<std::pair<unsigned,unsigned>,RtBarrier> ready_clone_barriers;
+      std::map<std::pair<unsigned,unsigned>,RtUserEvent> pending_clone_barriers;
     };
 
     /**

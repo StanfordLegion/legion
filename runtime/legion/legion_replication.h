@@ -1063,6 +1063,9 @@ namespace Legion {
       void send_composite_view_request(ShardID target, Serializer &rez);
       void handle_composite_view_request(Deserializer &derez);
     public:
+      void broadcast_clone_barrier(unsigned close_index,
+          unsigned clone_index, RtBarrier bar, AddressSpaceID origin);
+    public:
       static void handle_launch(const void *args);
       static void handle_delete(const void *args);
     public:
@@ -1079,6 +1082,8 @@ namespace Legion {
       static void handle_top_view_request(Deserializer &derez, Runtime *rt,
                                           AddressSpaceID request_source);
       static void handle_top_view_response(Deserializer &derez, Runtime *rt);
+      static void handle_clone_barrier(Deserializer &derez, Runtime *rt,
+                                       AddressSpaceID source);
     public:
       ShardingFunction* find_sharding_function(ShardingID sid);
     public:

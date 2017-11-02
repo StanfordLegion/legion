@@ -3208,6 +3208,38 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ShardManager::broadcast_clone_barrier(unsigned close_index,
+                     unsigned clone_index, RtBarrier bar, AddressSpaceID origin)
+    //--------------------------------------------------------------------------
+    {
+      // For now we will do a dumb broadcast where the owner sends it to
+      // everyone since this will be a rare event, if it ever becomes
+      // a performance bottleneck we can make this a radix broadcast
+      if (origin == runtime->address_space)
+      {
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(repl_id);
+          rez.serialize(close_index);
+          rez.serialize(clone_index);
+          rez.serialize(bar);
+        }
+        for (std::set<AddressSpaceID>::const_iterator it = 
+             unique_shard_spaces.begin(); it != unique_shard_spaces.end(); it++)
+        {
+          if ((*it) == origin)
+            continue;
+          runtime->send_control_replicate_clone_barrier(*it, rez);
+        }
+      }
+      // Then we can notify our local shards
+      for (std::vector<ShardTask*>::const_iterator it = 
+            local_shards.begin(); it != local_shards.end(); it++)
+        (*it)->handle_clone_barrier_broadcast(close_index, clone_index, bar);
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ void ShardManager::handle_launch(const void *args)
     //--------------------------------------------------------------------------
     {
@@ -3368,6 +3400,24 @@ namespace Legion {
       if (!view_ready.has_triggered())
         view_ready.lg_wait();
       request_context->record_replicate_instance_top_view(manager, view);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ShardManager::handle_clone_barrier(Deserializer &derez,
+                                        Runtime *runtime, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      ReplicationID repl_id;
+      derez.deserialize(repl_id);
+      unsigned close_index, clone_index;
+      derez.deserialize(close_index);
+      derez.deserialize(clone_index);
+      RtBarrier bar;
+      derez.deserialize(bar);
+
+      ShardManager *manager = runtime->find_shard_manager(repl_id);
+      manager->broadcast_clone_barrier(close_index, clone_index, bar, source);
     }
 
     //--------------------------------------------------------------------------
