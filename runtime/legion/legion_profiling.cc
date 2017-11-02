@@ -153,7 +153,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LegionProfInstance::process_task(VariantID variant_id, UniqueID op_id,
+    void LegionProfInstance::process_task(
+            TaskID task_id, VariantID variant_id, UniqueID op_id,
             const Realm::ProfilingMeasurements::OperationTimeline &timeline,
             const Realm::ProfilingMeasurements::OperationProcessorUsage &usage,
             const Realm::ProfilingMeasurements::OperationEventWaits &waits)
@@ -165,6 +166,7 @@ namespace Legion {
       task_infos.push_back(TaskInfo()); 
       TaskInfo &info = task_infos.back();
       info.op_id = op_id;
+      info.task_id = task_id;
       info.variant_id = variant_id;
       info.proc_id = usage.proc.id;
       info.create = timeline.create_time;
@@ -934,7 +936,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void LegionProfiler::add_task_request(Realm::ProfilingRequestSet &requests,
-                                          TaskID tid, SingleTask *task)
+                                    TaskID tid, VariantID vid, SingleTask *task)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -944,6 +946,7 @@ namespace Legion {
 #endif
       ProfilingInfo info(this, LEGION_PROF_TASK); 
       info.id = tid;
+      info.id2 = vid;
       info.op_id = task->get_unique_id();
       Realm::ProfilingRequest &req = requests.add_request((target_proc.exists())
                 ? target_proc : Processor::get_executing_processor(),
@@ -1094,7 +1097,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void LegionProfiler::add_task_request(Realm::ProfilingRequestSet &requests,
-                                          TaskID tid, UniqueID uid)
+                                        TaskID tid, VariantID vid, UniqueID uid)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -1104,6 +1107,7 @@ namespace Legion {
 #endif
       ProfilingInfo info(this, LEGION_PROF_TASK); 
       info.id = tid;
+      info.id2 = vid;
       info.op_id = uid;
       Realm::ProfilingRequest &req = requests.add_request((target_proc.exists())
                 ? target_proc : Processor::get_executing_processor(),
@@ -1270,7 +1274,7 @@ namespace Legion {
             // Ignore anything that was predicated false for now
             if (has_usage)
               thread_local_profiling_instance->process_task(info->id, 
-                  info->op_id, timeline, usage, waits);
+                  info->id2, info->op_id, timeline, usage, waits);
             break;
           }
         case LEGION_PROF_META:

@@ -230,7 +230,7 @@ namespace Legion {
       void register_multi_task(Operation *op, TaskID kind);
       void register_slice_owner(UniqueID pid, UniqueID id);
     public:
-      void process_task(VariantID variant_id, UniqueID op_id, 
+      void process_task(TaskID task_id, VariantID variant_id, UniqueID op_id, 
             const Realm::ProfilingMeasurements::OperationTimeline &timeline,
             const Realm::ProfilingMeasurements::OperationProcessorUsage &usage,
             const Realm::ProfilingMeasurements::OperationEventWaits &waits);
@@ -316,7 +316,7 @@ namespace Legion {
           : ProfilingResponseBase(p), kind(k) { }
       public:
         ProfilingKind kind;
-        size_t id;
+        size_t id, id2;
         UniqueID op_id;
       };
       struct LgOutputTaskArgs : public LgTaskArgs<LgOutputTaskArgs> {
@@ -356,7 +356,7 @@ namespace Legion {
       void register_slice_owner(UniqueID pid, UniqueID id);
     public:
       void add_task_request(Realm::ProfilingRequestSet &requests, 
-                            TaskID tid, SingleTask *task);
+                            TaskID tid, VariantID vid, SingleTask *task);
       void add_meta_request(Realm::ProfilingRequestSet &requests,
                             LgTaskID tid, Operation *op);
       void add_copy_request(Realm::ProfilingRequestSet &requests, 
@@ -374,7 +374,7 @@ namespace Legion {
     public:
       // Alternate versions of the one above with op ids
       void add_task_request(Realm::ProfilingRequestSet &requests, 
-                            TaskID tid, UniqueID uid);
+                            TaskID tid, VariantID vid, UniqueID uid);
       void add_meta_request(Realm::ProfilingRequestSet &requests,
                             LgTaskID tid, UniqueID uid);
       void add_copy_request(Realm::ProfilingRequestSet &requests, 
