@@ -136,6 +136,7 @@ namespace Legion {
       struct TaskInfo {
       public:
         UniqueID op_id;
+        TaskID task_id;
         VariantID variant_id;
         ProcID proc_id;
         timestamp_t create, ready, start, stop;

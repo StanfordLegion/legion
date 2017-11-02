@@ -1246,23 +1246,29 @@ namespace Realm {
     return cm;
   }
 
-  // proc with the same physical core share everything (ALU,FPU,LDST)
-  void update_ht_sharing(std::map<std::pair<int, int>, std::set<CoreMap::Proc *> > ht_sets)
+  // this function is templated on the map key, since we don't really care 
+  //  what was used to make the equivalence classes
+  template <typename K>
+  void update_core_sharing(const std::map<K, std::set<CoreMap::Proc *> >& core_sets,
+			   bool share_alu, bool share_fpu, bool share_ldst)
   {
-    for(std::map<std::pair<int, int>, std::set<CoreMap::Proc *> >::const_iterator it = ht_sets.begin();
-        it != ht_sets.end();
+    for(typename std::map<K, std::set<CoreMap::Proc *> >::const_iterator it = core_sets.begin();
+        it != core_sets.end();
         it++) {
-      const std::set<CoreMap::Proc *>& ht = it->second;
-      if(ht.size() == 1) continue;  // singleton set - no sharing
+      const std::set<CoreMap::Proc *>& cset = it->second;
+      if(cset.size() == 1) continue;  // singleton set - no sharing
 
       // all pairs dependencies
-      for(std::set<CoreMap::Proc *>::const_iterator it1 = ht.begin(); it1 != ht.end(); it1++) {
-        for(std::set<CoreMap::Proc *>::const_iterator it2 = ht.begin(); it2 != ht.end(); it2++) {
+      for(std::set<CoreMap::Proc *>::const_iterator it1 = cset.begin(); it1 != cset.end(); it1++) {
+        for(std::set<CoreMap::Proc *>::const_iterator it2 = cset.begin(); it2 != cset.end(); it2++) {
           if(it1 != it2) {
             CoreMap::Proc *p = *it1;
-            p->shares_alu.insert(*it2);
-            p->shares_fpu.insert(*it2);
-            p->shares_ldst.insert(*it2);
+            if(share_alu)
+	      p->shares_alu.insert(*it2);
+	    if(share_fpu)
+	      p->shares_fpu.insert(*it2);
+	    if(share_ldst)
+	      p->shares_ldst.insert(*it2);
           }
         }
       }
@@ -1287,7 +1293,12 @@ namespace Realm {
 
     CoreMap *cm = new CoreMap;
     // hyperthreading sets are cores with the same node ID and physical core ID
+    //  they share ALU, FPU, and LDST units
     std::map<std::pair<int, int>, std::set<CoreMap::Proc *> > ht_sets;
+
+    // "thread_siblings" can be used to detect Bulldozer's core pairs that 
+    //  share the same FPU (this will also catch hyperthreads, but that's ok)
+    std::map<std::string, std::set<CoreMap::Proc *> > sibling_sets;
 
     // look for entries named /sys/devices/system/node/node<N>
     for(struct dirent *ne = readdir(nd); ne; ne = readdir(nd)) {
@@ -1344,13 +1355,34 @@ namespace Realm {
 
 	// add to HT sets to deal with in a bit
 	ht_sets[std::make_pair(node_id, core_id)].insert(p);
+
+	// read the sibling set, if we can - no need to parse it because we
+	//  expect symmetry across all cores in the same set
+	{
+	  char sibling_path[1024];
+	  sprintf(sibling_path, "/sys/devices/system/node/%s/%s/topology/thread_siblings_list", ne->d_name, ce->d_name);
+	  FILE *f = fopen(sibling_path, "r");
+	  if(f) {
+	    char line[256];
+	    if(fgets(line, 255, f)) {
+	      if(*line)
+		sibling_sets[line].insert(p);
+	    } else
+	      log_thread.warning() << "error reading '" << sibling_path << "' - no contents?";
+	    fclose(f);
+	  } else
+	    log_thread.warning() << "can't read '" << sibling_path << "' - skipping";
+	}
       }
       closedir(cd);
     }
     closedir(nd);
 
-    if(hyperthread_sharing)
-      update_ht_sharing(ht_sets);
+    if(hyperthread_sharing) {
+      update_core_sharing(ht_sets, true /*alu*/, true /*fpu*/, true /*ldst*/);
+      update_core_sharing(sibling_sets,
+			  false /*!alu*/, true /*fpu*/, false /*!ldst*/);
+    }
 
     // all done!
     return cm;
@@ -1358,25 +1390,6 @@ namespace Realm {
 #endif
 
 #ifdef REALM_USE_HWLOC
-  // bulldozer siblings share fpu
-  static void update_bd_sharing(std::map<int, std::set<CoreMap::Proc *> > bd_sets)
-  {
-    for(std::map<int, std::set<CoreMap::Proc *> >::const_iterator it = bd_sets.begin();
-        it != bd_sets.end();
-        it++) {
-      const std::set<CoreMap::Proc *>& bd = it->second;
-
-      for(std::set<CoreMap::Proc *>::const_iterator it1 = bd.begin(); it1 != bd.end(); it1++) {
-        for(std::set<CoreMap::Proc *>::const_iterator it2 = bd.begin(); it2 != bd.end(); it2++) {
-          if(it1 != it2) {
-            CoreMap::Proc *p = *it1;
-            p->shares_fpu.insert(*it2);
-          }
-        }
-      }
-    }
-  }
-
 #ifdef __linux__
   // find bulldozer cpus that share fpu
   static bool get_bd_sibling_id(int cpu_id, int core_id,
@@ -1399,6 +1412,9 @@ namespace Realm {
 	siblingid = hwloc_bitmap_next(set, siblingid)) {
       if(siblingid == cpu_id) continue;
 
+      // don't filter siblings with the same core ID - this catches
+      //  hyperthreads too
+#if 0
       sprintf(str, "/sys/devices/system/cpu/cpu%d/topology/core_id", siblingid);
       f = fopen(str, "r");
       if(!f) {
@@ -1411,9 +1427,10 @@ namespace Realm {
       if(count != 1) {
 	log_thread.warning() << "can't find core id in '" << str << "' - skipping";
 	continue;
-      }      
-      if(sib_core_id != core_id)
-	sibling_ids.insert(sib_core_id);
+      }
+      if(sib_core_id == core_id) continue;
+#endif
+      sibling_ids.insert(siblingid);
     }
 
     hwloc_bitmap_free(set);
@@ -1476,9 +1493,11 @@ namespace Realm {
     }
     hwloc_topology_destroy(topology);
 
-    if(hyperthread_sharing)
-      update_ht_sharing(ht_sets);
-    update_bd_sharing(bd_sets);
+    if(hyperthread_sharing) {
+      update_core_sharing(ht_sets, true /*alu*/, true /*fpu*/, true /*ldst*/);
+      update_core_sharing(bd_sets,
+			  false /*!alu*/, true /*fpu*/, false /*!ldst*/);
+    }
 
     // all done!
     return cm;
