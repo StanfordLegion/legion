@@ -1255,6 +1255,28 @@ namespace Legion {
         FieldMask valid_fields;
       };
     public:
+      // A custom comparator for making sure that all our nested
+      // composite views are traversed in order for when we are
+      // control replicated and we have to guaranteed that things
+      // are done in the same order across all shards
+      struct NestedComparator {
+      public:
+        inline bool operator()(CompositeView* left, CompositeView *right) const
+        {
+          if (left->shard_invalid_barrier < right->shard_invalid_barrier)
+            return true;
+          else if (left->shard_invalid_barrier != right->shard_invalid_barrier)
+            return false;
+          else
+            return (left < right);
+        }
+      };
+      // Note we use a special comparator here to ensure that we always
+      // iterate over nested composite views in the same way across all
+      // shards for when we are doing control replication
+      typedef LegionMap<CompositeView*,FieldMask,
+                        LAST_ALLOC,NestedComparator>::aligned NestedViewMap;
+    public:
       CompositeView(RegionTreeForest *ctx, DistributedID did,
                     AddressSpaceID owner_proc, RegionTreeNode *node, 
                     DeferredVersionInfo *info,
@@ -1268,8 +1290,8 @@ namespace Legion {
       CompositeView& operator=(const CompositeView &rhs);
     public:
       CompositeView* clone(const FieldMask &clone_mask,
-        const LegionMap<CompositeView*,FieldMask>::aligned &replacements,
-        ReferenceMutator *mutator, InterCloseOp *op) const;
+          const NestedViewMap &replacements, 
+          ReferenceMutator *mutator, InterCloseOp *op) const;
     public:
       virtual bool has_parent(void) const { return false; }
       virtual LogicalView* get_parent(void) const 
@@ -1282,9 +1304,8 @@ namespace Legion {
       virtual void send_view(AddressSpaceID target); 
     public:
       void prune(ClosedNode *closed_tree, FieldMask &valid_mask,
-                 LegionMap<CompositeView*,FieldMask>::aligned &replacements,
-                 unsigned prune_depth, ReferenceMutator *mutator,
-                 InterCloseOp *op);
+                 NestedViewMap &replacements, unsigned prune_depth, 
+                 ReferenceMutator *mutator, InterCloseOp *op);
       virtual void issue_deferred_copies(const TraversalInfo &info,
                                          MaterializedView *dst,
                                          FieldMask copy_mask,
@@ -1370,8 +1391,8 @@ namespace Legion {
     protected:
       // Note that we never record any version state names here, we just
       // record the views and children we immediately depend on and that
-      // is how we break the inifinite meta-data cycle
-      LegionMap<CompositeView*,FieldMask>::aligned nested_composite_views;
+      // is how we break the inifinite meta-data cycle 
+      NestedViewMap nested_composite_views;
     protected:
       LegionMap<RegionTreeNode*,NodeVersionInfo>::aligned node_versions;
     protected:

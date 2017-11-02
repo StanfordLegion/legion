@@ -5595,7 +5595,7 @@ namespace Legion {
       // Remove any resource references we still have
       if (!is_owner())
       {
-        for (LegionMap<CompositeView*,FieldMask>::aligned::const_iterator it =
+        for (NestedViewMap::const_iterator it =
               nested_composite_views.begin(); it != 
               nested_composite_views.end(); it++)
           if (it->first->remove_nested_resource_ref(did))
@@ -5634,17 +5634,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     CompositeView* CompositeView::clone(const FieldMask &clone_mask,
-         const LegionMap<CompositeView*,FieldMask>::aligned &replacements,
+                                        const NestedViewMap &replacements,
                               ReferenceMutator *mutator, InterCloseOp *op) const
     //--------------------------------------------------------------------------
     {
       CompositeView *result = owner_context->create_composite_view(logical_node,
           version_info, closed_tree, op, true/*clone*/);
-#if 0
-      if (shard_invalid_barrier.exists())
-        result->set_shard_invalid_barrier(shard_invalid_barrier, origin_shard,
-                                          false/*original composite view*/);
-#endif
       // Clone the children
       for (LegionMap<CompositeNode*,FieldMask>::aligned::const_iterator it = 
             children.begin(); it != children.end(); it++)
@@ -5702,7 +5697,7 @@ namespace Legion {
       }
       children.clear();
       // Only GC references for nested views here
-      for (LegionMap<CompositeView*,FieldMask>::aligned::const_iterator it = 
+      for (NestedViewMap::const_iterator it = 
             nested_composite_views.begin(); it != 
             nested_composite_views.end(); it++)
         if (it->first->remove_nested_gc_ref(did, mutator))
@@ -5763,7 +5758,7 @@ namespace Legion {
                                          NULL/*op*/, shard_invalid_barrier);
       }
       // Tell the nested views that they can be potentially collected too
-      for (LegionMap<CompositeView*,FieldMask>::aligned::const_iterator it =
+      for (NestedViewMap::const_iterator it =
             nested_composite_views.begin(); it != 
             nested_composite_views.end(); it++)
         it->first->remove_nested_valid_ref(did, mutator);
@@ -5823,8 +5818,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void CompositeView::prune(ClosedNode *new_tree, FieldMask &valid_mask,
-              LegionMap<CompositeView*,FieldMask>::aligned &replacements, 
-              unsigned prune_depth, ReferenceMutator *mutator, InterCloseOp *op)
+                              NestedViewMap &replacements, unsigned prune_depth,
+                              ReferenceMutator *mutator, InterCloseOp *op)
     //--------------------------------------------------------------------------
     {
       if (prune_depth >= LEGION_PRUNE_DEPTH_WARNING)
@@ -5844,7 +5839,7 @@ namespace Legion {
         // If we had any dominated fields then we try to prune our
         // deferred valid views and put the results directly into 
         // the replacements
-        for (LegionMap<CompositeView*,FieldMask>::aligned::const_iterator it = 
+        for (NestedViewMap::const_iterator it = 
               nested_composite_views.begin(); it != 
               nested_composite_views.end(); it++)
         {
@@ -5872,8 +5867,8 @@ namespace Legion {
       }
       // For any non-dominated fields, see if any of our composite views change
       FieldMask changed_mask;
-      LegionMap<CompositeView*,FieldMask>::aligned local_replacements;
-      for (LegionMap<CompositeView*,FieldMask>::aligned::iterator it = 
+      NestedViewMap local_replacements;
+      for (NestedViewMap::iterator it = 
             nested_composite_views.begin(); it != 
             nested_composite_views.end(); it++)
       {
@@ -5890,7 +5885,7 @@ namespace Legion {
       }
       if (!local_replacements.empty())
       {
-        for (LegionMap<CompositeView*,FieldMask>::aligned::const_iterator it =
+        for (NestedViewMap::const_iterator it =
               local_replacements.begin(); it != local_replacements.end(); it++)
           changed_mask |= it->second;
       }
@@ -6285,7 +6280,7 @@ namespace Legion {
         else
           finder->second |= overlap;
       }
-      for (LegionMap<CompositeView*,FieldMask>::aligned::const_iterator it = 
+      for (NestedViewMap::const_iterator it = 
             nested_composite_views.begin(); it != 
             nested_composite_views.end(); it++)
       {
@@ -6428,7 +6423,7 @@ namespace Legion {
           if (composite_view->logical_node == logical_node)
           {
             // nested
-            LegionMap<CompositeView*,FieldMask>::aligned::iterator finder = 
+            NestedViewMap::iterator finder = 
               nested_composite_views.find(composite_view);
             if (finder == nested_composite_views.end())
             {
@@ -6543,8 +6538,8 @@ namespace Legion {
       if (need_prune)
       {
         std::vector<CompositeView*> to_erase;
-        LegionMap<CompositeView*,FieldMask>::aligned replacements;
-        for (LegionMap<CompositeView*,FieldMask>::aligned::iterator it = 
+        NestedViewMap replacements;
+        for (NestedViewMap::iterator it = 
               nested_composite_views.begin(); it != 
               nested_composite_views.end(); it++)
         {
@@ -6572,10 +6567,10 @@ namespace Legion {
         }
         if (!replacements.empty())
         {
-          for (LegionMap<CompositeView*,FieldMask>::aligned::const_iterator it =
+          for (NestedViewMap::const_iterator it =
                 replacements.begin(); it != replacements.end(); it++)
           {
-            LegionMap<CompositeView*,FieldMask>::aligned::iterator finder =
+            NestedViewMap::iterator finder =
               nested_composite_views.find(it->first);
             if (finder == nested_composite_views.end())
               nested_composite_views.insert(*it);
@@ -6599,7 +6594,7 @@ namespace Legion {
         rez.serialize(it->second);
       }
       rez.serialize<size_t>(nested_composite_views.size());
-      for (LegionMap<CompositeView*,FieldMask>::aligned::const_iterator it = 
+      for (NestedViewMap::const_iterator it = 
             nested_composite_views.begin(); it != 
             nested_composite_views.end(); it++)
       {
