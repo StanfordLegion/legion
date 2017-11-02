@@ -17,8 +17,6 @@
 
 from __future__ import print_function
 import argparse, hashlib, multiprocessing, os, platform, subprocess, sys
-sys.path.append(os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
-import install # from ./install.py
 
 def discover_llvm_version():
     if platform.node().startswith('titan'):
@@ -128,6 +126,22 @@ def build_terra(terra_dir, llvm_dir, is_cray, thread_count):
          '-j', str(thread_count),
         ],
         cwd=terra_dir,
+        env=env)
+
+def build_regent(root_dir, gasnet_dir, llvm_dir, terra_dir, conduit, thread_count):
+    env = dict(list(os.environ.items()) + [
+        ('CONDUIT', conduit),
+        ('GASNET', gasnet_dir),
+        ('LLVM_CONFIG', '%s/bin/llvm-config' % llvm_dir),
+    ])
+
+    subprocess.check_call(
+        ['install.py',
+         '--with-terra', terra_dir,
+         '--rdir', 'auto',
+         '-j', str(thread_count),
+        ],
+        cwd=root_dir,
         env=env)
 
 def install_llvm(llvm_dir, llvm_install_dir, llvm_version, llvm_use_cmake, cmake_exe, thread_count, is_cray, insecure):
@@ -308,14 +322,7 @@ def driver(prefix_dir, llvm_version, insecure):
         check_dirty_build('terra', terra_build_result, terra_dir)
     assert os.path.exists(terra_build_result)
 
-    use_cuda = 'USE_CUDA' in os.environ and os.environ['USE_CUDA'] == '1'
-    use_openmp = 'USE_OPENMP' in os.environ and os.environ['USE_OPENMP'] == '1'
-    use_hdf = 'USE_HDF' in os.environ and os.environ['USE_HDF'] == '1'
-    debug = 'DEBUG' in os.environ and os.environ['DEBUG'] == '1'
-    install.install(
-        gasnet=True, cuda=use_cuda, openmp=use_openmp, hdf=use_hdf,
-        external_terra_dir=terra_dir, gasnet_dir=gasnet_release_dir, conduit=conduit,
-        rdir='auto', debug=debug, thread_count=thread_count)
+    build_regent(conduit, gasnet_release_dir, llvm_install_dir, terra_dir, thread_count)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
