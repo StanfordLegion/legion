@@ -323,7 +323,7 @@ def driver(prefix_dir, llvm_version, insecure):
         check_dirty_build('terra', terra_build_result, terra_dir)
     assert os.path.exists(terra_build_result)
 
-    build_regent(conduit, gasnet_release_dir, llvm_install_dir, terra_dir, thread_count)
+    build_regent(root_dir, gasnet_dir, llvm_dir, terra_dir, conduit, thread_count)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
