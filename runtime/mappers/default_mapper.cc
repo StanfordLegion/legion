@@ -2123,11 +2123,19 @@ namespace Legion {
                                                    const RegionRequirement &req)
     //--------------------------------------------------------------------------
     {
+      bool prefer_rdma = ((req.tag & DefaultMapper::PREFER_RDMA_MEMORY) != 0);
+
       // TODO: deal with the updates in machine model which will
       //       invalidate this cache
-      std::map<Processor,Memory>::iterator it =
-        cached_target_memory.find(target_proc);
-      if (it != cached_target_memory.end()) return it->second;
+      std::map<Processor,Memory>::iterator it;
+      if (prefer_rdma)
+      {
+	it = cached_rdma_target_memory.find(target_proc);
+	if (it != cached_rdma_target_memory.end()) return it->second;
+      } else {
+        it = cached_target_memory.find(target_proc);
+	if (it != cached_target_memory.end()) return it->second;
+      }
 
       // Find the visible memories from the processor for the given kind
       Machine::MemoryQuery visible_memories(machine);
@@ -2139,8 +2147,10 @@ namespace Legion {
         assert(false);
       }
       // Figure out the memory with the highest-bandwidth
-      Memory chosen = Memory::NO_MEMORY;
+      Memory best_memory = Memory::NO_MEMORY;
       unsigned best_bandwidth = 0;
+      Memory best_rdma_memory = Memory::NO_MEMORY;
+      unsigned best_rdma_bandwidth = 0;
       std::vector<Machine::ProcessorMemoryAffinity> affinity(1);
       for (Machine::MemoryQuery::iterator it = visible_memories.begin();
             it != visible_memories.end(); it++)
@@ -2149,14 +2159,27 @@ namespace Legion {
         machine.get_proc_mem_affinity(affinity, target_proc, *it,
 				      false /*not just local affinities*/);
         assert(affinity.size() == 1);
-        if (!chosen.exists() || (affinity[0].bandwidth > best_bandwidth)) {
-          chosen = *it;
+        if (!best_memory.exists() || (affinity[0].bandwidth > best_bandwidth)) {
+          best_memory = *it;
           best_bandwidth = affinity[0].bandwidth;
         }
+        if ((it->kind() == Memory::REGDMA_MEM) &&
+	    (!best_rdma_memory.exists() ||
+	     (affinity[0].bandwidth > best_rdma_bandwidth))) {
+          best_rdma_memory = *it;
+          best_rdma_bandwidth = affinity[0].bandwidth;
+        }
       }
-      assert(chosen.exists());
-      cached_target_memory[target_proc] = chosen;
-      return chosen;
+      assert(best_memory.exists());
+      if (prefer_rdma)
+      {
+	if (!best_rdma_memory.exists()) best_rdma_memory = best_memory;
+	cached_rdma_target_memory[target_proc] = best_rdma_memory;
+	return best_rdma_memory;
+      } else {
+	cached_target_memory[target_proc] = best_memory;
+	return best_memory;
+      }
     }
 
     //--------------------------------------------------------------------------
