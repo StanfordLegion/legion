@@ -134,7 +134,7 @@ def build_regent(root_dir, gasnet_dir, llvm_dir, terra_dir, conduit, thread_coun
         ('CONDUIT', conduit),
         ('GASNET', gasnet_dir),
         ('USE_GASNET', os.environ['USE_GASNET'] if 'USE_GASNET' in os.environ else '1'),
-        ('LLVM_CONFIG', '%s/bin/llvm-config' % llvm_dir),
+        ('LLVM_CONFIG', os.path.join(llvm_dir, 'bin', 'llvm-config')),
     ])
 
     subprocess.check_call(
