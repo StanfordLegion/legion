@@ -137,12 +137,11 @@ def build_regent(root_dir, gasnet_dir, llvm_dir, terra_dir, conduit, thread_coun
     ])
 
     subprocess.check_call(
-        ['install.py',
+        [os.path.join(root_dir, 'install.py'),
          '--with-terra', terra_dir,
          '--rdir', 'auto',
          '-j', str(thread_count),
         ],
-        cwd=root_dir,
         env=env)
 
 def install_llvm(llvm_dir, llvm_install_dir, llvm_version, llvm_use_cmake, cmake_exe, thread_count, is_cray, insecure):
@@ -323,7 +322,7 @@ def driver(prefix_dir, llvm_version, insecure):
         check_dirty_build('terra', terra_build_result, terra_dir)
     assert os.path.exists(terra_build_result)
 
-    build_regent(root_dir, gasnet_dir, llvm_dir, terra_dir, conduit, thread_count)
+    build_regent(root_dir, gasnet_release_dir, llvm_install_dir, terra_dir, conduit, thread_count)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
