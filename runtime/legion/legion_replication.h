@@ -623,12 +623,20 @@ namespace Legion {
       virtual void activate(void);
       virtual void deactivate(void);
     public:
-      void set_close_barriers(RtBarrier mapped_barrier, RtBarrier view_barrier);
+      void set_repl_close_info(unsigned close_index,
+                               RtBarrier mapped_barrier,RtBarrier view_barrier);
+      virtual void trigger_dependence_analysis(void);
       virtual void complete_close_mapping(CompositeView *view,
                     RtEvent precondition = RtEvent::NO_RT_EVENT);
+    public:
+      inline RtBarrier get_view_barrier(void) const { return view_barrier; }
+      inline unsigned get_close_index(void) const { return close_index; }
+      inline unsigned get_next_clone_index(void) { return clone_index++; }
     protected:
       RtBarrier mapped_barrier;
       RtBarrier view_barrier;
+      unsigned close_index;
+      unsigned clone_index;
     };
 
     /**

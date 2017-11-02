@@ -1259,7 +1259,9 @@ namespace Legion {
                     AddressSpaceID owner_proc, RegionTreeNode *node, 
                     DeferredVersionInfo *info,
                     ClosedNode *closed_tree, InnerContext *context,
-                    bool register_now);
+                    bool register_now, ReplicationID repl_id = 0,
+                    RtBarrier shard_invalid_barrier = RtBarrier::NO_RT_BARRIER,
+                    ShardID origin_shard = 0);
       CompositeView(const CompositeView &rhs);
       virtual ~CompositeView(void);
     public:
@@ -1267,7 +1269,7 @@ namespace Legion {
     public:
       CompositeView* clone(const FieldMask &clone_mask,
         const LegionMap<CompositeView*,FieldMask>::aligned &replacements,
-                           ReferenceMutator *mutator) const;
+        ReferenceMutator *mutator, InterCloseOp *op) const;
     public:
       virtual bool has_parent(void) const { return false; }
       virtual LogicalView* get_parent(void) const 
@@ -1281,7 +1283,8 @@ namespace Legion {
     public:
       void prune(ClosedNode *closed_tree, FieldMask &valid_mask,
                  LegionMap<CompositeView*,FieldMask>::aligned &replacements,
-                 unsigned prune_depth, ReferenceMutator *mutator);
+                 unsigned prune_depth, ReferenceMutator *mutator,
+                 InterCloseOp *op);
       virtual void issue_deferred_copies(const TraversalInfo &info,
                                          MaterializedView *dst,
                                          FieldMask copy_mask,
@@ -1338,7 +1341,8 @@ namespace Legion {
                                  ReferenceMutator *mutator);
       void record_child_version_state(const LegionColor child_color, 
          VersionState *state, const FieldMask &mask, ReferenceMutator *mutator);
-      void finalize_capture(bool need_prune, ReferenceMutator *mutator);
+      void finalize_capture(bool need_prune, 
+                            ReferenceMutator *mutator, InterCloseOp *op);
     public:
       void pack_composite_view(Serializer &rez) const;
       void unpack_composite_view(Deserializer &derez,
@@ -1348,9 +1352,6 @@ namespace Legion {
       static void handle_deferred_view_ref(const void *args);
     public:
       // For control replication
-      void set_shard_invalid_barrier(RtBarrier shard_invalid_barrier,
-                                     ShardID origin_shard,
-                                     bool original_shard_view);
       void handle_sharding_update_request(Deserializer &derez,
                                           Runtime *runtime);
       static void handle_composite_view_response(Deserializer &derez,
@@ -1362,6 +1363,10 @@ namespace Legion {
       ClosedNode *const closed_tree;
       // The translation context if any
       InnerContext *const owner_context;
+      // Things used for control replication of composite views
+      const ReplicationID repl_id;
+      const RtBarrier shard_invalid_barrier;
+      const ShardID origin_shard;
     protected:
       // Note that we never record any version state names here, we just
       // record the views and children we immediately depend on and that
@@ -1372,12 +1377,7 @@ namespace Legion {
     protected:
       // Remember the original children which are the only ones that we
       // should ever have to send to another shard
-      LegionMap<CompositeNode*,FieldMask>::aligned original_children;
-      // Used for composite instances created during control replication
-      // to know when the whole composite view is invalid
-      RtBarrier shard_invalid_barrier;
-      ShardID origin_shard;
-      bool original_shard_view;
+      LegionMap<CompositeNode*,FieldMask>::aligned original_children; 
     protected:
       // For control replication to determine which shard checks
       // we've performed for different sub-nodes

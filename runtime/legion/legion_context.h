@@ -989,7 +989,12 @@ namespace Legion {
                                        std::vector<Future> &contributions);
     public:
       virtual ShardingFunction* find_sharding_function(ShardingID sid);
-      virtual ShardManager* find_shard_manager(void) const;
+      virtual CompositeView* create_composite_view(RegionTreeNode *node,
+                                      DeferredVersionInfo *version_info, 
+                                      ClosedNode *closed_tree, 
+                                      InterCloseOp *op, bool clone);
+      virtual void send_composite_view_shard_request(ShardID sid,
+                                                     Serializer &rez);
     public:
       static void handle_version_owner_request(Deserializer &derez,
                             Runtime *runtime, AddressSpaceID source);
@@ -1402,7 +1407,12 @@ namespace Legion {
                                        bool replicate = false);
     public:
       virtual ShardingFunction* find_sharding_function(ShardingID sid);
-      virtual ShardManager* find_shard_manager(void) const;
+      virtual CompositeView* create_composite_view(RegionTreeNode *node,
+                                      DeferredVersionInfo *version_info, 
+                                      ClosedNode *closed_tree, 
+                                      InterCloseOp *op, bool clone);
+      virtual void send_composite_view_shard_request(ShardID sid,
+                                                     Serializer &rez);
     public:
       virtual InstanceView* create_instance_top_view(PhysicalManager *manager,
                                                      AddressSpaceID source);
@@ -1443,6 +1453,11 @@ namespace Legion {
       // These are barriers used to identify composite views for inter close ops
       std::vector<RtBarrier>  view_close_barriers;
       unsigned                next_view_close_bar_index;
+      // These barriers are used for composite views that are created as part
+      // of cloning that occurs with creating a composite view to avoid the
+      // infinite nested composite view problem, the outer vector is the
+      // same size as view_close_barriers
+      std::vector<std::vector<RtBarrier> > clone_close_barriers;
     protected:
       ShardID index_space_allocator_shard;
       ShardID index_partition_allocator_shard;
@@ -1545,7 +1560,9 @@ namespace Legion {
       virtual void invalidate_remote_tree_contexts(Deserializer &derez);
     public:
       virtual ShardingFunction* find_sharding_function(ShardingID sid);
-      virtual ShardManager* find_shard_manager(void) const;
+      virtual void send_composite_view_shard_request(ShardID sid,
+                                                     Serializer &rez);
+      static void handle_shard_request(Deserializer &derez, Runtime *runtime);
     public:
       void unpack_local_field_update(Deserializer &derez);
       static void handle_local_field_update(Deserializer &derez);

@@ -5537,22 +5537,30 @@ namespace Legion {
     CompositeView::CompositeView(RegionTreeForest *ctx, DistributedID did,
                               AddressSpaceID owner_proc, RegionTreeNode *node,
                               DeferredVersionInfo *info, ClosedNode *tree, 
-                              InnerContext *context, bool register_now)
+                              InnerContext *context, bool register_now,
+                              ReplicationID repl/*=0*/,
+                              RtBarrier invalid_bar/*= NO_RT_BARRIER*/,
+                              ShardID origin/*=0*/)
       : DeferredView(ctx, encode_composite_did(did), owner_proc, 
                      node, register_now), CompositeBase(view_lock),
         version_info(info), closed_tree(tree), owner_context(context),
-        original_shard_view(false)
+        repl_id(repl), shard_invalid_barrier(invalid_bar), origin_shard(origin)
     //--------------------------------------------------------------------------
     {
-      // Add our references
-      version_info->add_reference();
-      closed_tree->add_reference();
-      owner_context->add_reference();
 #ifdef DEBUG_LEGION
       assert(owner_context != NULL);
       assert(closed_tree != NULL);
       assert(closed_tree->node == node);
 #endif
+      // Add our references
+      version_info->add_reference();
+      closed_tree->add_reference();
+      owner_context->add_reference();
+      // If we are the owner in a control replicated context then we add a 
+      // GC reference that will be removed once all the shards are done 
+      // with the view, no mutator since we know we're the owner
+      if (shard_invalid_barrier.exists() && is_owner())
+        add_base_gc_ref(COMPOSITE_SHARD_REF);
 #ifdef LEGION_GC
       log_garbage.info("GC Composite View %lld %d", 
           LEGION_DISTRIBUTED_ID_FILTER(did), local_space);
@@ -5562,7 +5570,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     CompositeView::CompositeView(const CompositeView &rhs)
       : DeferredView(NULL, 0, 0, NULL, false), CompositeBase(view_lock),
-        version_info(NULL), closed_tree(NULL), owner_context(NULL)
+        version_info(NULL), closed_tree(NULL), owner_context(NULL),
+        repl_id(0), shard_invalid_barrier(RtBarrier::NO_RT_BARRIER), 
+        origin_shard(0)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -5625,17 +5635,16 @@ namespace Legion {
     //--------------------------------------------------------------------------
     CompositeView* CompositeView::clone(const FieldMask &clone_mask,
          const LegionMap<CompositeView*,FieldMask>::aligned &replacements,
-                                        ReferenceMutator *mutator) const
+                              ReferenceMutator *mutator, InterCloseOp *op) const
     //--------------------------------------------------------------------------
     {
-      Runtime *runtime = context->runtime; 
-      DistributedID result_did = runtime->get_available_distributed_id(false);
-      CompositeView *result = new CompositeView(context, result_did,
-          runtime->address_space, logical_node, version_info, closed_tree, 
-          owner_context, true/*register now*/);
+      CompositeView *result = owner_context->create_composite_view(logical_node,
+          version_info, closed_tree, op, true/*clone*/);
+#if 0
       if (shard_invalid_barrier.exists())
         result->set_shard_invalid_barrier(shard_invalid_barrier, origin_shard,
                                           false/*original composite view*/);
+#endif
       // Clone the children
       for (LegionMap<CompositeNode*,FieldMask>::aligned::const_iterator it = 
             children.begin(); it != children.end(); it++)
@@ -5722,7 +5731,7 @@ namespace Legion {
           delete it->first;
       reduction_views.clear();
       // Unregister the view when we can be safely collected
-      if (shard_invalid_barrier.exists() && is_owner() && original_shard_view)
+      if (shard_invalid_barrier.exists() && is_owner())
       {
 #ifdef DEBUG_LEGION
         ReplicateContext *ctx = dynamic_cast<ReplicateContext*>(owner_context);
@@ -5792,6 +5801,12 @@ namespace Legion {
           rez.serialize(logical_node->as_partition_node()->handle);
         version_info->pack_version_numbers(rez);
         closed_tree->pack_closed_node(rez);
+        rez.serialize(shard_invalid_barrier);
+        if (shard_invalid_barrier.exists())
+        {
+          rez.serialize(repl_id);
+          rez.serialize(origin_shard);
+        }
         pack_composite_view(rez);
       }
       runtime->send_composite_view(target, rez);
@@ -5808,8 +5823,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void CompositeView::prune(ClosedNode *new_tree, FieldMask &valid_mask,
-                     LegionMap<CompositeView*,FieldMask>::aligned &replacements, 
-                     unsigned prune_depth, ReferenceMutator *mutator)
+              LegionMap<CompositeView*,FieldMask>::aligned &replacements, 
+              unsigned prune_depth, ReferenceMutator *mutator, InterCloseOp *op)
     //--------------------------------------------------------------------------
     {
       if (prune_depth >= LEGION_PRUNE_DEPTH_WARNING)
@@ -5837,7 +5852,7 @@ namespace Legion {
           if (!overlap)
             continue;
           it->first->prune(new_tree, overlap, replacements, 
-                           prune_depth+1, mutator);
+                           prune_depth+1, mutator, op);
           if (!!overlap)
           {
             // Some fields are still valid so add them to the replacements
@@ -5867,7 +5882,7 @@ namespace Legion {
           continue;
         FieldMask still_valid = overlap;
         it->first->prune(new_tree, still_valid, 
-                         local_replacements, prune_depth+1, mutator);
+                         local_replacements, prune_depth+1, mutator, op);
         // See if any fields were pruned, if so they are changed
         FieldMask changed = overlap - still_valid;
         if (!!changed)
@@ -5881,8 +5896,8 @@ namespace Legion {
       }
       if (!!changed_mask)
       {
-        CompositeView *view = clone(changed_mask, local_replacements, mutator);
-        view->finalize_capture(false/*need prune*/, mutator);
+        CompositeView *view = clone(changed_mask,local_replacements,mutator,op);
+        view->finalize_capture(false/*need prune*/, mutator, op);
         replacements[view] = changed_mask;
         // Any fields that changed are no longer valid
         valid_mask -= changed_mask;
@@ -6201,7 +6216,6 @@ namespace Legion {
         closed_tree->find_needed_shards(check_mask, target, needed_shards);
         if (!needed_shards.empty())
         {
-          ShardManager *manager = owner_context->find_shard_manager();
           std::set<RtEvent> wait_on;
           for (std::set<ShardID>::const_iterator it = needed_shards.begin();
                 it != needed_shards.end(); it++)
@@ -6227,13 +6241,13 @@ namespace Legion {
               }
             }
             Serializer rez;
-            rez.serialize(manager->repl_id);
+            rez.serialize(repl_id);
             rez.serialize(*it);
             rez.serialize<RtEvent>(shard_invalid_barrier);
             rez.serialize(shard_ready);
             rez.serialize(this);
             rez.serialize(context->runtime->address_space);
-            manager->send_composite_view_request(*it, rez);
+            owner_context->send_composite_view_shard_request(*it, rez);
             wait_on.insert(shard_ready);
           }
           // Wait for the result to be valid
@@ -6319,6 +6333,15 @@ namespace Legion {
       InnerContext *owner_context = runtime->find_context(owner_uid);
       ClosedNode *closed_tree = 
         ClosedNode::unpack_closed_node(derez, owner_context, runtime,is_region);
+      RtBarrier shard_invalid_barrier;
+      derez.deserialize(shard_invalid_barrier);
+      ReplicationID repl_id = 0;
+      ShardID origin_shard = 0;
+      if (shard_invalid_barrier.exists())
+      {
+        derez.deserialize(repl_id);
+        derez.deserialize(origin_shard);
+      }
       // Make the composite view, but don't register it yet
       void *location;
       CompositeView *view = NULL;
@@ -6327,11 +6350,14 @@ namespace Legion {
                                            did, owner, target_node, 
                                            version_info, closed_tree,
                                            owner_context,
-                                           false/*register now*/);
+                                           false/*register now*/,
+                                           repl_id, shard_invalid_barrier,
+                                           origin_shard);
       else
         view = new CompositeView(runtime->forest, did, owner, 
                            target_node, version_info, closed_tree, 
-                           owner_context, false/*register now*/);
+                           owner_context, false/*register now*/,
+                           repl_id, shard_invalid_barrier, origin_shard);
       // Unpack all the internal data structures
       std::set<RtEvent> ready_events;
       view->unpack_composite_view(derez, ready_events);
@@ -6509,7 +6535,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void CompositeView::finalize_capture(bool need_prune, 
-                                         ReferenceMutator *mutator)
+                                    ReferenceMutator *mutator, InterCloseOp *op)
     //--------------------------------------------------------------------------
     {
       // For the deferred views, we try to prune them 
@@ -6534,7 +6560,7 @@ namespace Legion {
             continue;
           }
           it->first->prune(closed_tree, it->second, replacements, 
-                           0/*depth*/, mutator);
+                           0/*depth*/, mutator, op);
           if (!it->second)
             to_erase.push_back(it->first);
         }
@@ -6595,8 +6621,6 @@ namespace Legion {
         it->first->pack_composite_node(rez);
         rez.serialize(it->second);
       }
-      rez.serialize(shard_invalid_barrier);
-      rez.serialize(origin_shard);
     }
 
     //--------------------------------------------------------------------------
@@ -6659,8 +6683,6 @@ namespace Legion {
                               this, context->runtime, did, preconditions);
         derez.deserialize(children[child]);
       }
-      derez.deserialize(shard_invalid_barrier);
-      derez.deserialize(origin_shard);
     }
 
     //--------------------------------------------------------------------------
@@ -6693,39 +6715,6 @@ namespace Legion {
       if (iargs->view->remove_base_gc_ref(COMPOSITE_SHARD_REF))
         delete iargs->view;
     }
-
-    //--------------------------------------------------------------------------
-    void CompositeView::set_shard_invalid_barrier(RtBarrier shard_invalid,
-                                            ShardID origin, bool original_shard)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(!shard_invalid_barrier.exists());
-#endif
-      shard_invalid_barrier = shard_invalid;
-      origin_shard = origin;
-      original_shard_view = original_shard;
-      // If we are the owner view we add a GC reference that will be
-      // removed once all the shards are done with the view
-      if (is_owner())
-      {
-        add_base_gc_ref(COMPOSITE_SHARD_REF);
-        if (original_shard_view)
-        {
-#ifdef DEBUG_LEGION
-          assert(is_owner());
-          ReplicateContext *ctx = 
-            dynamic_cast<ReplicateContext*>(owner_context);
-          assert(ctx != NULL);
-#else
-          ReplicateContext *ctx = static_cast<ReplicateContext*>(owner_context);
-#endif
-          ctx->register_composite_view(this, shard_invalid_barrier);
-        }
-        else // clone composite view, update the arrival count
-          Runtime::alter_arrival_count(shard_invalid_barrier, 1/*count*/);
-      }
-    } 
 
     //--------------------------------------------------------------------------
     void CompositeView::handle_sharding_update_request(Deserializer &derez,

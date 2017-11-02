@@ -743,6 +743,7 @@ namespace Legion {
       SEND_REMOTE_CONTEXT_FREE,
       SEND_REMOTE_CONTEXT_PHYSICAL_REQUEST,
       SEND_REMOTE_CONTEXT_PHYSICAL_RESPONSE,
+      SEND_REMOTE_CONTEXT_SHARD_REQUEST,
       SEND_VERSION_OWNER_REQUEST,
       SEND_VERSION_OWNER_RESPONSE,
       SEND_VERSION_STATE_REQUEST,
@@ -893,6 +894,7 @@ namespace Legion {
         "Send Remote Context Free",                                   \
         "Send Remote Context Physical Request",                       \
         "Send Remote Context Physical Response",                      \
+        "Send Remote Context Shard Request",                          \
         "Send Version Owner Request",                                 \
         "Send Version Owner Response",                                \
         "Send Version State Request",                                 \
@@ -1517,6 +1519,7 @@ namespace Legion {
     class InstanceView;
     class DeferredView;
     class MaterializedView;
+    class DeferredVersionInfo;
     class CompositeBase;
     class CompositeView;
     class CompositeVersionInfo;
@@ -2119,6 +2122,9 @@ namespace Legion {
     inline bool get_result(void *value, size_t value_size) const
       { Realm::Barrier b; b.id = id;
         b.timestamp = timestamp; return b.get_result(value, value_size); }
+    inline RtBarrier get_previous_phase(void)
+      { Realm::Barrier b; b.id = id;
+        return RtBarrier(b.get_previous_phase()); }
     inline void destroy_barrier(void)
       { Realm::Barrier b; b.id = id;
         b.timestamp = timestamp; b.destroy_barrier(); }

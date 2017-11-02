@@ -2327,7 +2327,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     CompositeView* RegionTreeForest::physical_perform_close(
                 const RegionRequirement &req,
-                VersionInfo &version_info, Operation *op, unsigned index, 
+                VersionInfo &version_info, InterCloseOp *op, unsigned index, 
                 ClosedNode *closed_tree, RegionTreeNode *close_node,
                 const FieldMask &closing_mask, std::set<RtEvent> &map_applied, 
                 const RestrictInfo &restrict_info, const InstanceSet &targets
@@ -2352,7 +2352,7 @@ namespace Legion {
       FieldMask composite_mask = closing_mask;
       CompositeView *result = close_node->create_composite_instance(info.ctx, 
                           composite_mask, version_info, logical_ctx_uid, 
-                          context, closed_tree, map_applied);
+                          context, closed_tree, op, map_applied);
       if (targets.empty())
         return result;
       PhysicalState *physical_state = 
@@ -11961,6 +11961,7 @@ namespace Legion {
                                                 UniqueID logical_context_uid,
                                                 InnerContext *owner_ctx,
                                                 ClosedNode *closed_tree,
+                                                InterCloseOp *op,
                                                 std::set<RtEvent> &ready_events)
     //--------------------------------------------------------------------------
     {
@@ -12000,15 +12001,12 @@ namespace Legion {
       // Fix the closed tree
       closed_tree->fix_closed_tree();
       // Prepare to make the new view
-      DistributedID did = context->runtime->get_available_distributed_id(false);
       // Copy the version info that we need
       DeferredVersionInfo *view_info = new DeferredVersionInfo();
       version_info.copy_to(*view_info);
-      const AddressSpace local_space = context->runtime->address_space;
       // Make the view
-      CompositeView *result = new CompositeView(context, did, 
-                           local_space, this, view_info, 
-                           closed_tree, owner_ctx, true/*register now*/);
+      CompositeView *result = owner_ctx->create_composite_view(this,
+                          view_info, closed_tree, op, false/*clone*/);
       
       LegionMap<LogicalView*,FieldMask>::aligned valid_above;
       // See if we have any valid views above we need to capture
@@ -12038,7 +12036,7 @@ namespace Legion {
       WrapperReferenceMutator mutator(ready_events);
       state->capture_composite_root(result, composite_mask, 
                                     &mutator, valid_above);
-      result->finalize_capture(true/*prune*/, &mutator);
+      result->finalize_capture(true/*prune*/, &mutator, op);
       // Clear out any reductions
       invalidate_reduction_views(state, composite_mask);
       // Update the valid views to reflect the new valid instance
@@ -13538,6 +13536,9 @@ namespace Legion {
     {
       // Mark that we are starting our dependence analysis
       close_op->begin_dependence_analysis();
+      // Do a call back to the close op in case it has anything to do
+      // This will be a no-op for most close operations
+      close_op->trigger_dependence_analysis();
       // First tell the operation to register dependences on any children
       // Register dependences on any interfering children
       // We know that only field non-interference is interesting here

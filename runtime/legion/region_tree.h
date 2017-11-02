@@ -415,7 +415,7 @@ namespace Legion {
                    std::set<RtEvent> &map_applied_events);
       CompositeView* physical_perform_close(const RegionRequirement &req,
                                   VersionInfo &version_info,
-                                  Operation *op, unsigned index,
+                                  InterCloseOp *op, unsigned index,
                                   ClosedNode *closed_tree,
                                   RegionTreeNode *close_node,
                                   const FieldMask &closing_mask,
@@ -2209,6 +2209,7 @@ namespace Legion {
                                      UniqueID logical_context_uid,
                                      InnerContext *owner_context,
                                      ClosedNode *closed_tree,
+                                     InterCloseOp *op,
                                      std::set<RtEvent> &ready_events);
       // This method will always add valid references to the set of views
       // that are returned.  It is up to the caller to remove the references.

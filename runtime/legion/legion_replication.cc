@@ -863,6 +863,8 @@ namespace Legion {
       activate_inter_close();
       mapped_barrier = RtBarrier::NO_RT_BARRIER;
       view_barrier = RtBarrier::NO_RT_BARRIER;
+      close_index = 0;
+      clone_index = 0;
     }
 
     //--------------------------------------------------------------------------
@@ -874,7 +876,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplInterCloseOp::set_close_barriers(RtBarrier mapped, RtBarrier view)
+    void ReplInterCloseOp::set_repl_close_info(unsigned index,
+                                               RtBarrier mapped, RtBarrier view)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -883,6 +886,21 @@ namespace Legion {
 #endif
       mapped_barrier = mapped;
       view_barrier = view;
+      close_index = index;
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplInterCloseOp::trigger_dependence_analysis(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(mapped_barrier.exists());
+#endif
+      // All we have to do is add our map precondition to the tracker
+      // so we know we are mapping in order with respect to other
+      // repl close operations that use the same close index
+      dependence_tracker.mapping->add_mapping_dependence(
+                      mapped_barrier.get_previous_phase());
     }
 
     //--------------------------------------------------------------------------
@@ -890,14 +908,6 @@ namespace Legion {
                                                   RtEvent precondition)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
-      assert(repl_ctx != NULL);
-#else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
-#endif
-      view->set_shard_invalid_barrier(view_barrier, 
-          repl_ctx->owner_shard->shard_id, true/*original view*/);
       // Arrive on our barrier with the precondition
       Runtime::phase_barrier_arrive(mapped_barrier, 1/*count*/, precondition);
       // Then complete the mapping once the barrier has triggered

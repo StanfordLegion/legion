@@ -5482,12 +5482,26 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ShardManager* InnerContext::find_shard_manager(void) const
+    CompositeView* InnerContext::create_composite_view(RegionTreeNode *node,
+                                            DeferredVersionInfo *version_info,
+                                            ClosedNode *closed_tree,
+                                            InterCloseOp *op, bool clone)
+    //--------------------------------------------------------------------------
+    {
+      // Just do the normal thing here, we mainly have this call back so
+      // that control replication contexts can make their views special
+      DistributedID did = runtime->get_available_distributed_id(false);
+      return new CompositeView(runtime->forest, did, runtime->address_space,
+                   node, version_info, closed_tree, this, true/*register now*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::send_composite_view_shard_request(ShardID sid,
+                                                         Serializer &rez)
     //--------------------------------------------------------------------------
     {
       // Should only be called by inherited classes
       assert(false);
-      return NULL;
     }
 
     //--------------------------------------------------------------------------
@@ -6704,6 +6718,16 @@ namespace Legion {
             idx += shard_manager->total_shards)
       {
         Realm::Barrier bar = view_close_barriers[idx];
+        bar.destroy_barrier();
+      }
+      std::vector<RtBarrier> flat_bars;
+      for (unsigned idx1 = 0; idx1 < clone_close_barriers.size(); idx1++)
+        for (unsigned idx2 = 0; idx2 < clone_close_barriers[idx1].size();idx2++)
+          flat_bars.push_back(clone_close_barriers[idx1][idx2]);
+      for (unsigned idx = owner_shard->shard_id;
+            idx < flat_bars.size(); idx += shard_manager->total_shards)
+      {
+        Realm::Barrier bar = flat_bars[idx];
         bar.destroy_barrier();
       }
     }
@@ -9546,10 +9570,10 @@ namespace Legion {
       ReplInterCloseOp *result = 
         runtime->get_available_repl_inter_close_op(false/*need continuation*/);
       // Get the mapped barrier for the close operation
-      RtBarrier &mapped_bar = 
-        close_mapped_barriers[next_close_mapped_bar_index++];
+      const unsigned close_index = next_close_mapped_bar_index++;
       if (next_close_mapped_bar_index == close_mapped_barriers.size())
         next_close_mapped_bar_index = 0;
+      RtBarrier &mapped_bar = close_mapped_barriers[close_index];
       // Get the next view barrier for the close operation
       RtBarrier &view_bar = view_close_barriers[next_view_close_bar_index++];
       if (next_view_close_bar_index == view_close_barriers.size())
@@ -9567,7 +9591,7 @@ namespace Legion {
       assert(actual_barrier == barrier);
       Runtime::advance_barrier(close_check_barrier);
 #endif
-      result->set_close_barriers(mapped_bar, view_bar);
+      result->set_repl_close_info(close_index, mapped_bar, view_bar);
       // Advance the phase for the next time through
       Runtime::advance_barrier(mapped_bar);
       Runtime::advance_barrier(view_bar);
@@ -9645,10 +9669,57 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ShardManager* ReplicateContext::find_shard_manager(void) const
+    CompositeView* ReplicateContext::create_composite_view(RegionTreeNode *node,
+                                            DeferredVersionInfo *version_info,
+                                            ClosedNode *closed_tree,
+                                            InterCloseOp *op, bool clone)
     //--------------------------------------------------------------------------
     {
-      return shard_manager;
+      // This better be a repl close operation or something is badly wrong
+#ifdef DEBUG_LEGION
+      ReplInterCloseOp *close = dynamic_cast<ReplInterCloseOp*>(op);
+      assert(close != NULL);
+#else
+      ReplInterCloseOp *close = static_cast<ReplInterCloseOp*>(op);
+#endif
+      RtBarrier close_bar;
+      if (clone)
+      {
+        const unsigned close_index = close->get_close_index();
+#ifdef DEBUG_LEGION
+        assert(close_index < clone_close_barriers.size());
+#endif
+        // If we're cloning we have to get the next index of the barriers
+        // to use for this particular clone operation
+        const unsigned clone_index = close->get_next_clone_index();
+        if (clone_index >= clone_close_barriers[close_index].size())
+        {
+          // Bad news
+          assert(false);
+        }
+        RtBarrier &bar = clone_close_barriers[close_index][clone_index];
+        close_bar = bar;
+        Runtime::advance_barrier(close_bar);
+      }
+      else // Not cloning so the close op knows the name
+        close_bar = close->get_view_barrier();
+      DistributedID did = runtime->get_available_distributed_id(false);
+      CompositeView *result = new CompositeView(runtime->forest, did,
+          runtime->address_space, node, version_info, closed_tree, this,
+          true/*register now*/, shard_manager->repl_id, close_bar,
+          owner_shard->shard_id);
+      // Register this view with the context
+      register_composite_view(result, close_bar);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplicateContext::send_composite_view_shard_request(ShardID sid, 
+                                                             Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      // We can just forward this on to our manager
+      shard_manager->send_composite_view_request(sid, rez);
     }
 
     //--------------------------------------------------------------------------
@@ -9756,9 +9827,27 @@ namespace Legion {
           CONTROL_REPLICATION_COMMUNICATION_BARRIERS, 
           view_close_barriers, COLLECTIVE_LOC_51);
       close_collective.exchange_barriers_async();
+      // Exchange an extra set of barriers for use in pruning
+      // when we have nested close operations
+      std::vector<RtBarrier> clone_barriers;
+      BarrierExchangeCollective clone_collective(this,
+        CONTROL_REPLICATION_COMMUNICATION_BARRIERS * LEGION_PRUNE_DEPTH_WARNING,
+        clone_barriers, COLLECTIVE_LOC_52);
+      clone_collective.exchange_barriers_async();
       // Wait for everything to be done
       mapped_collective.wait_for_barrier_exchange();
       close_collective.wait_for_barrier_exchange();
+      clone_collective.wait_for_barrier_exchange();
+      clone_close_barriers.resize(view_close_barriers.size());
+      // Sort the clone barriers into groups for each close barrier
+      for (unsigned bar_idx = 0; bar_idx < view_close_barriers.size();bar_idx++)
+      {
+        std::vector<RtBarrier> &bars = clone_close_barriers[bar_idx];
+        // This is just a guess, we can do expand this set later if necessary
+        bars.resize(LEGION_PRUNE_DEPTH_WARNING);
+        for (unsigned idx = 0; idx < LEGION_PRUNE_DEPTH_WARNING; idx++)
+          bars[idx] = clone_barriers[bar_idx * LEGION_PRUNE_DEPTH_WARNING +idx];
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -10532,14 +10621,45 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ShardManager* RemoteContext::find_shard_manager(void) const
+    void RemoteContext::send_composite_view_shard_request(ShardID sid, 
+                                                          Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      if (shard_manager != NULL)
-        return shard_manager;
-      // TODO: what happens if we get this and don't have a shard manager
-      assert(false);
-      return NULL;
+      // If we don't have a shard manager then we have to send the message
+      // back to the owner context to deal with it, otherwise we can 
+      // just forward it on to our local shard manager
+      if (shard_manager == NULL)
+      {
+        Serializer local_rez;
+        local_rez.serialize(context_uid);
+        local_rez.serialize(sid);
+        const size_t buffer_size = rez.get_used_bytes();
+        local_rez.serialize<size_t>(buffer_size);
+        local_rez.serialize(rez.get_buffer(), buffer_size);
+        const AddressSpaceID target = runtime->get_runtime_owner(context_uid);
+        runtime->send_remote_context_shard_request(target, local_rez);
+      }
+      else
+        shard_manager->send_composite_view_request(sid, rez);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void RemoteContext::handle_shard_request(Deserializer &derez,
+                                                        Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      UniqueID context_uid;
+      derez.deserialize(context_uid);
+      ShardID sid;
+      derez.deserialize(sid);
+      size_t buffer_size;
+      derez.deserialize(buffer_size);
+      Serializer rez;
+      rez.serialize(derez.get_current_pointer(), buffer_size);
+      derez.advance_pointer(buffer_size);
+       
+      InnerContext *context = runtime->find_context(context_uid);
+      context->send_composite_view_shard_request(sid, rez);
     }
 
     //--------------------------------------------------------------------------
