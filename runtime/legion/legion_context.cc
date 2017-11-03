@@ -9735,13 +9735,10 @@ namespace Legion {
       else // Not cloning so the close op knows the name
         close_bar = close->get_view_barrier();
       DistributedID did = runtime->get_available_distributed_id(false);
-      CompositeView *result = new CompositeView(runtime->forest, did,
+      return new CompositeView(runtime->forest, did,
           runtime->address_space, node, version_info, closed_tree, this,
           true/*register now*/, shard_manager->repl_id, close_bar,
           owner_shard->shard_id);
-      // Register this view with the context
-      register_composite_view(result, close_bar);
-      return result;
     }
 
     //--------------------------------------------------------------------------

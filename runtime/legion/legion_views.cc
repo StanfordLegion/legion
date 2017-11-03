@@ -6579,6 +6579,21 @@ namespace Legion {
           }
         }
       }
+      // If we have a shard invalid barrier then this is the point
+      // where it is safe to register ourselves as a composite view
+      if (shard_invalid_barrier.exists())
+      {
+        // Have to make a copy of our original children here
+        original_children = children;
+        // Then do our registration
+#ifdef DEBUG_LEGION
+        ReplicateContext *ctx = dynamic_cast<ReplicateContext*>(owner_context);
+        assert(ctx != NULL);
+#else
+        ReplicateContext *ctx = static_cast<ReplicateContext*>(owner_context);
+#endif
+        ctx->register_composite_view(this, shard_invalid_barrier);
+      }
     }
 
     //--------------------------------------------------------------------------
