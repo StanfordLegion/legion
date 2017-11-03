@@ -7126,12 +7126,17 @@ namespace Legion {
         RtEvent ready;
         VersionState *state = 
           runtime->find_or_request_version_state(did, ready); 
+#ifdef DEBUG_LEGION
+        assert(result->version_states.find(state) == 
+                result->version_states.end());
+#endif
         derez.deserialize(result->version_states[state]);
         if (ready.exists() && !ready.has_triggered())
         {
           DeferCompositeNodeRefArgs args;
           args.state = state;
           args.owner_did = owner_did;
+          args.root_owner = result->root_owner;
           RtEvent precondition = 
             runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY,
                                              NULL/*op*/, ready);
@@ -7140,6 +7145,13 @@ namespace Legion {
         else
         {
           state->add_nested_resource_ref(owner_did);
+          // If we're the root owner we also have to add
+          // our gc and valid references
+          if (result->root_owner)
+          {
+            state->add_nested_gc_ref(owner_did, &mutator);
+            state->add_nested_valid_ref(owner_did, &mutator);
+          }
         }
       }
       return result;
@@ -7207,14 +7219,23 @@ namespace Legion {
         {
           DeferCompositeNodeRefArgs args;
           args.state = state;
-          args.owner_did = owner_did;
+          args.owner_did = result->owner_did;
+          args.root_owner = result->root_owner;
           RtEvent precondition = 
             runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY,
                                              NULL/*op*/, ready);
           preconditions.insert(precondition);
         }
         else
+        {
           state->add_nested_resource_ref(owner_did);
+          // If we're the root owner then we also have to add our
+          if (result->root_owner)
+          {
+            state->add_nested_gc_ref(owner_did, &mutator);
+            state->add_nested_valid_ref(owner_did, &mutator);
+          }
+        }
       }
       return result;
     }
@@ -7226,6 +7247,12 @@ namespace Legion {
       const DeferCompositeNodeRefArgs *nargs = 
         (const DeferCompositeNodeRefArgs*)args;
       nargs->state->add_nested_resource_ref(nargs->owner_did);
+      if (nargs->root_owner)
+      {
+        LocalReferenceMutator mutator;
+        nargs->state->add_nested_gc_ref(nargs->owner_did, &mutator);
+        nargs->state->add_nested_valid_ref(nargs->owner_did, &mutator);
+      }
     }
 
     //--------------------------------------------------------------------------

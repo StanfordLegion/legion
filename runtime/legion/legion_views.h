@@ -1424,6 +1424,7 @@ namespace Legion {
       public:
         VersionState *state;
         DistributedID owner_did;
+        bool root_owner;
       };
       struct DeferCaptureArgs : public LgTaskArgs<DeferCaptureArgs> {
       public:
