@@ -607,7 +607,8 @@ class Channel(object):
         for point in self.time_points:
             if point.first:
                 if len(free_levels) > 0:
-                    point.thing.level = free_levels.pop()
+                    point.thing.level = min(free_levels)
+                    free_levels.remove(point.thing.level)
                 else:
                     point.thing.level = self.max_live_copies + 1
                     self.max_live_copies += 1
