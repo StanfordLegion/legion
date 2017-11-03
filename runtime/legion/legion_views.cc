@@ -5544,7 +5544,8 @@ namespace Legion {
       : DeferredView(ctx, encode_composite_did(did), owner_proc, 
                      node, register_now), CompositeBase(view_lock),
         version_info(info), closed_tree(tree), owner_context(context),
-        repl_id(repl), shard_invalid_barrier(invalid_bar), origin_shard(origin)
+        repl_id(repl), shard_invalid_barrier(invalid_bar), origin_shard(origin),
+        packed_shard(NULL)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -5592,6 +5593,8 @@ namespace Legion {
       // Remove the reference on our context
       if (owner_context->remove_reference())
         delete owner_context;
+      if (packed_shard != NULL)
+        delete packed_shard;
       // Remove any resource references we still have
       if (!is_owner())
       {
@@ -6583,8 +6586,18 @@ namespace Legion {
       // where it is safe to register ourselves as a composite view
       if (shard_invalid_barrier.exists())
       {
-        // Have to make a copy of our original children here
-        original_children = children;
+        // Compute an initial packing of shard
+#ifdef DEBUG_LEGION
+        assert(packed_shard == NULL);
+#endif
+        packed_shard = new Serializer;
+        packed_shard->serialize<size_t>(children.size());
+        for (LegionMap<CompositeNode*,FieldMask>::aligned::const_iterator 
+              it = children.begin(); it != children.end(); it++)
+        {
+          it->first->pack_composite_node(*packed_shard);
+          packed_shard->serialize(it->second);
+        }
         // Then do our registration
 #ifdef DEBUG_LEGION
         ReplicateContext *ctx = dynamic_cast<ReplicateContext*>(owner_context);
@@ -6733,6 +6746,7 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(is_owner());
+      assert(packed_shard != NULL);
 #endif
       RtUserEvent done_event;
       derez.deserialize(done_event);
@@ -6746,25 +6760,15 @@ namespace Legion {
       {
         RezCheck z(rez);
         rez.serialize(target);
-        rez.serialize<size_t>(original_children.size());
-        for (LegionMap<CompositeNode*,FieldMask>::aligned::const_iterator it =
-              original_children.begin(); it != original_children.end(); it++)
-        {
-          it->first->pack_composite_node(rez);
-          rez.serialize(it->second);
-        }
+        rez.serialize(packed_shard->get_buffer(),
+                      packed_shard->get_used_bytes());
         rez.serialize(done_event); 
       }
       else
       {
         // No check or target here since we know where we're going
-        rez.serialize<size_t>(original_children.size());
-        for (LegionMap<CompositeNode*,FieldMask>::aligned::const_iterator it =
-              original_children.begin(); it != original_children.end(); it++)
-        {
-          it->first->pack_composite_node(rez);
-          rez.serialize(it->second);
-        }
+        rez.serialize(packed_shard->get_buffer(),
+                      packed_shard->get_used_bytes());
         rez.serialize(done_event);
       }
       if (runtime->address_space == source)

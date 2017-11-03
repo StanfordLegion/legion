@@ -1396,9 +1396,10 @@ namespace Legion {
     protected:
       LegionMap<RegionTreeNode*,NodeVersionInfo>::aligned node_versions;
     protected:
-      // Remember the original children which are the only ones that we
-      // should ever have to send to another shard
-      LegionMap<CompositeNode*,FieldMask>::aligned original_children; 
+      // Keep track of a packed version of tree for this shard 
+      // when we are running in a control replication setting
+      // so we can share it with other shards when they ask for it
+      Serializer *packed_shard;
     protected:
       // For control replication to determine which shard checks
       // we've performed for different sub-nodes
