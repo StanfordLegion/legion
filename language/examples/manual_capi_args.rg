@@ -19,13 +19,13 @@
 
 local args = rawget(_G, "arg")
 local argc = #args
-local argv = terralib.newsymbol((&int8)[argc + 1], "argv")
+local argv = terralib.newsymbol((&int8)[argc + 2], "argv")
 local argv_setup = terralib.newlist({quote var [argv] end})
-for i, arg in ipairs(args) do
+for i = 0, argc do
   argv_setup:insert(quote
-    [argv][ [i - 1] ] = [arg]
+    [argv][ [i] ] = [ args[i] ]
   end)
 end
-argv_setup:insert(quote [argv][ [argc] ] = [&int8](0) end)
+argv_setup:insert(quote [argv][ [argc+1] ] = [&int8](0) end)
 
-return { argv_setup = argv_setup, argc = argc, argv = argv }
+return { argv_setup = argv_setup, argc = argc+1, argv = argv }
