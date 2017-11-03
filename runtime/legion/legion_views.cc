@@ -271,8 +271,10 @@ namespace Legion {
         int next_start = 0;
         pop_count = FieldMask::pop_count(it->set_mask);
         ApEvent precondition = Runtime::merge_events(it->preconditions);
+#ifndef LEGION_SPY
         if (precondition.has_triggered())
           continue;
+#endif
         for (int idx = 0; idx < pop_count; idx++)
         {
           int field_index = it->set_mask.find_next_set(next_start);
