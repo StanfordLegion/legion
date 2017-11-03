@@ -1554,7 +1554,7 @@ namespace Legion {
     class ShardingFunction {
     public:
       ShardingFunction(ShardingFunctor *functor, RegionTreeForest *forest,
-                       ShardingID sharding_id, ShardID max_shard);
+                       ShardingID sharding_id, size_t total_shards);
       ShardingFunction(const ShardingFunction &rhs);
       virtual ~ShardingFunction(void);
     public:
@@ -1566,7 +1566,7 @@ namespace Legion {
       ShardingFunctor *const functor;
       RegionTreeForest *const forest;
       const ShardingID sharding_id;
-      const ShardID max_shard;
+      const size_t total_shards;
     protected:
       Reservation sharding_lock;
       std::map<std::pair<IndexSpace/*full*/,ShardID>,

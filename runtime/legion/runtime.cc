@@ -9486,8 +9486,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ShardingFunction::ShardingFunction(ShardingFunctor *func, 
-              RegionTreeForest *f, ShardingID id, ShardID max)
-      : functor(func), forest(f), sharding_id(id), max_shard(max),
+              RegionTreeForest *f, ShardingID id, size_t total)
+      : functor(func), forest(f), sharding_id(id), total_shards(total),
         sharding_lock(Reservation::create_reservation())
     //--------------------------------------------------------------------------
     {
@@ -9495,7 +9495,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ShardingFunction::ShardingFunction(const ShardingFunction &rhs)
-      : functor(NULL), forest(NULL), sharding_id(0), max_shard(0)
+      : functor(NULL), forest(NULL), sharding_id(0), total_shards(0)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -9527,7 +9527,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(full_space.contains(point));
 #endif
-      return functor->shard(point, full_space, max_shard);
+      return functor->shard(point, full_space, total_shards);
     }
 
     //--------------------------------------------------------------------------

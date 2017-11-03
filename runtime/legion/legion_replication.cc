@@ -3441,9 +3441,8 @@ namespace Legion {
         sharding_functions.find(sid);
       if (finder != sharding_functions.end())
         return finder->second;
-      // total_shards-1 because we want the upper bound inclusive
       ShardingFunction *result = 
-        new ShardingFunction(functor, runtime->forest, sid, total_shards - 1);
+        new ShardingFunction(functor, runtime->forest, sid, total_shards);
       // Save the result for the future
       sharding_functions[sid] = result;
       return result;
