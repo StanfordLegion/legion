@@ -607,7 +607,8 @@ class Channel(object):
         for point in self.time_points:
             if point.first:
                 if len(free_levels) > 0:
-                    point.thing.level = free_levels.pop()
+                    point.thing.level = min(free_levels)
+                    free_levels.remove(point.thing.level)
                 else:
                     point.thing.level = self.max_live_copies + 1
                     self.max_live_copies += 1
@@ -1796,8 +1797,8 @@ class State(object):
             self.last_time = stop 
         proc.add_task(user)
 
-    def log_task_wait_info(self, op_id, variant_id, wait_start, wait_ready, wait_end):
-        variant = self.find_variant(variant_id)
+    def log_task_wait_info(self, op_id, task_id, variant_id, wait_start, wait_ready, wait_end):
+        variant = self.find_variant(task_id, variant_id)
         task = self.find_task(op_id, variant)
         assert wait_ready >= wait_start
         assert wait_end >= wait_ready
