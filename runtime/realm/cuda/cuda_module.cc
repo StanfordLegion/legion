@@ -179,7 +179,14 @@ namespace Realm {
 	  return true; // oldest event hasn't triggered - check again later
 
 	// no other kind of error is expected
-	assert(res == CUDA_SUCCESS);
+	if(res != CUDA_SUCCESS) {
+	  const char *ename = 0;
+	  const char *estr = 0;
+	  cuGetErrorName(res, &ename);
+	  cuGetErrorString(res, &estr);
+	  log_gpu.fatal() << "CUDA error reported on GPU " << gpu->info->index << ": " << estr << " (" << ename << ")";
+	  assert(0);
+	}
 
 	log_stream.debug() << "CUDA event " << event << " triggered on stream " << stream << " (GPU " << gpu << ")";
 
