@@ -12101,7 +12101,8 @@ namespace Legion {
       // numbers on the physical instance match the ones we need, if
       // they do then we know that it has already been updated and
       // we don't have to issue any copies ourself
-      if (IS_READ_ONLY(info.req))
+      // (Except when we have restrictions, and we need the copies)
+      if (IS_READ_ONLY(info.req) && !restrict_info.has_restrictions())
       {
         FieldMask already_valid = copy_mask;
         dst->filter_invalid_fields(already_valid, info.version_info);
