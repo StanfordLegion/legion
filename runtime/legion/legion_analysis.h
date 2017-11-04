@@ -284,7 +284,7 @@ namespace Legion {
       std::vector<PhysicalState*>      physical_states;
       std::vector<FieldVersions>       field_versions;
       LegionVector<FieldMask>::aligned split_masks;
-    }; 
+    };
 
     /**
      * \class Restriction

@@ -490,6 +490,9 @@ namespace Legion {
     public:
       virtual void send_view(AddressSpaceID target); 
       void update_gc_events(const std::deque<ApEvent> &gc_events);
+    public:
+      void filter_invalid_fields(FieldMask &to_filter,
+                                 VersionInfo &version_info);
     protected:
       // Update the version numbers
       // These first two methods do two-phase updates for copies

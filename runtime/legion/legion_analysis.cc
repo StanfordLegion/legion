@@ -943,7 +943,7 @@ namespace Legion {
 #endif
       const FieldMask &split_mask = split_masks[depth];
       const FieldVersions &local_versions = field_versions[depth];
-      if (!split_prev || !!split_mask)
+      if (!split_prev || !split_mask)
       {
         // If we don't care about the split previous mask then we can
         // just copy over what we need
