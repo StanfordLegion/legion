@@ -384,6 +384,16 @@ int read_events(FILE *f)
 	}
 
 	{
+	  unsigned wgen;
+	  int ret = sscanf(s, "  [%d] L:%*p - external waiter",
+			   &wgen);
+	  if(ret == 1) {
+	    // these are probably fine to ignore
+	    continue;
+	  }
+	}
+
+	{
 	  unsigned wgen, dummy;
 	  int ret = sscanf(s, "  [%d] R: %d",
 			   &wgen, &dummy);
@@ -394,7 +404,7 @@ int read_events(FILE *f)
 	}
 
 	// if we get here, we failed to parse the dependent event
-	printf("(%s)\n", s);
+	printf("unparseable: (%s)\n", s);
 	exit(1);
       }
     }
