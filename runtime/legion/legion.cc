@@ -4590,6 +4590,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    IndexSpace Runtime::get_index_subspace_internal(IndexPartition p,
+                                      const void *realm_color, TypeTag type_tag)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->get_index_subspace(p, realm_color, type_tag);
+    }
+
+    //--------------------------------------------------------------------------
     bool Runtime::has_index_subspace(Context ctx, 
                                      IndexPartition p, const DomainPoint &color)
     //--------------------------------------------------------------------------
@@ -4642,6 +4650,14 @@ namespace Legion {
           assert(false);
       }
       return false;
+    }
+
+    //--------------------------------------------------------------------------
+    bool Runtime::has_index_subspace_internal(IndexPartition p,
+                                      const void *realm_color, TypeTag type_tag)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->has_index_subspace(p, realm_color, type_tag);
     }
 
     //--------------------------------------------------------------------------
