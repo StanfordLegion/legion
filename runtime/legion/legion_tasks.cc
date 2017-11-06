@@ -3845,28 +3845,25 @@ namespace Legion {
       if (!task_profiling_requests.empty())
       {
         // See if we have any realm requests
-        std::vector<ProfilingMeasurementID> realm_requests;
+        std::set<Realm::ProfilingMeasurementID> realm_measurements;
         for (std::vector<ProfilingMeasurementID>::const_iterator it = 
               task_profiling_requests.begin(); it != 
               task_profiling_requests.end(); it++)
         {
           if ((*it) < Mapping::PMID_LEGION_FIRST)
-            realm_requests.push_back(*it);
+            realm_measurements.insert((Realm::ProfilingMeasurementID)(*it));
           else if ((*it) == Mapping::PMID_RUNTIME_OVERHEAD)
             execution_context->initialize_overhead_tracker();
           else
             assert(false); // should never get here
         }
-        if (!realm_requests.empty())
+        if (!realm_measurements.empty())
         {
           ProfilingResponseBase base(this);
           Realm::ProfilingRequest &request = profiling_requests.add_request(
               runtime->find_utility_group(), LG_LEGION_PROFILING_ID, 
               &base, sizeof(base));
-          for (std::vector<ProfilingMeasurementID>::const_iterator it = 
-                realm_requests.begin(); it != 
-                realm_requests.end(); it++)
-            request.add_measurement((Realm::ProfilingMeasurementID)(*it));
+          request.add_measurements(realm_measurements);
           int previous = 
             __sync_fetch_and_add(&outstanding_profiling_requests, 1);
           if ((previous == 1) && !profiling_reported.exists())

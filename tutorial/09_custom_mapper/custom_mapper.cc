@@ -612,6 +612,7 @@ void AdversarialMapper::map_task(const MapperContext         ctx,
     using namespace ProfilingMeasurements;
     output.task_prof_requests.add_measurement<OperationTimeline>();
     output.task_prof_requests.add_measurement<RuntimeOverhead>();
+    output.task_prof_requests.add_measurement<OperationStatus>();
   }
 }
 
@@ -657,6 +658,42 @@ void AdversarialMapper::report_profiling(const MapperContext      ctx,
   }
   else
     printf("No runtime overhead data for task %s\n", task.get_task_name());
+
+  OperationStatus *status = 
+    input.profiling_responses.get_measurement<OperationStatus>();
+  if (status)
+  {
+    switch (status->result)
+    {
+      case OperationStatus::COMPLETED_SUCCESSFULLY:
+        {
+          printf("Task %s COMPLETED SUCCESSFULLY\n", task.get_task_name());
+          break;
+        }
+      case OperationStatus::COMPLETED_WITH_ERRORS:
+        {
+          printf("Task %s COMPLETED WITH ERRORS\n", task.get_task_name());
+          break;
+        }
+      case OperationStatus::INTERRUPT_REQUESTED:
+        {
+          printf("Task %s was INTERRUPTED\n", task.get_task_name());
+        }
+      case OperationStatus::TERMINATED_EARLY:
+        {
+          printf("Task %s TERMINATED EARLY\n", task.get_task_name());
+        }
+      case OperationStatus::CANCELLED:
+        {
+          printf("Task %s was CANCELLED\n", task.get_task_name());
+          break;
+        }
+      default:
+        assert(false); // shouldn't get any of the rest currently
+    }
+  }
+  else
+    printf("No operation status for task %s\n", task.get_task_name());
 }
 
 PartitioningMapper::PartitioningMapper(Machine m,
