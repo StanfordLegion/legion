@@ -2140,6 +2140,52 @@ namespace Legion {
     }    
 
     //--------------------------------------------------------------------------
+    void MaterializedView::filter_invalid_fields(FieldMask &to_filter,
+                                                 VersionInfo &version_info)
+    //--------------------------------------------------------------------------
+    {
+      // If we're not the parent then keep going up
+      if ((parent != NULL) && !version_info.is_upper_bound_node(logical_node))
+        parent->filter_invalid_fields(to_filter, version_info);
+      // If we still have fields to filter, then do that now
+      if (!!to_filter)
+      {
+        // If we're not the owner then make sure that we are up to date
+        if (!is_logical_owner())
+          perform_remote_valid_check(to_filter, &version_info, true/*reading*/);
+        // Get the version numbers that we need 
+        FieldVersions needed_versions;
+        version_info.get_field_versions(logical_node, false/*split prev*/,
+                                        to_filter, needed_versions);
+        // Need the lock in read only mode while touching current versions
+        AutoLock v_lock(view_lock,1,false/*exclusive*/);
+        for (FieldVersions::iterator it = needed_versions.begin();
+              it != needed_versions.end(); it++)
+        {
+          std::map<VersionID,FieldMask>::const_iterator finder =  
+            current_versions.find(it->first);
+          if (finder != current_versions.end())
+          {
+            const FieldMask to_remove = it->second - finder->second;
+            if (!!to_remove)
+            {
+              to_filter -= to_remove;
+              if (!to_filter)
+                return;
+            }
+          }
+          else
+          {
+            // None of the fields are at the right version number
+            to_filter -= it->second;
+            if (!to_filter)
+              return;
+          }
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void MaterializedView::find_copy_version_updates(const FieldMask &copy_mask,
                                                      VersionTracker *versions,
                                                      FieldMask &write_skip_mask,

@@ -123,7 +123,7 @@ def build_terra(terra_dir, llvm_dir, is_cray, thread_count):
         ['make',
          'LLVM_CONFIG=%s' % os.path.join(llvm_dir, 'bin', 'llvm-config'),
          'CLANG=%s' % os.path.join(llvm_dir, 'bin', 'clang'),
-         'REEXPORT_LLVM_COMPONENTS=irreader jit mcjit x86',
+         'REEXPORT_LLVM_COMPONENTS=irreader mcjit x86',
          '-j', str(thread_count),
         ],
         cwd=terra_dir,

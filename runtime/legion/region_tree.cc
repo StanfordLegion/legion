@@ -12238,6 +12238,26 @@ namespace Legion {
             return;
         }
       }
+      // Another check here to also see if we are already valid
+      // There can be races with read-only region requirements from
+      // different operations updating the same physical instance,
+      // we know that our mapping process is atomic with respect to
+      // those other region requirements so check to see if the version
+      // numbers on the physical instance match the ones we need, if
+      // they do then we know that it has already been updated and
+      // we don't have to issue any copies ourself
+      // (Except when we have restrictions, and we need the copies)
+      if (IS_READ_ONLY(info.req) && !restrict_info.has_restrictions())
+      {
+        FieldMask already_valid = copy_mask;
+        dst->filter_invalid_fields(already_valid, info.version_info);
+        if (!!already_valid)
+        {
+          copy_mask -= already_valid;
+          if (!copy_mask)
+            return;
+        }
+      }
       // To facilitate optimized copies in the low-level runtime, 
       // we gather all the information needed to issue gather copies 
       // from multiple instances into the data structures below, we then 
