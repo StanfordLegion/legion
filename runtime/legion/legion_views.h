@@ -682,6 +682,11 @@ namespace Legion {
                                          RegionTreeForest *forest);
       virtual void process_remote_invalidate(const FieldMask &invalid_mask,
                                              RtUserEvent done_event); 
+#else
+    public:
+      static void handle_filter_invalid_fields_request(Deserializer &derez,
+                                  Runtime *runtime, AddressSpaceID source);
+      static void handle_filter_invalid_fields_response(Deserializer &derez);
 #endif
     public:
       InstanceManager *const manager;

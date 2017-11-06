@@ -6307,6 +6307,17 @@ namespace Legion {
               runtime->handle_view_remote_invalidate(derez);
               break;
             }
+          case SEND_VIEW_FILTER_INVALID_FIELDS_REQUEST:
+            {
+              runtime->handle_view_filter_invalid_fields_request(derez,
+                                                  remote_address_space);
+              break;
+            }
+          case SEND_VIEW_FILTER_INVALID_FIELDS_RESPONSE:
+            {
+              runtime->handle_view_filter_invalid_fields_response(derez);
+              break;
+            }
           case SEND_INSTANCE_VIEW_COPY_PRECONDITIONS:
             {
               runtime->handle_instance_view_copy_preconditions(derez, 
@@ -14283,6 +14294,26 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_view_filter_invalid_fields_request(AddressSpaceID target,
+                                                          Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, 
+          SEND_VIEW_FILTER_INVALID_FIELDS_REQUEST, 
+          UPDATE_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+    
+    //--------------------------------------------------------------------------
+    void Runtime::send_view_filter_invalid_fields_response(
+                                         AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez,
+          SEND_VIEW_FILTER_INVALID_FIELDS_RESPONSE,
+          UPDATE_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_instance_view_find_copy_preconditions(
                                          AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
@@ -15533,6 +15564,30 @@ namespace Legion {
       InstanceView::handle_view_remote_invalidate(derez, this);
 #else
       assert(false);
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_view_filter_invalid_fields_request(Deserializer &derez,
+                                                          AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DISTRIBUTED_INSTANCE_VIEWS
+      assert(false);
+#else
+      MaterializedView::handle_filter_invalid_fields_request(derez,this,source);
+#endif
+    }
+    
+    //--------------------------------------------------------------------------
+    void Runtime::handle_view_filter_invalid_fields_response(
+                                                            Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DISTRIBUTED_INSTANCE_VIEWS
+      assert(false);
+#else
+      MaterializedView::handle_filter_invalid_fields_response(derez);
 #endif
     }
 

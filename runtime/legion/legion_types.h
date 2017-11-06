@@ -705,6 +705,8 @@ namespace Legion {
       SEND_VIEW_UPDATE_RESPONSE,
       SEND_VIEW_REMOTE_UPDATE,
       SEND_VIEW_REMOTE_INVALIDATE,
+      SEND_VIEW_FILTER_INVALID_FIELDS_REQUEST,
+      SEND_VIEW_FILTER_INVALID_FIELDS_RESPONSE,
       SEND_INSTANCE_VIEW_COPY_PRECONDITIONS,
       SEND_INSTANCE_VIEW_ADD_COPY,
       SEND_INSTANCE_VIEW_USER_PRECONDITIONS,
@@ -857,6 +859,8 @@ namespace Legion {
         "Send View Update Response",                                  \
         "Send View Remote Update",                                    \
         "Send View Remote Invalidate",                                \
+        "Send View Filter Invalid Fields Request",                    \
+        "Send View Filter Invalid Fields Response",                   \
         "Send Instance View Copy Preconditions",                      \
         "Send Instance View Add Copy",                                \
         "Send Instance View User Preconditions",                      \

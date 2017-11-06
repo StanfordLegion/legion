@@ -2150,9 +2150,30 @@ namespace Legion {
       // If we still have fields to filter, then do that now
       if (!!to_filter)
       {
+#ifdef DISTRIBUTED_INSTANCE_VIEWS
         // If we're not the owner then make sure that we are up to date
         if (!is_logical_owner())
           perform_remote_valid_check(to_filter, &version_info, true/*reading*/);
+#else
+        if (!is_logical_owner())
+        {
+          // Send a message to the logical owner to do the analysis
+          RtUserEvent wait_on = Runtime::create_rt_user_event();
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize(did);
+            rez.serialize(to_filter);
+            version_info.pack_writing_version_numbers(rez);
+            rez.serialize(&to_filter);
+            rez.serialize(wait_on);
+          }
+          runtime->send_view_filter_invalid_fields_request(logical_owner, rez);
+          // Wait for the result to be ready
+          wait_on.lg_wait();
+          return;
+        }
+#endif
         // Get the version numbers that we need 
         FieldVersions needed_versions;
         version_info.get_field_versions(logical_node, false/*split prev*/,
@@ -4417,6 +4438,58 @@ namespace Legion {
         remote_valid_mask -= invalid_mask;
       }
       Runtime::trigger_event(done_event);
+    }
+#else // DISTRIBUTED_INSTANCE_VIEWS
+    //--------------------------------------------------------------------------
+    /*static*/ void MaterializedView::handle_filter_invalid_fields_request(
+                   Deserializer &derez, Runtime *runtime, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      DistributedID did;
+      derez.deserialize(did);
+      FieldMask to_filter;
+      derez.deserialize(to_filter);
+      VersionInfo version_info;
+      version_info.unpack_version_numbers(derez, runtime->forest);
+      FieldMask *remote_mask;
+      derez.deserialize(remote_mask);
+      RtUserEvent to_trigger;
+      derez.deserialize(to_trigger);
+
+      RtEvent ready;
+      LogicalView *view = runtime->find_or_request_logical_view(did, ready);
+      if (!ready.has_triggered())
+        ready.lg_wait();
+#ifdef DEBUG_LEGION
+      assert(view->is_materialized_view());
+#endif
+      MaterializedView *mat_view = view->as_materialized_view(); 
+      mat_view->filter_invalid_fields(to_filter, version_info);
+
+      // Now send the response back
+      Serializer rez;
+      {
+        RezCheck z(rez);
+        rez.serialize(remote_mask);
+        rez.serialize(to_filter);
+        rez.serialize(to_trigger);
+      }
+      runtime->send_view_filter_invalid_fields_response(source, rez);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void MaterializedView::handle_filter_invalid_fields_response(
+                                                            Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      FieldMask *target;
+      derez.deserialize(target);
+      derez.deserialize(*target);
+      RtUserEvent done;
+      derez.deserialize(done);
+      Runtime::trigger_event(done);
     }
 #endif // DISTRIBUTED_INSTANCE_VIEWS
 
