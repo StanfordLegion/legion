@@ -1021,6 +1021,8 @@ namespace Legion {
         PhysicalTrace *physical_trace = local_trace->get_physical_trace();
         if (physical_trace->is_tracing())
           physical_trace->fix_trace();
+        else
+          physical_trace->finish_replay();
       }
       FenceOp::trigger_mapping();
     }
@@ -1138,6 +1140,8 @@ namespace Legion {
         PhysicalTrace *physical_trace = local_trace->get_physical_trace();
         if (physical_trace->is_tracing())
           physical_trace->fix_trace();
+        else
+          physical_trace->finish_replay();
       }
       FenceOp::trigger_mapping();
     }
@@ -1259,7 +1263,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     PhysicalTrace::PhysicalTrace(Runtime *rt)
       : runtime(rt), tracing(false),
-        trace_lock(Reservation::create_reservation()), current_template(NULL)
+        trace_lock(Reservation::create_reservation()),
+        current_template(NULL), previous_template(NULL)
     //--------------------------------------------------------------------------
     {
     }
@@ -1300,8 +1305,19 @@ namespace Legion {
       assert(tracing);
 #endif
       current_template->finalize();
+      if (current_template->is_replayable())
+        previous_template = current_template;
       current_template = NULL;
       tracing = false;
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTrace::finish_replay()
+    //--------------------------------------------------------------------------
+    {
+      if (current_template->is_replayable())
+        previous_template = current_template;
+      current_template = NULL;
     }
 
     //--------------------------------------------------------------------------
@@ -1339,6 +1355,12 @@ namespace Legion {
     void PhysicalTrace::check_template_preconditions()
     //--------------------------------------------------------------------------
     {
+      if (previous_template != NULL)
+      {
+        current_template = previous_template;
+        tracing = false;
+        return;
+      }
       for (std::vector<PhysicalTemplate*>::reverse_iterator it =
            templates.rbegin(); it !=
            templates.rend(); ++it)

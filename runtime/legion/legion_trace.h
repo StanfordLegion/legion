@@ -373,12 +373,15 @@ namespace Legion {
     public:
       void fix_trace(void);
       inline bool is_tracing(void) const { return tracing; }
+      void finish_replay(void);
+      void clear_cached_template(void) { previous_template = NULL; }
     public:
       Runtime *runtime;
     private:
       bool tracing;
       Reservation trace_lock;
       PhysicalTemplate* current_template;
+      PhysicalTemplate* previous_template;
       std::vector<PhysicalTemplate*> templates;
     };
 
