@@ -569,6 +569,15 @@ namespace Legion {
       public:
         TaskOp *op;
       };
+      struct DeferMapperSchedulerArgs : 
+        public LgTaskArgs<DeferMapperSchedulerArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_DEFER_MAPPER_SCHEDULER_TASK_ID;
+      public:
+        ProcessorManager *proxy_this;
+        MapperID map_id;
+        RtEvent deferral_event;
+      };
       struct MapperMessage {
       public:
         MapperMessage(void)
@@ -602,6 +611,8 @@ namespace Legion {
     public:
       void perform_scheduling(void);
       void launch_task_scheduler(void);
+      void notify_deferred_mapper(MapperID map_id, RtEvent deferred_event);
+      static void handle_defer_mapper(const void *args);
     public:
       void activate_context(InnerContext *context);
       void deactivate_context(InnerContext *context);
@@ -643,10 +654,10 @@ namespace Legion {
       struct ContextState {
       public:
         ContextState(void)
-          : active(false), owned_tasks(0) { }
+          : owned_tasks(0), active(false) { }
       public:
-        bool active;
         unsigned owned_tasks;
+        bool active;
       };
       std::vector<ContextState> context_states;
     protected:
@@ -654,6 +665,9 @@ namespace Legion {
       std::map<MapperID,std::list<TaskOp*> > ready_queues;
       // Mapper objects
       std::map<MapperID,std::pair<MapperManager*,bool/*own*/> > mappers;
+      // Deferred mappers, blocked until the event triggers or
+      // a new task is added to the mapper's ready queue
+      std::map<MapperID,RtEvent> deferred_mappers;
       // Reservations for accessing mappers
       Reservation mapper_lock;
       // The set of visible memories from this processor

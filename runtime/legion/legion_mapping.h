@@ -115,16 +115,16 @@ namespace Legion {
     class MapperEvent {
     public:
       MapperEvent(void)
-        : mapper_event_id(0) { }
+        : impl(RtUserEvent::NO_RT_USER_EVENT) { }
       FRIEND_ALL_RUNTIME_CLASSES
     public:
-      inline bool exists(void) const { return (mapper_event_id > 0); }
+      inline bool exists(void) const { return impl.exists(); }
       inline bool operator==(const MapperEvent &rhs) const 
-        { return (mapper_event_id == rhs.mapper_event_id); }
+        { return (impl.id == rhs.impl.id); }
       inline bool operator<(const MapperEvent &rhs) const
-        { return (mapper_event_id < rhs.mapper_event_id); }
-    protected:
-      unsigned mapper_event_id;
+        { return (impl.id < rhs.impl.id); }
+    private:
+      RtUserEvent impl;
     };
 
     namespace ProfilingMeasurements {
@@ -1452,9 +1452,14 @@ namespace Legion {
        * another processor by placing it in the 'relocate_tasks' map 
        * along with the target processor for the task. Finally, the
        * mapper can also choose to leave the task on the ready queue
-       * by doing nothing. Note that if the mapper continues to leave
-       * tasks on the ready queue after repeated invocations of the 
-       * 'select_tasks_to_map' mapper call, it may appear like livelock.
+       * by doing nothing. If the mapper chooses not to do anything
+       * for any of the tasks in the ready queue then it must give
+       * the runtime a mapper event to use for deferring any future 
+       * calls to select_tasks_to_map. No more calls will be made to
+       * select_tasks_to_map until this mapper event is triggered by
+       * the mapper in another mapper call or the state of the 
+       * ready_queue changes (e.g. new tasks are added). Failure to
+       * provide a mapper event will result in an error.
        */
       struct SelectMappingInput {
         std::list<const Task*>                  ready_tasks;
@@ -1462,6 +1467,7 @@ namespace Legion {
       struct SelectMappingOutput {
         std::set<const Task*>                   map_tasks;
         std::map<const Task*,Processor>         relocate_tasks;
+        MapperEvent                             deferral_event;
       };
       //------------------------------------------------------------------------
       virtual void select_tasks_to_map(const MapperContext          ctx,
