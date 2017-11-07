@@ -524,6 +524,7 @@ namespace Legion {
         options_.inline_task = options.inline_task;
         options_.stealable = options.stealable;
         options_.map_locally = options.map_locally;
+        options_.parent_priority = options.parent_priority;
         return options_;
       }
 
@@ -534,6 +535,7 @@ namespace Legion {
         options.inline_task = options_.inline_task;
         options.stealable = options_.stealable;
         options.map_locally = options_.map_locally;
+        options.parent_priority = options_.parent_priority;
         return options;
       }
 
