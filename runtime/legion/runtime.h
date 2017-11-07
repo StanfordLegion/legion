@@ -633,6 +633,9 @@ namespace Legion {
     protected:
       void increment_active_contexts(void);
       void decrement_active_contexts(void);
+    protected:
+      void increment_active_mappers(void);
+      void decrement_active_mappers(void);
     public:
       // Immutable state
       Runtime *const runtime;
@@ -651,6 +654,7 @@ namespace Legion {
       Reservation queue_lock;
       bool task_scheduler_enabled;
       unsigned total_active_contexts;
+      unsigned total_active_mappers;
       struct ContextState {
       public:
         ContextState(void)
@@ -661,13 +665,16 @@ namespace Legion {
       };
       std::vector<ContextState> context_states;
     protected:
-      // For each mapper, a list of tasks that are ready to map
-      std::map<MapperID,std::list<TaskOp*> > ready_queues;
       // Mapper objects
       std::map<MapperID,std::pair<MapperManager*,bool/*own*/> > mappers;
-      // Deferred mappers, blocked until the event triggers or
-      // a new task is added to the mapper's ready queue
-      std::map<MapperID,RtEvent> deferred_mappers;
+      // For each mapper something to track its state
+      struct MapperState {
+      public:
+        std::list<TaskOp*> ready_queue;
+        RtEvent deferral_event;
+      };
+      // State for each mapper for scheduling purposes
+      std::map<MapperID,MapperState> mapper_states;
       // Reservations for accessing mappers
       Reservation mapper_lock;
       // The set of visible memories from this processor
