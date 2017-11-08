@@ -1476,7 +1476,8 @@ namespace Legion {
       static CompositeNode* unpack_composite_node(Deserializer &derez,
                  CompositeBase *parent, Runtime *runtime,
                  DistributedID owner_did, std::set<RtEvent> &preconditions,
-                 const LegionMap<CompositeNode*,FieldMask>::aligned &existing);
+                 const LegionMap<CompositeNode*,FieldMask>::aligned &existing,
+                 bool root_owner);
       static void handle_deferred_node_ref(const void *args);
     public:
       void record_dirty_fields(const FieldMask &dirty_mask);

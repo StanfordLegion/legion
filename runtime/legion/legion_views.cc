@@ -6288,7 +6288,7 @@ namespace Legion {
         for (unsigned idx = 0; idx < num_children; idx++)
         {
           CompositeNode *child = CompositeNode::unpack_composite_node(derez,
-                          this, runtime, owner_did, ready_events, children);
+                this, runtime, owner_did, ready_events, children, is_owner());
           FieldMask child_mask;
           derez.deserialize(child_mask);
           // Have to do a merge of field masks here
@@ -6992,7 +6992,7 @@ namespace Legion {
         for (unsigned idx = 0; idx < num_children; idx++)
         {
           CompositeNode *child = CompositeNode::unpack_composite_node(derez,
-                          this, runtime, owner_did, ready_events, children);
+           this, runtime, owner_did, ready_events, children, false/*root own*/);
           FieldMask child_mask;
           derez.deserialize(child_mask);
           // Have to do a merge of field masks here
@@ -7045,7 +7045,15 @@ namespace Legion {
       if (have_capture_fields) 
       {
         AutoLock n_lock(node_lock);
-        // See if there are any capture fields we need to perform
+        // Check for any pending captures
+        for (LegionMap<RtUserEvent,FieldMask>::aligned::const_iterator it =
+              pending_captures.begin(); it != pending_captures.end(); it++)
+        {
+          if (it->second * mask)
+            continue;
+          preconditions.insert(it->first);
+        }
+        // Also see if there are any capture fields we need to perform
         const FieldMask capture_mask = uncaptured_fields & mask;
         if (!!capture_mask)
         {
@@ -7062,6 +7070,9 @@ namespace Legion {
             if (!it->second)
               to_delete.push_back(it->first);
           }
+#ifdef DEBUG_LEGION
+          assert(!needed_states.empty());
+#endif
           if (!to_delete.empty())
           {
             for (std::vector<VersionState*>::const_iterator it = 
@@ -7074,20 +7085,9 @@ namespace Legion {
           // Then we can remove the capture mask from the capture fields
           uncaptured_fields -= capture_mask;
         }
-        // Also need to check for any pending captures
-        for (LegionMap<RtUserEvent,FieldMask>::aligned::const_iterator it =
-              pending_captures.begin(); it != pending_captures.end(); it++)
-        {
-          if (it->second * mask)
-            continue;
-          preconditions.insert(it->first);
-        }
       }
       if (capture_event.exists())
       {
-#ifdef DEBUG_LEGION
-        assert(!needed_states.empty());
-#endif
         // Request final states for all the version states and then either
         // launch a task to do the capture, or do it now
         std::set<RtEvent> capture_preconditions;
@@ -7252,8 +7252,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ CompositeNode* CompositeNode::unpack_composite_node(
-        Deserializer &derez, CompositeView *parent, Runtime *runtime, 
-        DistributedID owner_did, std::set<RtEvent> &preconditions)
+                   Deserializer &derez, CompositeView *parent, Runtime *runtime,
+                   DistributedID owner_did, std::set<RtEvent> &preconditions)
     //--------------------------------------------------------------------------
     {
       bool is_region;
@@ -7287,7 +7287,11 @@ namespace Legion {
         assert(result->version_states.find(state) == 
                 result->version_states.end());
 #endif
-        derez.deserialize(result->version_states[state]);
+        FieldMask &state_mask = result->version_states[state];
+        derez.deserialize(state_mask);
+        // Update the uncaptured state as well
+        result->uncaptured_states[state] = state_mask;
+        result->uncaptured_fields |= state_mask;
         if (ready.exists() && !ready.has_triggered())
         {
           DeferCompositeNodeRefArgs args;
@@ -7311,16 +7315,15 @@ namespace Legion {
           }
         }
       }
-      // All the version states go in the uncaptured set
-      result->uncaptured_states = result->version_states;
       return result;
     }
 
     //--------------------------------------------------------------------------
     /*static*/ CompositeNode* CompositeNode::unpack_composite_node(
-        Deserializer &derez, CompositeBase *parent, Runtime *runtime, 
-        DistributedID owner_did, std::set<RtEvent> &preconditions,
-        const LegionMap<CompositeNode*,FieldMask>::aligned &existing)
+              Deserializer &derez, CompositeBase *parent, Runtime *runtime, 
+              DistributedID owner_did, std::set<RtEvent> &preconditions,
+              const LegionMap<CompositeNode*,FieldMask>::aligned &existing,
+              bool root_owner)
     //--------------------------------------------------------------------------
     {
       bool is_region;
@@ -7350,7 +7353,7 @@ namespace Legion {
       }
       // If we didn't find it then we get to make it
       if (result == NULL)
-        result = new CompositeNode(node, parent, owner_did,false/*root owner*/);
+        result = new CompositeNode(node, parent, owner_did, root_owner);
       size_t num_versions;
       derez.deserialize(num_versions);
       std::vector<VersionState*> new_states;
