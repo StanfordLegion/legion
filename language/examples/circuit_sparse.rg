@@ -83,6 +83,7 @@ struct Colorings {
 struct Config {
   num_loops : uint,
   num_pieces : uint,
+  pieces_per_superpiece : uint,
   nodes_per_piece : uint,
   wires_per_piece : uint,
   pct_wire_in_piece : uint,
@@ -159,6 +160,9 @@ terra parse_input_args(conf : Config)
     elseif cstring.strcmp(args.argv[i], "-p") == 0 then
       i = i + 1
       conf.num_pieces = std.atoi(args.argv[i])
+    elseif cstring.strcmp(args.argv[i], "-pps") == 0 then
+      i = i + 1
+      conf.pieces_per_superpiece = std.atoi(args.argv[i])
     elseif cstring.strcmp(args.argv[i], "-npp") == 0 then
       i = i + 1
       conf.nodes_per_piece = std.atoi(args.argv[i])
@@ -258,7 +262,7 @@ end
 --  c.free(piece_shared_nodes)
 --end
 
-task init_wires(piece_id   : int,
+task init_wires(spiece_id  : int,
                 conf       : Config,
                 rgr        : region(ghost_range),
                 rpn        : region(node),
@@ -271,11 +275,9 @@ do
   var npp = conf.nodes_per_piece
   var snpp = conf.shared_nodes_per_piece
   var pnpp = npp - snpp
-  var num_pieces = conf.num_pieces
+  var num_pieces : int = conf.num_pieces
   var num_shared_nodes = num_pieces * snpp
-
-  var pn_ptr_offset = piece_id * pnpp + num_shared_nodes
-  var sn_ptr_offset = piece_id * snpp
+  var pps = conf.pieces_per_superpiece
 
   var num_neighbors : int = conf.num_neighbors
   if num_neighbors == 0 then
@@ -284,97 +286,114 @@ do
   if num_neighbors >= conf.num_pieces then
     num_neighbors = conf.num_pieces - 1
   end
-  var neighbor_ids : &uint = [&uint](c.malloc([sizeof(uint)] * num_neighbors))
-  var alread_picked : &bool = [&bool](c.malloc([sizeof(bool)] * num_pieces))
-
-  var piece_shared_nodes = [&uint](c.malloc([sizeof(uint)] * conf.num_pieces))
 
   var window = conf.window
   if window * 2 < num_neighbors then
     window = (num_neighbors + 1) / 2
   end
 
-  var start_piece_id = piece_id - window
-  var end_piece_id = piece_id + window
-
-  if start_piece_id < 0 then
-    start_piece_id = 0
-    end_piece_id = min(num_neighbors, num_pieces - 1)
-  end
-  if end_piece_id >= num_pieces then
-    start_piece_id = max(0, (num_pieces - 1) - num_neighbors)
-    end_piece_id = num_pieces - 1
-  end
-
-  for i = 0, num_pieces do
-    piece_shared_nodes[i] = 0
-    alread_picked[i] = false
-  end
-
-  var window_size = end_piece_id - start_piece_id + 1
-  for i = 0, num_neighbors do
-    var neighbor_id = [uint](drand48() * window_size + start_piece_id)
-    while neighbor_id == piece_id or alread_picked[neighbor_id] do
-      neighbor_id = [uint](drand48() * window_size + start_piece_id)
-    end
-    alread_picked[neighbor_id] = true
-    neighbor_ids[i] = neighbor_id
-  end
+  var piece_shared_nodes = [&uint](c.malloc([sizeof(uint)] * num_pieces))
+  var neighbor_ids : &uint = [&uint](c.malloc([sizeof(uint)] * num_neighbors))
+  var alread_picked : &bool = [&bool](c.malloc([sizeof(bool)] * num_pieces))
 
   var max_shared_node_id = 0
-  var min_shared_node_id = num_shared_nodes
-  for wire in rw do
-    wire.current.{_0, _1, _2, _3, _4, _5, _6, _7, _8, _9} = 0.0
-    wire.voltage.{_0, _1, _2, _3, _4, _5, _6, _7, _8} = 0.0
-    wire.resistance = drand48() * 10.0 + 1.0
+  var min_shared_node_id = num_shared_nodes * pps
 
-    -- Keep inductance on the order of 1e-3 * dt to avoid resonance problems
-    wire.inductance = (drand48() + 0.1) * DELTAT * 1e-3
-    wire.wire_cap = drand48() * 0.1
+  var offset = spiece_id * pps * conf.wires_per_piece
 
-    var in_node = [uint](drand48() * npp)
-    if in_node < snpp then
-      in_node += sn_ptr_offset
-    else
-      in_node += pn_ptr_offset - snpp
+  for piece_id = spiece_id * pps, (spiece_id + 1) * pps do
+    var pn_ptr_offset = piece_id * pnpp + num_shared_nodes
+    var sn_ptr_offset = piece_id * snpp
+
+    var start_piece_id : int = piece_id - window
+    var end_piece_id : int = piece_id + window
+
+    if start_piece_id < 0 then
+      start_piece_id = 0
+      end_piece_id = min(num_neighbors, num_pieces - 1)
+    end
+    if end_piece_id >= num_pieces then
+      start_piece_id = max(0, (num_pieces - 1) - num_neighbors)
+      end_piece_id = num_pieces - 1
     end
 
-    wire.in_ptr = dynamic_cast(ptr(node, rpn, rsn), [ptr](in_node))
-    regentlib.assert(not isnull(wire.in_ptr), "picked an invalid random pointer")
+    for i = 0, num_pieces do
+      piece_shared_nodes[i] = 0
+      alread_picked[i] = false
+    end
 
-    var out_node = 0
-    if (100 * drand48() < conf.pct_wire_in_piece) or (conf.num_pieces == 1) then
-      out_node = [uint](drand48() * npp)
-      if out_node < snpp then
-        out_node += sn_ptr_offset
+    var window_size = end_piece_id - start_piece_id + 1
+    regentlib.assert(start_piece_id >= 0, "wrong start piece id")
+    regentlib.assert(end_piece_id < num_pieces, "wrong end piece id")
+    regentlib.assert(start_piece_id <= end_piece_id, "wrong neighbor range")
+    for i = 0, num_neighbors do
+      var neighbor_id = [uint](drand48() * window_size + start_piece_id)
+      while neighbor_id == piece_id or alread_picked[neighbor_id] do
+        neighbor_id = [uint](drand48() * window_size + start_piece_id)
+      end
+      alread_picked[neighbor_id] = true
+      neighbor_ids[i] = neighbor_id
+    end
+
+    for wire_id = 0, conf.wires_per_piece do
+      var wire =
+        unsafe_cast(ptr(wire(rpn, rsn, all_shared), rw), [ptr](wire_id + offset))
+      wire.current.{_0, _1, _2, _3, _4, _5, _6, _7, _8, _9} = 0.0
+      wire.voltage.{_0, _1, _2, _3, _4, _5, _6, _7, _8} = 0.0
+      wire.resistance = drand48() * 10.0 + 1.0
+
+      -- Keep inductance on the order of 1e-3 * dt to avoid resonance problems
+      wire.inductance = (drand48() + 0.1) * DELTAT * 1e-3
+      wire.wire_cap = drand48() * 0.1
+
+      var in_node = [uint](drand48() * npp)
+      if in_node < snpp then
+        in_node += sn_ptr_offset
       else
-        out_node += pn_ptr_offset - snpp
+        in_node += pn_ptr_offset - snpp
       end
-    else
-      ---- pick a random other piece and a node from there
-      --var pp = [uint](drand48() * (conf.num_pieces - 1))
-      --if pp >= piece_id then pp += 1 end
 
-      var pp = neighbor_ids[ [uint](drand48() * num_neighbors) ]
-      var idx = [uint](drand48() * snpp)
-      if idx >= piece_shared_nodes[pp] then
-        idx = piece_shared_nodes[pp]
-        if piece_shared_nodes[pp] < snpp then
-          piece_shared_nodes[pp] = piece_shared_nodes[pp] + 1
+      wire.in_ptr = dynamic_cast(ptr(node, rpn, rsn), [ptr](in_node))
+      regentlib.assert(not isnull(wire.in_ptr), "picked an invalid random pointer")
+
+      var out_node = 0
+      if (100 * drand48() < conf.pct_wire_in_piece) or (conf.num_pieces == 1) then
+        out_node = [uint](drand48() * npp)
+        if out_node < snpp then
+          out_node += sn_ptr_offset
+        else
+          out_node += pn_ptr_offset - snpp
         end
+      else
+        ---- pick a random other piece and a node from there
+        --var pp = [uint](drand48() * (conf.num_pieces - 1))
+        --if pp >= piece_id then pp += 1 end
+
+        var pp = neighbor_ids[ [uint](drand48() * num_neighbors) ]
+        var idx = [uint](drand48() * snpp)
+        if idx >= piece_shared_nodes[pp] then
+          idx = piece_shared_nodes[pp]
+          if piece_shared_nodes[pp] < snpp then
+            piece_shared_nodes[pp] = piece_shared_nodes[pp] + 1
+          end
+        end
+        out_node = pp * snpp + idx
+        max_shared_node_id = max(max_shared_node_id, out_node)
+        min_shared_node_id = min(min_shared_node_id, out_node)
       end
-      out_node = pp * snpp + idx
-      max_shared_node_id = max(max_shared_node_id, out_node)
-      min_shared_node_id = min(min_shared_node_id, out_node)
+      wire.out_ptr = dynamic_cast(ptr(node, rpn, rsn, all_shared), [ptr](out_node))
     end
-    wire.out_ptr = dynamic_cast(ptr(node, rpn, rsn, all_shared), [ptr](out_node))
+    offset += conf.wires_per_piece
   end
 
   for range in rgr do
     range.first = min_shared_node_id
     range.last = max_shared_node_id
   end
+
   c.free(piece_shared_nodes)
+  c.free(neighbor_ids)
+  c.free(alread_picked)
 end
 
 --task init_piece(piece_id    : int,
@@ -390,7 +409,7 @@ end
 --  init_wires(piece_id, conf, rls, rn_all, rn, rw)
 --end
 
-task init_piece(piece_id    : int,
+task init_piece(spiece_id   : int,
                 conf        : Config,
                 rgr         : region(ghost_range),
                 rpn         : region(node),
@@ -402,7 +421,7 @@ where
 do
   init_nodes(rpn)
   init_nodes(rsn)
-  init_wires(piece_id, conf, rgr, rpn, rsn, all_shared, rw)
+  init_wires(spiece_id, conf, rgr, rpn, rsn, all_shared, rw)
 end
 
 --task create_colorings(num_pieces      : int,
@@ -695,15 +714,17 @@ terra create_colorings(conf : Config)
     c.legion_ptr_t { value = num_shared_nodes },
     c.legion_ptr_t { value = num_circuit_nodes - 1})
 
+  var pps = conf.pieces_per_superpiece
+  var num_superpieces = conf.num_pieces / pps
   var snpp = conf.shared_nodes_per_piece
   var pnpp = conf.nodes_per_piece - snpp
-  for piece_id = 0, conf.num_pieces do
-    c.legion_coloring_add_range(coloring.shared_node_map, piece_id,
-      c.legion_ptr_t { value = piece_id * snpp },
-      c.legion_ptr_t { value = (piece_id + 1) * snpp - 1})
-    c.legion_coloring_add_range(coloring.private_node_map, piece_id,
-      c.legion_ptr_t { value = num_shared_nodes + piece_id * pnpp},
-      c.legion_ptr_t { value = num_shared_nodes + (piece_id + 1) * pnpp - 1})
+  for spiece_id = 0, num_superpieces do
+    c.legion_coloring_add_range(coloring.shared_node_map, spiece_id,
+      c.legion_ptr_t { value = spiece_id * snpp * pps },
+      c.legion_ptr_t { value = (spiece_id + 1) * snpp * pps - 1})
+    c.legion_coloring_add_range(coloring.private_node_map, spiece_id,
+      c.legion_ptr_t { value = num_shared_nodes + spiece_id * pnpp * pps},
+      c.legion_ptr_t { value = num_shared_nodes + (spiece_id + 1) * pnpp * pps - 1})
   end
   return coloring
 end
@@ -715,8 +736,8 @@ where
   reads(ghost_ranges)
 do
   var ghost_node_map = c.legion_coloring_create()
-  var num_pieces = conf.num_pieces
-  for i = 0, num_pieces do
+  var num_superpieces = conf.num_pieces / conf.pieces_per_superpiece
+  for i = 0, num_superpieces do
     c.legion_coloring_ensure_color(ghost_node_map, i)
   end
 
@@ -736,6 +757,7 @@ task toplevel()
   var conf : Config
   conf.num_loops = 5
   conf.num_pieces = 4
+  conf.pieces_per_superpiece = 1
   conf.nodes_per_piece = 4
   conf.wires_per_piece = 8
   conf.pct_wire_in_piece = 80
@@ -750,13 +772,16 @@ task toplevel()
   conf.window = 3 -- find neighbors among [piece_id - window, piece_id + window]
 
   conf = parse_input_args(conf)
+  regentlib.assert(conf.num_pieces % conf.pieces_per_superpiece == 0,
+      "pieces should be evenly distributed to superpieces")
   conf.shared_nodes_per_piece =
     [int](ceil(conf.nodes_per_piece * conf.pct_shared_nodes / 100.0))
-  c.printf("circuit settings: loops=%d pieces=%d nodes/piece=%d (nodes/piece=%d) wires/piece=%d pct_in_piece=%d seed=%d\n",
-    conf.num_loops, conf.num_pieces, conf.nodes_per_piece, conf.shared_nodes_per_piece,
-    conf.wires_per_piece, conf.pct_wire_in_piece, conf.random_seed)
+  c.printf("circuit settings: loops=%d pieces=%d (pieces/superpiece=%d) nodes/piece=%d (nodes/piece=%d) wires/piece=%d pct_in_piece=%d seed=%d\n",
+    conf.num_loops, conf.num_pieces, conf.pieces_per_superpiece, conf.nodes_per_piece,
+    conf.shared_nodes_per_piece, conf.wires_per_piece, conf.pct_wire_in_piece, conf.random_seed)
 
   var num_pieces = conf.num_pieces
+  var num_superpieces = conf.num_pieces / conf.pieces_per_superpiece
   var num_circuit_nodes : uint64 = num_pieces * conf.nodes_per_piece
   var num_circuit_wires : uint64 = num_pieces * conf.wires_per_piece
 
@@ -779,17 +804,17 @@ task toplevel()
   var all_private = rp_all_nodes[0]
   var all_shared = rp_all_nodes[1]
 
-  var launch_domain = ispace(int1d, num_pieces)
+  var launch_domain = ispace(int1d, num_superpieces)
   var rp_private = partition(disjoint, all_private, colorings.private_node_map)
   var rp_shared = partition(disjoint, all_shared, colorings.shared_node_map)
   var rp_wires = partition(equal, all_wires, launch_domain)
 
-  var ghost_ranges = region(ispace(ptr, num_pieces), ghost_range)
+  var ghost_ranges = region(ispace(ptr, num_superpieces), ghost_range)
   var rp_ghost_ranges = partition(equal, ghost_ranges, launch_domain)
 
   for j = 0, 1 do
     __demand(__parallel)
-    for i = 0, num_pieces do
+    for i = 0, num_superpieces do
       init_piece(i, conf, rp_ghost_ranges[i],
                  rp_private[i], rp_shared[i], all_shared, rp_wires[i])
     end
@@ -833,7 +858,7 @@ task toplevel()
 
   __demand(__spmd)
   for j = 0, 1 do
-    for i = 0, num_pieces do
+    for i = 0, num_superpieces do
       init_pointers(rp_private[i], rp_shared[i], rp_ghost[i], rp_wires[i])
     end
   end
@@ -857,15 +882,15 @@ task toplevel()
     -- c.legion_runtime_begin_trace(__runtime(), __context(), 0)
 
     --__demand(__parallel)
-    for i = 0, num_pieces do
+    for i = 0, num_superpieces do
       calculate_new_currents(j == 0, steps, rp_private[i], rp_shared[i], rp_ghost[i], rp_wires[i])
     end
     --__demand(__parallel)
-    for i = 0, num_pieces do
+    for i = 0, num_superpieces do
       distribute_charge(rp_private[i], rp_shared[i], rp_ghost[i], rp_wires[i])
     end
     --__demand(__parallel)
-    for i = 0, num_pieces do
+    for i = 0, num_superpieces do
       update_voltages(j == num_loops - 1, rp_private[i], rp_shared[i])
     end
 
