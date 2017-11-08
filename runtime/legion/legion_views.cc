@@ -7019,77 +7019,123 @@ namespace Legion {
                                             RegionTreeNode *target)
     //--------------------------------------------------------------------------
     {
-      // Do a quick test with read-only lock first
-      {
-        AutoLock n_lock(node_lock,1,false/*exclusive*/);
-        // Remove any fields that are already valid
-        mask -= valid_fields;
-        if (!mask)
-          return;
-      }
       RtUserEvent capture_event;
       std::set<RtEvent> preconditions; 
       LegionMap<VersionState*,FieldMask>::aligned needed_states;
+      bool have_capture_fields = true;
+      // Do a quick test with read-only lock first
+      {
+        AutoLock n_lock(node_lock,1,false/*exclusive*/);
+        // Check to see if we are disjoint with the need capture fields
+        if (mask * uncaptured_fields)
+        {
+          have_capture_fields = false;
+          // If there are any pending captures then we also need
+          // the preconditions for those fields since we aren't going
+          // to do the later test
+          for (LegionMap<RtUserEvent,FieldMask>::aligned::const_iterator it =
+                pending_captures.begin(); it != pending_captures.end(); it++)
+          {
+            if (it->second * mask)
+              continue;
+            preconditions.insert(it->first);
+          }
+        }
+      }
+      if (have_capture_fields) 
       {
         AutoLock n_lock(node_lock);
-        // Retest to see if we lost the race
-        mask -= valid_fields;
-        if (!mask)
-          return;
-        for (LegionMap<RtUserEvent,FieldMask>::aligned::const_iterator it = 
+        // See if there are any capture fields we need to perform
+        const FieldMask capture_mask = uncaptured_fields & mask;
+        if (!!capture_mask)
+        {
+          // Find the set of VersionState objects that need capturing
+          std::vector<VersionState*> to_delete;
+          for (LegionMap<VersionState*,FieldMask>::aligned::iterator it = 
+                uncaptured_states.begin(); it != uncaptured_states.end(); it++)
+          {
+            const FieldMask needed_fields = it->second & capture_mask;
+            if (!needed_fields)
+              continue;
+            needed_states[it->first] = needed_fields;
+            it->second -= needed_fields;
+            if (!it->second)
+              to_delete.push_back(it->first);
+          }
+          if (!to_delete.empty())
+          {
+            for (std::vector<VersionState*>::const_iterator it = 
+                  to_delete.begin(); it != to_delete.end(); it++)
+              uncaptured_states.erase(*it);
+          }
+          // Save a pending capture mask
+          capture_event = Runtime::create_rt_user_event();
+          pending_captures[capture_event] = capture_mask;
+          // Then we can remove the capture mask from the capture fields
+          uncaptured_fields -= capture_mask;
+        }
+        // Also need to check for any pending captures
+        for (LegionMap<RtUserEvent,FieldMask>::aligned::const_iterator it =
               pending_captures.begin(); it != pending_captures.end(); it++)
         {
           if (it->second * mask)
             continue;
           preconditions.insert(it->first);
-          mask -= it->second;
-          if (!mask)
-            break;
-        }
-        // If we still have fields, we're going to do a pending capture
-        if (!!mask)
-        {
-          capture_event = Runtime::create_rt_user_event();
-          pending_captures[capture_event] = mask;
-          for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator 
-                it = version_states.begin(); it != version_states.end(); it++)
-          {
-            FieldMask overlap = it->second & mask;
-            if (!overlap)
-              continue;
-            needed_states[it->first] = overlap;
-          }
         }
       }
-      if (!needed_states.empty())
+      if (capture_event.exists())
       {
+#ifdef DEBUG_LEGION
+        assert(!needed_states.empty());
+#endif
         // Request final states for all the version states and then either
         // launch a task to do the capture, or do it now
         std::set<RtEvent> capture_preconditions;
+        WrapperReferenceMutator mutator(capture_preconditions);
         InnerContext *owner_context = parent->get_owner_context();
         for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it = 
               needed_states.begin(); it != needed_states.end(); it++)
+        {
+          std::set<RtEvent> version_preconditions;
           it->first->request_final_version_state(owner_context, it->second,
-                                                 capture_preconditions);
+                                                 version_preconditions);
+          if (!version_preconditions.empty())
+          {
+            RtEvent version_precondition = 
+              Runtime::merge_events(version_preconditions);
+            if (version_precondition.exists())
+            {
+              DeferCaptureArgs args;
+              args.proxy_this = this;
+              args.version_state = it->first;
+              // Little scary, but safe since we're going to
+              // wait inside this scope and needed_states will
+              // not be changing while this is occurring
+              args.capture_mask = &it->second;
+              capture_preconditions.insert(
+                owner_context->runtime->issue_runtime_meta_task(args,
+                    LG_LATENCY_PRIORITY, NULL/*op*/, version_precondition));
+              continue;
+            }
+          }
+          // If we get here then we can just do the capture now
+          capture(it->first, it->second, &mutator);
+        }
+        // Now we can trigger our capture event with the preconditions
         if (!capture_preconditions.empty())
         {
-          RtEvent capture_precondition = 
-            Runtime::merge_events(capture_preconditions);
-          DeferCaptureArgs args;
-          args.proxy_this = this;
-          args.capture_event = capture_event;
-          Runtime *runtime = logical_node->context->runtime;
-          RtEvent precondition = 
-            runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY,
-                                             NULL/*op*/, capture_precondition);
-          preconditions.insert(precondition);
+          Runtime::trigger_event(capture_event,
+              Runtime::merge_events(capture_preconditions));
+          // Wait for it to be ready
+          capture_event.lg_wait();
         }
-        else // We can do the capture now!
-        {
-          WrapperReferenceMutator mutator(preconditions);
-          capture(capture_event, &mutator);
-        }
+        else
+          Runtime::trigger_event(capture_event);
+        // Now we can remove the capture event from the set
+        AutoLock n_lock(node_lock);
+        pending_captures.erase(capture_event);
       }
+      // Wait for anything else that we need to trigger
       if (!preconditions.empty())
       {
         RtEvent wait_on = Runtime::merge_events(preconditions);
@@ -7141,30 +7187,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void CompositeNode::capture(RtUserEvent capture_event, 
+    void CompositeNode::capture(VersionState *to_capture, 
+                                const FieldMask &capture_mask,
                                 ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
-      {
-        AutoLock n_lock(node_lock);
-        LegionMap<RtUserEvent,FieldMask>::aligned::iterator finder = 
-          pending_captures.find(capture_event);
-#ifdef DEBUG_LEGION
-        assert(finder != pending_captures.end());
-#endif
-        // Perform the capture of each of our overlapping version states
-        for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it = 
-              version_states.begin(); it != version_states.end(); it++)
-        {
-          FieldMask overlap = it->second & finder->second;
-          if (!overlap)
-            continue;
-          it->first->capture(this, overlap, mutator);
-        }
-        valid_fields |= finder->second;
-        pending_captures.erase(finder); 
-      }
-      Runtime::trigger_event(capture_event);
+      // Need the lock while doing this for the callbacks that
+      // will mutate the state of the composite node
+      AutoLock n_lock(node_lock);
+      to_capture->capture(this, capture_mask, mutator);
     }
 
     //--------------------------------------------------------------------------
@@ -7173,7 +7204,8 @@ namespace Legion {
     {
       const DeferCaptureArgs *dargs = (const DeferCaptureArgs*)args;
       LocalReferenceMutator mutator;
-      dargs->proxy_this->capture(dargs->capture_event, &mutator);
+      dargs->proxy_this->capture(dargs->version_state, 
+                      *(dargs->capture_mask), &mutator);
     }
 
     //--------------------------------------------------------------------------
@@ -7279,6 +7311,8 @@ namespace Legion {
           }
         }
       }
+      // All the version states go in the uncaptured set
+      result->uncaptured_states = result->version_states;
       return result;
     }
 
@@ -7328,18 +7362,25 @@ namespace Legion {
         RtEvent ready;
         VersionState *state = 
           runtime->find_or_request_version_state(did, ready); 
-        std::map<VersionState*,FieldMask>::const_iterator finder = 
+        std::map<VersionState*,FieldMask>::iterator finder = 
           result->version_states.find(state);
         if (finder != result->version_states.end())
         {
           FieldMask state_mask;
           derez.deserialize(state_mask);
-          result->version_states[state] |= state_mask;
+          result->uncaptured_states[state] |= (state_mask - finder->second);
+          result->uncaptured_fields |= (state_mask - finder->second);
+          finder->second |= state_mask;
           // No need to add any references since it was already captured
           continue;
         }
         else // Can just unpack it directly
-          derez.deserialize(result->version_states[state]);
+        {
+          FieldMask &state_mask = result->version_states[state];
+          derez.deserialize(state_mask);
+          result->uncaptured_states[state] = state_mask;
+          result->uncaptured_fields |= state_mask;
+        }
         if (ready.exists() && !ready.has_triggered())
         {
           DeferCompositeNodeRefArgs args;
@@ -7464,6 +7505,9 @@ namespace Legion {
       if (finder == version_states.end())
       {
         version_states[state] = mask;
+        // Also need to update the uncaptured state
+        uncaptured_states[state] = mask;
+        uncaptured_fields |= mask;
         state->add_nested_resource_ref(owner_did);
         // Root owners need gc and valid references on the tree
         // otherwise everyone else just needs a resource reference
@@ -7474,7 +7518,16 @@ namespace Legion {
         }
       }
       else
+      {
         finder->second |= mask;
+        // Also update the uncaptured data structure with any missing fileds
+        const FieldMask uncaptured_mask = mask - finder->second;
+        if (!!uncaptured_mask)
+        {
+          uncaptured_states[state] |= uncaptured_mask;
+          uncaptured_fields |= uncaptured_mask;
+        }
+      }
     } 
 
     //--------------------------------------------------------------------------

@@ -1440,7 +1440,8 @@ namespace Legion {
         static const LgTaskID TASK_ID = LG_DEFER_COMPOSITE_NODE_CAPTURE_TASK_ID;
       public:
         CompositeNode *proxy_this;
-        RtUserEvent capture_event;
+        VersionState *version_state;
+        const FieldMask *capture_mask;
       };
     public:
       CompositeNode(RegionTreeNode *node, CompositeBase *parent,
@@ -1461,7 +1462,8 @@ namespace Legion {
                                     bool needs_lock = true);
       virtual void unpack_composite_view_response(Deserializer &derez,
                                                   Runtime *runtime);
-      void capture(RtUserEvent capture_event, ReferenceMutator *mutator);
+      void capture(VersionState *state, const FieldMask &capture_mask,
+                   ReferenceMutator *mutator);
       static void handle_deferred_capture(const void *args);
     public:
       void clone(CompositeView *target, const FieldMask &clone_mask,
@@ -1501,9 +1503,10 @@ namespace Legion {
       // them if we are the root child of a composite view subtree
       LegionMap<VersionState*,FieldMask>::aligned version_states;
     protected:
-      // Keep track of the fields that are valid because we've captured them
-      FieldMask valid_fields;
+      // Keep track of the fields for which we still need captures
+      FieldMask uncaptured_fields;
       LegionMap<RtUserEvent,FieldMask>::aligned pending_captures;
+      LegionMap<VersionState*,FieldMask>::aligned uncaptured_states;
     }; 
 
     /**
