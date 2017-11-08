@@ -7273,48 +7273,8 @@ namespace Legion {
       }
       CompositeNode *result = 
         new CompositeNode(node, parent, owner_did, false/*root owner*/);
-      size_t num_versions;
-      derez.deserialize(num_versions);
-      WrapperReferenceMutator mutator(preconditions);
-      for (unsigned idx = 0; idx < num_versions; idx++)
-      {
-        DistributedID did;
-        derez.deserialize(did);
-        RtEvent ready;
-        VersionState *state = 
-          runtime->find_or_request_version_state(did, ready); 
-#ifdef DEBUG_LEGION
-        assert(result->version_states.find(state) == 
-                result->version_states.end());
-#endif
-        FieldMask &state_mask = result->version_states[state];
-        derez.deserialize(state_mask);
-        // Update the uncaptured state as well
-        result->uncaptured_states[state] = state_mask;
-        result->uncaptured_fields |= state_mask;
-        if (ready.exists() && !ready.has_triggered())
-        {
-          DeferCompositeNodeRefArgs args;
-          args.state = state;
-          args.owner_did = owner_did;
-          args.root_owner = result->root_owner;
-          RtEvent precondition = 
-            runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY,
-                                             NULL/*op*/, ready);
-          preconditions.insert(precondition);
-        }
-        else
-        {
-          state->add_nested_resource_ref(owner_did);
-          // If we're the root owner we also have to add
-          // our gc and valid references
-          if (result->root_owner)
-          {
-            state->add_nested_gc_ref(owner_did, &mutator);
-            state->add_nested_valid_ref(owner_did, &mutator);
-          }
-        }
-      }
+      result->unpack_version_states(derez, runtime, 
+                                    preconditions, false/*need lock*/);
       return result;
     }
 
@@ -7353,10 +7313,30 @@ namespace Legion {
       }
       // If we didn't find it then we get to make it
       if (result == NULL)
+      {
         result = new CompositeNode(node, parent, owner_did, root_owner);
+        result->unpack_version_states(derez, runtime, 
+                                      preconditions, false/*need lock*/);
+      }
+      else // already exists so we need a lock when updating it
+        result->unpack_version_states(derez, runtime,
+                                      preconditions, true/*need lock*/);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    void CompositeNode::unpack_version_states(Deserializer &derez, 
+             Runtime *runtime, std::set<RtEvent> &preconditions, bool need_lock)
+    //--------------------------------------------------------------------------
+    {
+      if (need_lock)
+      {
+        AutoLock n_lock(node_lock);
+        unpack_version_states(derez, runtime, preconditions,false/*need lock*/);
+        return;
+      }
       size_t num_versions;
       derez.deserialize(num_versions);
-      std::vector<VersionState*> new_states;
       WrapperReferenceMutator mutator(preconditions);
       for (unsigned idx = 0; idx < num_versions; idx++)
       {
@@ -7366,30 +7346,30 @@ namespace Legion {
         VersionState *state = 
           runtime->find_or_request_version_state(did, ready); 
         std::map<VersionState*,FieldMask>::iterator finder = 
-          result->version_states.find(state);
-        if (finder != result->version_states.end())
+          version_states.find(state);
+        if (finder != version_states.end())
         {
           FieldMask state_mask;
           derez.deserialize(state_mask);
-          result->uncaptured_states[state] |= (state_mask - finder->second);
-          result->uncaptured_fields |= (state_mask - finder->second);
+          uncaptured_states[state] |= (state_mask - finder->second);
+          uncaptured_fields |= (state_mask - finder->second);
           finder->second |= state_mask;
           // No need to add any references since it was already captured
           continue;
         }
         else // Can just unpack it directly
         {
-          FieldMask &state_mask = result->version_states[state];
+          FieldMask &state_mask = version_states[state];
           derez.deserialize(state_mask);
-          result->uncaptured_states[state] = state_mask;
-          result->uncaptured_fields |= state_mask;
+          uncaptured_states[state] = state_mask;
+          uncaptured_fields |= state_mask;
         }
         if (ready.exists() && !ready.has_triggered())
         {
           DeferCompositeNodeRefArgs args;
           args.state = state;
-          args.owner_did = result->owner_did;
-          args.root_owner = result->root_owner;
+          args.owner_did = owner_did;
+          args.root_owner = root_owner;
           RtEvent precondition = 
             runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY,
                                              NULL/*op*/, ready);
@@ -7399,14 +7379,13 @@ namespace Legion {
         {
           state->add_nested_resource_ref(owner_did);
           // If we're the root owner then we also have to add our
-          if (result->root_owner)
+          if (root_owner)
           {
             state->add_nested_gc_ref(owner_did, &mutator);
             state->add_nested_valid_ref(owner_did, &mutator);
           }
         }
       }
-      return result;
     }
 
     //--------------------------------------------------------------------------

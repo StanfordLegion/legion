@@ -1478,6 +1478,8 @@ namespace Legion {
                  DistributedID owner_did, std::set<RtEvent> &preconditions,
                  const LegionMap<CompositeNode*,FieldMask>::aligned &existing,
                  bool root_owner);
+      void unpack_version_states(Deserializer &derez, Runtime *runtime,
+                       std::set<RtEvent> &preconditions, bool need_lock);
       static void handle_deferred_node_ref(const void *args);
     public:
       void record_dirty_fields(const FieldMask &dirty_mask);
