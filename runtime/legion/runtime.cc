@@ -12241,10 +12241,18 @@ namespace Legion {
         if (finder != task_table.end())
           return finder->second;
       }
-      TaskImpl *result = new TaskImpl(task_id, this);
       AutoLock tv_lock(task_variant_lock);
-      task_table[task_id] = result;
-      return result;
+      std::map<TaskID,TaskImpl*>::const_iterator finder = 
+        task_table.find(task_id);
+      // Check to see if we lost the race
+      if (finder == task_table.end())
+      {
+        TaskImpl *result = new TaskImpl(task_id, this);
+        task_table[task_id] = result;
+        return result;
+      }
+      else // Lost the race as it already exists
+        return finder->second;
     }
 
     //--------------------------------------------------------------------------
