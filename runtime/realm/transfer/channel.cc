@@ -553,79 +553,68 @@ namespace Realm {
 		log_request.info() << "pred limits xfer: " << max_bytes << " -> " << pre_max;
 		max_bytes = pre_max;
 	      }
+
+	      // further limit by bytes we've actually received
+	      max_bytes = seq_pre_write.span_exists(read_bytes_total, max_bytes);
+	      if(max_bytes == 0) {
+		// TODO: put this XD to sleep until we do have data
+		break;
+	      }
 	    }
 
+	    if(next_xd_guid != XFERDES_NO_GUID) {
+	      // if we're writing to an intermediate buffer, make sure to not
+	      //  overwrite previously written data that has not been read yet
+	      max_bytes = seq_next_read.span_exists(write_bytes_total, max_bytes);
+	      if(max_bytes == 0) {
+		// TODO: put this XD to sleep until we do have data
+		break;
+	      }
+	    }
+
+	    // tentatively get as much as we can from the source iterator
 	    size_t src_bytes = src_iter->step(max_bytes, src_info,
 					      flags,
 					      true /*tentative*/);
-	    size_t src_bytes_avail;
-	    if(pre_xd_guid == XFERDES_NO_GUID) {
-	      src_bytes_avail = src_bytes;
-	    } else {
-	      // if we're reading from an intermediate buffer, make sure we
-	      //  have enough data from the predecessor
-	      assert((src_info.num_lines == 1) && (src_info.num_planes == 1));
-	      src_bytes_avail = seq_pre_write.span_exists(read_bytes_total,
-							  src_bytes);
-	      if(src_bytes_avail == 0) {
-		// TODO: put this XD to sleep until we do have data
-		src_iter->cancel_step();
-		break;
-	      }
-	      
-	      // if src_bytes_avail < src_bytes, we'll need to redo the src_iter
-	      //  step, but wait until we see if we need to shrink even more due
-	      //  to the destination side
+	    if(src_bytes == 0) {
+	      // not enough space for even one element
+	      // TODO: put this XD to sleep until we do have data
+	      break;
 	    }
 
-	    // destination step must be tentative for an IB that might be full
-	    //  or a non-IB target that might collapse dimensions differently
-	    bool dimension_mismatch_possible = ((flags & TransferIterator::LINES_OK) != 0);
-	    bool dst_step_tentative = ((next_xd_guid != XFERDES_NO_GUID) ||
-				       dimension_mismatch_possible);
+	    // destination step must be tentative for an non-IB source or
+	    //  target that might collapse dimensions differently
+	    bool dimension_mismatch_possible = (((pre_xd_guid == XFERDES_NO_GUID) ||
+						 (next_xd_guid == XFERDES_NO_GUID)) &&
+						((flags & TransferIterator::LINES_OK) != 0));
 
-	    size_t dst_bytes = dst_iter->step(src_bytes_avail, dst_info,
+	    size_t dst_bytes = dst_iter->step(src_bytes, dst_info,
 					      flags,
-					      dst_step_tentative);
-	    if(next_xd_guid != XFERDES_NO_GUID) {
-	      // if we're writing to an intermediate buffer, make sure the
-	      //  next XD has read the data we want to overwrite
-	      assert((dst_info.num_lines == 1) && (dst_info.num_planes == 1));
-	      size_t dst_bytes_avail = seq_next_read.span_exists(write_bytes_total,
-								 dst_bytes);
-	      if(dst_bytes_avail == 0) {
-		// TODO: put this XD to sleep until we do have data
-		dst_iter->cancel_step();
-		src_iter->cancel_step();
-		break;
-	      }
-
-	      // if dst_bytes_avail < dst_bytes, we'll need to redo the dst_iter
-	      // step
-	      if(dst_bytes_avail < dst_bytes) {
-		// cancel and request what we have room to write
-		dst_iter->cancel_step();
-		dst_bytes = dst_iter->step(dst_bytes_avail, dst_info, flags,
-					   dimension_mismatch_possible);
-		assert(dst_bytes == dst_bytes_avail);
-	      } else {
-		// in the absense of dimension mismatches, it's safe now to confirm
-		//  the destination step
-		if(!dimension_mismatch_possible)
-		  dst_iter->confirm_step();
-	      }
+					      dimension_mismatch_possible);
+	    if(dst_bytes == 0) {
+	      // not enough space for even one element
+	      src_iter->cancel_step();
+	      // TODO: put this XD to sleep until we do have data
+	      break;
 	    }
 
 	    // does source now need to be shrunk?
 	    if(dst_bytes < src_bytes) {
 	      // cancel the src step and try to just step by dst_bytes
-	      assert(dst_bytes < src_bytes);  // should never be larger
 	      src_iter->cancel_step();
 	      // this step must still be tentative if a dimension mismatch is
 	      //  posisble
 	      src_bytes = src_iter->step(dst_bytes, src_info, flags,
 					 dimension_mismatch_possible);
-	      // now must match
+	      // a mismatch is still possible if the source is 2+D and the
+	      //  destination wants to stop mid-span
+	      if(src_bytes < dst_bytes) {
+		assert(dimension_mismatch_possible);
+		dst_iter->cancel_step();
+		dst_bytes = dst_iter->step(src_bytes, dst_info, flags,
+					   true /*tentative*/);
+	      }
+	      // byte counts now must match
 	      assert(src_bytes == dst_bytes);
 	    } else {
 	      // in the absense of dimension mismatches, it's safe now to confirm

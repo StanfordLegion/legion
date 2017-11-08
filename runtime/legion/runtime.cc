@@ -13304,10 +13304,18 @@ namespace Legion {
         if (finder != task_table.end())
           return finder->second;
       }
-      TaskImpl *result = new TaskImpl(task_id, this);
       AutoLock tv_lock(task_variant_lock);
-      task_table[task_id] = result;
-      return result;
+      std::map<TaskID,TaskImpl*>::const_iterator finder = 
+        task_table.find(task_id);
+      // Check to see if we lost the race
+      if (finder == task_table.end())
+      {
+        TaskImpl *result = new TaskImpl(task_id, this);
+        task_table[task_id] = result;
+        return result;
+      }
+      else // Lost the race as it already exists
+        return finder->second;
     }
 
     //--------------------------------------------------------------------------
@@ -13343,10 +13351,14 @@ namespace Legion {
         if (finder != memory_managers.end())
           return finder->second;
       }
-      // Otherwise, if we haven't made it yet, make it now
-      MemoryManager *result = new MemoryManager(mem, this);
-      // Put it in the map
+      // Not there?  Take exclusive lock and check again, create if needed
       AutoLock m_lock(memory_manager_lock);
+      std::map<Memory,MemoryManager*>::const_iterator finder =
+        memory_managers.find(mem);
+      if (finder != memory_managers.end())
+        return finder->second;
+      // Really do need to create it (and put it in the map)
+      MemoryManager *result = new MemoryManager(mem, this);
       memory_managers[mem] = result;
       return result;
     }
