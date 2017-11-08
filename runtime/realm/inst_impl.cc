@@ -48,7 +48,6 @@ namespace Realm {
 	if(poisoned) {
 	  log_poison.info() << "poisoned deferred instance destruction skipped - POSSIBLE LEAK - inst=" << inst;
 	} else {
-	  log_inst.info() << "instance destroyed: inst=" << inst;
 	  inst.destroy();
 	  //get_runtime()->get_memory_impl(impl->memory)->destroy_instance(impl->me, true); 
 	}
@@ -177,11 +176,14 @@ namespace Realm {
       // a poisoned precondition silently cancels the deletion - up to
       //  requestor to realize this has occurred since the deletion does
       //  not have its own completion event
-      if(!poisoned) {
-	// this does the right thing even though we're using an instance ID
-	MemoryImpl *mem_impl = get_runtime()->get_memory_impl(*this);
-	mem_impl->release_instance_storage(*this, wait_on);
-      }
+      if(poisoned)
+	return;
+
+      log_inst.info() << "instance destroyed: inst=" << *this;
+
+      // this does the right thing even though we're using an instance ID
+      MemoryImpl *mem_impl = get_runtime()->get_memory_impl(*this);
+      mem_impl->release_instance_storage(*this, wait_on);
     }
 
     void RegionInstance::destroy(const std::vector<DestroyedField>& destroyed_fields,
