@@ -615,6 +615,7 @@ namespace Realm {
       OASVec& oasvec = (*oas_by_inst)[inst_pair];
       size_t ib_elmnt_size = 0, domain_size = 0;
       size_t serdez_pad = 0;
+      size_t min_granularity = 1;
       for(OASVec::const_iterator it = oasvec.begin(); it != oasvec.end(); it++) {
 	if(it->serdez_id != 0) {
 	  const CustomSerdezUntyped *serdez_op = get_runtime()->custom_serdez_table[it->serdez_id];
@@ -622,13 +623,28 @@ namespace Realm {
 	  ib_elmnt_size += serdez_op->max_serialized_size;
 	  if(serdez_op->max_serialized_size > serdez_pad)
 	    serdez_pad = serdez_op->max_serialized_size;
-	} else
+	} else {
 	  ib_elmnt_size += it->size;
+	  min_granularity = lcm(min_granularity, size_t(it->size));
+	}
       }
       domain_size = domain->volume();
 
-      size_t ib_size = std::min(domain_size * ib_elmnt_size + serdez_pad,
-				IB_MAX_SIZE);
+      size_t ib_size = domain_size * ib_elmnt_size + serdez_pad;
+      if(ib_size > IB_MAX_SIZE) {
+	// take up to IB_MAX_SIZE, respecting the min granularity
+	if(min_granularity > 1) {
+	  // (really) corner case: if min_granulary exceeds IB_MAX_SIZE, use it
+	  //  directly and hope it's ok
+	  if(min_granularity > IB_MAX_SIZE) {
+	    ib_size = min_granularity;
+	  } else {
+	    size_t extra = IB_MAX_SIZE % min_granularity;
+	    ib_size = IB_MAX_SIZE - extra;
+	  }
+	} else
+	  ib_size = IB_MAX_SIZE;
+      }
       //log_ib_alloc.info("alloc_ib: src_inst_id(%llx) dst_inst_id(%llx) idx(%d) size(%lu) memory(%llx)", inst_pair.first.id, inst_pair.second.id, idx, ib_size, tgt_mem.id);
       if (ID(tgt_mem).memory.owner_node == my_node_id) {
         // create local intermediate buffer
