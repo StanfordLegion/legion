@@ -7501,13 +7501,14 @@ namespace Legion {
       }
       else
       {
-        finder->second |= mask;
-        // Also update the uncaptured data structure with any missing fileds
+        // Update the uncaptured data structure with any missing fileds
         const FieldMask uncaptured_mask = mask - finder->second;
         if (!!uncaptured_mask)
         {
           uncaptured_states[state] |= uncaptured_mask;
           uncaptured_fields |= uncaptured_mask;
+          // Only need to update this if the fields aren't already valid
+          finder->second |= uncaptured_mask;
         }
       }
     } 
