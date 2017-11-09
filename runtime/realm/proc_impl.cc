@@ -502,6 +502,22 @@ namespace Realm {
 						Event start_event, Event finish_event,
 						int priority)
     {
+      // check for spawn to remote processor group
+      NodeID target = ID(me).pgroup.owner_node;
+      if(target != my_node_id) {
+	log_task.debug() << "sending remote spawn request:"
+			 << " func=" << func_id
+			 << " proc=" << me
+			 << " finish=" << finish_event;
+
+	get_runtime()->optable.add_remote_operation(finish_event, target);
+
+	SpawnTaskMessage::send_request(target, me, func_id,
+				       args, arglen, &reqs,
+				       start_event, finish_event, priority);
+	return;
+      }
+
       // create a task object and insert it into the queue
       Task *task = new Task(me, func_id, args, arglen, reqs,
                             start_event, finish_event, priority);
