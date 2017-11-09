@@ -4987,11 +4987,6 @@ namespace Legion {
       // If we are performing a trace mark that the child has a trace
       if (current_trace != NULL)
         op->set_trace(current_trace, !current_trace->is_fixed(), dependences);
-      else if (previous_trace != NULL && previous_trace->has_physical_trace())
-      {
-        previous_trace->get_physical_trace()->clear_cached_template();
-        previous_trace = NULL;
-      }
       unsigned result = total_children_count++;
       unsigned outstanding_count = 
         __sync_add_and_fetch(&outstanding_children_count,1);
@@ -5072,6 +5067,12 @@ namespace Legion {
                                                RtEvent op_precondition)
     //--------------------------------------------------------------------------
     {
+      if (current_trace == NULL && previous_trace != NULL &&
+          previous_trace->has_physical_trace())
+      {
+        previous_trace->get_physical_trace()->clear_cached_template();
+        previous_trace = NULL;
+      }
       if (!has_lock)
       {
         RtEvent lock_acquire = Runtime::acquire_rt_reservation(context_lock,
@@ -5504,10 +5505,9 @@ namespace Legion {
       // Issue a replay op
       TraceReplayOp *replay = runtime->get_available_replay_op(true);
       replay->initialize_replay(this, dynamic_trace);
-      runtime->add_to_dependence_queue(this, executing_processor, replay);
-
       // Now mark that we are starting a trace
       current_trace = dynamic_trace;
+      runtime->add_to_dependence_queue(this, executing_processor, replay);
     }
 
     //--------------------------------------------------------------------------
