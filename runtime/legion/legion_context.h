@@ -1497,6 +1497,7 @@ namespace Legion {
       int shard_collective_last_radix;
       int shard_collective_last_log_radix;
     protected:
+      Reservation replication_lock;
       CollectiveID next_available_collective_index;
       std::map<CollectiveID,ShardCollective*> collectives;
       std::map<CollectiveID,std::vector<

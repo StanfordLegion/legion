@@ -6681,6 +6681,7 @@ namespace Legion {
         logical_region_allocator_shard(0), next_available_collective_index(0)
     //--------------------------------------------------------------------------
     {
+      replication_lock = Reservation::create_reservation();
       // Get our allocation barriers
       pending_partition_barrier = manager->get_pending_partition_barrier();
       future_map_barrier = manager->get_future_map_barrier();
@@ -6715,6 +6716,8 @@ namespace Legion {
     ReplicateContext::~ReplicateContext(void)
     //--------------------------------------------------------------------------
     {
+      replication_lock.destroy_reservation();
+      replication_lock = Reservation::NO_RESERVATION;
       // We delete the barriers that we created
       for (unsigned idx = owner_shard->shard_id; 
             idx < close_mapped_barriers.size(); 
@@ -6802,7 +6805,7 @@ namespace Legion {
         // otherwise we can only support this currently if we are
         // the context for the top-level task
         index -= owner_size;
-        AutoLock ctx_lock(context_lock,1,false/*exclusive*/);
+        AutoLock priv_lock(privilege_lock,1,false/*exclusive*/);
         if ((index >= returnable_privileges.size()) ||
             returnable_privileges[index])
         {
@@ -9766,7 +9769,7 @@ namespace Legion {
       RtEvent wait_on;
       bool send_request = false;
       {
-        AutoLock ctx_lock(context_lock);
+        AutoLock inst_lock(instance_view_lock);
         std::map<PhysicalManager*,InstanceView*>::const_iterator finder = 
           instance_top_views.find(manager);
         if (finder != instance_top_views.end())
@@ -9794,7 +9797,7 @@ namespace Legion {
       // Wait for the result to be ready
       wait_on.lg_wait();
       // Retake the lock and retrieve the result
-      AutoLock ctx_lock(context_lock,1,false/*exclusive*/);
+      AutoLock inst_lock(instance_view_lock,1,false/*exclusive*/);
 #ifdef DEBUG_LEGION
       assert(instance_top_views.find(manager) != instance_top_views.end());
 #endif
@@ -9820,7 +9823,7 @@ namespace Legion {
       bool remove_duplicate_reference = false;
       RtUserEvent to_trigger;
       {
-        AutoLock ctx_lock(context_lock);
+        AutoLock inst_lock(instance_view_lock);
         std::map<PhysicalManager*,InstanceView*>::const_iterator finder = 
           instance_top_views.find(manager);
         if (finder != instance_top_views.end())
@@ -9943,7 +9946,7 @@ namespace Legion {
     {
       std::vector<std::pair<void*,size_t> > to_apply;
       {
-        AutoLock ctx_lock(context_lock);
+        AutoLock repl_lock(replication_lock);
 #ifdef DEBUG_LEGION
         assert(collectives.find(collective->collective_index) == 
                collectives.end());
@@ -9977,7 +9980,7 @@ namespace Legion {
     {
       CollectiveID collective_index;
       derez.deserialize(collective_index);
-      AutoLock ctx_lock(context_lock);
+      AutoLock repl_lock(replication_lock);
       // See if we already have the collective in which case we can just
       // return it, otherwise we need to buffer the deserializer
       std::map<CollectiveID,ShardCollective*>::const_iterator finder = 
@@ -9998,7 +10001,7 @@ namespace Legion {
     void ReplicateContext::unregister_collective(ShardCollective *collective)
     //--------------------------------------------------------------------------
     {
-      AutoLock ctx_lock(context_lock); 
+      AutoLock repl_lock(replication_lock); 
       std::map<CollectiveID,ShardCollective*>::iterator finder =
         collectives.find(collective->collective_index);
 #ifdef DEBUG_LEGION
@@ -10023,7 +10026,7 @@ namespace Legion {
       map->add_base_resource_ref(FUTURE_HANDLE_REF);
       std::vector<std::pair<void*,size_t> > to_apply;
       {
-        AutoLock ctx_lock(context_lock);
+        AutoLock repl_lock(replication_lock);
 #ifdef DEBUG_LEGION
         assert(future_maps.find(map->future_map_barrier) == future_maps.end());
 #endif
@@ -10062,7 +10065,7 @@ namespace Legion {
     {
       ApEvent future_map_event;
       derez.deserialize(future_map_event);
-      AutoLock ctx_lock(context_lock);
+      AutoLock repl_lock(replication_lock);
       // See if we already have the future map in which case we can just
       // return it, otherwise we need to buffer the deserializer
       std::map<ApEvent,ReplFutureMapImpl*>::const_iterator finder = 
@@ -10084,7 +10087,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       {
-        AutoLock ctx_lock(context_lock);
+        AutoLock repl_lock(replication_lock);
         std::map<ApEvent,ReplFutureMapImpl*>::iterator finder = 
           future_maps.find(map->future_map_barrier);
 #ifdef DEBUG_LEGION
@@ -10111,7 +10114,7 @@ namespace Legion {
     {
       std::vector<std::pair<void*,size_t> > to_perform;
       {
-        AutoLock ctx_lock(context_lock);
+        AutoLock repl_lock(replication_lock);
 #ifdef DEBUG_LEGION
         assert(live_composite_views.find(close_done) == 
                 live_composite_views.end());
@@ -10145,7 +10148,7 @@ namespace Legion {
     {
       RtEvent composite_name;
       derez.deserialize(composite_name);
-      AutoLock ctx_lock(context_lock);
+      AutoLock repl_lock(replication_lock);
       // See if we already have the composite view registered 
       std::map<RtEvent,CompositeView*>::const_iterator finder = 
         live_composite_views.find(composite_name);
@@ -10167,7 +10170,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       {
-        AutoLock ctx_lock(context_lock);
+        AutoLock repl_lock(replication_lock);
         std::map<RtEvent,CompositeView*>::iterator finder = 
           live_composite_views.find(close_done);
 #ifdef DEBUG_LEGION
@@ -10187,7 +10190,7 @@ namespace Legion {
       const std::pair<unsigned,unsigned> key(close_index, clone_index);
       // Take the lock and see if we can find one that already exists
       {
-        AutoLock ctx_lock(context_lock);
+        AutoLock repl_lock(replication_lock);
         std::map<std::pair<unsigned,unsigned>,RtBarrier>::iterator finder = 
           ready_clone_barriers.find(key);
         if (finder != ready_clone_barriers.end())
@@ -10202,7 +10205,7 @@ namespace Legion {
       }
       wait_on.lg_wait();
       // Retake the lock and it better be there
-      AutoLock ctx_lock(context_lock);
+      AutoLock repl_lock(replication_lock);
       std::map<std::pair<unsigned,unsigned>,RtBarrier>::iterator finder = 
           ready_clone_barriers.find(key);
 #ifdef DEBUG_LEGION
@@ -10221,7 +10224,7 @@ namespace Legion {
       RtUserEvent to_trigger;
       const std::pair<unsigned,unsigned> key(close_index, clone_index);
       {
-        AutoLock ctx_lock(context_lock);
+        AutoLock repl_lock(replication_lock);
 #ifdef DEBUG_LEGION
         assert(ready_clone_barriers.find(key) == ready_clone_barriers.end());
 #endif
@@ -10690,7 +10693,7 @@ namespace Legion {
         return shard_manager->find_sharding_function(sid);
       // Check to see if it is in the cache
       {
-        AutoLock ctx_lock(context_lock,1,false/*exclusive*/);
+        AutoLock rem_lock(remote_lock,1,false/*exclusive*/);
         std::map<ShardingID,ShardingFunction*>::const_iterator finder = 
           sharding_functions.find(sid);
         if (finder != sharding_functions.end())
@@ -10699,7 +10702,7 @@ namespace Legion {
       // Get the functor from the runtime
       ShardingFunctor *functor = runtime->find_sharding_functor(sid);
       // Retake the lock
-      AutoLock ctx_lock(context_lock);
+      AutoLock rem_lock(remote_lock);
       // See if we lost the race
       std::map<ShardingID,ShardingFunction*>::const_iterator finder = 
         sharding_functions.find(sid);
