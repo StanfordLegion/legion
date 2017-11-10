@@ -111,6 +111,7 @@ namespace Legion {
       std::map<unsigned,LegionVector<AliasChildren>::aligned> aliased_children;
       // Pointer to a physical trace
       PhysicalTrace *physical_trace;
+      std::set<std::pair<Operation*,GenerationID> > frontiers;
 #ifdef LEGION_SPY
     protected:
       std::vector<UniqueID> current_uids;

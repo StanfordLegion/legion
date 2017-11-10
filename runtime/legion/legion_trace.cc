@@ -74,9 +74,13 @@ namespace Legion {
     {
       // Register for this fence on every one of the operations in
       // the trace and then clear out the operations data structure
-      for (unsigned idx = 0; idx < operations.size(); idx++)
+      for (std::set<std::pair<Operation*,GenerationID> >::iterator it =
+           frontiers.begin(); it != frontiers.end(); ++it)
       {
-        const std::pair<Operation*,GenerationID> &target = operations[idx];
+        const std::pair<Operation*,GenerationID> &target = *it;
+#ifdef DEBUG_LEGION
+        assert(!target.first->is_internal_op());
+#endif
         op->register_dependence(target.first, target.second);
 #ifdef LEGION_SPY
         for (unsigned req_idx = 0; req_idx < num_regions[idx]; req_idx++)
@@ -90,6 +94,7 @@ namespace Legion {
         target.first->remove_mapping_reference(target.second);
       }
       operations.clear();
+      frontiers.clear();
 #ifdef LEGION_SPY
       current_uids.clear();
       num_regions.clear();
@@ -209,6 +214,7 @@ namespace Legion {
         exit(ERROR_INCOMPLETE_PHYSICAL_TRACING);
       }
 
+      frontiers.insert(key);
       if (!op->is_internal_op())
       {
         const LegionVector<DependenceRecord>::aligned &deps = 
@@ -232,6 +238,13 @@ namespace Legion {
 #endif
           const std::pair<Operation*,GenerationID> &target = 
                                                 operations[it->operation_idx];
+          std::set<std::pair<Operation*,GenerationID> >::iterator finder =
+            frontiers.find(target);
+          if (finder != frontiers.end())
+          {
+            finder->first->remove_mapping_reference(finder->second);
+            frontiers.erase(finder);
+          }
 
           if ((it->prev_idx == -1) || (it->next_idx == -1))
           {
@@ -293,6 +306,13 @@ namespace Legion {
 #endif
           const std::pair<Operation*,GenerationID> &target = 
                                                 operations[it->operation_idx];
+          std::set<std::pair<Operation*,GenerationID> >::iterator finder =
+            frontiers.find(target);
+          if (finder != frontiers.end())
+          {
+            finder->first->remove_mapping_reference(finder->second);
+            frontiers.erase(finder);
+          }
           // If this is the case we can do the normal registration
           if ((it->prev_idx == -1) || (it->next_idx == -1))
           {
@@ -541,6 +561,7 @@ namespace Legion {
       }
       else
       {
+        frontiers.insert(key);
         if (!op->is_internal_op())
         {
           // Check for exceeding the trace size
@@ -613,6 +634,13 @@ namespace Legion {
 #endif
             const std::pair<Operation*,GenerationID> &target = 
                                                   operations[it->operation_idx];
+            std::set<std::pair<Operation*,GenerationID> >::iterator finder =
+              frontiers.find(target);
+            if (finder != frontiers.end())
+            {
+              finder->first->remove_mapping_reference(finder->second);
+              frontiers.erase(finder);
+            }
 
             if ((it->prev_idx == -1) || (it->next_idx == -1))
             {
@@ -674,6 +702,14 @@ namespace Legion {
 #endif
             const std::pair<Operation*,GenerationID> &target = 
                                                   operations[it->operation_idx];
+            std::set<std::pair<Operation*,GenerationID> >::iterator finder =
+              frontiers.find(target);
+            if (finder != frontiers.end())
+            {
+              finder->first->remove_mapping_reference(finder->second);
+              frontiers.erase(finder);
+            }
+
             // If this is the case we can do the normal registration
             if ((it->prev_idx == -1) || (it->next_idx == -1))
             {
@@ -1116,8 +1152,6 @@ namespace Legion {
       // This also registers that we have dependences on all operations
       // in the trace.
       local_trace->end_trace_execution(this);
-      // Register this fence with all previous users in the parent's context
-      parent_ctx->perform_fence_analysis(this);
       // Now update the parent context with this fence before we can complete
       // the dependence analysis and possibly be deactivated
       parent_ctx->update_current_fence(this);
@@ -1239,8 +1273,15 @@ namespace Legion {
           fence_op->get_mapped_event().wait();
         local_trace->get_physical_trace()->check_template_preconditions();
       }
-      // Register this fence with all previous users in the parent's context
-      parent_ctx->perform_fence_analysis(this);
+
+      if (parent_ctx->check_trace_recurrent())
+      {
+        FenceOp *fence_op = parent_ctx->get_current_fence();
+        register_dependence(fence_op, fence_op->get_generation());
+      }
+      else
+        // Register this fence with all previous users in the parent's context
+        parent_ctx->perform_fence_analysis(this);
       // Now update the parent context with this fence before we can complete
       // the dependence analysis and possibly be deactivated
       parent_ctx->update_current_fence(this);
