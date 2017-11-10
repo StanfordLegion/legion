@@ -310,7 +310,8 @@ namespace Legion {
       virtual void begin_static_trace(
                                      const std::set<RegionTreeID> *managed) = 0;
       virtual void end_static_trace(void) = 0;
-      virtual bool check_trace_recurrent(void) const = 0;
+      virtual void record_previous_trace(LegionTrace *trace) = 0;
+      virtual bool check_trace_recurrent(LegionTrace *trace) const = 0;
     public:
       virtual void issue_frame(FrameOp *frame, ApEvent frame_termination) = 0;
       virtual void perform_frame_issue(FrameOp *frame, 
@@ -885,7 +886,8 @@ namespace Legion {
       virtual void end_trace(TraceID tid);
       virtual void begin_static_trace(const std::set<RegionTreeID> *managed);
       virtual void end_static_trace(void);
-      virtual bool check_trace_recurrent(void) const;
+      virtual void record_previous_trace(LegionTrace *trace);
+      virtual bool check_trace_recurrent(LegionTrace *trace) const;
     public:
       virtual void issue_frame(FrameOp *frame, ApEvent frame_termination);
       virtual void perform_frame_issue(FrameOp *frame, 
@@ -1397,7 +1399,8 @@ namespace Legion {
       virtual void end_trace(TraceID tid);
       virtual void begin_static_trace(const std::set<RegionTreeID> *managed);
       virtual void end_static_trace(void);
-      virtual bool check_trace_recurrent(void) const;
+      virtual void record_previous_trace(LegionTrace *trace);
+      virtual bool check_trace_recurrent(LegionTrace *trace) const;
     public:
       virtual void issue_frame(FrameOp *frame, ApEvent frame_termination);
       virtual void perform_frame_issue(FrameOp *frame, 
@@ -1698,7 +1701,8 @@ namespace Legion {
       virtual void end_trace(TraceID tid);
       virtual void begin_static_trace(const std::set<RegionTreeID> *managed);
       virtual void end_static_trace(void);
-      virtual bool check_trace_recurrent(void) const;
+      virtual void record_previous_trace(LegionTrace *trace);
+      virtual bool check_trace_recurrent(LegionTrace *trace) const;
     public:
       virtual void issue_frame(FrameOp *frame, ApEvent frame_termination);
       virtual void perform_frame_issue(FrameOp *frame, 

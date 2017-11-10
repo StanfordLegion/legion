@@ -214,9 +214,9 @@ namespace Legion {
         exit(ERROR_INCOMPLETE_PHYSICAL_TRACING);
       }
 
-      frontiers.insert(key);
       if (!op->is_internal_op())
       {
+        frontiers.insert(key);
         const LegionVector<DependenceRecord>::aligned &deps = 
           translate_dependence_records(op, index); 
         operations.push_back(key);
@@ -306,13 +306,6 @@ namespace Legion {
 #endif
           const std::pair<Operation*,GenerationID> &target = 
                                                 operations[it->operation_idx];
-          std::set<std::pair<Operation*,GenerationID> >::iterator finder =
-            frontiers.find(target);
-          if (finder != frontiers.end())
-          {
-            finder->first->remove_mapping_reference(finder->second);
-            frontiers.erase(finder);
-          }
           // If this is the case we can do the normal registration
           if ((it->prev_idx == -1) || (it->next_idx == -1))
           {
@@ -561,9 +554,9 @@ namespace Legion {
       }
       else
       {
-        frontiers.insert(key);
         if (!op->is_internal_op())
         {
+          frontiers.insert(key);
           // Check for exceeding the trace size
           if (index >= dependences.size())
           {
@@ -702,13 +695,6 @@ namespace Legion {
 #endif
             const std::pair<Operation*,GenerationID> &target = 
                                                   operations[it->operation_idx];
-            std::set<std::pair<Operation*,GenerationID> >::iterator finder =
-              frontiers.find(target);
-            if (finder != frontiers.end())
-            {
-              finder->first->remove_mapping_reference(finder->second);
-              frontiers.erase(finder);
-            }
 
             // If this is the case we can do the normal registration
             if ((it->prev_idx == -1) || (it->next_idx == -1))
@@ -1045,6 +1031,7 @@ namespace Legion {
       // Now update the parent context with this fence before we can complete
       // the dependence analysis and possibly be deactivated
       parent_ctx->update_current_fence(this);
+      parent_ctx->record_previous_trace(local_trace);
     }
 
     //--------------------------------------------------------------------------
@@ -1162,6 +1149,7 @@ namespace Legion {
         if (static_trace->remove_reference())
           delete static_trace;
       }
+      parent_ctx->record_previous_trace(local_trace);
     }
 
     //--------------------------------------------------------------------------
@@ -1274,14 +1262,13 @@ namespace Legion {
         local_trace->get_physical_trace()->check_template_preconditions();
       }
 
-      if (parent_ctx->check_trace_recurrent())
+      // If this trace is replayed just previously, we know there is a
+      // preceding fence and this is already registered to it.
+      if (!parent_ctx->check_trace_recurrent(local_trace))
       {
-        FenceOp *fence_op = parent_ctx->get_current_fence();
-        register_dependence(fence_op, fence_op->get_generation());
-      }
-      else
         // Register this fence with all previous users in the parent's context
         parent_ctx->perform_fence_analysis(this);
+      }
       // Now update the parent context with this fence before we can complete
       // the dependence analysis and possibly be deactivated
       parent_ctx->update_current_fence(this);

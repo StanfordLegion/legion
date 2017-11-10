@@ -5551,8 +5551,6 @@ namespace Legion {
         // Mark that the current trace is now fixed
         current_trace->as_dynamic_trace()->fix_trace();
       }
-      // Record the current trace in case to invalidate cached physical traces
-      previous_trace = current_trace;
       // We no longer have a trace that we're executing 
       current_trace = NULL;
     }
@@ -5620,17 +5618,22 @@ namespace Legion {
       TraceCompleteOp *complete_op = runtime->get_available_trace_op(true);
       complete_op->initialize_complete(this);
       runtime->add_to_dependence_queue(this, executing_processor, complete_op);
-      // Record the current trace in case to invalidate cached physical traces
-      previous_trace = current_trace;
       // We no longer have a trace that we're executing 
       current_trace = NULL;
     }
 
     //--------------------------------------------------------------------------
-    bool InnerContext::check_trace_recurrent(void) const
+    void InnerContext::record_previous_trace(LegionTrace *trace)
     //--------------------------------------------------------------------------
     {
-      return current_trace != NULL && current_trace == previous_trace;
+      previous_trace = trace;
+    }
+
+    //--------------------------------------------------------------------------
+    bool InnerContext::check_trace_recurrent(LegionTrace *trace) const
+    //--------------------------------------------------------------------------
+    {
+      return previous_trace == trace;
     }
 
     //--------------------------------------------------------------------------
@@ -8811,7 +8814,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool LeafContext::check_trace_recurrent(void) const
+    void LeafContext::record_previous_trace(LegionTrace *trace)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(false);
+#endif
+      exit(ERROR_LEAF_TASK_VIOLATION);
+    }
+
+    //--------------------------------------------------------------------------
+    bool LeafContext::check_trace_recurrent(LegionTrace *trace) const
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -9975,10 +9988,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool InlineContext::check_trace_recurrent(void) const
+    void InlineContext::record_previous_trace(LegionTrace *trace)
     //--------------------------------------------------------------------------
     {
-      return enclosing->check_trace_recurrent();
+      enclosing->record_previous_trace(trace);
+    }
+
+    //--------------------------------------------------------------------------
+    bool InlineContext::check_trace_recurrent(LegionTrace *trace) const
+    //--------------------------------------------------------------------------
+    {
+      return enclosing->check_trace_recurrent(trace);
     }
 
     //--------------------------------------------------------------------------
