@@ -777,7 +777,6 @@ namespace Legion {
       Domain domain;
       TraceLocalId op_key;
       std::vector<Domain::CopySrcDstField> fields;
-      const ReductionOp *reduction_op;
       void *fill_buffer;
       size_t fill_size;
       unsigned precondition_idx;
@@ -901,10 +900,6 @@ namespace Legion {
       unsigned inst_idx;
       unsigned ready_event_idx;
       InstanceView* view;
-#ifdef DEBUG_LEGION
-      LegionMap<InstanceView*, FieldMask>::aligned &reduction_views;
-      LegionMap<InstanceView*, bool>::aligned      &initialized;
-#endif
     };
 
     /**
