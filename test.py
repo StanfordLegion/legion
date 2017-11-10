@@ -224,7 +224,7 @@ def run_test_external(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
     # Contact: Mike Bauer <mbauer@nvidia.com>
     snap_dir = os.path.join(tmp_dir, 'snap')
     # TODO: Merge deppart branch into master after this makes it to stable Legion branch
-    cmd(['git', 'clone', '-b', 'deppart', 'https://github.com/StanfordLegion/Legion-SNAP.git', snap_dir])
+    cmd(['git', 'clone', '-b', 'master', 'https://github.com/StanfordLegion/Legion-SNAP.git', snap_dir])
     # This can't handle flags before application arguments, so place
     # them after.
     snap = [[os.path.join(snap_dir, 'src/snap'),
