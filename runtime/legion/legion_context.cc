@@ -4517,8 +4517,10 @@ namespace Legion {
     {
       if (!has_lock)
       {
+        // In order to guarantee in order adding of the operation to 
+        // the queue we just need to guarantee ordering on acquires
         RtEvent lock_acquire = Runtime::acquire_rt_reservation(child_op_lock,
-                                true/*exclusive*/, last_registration);
+                                true/*exclusive*/, last_acquire_reservation);
         if (!lock_acquire.has_triggered())
         {
           AddToDepQueueArgs args;
@@ -4528,6 +4530,8 @@ namespace Legion {
           last_registration = 
             runtime->issue_runtime_meta_task(args, LG_RESOURCE_PRIORITY,
                                              op, lock_acquire);
+          // Now update the last acquire reservation
+          last_acquire_reservation = lock_acquire;
           return;
         }
       }

@@ -1006,6 +1006,7 @@ namespace Legion {
       RtUserEvent window_wait;
       std::deque<ApEvent> frame_events;
       RtEvent last_registration;
+      RtEvent last_acquire_reservation;
       RtEvent dependence_precondition;
     protected:
       // Our cached set of index spaces for immediate domains
