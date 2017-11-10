@@ -301,7 +301,7 @@ namespace Legion {
                const std::vector<StaticDependence> *dependences) = 0;
       virtual void register_new_internal_operation(InternalOp *op) = 0;
       virtual unsigned register_new_close_operation(CloseOp *op) = 0;
-      virtual void add_to_dependence_queue(Operation *op, bool has_lock,
+      virtual void add_to_dependence_queue(Operation *op, bool first,
                                            RtEvent op_precondition) = 0;
       virtual void register_child_executed(Operation *op) = 0;
       virtual void register_child_complete(Operation *op) = 0;
@@ -538,12 +538,8 @@ namespace Legion {
       const std::vector<RegionRequirement> &regions;
     protected:
       friend class SingleTask;
-      Reservation context_lock;
     protected:
-      // Keep track of inline mapping regions for this task
-      // so we can see when there are conflicts
-      LegionList<PhysicalRegion,TASK_INLINE_REGION_ALLOC>::tracked
-                                                   inline_regions; 
+      Reservation                               privilege_lock;
       // Application tasks can manipulate these next two data
       // structures by creating regions and fields, make sure you are
       // holding the operation lock when you are accessing them
@@ -552,10 +548,13 @@ namespace Legion {
       // privileges to be returned or not
       std::vector<bool>                         returnable_privileges;
     protected:
+      // These next two data structure don't need a lock becaue
+      // they are only mutated by the application task 
       std::vector<PhysicalRegion>               physical_regions;
-    protected: // Instance top view data structures
-      std::map<PhysicalManager*,InstanceView*>  instance_top_views;
-      std::map<PhysicalManager*,RtUserEvent>    pending_top_views;
+      // Keep track of inline mapping regions for this task
+      // so we can see when there are conflicts
+      LegionList<PhysicalRegion,TASK_INLINE_REGION_ALLOC>::tracked
+                                                inline_regions; 
     protected:
       Processor                             executing_processor;
       unsigned                              total_tunable_count;
@@ -892,7 +891,7 @@ namespace Legion {
                 const std::vector<StaticDependence> *dependences);
       virtual void register_new_internal_operation(InternalOp *op);
       virtual unsigned register_new_close_operation(CloseOp *op);
-      virtual void add_to_dependence_queue(Operation *op, bool has_lock,
+      virtual void add_to_dependence_queue(Operation *op, bool first,
                                            RtEvent op_precondition);
       virtual void register_child_executed(Operation *op);
       virtual void register_child_complete(Operation *op);
@@ -1024,6 +1023,7 @@ namespace Legion {
       const std::vector<unsigned>           &parent_req_indexes;
       const std::vector<bool>               &virtual_mapped;
     protected:
+      Reservation                           child_op_lock;
       // Track whether this task has finished executing
       unsigned total_children_count; // total number of sub-operations
       unsigned total_close_count; 
@@ -1046,6 +1046,7 @@ namespace Legion {
       LegionTrace *current_trace;
       // Event for waiting when the number of mapping+executing
       // child operations has grown too large.
+      Reservation window_lock;
       bool valid_wait_event;
       RtUserEvent window_wait;
       std::deque<ApEvent> frame_events;
@@ -1074,18 +1075,25 @@ namespace Legion {
     protected:
       // For tracking restricted coherence
       std::list<Restriction*> coherence_restrictions;
+    protected: // Instance top view data structures
+      Reservation                               instance_view_lock;
+      std::map<PhysicalManager*,InstanceView*>  instance_top_views;
+      std::map<PhysicalManager*,RtUserEvent>    pending_top_views;
     protected:
+      Reservation                                       tree_owner_lock;
       std::map<RegionTreeNode*,
         std::pair<AddressSpaceID,bool/*remote only*/> > region_tree_owners;
-    protected:
       std::map<RegionTreeNode*,RtUserEvent> pending_version_owner_requests;
     protected:
+      Reservation                             remote_lock;
       std::map<AddressSpaceID,RemoteContext*> remote_instances;
     protected:
       // Tracking information for dynamic collectives
+      Reservation                            collective_lock;
       std::map<ApEvent,std::vector<Future> > collective_contributions;
     protected:
       // Track information for locally allocated fields
+      Reservation                                       local_field_lock;
       std::map<FieldSpace,std::vector<LocalFieldInfo> > local_fields;
 #ifdef LEGION_SPY
       // Some help for Legion Spy for validating execution fences
@@ -1832,7 +1840,7 @@ namespace Legion {
                 const std::vector<StaticDependence> *dependences);
       virtual void register_new_internal_operation(InternalOp *op);
       virtual unsigned register_new_close_operation(CloseOp *op);
-      virtual void add_to_dependence_queue(Operation *op, bool has_lock,
+      virtual void add_to_dependence_queue(Operation *op, bool first,
                                            RtEvent op_precondition);
       virtual void register_child_executed(Operation *op);
       virtual void register_child_complete(Operation *op);
@@ -1922,6 +1930,8 @@ namespace Legion {
                                                           const Future &f);
       virtual void find_collective_contributions(DynamicCollective dc,
                                              std::vector<Future> &futures);
+    protected:
+      Reservation                                   leaf_lock;
     };
 
     /**
@@ -2152,7 +2162,7 @@ namespace Legion {
                 const std::vector<StaticDependence> *dependences);
       virtual void register_new_internal_operation(InternalOp *op);
       virtual unsigned register_new_close_operation(CloseOp *op);
-      virtual void add_to_dependence_queue(Operation *op, bool has_lock,
+      virtual void add_to_dependence_queue(Operation *op, bool first,
                                            RtEvent op_precondition);
       virtual void register_child_executed(Operation *op);
       virtual void register_child_complete(Operation *op);
