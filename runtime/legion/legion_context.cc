@@ -4511,30 +4511,25 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InnerContext::add_to_dependence_queue(Operation *op, bool has_lock,
+    void InnerContext::add_to_dependence_queue(Operation *op, bool first,
                                                RtEvent op_precondition)
     //--------------------------------------------------------------------------
     {
-      if (!has_lock)
+      // If this is the first call, then defer it so we avoid
+      // trying to take the lock while being called from an 
+      // application task
+      if (first)
       {
-        // In order to guarantee in order adding of the operation to 
-        // the queue we just need to guarantee ordering on acquires
-        RtEvent lock_acquire = Runtime::acquire_rt_reservation(child_op_lock,
-                                true/*exclusive*/, last_acquire_reservation);
-        if (!lock_acquire.has_triggered())
-        {
-          AddToDepQueueArgs args;
-          args.proxy_this = this;
-          args.op = op;
-          args.op_pre = op_precondition;
-          last_registration = 
-            runtime->issue_runtime_meta_task(args, LG_RESOURCE_PRIORITY,
-                                             op, lock_acquire);
-          // Now update the last acquire reservation
-          last_acquire_reservation = lock_acquire;
-          return;
-        }
+        AddToDepQueueArgs args;
+        args.proxy_this = this;
+        args.op = op;
+        args.op_pre = op_precondition;
+        last_registration = 
+          runtime->issue_runtime_meta_task(args, LG_RESOURCE_PRIORITY,
+                                           op, last_registration);
+        return;
       }
+      AutoLock child_lock(child_op_lock);
       // We have the lock
       if (op->is_tracking_parent())
       {
@@ -4573,8 +4568,6 @@ namespace Legion {
                                         op, dependence_precondition);
         dependence_precondition = next;
       }
-      // Now we can release the lock
-      child_op_lock.release();
     }
 
     //--------------------------------------------------------------------------
@@ -7964,7 +7957,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LeafContext::add_to_dependence_queue(Operation *op, bool has_lock,
+    void LeafContext::add_to_dependence_queue(Operation *op, bool first,
                                               RtEvent op_precondition)
     //--------------------------------------------------------------------------
     {
@@ -9093,11 +9086,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InlineContext::add_to_dependence_queue(Operation *op, bool has_lock,
+    void InlineContext::add_to_dependence_queue(Operation *op, bool first,
                                                 RtEvent op_precondition)
     //--------------------------------------------------------------------------
     {
-      enclosing->add_to_dependence_queue(op, has_lock, op_precondition);
+      enclosing->add_to_dependence_queue(op, first, op_precondition);
     }
 
     //--------------------------------------------------------------------------

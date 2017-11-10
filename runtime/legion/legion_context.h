@@ -296,7 +296,7 @@ namespace Legion {
       virtual unsigned register_new_child_operation(Operation *op,
                const std::vector<StaticDependence> *dependences) = 0;
       virtual unsigned register_new_close_operation(CloseOp *op) = 0;
-      virtual void add_to_dependence_queue(Operation *op, bool has_lock,
+      virtual void add_to_dependence_queue(Operation *op, bool first,
                                            RtEvent op_precondition) = 0;
       virtual void register_child_executed(Operation *op) = 0;
       virtual void register_child_complete(Operation *op) = 0;
@@ -864,7 +864,7 @@ namespace Legion {
       virtual unsigned register_new_child_operation(Operation *op,
                 const std::vector<StaticDependence> *dependences);
       virtual unsigned register_new_close_operation(CloseOp *op);
-      virtual void add_to_dependence_queue(Operation *op, bool has_lock,
+      virtual void add_to_dependence_queue(Operation *op, bool first,
                                            RtEvent op_precondition);
       virtual void register_child_executed(Operation *op);
       virtual void register_child_complete(Operation *op);
@@ -1006,7 +1006,6 @@ namespace Legion {
       RtUserEvent window_wait;
       std::deque<ApEvent> frame_events;
       RtEvent last_registration;
-      RtEvent last_acquire_reservation;
       RtEvent dependence_precondition;
     protected:
       // Our cached set of index spaces for immediate domains
@@ -1401,7 +1400,7 @@ namespace Legion {
       virtual unsigned register_new_child_operation(Operation *op,
                 const std::vector<StaticDependence> *dependences);
       virtual unsigned register_new_close_operation(CloseOp *op);
-      virtual void add_to_dependence_queue(Operation *op, bool has_lock,
+      virtual void add_to_dependence_queue(Operation *op, bool first,
                                            RtEvent op_precondition);
       virtual void register_child_executed(Operation *op);
       virtual void register_child_complete(Operation *op);
@@ -1709,7 +1708,7 @@ namespace Legion {
       virtual unsigned register_new_child_operation(Operation *op,
                 const std::vector<StaticDependence> *dependences);
       virtual unsigned register_new_close_operation(CloseOp *op);
-      virtual void add_to_dependence_queue(Operation *op, bool has_lock,
+      virtual void add_to_dependence_queue(Operation *op, bool first,
                                            RtEvent op_precondition);
       virtual void register_child_executed(Operation *op);
       virtual void register_child_complete(Operation *op);

@@ -15008,13 +15008,13 @@ namespace Legion {
       if (program_order_execution)
       {
         ApEvent term_event = op->get_completion_event();
-        ctx->add_to_dependence_queue(op, false/*has_lock*/, precondition);
+        ctx->add_to_dependence_queue(op, true/*first*/, precondition);
         ctx->begin_task_wait(true/*from runtime*/);
         term_event.lg_wait();
         ctx->end_task_wait();
       }
       else
-        ctx->add_to_dependence_queue(op, false/*has lock*/, precondition);
+        ctx->add_to_dependence_queue(op, true/*first*/, precondition);
     }
     
     //--------------------------------------------------------------------------
@@ -19705,7 +19705,7 @@ namespace Legion {
             InnerContext::AddToDepQueueArgs *dargs = 
               (InnerContext::AddToDepQueueArgs*)args;
             dargs->proxy_this->add_to_dependence_queue(dargs->op,
-                                 true/*has lock*/, dargs->op_pre);
+                                 false/*true*/, dargs->op_pre);
             break;
           }
         case LG_WINDOW_WAIT_TASK_ID:
