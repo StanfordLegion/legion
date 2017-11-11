@@ -366,7 +366,15 @@ namespace Legion {
       // See if we need to do any versioning computations first
       RtEvent version_ready_event = perform_versioning_analysis();
       if (version_ready_event.exists() && !version_ready_event.has_triggered())
-        return defer_perform_mapping(version_ready_event, must_epoch_owner);
+        return defer_perform_mapping(version_ready_event, must_epoch_owner); 
+      // Grab the mapped event so we can know when to do the broadcast
+      RtEvent map_wait = get_mapped_event();
+      // Do the base call  
+      RtEvent result = IndividualTask::perform_mapping(must_epoch_owner);
+      // If there is an event then the mapping isn't done so we don't have
+      // the final versions yet and can't do the broadcast
+      if (result.exists())
+        return result;
       // Next let's do everything we need to in order to capture the
       // versioning informaton we need to send to avoid the completion race
 #ifdef DEBUG_LEGION
@@ -387,14 +395,8 @@ namespace Legion {
         if (IS_WRITE(regions[idx]))
           version_broadcast.pack_advance_states(idx, version_infos[idx]);
       }
-      // Grab the mapped event so we can know when to do the broadcast
-      RtEvent map_wait = get_mapped_event();
-      // Do the base call  
-      RtEvent result = IndividualTask::perform_mapping(must_epoch_owner);
-      // If there is an event then the mapping isn't done so we don't have
-      // the final versions yet and can't do the broadcast
-      if (result.exists())
-        return result;
+      // Have to wait for the mapping to be complete before sending to 
+      // guarantee correctness of mapping dependences on remote nodes
       if (!map_wait.has_triggered())
         map_wait.lg_wait();
       version_broadcast.perform_collective_async();
