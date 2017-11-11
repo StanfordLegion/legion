@@ -475,8 +475,8 @@ namespace Legion {
       // that are writes which are going to advance the version numbers
       VersioningInfoBroadcast version_broadcast(repl_ctx, 
                     versioning_collective_id, owner_shard);
-      // Cool trick: unpack directly into the data structure
-      version_broadcast.unpack_collective(derez);
+      // Explicitly unpack into the data structure
+      version_broadcast.explicit_unpack(derez);
       // Now do the broadcast
       version_broadcast.perform_collective_async();
     }
@@ -5178,6 +5178,56 @@ namespace Legion {
       assert(versions.empty());
 #endif
       derez.deserialize(acknowledge_event);
+      common_unpack(derez); 
+    }
+
+    //--------------------------------------------------------------------------
+    void VersioningInfoBroadcast::explicit_unpack(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      // This better happen on the owner
+      assert(local_shard == origin);
+#endif
+      common_unpack(derez);
+      // Now record valid references on all our version state objects
+      // Record a valid reference to all the version state objects
+      // that we will hold until we get acknowledgements from all
+      // the other shards that we will broadcast to
+      std::set<RtEvent> reference_preconditions;
+      for (std::map<unsigned,LegionMap<DistributedID,FieldMask>::aligned>::
+            const_iterator vit = versions.begin(); vit != versions.end(); vit++)
+      {
+        for (LegionMap<DistributedID,FieldMask>::aligned::const_iterator it = 
+              vit->second.begin(); it != vit->second.end(); it++)
+        {
+          RtEvent ready;
+          VersionState *state = 
+            context->runtime->find_or_request_version_state(it->first, ready);
+          if (ready.exists())
+            reference_preconditions.insert(ready);
+          // Check to see if we already have a reference
+          if (held_references.find(state) != held_references.end())
+            continue;
+          held_references.insert(state);
+        }
+      }
+      if (!reference_preconditions.empty())
+      {
+        RtEvent wait_for = Runtime::merge_events(reference_preconditions);
+        wait_for.lg_wait();
+      }
+      // Now we can add the references
+      WrapperReferenceMutator mutator(ack_preconditions);
+      for (std::set<VersionState*>::const_iterator it = 
+            held_references.begin(); it != held_references.end(); it++)
+        (*it)->add_base_valid_ref(VERSION_INFO_REF, &mutator);
+    }
+
+    //--------------------------------------------------------------------------
+    void VersioningInfoBroadcast::common_unpack(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
       size_t num_versions;
       derez.deserialize(num_versions);
       for (unsigned idx1 = 0; idx1 < num_versions; idx1++)

@@ -490,6 +490,8 @@ namespace Legion {
       virtual void pack_collective(Serializer &rez) const;
       virtual void unpack_collective(Deserializer &derez);
     public:
+      void explicit_unpack(Deserializer &derez);
+      void common_unpack(Deserializer &derez);
       void pack_advance_states(unsigned index, const VersionInfo &version_info);
       void wait_for_states(std::set<RtEvent> &applied_events);
       const VersioningSet<>& find_advance_states(unsigned index) const;
