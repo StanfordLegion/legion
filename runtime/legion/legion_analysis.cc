@@ -4413,7 +4413,12 @@ namespace Legion {
       // Finally record any valid above views
       for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it = 
             valid_above.begin(); it != valid_above.end(); it++)
+      {
         composite_view->record_valid_view(it->first, it->second, mutator);
+        // We also have to record these as dirty fields to make 
+        // sure that we issue copies from them if necessary
+        composite_view->record_dirty_fields(it->second);
+      }
     }
 
     //--------------------------------------------------------------------------
