@@ -245,6 +245,7 @@ namespace Legion {
       launch_space = IndexSpace::NO_SPACE;
       versioning_collective_id = UINT_MAX;
       future_collective_id = UINT_MAX;
+      version_broadcast_collective = NULL;
 #ifdef DEBUG_LEGION
       sharding_collective = NULL; 
 #endif
@@ -258,6 +259,8 @@ namespace Legion {
       if (sharding_collective != NULL)
         delete sharding_collective;
 #endif
+      if (version_broadcast_collective != NULL)
+        delete version_broadcast_collective;
       deactivate_individual_task();
       projection_infos.clear();
       runtime->free_repl_individual_task(this);
@@ -468,17 +471,20 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
       assert(repl_ctx != NULL);
+      assert(version_broadcast_collective == NULL);
 #else
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
       // Then broadcast the versioning results for any region requirements
       // that are writes which are going to advance the version numbers
-      VersioningInfoBroadcast version_broadcast(repl_ctx, 
-                    versioning_collective_id, owner_shard);
+      // We put this one on the heap because we don't want to end up blocking
+      // the virtual channel on which the message was sent
+      version_broadcast_collective = new VersioningInfoBroadcast(repl_ctx,
+                                     versioning_collective_id, owner_shard);
       // Explicitly unpack into the data structure
-      version_broadcast.explicit_unpack(derez);
+      version_broadcast_collective->explicit_unpack(derez);
       // Now do the broadcast
-      version_broadcast.perform_collective_async();
+      version_broadcast_collective->perform_collective_async();
     }
 
     //--------------------------------------------------------------------------

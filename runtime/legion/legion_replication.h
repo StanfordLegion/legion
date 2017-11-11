@@ -542,6 +542,7 @@ namespace Legion {
       std::vector<ProjectionInfo> projection_infos;
       CollectiveID versioning_collective_id; // id for version state broadcasts
       CollectiveID future_collective_id; // id for the future broadcast 
+      VersioningInfoBroadcast *version_broadcast_collective;
 #ifdef DEBUG_LEGION
     public:
       inline void set_sharding_collective(ShardingGatherCollective *collective)
