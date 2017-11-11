@@ -348,7 +348,14 @@ namespace Legion {
           }
         }
         if (!map_applied_conditions.empty())
-          complete_mapping(Runtime::merge_events(map_applied_conditions));
+        {
+          RtEvent map_applied = Runtime::merge_events(map_applied_conditions);
+          complete_mapping(map_applied);
+          // Record the map applied precondition in the versioning
+          // broadcast as well so we know when it is safe to remove
+          // our valid references
+          version_broadcast.record_precondition(map_applied);
+        }
         else
           complete_mapping();
         complete_execution();
@@ -1245,7 +1252,12 @@ namespace Legion {
             req.privilege = REDUCE;
         }
         if (!map_applied_conditions.empty())
-          complete_mapping(Runtime::merge_events(map_applied_conditions));
+        {
+          RtEvent map_applied = Runtime::merge_events(map_applied_conditions);
+          complete_mapping(map_applied);
+          // Also record a precondition for our versioning info being done
+          version_broadcast.record_precondition(map_applied);
+        }
         else
           complete_mapping();
         complete_execution();
@@ -5086,6 +5098,9 @@ namespace Legion {
       : BroadcastCollective(ctx, id, own)
     //--------------------------------------------------------------------------
     {
+      // If we own it then make our done event
+      if (local_shard == origin)
+        acknowledge_event = Runtime::create_rt_user_event();
     }
 
     //--------------------------------------------------------------------------
@@ -5102,6 +5117,24 @@ namespace Legion {
     VersioningInfoBroadcast::~VersioningInfoBroadcast(void)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      // Everybody should have a done event at this point
+      assert(acknowledge_event.exists());
+#endif
+      if (!ack_preconditions.empty())
+        Runtime::trigger_event(acknowledge_event, 
+            Runtime::merge_events(ack_preconditions));
+      else
+        Runtime::trigger_event(acknowledge_event);
+      // If we're the owner, we need to wait for all the triggers to 
+      // happen and then we can remove our valid references 
+      if ((local_shard == origin) && !held_references.empty())
+      {
+        acknowledge_event.lg_wait();
+        for (std::set<VersionState*>::const_iterator it = 
+              held_references.begin(); it != held_references.end(); it++)
+          (*it)->remove_base_valid_ref(VERSION_INFO_REF);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -5118,6 +5151,9 @@ namespace Legion {
     void VersioningInfoBroadcast::pack_collective(Serializer &rez) const
     //--------------------------------------------------------------------------
     {
+      RtUserEvent precondition = Runtime::create_rt_user_event();
+      rez.serialize(precondition);
+      ack_preconditions.insert(precondition);
       rez.serialize<size_t>(versions.size());
       for (std::map<unsigned,LegionMap<DistributedID,FieldMask>::aligned>::
             const_iterator vit = versions.begin(); vit != versions.end(); vit++)
@@ -5138,8 +5174,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
+      assert(!acknowledge_event.exists());
       assert(versions.empty());
 #endif
+      derez.deserialize(acknowledge_event);
       size_t num_versions;
       derez.deserialize(num_versions);
       for (unsigned idx1 = 0; idx1 < num_versions; idx1++)
@@ -5163,7 +5201,34 @@ namespace Legion {
                                                 const VersionInfo &version_info)
     //--------------------------------------------------------------------------
     {
-      version_info.capture_base_advance_states(versions[index]);
+#ifdef DEBUG_LEGION
+      // We should be on the owner
+      assert(local_shard == origin);
+#endif
+      LegionMap<DistributedID,FieldMask>::aligned &dids = versions[index];
+      version_info.capture_base_advance_states(dids);
+      // Record a valid reference to all the version state objects
+      // that we will hold until we get acknowledgements from all
+      // the other shards that we will broadcast to
+      WrapperReferenceMutator mutator(ack_preconditions);
+      for (LegionMap<DistributedID,FieldMask>::aligned::const_iterator it = 
+            dids.begin(); it != dids.end(); it++)
+      {
+        // We know it already exists
+#ifdef DEBUG_LEGION
+        VersionState *state = dynamic_cast<VersionState*>(
+            context->runtime->find_distributed_collectable(it->first));
+        assert(state != NULL);
+#else
+        VersionState *state = static_cast<VersionState*>(
+            context->runtime->find_distributed_collectable(it->first));
+#endif
+        // Check to see if we already have a reference
+        if (held_references.find(state) != held_references.end())
+          continue;
+        state->add_base_valid_ref(VERSION_INFO_REF, &mutator);
+        held_references.insert(state);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -5208,6 +5273,13 @@ namespace Legion {
       assert(finder != results.end());
 #endif
       return finder->second;
+    }
+
+    //--------------------------------------------------------------------------
+    void VersioningInfoBroadcast::record_precondition(RtEvent precondition)
+    //--------------------------------------------------------------------------
+    {
+      ack_preconditions.insert(precondition);
     }
 
   }; // namespace Internal

@@ -493,10 +493,15 @@ namespace Legion {
       void pack_advance_states(unsigned index, const VersionInfo &version_info);
       void wait_for_states(std::set<RtEvent> &applied_events);
       const VersioningSet<>& find_advance_states(unsigned index) const;
+      void record_precondition(RtEvent precondition);
     protected:
       std::map<unsigned/*index*/,
                LegionMap<DistributedID,FieldMask>::aligned> versions;
       LegionMap<unsigned/*index*/,VersioningSet<> >::aligned results;
+    protected:
+      RtUserEvent acknowledge_event;
+      mutable std::set<RtEvent> ack_preconditions;
+      std::set<VersionState*> held_references;
     };
 
     /**
