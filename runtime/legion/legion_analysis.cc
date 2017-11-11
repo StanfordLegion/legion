@@ -356,6 +356,8 @@ namespace Legion {
           finder->second |= mask;
         valid_fields |= mask;
       }
+      if (pre.exists())
+        return pre;
       return RtEvent::NO_RT_EVENT;
     }
 
