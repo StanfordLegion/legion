@@ -115,16 +115,16 @@ namespace Legion {
     class MapperEvent {
     public:
       MapperEvent(void)
-        : mapper_event_id(0) { }
+        : impl(RtUserEvent::NO_RT_USER_EVENT) { }
       FRIEND_ALL_RUNTIME_CLASSES
     public:
-      inline bool exists(void) const { return (mapper_event_id > 0); }
+      inline bool exists(void) const { return impl.exists(); }
       inline bool operator==(const MapperEvent &rhs) const 
-        { return (mapper_event_id == rhs.mapper_event_id); }
+        { return (impl.id == rhs.impl.id); }
       inline bool operator<(const MapperEvent &rhs) const
-        { return (mapper_event_id < rhs.mapper_event_id); }
-    protected:
-      unsigned mapper_event_id;
+        { return (impl.id < rhs.impl.id); }
+    private:
+      RtUserEvent impl;
     };
 
     namespace ProfilingMeasurements {
@@ -307,6 +307,12 @@ namespace Legion {
        *     allowed to have reduction-only privileges. Furthermore
        *     the mapper must map any regions with write privileges
        *     for different copies of the task to different instances.
+       *
+       * parent_priority default:current
+       *     If the mapper for the parent task permits child
+       *     operations to mutate the priority of the parent task
+       *     then the mapper can use this field to alter the 
+       *     priority of the parent task
        */
       struct TaskOptions {
         Processor                              initial_proc; // = current
@@ -314,6 +320,7 @@ namespace Legion {
         bool                                   stealable;    // = false
         bool                                   map_locally;  // = false
         bool                                   replicate;    // = false
+        TaskPriority                           parent_priority; // = current
       };
       //------------------------------------------------------------------------
       virtual void select_task_options(const MapperContext    ctx,
@@ -1520,6 +1527,13 @@ namespace Legion {
        * to be mapped before the mapping process is considered to be far
        * enough ahead that it can be halted for this context by setting
        * the 'min_tasks_to_schedule' parameter.
+       *
+       * The 'mutable_priority' parameter allows the mapper to specify
+       * whether child operations launched in this context are permitted
+       * to alter the priority of parent task. See the 'update_parent_priority'
+       * field of the 'select_task_options' mapper call. If this is set 
+       * to false then the child mappers cannot change the priority of
+       * the parent task.
        */
       struct ContextConfigOutput {
         unsigned                                max_window_size; // = 1024
@@ -1527,6 +1541,7 @@ namespace Legion {
         unsigned                                max_outstanding_frames; // = 2
         unsigned                                min_tasks_to_schedule; // = 64
         unsigned                                min_frames_to_schedule; // = 0 
+        bool                                    mutable_priority; // = false
       };
       //------------------------------------------------------------------------
       virtual void configure_context(const MapperContext         ctx,
@@ -1634,9 +1649,14 @@ namespace Legion {
        * another processor by placing it in the 'relocate_tasks' map 
        * along with the target processor for the task. Finally, the
        * mapper can also choose to leave the task on the ready queue
-       * by doing nothing. Note that if the mapper continues to leave
-       * tasks on the ready queue after repeated invocations of the 
-       * 'select_tasks_to_map' mapper call, it may appear like livelock.
+       * by doing nothing. If the mapper chooses not to do anything
+       * for any of the tasks in the ready queue then it must give
+       * the runtime a mapper event to use for deferring any future 
+       * calls to select_tasks_to_map. No more calls will be made to
+       * select_tasks_to_map until this mapper event is triggered by
+       * the mapper in another mapper call or the state of the 
+       * ready_queue changes (e.g. new tasks are added). Failure to
+       * provide a mapper event will result in an error.
        */
       struct SelectMappingInput {
         std::list<const Task*>                  ready_tasks;
@@ -1644,6 +1664,7 @@ namespace Legion {
       struct SelectMappingOutput {
         std::set<const Task*>                   map_tasks;
         std::map<const Task*,Processor>         relocate_tasks;
+        MapperEvent                             deferral_event;
       };
       //------------------------------------------------------------------------
       virtual void select_tasks_to_map(const MapperContext          ctx,

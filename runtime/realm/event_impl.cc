@@ -321,6 +321,11 @@ namespace Realm {
     get_runtime()->optable.request_cancellation(*this, reason_data, reason_len);
   }
 
+  void Event::set_operation_priority(int new_priority) const
+  {
+    get_runtime()->optable.set_priority(*this, new_priority);
+  }
+
 
   ////////////////////////////////////////////////////////////////////////
   //

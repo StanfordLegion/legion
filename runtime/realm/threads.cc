@@ -633,6 +633,14 @@ namespace Realm {
     }
   }
 
+  // changes the priority of the thread (and, by extension, the operation it
+  //   is working on)
+  void Thread::set_priority(int new_priority)
+  {
+    assert(scheduler != 0);
+    scheduler->set_thread_priority(this, new_priority);
+  }
+
 
   ////////////////////////////////////////////////////////////////////////
   //

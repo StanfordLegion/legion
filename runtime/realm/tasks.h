@@ -51,6 +51,8 @@ namespace Realm {
       virtual void print(std::ostream& os) const;
 
       virtual bool attempt_cancellation(int error_code, const void *reason_data, size_t reason_size);
+
+      virtual void set_priority(int new_priority);
       
       void execute_on_processor(Processor p);
 
@@ -88,6 +90,8 @@ namespace Realm {
       // called when thread status changes
       virtual void thread_blocking(Thread *thread);
       virtual void thread_ready(Thread *thread);
+
+      virtual void set_thread_priority(Thread *thread, int new_priority);
 
     public:
       // the main scheduler loop - lock should be held before calling

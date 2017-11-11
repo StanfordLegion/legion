@@ -309,24 +309,7 @@ namespace Realm {
       //   unnecessarily
       long long old_work_counter = work_counter.read_counter();
 
-      // first rule - always yield to a resumable worker
-      while(!resumable_workers.empty()) {
-	Thread *yield_to = resumable_workers.get(0); // priority is irrelevant
-	assert(yield_to != Thread::self());
-
-	// this should only happen if we're at the max active worker count (otherwise
-	//  somebody should have just woken this guy up earlier), and reduces the 
-	// unassigned worker count by one
-	update_worker_count(0, -1);
-
-	idle_workers.push_back(Thread::self());
-	worker_sleep(yield_to);
-
-	// we're awake again, but still looking for work...
-	old_work_counter = work_counter.read_counter();  // re-read - may have changed while we slept
-      }
-
-      // next priority - task registration
+      // first priority - task registration
       while(!taskreg_queue.empty()) {
 	LocalPythonProcessor::TaskRegistration *treg = taskreg_queue.front();
 	taskreg_queue.pop_front();
@@ -355,11 +338,21 @@ namespace Realm {
 	update_worker_count(0, +1);
       }
 
+      // if we have both resumable and new ready tasks, we want the one that
+      //  is the highest priority, with ties going to resumable tasks - we
+      //  can do this cleanly by taking advantage of the fact that the
+      //  resumable_workers queue uses the scheduler lock, so can't change
+      //  during this call
+      // peek at the top thing (if any) in that queue, and then try to find
+      //  a ready task with higher priority
+      int resumable_priority = ResumableQueue::PRI_NEG_INF;
+      resumable_workers.peek(&resumable_priority);
+
       // try to get a new task then
       // remember where a task has come from in case we want to put it back
       Task *task = 0;
       TaskQueue *task_source = 0;
-      int task_priority = TaskQueue::PRI_NEG_INF;
+      int task_priority = resumable_priority;
       for(std::vector<TaskQueue *>::const_iterator it = task_queues.begin();
 	  it != task_queues.end();
 	  it++) {
@@ -410,8 +403,29 @@ namespace Realm {
 
 	// and we're back to being unassigned
 	update_worker_count(0, +1);
-      } else {
-	// no?  thumb twiddling time
+	continue;
+      }
+
+      // having checked for higher-priority ready tasks, we can always
+      //  take the highest-priority resumable task, if any, and run it
+      if(!resumable_workers.empty()) {
+	Thread *yield_to = resumable_workers.get(0); // priority is irrelevant
+	assert(yield_to != Thread::self());
+
+	// this should only happen if we're at the max active worker count (otherwise
+	//  somebody should have just woken this guy up earlier), and reduces the 
+	// unassigned worker count by one
+	update_worker_count(0, -1);
+
+	idle_workers.push_back(Thread::self());
+	worker_sleep(yield_to);
+
+	// loop around and check both queues again
+	continue;
+      }
+
+      {
+	// no ready or resumable tasks?  thumb twiddling time
 
 	// are we shutting down?
 	if(shutdown_flag) {

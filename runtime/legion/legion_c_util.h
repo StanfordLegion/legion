@@ -525,6 +525,7 @@ namespace Legion {
         options_.stealable = options.stealable;
         options_.map_locally = options.map_locally;
         options_.replicate = options.replicate;
+        options_.parent_priority = options.parent_priority;
         return options_;
       }
 
@@ -536,6 +537,7 @@ namespace Legion {
         options.stealable = options_.stealable;
         options.map_locally = options_.map_locally;
         options.replicate = options_.replicate;
+        options.parent_priority = options_.parent_priority;
         return options;
       }
 

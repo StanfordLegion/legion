@@ -2691,7 +2691,7 @@ namespace Legion {
       : runtime(rt), local_proc(proc), proc_kind(kind), 
         stealing_disabled(no_steal), replay_execution(replay), 
         next_local_index(0), task_scheduler_enabled(false), 
-        total_active_contexts(0)
+        total_active_contexts(0), total_active_mappers(0)
     //--------------------------------------------------------------------------
     {
       this->local_queue_lock = Reservation::create_reservation();
@@ -2722,7 +2722,7 @@ namespace Legion {
     ProcessorManager::~ProcessorManager(void)
     //--------------------------------------------------------------------------
     {
-      ready_queues.clear();
+      mapper_states.clear();
       local_queue_lock.destroy_reservation();
       local_queue_lock = Reservation::NO_RESERVATION;
       queue_lock.destroy_reservation();
@@ -2800,7 +2800,7 @@ namespace Legion {
       {
         mappers[mid] = std::pair<MapperManager*,bool>(m, own); 
         AutoLock q_lock(queue_lock);
-        ready_queues[mid] = std::list<TaskOp*>();
+        mapper_states[mid] = MapperState();
       }
     }
 
@@ -2870,7 +2870,7 @@ namespace Legion {
       // Now re-take the lock and re-check the condition to see 
       // if the next scheduling task should be launched
       AutoLock q_lock(queue_lock);
-      if (total_active_contexts > 0)
+      if ((total_active_contexts > 0) && (total_active_mappers > 0))
       {
         task_scheduler_enabled = true;
         launch_task_scheduler();
@@ -2887,6 +2887,34 @@ namespace Legion {
       sched_args.proc = local_proc;
       runtime->issue_runtime_meta_task(sched_args, LG_LATENCY_PRIORITY);
     } 
+
+    //--------------------------------------------------------------------------
+    void ProcessorManager::notify_deferred_mapper(MapperID map_id,
+                                                  RtEvent deferred_event)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock q_lock(queue_lock);
+      MapperState &state = mapper_states[map_id];
+      // Check to see if the deferral event matches the one that we have
+      if (state.deferral_event == deferred_event)
+      {
+        // Now we can clear it
+        state.deferral_event = RtEvent::NO_RT_EVENT;
+        // And if we still have tasks, reactivate the mapper
+        if (!state.ready_queue.empty())
+          increment_active_mappers();
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ProcessorManager::handle_defer_mapper(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const DeferMapperSchedulerArgs *dargs = 
+        (const DeferMapperSchedulerArgs*)args; 
+      dargs->proxy_this->notify_deferred_mapper(dargs->map_id, 
+                                                dargs->deferral_event);
+    }
 
     //--------------------------------------------------------------------------
     void ProcessorManager::activate_context(InnerContext *context)
@@ -2933,7 +2961,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Better be called while holding the queue lock
-      if ((total_active_contexts == 0) && !task_scheduler_enabled)
+      if (!task_scheduler_enabled && (total_active_contexts == 0) &&
+          (total_active_mappers > 0))
       {
         task_scheduler_enabled = true;
         launch_task_scheduler();
@@ -2951,6 +2980,33 @@ namespace Legion {
 #endif
       total_active_contexts--;
       if (total_active_contexts == 0)
+        task_scheduler_enabled = false;
+    }
+
+    //--------------------------------------------------------------------------
+    void ProcessorManager::increment_active_mappers(void)
+    //--------------------------------------------------------------------------
+    {
+      // Better be called while holding the queue lock
+      if (!task_scheduler_enabled && (total_active_mappers == 0) &&
+          (total_active_contexts > 0))
+      {
+        task_scheduler_enabled = true;
+        launch_task_scheduler();
+      }
+      total_active_mappers++;
+    }
+
+    //--------------------------------------------------------------------------
+    void ProcessorManager::decrement_active_mappers(void)
+    //--------------------------------------------------------------------------
+    {
+      // Better be called while holding the queue lock
+#ifdef DEBUG_LEGION
+      assert(total_active_mappers > 0);
+#endif
+      total_active_mappers--;
+      if (total_active_mappers == 0)
         task_scheduler_enabled = false;
     }
 
@@ -2983,7 +3039,7 @@ namespace Legion {
         std::vector<const Task*> &mapper_tasks = input.stealable_tasks;
         {
           AutoLock q_lock(queue_lock,1,false/*exclusive*/);
-          std::list<TaskOp*> &target_list = ready_queues[stealer];
+          std::list<TaskOp*> &target_list = mapper_states[stealer].ready_queue;
           for (std::list<TaskOp*>::const_iterator it = 
                 target_list.begin(); it != target_list.end(); it++)
           {
@@ -3001,7 +3057,8 @@ namespace Legion {
         {
           // See if we can still get it out of the queue
           AutoLock q_lock(queue_lock);
-          std::list<TaskOp*> &target_list = ready_queues[stealer];
+          MapperState &map_state = mapper_states[stealer];
+          std::list<TaskOp*> &target_list = map_state.ready_queue;
           for (std::set<const Task*>::const_iterator steal_it = 
                 to_steal.begin(); steal_it != to_steal.end(); steal_it++)
           {
@@ -3014,6 +3071,15 @@ namespace Legion {
               if ((*it) == target)
               {
                 target_list.erase(it);
+                if (target_list.empty())
+                {
+                  // If we already have a deferral event then we
+                  // are already not active so just clear it
+                  if (map_state.deferral_event.exists())
+                    map_state.deferral_event = RtEvent::NO_RT_EVENT;
+                  else
+                    decrement_active_mappers();
+                }
                 found = true;
                 break;
               }
@@ -3055,10 +3121,15 @@ namespace Legion {
               temp_stolen[idx]->get_context()->get_context_id();
             AutoLock q_lock(queue_lock);
             ContextState &state = context_states[ctx_id];
-            ready_queues[stealer].push_front(temp_stolen[idx]);
             if (state.active && (state.owned_tasks == 0))
               increment_active_contexts();
             state.owned_tasks++;
+            MapperState &map_state = mapper_states[stealer];
+            if (map_state.ready_queue.empty())
+              increment_active_mappers();
+            // Otherwise the state hasn't actually changed so
+            // we can't actually clear any deferral events
+            map_state.ready_queue.push_back(temp_stolen[idx]);
           }
         }
 
@@ -3117,13 +3188,25 @@ namespace Legion {
       ContextID ctx_id = task->get_context()->get_context_id();
       AutoLock q_lock(queue_lock);
 #ifdef DEBUG_LEGION
-      assert(ready_queues.find(task->map_id) != ready_queues.end());
+      assert(mapper_states.find(task->map_id) != mapper_states.end());
 #endif
+      // Update the state for the context
       ContextState &state = context_states[ctx_id];
-      ready_queues[task->map_id].push_back(task);
       if (state.active && (state.owned_tasks == 0))
         increment_active_contexts();
       state.owned_tasks++;
+      // Also update the queue for the mapper
+      MapperState &map_state = mapper_states[task->map_id];
+      if (map_state.ready_queue.empty())
+        increment_active_mappers();
+      else if (map_state.deferral_event.exists())
+      {
+        // If we have a deferral event then we can clear it because
+        // the state has changed and we can increment the active mappers
+        map_state.deferral_event = RtEvent::NO_RT_EVENT;
+        increment_active_mappers();
+      }
+      map_state.ready_queue.push_back(task);
     }
 
     //--------------------------------------------------------------------------
@@ -3149,21 +3232,20 @@ namespace Legion {
       // Take a snapshot of our current mappers
       {
         AutoLock m_lock(mapper_lock,1,false/*exclusive*/);
+        // Fast path for no deferred mappers
         current_mappers.resize(mappers.size());
         unsigned idx = 0;
         for (std::map<MapperID,std::pair<MapperManager*,bool> >::
               const_iterator it = mappers.begin(); it != 
               mappers.end(); it++, idx++)
-        {
           current_mappers[idx] = 
             std::pair<MapperID,MapperManager*>(it->first, it->second.first);
-        }
       }
       for (std::vector<std::pair<MapperID,MapperManager*> >::const_iterator
             it = current_mappers.begin(); it != current_mappers.end(); it++)
       {
-        MapperID map_id = it->first;
-        MapperManager *mapper = it->second;
+        const MapperID map_id = it->first;
+        MapperManager *const mapper = it->second;
         Mapper::SelectMappingInput input;
         std::list<const Task*> &visible_tasks = input.ready_tasks;
         // We also need to capture the generations here
@@ -3171,20 +3253,62 @@ namespace Legion {
         // Pull out the current tasks for this mapping operation
         {
           AutoLock q_lock(queue_lock,1,false/*exclusive*/);
-          std::list<TaskOp*> &target_list = ready_queues[map_id];
-          for (std::list<TaskOp*>::const_iterator it = 
-                target_list.begin(); it != target_list.end(); it++)
+          MapperState &map_state = mapper_states[map_id];
+          // Only grap tasks if we don't have a deferral event
+          if (!map_state.deferral_event.exists())
           {
-            visible_tasks.push_back(*it);
-            visible_generations.push_back((*it)->get_generation());
+            std::list<TaskOp*> &target_list = map_state.ready_queue;
+            for (std::list<TaskOp*>::const_iterator it = 
+                  target_list.begin(); it != target_list.end(); it++)
+            {
+              visible_tasks.push_back(*it);
+              visible_generations.push_back((*it)->get_generation());
+            }  
           }
         }
+        // Do this before anything else in case we don't have any tasks
+        if (!stealing_disabled)
+          mapper->perform_stealing(stealing_targets);
+        // Nothing to do if there are no visible tasks
+        if (visible_tasks.empty())
+          continue;
         // Ask the mapper which tasks it would like to schedule
         Mapper::SelectMappingOutput output;
         if (!visible_tasks.empty())
           mapper->invoke_select_tasks_to_map(&input, &output);
-        if (!stealing_disabled)
-          mapper->perform_stealing(stealing_targets); 
+        // If we had no entry then we better have gotten a mapper event
+        if (output.map_tasks.empty() && output.relocate_tasks.empty())
+        {
+          const RtEvent wait_on = output.deferral_event.impl;
+          if (wait_on.exists())
+          {
+            // Put this on the list of the deferred mappers
+            AutoLock q_lock(queue_lock);
+            MapperState &map_state = mapper_states[map_id];
+#ifdef DEBUG_LEGION
+            assert(!map_state.deferral_event.exists());
+#endif
+            map_state.deferral_event = wait_on;
+            // Decrement the number of active mappers
+            decrement_active_mappers();
+          }
+          else // Very bad, error message
+            REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                          "Mapper %s failed to specify an output MapperEvent "
+                          "when returning from a call to 'select_tasks_to_map' "
+                          "that performed no other actions. Specifying a "
+                          "MapperEvent in such situation is necessary to avoid "
+                          "livelock conditions.", mapper->get_mapper_name())
+          // Launch a task to remove the deferred mapper event when it triggers
+          DeferMapperSchedulerArgs args;
+          args.proxy_this = this;
+          args.map_id = map_id;
+          args.deferral_event = wait_on;
+          runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY,
+                                           NULL, wait_on);
+          // We can continue because there is nothing left to do for this mapper
+          continue;
+        }
         // Process the results first remove the operations that were
         // selected to be mapped from the queue.  Note its possible
         // that we can't actually find the task because it has been
@@ -3216,7 +3340,8 @@ namespace Legion {
           // Reset the iterator to the start
           gen_it = visible_generations.begin();
           AutoLock q_lock(queue_lock);
-          std::list<TaskOp*> &rqueue = ready_queues[map_id];
+          MapperState &map_state = mapper_states[map_id];
+          std::list<TaskOp*> &rqueue = map_state.ready_queue;
           for (std::list<const Task*>::iterator vis_it = visible_tasks.begin(); 
                 vis_it != visible_tasks.end(); gen_it++)
           {
@@ -3230,6 +3355,13 @@ namespace Legion {
                   ((*gen_it) == (*it)->get_generation()))
               {
                 rqueue.erase(it);
+                if (rqueue.empty())
+                {
+                  if (map_state.deferral_event.exists())
+                    map_state.deferral_event = RtEvent::NO_RT_EVENT;
+                  else
+                    decrement_active_mappers();
+                }
                 found = true;
                 break;
               }
@@ -21457,6 +21589,11 @@ namespace Legion {
             const ProcessorManager::TriggerTaskArgs *trigger_args = 
                           (const ProcessorManager::TriggerTaskArgs*)args;
             trigger_args->op->trigger_mapping(); 
+            break;
+          }
+        case LG_DEFER_MAPPER_SCHEDULER_TASK_ID:
+          {
+            ProcessorManager::handle_defer_mapper(args);
             break;
           }
         case LG_DEFERRED_RECYCLE_ID:
