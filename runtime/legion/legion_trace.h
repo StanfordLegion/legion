@@ -114,8 +114,8 @@ namespace Legion {
       std::set<std::pair<Operation*,GenerationID> > frontiers;
 #ifdef LEGION_SPY
     protected:
-      std::vector<UniqueID> current_uids;
-      std::vector<unsigned> num_regions;
+      std::map<std::pair<Operation*,GenerationID>,UniqueID> current_uids;
+      std::map<std::pair<Operation*,GenerationID>,unsigned> num_regions;
 #endif
     };
 

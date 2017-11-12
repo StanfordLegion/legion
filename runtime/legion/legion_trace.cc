@@ -83,10 +83,10 @@ namespace Legion {
 #endif
         op->register_dependence(target.first, target.second);
 #ifdef LEGION_SPY
-        for (unsigned req_idx = 0; req_idx < num_regions[idx]; req_idx++)
+        for (unsigned req_idx = 0; req_idx < num_regions[target]; req_idx++)
         {
           LegionSpy::log_mapping_dependence(
-              op->get_context()->get_unique_id(), current_uids[idx], req_idx,
+              op->get_context()->get_unique_id(), current_uids[target], req_idx,
               op->get_unique_op_id(), 0, TRUE_DEPENDENCE);
         }
 #endif
@@ -221,8 +221,8 @@ namespace Legion {
           translate_dependence_records(op, index); 
         operations.push_back(key);
 #ifdef LEGION_SPY
-        current_uids.push_back(op->get_unique_op_id());
-        num_regions.push_back(op->get_region_count());
+        current_uids[key] = op->get_unique_op_id();
+        num_regions[key] = op->get_region_count();
 #endif
         // Add a mapping reference since people will be 
         // registering dependences
@@ -252,7 +252,7 @@ namespace Legion {
 #ifdef LEGION_SPY
             LegionSpy::log_mapping_dependence(
                 op->get_context()->get_unique_id(),
-                current_uids[it->operation_idx], 
+                current_uids[key],
                 (it->prev_idx == -1) ? 0 : it->prev_idx,
                 op->get_unique_op_id(), 
                 (it->next_idx == -1) ? 0 : it->next_idx, TRUE_DEPENDENCE);
@@ -267,7 +267,7 @@ namespace Legion {
 #ifdef LEGION_SPY
             LegionSpy::log_mapping_dependence(
                 op->get_context()->get_unique_id(),
-                current_uids[it->operation_idx], it->prev_idx,
+                current_uids[key], it->prev_idx,
                 op->get_unique_op_id(), it->next_idx, it->dtype);
 #endif
           }
@@ -313,7 +313,7 @@ namespace Legion {
 #ifdef LEGION_SPY
             LegionSpy::log_mapping_dependence(
                 op->get_context()->get_unique_id(),
-                current_uids[it->operation_idx], 
+                current_uids[key],
                 (it->prev_idx == -1) ? 0 : it->prev_idx,
                 op->get_unique_op_id(), 
                 (it->next_idx == -1) ? 0 : it->next_idx, TRUE_DEPENDENCE);
@@ -327,7 +327,7 @@ namespace Legion {
 #ifdef LEGION_SPY
             LegionSpy::log_mapping_dependence(
                 internal_op->get_context()->get_unique_id(),
-                current_uids[it->operation_idx], it->prev_idx,
+                current_uids[key], it->prev_idx,
                 internal_op->get_unique_op_id(), 0, it->dtype);
 #endif
           }
@@ -610,8 +610,8 @@ namespace Legion {
                                                           dependences[index];
           operations.push_back(key);
 #ifdef LEGION_SPY
-          current_uids.push_back(op->get_unique_op_id());
-          num_regions.push_back(op->get_region_count());
+          current_uids[key] = op->get_unique_op_id();
+          num_regions[key] = op->get_region_count();
 #endif
           // Add a mapping reference since people will be 
           // registering dependences
@@ -641,7 +641,7 @@ namespace Legion {
 #ifdef LEGION_SPY
               LegionSpy::log_mapping_dependence(
                   op->get_context()->get_unique_id(),
-                  current_uids[it->operation_idx], 
+                  current_uids[key],
                   (it->prev_idx == -1) ? 0 : it->prev_idx,
                   op->get_unique_op_id(), 
                   (it->next_idx == -1) ? 0 : it->next_idx, TRUE_DEPENDENCE);
@@ -656,7 +656,7 @@ namespace Legion {
 #ifdef LEGION_SPY
               LegionSpy::log_mapping_dependence(
                   op->get_context()->get_unique_id(),
-                  current_uids[it->operation_idx], it->prev_idx,
+                  current_uids[key], it->prev_idx,
                   op->get_unique_op_id(), it->next_idx, it->dtype);
 #endif
             }
@@ -703,7 +703,7 @@ namespace Legion {
 #ifdef LEGION_SPY
               LegionSpy::log_mapping_dependence(
                   op->get_context()->get_unique_id(),
-                  current_uids[it->operation_idx], 
+                  current_uids[key],
                   (it->prev_idx == -1) ? 0 : it->prev_idx,
                   op->get_unique_op_id(), 
                   (it->next_idx == -1) ? 0 : it->next_idx, TRUE_DEPENDENCE);
@@ -717,7 +717,7 @@ namespace Legion {
 #ifdef LEGION_SPY
               LegionSpy::log_mapping_dependence(
                   internal_op->get_context()->get_unique_id(),
-                  current_uids[it->operation_idx], it->prev_idx,
+                  current_uids[key], it->prev_idx,
                   internal_op->get_unique_op_id(), 0, it->dtype);
 #endif
             }
