@@ -7178,7 +7178,7 @@ function codegen.stat_for_list(cx, node)
       upper_bounds:insert(terralib.newsymbol(c.coord_t, "hi1"))
       body = quote
         var [symbol] = [symbol.type]{
-          __ptr = c.legion_ptr_t { value = [ indices[1] ] }
+          __ptr = [ptr]{ __ptr = c.legion_ptr_t { value = [ indices[1] ] } }
         }
         do
           [block]
