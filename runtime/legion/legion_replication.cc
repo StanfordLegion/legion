@@ -2360,6 +2360,7 @@ namespace Legion {
         local_constraints.push_back(input.constraints[idx]);
       const size_t total_constraints = input.constraints.size();
       input.constraints = local_constraints;
+      output.constraint_mappings.resize(input.constraints.size());
       // Do the mapper call
       Processor mapper_proc = parent_ctx->get_executing_processor();
       MapperManager *mapper = runtime->find_mapper(mapper_proc, mapper_id);
@@ -5096,6 +5097,7 @@ namespace Legion {
 #endif
           results[constraint_index] = mappings[idx1];
           std::vector<DistributedID> &dids = instances[constraint_index];
+          dids.resize(mappings[idx1].size());
           for (unsigned idx2 = 0; idx2 < mappings[idx1].size(); idx2++)
             dids[idx2] = mappings[idx1][idx2].impl->did;
         }
