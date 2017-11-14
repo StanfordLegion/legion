@@ -98,6 +98,7 @@ namespace Legion {
     public:
       bool has_physical_trace() { return physical_trace != NULL; }
       PhysicalTrace* get_physical_trace() { return physical_trace; }
+      void register_physical_only(Operation *op, GenerationID gen);
     public:
       void replay_aliased_children(std::vector<RegionTreePath> &paths) const;
       void end_trace_execution(FenceOp *fence_op);
@@ -365,6 +366,7 @@ namespace Legion {
       void check_template_preconditions();
       void get_current_template(PhysicalTraceInfo &trace_info,
                                 bool allow_create = true);
+      PhysicalTemplate* get_current_template() { return current_template; }
     private:
       void start_new_template();
     private:
@@ -374,6 +376,9 @@ namespace Legion {
     public:
       void fix_trace(void);
       inline bool is_tracing(void) const { return tracing; }
+      inline bool is_recurrent(void) const
+        { return current_template != NULL &&
+                 current_template == previous_template; }
       void finish_replay(void);
       void clear_cached_template(void) { previous_template = NULL; }
     public:
@@ -412,7 +417,8 @@ namespace Legion {
                                    LegionMap<Domain, FieldMask>::aligned projs);
     public:
       bool check_preconditions();
-      void execute(PhysicalTraceInfo &trace_info, Operation *op);
+      void register_operation(Operation *op);
+      void execute_all();
       void finalize();
       void optimize();
       void schedule();
@@ -550,6 +556,7 @@ namespace Legion {
       ASSIGN_FENCE_COMPLETION,
       SET_READY_EVENT,
       TRIGGER_COPY_COMPLETION,
+      LAUNCH_TASK,
     };
 
     /**
@@ -1029,6 +1036,42 @@ namespace Legion {
       friend struct PhysicalTemplate;
       TraceLocalId lhs;
       unsigned rhs;
+    };
+
+    struct LaunchTask : public Instruction {
+      LaunchTask(PhysicalTemplate& tpl, const TraceLocalId& lhs);
+      virtual void execute();
+      virtual std::string to_string();
+
+      virtual InstructionKind get_kind()
+        { return LAUNCH_TASK; }
+      virtual GetTermEvent* as_get_term_event()
+        { return NULL; }
+      virtual MergeEvent* as_merge_event()
+        { return NULL; }
+      virtual AssignFenceCompletion* as_assignment_fence_completion()
+        { return NULL; }
+      virtual IssueCopy* as_issue_copy()
+        { return NULL; }
+      virtual IssueFill* as_issue_fill()
+        { return NULL; }
+      virtual SetReadyEvent* as_set_ready_event()
+        { return NULL; }
+      virtual GetCopyTermEvent* as_get_copy_term_event()
+        { return NULL; }
+      virtual SetCopySyncEvent* as_set_copy_sync_event()
+        { return NULL; }
+      virtual TriggerCopyCompletion* as_triger_copy_completion()
+        { return NULL; }
+
+      virtual Instruction* clone(PhysicalTemplate& tpl,
+                                 const std::map<unsigned, unsigned> &rewrite);
+
+      virtual TraceLocalId get_owner(const TraceLocalId &key) { return op_key; }
+
+    private:
+      friend struct PhysicalTemplate;
+      TraceLocalId op_key;
     };
 
   }; // namespace Internal

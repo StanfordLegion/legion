@@ -48,6 +48,45 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void LegionTrace::register_physical_only(Operation *op, GenerationID gen)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!Runtime::no_physical_tracing);
+      assert(physical_trace != NULL);
+      assert(!physical_trace->is_tracing());
+      assert(physical_trace->is_recurrent());
+#endif
+      std::pair<Operation*,GenerationID> key(op,gen);
+      const unsigned index = operations.size();
+      op->set_trace_local_id(index);
+      operations.push_back(key);
+      Operation::OpKind kind = op->get_operation_kind();
+      switch (kind)
+      {
+        case Operation::FILL_OP_KIND :
+          {
+            op->trigger_resolution();
+            op->complete_mapping();
+            op->complete_execution();
+            break;
+          }
+        case Operation::DYNAMIC_COLLECTIVE_OP_KIND :
+          {
+            op->trigger_resolution();
+            op->trigger_mapping();
+            break;
+          }
+        default:
+          {
+            op->add_mapping_reference(op->get_generation());
+            physical_trace->get_current_template()->register_operation(op);
+            break;
+          }
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void LegionTrace::replay_aliased_children(
                              std::vector<RegionTreePath> &privilege_paths) const
     //--------------------------------------------------------------------------
@@ -494,11 +533,6 @@ namespace Legion {
       const unsigned index = operations.size();
       if (!Runtime::no_physical_tracing)
       {
-        if ((op->get_operation_kind() == Operation::COPY_OP_KIND ||
-             op->get_operation_kind() == Operation::FILL_OP_KIND ||
-             op->get_operation_kind() == Operation::DYNAMIC_COLLECTIVE_OP_KIND) &&
-            physical_trace != NULL)
-          op->set_memoizing();
         if (op->is_memoizing())
         {
           if (physical_trace == NULL)
@@ -1047,8 +1081,6 @@ namespace Legion {
         PhysicalTrace *physical_trace = local_trace->get_physical_trace();
         if (physical_trace->is_tracing())
           physical_trace->fix_trace();
-        else
-          physical_trace->finish_replay();
       }
       FenceOp::trigger_mapping();
     }
@@ -1138,6 +1170,20 @@ namespace Legion {
       assert(trace == NULL);
       assert(local_trace != NULL);
 #endif
+      if (local_trace->has_physical_trace())
+      {
+        PhysicalTrace *physical_trace = local_trace->get_physical_trace();
+        if (!physical_trace->is_tracing() && physical_trace->is_recurrent())
+        {
+          physical_trace->get_current_template()->execute_all();
+          physical_trace->finish_replay();
+          local_trace->end_trace_execution(this);
+          parent_ctx->update_current_fence(this);
+          parent_ctx->record_previous_trace(local_trace);
+          return;
+        }
+      }
+
       // Indicate that this trace is done being captured
       // This also registers that we have dependences on all operations
       // in the trace.
@@ -1165,8 +1211,10 @@ namespace Legion {
         PhysicalTrace *physical_trace = local_trace->get_physical_trace();
         if (physical_trace->is_tracing())
           physical_trace->fix_trace();
+#ifdef DEBUG_LEGION
         else
-          physical_trace->finish_replay();
+          assert(false);
+#endif
       }
       FenceOp::trigger_mapping();
     }
@@ -1263,6 +1311,8 @@ namespace Legion {
         if (fence_op != NULL)
           fence_op->get_mapped_event().wait();
         local_trace->get_physical_trace()->check_template_preconditions();
+        local_trace->get_physical_trace()->initialize_template(
+            get_completion_event());
       }
 
       // If this trace is replayed just previously, we know there is a
@@ -1281,9 +1331,6 @@ namespace Legion {
     void TraceReplayOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
-      if (local_trace->has_physical_trace())
-        local_trace->get_physical_trace()->initialize_template(
-            get_completion_event());
       FenceOp::trigger_mapping();
     }
 
@@ -1482,24 +1529,10 @@ namespace Legion {
       }
       else
       {
-        size_t num_events = events.size();
-        events.clear();
-        events.resize(num_events);
         events[fence_completion_id] = fence_completion;
         Realm::UserEvent no_event = Realm::UserEvent::create_user_event();
         events[no_event_id] = ApEvent(no_event);
         no_event.trigger();
-        pending_events.clear();
-        pending_events.resize(num_events);
-        for (unsigned idx = 0; idx < instructions.size(); ++idx)
-        {
-          if (instructions[idx]->get_kind() <= SET_COPY_SYNC_EVENT)
-          {
-            ApUserEvent e = ApUserEvent(Realm::UserEvent::create_user_event());
-            events[idx] = e;
-            pending_events[idx] = e;
-          }
-        }
 #ifdef DEBUG_LEGION
         for (std::map<TraceLocalId, Operation*>::iterator it =
              operations.begin(); it != operations.end(); ++it)
@@ -1678,13 +1711,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::execute(PhysicalTraceInfo &trace_info,
-                                   Operation *op)
+    void PhysicalTemplate::register_operation(Operation *op)
     //--------------------------------------------------------------------------
     {
+      DomainPoint color;
       DETAILED_PROFILER(task->runtime, PHYSICAL_TRACE_EXECUTE_CALL);
-      TraceLocalId key(op->get_trace_local_id(), trace_info.color);
+      TraceLocalId key(op->get_trace_local_id(), color);
       {
+        // TODO: Index operations should be sliced here.
         std::map<TraceLocalId, Operation*>::iterator op_finder =
           operations.find(key);
 #ifdef DEBUG_LEGION
@@ -1693,17 +1727,15 @@ namespace Legion {
 #endif
         op_finder->second = op;
       }
-      {
-        std::map<TraceLocalId, std::vector<Instruction*> >::iterator
-          inst_finder = inst_map.find(key);
-#ifdef DEBUG_LEGION
-        assert(inst_finder != inst_map.end());
-#endif
-        const std::vector<Instruction*> &insts = inst_finder->second;
-        for (std::vector<Instruction*>::const_iterator it = insts.begin();
-             it != insts.end(); ++it)
-          (*it)->execute();
-      }
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTemplate::execute_all()
+    //--------------------------------------------------------------------------
+    {
+      for (std::vector<Instruction*>::const_iterator it = instructions.begin();
+           it != instructions.end(); ++it)
+        (*it)->execute();
     }
 
     //--------------------------------------------------------------------------
@@ -1714,6 +1746,10 @@ namespace Legion {
       optimize();
       replayable = check_preconditions();
       schedule();
+      for (std::map<TraceLocalId, Operation*>::iterator it =
+           operations.begin(); it != operations.end(); ++it)
+        if (it->second->get_operation_kind() == Operation::TASK_OP_KIND)
+          instructions.push_back(new LaunchTask(*this, it->first));
       if (Runtime::reduce_fanout) reduce_fanout();
       if (Runtime::dump_physical_traces) dump_template();
       event_map.clear();
@@ -1851,6 +1887,11 @@ namespace Legion {
               copy_pre.insert(rhs_pre.begin(), rhs_pre.end());
               break;
             }
+          case LAUNCH_TASK:
+            {
+              assert(false);
+              break;
+            }
 #ifdef DEBUG_LEGION
           default:
             {
@@ -1945,6 +1986,11 @@ namespace Legion {
               }
               else
                 rewrite[idx] = rewrite[generate[idx]];
+              break;
+            }
+          case LAUNCH_TASK:
+            {
+              assert(false);
               break;
             }
 #ifdef DEBUG_LEGION
@@ -2113,6 +2159,11 @@ namespace Legion {
               consumers[inst->rhs].push_back(idx);
               producers.push_back(2);
               consumers.push_back(std::vector<unsigned>());
+              break;
+            }
+          case LAUNCH_TASK:
+            {
+              assert(false);
               break;
             }
 #ifdef DEBUG_LEGION
@@ -2983,11 +3034,17 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(operations.find(rhs) != operations.end());
       assert(operations.find(rhs)->second != NULL);
-      assert(pending_events[lhs] == events[lhs]);
+
+      SingleTask *task = dynamic_cast<SingleTask*>(operations[rhs]);
+      assert(task != NULL);
+#else
+      SingleTask *task = static_cast<SingleTask*>(operations[rhs]);
 #endif
-      ApEvent completion_event =
-        dynamic_cast<SingleTask*>(operations[rhs])->get_task_completion();
-      Runtime::trigger_event(pending_events[lhs], completion_event);
+      ApEvent completion_event = task->get_task_completion();
+      events[lhs] = completion_event;
+      PhysicalTraceInfo trace_info;
+      task->get_physical_trace_info(trace_info);
+      task->replay_map_task_output(trace_info);
     }
 
     //--------------------------------------------------------------------------
@@ -3048,12 +3105,11 @@ namespace Legion {
       {
 #ifdef DEBUG_LEGION
         assert(*it < events.size());
-        assert(events[*it].exists());
 #endif
         to_merge.insert(events[*it]);
       }
       ApEvent result = Runtime::merge_events(to_merge);
-      Runtime::trigger_event(pending_events[lhs], result);
+      events[lhs] = result;
     }
 
     //--------------------------------------------------------------------------
@@ -3211,7 +3267,7 @@ namespace Legion {
         }
       }
 #endif
-      Runtime::trigger_event(pending_events[lhs], result);
+      events[lhs] = result;
     }
 
     //--------------------------------------------------------------------------
@@ -3370,7 +3426,7 @@ namespace Legion {
         LegionSpy::log_fill_field(result, fields[idx].field_id,
                                   fields[idx].inst.id);
 #endif
-      Runtime::trigger_event(pending_events[lhs], result);
+      events[lhs] = result;
     }
 
     //--------------------------------------------------------------------------
@@ -3438,8 +3494,12 @@ namespace Legion {
       assert(ready_event_idx < events.size());
       assert(operations.find(op_key) != operations.end());
       assert(operations.find(op_key)->second != NULL);
-#endif
+
       SingleTask *task = dynamic_cast<SingleTask*>(operations[op_key]);
+      assert(task != NULL);
+#else
+      SingleTask *task = static_cast<SingleTask*>(operations[op_key]);
+#endif
       const std::deque<InstanceSet> &physical_instances =
         task->get_physical_instances();
       InstanceRef &ref =
@@ -3507,10 +3567,13 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(operations.find(rhs) != operations.end());
       assert(operations.find(rhs)->second != NULL);
-      assert(pending_events[lhs] == events[lhs]);
+
+      CopyOp *copy = dynamic_cast<CopyOp*>(operations[rhs]);
+      assert(copy != NULL);
+#else
+      CopyOp *copy = static_cast<CopyOp*>(operations[rhs]);
 #endif
-      Runtime::trigger_event(pending_events[lhs],
-          operations[rhs]->get_completion_event());
+      events[lhs] = copy->get_completion_event();
     }
 
     //--------------------------------------------------------------------------
@@ -3565,10 +3628,14 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(operations.find(rhs) != operations.end());
       assert(operations.find(rhs)->second != NULL);
+
+      CopyOp *copy = dynamic_cast<CopyOp*>(operations[rhs]);
+      assert(copy != NULL);
+#else
+      CopyOp *copy = static_cast<CopyOp*>(operations[rhs]);
 #endif
-      ApEvent sync_condition =
-        dynamic_cast<CopyOp*>(operations[rhs])->compute_sync_precondition();
-      Runtime::trigger_event(pending_events[lhs], sync_condition);
+      ApEvent sync_condition = copy->compute_sync_precondition();
+      events[lhs] = sync_condition;
     }
 
     //--------------------------------------------------------------------------
@@ -3623,9 +3690,16 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(operations.find(lhs) != operations.end());
       assert(operations.find(lhs)->second != NULL);
-#endif
+
       CopyOp *copy = dynamic_cast<CopyOp*>(operations[lhs]);
+      assert(copy != NULL);
+#else
+      CopyOp *copy = static_cast<CopyOp*>(operations[lhs]);
+#endif
+      copy->trigger_resolution();
+      copy->complete_mapping();
       copy->complete_copy_execution(events[rhs]);
+      copy->remove_mapping_reference(copy->get_generation());
     }
 
     //--------------------------------------------------------------------------
@@ -3655,6 +3729,75 @@ namespace Legion {
       assert(finder != rewrite.end());
 #endif
       return new TriggerCopyCompletion(tpl, lhs, finder->second);
+    }
+
+    /////////////////////////////////////////////////////////////
+    // LaunchTask
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    LaunchTask::LaunchTask(PhysicalTemplate& tpl, const TraceLocalId& op)
+      : Instruction(tpl), op_key(op)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(operations.find(op_key) != operations.end());
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    void LaunchTask::execute()
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(operations.find(op_key) != operations.end());
+      assert(operations.find(op_key)->second != NULL);
+
+      SingleTask *task = dynamic_cast<SingleTask*>(operations[op_key]);
+      assert(task != NULL);
+#else
+      SingleTask *task = static_cast<SingleTask*>(operations[op_key]);
+#endif
+      task->trigger_resolution();
+      if (!task->arrive_barriers.empty())
+      {
+        ApEvent done_event = task->get_task_completion();
+        for (std::vector<PhaseBarrier>::const_iterator it = 
+             task->arrive_barriers.begin(); it != 
+             task->arrive_barriers.end(); it++)
+          Runtime::phase_barrier_arrive(*it, 1/*count*/, done_event);
+      }
+#ifdef DEBUG_LEGION
+      assert(task->is_leaf() && !task->has_virtual_instances());
+#endif
+      task->complete_mapping();
+      task->launch_task();
+      task->remove_mapping_reference(task->get_generation());
+    }
+
+    //--------------------------------------------------------------------------
+    std::string LaunchTask::to_string()
+    //--------------------------------------------------------------------------
+    {
+      std::stringstream ss;
+      ss << "operations[" << op_key.first << ",";
+      if (op_key.second.dim > 1) ss << "(";
+      for (int dim = 0; dim < op_key.second.dim; ++dim)
+      {
+        if (dim > 0) ss << ",";
+        ss << op_key.second[dim];
+      }
+      if (op_key.second.dim > 1) ss << ")";
+      ss << ")].launch_task()";
+      return ss.str();
+    }
+
+    //--------------------------------------------------------------------------
+    Instruction* LaunchTask::clone(PhysicalTemplate& tpl,
+                                    const std::map<unsigned, unsigned> &rewrite)
+    //--------------------------------------------------------------------------
+    {
+      return new LaunchTask(tpl, op_key);
     }
 
     /////////////////////////////////////////////////////////////

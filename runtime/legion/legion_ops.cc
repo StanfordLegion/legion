@@ -304,8 +304,17 @@ namespace Legion {
     void Operation::execute_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
-      // Always wrap this call with calls to begin/end dependence analysis
-      begin_dependence_analysis();
+      //fprintf(stderr, "execute_dependence_analysis: %p\n", this);
+      if (trace != NULL && trace->get_physical_trace() != NULL)
+      {
+        if (get_operation_kind() == Operation::COPY_OP_KIND ||
+            get_operation_kind() == Operation::FILL_OP_KIND ||
+            get_operation_kind() == Operation::DYNAMIC_COLLECTIVE_OP_KIND)
+          set_memoizing();
+      }
+      if (trace == NULL &&
+          !get_operation_kind() == Operation::TRACE_REPLAY_OP_KIND)
+        parent_ctx->invalidate_trace_cache();
 #ifdef DEBUG_LEGION
       assert(!memoizing || trace != NULL);
 #endif
@@ -313,12 +322,25 @@ namespace Legion {
       {
         PhysicalTraceInfo trace_info;
         trace->get_physical_trace()->get_current_template(trace_info, false);
-        if (!trace_info.tracing)
+        if (!trace_info.tracing && trace->get_physical_trace()->is_recurrent())
         {
-          end_dependence_analysis();
+          trace->register_physical_only(this, gen);
           return;
         }
       }
+
+      // Always wrap this call with calls to begin/end dependence analysis
+      begin_dependence_analysis();
+      //if (memoizing)
+      //{
+      //  PhysicalTraceInfo trace_info;
+      //  trace->get_physical_trace()->get_current_template(trace_info, false);
+      //  if (!trace_info.tracing)
+      //  {
+      //    end_dependence_analysis();
+      //    return;
+      //  }
+      //}
       trigger_dependence_analysis();
       end_dependence_analysis();
     }
@@ -733,6 +755,7 @@ namespace Legion {
       // Tell our parent context that we are done mapping
       // It's important that this is done before we mark that we
       // are executed to avoid race conditions
+      //fprintf(stderr, "track_parent: %d, %p\n", track_parent, this);
       if (track_parent)
         parent_ctx->register_child_executed(this);
 #ifdef DEBUG_LEGION
@@ -3820,12 +3843,6 @@ namespace Legion {
         trace_info.memoizing = memoizing;
         trace_info.trace_local_id = trace_local_id;
         trace->get_physical_trace()->get_current_template(trace_info);
-        if (trace_info.tpl->is_replaying())
-        {
-          trace_info.tpl->execute(trace_info, this);
-          return;
-        }
-
 #ifdef DEBUG_LEGION
         assert(trace_info.tpl != NULL && trace_info.tpl->is_tracing());
 #endif
@@ -4642,8 +4659,6 @@ namespace Legion {
                                         completion_event);    
         }
       }
-      // Mark that we completed mapping
-      complete_mapping();
 
       // Handle the case for marking when the copy completes
       Runtime::trigger_event(completion_event, copy_complete_event);

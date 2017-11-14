@@ -5066,12 +5066,7 @@ namespace Legion {
                                                RtEvent op_precondition)
     //--------------------------------------------------------------------------
     {
-      if (current_trace == NULL && previous_trace != NULL &&
-          previous_trace->has_physical_trace())
-      {
-        previous_trace->get_physical_trace()->clear_cached_template();
-        previous_trace = NULL;
-      }
+      //fprintf(stderr, "InnerContext::add_to_dependence_queue: %p\n", op);
       if (!has_lock)
       {
         RtEvent lock_acquire = Runtime::acquire_rt_reservation(context_lock,
@@ -5501,7 +5496,6 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(dynamic_trace != NULL);
 #endif
-
       // Issue a replay op
       TraceReplayOp *replay = runtime->get_available_replay_op(true);
       replay->initialize_replay(this, dynamic_trace);
@@ -5635,6 +5629,17 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return previous_trace == trace;
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::invalidate_trace_cache(void)
+    //--------------------------------------------------------------------------
+    {
+      if (previous_trace != NULL && previous_trace->has_physical_trace())
+      {
+        previous_trace->get_physical_trace()->clear_cached_template();
+        previous_trace = NULL;
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -8835,6 +8840,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void LeafContext::invalidate_trace_cache(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(false);
+#endif
+      exit(ERROR_LEAF_TASK_VIOLATION);
+    }
+
+    //--------------------------------------------------------------------------
     void LeafContext::issue_frame(FrameOp *frame, ApEvent frame_termination)
     //--------------------------------------------------------------------------
     {
@@ -9036,6 +9051,8 @@ namespace Legion {
 #else
       SingleTask *single_task = static_cast<SingleTask*>(owner_task);
 #endif
+      //fprintf(stderr, "LeafContext::post_end_task: %p, %s\n",
+      //    dynamic_cast<Operation*>(single_task), single_task->get_task_name());
       // Handle the future result
       single_task->handle_future(res, res_size, owned);
       bool need_complete = false;
@@ -10000,6 +10017,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return enclosing->check_trace_recurrent(trace);
+    }
+
+    //--------------------------------------------------------------------------
+    void InlineContext::invalidate_trace_cache(void)
+    //--------------------------------------------------------------------------
+    {
+      enclosing->invalidate_trace_cache();
     }
 
     //--------------------------------------------------------------------------
