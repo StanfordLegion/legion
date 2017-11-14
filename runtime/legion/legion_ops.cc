@@ -313,7 +313,9 @@ namespace Legion {
           set_memoizing();
       }
       if (trace == NULL &&
-          !get_operation_kind() == Operation::TRACE_REPLAY_OP_KIND)
+          get_operation_kind() != Operation::TRACE_CAPTURE_OP_KIND &&
+          get_operation_kind() != Operation::TRACE_COMPLETE_OP_KIND &&
+          get_operation_kind() != Operation::TRACE_REPLAY_OP_KIND)
         parent_ctx->invalidate_trace_cache();
 #ifdef DEBUG_LEGION
       assert(!memoizing || trace != NULL);
