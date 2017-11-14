@@ -1474,6 +1474,13 @@ namespace Legion {
     {
       if (current_template != NULL)
         return current_template->get_completion();
+      else
+      {
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        return ApEvent::NO_AP_EVENT;
+      }
     }
 
     /////////////////////////////////////////////////////////////
