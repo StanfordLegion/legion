@@ -373,6 +373,7 @@ namespace Legion {
       PhysicalTemplate* get_template(PhysicalTraceInfo &trace_info);
     public:
       void initialize_template(ApEvent fence_completion);
+      ApEvent get_template_completion(void) const;
     public:
       void fix_trace(void);
       inline bool is_tracing(void) const { return tracing; }
@@ -409,7 +410,8 @@ namespace Legion {
       friend class PhysicalTrace;
       ~PhysicalTemplate();
     public:
-      void initialize(ApEvent fence_completion);
+      void initialize(ApEvent fence_completion, bool recurrent);
+      ApEvent get_completion() const;
     private:
       static bool check_logical_open(RegionTreeNode *node, ContextID ctx,
                                      FieldMask fields);
@@ -421,8 +423,6 @@ namespace Legion {
       void execute_all();
       void finalize();
       void optimize();
-      void schedule();
-      void reduce_fanout();
       void dump_template();
     public:
       inline bool is_tracing() const { return tracing; }
@@ -513,23 +513,31 @@ namespace Legion {
                              const FieldMask &fields,
                              ContextID logical_ctx,
                              ContextID physical_ctx);
+      void record_last_user(const PhysicalInstance &inst, unsigned field,
+                            unsigned user, bool read);
+      void find_last_users(const PhysicalInstance &inst, unsigned field,
+                           std::set<unsigned> &users);
     private:
       PhysicalTrace *trace;
       bool tracing;
       bool replayable;
       Reservation template_lock;
       unsigned fence_completion_id;
-      unsigned no_event_id;
     private:
       std::map<ApEvent, unsigned> event_map;
       std::vector<Instruction*> instructions;
-      std::map<TraceLocalId, std::vector<Instruction*> > inst_map;
       std::map<TraceLocalId, unsigned> task_entries;
+      typedef std::pair<PhysicalInstance, unsigned> InstanceAccess;
+      struct UserInfo {
+        std::set<unsigned> users;
+        bool read;
+      };
+      std::map<InstanceAccess, UserInfo> last_users;
+      std::map<unsigned, unsigned> frontiers;
     public:
       ApEvent fence_completion;
       std::map<TraceLocalId, Operation*> operations;
       std::vector<ApEvent> events;
-      std::vector<ApUserEvent> pending_events;
       std::vector<TraceLocalId> op_list;
       CachedMappings                                  cached_mappings;
       LegionMap<InstanceView*, FieldMask>::aligned    previous_valid_views;
@@ -588,7 +596,6 @@ namespace Legion {
     protected:
       std::map<TraceLocalId, Operation*> &operations;
       std::vector<ApEvent> &events;
-      std::vector<ApUserEvent> &pending_events;
     };
 
     /**
@@ -870,7 +877,8 @@ namespace Legion {
                     unsigned region_idx,
                     unsigned inst_idx,
                     unsigned ready_event_idx,
-                    InstanceView *view);
+                    InstanceView *view,
+                    const FieldMask &fields);
       virtual void execute();
       virtual std::string to_string();
 
@@ -907,6 +915,7 @@ namespace Legion {
       unsigned inst_idx;
       unsigned ready_event_idx;
       InstanceView* view;
+      FieldMask fields;
     };
 
     /**

@@ -2955,7 +2955,6 @@ namespace Legion {
 #endif
       static bool program_order_execution;
       static bool dump_physical_traces;
-      static bool reduce_fanout;
       static bool no_tracing;
       static bool no_physical_tracing;
     public:
