@@ -3554,6 +3554,8 @@ namespace Legion {
                           mapper->get_mapper_name(), 
                           output.control_replication_map.size(), total_shards,
                           get_task_name(), get_unique_id())
+          else
+            shard_manager->set_shard_mapping(output.control_replication_map);
           if (!Runtime::unsafe_mapper)
           {
             // Check to make sure that they all picked the same variant

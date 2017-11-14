@@ -714,7 +714,7 @@ namespace Legion {
        * but not in release mode.
        */
       struct SelectShardingFunctorInput {
-        std::map<ShardID,Processor>             shard_mapping;
+        std::vector<Processor>                  shard_mapping;
       };
       struct SelectShardingFunctorOutput {
         ShardingID                              chosen_functor;
@@ -1606,7 +1606,7 @@ namespace Legion {
         std::vector<const Task*>                    tasks;
         std::vector<MappingConstraint>              constraints;
         MappingTagID                                mapping_tag;
-        std::map<ShardID,Processor>                 shard_mapping;
+        std::vector<Processor>                      shard_mapping;
       };
       struct MapMustEpochOutput {
         std::vector<Processor>                      task_processors;

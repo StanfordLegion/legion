@@ -2789,6 +2789,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ShardManager::set_shard_mapping(const std::vector<Processor> &mapping)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(mapping.size() == total_shards);
+#endif
+      shard_mapping = mapping;
+    }
+
+    //--------------------------------------------------------------------------
     ShardTask* ShardManager::create_shard(ShardID id, Processor target)
     //--------------------------------------------------------------------------
     {
@@ -2882,6 +2892,7 @@ namespace Legion {
           assert(future_map_barrier.exists());
           assert(creation_barrier.exists());
           assert(deletion_barrier.exists());
+          assert(shard_mapping.size() == total_shards);
 #endif
           rez.serialize(pending_partition_barrier);
           rez.serialize(future_map_barrier);
@@ -2893,6 +2904,9 @@ namespace Legion {
           assert(close_check_barrier.exists());
           rez.serialize(close_check_barrier);
 #endif
+          for (std::vector<Processor>::const_iterator it = 
+                shard_mapping.begin(); it != shard_mapping.end(); it++)
+            rez.serialize(*it);
         }
         rez.serialize<size_t>(shards.size());
         for (std::vector<ShardTask*>::const_iterator it = 
@@ -2928,6 +2942,9 @@ namespace Legion {
         derez.deserialize(collective_check_barrier);
         derez.deserialize(close_check_barrier);
 #endif
+        shard_mapping.resize(total_shards);
+        for (unsigned idx = 0; idx < total_shards; idx++)
+          derez.deserialize(shard_mapping[idx]);
       }
       size_t num_shards;
       derez.deserialize(num_shards);

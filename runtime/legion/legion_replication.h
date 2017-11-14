@@ -1047,6 +1047,7 @@ namespace Legion {
       inline ShardMapping* get_mapping(void) const
         { return address_spaces; }
     public:
+      void set_shard_mapping(const std::vector<Processor> &shard_mapping);
       ShardTask* create_shard(ShardID id, Processor target);
       void extract_event_preconditions(const std::deque<InstanceSet> &insts);
       void launch(void);
@@ -1110,7 +1111,7 @@ namespace Legion {
     protected:
       Reservation                      manager_lock;
       // Inheritted from Mapper::SelectShardingFunctorInput
-      // std::map<ShardID,Processor>   shard_mapping;
+      // std::vector<Processor>        shard_mapping;
       ShardMapping*                    address_spaces;
       std::vector<ShardTask*>          local_shards;
     protected:
