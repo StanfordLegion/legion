@@ -49,7 +49,92 @@ end
 
 local function apply_tracing_node(cx)
   return function(node)
-    if node:is(ast.typed.stat.While) or
+    if node:is(ast.typed.stat.While) and
+       node.cond:is(ast.typed.expr.FutureGetResult) and
+       node.cond.value:is(ast.typed.expr.Call) then
+      if not node.annotations.trace:is(ast.annotation.Demand) then
+        return node
+      end
+
+      local trace_id = ast.typed.expr.Constant {
+        value = cx.next_trace_id,
+        expr_type = c.legion_trace_id_t,
+        annotations = ast.default_annotations(),
+        span = node.span,
+      }
+      cx.next_trace_id = cx.next_trace_id + 1
+
+      local call = node.cond.value
+      local future_type = call.expr_type
+      assert(std.is_future(future_type))
+      local future_var = std.newsymbol(future_type, "__while_cond")
+
+      local inner_stats = terralib.newlist()
+
+      inner_stats:insert(
+        ast.typed.stat.BeginTrace {
+          trace_id = trace_id,
+          annotations = ast.default_annotations(),
+          span = node.span,
+      })
+      inner_stats:insertall(node.block.stats)
+      inner_stats:insert(
+        ast.typed.stat.Assignment {
+          lhs = terralib.newlist {
+            ast.typed.expr.ID {
+              value = future_var,
+              expr_type = std.rawref(&future_type),
+              annotations = ast.default_annotations(),
+              span = node.span,
+            }
+          },
+          rhs = terralib.newlist { call },
+          annotations = ast.default_annotations(),
+          span = node.span,
+        }
+      )
+      inner_stats:insert(
+        ast.typed.stat.EndTrace {
+          trace_id = trace_id,
+          annotations = ast.default_annotations(),
+          span = node.span,
+      })
+
+      local outer_stats = terralib.newlist()
+
+      outer_stats:insert(
+        ast.typed.stat.Var {
+          symbols = terralib.newlist { future_var },
+          types = terralib.newlist { future_type },
+          values = terralib.newlist { call },
+          annotations = ast.default_annotations(),
+          span = node.span,
+      })
+      outer_stats:insert(
+        node {
+          cond = node.cond {
+            value = ast.typed.expr.ID {
+              value = future_var,
+              expr_type = future_type,
+              annotations = ast.default_annotations(),
+              span = node.span,
+            }
+          },
+          block = node.block {
+            stats = inner_stats,
+          }
+      })
+
+      return ast.typed.stat.Block {
+        block = ast.typed.Block {
+          stats = outer_stats,
+          span = node.span,
+        },
+        annotations = ast.default_annotations(),
+        span = node.span,
+      }
+
+    elseif node:is(ast.typed.stat.While) or
       node:is(ast.typed.stat.ForNum) or
       node:is(ast.typed.stat.ForList) or
       node:is(ast.typed.stat.Repeat) or
