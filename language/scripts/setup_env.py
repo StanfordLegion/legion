@@ -230,7 +230,7 @@ def check_dirty_build(name, build_result, component_dir):
         print('Good luck and please ask for help if you get stuck!')
         sys.exit(1)
 
-def driver(prefix_dir, llvm_version, insecure):
+def driver(prefix_dir, llvm_version, terra_url, terra_branch, insecure):
     if 'CC' not in os.environ:
         raise Exception('Please set CC in your environment')
     if 'CXX' not in os.environ:
@@ -314,7 +314,7 @@ def driver(prefix_dir, llvm_version, insecure):
     terra_dir = os.path.join(prefix_dir, 'terra.build')
     terra_build_result = os.path.join(terra_dir, 'release', 'bin', 'terra')
     if not os.path.exists(terra_dir):
-        git_clone(terra_dir, 'https://github.com/elliottslaughter/terra.git', 'compiler-sc17-snapshot')
+        git_clone(terra_dir, terra_url, terra_branch)
         try:
             build_terra(terra_dir, llvm_install_dir, is_cray, thread_count)
         except Exception as e:
@@ -339,5 +339,13 @@ if __name__ == '__main__':
         '--llvm-version', dest='llvm_version', required=False, choices=('38', '39'),
         default=discover_llvm_version(),
         help='Select LLVM version.')
+    parser.add_argument(
+        '--terra-url', dest='terra_url', required=False,
+        default='https://github.com/elliottslaughter/terra.git',
+        help='URL of Terra repository to clone from.')
+    parser.add_argument(
+        '--terra-branch', dest='terra_branch', required=False,
+        default='compiler-sc17-snapshot',
+        help='Branch of Terra repository to checkout.')
     args = parser.parse_args()
-    driver(args.prefix, args.llvm_version, args.skip_certificate_check)
+    driver(args.prefix, args.llvm_version, args.terra_url, args.terra_branch, args.skip_certificate_check)

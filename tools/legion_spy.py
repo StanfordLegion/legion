@@ -5498,9 +5498,9 @@ class Operation(object):
             for fill in self.realm_fills:
                 if req.logical_node is not fill.region:
                     continue
-                if field.fid not in fill.fields:
+                if field not in fill.fields:
                     continue
-                idx = fill.fields.index(field.fid)
+                idx = fill.fields.index(field)
                 if dst is not fill.dsts[idx]:
                     continue
                 return fill
@@ -5542,9 +5542,9 @@ class Operation(object):
                 # See if the regions are the same
                 if req.logical_node is not copy.region:
                     continue
-                if field.fid not in copy.src_fields:
+                if field not in copy.src_fields:
                     continue
-                idx = copy.src_fields.index(field.fid)
+                idx = copy.src_fields.index(field)
                 if field.fid != copy.dst_fields[idx]:
                     continue
                 if src is not copy.srcs[idx]:

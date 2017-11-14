@@ -562,9 +562,13 @@ GEN_GPU_OBJS	:=
 GPU_RUNTIME_OBJS:=
 endif
 
+# Provide build rules unless the user asks us not to
 ifndef NO_BUILD_RULES
+# Provide an all unless the user asks us not to
+ifndef NO_BUILD_ALL
 .PHONY: all
 all: $(OUTFILE)
+endif
 
 # If we're using CUDA we have to link with nvcc
 $(OUTFILE) : $(GEN_OBJS) $(GEN_GPU_OBJS) $(SLIB_LEGION) $(SLIB_REALM)
