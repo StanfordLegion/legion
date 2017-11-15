@@ -1176,6 +1176,7 @@ namespace Legion {
         if (!physical_trace->is_tracing() && physical_trace->is_recurrent())
         {
           physical_trace->get_current_template()->execute_all();
+          template_completion = physical_trace->get_template_completion();
           physical_trace->finish_replay();
           local_trace->end_trace_execution(this);
           parent_ctx->update_current_fence(this);
@@ -1211,12 +1212,19 @@ namespace Legion {
         PhysicalTrace *physical_trace = local_trace->get_physical_trace();
         if (physical_trace->is_tracing())
           physical_trace->fix_trace();
-        else if (physical_trace->is_recurrent())
+        else
         {
-          complete_mapping();
-          Runtime::trigger_event(completion_event,
-              physical_trace->get_template_completion());
-          complete_execution();
+          if (!template_completion.has_triggered())
+          {
+            RtEvent wait_on = Runtime::protect_event(template_completion);
+            complete_mapping(wait_on);
+            complete_execution(wait_on);
+          }
+          else
+          {
+            complete_mapping();
+            complete_execution();
+          }
           return;
         }
       }
@@ -2077,6 +2085,7 @@ namespace Legion {
       last_users.swap(new_last_users);
 
       new_instructions.clear();
+      unsigned next_instruction_id = instructions.size();
       for (unsigned idx = 0; idx < instructions.size(); ++idx)
       {
         Instruction *inst = instructions[idx];
@@ -2106,9 +2115,9 @@ namespace Legion {
                   copy->precondition_idx = *users.begin();
                 else
                 {
-                  unsigned new_event = instructions.size();
-                  new_merge = new MergeEvent(*this, new_event, users);
-                  copy->precondition_idx = new_event;
+                  new_merge = new MergeEvent(*this, next_instruction_id, users);
+                  copy->precondition_idx = next_instruction_id;
+                  ++next_instruction_id;
                 }
               }
               break;
@@ -2127,9 +2136,9 @@ namespace Legion {
                   fill->precondition_idx = *users.begin();
                 else
                 {
-                  unsigned new_event = instructions.size();
-                  new_merge = new MergeEvent(*this, new_event, users);
-                  fill->precondition_idx = new_event;
+                  new_merge = new MergeEvent(*this, next_instruction_id, users);
+                  fill->precondition_idx = next_instruction_id;
+                  ++next_instruction_id;
                 }
               }
               break;
@@ -2152,9 +2161,9 @@ namespace Legion {
                   ready->ready_event_idx = *users.begin();
                 else
                 {
-                  unsigned new_event = instructions.size();
-                  new_merge = new MergeEvent(*this, new_event, users);
-                  ready->ready_event_idx = new_event;
+                  new_merge = new MergeEvent(*this, next_instruction_id, users);
+                  ready->ready_event_idx = next_instruction_id;
+                  ++next_instruction_id;
                 }
               }
               break;

@@ -307,6 +307,7 @@ namespace Legion {
       virtual void trigger_mapping(void);
     protected:
       LegionTrace *local_trace;
+      ApEvent template_completion;
     };
 
     /**
