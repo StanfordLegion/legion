@@ -471,6 +471,35 @@ namespace Legion {
                std::vector<DistributedID> > instances;
       std::vector<std::vector<Mapping::PhysicalInstance> > results;
       std::set<RtEvent> ready_events;
+    protected:
+      RtUserEvent local_done_event;
+      std::set<RtEvent> done_events;
+      std::set<PhysicalManager*> held_references;
+    };
+
+    /**
+     * \class MustEpochDependenceExchange
+     * A class for exchanging the mapping dependence events for all 
+     * the single tasks in a must epoch launch so we can know which
+     * order the point tasks are being mapped in.
+     */
+    class MustEpochDependenceExchange : public AllGatherCollective {
+    public:
+      MustEpochDependenceExchange(ReplicateContext *ctx, 
+                                  CollectiveIndexLocation loc);
+      MustEpochDependenceExchange(const MustEpochDependenceExchange &rhs);
+      virtual ~MustEpochDependenceExchange(void);
+    public:
+      MustEpochDependenceExchange& operator=(
+                                  const MustEpochDependenceExchange &rhs);
+    public:
+      virtual void pack_collective_stage(Serializer &rez, int stage) const;
+      virtual void unpack_collective_stage(Deserializer &derez, int stage);
+    public:
+      void exchange_must_epoch_dependences(
+                            std::map<DomainPoint,RtEvent> &mapped_events);
+    protected:
+      std::map<DomainPoint,RtEvent> mapping_dependences;
     };
 
     /**
@@ -930,13 +959,19 @@ namespace Legion {
       virtual FutureMapImpl* create_future_map(TaskContext *ctx,
                                                IndexSpace launch_space);
       virtual MapperManager* invoke_mapper(void);
+      virtual void map_single_task(SingleTask *task);
+      virtual void distribute_tasks(void);
     public:
       void initialize_collectives(ReplicateContext *ctx);
     protected:
       ShardingID sharding_functor;
+      ShardingFunction *sharding_function;
       Domain index_domain;
-      MustEpochProcessorBroadcast *broadcast;
-      MustEpochMappingExchange *exchange;
+      MustEpochProcessorBroadcast *processor_broadcast;
+      MustEpochMappingExchange *mapping_exchange;
+      MustEpochDependenceExchange *dependence_exchange;
+      std::set<SingleTask*> shard_single_tasks;
+      std::map<DomainPoint,RtEvent> mapped_events;
 #ifdef DEBUG_LEGION
     public:
       inline void set_sharding_collective(ShardingGatherCollective *collective)
