@@ -21616,7 +21616,7 @@ namespace Legion {
           }
         case LG_MUST_MAP_ID:
           {
-            MustEpochMapper::handle_map_task(args);
+            MustEpochOp::handle_map_task(args);
             break;
           }
         case LG_MUST_DIST_ID:

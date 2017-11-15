@@ -10453,11 +10453,8 @@ namespace Legion {
         }
       }
       // Then we need to actually perform the mapping
-      {
-        MustEpochMapper mapper(this); 
-        mapper.map_tasks(single_tasks, mapping_dependences);
-        mapping_dependences.clear();
-      }
+      map_tasks();
+      mapping_dependences.clear();
       // Once all the tasks have been initialized we can defer
       // our all mapped event on all their all mapped events
       std::set<RtEvent> tasks_all_mapped;
@@ -10561,6 +10558,76 @@ namespace Legion {
       const MustEpochIndexArgs *index_args = (const MustEpochIndexArgs*)args;
       index_args->task->set_target_proc(index_args->current_proc);
       index_args->task->trigger_mapping();
+    }
+
+    //--------------------------------------------------------------------------
+    void MustEpochOp::map_tasks(void) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(single_tasks.size() == mapping_dependences.size());
+#endif
+      MustEpochMapArgs args;
+      args.owner = const_cast<MustEpochOp*>(this);
+      // For correctness we still have to abide by the mapping dependences
+      // computed on the individual tasks while we are mapping them
+      std::vector<RtEvent> mapped_events(single_tasks.size());
+      for (unsigned idx = 0; idx < single_tasks.size(); idx++)
+      {
+        // Figure out our preconditions
+        std::set<RtEvent> preconditions;
+        for (std::set<unsigned>::const_iterator it = 
+              mapping_dependences[idx].begin(); it != 
+              mapping_dependences[idx].end(); it++)
+        {
+#ifdef DEBUG_LEGION
+          assert((*it) < idx);
+#endif
+          preconditions.insert(mapped_events[*it]);          
+        }
+        args.task = single_tasks[idx];
+        if (!preconditions.empty())
+        {
+          RtEvent precondition = Runtime::merge_events(preconditions);
+          mapped_events[idx] = 
+            runtime->issue_runtime_meta_task(args, 
+                LG_DEFERRED_THROUGHPUT_PRIORITY, args.owner, precondition); 
+        }
+        else
+          mapped_events[idx] = 
+            runtime->issue_runtime_meta_task(args,
+                  LG_DEFERRED_THROUGHPUT_PRIORITY, args.owner);
+      }
+      std::set<RtEvent> wait_events(mapped_events.begin(), mapped_events.end());
+      if (!wait_events.empty())
+      {
+        RtEvent mapped_event = Runtime::merge_events(wait_events);
+        mapped_event.lg_wait();
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void MustEpochOp::map_single_task(SingleTask *task)
+    //--------------------------------------------------------------------------
+    {
+      // Before we can actually map, we have to perform our versioning analysis
+      RtEvent versions_ready = task->perform_must_epoch_version_analysis(this);
+      if (versions_ready.exists())
+        versions_ready.lg_wait();
+      // Note we don't need to hold a lock here because this is
+      // a monotonic change.  Once it fails for anyone then it
+      // fails for everyone.
+      RtEvent done_mapping = task->perform_mapping(this);
+      if (done_mapping.exists())
+        done_mapping.lg_wait();
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void MustEpochOp::handle_map_task(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const MustEpochMapArgs *map_args = (const MustEpochMapArgs*)args;
+      map_args->owner->map_single_task(map_args->task);
     }
 
     //--------------------------------------------------------------------------
@@ -10908,112 +10975,6 @@ namespace Legion {
         return index_tasks[index];
       assert(false);
       return NULL;
-    }
-
-    /////////////////////////////////////////////////////////////
-    // Must Epoch Mapper 
-    /////////////////////////////////////////////////////////////
-
-    //--------------------------------------------------------------------------
-    MustEpochMapper::MustEpochMapper(MustEpochOp *own)
-      : owner(own)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    MustEpochMapper::MustEpochMapper(const MustEpochMapper &rhs)
-      : owner(rhs.owner)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    MustEpochMapper::~MustEpochMapper(void)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    MustEpochMapper& MustEpochMapper::operator=(const MustEpochMapper &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
-    }
-
-    //--------------------------------------------------------------------------
-    void MustEpochMapper::map_tasks(
-                                   const std::vector<SingleTask*> &single_tasks,
-                            const std::vector<std::set<unsigned> > &dependences)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(single_tasks.size() == dependences.size());
-#endif
-      MustEpochMapArgs args;
-      args.mapper = this;
-      // For correctness we still have to abide by the mapping dependences
-      // computed on the individual tasks while we are mapping them
-      std::vector<RtEvent> mapped_events(single_tasks.size());
-      for (unsigned idx = 0; idx < single_tasks.size(); idx++)
-      {
-        // Figure out our preconditions
-        std::set<RtEvent> preconditions;
-        for (std::set<unsigned>::const_iterator it = 
-              dependences[idx].begin(); it != dependences[idx].end(); it++)
-        {
-#ifdef DEBUG_LEGION
-          assert((*it) < idx);
-#endif
-          preconditions.insert(mapped_events[*it]);          
-        }
-        args.task = single_tasks[idx];
-        if (!preconditions.empty())
-        {
-          RtEvent precondition = Runtime::merge_events(preconditions);
-          mapped_events[idx] = 
-            owner->runtime->issue_runtime_meta_task(args, 
-                LG_DEFERRED_THROUGHPUT_PRIORITY, owner, precondition); 
-        }
-        else
-          mapped_events[idx] = 
-            owner->runtime->issue_runtime_meta_task(args,
-                  LG_DEFERRED_THROUGHPUT_PRIORITY, owner);
-      }
-      std::set<RtEvent> wait_events(mapped_events.begin(), mapped_events.end());
-      if (!wait_events.empty())
-      {
-        RtEvent mapped_event = Runtime::merge_events(wait_events);
-        mapped_event.lg_wait();
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void MustEpochMapper::map_task(SingleTask *task)
-    //--------------------------------------------------------------------------
-    {
-      // Before we can actually map, we have to perform our versioning analysis
-      RtEvent versions_ready = task->perform_must_epoch_version_analysis(owner);
-      if (versions_ready.exists())
-        versions_ready.lg_wait();
-      // Note we don't need to hold a lock here because this is
-      // a monotonic change.  Once it fails for anyone then it
-      // fails for everyone.
-      RtEvent done_mapping = task->perform_mapping(owner);
-      if (done_mapping.exists())
-        done_mapping.lg_wait();
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void MustEpochMapper::handle_map_task(const void *args)
-    //--------------------------------------------------------------------------
-    {
-      const MustEpochMapArgs *map_args = (const MustEpochMapArgs*)args;
-      map_args->mapper->map_task(map_args->task);
     }
 
     /////////////////////////////////////////////////////////////

@@ -1875,6 +1875,13 @@ namespace Legion {
         Processor current_proc;
         IndexTask *task;
       };
+      struct MustEpochMapArgs : public LgTaskArgs<MustEpochMapArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_MUST_MAP_ID;
+      public:
+        MustEpochOp *owner;
+        SingleTask *task;
+      };
     public:
       MustEpochOp(Runtime *rt);
       MustEpochOp(const MustEpochOp &rhs);
@@ -1951,6 +1958,12 @@ namespace Legion {
       static void handle_trigger_individual(const void *args);
       static void handle_trigger_index(const void *args);
     protected:
+      // Make this virtual so we can override it for control replication
+      virtual void map_tasks(void) const;
+      void map_single_task(SingleTask *task);
+    public:
+      static void handle_map_task(const void *args);
+    protected:
       std::vector<IndividualTask*>        indiv_tasks;
       std::vector<bool>                   indiv_triggered;
       std::vector<IndexTask*>             index_tasks;
@@ -1987,35 +2000,6 @@ namespace Legion {
       std::vector<std::set<unsigned/*single task index*/> > mapping_dependences;
     protected:
       std::map<UniqueID,RtUserEvent> slice_version_events;
-    };
-
-    /**
-     * \class MustEpochMapper
-     * A helper class for parallelizing mapping for must epochs
-     */
-    class MustEpochMapper {
-    public:
-      struct MustEpochMapArgs : public LgTaskArgs<MustEpochMapArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_MUST_MAP_ID;
-      public:
-        MustEpochMapper *mapper;
-        SingleTask *task;
-      };
-    public:
-      MustEpochMapper(MustEpochOp *owner);
-      MustEpochMapper(const MustEpochMapper &rhs);
-      ~MustEpochMapper(void);
-    public:
-      MustEpochMapper& operator=(const MustEpochMapper &rhs);
-    public:
-      void map_tasks(const std::vector<SingleTask*> &single_tasks,
-            const std::vector<std::set<unsigned> > &dependences);
-      void map_task(SingleTask *task);
-    public:
-      static void handle_map_task(const void *args);
-    private:
-      MustEpochOp *const owner;
     };
 
     class MustEpochDistributor {
