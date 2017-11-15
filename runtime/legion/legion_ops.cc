@@ -10338,9 +10338,8 @@ namespace Legion {
       if (!triggering_complete)
       {
         task_sets.resize(indiv_tasks.size()+index_tasks.size());
-        MustEpochTriggerer triggerer(this);
-        triggerer.trigger_tasks(indiv_tasks, indiv_triggered,
-                                     index_tasks, index_triggered);
+        trigger_tasks(this, indiv_tasks, indiv_triggered, 
+                            index_tasks, index_triggered);
 #ifdef DEBUG_LEGION
         assert(!single_tasks.empty());
 #endif 
@@ -10497,6 +10496,71 @@ namespace Legion {
       // We've got all our meta-data set up so go ahead and issue the call
       mapper->invoke_map_must_epoch(this, &input, &output);
       return mapper;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void MustEpochOp::trigger_tasks(MustEpochOp *owner,
+                         const std::vector<IndividualTask*> &indiv_tasks,
+                         std::vector<bool> &indiv_triggered,
+                         const std::vector<IndexTask*> &index_tasks,
+                         std::vector<bool> &index_triggered)
+    //--------------------------------------------------------------------------
+    {
+      const Processor current = owner->get_context()->get_executing_processor();
+      std::set<RtEvent> wait_events;
+      for (unsigned idx = 0; idx < indiv_triggered.size(); idx++)
+      {
+        if (!indiv_triggered[idx])
+        {
+          MustEpochIndivArgs args;
+          args.current_proc = current;
+          args.task = indiv_tasks[idx];
+          RtEvent wait = 
+            owner->runtime->issue_runtime_meta_task(args, 
+                  LG_DEFERRED_THROUGHPUT_PRIORITY, owner);
+          if (wait.exists())
+            wait_events.insert(wait);
+        }
+      }
+      for (unsigned idx = 0; idx < index_tasks.size(); idx++)
+      {
+        if (!index_triggered[idx])
+        {
+          MustEpochIndexArgs args;
+          args.current_proc = current;
+          args.task = index_tasks[idx];
+          RtEvent wait = 
+            owner->runtime->issue_runtime_meta_task(args,
+                  LG_DEFERRED_THROUGHPUT_PRIORITY, owner);
+          if (wait.exists())
+            wait_events.insert(wait);
+        }
+      }
+      // Wait for all of the launches to be done
+      // We can safely block to free up the utility processor
+      if (!wait_events.empty())
+      {
+        RtEvent trigger_event = Runtime::merge_events(wait_events);
+        trigger_event.lg_wait();
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void MustEpochOp::handle_trigger_individual(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const MustEpochIndivArgs *indiv_args = (const MustEpochIndivArgs*)args;
+      indiv_args->task->set_target_proc(indiv_args->current_proc);
+      indiv_args->task->trigger_mapping();
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void MustEpochOp::handle_trigger_index(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const MustEpochIndexArgs *index_args = (const MustEpochIndexArgs*)args;
+      index_args->task->set_target_proc(index_args->current_proc);
+      index_args->task->trigger_mapping();
     }
 
     //--------------------------------------------------------------------------
@@ -10844,123 +10908,6 @@ namespace Legion {
         return index_tasks[index];
       assert(false);
       return NULL;
-    }
-
-    /////////////////////////////////////////////////////////////
-    // Must Epoch Triggerer 
-    /////////////////////////////////////////////////////////////
-
-    //--------------------------------------------------------------------------
-    MustEpochTriggerer::MustEpochTriggerer(MustEpochOp *own)
-      : current_proc(own->get_context()->get_executing_processor()), owner(own)
-    //--------------------------------------------------------------------------
-    {
-      trigger_lock = Reservation::create_reservation();
-    }
-
-    //--------------------------------------------------------------------------
-    MustEpochTriggerer::MustEpochTriggerer(const MustEpochTriggerer &rhs)
-      : current_proc(rhs.current_proc), owner(rhs.owner)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    MustEpochTriggerer::~MustEpochTriggerer(void)
-    //--------------------------------------------------------------------------
-    {
-      trigger_lock.destroy_reservation();
-      trigger_lock = Reservation::NO_RESERVATION;
-    }
-
-    //--------------------------------------------------------------------------
-    MustEpochTriggerer& MustEpochTriggerer::operator=(
-                                                  const MustEpochTriggerer &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
-    }
-
-    //--------------------------------------------------------------------------
-    void MustEpochTriggerer::trigger_tasks(
-                                const std::vector<IndividualTask*> &indiv_tasks,
-                                std::vector<bool> &indiv_triggered,
-                                const std::vector<IndexTask*> &index_tasks,
-                                std::vector<bool> &index_triggered)
-    //--------------------------------------------------------------------------
-    {
-      std::set<RtEvent> wait_events;
-      for (unsigned idx = 0; idx < indiv_triggered.size(); idx++)
-      {
-        if (!indiv_triggered[idx])
-        {
-          MustEpochIndivArgs args;
-          args.triggerer = this;
-          args.task = indiv_tasks[idx];
-          RtEvent wait = 
-            owner->runtime->issue_runtime_meta_task(args, 
-                  LG_DEFERRED_THROUGHPUT_PRIORITY, owner);
-          if (wait.exists())
-            wait_events.insert(wait);
-        }
-      }
-      for (unsigned idx = 0; idx < index_tasks.size(); idx++)
-      {
-        if (!index_triggered[idx])
-        {
-          MustEpochIndexArgs args;
-          args.triggerer = this;
-          args.task = index_tasks[idx];
-          RtEvent wait = 
-            owner->runtime->issue_runtime_meta_task(args,
-                  LG_DEFERRED_THROUGHPUT_PRIORITY, owner);
-          if (wait.exists())
-            wait_events.insert(wait);
-        }
-      }
-      // Wait for all of the launches to be done
-      // We can safely block to free up the utility processor
-      if (!wait_events.empty())
-      {
-        RtEvent trigger_event = Runtime::merge_events(wait_events);
-        trigger_event.lg_wait();
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void MustEpochTriggerer::trigger_individual(IndividualTask *task)
-    //--------------------------------------------------------------------------
-    {
-      task->set_target_proc(current_proc);
-      task->trigger_mapping();
-    }
-
-    //--------------------------------------------------------------------------
-    void MustEpochTriggerer::trigger_index(IndexTask *task)
-    //--------------------------------------------------------------------------
-    {
-      task->set_target_proc(current_proc);
-      task->trigger_mapping();
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void MustEpochTriggerer::handle_individual(const void *args)
-    //--------------------------------------------------------------------------
-    {
-      const MustEpochIndivArgs *indiv_args = (const MustEpochIndivArgs*)args;
-      indiv_args->triggerer->trigger_individual(indiv_args->task);
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void MustEpochTriggerer::handle_index(const void *args)
-    //--------------------------------------------------------------------------
-    {
-      const MustEpochIndexArgs *index_args = (const MustEpochIndexArgs*)args;
-      index_args->triggerer->trigger_index(index_args->task);
     }
 
     /////////////////////////////////////////////////////////////

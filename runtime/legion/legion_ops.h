@@ -1861,6 +1861,21 @@ namespace Legion {
         std::vector<unsigned> req_indexes;
       };
     public:
+      struct MustEpochIndivArgs : public LgTaskArgs<MustEpochIndivArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_MUST_INDIV_ID;
+      public:
+        Processor current_proc;
+        IndividualTask *task;
+      };
+      struct MustEpochIndexArgs : public LgTaskArgs<MustEpochIndexArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_MUST_INDEX_ID;
+      public:
+        Processor current_proc;
+        IndexTask *task;
+      };
+    public:
       MustEpochOp(Runtime *rt);
       MustEpochOp(const MustEpochOp &rhs);
       virtual ~MustEpochOp(void);
@@ -1927,6 +1942,14 @@ namespace Legion {
       TaskOp* find_task_by_index(int index);
     protected:
       static bool single_task_sorter(const Task *t1, const Task *t2);
+    public:
+      static void trigger_tasks(MustEpochOp *owner,
+                         const std::vector<IndividualTask*> &indiv_tasks,
+                         std::vector<bool> &indiv_triggered,
+                         const std::vector<IndexTask*> &index_tasks,
+                         std::vector<bool> &index_triggered);
+      static void handle_trigger_individual(const void *args);
+      static void handle_trigger_index(const void *args);
     protected:
       std::vector<IndividualTask*>        indiv_tasks;
       std::vector<bool>                   indiv_triggered;
@@ -1964,48 +1987,6 @@ namespace Legion {
       std::vector<std::set<unsigned/*single task index*/> > mapping_dependences;
     protected:
       std::map<UniqueID,RtUserEvent> slice_version_events;
-    };
-
-    /**
-     * \class MustEpochTriggerer
-     * A helper class for parallelizing must epoch triggering
-     */
-    class MustEpochTriggerer {
-    public:
-      struct MustEpochIndivArgs : public LgTaskArgs<MustEpochIndivArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_MUST_INDIV_ID;
-      public:
-        MustEpochTriggerer *triggerer;
-        IndividualTask *task;
-      };
-      struct MustEpochIndexArgs : public LgTaskArgs<MustEpochIndexArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_MUST_INDEX_ID;
-      public:
-        MustEpochTriggerer *triggerer;
-        IndexTask *task;
-      };
-    public:
-      MustEpochTriggerer(MustEpochOp *owner);
-      MustEpochTriggerer(const MustEpochTriggerer &rhs);
-      ~MustEpochTriggerer(void);
-    public:
-      MustEpochTriggerer& operator=(const MustEpochTriggerer &rhs);
-    public:
-      void trigger_tasks(const std::vector<IndividualTask*> &indiv_tasks,
-                         std::vector<bool> &indiv_triggered,
-                         const std::vector<IndexTask*> &index_tasks,
-                         std::vector<bool> &index_triggered);
-      void trigger_individual(IndividualTask *task);
-      void trigger_index(IndexTask *task);
-    public:
-      static void handle_individual(const void *args);
-      static void handle_index(const void *args);
-    private:
-      const Processor current_proc;
-      MustEpochOp *const owner;
-      Reservation trigger_lock;
     };
 
     /**

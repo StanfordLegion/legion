@@ -21606,12 +21606,12 @@ namespace Legion {
           }
         case LG_MUST_INDIV_ID:
           {
-            MustEpochTriggerer::handle_individual(args);
+            MustEpochOp::handle_trigger_individual(args);
             break;
           }
         case LG_MUST_INDEX_ID:
           {
-            MustEpochTriggerer::handle_index(args);
+            MustEpochOp::handle_trigger_index(args);
             break;
           }
         case LG_MUST_MAP_ID:
