@@ -1315,12 +1315,16 @@ namespace Legion {
 #endif
       if (local_trace->has_physical_trace())
       {
-        // Wait for the previous traces to be mapped before checking
-        // template preconditions because no template would exist
-        // until they are mapped.
-        FenceOp *fence_op = parent_ctx->get_current_fence();
-        if (fence_op != NULL)
-          fence_op->get_mapped_event().wait();
+        PhysicalTrace *physical_trace = local_trace->get_physical_trace();
+        if (physical_trace->is_tracing() && !physical_trace->is_recurrent())
+        {
+          // Wait for the previous traces to be mapped before checking
+          // template preconditions because no template would exist
+          // until they are mapped.
+          FenceOp *fence_op = parent_ctx->get_current_fence();
+          if (fence_op != NULL)
+            fence_op->get_mapped_event().wait();
+        }
         local_trace->get_physical_trace()->check_template_preconditions();
         local_trace->get_physical_trace()->initialize_template(
             get_completion_event());
