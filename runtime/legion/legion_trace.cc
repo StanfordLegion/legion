@@ -1177,6 +1177,7 @@ namespace Legion {
         {
           physical_trace->get_current_template()->execute_all();
           template_completion = physical_trace->get_template_completion();
+          Runtime::trigger_event(completion_event, template_completion);
           physical_trace->finish_replay();
           local_trace->end_trace_execution(this);
           parent_ctx->update_current_fence(this);
@@ -1214,17 +1215,15 @@ namespace Legion {
           physical_trace->fix_trace();
         else
         {
+          complete_mapping();
+          need_completion_trigger = false;
           if (!template_completion.has_triggered())
           {
             RtEvent wait_on = Runtime::protect_event(template_completion);
-            complete_mapping(wait_on);
             complete_execution(wait_on);
           }
           else
-          {
-            complete_mapping();
             complete_execution();
-          }
           return;
         }
       }
