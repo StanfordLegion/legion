@@ -1882,6 +1882,20 @@ namespace Legion {
         MustEpochOp *owner;
         SingleTask *task;
       };
+      struct MustEpochDistributorArgs : 
+        public LgTaskArgs<MustEpochDistributorArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_MUST_DIST_ID;
+      public:
+        TaskOp *task;
+      };
+      struct MustEpochLauncherArgs : 
+        public LgTaskArgs<MustEpochLauncherArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_MUST_LAUNCH_ID;
+      public:
+        TaskOp *task;
+      };
     public:
       MustEpochOp(Runtime *rt);
       MustEpochOp(const MustEpochOp &rhs);
@@ -1964,6 +1978,12 @@ namespace Legion {
     public:
       static void handle_map_task(const void *args);
     protected:
+      // Make this virtual so we can override it for control replication
+      virtual void distribute_tasks(void) const;
+    public:
+      static void handle_distribute_task(const void *args);
+      static void handle_launch_task(const void *args);
+    protected:
       std::vector<IndividualTask*>        indiv_tasks;
       std::vector<bool>                   indiv_triggered;
       std::vector<IndexTask*>             index_tasks;
@@ -2000,39 +2020,6 @@ namespace Legion {
       std::vector<std::set<unsigned/*single task index*/> > mapping_dependences;
     protected:
       std::map<UniqueID,RtUserEvent> slice_version_events;
-    };
-
-    class MustEpochDistributor {
-    public:
-      struct MustEpochDistributorArgs : 
-        public LgTaskArgs<MustEpochDistributorArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_MUST_DIST_ID;
-      public:
-        TaskOp *task;
-      };
-      struct MustEpochLauncherArgs : 
-        public LgTaskArgs<MustEpochLauncherArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_MUST_LAUNCH_ID;
-      public:
-        TaskOp *task;
-      };
-    public:
-      MustEpochDistributor(MustEpochOp *owner);
-      MustEpochDistributor(const MustEpochDistributor &rhs);
-      ~MustEpochDistributor(void);
-    public:
-      MustEpochDistributor& operator=(const MustEpochDistributor &rhs);
-    public:
-      void distribute_tasks(Runtime *runtime,
-                            const std::vector<IndividualTask*> &indiv_tasks,
-                            const std::set<SliceTask*> &slice_tasks);
-    public:
-      static void handle_distribute_task(const void *args);
-      static void handle_launch_task(const void *args);
-    private:
-      MustEpochOp *const owner;
     };
 
     /**

@@ -21621,12 +21621,12 @@ namespace Legion {
           }
         case LG_MUST_DIST_ID:
           {
-            MustEpochDistributor::handle_distribute_task(args);
+            MustEpochOp::handle_distribute_task(args);
             break;
           }
         case LG_MUST_LAUNCH_ID:
           {
-            MustEpochDistributor::handle_launch_task(args);
+            MustEpochOp::handle_launch_task(args);
             break;
           }
         case LG_DEFERRED_FUTURE_SET_ID:

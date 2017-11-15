@@ -10472,8 +10472,7 @@ namespace Legion {
         tasks_all_complete.insert((*it)->get_completion_event());
       }
       // If we passed all the constraints, then kick everything off
-      MustEpochDistributor distributor(this);
-      distributor.distribute_tasks(runtime, indiv_tasks, slice_tasks); 
+      distribute_tasks(); 
       
       // Mark that we are done mapping and executing this operation
       RtEvent all_mapped = Runtime::merge_events(tasks_all_mapped);
@@ -10628,6 +10627,84 @@ namespace Legion {
     {
       const MustEpochMapArgs *map_args = (const MustEpochMapArgs*)args;
       map_args->owner->map_single_task(map_args->task);
+    }
+
+    //--------------------------------------------------------------------------
+    void MustEpochOp::distribute_tasks(void) const
+    //--------------------------------------------------------------------------
+    {
+      MustEpochDistributorArgs dist_args;
+      MustEpochLauncherArgs launch_args;
+      std::set<RtEvent> wait_events;
+      MustEpochOp *owner = const_cast<MustEpochOp*>(this);
+      for (std::vector<IndividualTask*>::const_iterator it = 
+            indiv_tasks.begin(); it != indiv_tasks.end(); it++)
+      {
+        if (!runtime->is_local((*it)->target_proc))
+        {
+          dist_args.task = *it;
+          RtEvent wait = 
+            runtime->issue_runtime_meta_task(dist_args, 
+                LG_DEFERRED_THROUGHPUT_PRIORITY, owner);
+          if (wait.exists())
+            wait_events.insert(wait);
+        }
+        else
+        {
+          launch_args.task = *it;
+          RtEvent wait = 
+            runtime->issue_runtime_meta_task(launch_args,
+                  LG_DEFERRED_THROUGHPUT_PRIORITY, owner);
+          if (wait.exists())
+            wait_events.insert(wait);
+        }
+      }
+      for (std::set<SliceTask*>::const_iterator it = 
+            slice_tasks.begin(); it != slice_tasks.end(); it++)
+      {
+        (*it)->update_target_processor();
+        if (!runtime->is_local((*it)->target_proc))
+        {
+          dist_args.task = *it;
+          RtEvent wait = 
+            runtime->issue_runtime_meta_task(dist_args, 
+                LG_DEFERRED_THROUGHPUT_PRIORITY, owner);
+          if (wait.exists())
+            wait_events.insert(wait);
+        }
+        else
+        {
+          launch_args.task = *it;
+          RtEvent wait = 
+            runtime->issue_runtime_meta_task(launch_args,
+                 LG_DEFERRED_THROUGHPUT_PRIORITY, owner);
+          if (wait.exists())
+            wait_events.insert(wait);
+        }
+      }
+      if (!wait_events.empty())
+      {
+        RtEvent dist_event = Runtime::merge_events(wait_events);
+        dist_event.lg_wait();
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void MustEpochOp::handle_distribute_task(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const MustEpochDistributorArgs *dist_args = 
+        (const MustEpochDistributorArgs*)args;
+      dist_args->task->distribute_task();
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void MustEpochOp::handle_launch_task(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const MustEpochLauncherArgs *launch_args = 
+        (const MustEpochLauncherArgs *)args;
+      launch_args->task->launch_task();
     }
 
     //--------------------------------------------------------------------------
@@ -10975,122 +11052,6 @@ namespace Legion {
         return index_tasks[index];
       assert(false);
       return NULL;
-    }
-
-    /////////////////////////////////////////////////////////////
-    // Must Epoch Distributor 
-    /////////////////////////////////////////////////////////////
-
-    //--------------------------------------------------------------------------
-    MustEpochDistributor::MustEpochDistributor(MustEpochOp *own)
-      : owner(own)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    MustEpochDistributor::MustEpochDistributor(const MustEpochDistributor &rhs)
-      : owner(rhs.owner)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    MustEpochDistributor::~MustEpochDistributor(void)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    MustEpochDistributor& MustEpochDistributor::operator=(
-                                                const MustEpochDistributor &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
-    }
-
-    //--------------------------------------------------------------------------
-    void MustEpochDistributor::distribute_tasks(Runtime *runtime,
-                                const std::vector<IndividualTask*> &indiv_tasks,
-                                const std::set<SliceTask*> &slice_tasks)
-    //--------------------------------------------------------------------------
-    {
-      MustEpochDistributorArgs dist_args;
-      MustEpochLauncherArgs launch_args;
-      std::set<RtEvent> wait_events;
-      for (std::vector<IndividualTask*>::const_iterator it = 
-            indiv_tasks.begin(); it != indiv_tasks.end(); it++)
-      {
-        if (!runtime->is_local((*it)->target_proc))
-        {
-          dist_args.task = *it;
-          RtEvent wait = 
-            runtime->issue_runtime_meta_task(dist_args, 
-                LG_DEFERRED_THROUGHPUT_PRIORITY, owner);
-          if (wait.exists())
-            wait_events.insert(wait);
-        }
-        else
-        {
-          launch_args.task = *it;
-          RtEvent wait = 
-            runtime->issue_runtime_meta_task(launch_args,
-                  LG_DEFERRED_THROUGHPUT_PRIORITY, owner);
-          if (wait.exists())
-            wait_events.insert(wait);
-        }
-      }
-      for (std::set<SliceTask*>::const_iterator it = 
-            slice_tasks.begin(); it != slice_tasks.end(); it++)
-      {
-        (*it)->update_target_processor();
-        if (!runtime->is_local((*it)->target_proc))
-        {
-          dist_args.task = *it;
-          RtEvent wait = 
-            runtime->issue_runtime_meta_task(dist_args, 
-                LG_DEFERRED_THROUGHPUT_PRIORITY, owner);
-          if (wait.exists())
-            wait_events.insert(wait);
-        }
-        else
-        {
-          launch_args.task = *it;
-          RtEvent wait = 
-            runtime->issue_runtime_meta_task(launch_args,
-                 LG_DEFERRED_THROUGHPUT_PRIORITY, owner);
-          if (wait.exists())
-            wait_events.insert(wait);
-        }
-      }
-      if (!wait_events.empty())
-      {
-        RtEvent dist_event = Runtime::merge_events(wait_events);
-        dist_event.lg_wait();
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void MustEpochDistributor::handle_distribute_task(
-                                                               const void *args)
-    //--------------------------------------------------------------------------
-    {
-      const MustEpochDistributorArgs *dist_args = 
-        (const MustEpochDistributorArgs*)args;
-      dist_args->task->distribute_task();
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void MustEpochDistributor::handle_launch_task(const void *args)
-    //--------------------------------------------------------------------------
-    {
-      const MustEpochLauncherArgs *launch_args = 
-        (const MustEpochLauncherArgs *)args;
-      launch_args->task->launch_task();
     }
 
     /////////////////////////////////////////////////////////////
