@@ -10613,7 +10613,11 @@ namespace Legion {
       RtEvent versions_ready = task->perform_must_epoch_version_analysis(this);
       if (versions_ready.exists())
         versions_ready.lg_wait();
-      task->perform_mapping(this);
+      // If we deferred the mapping with another meta-task then we need
+      // to wait for that task to be done
+      RtEvent done = task->perform_mapping(this);
+      if (!done.has_triggered())
+        done.lg_wait();
       // We need to wait for any applied events to have completed before
       // we can guarantee that we are actually mapped
       const std::set<RtEvent> &map_applied = task->get_map_applied_conditions();
