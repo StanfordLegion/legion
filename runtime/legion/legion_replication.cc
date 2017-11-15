@@ -2419,8 +2419,7 @@ namespace Legion {
       // Exchange the constraint mappings so that all ops have all the mappings
       mapping_exchange->exchange_must_epoch_mappings(
           repl_ctx->owner_shard->shard_id,repl_ctx->shard_manager->total_shards,
-          total_constraints, output.constraint_mappings, 
-          *get_acquired_instances_ref());
+          total_constraints, output.constraint_mappings);
       // Compute the set of single tasks that are local to our shard
       for (std::vector<SingleTask*>::const_iterator it = 
             single_tasks.begin(); it != single_tasks.end(); it++)
@@ -5144,6 +5143,10 @@ namespace Legion {
     MustEpochMappingExchange::~MustEpochMappingExchange(void)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(local_done_event.exists()); // better have one of these
+#endif
+      Runtime::trigger_event(local_done_event);
       // See if we need to wait for others to be done before we can
       // remove our valid references
       if (!done_events.empty())
@@ -5233,16 +5236,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void MustEpochMappingExchange::exchange_must_epoch_mappings(
-                ShardID shard_id,size_t total_shards, size_t total_constraints,
-                std::vector<std::vector<Mapping::PhysicalInstance> > &mappings,
-                std::map<PhysicalManager*,std::pair<unsigned,bool> > &acquired)
+                ShardID shard_id, size_t total_shards, size_t total_constraints,
+                std::vector<std::vector<Mapping::PhysicalInstance> > &mappings)
     //--------------------------------------------------------------------------
     {
       results.resize(total_constraints);
       // Add valid references to all the physical instances that we will
       // hold until all the must epoch operations are done with the exchange
-      std::set<RtEvent> reference_events;
-      WrapperReferenceMutator mutator(reference_events);
+      WrapperReferenceMutator mutator(done_events);
       for (unsigned idx = 0; idx < mappings.size(); idx++)
       {
         for (std::vector<Mapping::PhysicalInstance>::const_iterator it = 
@@ -5254,7 +5255,10 @@ namespace Legion {
           held_references.insert(it->impl);
         }
       }
-      RtUserEvent local_done_event = Runtime::create_rt_user_event();
+#ifdef DEBUG_LEGION
+      assert(!local_done_event.exists());
+#endif
+      local_done_event = Runtime::create_rt_user_event();
       // Then we can add our instances to the set and do the exchange
       {
         AutoLock c_lock(collective_lock);
@@ -5283,28 +5287,6 @@ namespace Legion {
           ready.lg_wait();
       }
       mappings = results;
-      // Add acquired references to all of our references that we have
-      for (unsigned idx = 0; idx < mappings.size(); idx++)
-      {
-        for (std::vector<Mapping::PhysicalInstance>::const_iterator it = 
-              mappings[idx].begin(); it != mappings[idx].end(); it++)
-        {
-          std::map<PhysicalManager*,std::pair<unsigned,bool> >::iterator
-            finder = acquired.find(it->impl);
-          // If we already have it, then no need to add a new one
-          if (finder != acquired.end())
-            continue;
-          it->impl->add_base_valid_ref(MAPPING_ACQUIRE_REF, &mutator); 
-          acquired[it->impl] = 
-            std::pair<unsigned,bool>(1/*count*/, false/*create*/);
-        }
-      }
-      // Trigger our local done once all the valid references are added
-      if (!reference_events.empty())
-        Runtime::trigger_event(local_done_event, 
-            Runtime::merge_events(reference_events));
-      else
-        Runtime::trigger_event(local_done_event);
     }
 
     /////////////////////////////////////////////////////////////

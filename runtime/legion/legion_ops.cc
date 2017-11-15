@@ -10518,7 +10518,7 @@ namespace Legion {
         }
       }
       // Then we need to actually perform the mapping
-      map_tasks(this, single_tasks, mapping_dependences);
+      map_tasks();
       // Once all the tasks have been initialized we can defer
       // our all mapped event on all their all mapped events
       std::set<RtEvent> tasks_all_mapped;
@@ -10559,16 +10559,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void MustEpochOp::map_tasks(MustEpochOp *owner,
-                    const std::vector<SingleTask*> &single_tasks,
-                    const std::vector<std::set<unsigned> > &mapping_dependences)
+    void MustEpochOp::map_tasks(void)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(single_tasks.size() == mapping_dependences.size());
 #endif
       MustEpochMapArgs args;
-      args.owner = owner;
+      args.owner = this;
       // For correctness we still have to abide by the mapping dependences
       // computed on the individual tasks while we are mapping them
       std::vector<RtEvent> mapped_events(single_tasks.size());
@@ -10590,13 +10588,13 @@ namespace Legion {
         {
           RtEvent precondition = Runtime::merge_events(preconditions);
           mapped_events[idx] = 
-            owner->runtime->issue_runtime_meta_task(args, 
-                LG_DEFERRED_THROUGHPUT_PRIORITY, owner, precondition); 
+            runtime->issue_runtime_meta_task(args, 
+                LG_DEFERRED_THROUGHPUT_PRIORITY, this, precondition); 
         }
         else
           mapped_events[idx] = 
-            owner->runtime->issue_runtime_meta_task(args,
-                  LG_DEFERRED_THROUGHPUT_PRIORITY, owner);
+            runtime->issue_runtime_meta_task(args,
+                  LG_DEFERRED_THROUGHPUT_PRIORITY, this);
       }
       std::set<RtEvent> wait_events(mapped_events.begin(), mapped_events.end());
       if (!wait_events.empty())
@@ -10627,7 +10625,6 @@ namespace Legion {
       // Get the map applied conditions and wait for them to be done
       // if there are any so we know the mapping that we did is at
       // least applied before allowing any other point tasks to run
-#if 0
       const std::set<RtEvent> &map_applied = task->get_map_applied_conditions();
       if (!map_applied.empty())
       {
@@ -10635,7 +10632,6 @@ namespace Legion {
         if (done.exists())
           done.lg_wait();
       }
-#endif
     }
 
     //--------------------------------------------------------------------------
