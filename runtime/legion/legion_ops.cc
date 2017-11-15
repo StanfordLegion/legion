@@ -10613,12 +10613,16 @@ namespace Legion {
       RtEvent versions_ready = task->perform_must_epoch_version_analysis(this);
       if (versions_ready.exists())
         versions_ready.lg_wait();
-      // Note we don't need to hold a lock here because this is
-      // a monotonic change.  Once it fails for anyone then it
-      // fails for everyone.
-      RtEvent done_mapping = task->perform_mapping(this);
-      if (done_mapping.exists())
-        done_mapping.lg_wait();
+      task->perform_mapping(this);
+      // We need to wait for any applied events to have completed before
+      // we can guarantee that we are actually mapped
+      const std::set<RtEvent> &map_applied = task->get_map_applied_conditions();
+      if (!map_applied.empty())
+      {
+        const RtEvent applied = Runtime::merge_events(map_applied);
+        if (!applied.has_triggered())
+          applied.lg_wait();
+      }
     }
 
     //--------------------------------------------------------------------------

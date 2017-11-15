@@ -404,6 +404,8 @@ namespace Legion {
         { return no_access_regions; }
       inline VariantID get_selected_variant(void) const 
         { return selected_variant; }
+      inline const std::set<RtEvent>& get_map_applied_conditions(void) const
+        { return map_applied_conditions; }
     public:
       void initialize_map_task_input(Mapper::MapTaskInput &input,
                                      Mapper::MapTaskOutput &output,
