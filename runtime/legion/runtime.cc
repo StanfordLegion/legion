@@ -21606,27 +21606,27 @@ namespace Legion {
           }
         case LG_MUST_INDIV_ID:
           {
-            MustEpochOp::handle_individual_trigger(args);
+            MustEpochTriggerer::handle_individual(args);
             break;
           }
         case LG_MUST_INDEX_ID:
           {
-            MustEpochOp::handle_index_trigger(args);
+            MustEpochTriggerer::handle_index(args);
             break;
           }
         case LG_MUST_MAP_ID:
           {
-            MustEpochOp::handle_map_task(args);
+            MustEpochMapper::handle_map_task(args);
             break;
           }
         case LG_MUST_DIST_ID:
           {
-            MustEpochOp::handle_distribute_task(args);
+            MustEpochDistributor::handle_distribute_task(args);
             break;
           }
         case LG_MUST_LAUNCH_ID:
           {
-            MustEpochOp::handle_launch_task(args);
+            MustEpochDistributor::handle_launch_task(args);
             break;
           }
         case LG_DEFERRED_FUTURE_SET_ID:

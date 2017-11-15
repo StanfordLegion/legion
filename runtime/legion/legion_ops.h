@@ -1861,46 +1861,6 @@ namespace Legion {
         std::vector<unsigned> req_indexes;
       };
     public:
-      struct MustEpochIndivArgs : public LgTaskArgs<MustEpochIndivArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_MUST_INDIV_ID;
-      public:
-        Processor current_proc;
-        IndividualTask *task;
-      };
-    public:
-      struct MustEpochIndexArgs : public LgTaskArgs<MustEpochIndexArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_MUST_INDEX_ID;
-      public:
-        Processor current_proc;
-        IndexTask *task;
-      };
-    public:
-      struct MustEpochMapArgs : public LgTaskArgs<MustEpochMapArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_MUST_MAP_ID;
-      public:
-        MustEpochOp *owner;
-        SingleTask *task;
-      };
-    public:
-      struct MustEpochDistributorArgs : 
-        public LgTaskArgs<MustEpochDistributorArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_MUST_DIST_ID;
-      public:
-        TaskOp *task;
-      };
-    public:
-      struct MustEpochLauncherArgs : 
-        public LgTaskArgs<MustEpochLauncherArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_MUST_LAUNCH_ID;
-      public:
-        TaskOp *task;
-      };
-    public:
       MustEpochOp(Runtime *rt);
       MustEpochOp(const MustEpochOp &rhs);
       virtual ~MustEpochOp(void);
@@ -1949,8 +1909,6 @@ namespace Legion {
     public:
       // Make this a virtual method to override it for control replication
       virtual MapperManager* invoke_mapper(void);
-      // Another virtual method to use for mapping control replication tasks
-      virtual void map_single_task(SingleTask *task);
     public:
       void add_mapping_dependence(RtEvent precondition);
       void register_single_task(SingleTask *single, unsigned index);
@@ -1969,23 +1927,6 @@ namespace Legion {
       TaskOp* find_task_by_index(int index);
     protected:
       static bool single_task_sorter(const Task *t1, const Task *t2);
-    public:
-      static void trigger_tasks(MustEpochOp *owner,
-                                const std::vector<IndividualTask*> &indiv_tasks,
-                                std::vector<bool> &indiv_triggered,
-                                const std::vector<IndexTask*> &index_tasks,
-                                std::vector<bool> &index_triggered);
-      static void handle_individual_trigger(const void *args);
-      static void handle_index_trigger(const void *args);
-    public:
-      // Provide ability to override for control replication
-      virtual void map_tasks(void);
-      static void handle_map_task(const void *args);
-    public:
-      // Provide ability to override for control replication
-      virtual void distribute_tasks(void);
-      static void handle_distribute_task(const void *args);
-      static void handle_launch_task(const void *args);
     protected:
       std::vector<IndividualTask*>        indiv_tasks;
       std::vector<bool>                   indiv_triggered;
@@ -2023,6 +1964,110 @@ namespace Legion {
       std::vector<std::set<unsigned/*single task index*/> > mapping_dependences;
     protected:
       std::map<UniqueID,RtUserEvent> slice_version_events;
+    };
+
+    /**
+     * \class MustEpochTriggerer
+     * A helper class for parallelizing must epoch triggering
+     */
+    class MustEpochTriggerer {
+    public:
+      struct MustEpochIndivArgs : public LgTaskArgs<MustEpochIndivArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_MUST_INDIV_ID;
+      public:
+        MustEpochTriggerer *triggerer;
+        IndividualTask *task;
+      };
+      struct MustEpochIndexArgs : public LgTaskArgs<MustEpochIndexArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_MUST_INDEX_ID;
+      public:
+        MustEpochTriggerer *triggerer;
+        IndexTask *task;
+      };
+    public:
+      MustEpochTriggerer(MustEpochOp *owner);
+      MustEpochTriggerer(const MustEpochTriggerer &rhs);
+      ~MustEpochTriggerer(void);
+    public:
+      MustEpochTriggerer& operator=(const MustEpochTriggerer &rhs);
+    public:
+      void trigger_tasks(const std::vector<IndividualTask*> &indiv_tasks,
+                         std::vector<bool> &indiv_triggered,
+                         const std::vector<IndexTask*> &index_tasks,
+                         std::vector<bool> &index_triggered);
+      void trigger_individual(IndividualTask *task);
+      void trigger_index(IndexTask *task);
+    public:
+      static void handle_individual(const void *args);
+      static void handle_index(const void *args);
+    private:
+      const Processor current_proc;
+      MustEpochOp *const owner;
+      Reservation trigger_lock;
+    };
+
+    /**
+     * \class MustEpochMapper
+     * A helper class for parallelizing mapping for must epochs
+     */
+    class MustEpochMapper {
+    public:
+      struct MustEpochMapArgs : public LgTaskArgs<MustEpochMapArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_MUST_MAP_ID;
+      public:
+        MustEpochMapper *mapper;
+        SingleTask *task;
+      };
+    public:
+      MustEpochMapper(MustEpochOp *owner);
+      MustEpochMapper(const MustEpochMapper &rhs);
+      ~MustEpochMapper(void);
+    public:
+      MustEpochMapper& operator=(const MustEpochMapper &rhs);
+    public:
+      void map_tasks(const std::vector<SingleTask*> &single_tasks,
+            const std::vector<std::set<unsigned> > &dependences);
+      void map_task(SingleTask *task);
+    public:
+      static void handle_map_task(const void *args);
+    private:
+      MustEpochOp *const owner;
+    };
+
+    class MustEpochDistributor {
+    public:
+      struct MustEpochDistributorArgs : 
+        public LgTaskArgs<MustEpochDistributorArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_MUST_DIST_ID;
+      public:
+        TaskOp *task;
+      };
+      struct MustEpochLauncherArgs : 
+        public LgTaskArgs<MustEpochLauncherArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_MUST_LAUNCH_ID;
+      public:
+        TaskOp *task;
+      };
+    public:
+      MustEpochDistributor(MustEpochOp *owner);
+      MustEpochDistributor(const MustEpochDistributor &rhs);
+      ~MustEpochDistributor(void);
+    public:
+      MustEpochDistributor& operator=(const MustEpochDistributor &rhs);
+    public:
+      void distribute_tasks(Runtime *runtime,
+                            const std::vector<IndividualTask*> &indiv_tasks,
+                            const std::set<SliceTask*> &slice_tasks);
+    public:
+      static void handle_distribute_task(const void *args);
+      static void handle_launch_task(const void *args);
+    private:
+      MustEpochOp *const owner;
     };
 
     /**
