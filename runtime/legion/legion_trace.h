@@ -871,7 +871,8 @@ namespace Legion {
      *   operations[op_key]->get_physical_instances()[region_idx][inst_idx]
      *                      .set_ready_event(events[ready_event_idx])
      */
-    struct SetReadyEvent : public Instruction {
+    struct SetReadyEvent : public Instruction,
+                           public LegionHeapify<SetReadyEvent> {
       SetReadyEvent(PhysicalTemplate& tpl,
                     const TraceLocalId& op_key,
                     unsigned region_idx,
