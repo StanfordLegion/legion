@@ -1978,8 +1978,9 @@ namespace Legion {
       static void handle_individual_trigger(const void *args);
       static void handle_index_trigger(const void *args);
     public:
-      // Provide ability to override for control replication
-      virtual void map_tasks(void);
+      static void map_tasks(MustEpochOp *owner,
+            const std::vector<SingleTask*> &single_tasks,
+            const std::vector<std::set<unsigned> > &mapping_dependences);
       static void handle_map_task(const void *args);
     public:
       // Provide ability to override for control replication

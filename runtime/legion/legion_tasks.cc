@@ -3069,7 +3069,7 @@ namespace Legion {
         // Get the acquired instances only if we are checking
         if (!Runtime::unsafe_mapper)
         {
-          if (this->must_epoch != NULL)
+          if (must_epoch_owner != NULL)
           {
             acquired = new std::map<PhysicalManager*,
                      std::pair<unsigned,bool> >(*get_acquired_instances_ref());
@@ -3077,7 +3077,7 @@ namespace Legion {
             // Merge the must epoch owners acquired instances too 
             // if we need to check for all our instances being acquired
             std::map<PhysicalManager*,std::pair<unsigned,bool> > 
-              *epoch_acquired = this->must_epoch->get_acquired_instances_ref();
+              *epoch_acquired = must_epoch_owner->get_acquired_instances_ref();
             if (epoch_acquired != NULL)
               acquired->insert(epoch_acquired->begin(), epoch_acquired->end());
           }
