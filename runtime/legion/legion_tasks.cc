@@ -3279,35 +3279,6 @@ namespace Legion {
         }
       }
       early_mapped_regions.clear();
-      // See whether the mapper picked a variant or a generator
-      if (output.chosen_variant > 0)
-      {
-        variant_impl = runtime->find_variant_impl(task_id, 
-                                output.chosen_variant, true/*can fail*/);
-      }
-      else
-      {
-        REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
-                      "Invalid mapper output from invocation of '%s' on "
-                      "mapper %s. Mapper specified an invalid task variant "
-                      "of ID 0 for task %s (ID %lld), but Legion does not yet "
-                      "support task generators.", "map_task", 
-                      mapper->get_mapper_name(), 
-                      get_task_name(), get_unique_id())
-        // TODO: invoke a generator if one exists
-      }
-      if (variant_impl == NULL) 
-        // If we couldn't find or make a variant that is bad
-        REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
-                      "Invalid mapper output from invocation of '%s' on "
-                      "mapper %s. Mapper failed to specify a valid "
-                      "task variant or generator capable of create a variant "
-                      "implementation of task %s (ID %lld).",
-                      "map_task", mapper->get_mapper_name(), get_task_name(),
-                      get_unique_id())
-      // Now that we know which variant to use, we can validate it
-      if (!Runtime::unsafe_mapper)
-        validate_variant_selection(mapper, variant_impl, "map_task"); 
       // Record anything else that needs to be recorded 
       selected_variant = output.chosen_variant;
       task_priority = output.task_priority;
