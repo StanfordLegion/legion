@@ -10452,28 +10452,10 @@ namespace Legion {
           task->target_proc = proc;
         }
       }
-      // Then we need to actually perform the mapping
-      map_tasks();
-      mapping_dependences.clear();
-      // Once all the tasks have been initialized we can defer
-      // our all mapped event on all their all mapped events
       std::set<RtEvent> tasks_all_mapped;
       std::set<ApEvent> tasks_all_complete;
-      for (std::vector<IndividualTask*>::const_iterator it = 
-            indiv_tasks.begin(); it != indiv_tasks.end(); it++)
-      {
-        tasks_all_mapped.insert((*it)->get_mapped_event());
-        tasks_all_complete.insert((*it)->get_completion_event());
-      }
-      for (std::vector<IndexTask*>::const_iterator it = 
-            index_tasks.begin(); it != index_tasks.end(); it++)
-      {
-        tasks_all_mapped.insert((*it)->get_mapped_event());
-        tasks_all_complete.insert((*it)->get_completion_event());
-      }
-      // If we passed all the constraints, then kick everything off
-      distribute_tasks(); 
-      
+      // Map and distribute all our tasks
+      map_and_distribute(tasks_all_mapped, tasks_all_complete);
       // Mark that we are done mapping and executing this operation
       RtEvent all_mapped = Runtime::merge_events(tasks_all_mapped);
       RtEvent all_complete = Runtime::protect_merge_events(tasks_all_complete);
@@ -10481,6 +10463,32 @@ namespace Legion {
       if (!acquired_instances.empty())
         release_acquired_instances(acquired_instances);
       complete_execution(all_complete);
+    }
+
+    //--------------------------------------------------------------------------
+    void MustEpochOp::map_and_distribute(std::set<RtEvent> &tasks_mapped,
+                                         std::set<ApEvent> &tasks_complete)
+    //--------------------------------------------------------------------------
+    {
+      // Perform the mapping
+      map_tasks();
+      mapping_dependences.clear();
+      // Once all the tasks have been initialized we can defer
+      // our all mapped event on all their all mapped events
+      for (std::vector<IndividualTask*>::const_iterator it = 
+            indiv_tasks.begin(); it != indiv_tasks.end(); it++)
+      {
+        tasks_mapped.insert((*it)->get_mapped_event());
+        tasks_complete.insert((*it)->get_completion_event());
+      }
+      for (std::vector<IndexTask*>::const_iterator it = 
+            index_tasks.begin(); it != index_tasks.end(); it++)
+      {
+        tasks_mapped.insert((*it)->get_mapped_event());
+        tasks_complete.insert((*it)->get_completion_event());
+      }
+      // Then we can distribute the tasks
+      distribute_tasks();
     }
 
     //--------------------------------------------------------------------------
@@ -10582,7 +10590,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
           assert((*it) < idx);
 #endif
-          preconditions.insert(mapped_events[*it]);          
+          preconditions.insert(mapped_events[*it]);
         }
         args.task = single_tasks[idx];
         if (!preconditions.empty())

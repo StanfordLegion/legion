@@ -1145,6 +1145,7 @@ namespace Legion {
     protected:
       friend class IndexTask;
       friend class PointTask;
+      friend class ReplMustEpochOp;
       std::vector<PointTask*> points;
     protected:
       unsigned num_unmapped_points;

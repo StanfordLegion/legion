@@ -4440,6 +4440,118 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    ApBarrier InnerContext::create_phase_barrier(unsigned arrivals,
+                                                 ReductionOpID redop,
+                                                 const void *init_value,
+                                                 size_t init_size)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+#ifdef DEBUG_LEGION
+      log_run.debug("Creating application barrier in task %s (ID %lld)",
+                      get_task_name(), get_unique_id());
+#endif
+      return ApBarrier(Realm::Barrier::create_barrier(arrivals, redop,
+                                                      init_value, init_size));
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::destroy_phase_barrier(ApBarrier bar)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+#ifdef DEBUG_LEGION
+      log_run.debug("Destroying phase barrier in task %s (ID %lld)",
+                      get_task_name(), get_unique_id());
+#endif
+      destroy_user_barrier(bar);
+    }
+
+    //--------------------------------------------------------------------------
+    PhaseBarrier InnerContext::advance_phase_barrier(PhaseBarrier bar)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+#ifdef DEBUG_LEGION
+      log_run.debug("Advancing phase barrier in task %s (ID %lld)",
+                      get_task_name(), get_unique_id());
+#endif
+      PhaseBarrier result = bar;
+      Runtime::advance_barrier(result);
+#ifdef LEGION_SPY
+      LegionSpy::log_event_dependence(bar.phase_barrier, result.phase_barrier);
+#endif
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::arrive_dynamic_collective(DynamicCollective dc,
+                                                 const void *buffer,
+                                                 size_t size, unsigned count)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+#ifdef DEBUG_LEGION
+      log_run.debug("Arrive dynamic collective in task %s (ID %lld)",
+                      get_task_name(), get_unique_id());
+#endif
+      Runtime::phase_barrier_arrive(dc, count, ApEvent::NO_AP_EVENT, 
+                                    buffer, size);
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::defer_dynamic_collective_arrival(DynamicCollective dc,
+                                                        const Future &f,
+                                                        unsigned count)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+#ifdef DEBUG_LEGION
+      log_run.debug("Defer dynamic collective arrival in task %s (ID %lld)",
+                      get_task_name(), get_unique_id());
+#endif
+      // Record this future as a contribution to the collective
+      // for future dependence analysis
+      record_dynamic_collective_contribution(dc, f);
+      f.impl->contribute_to_collective(dc, count);
+    }
+
+    //--------------------------------------------------------------------------
+    Future InnerContext::get_dynamic_collective_result(DynamicCollective dc)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+#ifdef DEBUG_LEGION
+      log_run.debug("Get dynamic collective result in task %s (ID %lld)",
+                      get_task_name(), get_unique_id());
+#endif
+      DynamicCollectiveOp *collective = 
+        runtime->get_available_dynamic_collective_op(true);
+      Future result = collective->initialize(this, dc);
+      Processor proc = get_executing_processor();
+      runtime->add_to_dependence_queue(this, proc, collective);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    DynamicCollective InnerContext::advance_dynamic_collective( 
+                                                           DynamicCollective dc)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+#ifdef DEBUG_LEGION
+      log_run.debug("Advancing dynamic collective in task %s (ID %lld)",
+                      get_task_name(), get_unique_id());
+#endif
+      DynamicCollective result = dc;
+      Runtime::advance_barrier(result);
+#ifdef LEGION_SPY
+      LegionSpy::log_event_dependence(dc.phase_barrier, result.phase_barrier);
+#endif
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
     unsigned InnerContext::register_new_child_operation(Operation *op,
                       const std::vector<StaticDependence> *dependences)
     //--------------------------------------------------------------------------
@@ -9470,22 +9582,22 @@ namespace Legion {
     void ReplicateContext::issue_acquire(const AcquireLauncher &launcher)
     //--------------------------------------------------------------------------
     {
-      log_run.error("Acquire operations are not currently supported in control "
+      REPORT_LEGION_ERROR(ERROR_REPLICATE_TASK_VIOLATION,
+                    "Acquire operations are not currently supported in control "
                     "replication contexts for task %s (UID %lld). It may be "
                     "supported in the future.",
-                    get_task_name(), get_unique_id());
-      assert(false);
+                    get_task_name(), get_unique_id())
     }
 
     //--------------------------------------------------------------------------
     void ReplicateContext::issue_release(const ReleaseLauncher &launcher)
     //--------------------------------------------------------------------------
     {
-      log_run.error("Release operations are not currently supported in control "
+      REPORT_LEGION_ERROR(ERROR_REPLICATE_TASK_VIOLATION,
+                    "Release operations are not currently supported in control "
                     "replication contexts for task %s (UID %lld). It may be "
                     "supported in the future.",
-                    get_task_name(), get_unique_id());
-      assert(false);
+                    get_task_name(), get_unique_id())
     }
 
     //--------------------------------------------------------------------------
@@ -9493,11 +9605,11 @@ namespace Legion {
                                                  const AttachLauncher &launcher)
     //--------------------------------------------------------------------------
     {
-      log_run.error("Attach operations are not currently supported in control "
+      REPORT_LEGION_ERROR(ERROR_REPLICATE_TASK_VIOLATION,
+                    "Attach operations are not currently supported in control "
                     "replication contexts for task %s (UID %lld). It may be "
                     "supported in the future.",
-                    get_task_name(), get_unique_id());
-      assert(false);
+                    get_task_name(), get_unique_id())
       return PhysicalRegion();
     }
 
@@ -9505,11 +9617,11 @@ namespace Legion {
     void ReplicateContext::detach_resource(PhysicalRegion region)
     //--------------------------------------------------------------------------
     {
-      log_run.error("Detach operations are not currently supported in control "
+      REPORT_LEGION_ERROR(ERROR_REPLICATE_TASK_VIOLATION,
+                    "Detach operations are not currently supported in control "
                     "replication contexts for task %s (UID %lld). It may be "
                     "supported in the future.",
-                    get_task_name(), get_unique_id());
-      assert(false);
+                    get_task_name(), get_unique_id())
     }
 
     //--------------------------------------------------------------------------
@@ -9591,10 +9703,10 @@ namespace Legion {
                                           DynamicCollective dc, const Future &f)
     //--------------------------------------------------------------------------
     {
-      log_run.error("Illegal dynamic collective operation used in "
+      REPORT_LEGION_ERROR(ERROR_REPLICATE_TASK_VIOLATION,
+                    "Illegal dynamic collective operation used in "
                     "control replicated task %s (UID %lld)", 
-                    get_task_name(), get_unique_id());
-      assert(false);
+                    get_task_name(), get_unique_id())
     }
 
     //--------------------------------------------------------------------------
@@ -9602,11 +9714,118 @@ namespace Legion {
                                              std::vector<Future> &contributions)
     //--------------------------------------------------------------------------
     {
-      log_run.error("Illegal dynamic collective operation used in "
+      REPORT_LEGION_ERROR(ERROR_REPLICATE_TASK_VIOLATION,
+                    "Illegal dynamic collective operation used in "
                     "control replicated task %s (UID %lld)",
-                    get_task_name(), get_unique_id());
-      assert(false);
+                    get_task_name(), get_unique_id())
     } 
+
+    //--------------------------------------------------------------------------
+    ApBarrier ReplicateContext::create_phase_barrier(unsigned arrivals,
+                                                     ReductionOpID redop,
+                                                     const void *init_value,
+                                                     size_t init_size)
+    //--------------------------------------------------------------------------
+    {
+      ValueBroadcast<ApBarrier> bar_collective(this, 0/*origin*/,
+                                               COLLECTIVE_LOC_71); 
+      // Shard 0 will make the barrier and broadcast it
+      if (owner_shard->shard_id == 0)
+      {
+        ApBarrier result = InnerContext::create_phase_barrier(arrivals, redop,
+                                                        init_value, init_size);
+        bar_collective.broadcast(result);
+        return result;
+      }
+      else
+        return bar_collective;
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplicateContext::destroy_phase_barrier(ApBarrier bar)
+    //--------------------------------------------------------------------------
+    {
+      // Shard 0 has to wait for all the other shards to get here
+      // too before it can do the deletion
+      ShardSyncTree sync_point(this, 0/*origin*/, COLLECTIVE_LOC_72);
+      if (owner_shard->shard_id == 0)
+        InnerContext::destroy_phase_barrier(bar);
+    }
+
+    //--------------------------------------------------------------------------
+    PhaseBarrier ReplicateContext::advance_phase_barrier(PhaseBarrier bar)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+#ifdef DEBUG_LEGION
+      if (owner_shard->shard_id == 0)
+        log_run.debug("Advancing phase barrier in task %s (ID %lld)",
+                        get_task_name(), get_unique_id());
+#endif
+      PhaseBarrier result = bar;
+      Runtime::advance_barrier(result);
+#ifdef LEGION_SPY
+      if (owner_shard->shard_id == 0)
+        LegionSpy::log_event_dependence(bar.phase_barrier,result.phase_barrier);
+#endif
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplicateContext::arrive_dynamic_collective(DynamicCollective dc,
+                                                    const void *buffer,
+                                                    size_t size, unsigned count)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_REPLICATE_TASK_VIOLATION,
+                    "Illegal dynamic collective arrival performed in "
+                    "control replicated task %s (UID %lld)",
+                    get_task_name(), get_unique_id())
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplicateContext::defer_dynamic_collective_arrival(
+                                                         DynamicCollective dc,
+                                                         const Future &f,
+                                                         unsigned count)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_REPLICATE_TASK_VIOLATION,
+                    "Illegal defer dynamic collective arrival performed in "
+                    "control replicated task %s (UID %lld)",
+                    get_task_name(), get_unique_id())
+    }
+
+    //--------------------------------------------------------------------------
+    Future ReplicateContext::get_dynamic_collective_result(DynamicCollective dc)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_REPLICATE_TASK_VIOLATION,
+                    "Illegal get dynamic collective result performed in "
+                    "control replicated task %s (UID %lld)",
+                    get_task_name(), get_unique_id())
+      return Future();
+    }
+
+    //--------------------------------------------------------------------------
+    DynamicCollective ReplicateContext::advance_dynamic_collective( 
+                                                           DynamicCollective dc)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+#ifdef DEBUG_LEGION
+      if (owner_shard->shard_id == 0)
+        log_run.debug("Advancing dynamic collective in task %s (ID %lld)",
+                        get_task_name(), get_unique_id());
+#endif
+      DynamicCollective result = dc;
+      Runtime::advance_barrier(result);
+#ifdef LEGION_SPY
+      if (owner_shard->shard_id == 0)
+        LegionSpy::log_event_dependence(dc.phase_barrier, result.phase_barrier);
+#endif
+      return result;
+    }
 
     //--------------------------------------------------------------------------
 #ifdef DEBUG_LEGION_COLLECTIVES
@@ -10060,7 +10279,7 @@ namespace Legion {
     void ReplicateContext::register_future_map(ReplFutureMapImpl *map)
     //--------------------------------------------------------------------------
     {
-      map->add_base_resource_ref(FUTURE_HANDLE_REF);
+      map->add_base_resource_ref(REPLICATION_REF);
       std::vector<std::pair<void*,size_t> > to_apply;
       {
         AutoLock repl_lock(replication_lock);
@@ -10132,7 +10351,7 @@ namespace Legion {
 #endif
         future_maps.erase(finder);
       }
-      if (map->remove_base_resource_ref(FUTURE_HANDLE_REF))
+      if (map->remove_base_resource_ref(REPLICATION_REF))
         delete map;
     }
 
@@ -11755,6 +11974,81 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    ApBarrier LeafContext::create_phase_barrier(unsigned arrivals,
+                                                ReductionOpID redop,
+                                                const void *init_value,
+                                                size_t init_size)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_LEAF_TASK_VIOLATION,
+          "Illegal create phase barrier call performed in leaf task %s "
+          "(UID %lld)", get_task_name(), get_unique_id());
+      return ApBarrier::NO_AP_BARRIER;
+    }
+
+    //--------------------------------------------------------------------------
+    void LeafContext::destroy_phase_barrier(ApBarrier bar)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_LEAF_TASK_VIOLATION,
+          "Illegal destroy phase barrier call performed in leaf task %s "
+          "(UID %lld)", get_task_name(), get_unique_id());
+    }
+
+    //--------------------------------------------------------------------------
+    PhaseBarrier LeafContext::advance_phase_barrier(PhaseBarrier bar)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_LEAF_TASK_VIOLATION,
+          "Illegal advance phase barrier call performed in leaf task %s "
+          "(UID %lld)", get_task_name(), get_unique_id());
+      return bar;
+    }
+
+    //--------------------------------------------------------------------------
+    void LeafContext::arrive_dynamic_collective(DynamicCollective dc,
+                                                const void *buffer,
+                                                size_t size, unsigned count)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_LEAF_TASK_VIOLATION,
+          "Illegal arrive dynamic collective call performed in leaf task %s "
+          "(UID %lld)", get_task_name(), get_unique_id());
+    }
+
+    //--------------------------------------------------------------------------
+    void LeafContext::defer_dynamic_collective_arrival(DynamicCollective dc,
+                                                       const Future &f,
+                                                       unsigned count)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_LEAF_TASK_VIOLATION,
+          "Illegal defer dynamic collective call performed in leaf task %s "
+          "(UID %lld)", get_task_name(), get_unique_id());
+    }
+
+    //--------------------------------------------------------------------------
+    Future LeafContext::get_dynamic_collective_result(DynamicCollective dc)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_LEAF_TASK_VIOLATION,
+          "Illegal get dynamic collective result call performed in leaf task %s"
+          " (UID %lld)", get_task_name(), get_unique_id());
+      return Future();
+    }
+
+    //--------------------------------------------------------------------------
+    DynamicCollective LeafContext::advance_dynamic_collective( 
+                                                           DynamicCollective dc)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_LEAF_TASK_VIOLATION,
+          "Illegal advance dynamic collective call performed in leaf task %s "
+          "(UID %lld)", get_task_name(), get_unique_id());
+      return dc;
+    }
+
+    //--------------------------------------------------------------------------
     unsigned LeafContext::register_new_child_operation(Operation *op,
                     const std::vector<StaticDependence> *dependences)
     //--------------------------------------------------------------------------
@@ -12944,6 +13238,64 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return enclosing->get_predicate_future(p);
+    }
+
+    //--------------------------------------------------------------------------
+    ApBarrier InlineContext::create_phase_barrier(unsigned arrivals,
+                                                  ReductionOpID redop,
+                                                  const void *init_value,
+                                                  size_t init_size)
+    //--------------------------------------------------------------------------
+    {
+      return enclosing->create_phase_barrier(arrivals, redop, 
+                                             init_value, init_size);
+    }
+
+    //--------------------------------------------------------------------------
+    void InlineContext::destroy_phase_barrier(ApBarrier bar)
+    //--------------------------------------------------------------------------
+    {
+      enclosing->destroy_phase_barrier(bar);
+    }
+
+    //--------------------------------------------------------------------------
+    PhaseBarrier InlineContext::advance_phase_barrier(PhaseBarrier bar)
+    //--------------------------------------------------------------------------
+    {
+      return enclosing->advance_phase_barrier(bar);
+    }
+
+    //--------------------------------------------------------------------------
+    void InlineContext::arrive_dynamic_collective(DynamicCollective dc,
+                                                  const void *buffer,
+                                                  size_t size, unsigned count)
+    //--------------------------------------------------------------------------
+    {
+      enclosing->arrive_dynamic_collective(dc, buffer, size, count);
+    }
+
+    //--------------------------------------------------------------------------
+    void InlineContext::defer_dynamic_collective_arrival(DynamicCollective dc,
+                                                         const Future &f,
+                                                         unsigned count)
+    //--------------------------------------------------------------------------
+    {
+      enclosing->defer_dynamic_collective_arrival(dc, f, count);
+    }
+
+    //--------------------------------------------------------------------------
+    Future InlineContext::get_dynamic_collective_result(DynamicCollective dc)
+    //--------------------------------------------------------------------------
+    {
+      return enclosing->get_dynamic_collective_result(dc);
+    }
+
+    //--------------------------------------------------------------------------
+    DynamicCollective InlineContext::advance_dynamic_collective( 
+                                                           DynamicCollective dc)
+    //--------------------------------------------------------------------------
+    {
+      return enclosing->advance_dynamic_collective(dc);
     }
 
     //--------------------------------------------------------------------------

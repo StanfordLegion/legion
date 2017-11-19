@@ -12325,14 +12325,7 @@ namespace Legion {
       if (ctx == DUMMY_CONTEXT)
         REPORT_DUMMY_CONTEXT(
             "Illegal dummy context create phase barrier!");
-#ifdef DEBUG_LEGION
-      log_run.debug("Creating phase barrier in task %s (ID %lld)",
-                          ctx->get_task_name(), ctx->get_unique_id());
-#endif
-      ctx->begin_runtime_call();
-      ApBarrier result(Realm::Barrier::create_barrier(arrivals));
-      ctx->end_runtime_call();
-      return PhaseBarrier(result);
+      return PhaseBarrier(ctx->create_phase_barrier(arrivals));
     }
 
     //--------------------------------------------------------------------------
@@ -12342,13 +12335,7 @@ namespace Legion {
       if (ctx == DUMMY_CONTEXT)
         REPORT_DUMMY_CONTEXT(
             "Illegal dummy context destroy phase barrier!");
-#ifdef DEBUG_LEGION
-      log_run.debug("Destroying phase barrier in task %s (ID %lld)",
-                          ctx->get_task_name(), ctx->get_unique_id());
-#endif
-      ctx->begin_runtime_call();
-      ctx->destroy_user_barrier(pb.phase_barrier);
-      ctx->end_runtime_call();
+      ctx->destroy_phase_barrier(pb.phase_barrier);
     }
 
     //--------------------------------------------------------------------------
@@ -12358,18 +12345,7 @@ namespace Legion {
       if (ctx == DUMMY_CONTEXT)
         REPORT_DUMMY_CONTEXT(
             "Illegal dummy context advance phase barrier!");
-#ifdef DEBUG_LEGION
-      log_run.debug("Advancing phase barrier in task %s (ID %lld)",
-                          ctx->get_task_name(), ctx->get_unique_id());
-#endif
-      ctx->begin_runtime_call();
-      PhaseBarrier result = pb;
-      Runtime::advance_barrier(result);
-#ifdef LEGION_SPY
-      LegionSpy::log_event_dependence(pb.phase_barrier, result.phase_barrier);
-#endif
-      ctx->end_runtime_call();
-      return result;
+      return ctx->advance_phase_barrier(pb);
     }
 
     //--------------------------------------------------------------------------
@@ -12383,15 +12359,8 @@ namespace Legion {
       if (ctx == DUMMY_CONTEXT)
         REPORT_DUMMY_CONTEXT(
             "Illegal dummy context create dynamic collective!");
-#ifdef DEBUG_LEGION
-      log_run.debug("Creating dynamic collective in task %s (ID %lld)",
-                          ctx->get_task_name(), ctx->get_unique_id());
-#endif
-      ctx->begin_runtime_call();
-      ApBarrier result(Realm::Barrier::create_barrier(arrivals, redop, 
-                                               init_value, init_size));
-      ctx->end_runtime_call();
-      return DynamicCollective(result, redop);
+      return DynamicCollective(ctx->create_phase_barrier(arrivals, redop,
+                                             init_value, init_size), redop);
     }
 
     //--------------------------------------------------------------------------
@@ -12401,13 +12370,7 @@ namespace Legion {
       if (ctx == DUMMY_CONTEXT)
         REPORT_DUMMY_CONTEXT(
             "Illegal dummy context destroy dynamic collective!");
-#ifdef DEBUG_LEGION
-      log_run.debug("Destroying dynamic collective in task %s (ID %lld)",
-                          ctx->get_task_name(), ctx->get_unique_id());
-#endif
-      ctx->begin_runtime_call();
-      ctx->destroy_user_barrier(dc.phase_barrier);
-      ctx->end_runtime_call();
+      ctx->destroy_phase_barrier(dc.phase_barrier);
     }
 
     //--------------------------------------------------------------------------
@@ -12419,14 +12382,7 @@ namespace Legion {
       if (ctx == DUMMY_CONTEXT)
         REPORT_DUMMY_CONTEXT(
             "Illegal dummy context arrive dynamic collective!");
-#ifdef DEBUG_LEGION
-      log_run.debug("Arrive dynamic collective in task %s (ID %lld)",
-                          ctx->get_task_name(), ctx->get_unique_id());
-#endif
-      ctx->begin_runtime_call();
-      Runtime::phase_barrier_arrive(dc, count, ApEvent::NO_AP_EVENT, 
-                                    buffer, size);
-      ctx->end_runtime_call();
+      ctx->arrive_dynamic_collective(dc, buffer, size, count);
     }
 
     //--------------------------------------------------------------------------
@@ -12439,17 +12395,7 @@ namespace Legion {
       if (ctx == DUMMY_CONTEXT)
         REPORT_DUMMY_CONTEXT(
             "Illegal dummy context defer dynamic collective arrival!");
-#ifdef DEBUG_LEGION
-      log_run.debug("Defer dynamic collective arrival in "
-                          "task %s (ID %lld)",
-                          ctx->get_task_name(), ctx->get_unique_id());
-#endif
-      ctx->begin_runtime_call();
-      // Record this future as a contribution to the collective
-      // for future dependence analysis
-      ctx->record_dynamic_collective_contribution(dc, f);
-      f.impl->contribute_to_collective(dc, count);
-      ctx->end_runtime_call();
+      ctx->defer_dynamic_collective_arrival(dc, f, count);
     }
 
     //--------------------------------------------------------------------------
@@ -12460,18 +12406,7 @@ namespace Legion {
       if (ctx == DUMMY_CONTEXT)
         REPORT_DUMMY_CONTEXT(
             "Illegal dummy context get dynamic collective result!");
-#ifdef DEBUG_LEGION
-      log_run.debug("Get dynamic collective result in task %s (ID %lld)",
-                          ctx->get_task_name(), ctx->get_unique_id());
-#endif
-      ctx->begin_runtime_call();
-      DynamicCollectiveOp *collective = 
-        get_available_dynamic_collective_op(true);
-      Future result = collective->initialize(ctx, dc);
-      Processor proc = ctx->get_executing_processor();
-      add_to_dependence_queue(ctx, proc, collective);
-      ctx->end_runtime_call();
-      return result;
+      return ctx->get_dynamic_collective_result(dc);
     }
 
     //--------------------------------------------------------------------------
@@ -12482,18 +12417,7 @@ namespace Legion {
       if (ctx == DUMMY_CONTEXT)
         REPORT_DUMMY_CONTEXT(
             "Illegal dummy context advance dynamic collective!");
-#ifdef DEBUG_LEGION
-      log_run.debug("Advancing dynamic collective in task %s (ID %lld)",
-                          ctx->get_task_name(), ctx->get_unique_id());
-#endif
-      ctx->begin_runtime_call();
-      DynamicCollective result = dc;
-      Runtime::advance_barrier(result);
-#ifdef LEGION_SPY
-      LegionSpy::log_event_dependence(dc.phase_barrier, result.phase_barrier);
-#endif
-      ctx->end_runtime_call();
-      return result;
+      return ctx->advance_dynamic_collective(dc);
     }
 
     //--------------------------------------------------------------------------

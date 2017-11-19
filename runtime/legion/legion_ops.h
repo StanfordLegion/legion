@@ -1972,14 +1972,19 @@ namespace Legion {
       static void handle_trigger_individual(const void *args);
       static void handle_trigger_index(const void *args);
     protected:
+      // Have a virtual function that we can override to for doing the
+      // mapping and distribution of the point tasks, we'll override
+      // this for control replication
+      virtual void map_and_distribute(std::set<RtEvent> &tasks_mapped,
+                                      std::set<ApEvent> &tasks_complete);
       // Make this virtual so we can override it for control replication
-      virtual void map_tasks(void) const;
+      void map_tasks(void) const;
       void map_single_task(SingleTask *task);
     public:
       static void handle_map_task(const void *args);
     protected:
       // Make this virtual so we can override it for control replication
-      virtual void distribute_tasks(void) const;
+      void distribute_tasks(void) const;
     public:
       static void handle_distribute_task(const void *args);
       static void handle_launch_task(const void *args);

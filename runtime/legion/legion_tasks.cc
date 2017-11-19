@@ -2922,10 +2922,8 @@ namespace Legion {
       // See whether the mapper picked a variant or a generator
       VariantImpl *variant_impl = NULL;
       if (output.chosen_variant > 0)
-      {
         variant_impl = runtime->find_variant_impl(task_id, 
                                 output.chosen_variant, true/*can fail*/);
-      }
       else // TODO: invoke a generator if one exists
         REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                       "Invalid mapper output from invocation of '%s' on "

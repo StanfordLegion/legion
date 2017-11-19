@@ -1340,6 +1340,10 @@ namespace Legion {
       COLLECTIVE_LOC_67 = 67,
       COLLECTIVE_LOC_68 = 68,
       COLLECTIVE_LOC_69 = 69,
+      COLLECTIVE_LOC_70 = 70,
+      COLLECTIVE_LOC_71 = 71,
+      COLLECTIVE_LOC_72 = 72,
+      COLLECTIVE_LOC_73 = 73,
     };
 
     // Forward declarations for runtime level objects

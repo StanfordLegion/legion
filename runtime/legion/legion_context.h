@@ -293,6 +293,24 @@ namespace Legion {
       virtual Predicate create_predicate(const PredicateLauncher &launcher) = 0;
       virtual Future get_predicate_future(const Predicate &p) = 0;
     public:
+      // Calls for barriers and dynamic collectives
+      virtual ApBarrier create_phase_barrier(unsigned arrivals,
+                                                ReductionOpID redop = 0,
+                                                const void *init_value = NULL,
+                                                size_t init_size = 0) = 0;
+      virtual void destroy_phase_barrier(ApBarrier bar) = 0;
+      virtual PhaseBarrier advance_phase_barrier(PhaseBarrier bar) = 0;
+      virtual void arrive_dynamic_collective(DynamicCollective dc,
+                                             const void *buffer, 
+                                             size_t size,
+                                             unsigned count) = 0;
+      virtual void defer_dynamic_collective_arrival(DynamicCollective dc,
+                                                    const Future &f,
+                                                    unsigned count) = 0;
+      virtual Future get_dynamic_collective_result(DynamicCollective dc) = 0;
+      virtual DynamicCollective advance_dynamic_collective(
+                                                   DynamicCollective dc) = 0;
+    public:
       // The following set of operations correspond directly
       // to the complete_mapping, complete_operation, and
       // commit_operations performed by an operation.  Every
@@ -887,6 +905,24 @@ namespace Legion {
       virtual Predicate create_predicate(const PredicateLauncher &launcher);
       virtual Future get_predicate_future(const Predicate &p);
     public:
+      // Calls for barriers and dynamic collectives
+      virtual ApBarrier create_phase_barrier(unsigned arrivals,
+                                                ReductionOpID redop = 0,
+                                                const void *init_value = NULL,
+                                                size_t init_size = 0);
+      virtual void destroy_phase_barrier(ApBarrier bar);
+      virtual PhaseBarrier advance_phase_barrier(PhaseBarrier bar);
+      virtual void arrive_dynamic_collective(DynamicCollective dc,
+                                             const void *buffer, 
+                                             size_t size,
+                                             unsigned count);
+      virtual void defer_dynamic_collective_arrival(DynamicCollective dc,
+                                                    const Future &f,
+                                                    unsigned count);
+      virtual Future get_dynamic_collective_result(DynamicCollective dc);
+      virtual DynamicCollective advance_dynamic_collective(
+                                                   DynamicCollective dc);
+    public:
       // The following set of operations correspond directly
       // to the complete_mapping, complete_operation, and
       // commit_operations performed by an operation.  Every
@@ -1410,6 +1446,24 @@ namespace Legion {
       virtual void find_collective_contributions(DynamicCollective dc,
                                        std::vector<Future> &contributions);
     public:
+      // Calls for barriers and dynamic collectives
+      virtual ApBarrier create_phase_barrier(unsigned arrivals,
+                                             ReductionOpID redop = 0,
+                                             const void *init_value = NULL,
+                                             size_t init_size = 0);
+      virtual void destroy_phase_barrier(ApBarrier bar);
+      virtual PhaseBarrier advance_phase_barrier(PhaseBarrier bar);
+      virtual void arrive_dynamic_collective(DynamicCollective dc,
+                                             const void *buffer, 
+                                             size_t size,
+                                             unsigned count);
+      virtual void defer_dynamic_collective_arrival(DynamicCollective dc,
+                                                    const Future &f,
+                                                    unsigned count);
+      virtual Future get_dynamic_collective_result(DynamicCollective dc);
+      virtual DynamicCollective advance_dynamic_collective(
+                                                   DynamicCollective dc);
+    public:
 #ifdef DEBUG_LEGION_COLLECTIVES
       virtual InterCloseOp* get_inter_close_op(const LogicalUser &user,
                                                RegionTreeNode *node);
@@ -1845,6 +1899,24 @@ namespace Legion {
       virtual Predicate create_predicate(const PredicateLauncher &launcher);
       virtual Future get_predicate_future(const Predicate &p);
     public:
+      // Calls for barriers and dynamic collectives
+      virtual ApBarrier create_phase_barrier(unsigned arrivals,
+                                                ReductionOpID redop = 0,
+                                                const void *init_value = NULL,
+                                                size_t init_size = 0);
+      virtual void destroy_phase_barrier(ApBarrier bar);
+      virtual PhaseBarrier advance_phase_barrier(PhaseBarrier bar);
+      virtual void arrive_dynamic_collective(DynamicCollective dc,
+                                             const void *buffer, 
+                                             size_t size,
+                                             unsigned count);
+      virtual void defer_dynamic_collective_arrival(DynamicCollective dc,
+                                                    const Future &f,
+                                                    unsigned count);
+      virtual Future get_dynamic_collective_result(DynamicCollective dc);
+      virtual DynamicCollective advance_dynamic_collective(
+                                                   DynamicCollective dc);
+    public:
       // The following set of operations correspond directly
       // to the complete_mapping, complete_operation, and
       // commit_operations performed by an operation.  Every
@@ -2169,6 +2241,24 @@ namespace Legion {
       virtual Predicate predicate_not(const Predicate &p);
       virtual Predicate create_predicate(const PredicateLauncher &launcher);
       virtual Future get_predicate_future(const Predicate &p);
+    public:
+      // Calls for barriers and dynamic collectives
+      virtual ApBarrier create_phase_barrier(unsigned arrivals,
+                                                ReductionOpID redop = 0,
+                                                const void *init_value = NULL,
+                                                size_t init_size = 0);
+      virtual void destroy_phase_barrier(ApBarrier bar);
+      virtual PhaseBarrier advance_phase_barrier(PhaseBarrier bar);
+      virtual void arrive_dynamic_collective(DynamicCollective dc,
+                                             const void *buffer, 
+                                             size_t size,
+                                             unsigned count);
+      virtual void defer_dynamic_collective_arrival(DynamicCollective dc,
+                                                    const Future &f,
+                                                    unsigned count);
+      virtual Future get_dynamic_collective_result(DynamicCollective dc);
+      virtual DynamicCollective advance_dynamic_collective(
+                                                   DynamicCollective dc);
     public:
       // The following set of operations correspond directly
       // to the complete_mapping, complete_operation, and

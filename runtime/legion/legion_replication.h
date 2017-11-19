@@ -260,6 +260,32 @@ namespace Legion {
     };
 
     /**
+     * \class ShardSyncTree
+     * A synchronization tree allows one shard to be notified when
+     * all the other shards have reached a certain point in the 
+     * execution of the program.
+     */
+    class ShardSyncTree : public BroadcastCollective {
+    public:
+      ShardSyncTree(ReplicateContext *ctx, ShardID origin, 
+                    CollectiveIndexLocation loc);
+      ShardSyncTree(const ShardSyncTree &rhs) 
+        : BroadcastCollective(rhs), is_origin(false) 
+        { assert(false); }
+      virtual ~ShardSyncTree(void);
+    public:
+      ShardSyncTree& operator=(const ShardSyncTree &rhs) 
+        { assert(false); return *this; }
+    public:
+      virtual void pack_collective(Serializer &rez) const;
+      virtual void unpack_collective(Deserializer &derez);
+    protected:
+      RtUserEvent done_event;
+      mutable std::set<RtEvent> done_preconditions;
+      const bool is_origin;
+    };
+
+    /**
      * \class CrossProductExchange
      * A class for exchanging the names of partitions created by
      * a call for making cross-product partitions
@@ -465,12 +491,68 @@ namespace Legion {
     public:
       void exchange_must_epoch_mappings(ShardID shard_id, 
               size_t total_shards, size_t total_constraints,
-              std::vector<std::vector<Mapping::PhysicalInstance> > &mappings);
+              std::vector<std::vector<Mapping::PhysicalInstance> > &mappings,
+              std::map<PhysicalManager*,std::pair<unsigned,bool> > &acquired);
     protected:
       std::map<unsigned/*constraint index*/,
                std::vector<DistributedID> > instances;
       std::vector<std::vector<Mapping::PhysicalInstance> > results;
       std::set<RtEvent> ready_events;
+    protected:
+      RtUserEvent local_done_event;
+      std::set<RtEvent> done_events;
+      std::set<PhysicalManager*> held_references;
+    };
+
+    /**
+     * \class MustEpochDependenceExchange
+     * A class for exchanging the mapping dependence events for all 
+     * the single tasks in a must epoch launch so we can know which
+     * order the point tasks are being mapped in.
+     */
+    class MustEpochDependenceExchange : public AllGatherCollective {
+    public:
+      MustEpochDependenceExchange(ReplicateContext *ctx, 
+                                  CollectiveIndexLocation loc);
+      MustEpochDependenceExchange(const MustEpochDependenceExchange &rhs);
+      virtual ~MustEpochDependenceExchange(void);
+    public:
+      MustEpochDependenceExchange& operator=(
+                                  const MustEpochDependenceExchange &rhs);
+    public:
+      virtual void pack_collective_stage(Serializer &rez, int stage) const;
+      virtual void unpack_collective_stage(Deserializer &derez, int stage);
+    public:
+      void exchange_must_epoch_dependences(
+                            std::map<DomainPoint,RtUserEvent> &mapped_events);
+    protected:
+      std::map<DomainPoint,RtUserEvent> mapping_dependences;
+    };
+
+    /**
+     * \class MustEpochCompletionExchange
+     * A class for exchanging the local mapping and completion events
+     * for all the tasks in a must epoch operation
+     */
+    class MustEpochCompletionExchange : public AllGatherCollective {
+    public:
+      MustEpochCompletionExchange(ReplicateContext *ctx,
+                                  CollectiveIndexLocation loc);
+      MustEpochCompletionExchange(const MustEpochCompletionExchange &rhs);
+      virtual ~MustEpochCompletionExchange(void);
+    public:
+      MustEpochCompletionExchange& operator=(
+                                    const MustEpochCompletionExchange &rhs);
+    public:
+      virtual void pack_collective_stage(Serializer &rez, int stage) const;
+      virtual void unpack_collective_stage(Deserializer &derez, int stage);
+    public:
+      void exchange_must_epoch_completion(RtEvent mapped, ApEvent complete,
+                                          std::set<RtEvent> &tasks_mapped,
+                                          std::set<ApEvent> &tasks_complete);
+    protected:
+      std::set<RtEvent> tasks_mapped;
+      std::set<ApEvent> tasks_complete;
     };
 
     /**
@@ -930,13 +1012,20 @@ namespace Legion {
       virtual FutureMapImpl* create_future_map(TaskContext *ctx,
                                                IndexSpace launch_space);
       virtual MapperManager* invoke_mapper(void);
+      virtual void map_and_distribute(std::set<RtEvent> &tasks_mapped,
+                                      std::set<ApEvent> &tasks_complete);
+      void map_replicate_tasks(void) const;
+      void distribute_replicate_tasks(void) const;
     public:
       void initialize_collectives(ReplicateContext *ctx);
     protected:
       ShardingID sharding_functor;
       Domain index_domain;
-      MustEpochProcessorBroadcast *broadcast;
-      MustEpochMappingExchange *exchange;
+      MustEpochProcessorBroadcast *processor_broadcast;
+      MustEpochMappingExchange *mapping_exchange;
+      MustEpochDependenceExchange *dependence_exchange;
+      MustEpochCompletionExchange *completion_exchange;
+      std::set<SingleTask*> shard_single_tasks;
 #ifdef DEBUG_LEGION
     public:
       inline void set_sharding_collective(ShardingGatherCollective *collective)
