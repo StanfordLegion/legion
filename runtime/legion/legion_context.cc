@@ -11980,19 +11980,23 @@ namespace Legion {
                                                 size_t init_size)
     //--------------------------------------------------------------------------
     {
-      REPORT_LEGION_ERROR(ERROR_LEAF_TASK_VIOLATION,
-          "Illegal create phase barrier call performed in leaf task %s "
-          "(UID %lld)", get_task_name(), get_unique_id());
-      return ApBarrier::NO_AP_BARRIER;
+#ifdef DEBUG_LEGION
+      log_run.debug("Creating application barrier in task %s (ID %lld)",
+                      get_task_name(), get_unique_id());
+#endif
+      return ApBarrier(Realm::Barrier::create_barrier(arrivals, redop,
+                                                      init_value, init_size));
     }
 
     //--------------------------------------------------------------------------
     void LeafContext::destroy_phase_barrier(ApBarrier bar)
     //--------------------------------------------------------------------------
     {
-      REPORT_LEGION_ERROR(ERROR_LEAF_TASK_VIOLATION,
-          "Illegal destroy phase barrier call performed in leaf task %s "
-          "(UID %lld)", get_task_name(), get_unique_id());
+#ifdef DEBUG_LEGION
+      log_run.debug("Destroying phase barrier in task %s (ID %lld)",
+                      get_task_name(), get_unique_id());
+#endif
+      destroy_user_barrier(bar);
     }
 
     //--------------------------------------------------------------------------
