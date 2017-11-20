@@ -294,7 +294,7 @@ local function analyze_idempotent_node(cx)
     -- do no external call of any kind and also
     -- do not perform any kind of file I/O
     if node:is(ast.typed.expr.Call) then
-      return std.is_task(node.fn.value)
+      return std.is_task(node.fn.value) or node.replicable
 
     elseif node:is(ast.typed.expr.MethodCall) or
       node:is(ast.typed.expr.Adjust) or
@@ -415,8 +415,12 @@ local function analyze_replicable_node(cx)
     -- call for replicable which could call
     -- a random number generator, so no 
     -- non-task calls and no method calls
+    -- If the replicable field is set then we
+    -- know that the node was inserted by the
+    -- compiler and therefore must be a legion
+    -- runtime call
     if node:is(ast.typed.expr.Call) then
-      return std.is_task(node.fn.value)
+      return std.is_task(node.fn.value) or node.replicable
     
     elseif node:is(ast.typed.expr.MethodCall) then
       return false
