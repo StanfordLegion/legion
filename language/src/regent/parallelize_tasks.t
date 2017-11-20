@@ -3300,6 +3300,7 @@ function parallelize_tasks.top_task(global_cx, node)
       leaf = false,
       inner = false,
       idempotent = false,
+      replicable = false,
     },
     region_divergence = false,
     prototype = task,

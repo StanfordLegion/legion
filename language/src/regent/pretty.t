@@ -1150,6 +1150,7 @@ function pretty.task_config_options(cx, node)
       join({"leaf (", tostring(node.leaf), ")"}),
       join({"inner (", tostring(node.inner), ")"}),
       join({"idempotent (", tostring(node.idempotent), ")"}),
+      join({"replicable (", tostring(node.replicable), ")"}),
   })
 end
 

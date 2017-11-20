@@ -498,7 +498,7 @@ ast.typed.stat:leaf("EndTrace", {"trace_id"})
 ast.typed.stat:leaf("MapRegions", {"region_types"})
 ast.typed.stat:leaf("UnmapRegions", {"region_types"})
 
-ast:leaf("TaskConfigOptions", {"leaf", "inner", "idempotent"})
+ast:leaf("TaskConfigOptions", {"leaf", "inner", "idempotent", "replicable"})
 
 ast.typed:inner("top", {"annotations"})
 ast.typed.top:leaf("Fspace", {"name", "fspace"})

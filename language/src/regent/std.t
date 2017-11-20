@@ -3903,7 +3903,8 @@ function std.setup(main_task, extra_setup_thunk, registration_name)
           var options = c.legion_task_config_options_t {
             leaf = [ options.leaf and std.config["legion-leaf"] ],
             inner = [ options.inner and std.config["legion-inner"] ],
-            idempotent = options.idempotent,
+            idempotent = options.idempotent or options.replicable,
+            replicable = [ options.replicable and std.config["legion-replicable"] ],
           }
 
           c.legion_runtime_preregister_task_variant_fnptr(

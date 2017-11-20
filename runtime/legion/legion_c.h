@@ -216,6 +216,7 @@ extern "C" {
     bool leaf /* = false */;
     bool inner /* = false */;
     bool idempotent /* = false */;
+    bool replicable /* = false */;
   }  legion_task_config_options_t;
 
   /**

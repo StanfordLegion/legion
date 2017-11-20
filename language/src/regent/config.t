@@ -29,6 +29,7 @@ local default_options = {
   ["future"] = true,
   ["leaf"] = true,
   ["inner"] = true,
+  ["replicable"] = true,
   ["mapping"] = true,
   ["openmp"] = false,
   ["openmp-strict"] = false,
@@ -39,6 +40,7 @@ local default_options = {
   -- Legion runtime optimization flags:
   ["legion-leaf"] = true,
   ["legion-inner"] = true,
+  ["legion-replicable"] = true,
 
   -- Dataflow optimization flags:
   ["flow"] = os.getenv('USE_RDIR') == '1' or false,
