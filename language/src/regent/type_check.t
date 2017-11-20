@@ -980,6 +980,7 @@ function type_check.expr_call(cx, node)
     fn = fn,
     args = args,
     conditions = conditions,
+    replicable = false,
     expr_type = expr_type,
     annotations = node.annotations,
     span = node.span,

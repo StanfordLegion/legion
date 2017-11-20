@@ -248,6 +248,7 @@ function flip_types.expr(cx, simd_width, symbol, node)
         fn = fn_node,
         args = args,
         conditions = terralib.newlist(),
+        replicable = false,
         expr_type = rval_type,
         annotations = node.annotations,
         span = node.span,
