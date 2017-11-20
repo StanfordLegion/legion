@@ -131,6 +131,7 @@ function ast_util.mk_expr_call(fn, args)
     args = args,
     expr_type = expr_type,
     conditions = terralib.newlist(),
+    replicable = false,
     span = ast.trivial_span(),
     annotations = ast.default_annotations(),
   }
