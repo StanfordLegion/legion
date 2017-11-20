@@ -4094,7 +4094,7 @@ legion_runtime_register_task_variant_llvmir(
   registrar.set_leaf(options.leaf);
   registrar.set_inner(options.inner);
   registrar.set_idempotent(options.idempotent);
-  registrar.set_replicable(optoins.replicable);
+  registrar.set_replicable(options.replicable);
   if (layout_constraints)
     registrar.layout_constraints = *layout_constraints;
   if (execution_constraints)
