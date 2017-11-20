@@ -29,6 +29,7 @@ local default_options = {
   ["future"] = true,
   ["leaf"] = true,
   ["inner"] = true,
+  ["idempotent"] = true,
   ["replicable"] = true,
   ["mapping"] = true,
   ["openmp"] = false,
@@ -40,6 +41,7 @@ local default_options = {
   -- Legion runtime optimization flags:
   ["legion-leaf"] = true,
   ["legion-inner"] = true,
+  ["legion-idempotent"] = true,
   ["legion-replicable"] = true,
 
   -- Dataflow optimization flags:
