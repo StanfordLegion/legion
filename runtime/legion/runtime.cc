@@ -19940,6 +19940,16 @@ namespace Legion {
                           false, false, RtUserEvent::NO_RT_USER_EVENT);
             break;
           }
+        case LG_INDEX_SPACE_DEFER_CHILD_TASK_ID:
+          {
+            IndexSpaceNode::defer_node_child_request(args);
+            break;
+          }
+        case LG_INDEX_PART_DEFER_CHILD_TASK_ID:
+          {
+            IndexPartNode::defer_node_child_request(args);
+            break;
+          }
         case LG_SELECT_TUNABLE_TASK_ID:
           {
             const SelectTunableArgs *tunable_args = 

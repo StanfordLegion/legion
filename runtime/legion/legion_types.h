@@ -338,6 +338,8 @@ namespace Legion {
       LG_FIELD_SEMANTIC_INFO_REQ_TASK_ID,
       LG_REGION_SEMANTIC_INFO_REQ_TASK_ID,
       LG_PARTITION_SEMANTIC_INFO_REQ_TASK_ID,
+      LG_INDEX_SPACE_DEFER_CHILD_TASK_ID,
+      LG_INDEX_PART_DEFER_CHILD_TASK_ID,
       LG_SELECT_TUNABLE_TASK_ID,
       LG_DEFERRED_ENQUEUE_OP_ID,
       LG_DEFERRED_ENQUEUE_TASK_ID,
@@ -437,6 +439,8 @@ namespace Legion {
         "Field Semantic Request",                                 \
         "Region Semantic Request",                                \
         "Partition Semantic Request",                             \
+        "Defer Index Space Child Request",                        \
+        "Defer Index Partition Child Request",                    \
         "Select Tunable",                                         \
         "Deferred Enqueue Op",                                    \
         "Deferred Enqueue Task",                                  \

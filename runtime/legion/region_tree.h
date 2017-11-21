@@ -734,6 +734,16 @@ namespace Legion {
       public:
         IndexSpaceNode *proxy_this;
       };
+      struct DeferChildArgs : public LgTaskArgs<DeferChildArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_INDEX_SPACE_DEFER_CHILD_TASK_ID;
+      public:
+        IndexSpaceNode *proxy_this;
+        LegionColor child_color;
+        IndexPartNode *target;
+        RtUserEvent to_trigger;
+        AddressSpaceID source;
+      };
       class IndexSpaceSetFunctor {
       public:
         IndexSpaceSetFunctor(Runtime *rt, AddressSpaceID src, Serializer &r)
@@ -791,7 +801,8 @@ namespace Legion {
                                  Deserializer &derez, AddressSpaceID source);
     public:
       bool has_color(const LegionColor c);
-      IndexPartNode* get_child(const LegionColor c, bool can_fail = false);
+      IndexPartNode* get_child(const LegionColor c, 
+                               RtEvent *defer = NULL, bool can_fail = false);
       void add_child(IndexPartNode *child);
       void remove_child(const LegionColor c);
       size_t get_num_children(void) const;
@@ -822,6 +833,7 @@ namespace Legion {
       static void handle_node_return(Deserializer &derez);
       static void handle_node_child_request(RegionTreeForest *context,
                             Deserializer &derez, AddressSpaceID source);
+      static void defer_node_child_request(const void *args);
       static void handle_node_child_response(Deserializer &derez);
       static void handle_colors_request(RegionTreeForest *context,
                             Deserializer &derez, AddressSpaceID source);
@@ -1395,6 +1407,16 @@ namespace Legion {
         SemanticTag tag;
         AddressSpaceID source;
       };
+      struct DeferChildArgs : public LgTaskArgs<DeferChildArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_INDEX_PART_DEFER_CHILD_TASK_ID;
+      public:
+        IndexPartNode *proxy_this;
+        LegionColor child_color;
+        IndexSpace *target;
+        RtUserEvent to_trigger;
+        AddressSpaceID source;
+      };
       class DestructionFunctor {
       public:
         DestructionFunctor(IndexPartNode *n, ReferenceMutator *m)
@@ -1446,7 +1468,7 @@ namespace Legion {
                                    Deserializer &derez, AddressSpaceID source);
     public:
       bool has_color(const LegionColor c);
-      IndexSpaceNode* get_child(const LegionColor c);
+      IndexSpaceNode* get_child(const LegionColor c, RtEvent *defer = NULL);
       void add_child(IndexSpaceNode *child);
       void remove_child(const LegionColor c);
       size_t get_num_children(void) const;
@@ -1504,6 +1526,7 @@ namespace Legion {
       static void handle_node_return(Deserializer &derez);
       static void handle_node_child_request(
           RegionTreeForest *forest, Deserializer &derez, AddressSpaceID source);
+      static void defer_node_child_request(const void *args);
       static void handle_node_child_response(Deserializer &derez);
       static void handle_notification(RegionTreeForest *context, 
                                       Deserializer &derez);
