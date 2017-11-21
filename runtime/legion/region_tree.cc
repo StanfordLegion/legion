@@ -3552,7 +3552,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexPartNode* RegionTreeForest::get_node(IndexPartition part)
+    IndexPartNode* RegionTreeForest::get_node(IndexPartition part,
+                                              RtEvent *defer/* = NULL*/)
     //--------------------------------------------------------------------------
     {
       if (!part.exists())
@@ -3595,16 +3596,24 @@ namespace Legion {
         else
           wait_on = wait_finder->second;
       }
-      // Wait for the event
-      wait_on.lg_wait();
-      AutoLock l_lock(lookup_lock,1,false/*exclusive*/);
-      std::map<IndexPartition,IndexPartNode*>::const_iterator finder = 
-        index_parts.find(part);
-      if (finder == index_parts.end())
-        REPORT_LEGION_ERROR(ERROR_UNABLE_FIND_ENTRY,
-          "Unable to find entry for index partition %x. "
-                        "This is definitely a runtime bug.", part.id)
-      return finder->second;
+      if (defer == NULL)
+      {
+        // Wait for the event
+        wait_on.lg_wait();
+        AutoLock l_lock(lookup_lock,1,false/*exclusive*/);
+        std::map<IndexPartition,IndexPartNode*>::const_iterator finder = 
+          index_parts.find(part);
+        if (finder == index_parts.end())
+          REPORT_LEGION_ERROR(ERROR_UNABLE_FIND_ENTRY,
+            "Unable to find entry for index partition %x. "
+                          "This is definitely a runtime bug.", part.id)
+        return finder->second;
+      }
+      else
+      {
+        *defer = wait_on;
+        return NULL;
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -5098,7 +5107,7 @@ namespace Legion {
       if (owner_space == context->runtime->address_space)
       {
         if (remote_handle.exists())
-          return context->get_node(remote_handle);
+          return context->get_node(remote_handle, defer);
         if (can_fail)
           return NULL;
         REPORT_LEGION_ERROR(ERROR_INVALID_PARTITION_COLOR,

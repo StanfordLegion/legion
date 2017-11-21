@@ -515,7 +515,7 @@ namespace Legion {
       PartitionNode*  create_node(LogicalPartition p, RegionNode *par);
     public:
       IndexSpaceNode* get_node(IndexSpace space);
-      IndexPartNode*  get_node(IndexPartition part);
+      IndexPartNode*  get_node(IndexPartition part, RtEvent *defer = NULL);
       FieldSpaceNode* get_node(FieldSpace space);
       RegionNode*     get_node(LogicalRegion handle, bool need_check = true);
       PartitionNode*  get_node(LogicalPartition handle, bool need_check = true);
