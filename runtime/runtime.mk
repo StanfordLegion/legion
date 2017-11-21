@@ -709,7 +709,7 @@ $(GPU_RUNTIME_OBJS): %.cu.o : %.cu
 	$(NVCC) -o $@ -c $< $(NVCC_FLAGS) $(INC_FLAGS)
 	
 $(LEGION_FORTRAN_API_OBJS) : %.o : %.f90
-	gfortran -cpp -J$(LG_RT_DIR)/legion -o $@ -c $< $(FC_FLAGS) $(INC_FLAGS)
+	gfortran -cpp -J$(LG_RT_DIR) -o $@ -c $< $(FC_FLAGS) $(INC_FLAGS)
 	
 $(GEN_OBJS) : %.o : %.cc
 	$(CXX) -o $@ -c $< $(CC_FLAGS) $(INC_FLAGS)
