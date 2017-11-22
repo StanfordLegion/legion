@@ -21974,6 +21974,11 @@ namespace Legion {
             IndexSpaceNode::handle_tighten_index_space(args);
             break;
           }
+        case LG_DEFER_VERSION_BROADCAST_TASK_ID:
+          {
+            VersioningInfoBroadcast::handle_deferral(args);
+            break;
+          }
         case LG_PROF_OUTPUT_TASK_ID:
           {
             const LegionProfiler::LgOutputTaskArgs *oargs = 

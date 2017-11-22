@@ -369,6 +369,7 @@ namespace Legion {
       LG_CONTROL_REP_DELETE_TASK_ID,
       LG_RECLAIM_FUTURE_MAP_TASK_ID,
       LG_TIGHTEN_INDEX_SPACE_TASK_ID,
+      LG_DEFER_VERSION_BROADCAST_TASK_ID,
       LG_PROF_OUTPUT_TASK_ID,
       LG_MESSAGE_ID, // These two must be the last two
       LG_RETRY_SHUTDOWN_TASK_ID,
@@ -472,6 +473,7 @@ namespace Legion {
         "Control Replciation Delete",                             \
         "Reclaim Future Map",                                     \
         "Tighten Index Space",                                    \
+        "Defer Version Broadcast",                                \
         "Legion Prof Early Output",                               \
         "Remote Message",                                         \
         "Retry Shutdown",                                         \

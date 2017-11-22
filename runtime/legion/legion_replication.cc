@@ -396,21 +396,26 @@ namespace Legion {
 #endif
       // Then broadcast the versioning results for any region requirements
       // that are writes which are going to advance the version numbers
-      VersioningInfoBroadcast version_broadcast(repl_ctx, 
-                    versioning_collective_id, owner_shard);
+      // Have to new this on the heap in case we have to defer it
+      VersioningInfoBroadcast *version_broadcast = new VersioningInfoBroadcast(
+                               repl_ctx, versioning_collective_id, owner_shard);
 #ifdef DEBUG_LEGION
       assert(regions.size() == version_infos.size());
 #endif
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
         if (IS_WRITE(regions[idx]))
-          version_broadcast.pack_advance_states(idx, version_infos[idx]);
+          version_broadcast->pack_advance_states(idx, version_infos[idx]);
       }
       // Have to wait for the mapping to be complete before sending to 
       // guarantee correctness of mapping dependences on remote nodes
-      if (!map_wait.has_triggered())
-        map_wait.lg_wait();
-      version_broadcast.perform_collective_async();
+      if (map_wait.has_triggered())
+      {
+        version_broadcast->perform_collective_async();
+        delete version_broadcast;
+      }
+      else // Will take ownership of deleting the collective
+        version_broadcast->defer_perform_collective(this, map_wait);
       return RtEvent::NO_RT_EVENT;
     }
 
@@ -1292,22 +1297,27 @@ namespace Legion {
         sharding_function->find_owner(index_point, index_domain);
       // Grab the vesioning info before we do the mapping in 
       // case that kicks off the completion process
-      VersioningInfoBroadcast version_broadcast(repl_ctx, 
-                    versioning_collective_id, owner_shard);
+      // Have to new this on the heap in case we end up needing to defer it
+      VersioningInfoBroadcast *version_broadcast = new VersioningInfoBroadcast(
+                               repl_ctx, versioning_collective_id, owner_shard);
 #ifdef DEBUG_LEGION
       assert(dst_requirements.size() == dst_versions.size());
 #endif
       for (unsigned idx = 0; idx < dst_versions.size(); idx++)
-        version_broadcast.pack_advance_states(idx, dst_versions[idx]);
+        version_broadcast->pack_advance_states(idx, dst_versions[idx]);
       // Have to make a copy to avoid completion race
       RtEvent map_wait = get_mapped_event();
       // Do the base trigger mapping
       CopyOp::trigger_mapping();
-      // Wait until we are done being mapped
-      if (!map_wait.has_triggered())
-        map_wait.lg_wait();
-      // Then broadcast the results
-      version_broadcast.perform_collective_async();
+      // See if we can send the result now or need to defer it
+      if (map_wait.has_triggered())
+      {
+        // We can do it now
+        version_broadcast->perform_collective_async();
+        delete version_broadcast;
+      }
+      else // Will take ownership of deleting the collective
+        version_broadcast->defer_perform_collective(this, map_wait);
     }
 
     /////////////////////////////////////////////////////////////
@@ -5988,6 +5998,27 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       ack_preconditions.insert(precondition);
+    }
+
+    //--------------------------------------------------------------------------
+    void VersioningInfoBroadcast::defer_perform_collective(Operation *op,
+                                                           RtEvent precondition)
+    //--------------------------------------------------------------------------
+    {
+      DeferVersionBroadcastArgs args;
+      args.proxy_this = this;
+      context->runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY,
+                                                op, precondition);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void VersioningInfoBroadcast::handle_deferral(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const DeferVersionBroadcastArgs *dargs = 
+        (const DeferVersionBroadcastArgs*)args;
+      dargs->proxy_this->perform_collective_async();
+      delete dargs->proxy_this;
     }
 
   }; // namespace Internal

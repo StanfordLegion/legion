@@ -562,6 +562,14 @@ namespace Legion {
      */
     class VersioningInfoBroadcast : public BroadcastCollective {
     public:
+      struct DeferVersionBroadcastArgs :
+        public LgTaskArgs<DeferVersionBroadcastArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_DEFER_VERSION_BROADCAST_TASK_ID;
+      public:
+        VersioningInfoBroadcast *proxy_this;
+      };
+    public:
       VersioningInfoBroadcast(ReplicateContext *ctx,
                     CollectiveID id, ShardID owner);
       VersioningInfoBroadcast(const VersioningInfoBroadcast &rhs);
@@ -578,6 +586,8 @@ namespace Legion {
       void wait_for_states(std::set<RtEvent> &applied_events);
       const VersioningSet<>& find_advance_states(unsigned index) const;
       void record_precondition(RtEvent precondition);
+      void defer_perform_collective(Operation *op, RtEvent precondition);
+      static void handle_deferral(const void *args);
     protected:
       std::map<unsigned/*index*/,
                LegionMap<DistributedID,FieldMask>::aligned> versions;
