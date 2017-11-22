@@ -2967,6 +2967,17 @@ legion_must_epoch_launcher_add_index_task(
   legion_index_launcher_destroy(handle_);
 }
 
+void
+legion_must_epoch_launcher_set_launch_space(
+    legion_must_epoch_launcher_t launcher_,
+    legion_index_space_t is_)
+{
+  MustEpochLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+  IndexSpace is = CObjectWrapper::unwrap(is_);
+
+  launcher->launch_space = is;
+}
+
 // -----------------------------------------------------------------------
 // Tracing Operations
 // -----------------------------------------------------------------------

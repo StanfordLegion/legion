@@ -1018,6 +1018,10 @@ namespace Legion {
       void distribute_replicate_tasks(void) const;
     public:
       void initialize_collectives(ReplicateContext *ctx);
+    public:
+      static IndexSpace create_temporary_launch_space(Runtime *runtime,
+                                  RegionTreeForest *forest, Context ctx, 
+                                  const MustEpochLauncher &launcher);
     protected:
       ShardingID sharding_functor;
       Domain index_domain;

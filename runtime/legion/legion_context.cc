@@ -3312,14 +3312,11 @@ namespace Legion {
         fid = runtime->get_unique_field_id();
 #ifdef DEBUG_LEGION
       else if (fid >= MAX_APPLICATION_FIELD_ID)
-      {
-        REPORT_LEGION_ERROR(ERROR_TASK_ATTEMPTED_ALLOCATE_FILED,
+        REPORT_LEGION_ERROR(ERROR_TASK_ATTEMPTED_ALLOCATE_FIELD,
           "Task %s (ID %lld) attempted to allocate a field with "
                        "ID %d which exceeds the MAX_APPLICATION_FIELD_ID bound "
                        "set in legion_config.h", get_task_name(),
-                       get_unique_id(), fid);
-        assert(false);
-      }
+                       get_unique_id(), fid)
 #endif
 
       if (Runtime::legion_spy_enabled)
@@ -3420,14 +3417,11 @@ namespace Legion {
           resulting_fields[idx] = runtime->get_unique_field_id();
 #ifdef DEBUG_LEGION
         else if (resulting_fields[idx] >= MAX_APPLICATION_FIELD_ID)
-        {
           REPORT_LEGION_ERROR(ERROR_TASK_ATTEMPTED_ALLOCATE_FIELD,
             "Task %s (ID %lld) attempted to allocate a field with "
                          "ID %d which exceeds the MAX_APPLICATION_FIELD_ID "
                          "bound set in legion_config.h", get_task_name(),
-                         get_unique_id(), resulting_fields[idx]);
-          assert(false);
-        }
+                         get_unique_id(), resulting_fields[idx])
 #endif
 
         if (Runtime::legion_spy_enabled)
@@ -8959,12 +8953,10 @@ namespace Legion {
     {
       AutoRuntimeCall call(this);
       if (local)
-      {
-        log_run.error("Local field creation is not currently supported "
+        REPORT_LEGION_FATAL(LEGION_FATAL_UNIMPLEMENTED_FEATURE,
+                      "Local field creation is not currently supported "
                       "for control replication with task %s (UID %lld)",
-                      get_task_name(), get_unique_id());
-        assert(false);
-      }
+                      get_task_name(), get_unique_id())
       if (field_allocator_shard == owner_shard->shard_id)
       {
         // We're the owner so we do the allocation
@@ -8972,13 +8964,11 @@ namespace Legion {
           fid = runtime->get_unique_field_id();
 #ifdef DEBUG_LEGION
         else if (fid >= MAX_APPLICATION_FIELD_ID)
-        {
-          log_task.error("Task %s (ID %lld) attempted to allocate a field with "
-                         "ID %d which exceeds the MAX_APPLICATION_FIELD_ID "
-                         "bound set in legion_config.h", get_task_name(),
-                         get_unique_id(), fid);
-          assert(false);
-        }
+          REPORT_LEGION_ERROR(ERROR_TASK_ATTEMPTED_ALLOCATE_FIELD,
+                       "Task %s (ID %lld) attempted to allocate a field with "
+                       "ID %d which exceeds the MAX_APPLICATION_FIELD_ID bound "
+                       "set in legion_config.h", get_task_name(),
+                       get_unique_id(), fid)
 #endif
         forest->allocate_field(space, field_size, fid, serdez_id);
         ValueBroadcast<FieldID> field_collective(this, COLLECTIVE_LOC_33);
@@ -9367,7 +9357,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (launcher.must_parallelism)
-        assert(false); // TODO: add support for this
+        REPORT_LEGION_FATAL(LEGION_FATAL_UNIMPLEMENTED_FEATURE,
+            "Task %s (UID %lld) requested an index space launch with must "
+            "parallelism (aka a MustEpochLaunch) that needs a reduction of "
+            "all future values. This feature is not currently implemented.",
+            get_task_name(), get_unique_id())
       AutoRuntimeCall call(this);
       // Quick out for predicate false
       if (launcher.predicate == Predicate::FALSE_PRED)
@@ -9631,18 +9625,35 @@ namespace Legion {
     {
       AutoRuntimeCall call(this);
       ReplMustEpochOp *epoch_op = runtime->get_available_repl_epoch_op(true);
-      if (!launcher.launch_space.exists() && !launcher.launch_domain.exists())
-      {
-        log_run.error("Must epoch launch in control replicated task %s "
-                      "(UID %lld) is missing an explicit launch index space "
-                      "or launch domain. These are required for must epoch "
-                      "launches in control replicated tasks",
-                      get_task_name(), get_unique_id());
-        assert(false);
-      }
       IndexSpace launch_space = launcher.launch_space;
       if (!launch_space.exists())
-        launch_space = find_index_launch_space(launcher.launch_domain);
+      {
+        if (!launcher.launch_domain.exists())
+        {
+          REPORT_LEGION_WARNING(LEGION_WARNING_MISSING_MUST_EPOCH_DOMAIN,
+                        "Must epoch launch in control replicated task %s "
+                        "(UID %lld) is missing an explicit launch index space "
+                        "or launch domain. These are required for must epoch "
+                        "launches in control replicated tasks.",
+                        get_task_name(), get_unique_id())
+          if (!launcher.single_tasks.empty() || 
+              (launcher.index_tasks.size() > 1))
+          {
+            launch_space = ReplMustEpochOp::create_temporary_launch_space(
+                                  runtime, runtime->forest, this, launcher);
+          }
+          else
+          {
+            // We have exactly one index space so we can just use it
+            launch_space = launcher.index_tasks[0].launch_space;
+            if (!launch_space.exists())
+              launch_space = 
+                find_index_launch_space(launcher.launch_domain);
+          }
+        }
+        else
+          launch_space = find_index_launch_space(launcher.launch_domain);
+      }
 #ifdef DEBUG_LEGION
       if (owner_shard->shard_id == 0)
         log_run.debug("Executing a must epoch in task %s (ID %lld)",

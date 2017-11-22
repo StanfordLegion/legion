@@ -362,7 +362,6 @@ namespace Legion {
         else
           complete_mapping();
         complete_execution();
-        resolve_speculation();
         trigger_children_complete();
         trigger_children_committed();
       }
@@ -2669,6 +2668,116 @@ namespace Legion {
         new MustEpochDependenceExchange(ctx, COLLECTIVE_LOC_70);
       completion_exchange = 
         new MustEpochCompletionExchange(ctx, COLLECTIVE_LOC_73);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ IndexSpace ReplMustEpochOp::create_temporary_launch_space(
+                                 Runtime *runtime, RegionTreeForest *forest,
+                                 Context ctx, const MustEpochLauncher &launcher)
+    //--------------------------------------------------------------------------
+    {
+      size_t dim;
+      if (launcher.single_tasks.empty())
+      {
+        const IndexTaskLauncher &index = launcher.index_tasks[0]; 
+        if (index.launch_domain.exists())
+          dim = index.launch_domain.get_dim();
+        else
+          dim = NT_TemplateHelper::get_dim(index.launch_space.get_type_tag());
+      }
+      else
+        dim = launcher.single_tasks[0].point.get_dim();
+      IndexSpace result;
+      switch (dim)
+      {
+        case 1:
+          {
+            std::vector<Realm::Point<1,coord_t> > realm_points;
+            for (unsigned idx = 0; idx < launcher.single_tasks.size(); idx++)
+            {
+              Realm::Point<1,coord_t> p = 
+                Point<1,coord_t>(launcher.single_tasks[idx].point); 
+              realm_points.push_back(p);
+            }
+            for (unsigned idx = 0; idx < launcher.index_tasks.size(); idx++)
+            {
+              const IndexTaskLauncher &index = launcher.index_tasks[idx];
+              Domain dom = index.launch_domain;
+              if (!dom.exists())
+                forest->find_launch_space_domain(index.launch_space, dom);
+              for (Domain::DomainPointIterator itr(index.launch_domain);
+                    itr; itr++)
+              {
+                Realm::Point<1,coord_t> p = Point<1,coord_t>(itr.p);
+                realm_points.push_back(p);
+              }
+            }
+            DomainT<1,coord_t> realm_is((
+                Realm::IndexSpace<1,coord_t>(realm_points)));
+            result = runtime->create_index_space(ctx, &realm_is, 
+                NT_TemplateHelper::encode_tag<1,coord_t>());
+            break;
+          }
+        case 2:
+          {
+            std::vector<Realm::Point<2,coord_t> > realm_points;
+            for (unsigned idx = 0; idx < launcher.single_tasks.size(); idx++)
+            {
+              Realm::Point<2,coord_t> p = 
+                Point<2,coord_t>(launcher.single_tasks[idx].point); 
+              realm_points.push_back(p);
+            }
+            for (unsigned idx = 0; idx < launcher.index_tasks.size(); idx++)
+            {
+              const IndexTaskLauncher &index = launcher.index_tasks[idx];
+              Domain dom = index.launch_domain;
+              if (!dom.exists())
+                forest->find_launch_space_domain(index.launch_space, dom);
+              for (Domain::DomainPointIterator itr(index.launch_domain);
+                    itr; itr++)
+              {
+                Realm::Point<2,coord_t> p = Point<2,coord_t>(itr.p);
+                realm_points.push_back(p);
+              }
+            }
+            DomainT<2,coord_t> realm_is((
+                Realm::IndexSpace<2,coord_t>(realm_points)));
+            result = runtime->create_index_space(ctx, &realm_is, 
+                NT_TemplateHelper::encode_tag<2,coord_t>());
+            break;
+          }
+        case 3:
+          {
+            std::vector<Realm::Point<3,coord_t> > realm_points;
+            for (unsigned idx = 0; idx < launcher.single_tasks.size(); idx++)
+            {
+              Realm::Point<3,coord_t> p = 
+                Point<3,coord_t>(launcher.single_tasks[idx].point); 
+              realm_points.push_back(p);
+            }
+            for (unsigned idx = 0; idx < launcher.index_tasks.size(); idx++)
+            {
+              const IndexTaskLauncher &index = launcher.index_tasks[idx];
+              Domain dom = index.launch_domain;
+              if (!dom.exists())
+                forest->find_launch_space_domain(index.launch_space, dom);
+              for (Domain::DomainPointIterator itr(index.launch_domain);
+                    itr; itr++)
+              {
+                Realm::Point<3,coord_t> p = Point<3,coord_t>(itr.p);
+                realm_points.push_back(p);
+              }
+            }
+            DomainT<3,coord_t> realm_is((
+                Realm::IndexSpace<3,coord_t>(realm_points)));
+            result = runtime->create_index_space(ctx, &realm_is, 
+                NT_TemplateHelper::encode_tag<3,coord_t>());
+            break;
+          }
+        default:
+          assert(false);
+      }
+      return result;
     }
 
     /////////////////////////////////////////////////////////////
