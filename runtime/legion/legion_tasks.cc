@@ -7101,7 +7101,10 @@ namespace Legion {
       // that it has no virtual instances because it is a 
       // replicated task
       if (is_leaf())
+      {
+        shard_manager->handle_post_mapped(true/*local*/);
         complete_mapping();
+      }
       // Speculation can always be resolved here
       resolve_speculation();
       // Then launch the task for execution
