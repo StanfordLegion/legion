@@ -3072,7 +3072,9 @@ namespace Legion {
                           "when returning from a call to 'select_tasks_to_map' "
                           "that performed no other actions. Specifying a "
                           "MapperEvent in such situation is necessary to avoid "
-                          "livelock conditions.", mapper->get_mapper_name())
+                          "livelock conditions. Please return a "
+                          "'deferral_event' in the 'output' struct.",
+                          mapper->get_mapper_name())
           // Launch a task to remove the deferred mapper event when it triggers
           DeferMapperSchedulerArgs args;
           args.proxy_this = this;
