@@ -705,28 +705,28 @@ namespace Realm {
 					 FieldID field_id, const Rect<N,T>& subrect,
 					 size_t subfield_offset /*= 0*/)
   {
-    // Special case for empty regions
-    if(subrect.empty()) {
-      base = 0;
-      for(int i = 0; i < N; i++) strides[i] = 0;
-      return;
-    }
     const InstanceLayout<N,T> *layout = dynamic_cast<const InstanceLayout<N,T> *>(inst.get_layout());
     std::map<FieldID, InstanceLayoutGeneric::FieldLayout>::const_iterator it = layout->fields.find(field_id);
     assert(it != layout->fields.end());
     const InstancePieceList<N,T>& ipl = layout->piece_lists[it->second.list_idx];
-    
-    // find the piece that holds the lo corner of the subrect and insist it
-    //  exists, covers the whole subrect, and is affine
-    const InstanceLayoutPiece<N,T> *ilp = ipl.find_piece(subrect.lo);
-    assert(ilp && ilp->bounds.contains(subrect));
-    assert((ilp->layout_type == InstanceLayoutPiece<N,T>::AffineLayoutType));
-    const AffineLayoutPiece<N,T> *alp = static_cast<const AffineLayoutPiece<N,T> *>(ilp);
-    base = reinterpret_cast<intptr_t>(inst.pointer_untyped(0,
-							   layout->bytes_used));
-    assert(base != 0);
-    base += alp->offset + it->second.rel_offset + subfield_offset;
-    strides = alp->strides;
+
+    // special case for empty regions
+    if(subrect.empty()) {
+      base = 0;
+      for(int i = 0; i < N; i++) strides[i] = 0;
+    } else {
+      // find the piece that holds the lo corner of the subrect and insist it
+      //  exists, covers the whole subrect, and is affine
+      const InstanceLayoutPiece<N,T> *ilp = ipl.find_piece(subrect.lo);
+      assert(ilp && ilp->bounds.contains(subrect));
+      assert((ilp->layout_type == InstanceLayoutPiece<N,T>::AffineLayoutType));
+      const AffineLayoutPiece<N,T> *alp = static_cast<const AffineLayoutPiece<N,T> *>(ilp);
+      base = reinterpret_cast<intptr_t>(inst.pointer_untyped(0,
+							     layout->bytes_used));
+      assert(base != 0);
+      base += alp->offset + it->second.rel_offset + subfield_offset;
+      strides = alp->strides;
+    }
 #ifdef REALM_ACCESSOR_DEBUG
     dbg_inst = inst;
     dbg_bounds = alp->bounds;
@@ -768,6 +768,11 @@ namespace Realm {
     if(it == layout->fields.end())
       return false;
     const InstancePieceList<N,T>& ipl = layout->piece_lists[it->second.list_idx];
+
+    // as long as we had the right field, we're always compatible with an
+    //  empty subrect
+    if(subrect.empty())
+      return true;
     
     // find the piece that holds the lo corner of the subrect and insist it
     //  exists, covers the whole subrect, and is affine

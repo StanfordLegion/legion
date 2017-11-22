@@ -3776,7 +3776,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexPartNode* RegionTreeForest::get_node(IndexPartition part)
+    IndexPartNode* RegionTreeForest::get_node(IndexPartition part,
+                                              RtEvent *defer/* = NULL*/)
     //--------------------------------------------------------------------------
     {
       if (!part.exists())
@@ -3819,16 +3820,24 @@ namespace Legion {
         else
           wait_on = wait_finder->second;
       }
-      // Wait for the event
-      wait_on.lg_wait();
-      AutoLock l_lock(lookup_lock,1,false/*exclusive*/);
-      std::map<IndexPartition,IndexPartNode*>::const_iterator finder = 
-        index_parts.find(part);
-      if (finder == index_parts.end())
-        REPORT_LEGION_ERROR(ERROR_UNABLE_FIND_ENTRY,
-          "Unable to find entry for index partition %x. "
-                        "This is definitely a runtime bug.", part.id)
-      return finder->second;
+      if (defer == NULL)
+      {
+        // Wait for the event
+        wait_on.lg_wait();
+        AutoLock l_lock(lookup_lock,1,false/*exclusive*/);
+        std::map<IndexPartition,IndexPartNode*>::const_iterator finder = 
+          index_parts.find(part);
+        if (finder == index_parts.end())
+          REPORT_LEGION_ERROR(ERROR_UNABLE_FIND_ENTRY,
+            "Unable to find entry for index partition %x. "
+                          "This is definitely a runtime bug.", part.id)
+        return finder->second;
+      }
+      else
+      {
+        *defer = wait_on;
+        return NULL;
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -5303,12 +5312,13 @@ namespace Legion {
     bool IndexSpaceNode::has_color(const LegionColor c)
     //--------------------------------------------------------------------------
     {
-      IndexPartNode *child = get_child(c, true/*can fail*/);
+      IndexPartNode *child = get_child(c, NULL/*defer*/, true/*can fail*/);
       return (child != NULL);
     }
 
     //--------------------------------------------------------------------------
-    IndexPartNode* IndexSpaceNode::get_child(const LegionColor c, bool can_fail)
+    IndexPartNode* IndexSpaceNode::get_child(const LegionColor c, 
+                                             RtEvent *defer, bool can_fail)
     //--------------------------------------------------------------------------
     {
       // See if we have it locally if not go find it
@@ -5334,7 +5344,7 @@ namespace Legion {
       if (owner_space == context->runtime->address_space)
       {
         if (remote_handle.exists())
-          return context->get_node(remote_handle);
+          return context->get_node(remote_handle, defer);
         if (can_fail)
           return NULL;
         REPORT_LEGION_ERROR(ERROR_INVALID_PARTITION_COLOR,
@@ -5353,18 +5363,26 @@ namespace Legion {
         rez.serialize(ready_event);
       }
       context->runtime->send_index_space_child_request(owner_space, rez);
-      ready_event.lg_wait();
-      // Stupid volatile-ness
-      IndexPartition handle_copy = *handle_ptr;
-      if (!handle_copy.exists())
+      if (defer == NULL)
       {
-        if (can_fail)
-          return NULL;
-        REPORT_LEGION_ERROR(ERROR_INVALID_PARTITION_COLOR,
-          "Unable to find entry for color %lld in "
-                        "index space %x.", c, handle.id)
+        ready_event.lg_wait();
+        // Stupid volatile-ness
+        IndexPartition handle_copy = *handle_ptr;
+        if (!handle_copy.exists())
+        {
+          if (can_fail)
+            return NULL;
+          REPORT_LEGION_ERROR(ERROR_INVALID_PARTITION_COLOR,
+            "Unable to find entry for color %lld in "
+                          "index space %x.", c, handle.id)
+        }
+        return context->get_node(handle_copy);
       }
-      return context->get_node(handle_copy);
+      else
+      {
+        *defer = ready_event;
+        return NULL;
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -5782,7 +5800,24 @@ namespace Legion {
       RtUserEvent to_trigger;
       derez.deserialize(to_trigger);
       IndexSpaceNode *parent = forest->get_node(handle);
-      IndexPartNode *child = parent->get_child(child_color, true/*can fail*/);
+      RtEvent defer;
+      IndexPartNode *child = 
+        parent->get_child(child_color, &defer, true/*can fail*/);
+      if (defer.exists())
+      {
+        // Build a continuation and run it when the node is 
+        // ready, we have to do this in order to avoid blocking
+        // the virtual channel for nested index tree requests
+        DeferChildArgs args;
+        args.proxy_this = parent;
+        args.child_color = child_color;
+        args.target = target;
+        args.to_trigger = to_trigger;
+        args.source = source;
+        forest->runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY,
+                                                 NULL/*op*/, defer);
+        return;
+      }
       if (child != NULL)
       {
         Serializer rez;
@@ -5796,6 +5831,29 @@ namespace Legion {
       }
       else // Failed so just trigger the result
         Runtime::trigger_event(to_trigger);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void IndexSpaceNode::defer_node_child_request(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const DeferChildArgs *dargs = (const DeferChildArgs*)args;
+      IndexPartNode *child = 
+       dargs->proxy_this->get_child(dargs->child_color, NULL, true/*can fail*/);
+      if (child != NULL)
+      {
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(child->handle);
+          rez.serialize(dargs->target);
+          rez.serialize(dargs->to_trigger);
+        }
+        Runtime *runtime = dargs->proxy_this->context->runtime;
+        runtime->send_index_space_child_response(dargs->source, rez);
+      }
+      else // Failed so just trigger the result
+        Runtime::trigger_event(dargs->to_trigger);
     }
 
     //--------------------------------------------------------------------------
@@ -6210,7 +6268,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexSpaceNode* IndexPartNode::get_child(const LegionColor c)
+    IndexSpaceNode* IndexPartNode::get_child(const LegionColor c,RtEvent *defer)
     //--------------------------------------------------------------------------
     {
       // First check to see if we can find it
@@ -6258,15 +6316,23 @@ namespace Legion {
         if (wait_on.exists())
         {
           // Someone else is already making it so just wait
-          wait_on.lg_wait();
-          AutoLock n_lock(node_lock,1,false/*exclusive*/);
-          std::map<LegionColor,IndexSpaceNode*>::const_iterator finder =
-            color_map.find(c);
+          if (defer == NULL)
+          {
+            wait_on.lg_wait();
+            AutoLock n_lock(node_lock,1,false/*exclusive*/);
+            std::map<LegionColor,IndexSpaceNode*>::const_iterator finder =
+              color_map.find(c);
 #ifdef DEBUG_LEGION
-          // It better be here when we wake up
-          assert(finder != color_map.end());
+            // It better be here when we wake up
+            assert(finder != color_map.end());
 #endif
-          return finder->second;
+            return finder->second;
+          }
+          else
+          {
+            *defer = wait_on;
+            return NULL;
+          }
         }
         else
         {
@@ -6309,12 +6375,20 @@ namespace Legion {
           rez.serialize(ready_event);
         }
         context->runtime->send_index_partition_child_request(owner_space, rez);
-        ready_event.lg_wait();
-        IndexSpace copy_handle = *handle_ptr;
+        if (defer == NULL)
+        {
+          ready_event.lg_wait();
+          IndexSpace copy_handle = *handle_ptr;
 #ifdef DEBUG_LEGION
-        assert(copy_handle.exists());
+          assert(copy_handle.exists());
 #endif
-        return context->get_node(copy_handle);
+          return context->get_node(copy_handle);
+        }
+        else
+        {
+          *defer = ready_event;
+          return NULL;
+        }
       }
     }
 
@@ -6873,15 +6947,49 @@ namespace Legion {
       RtUserEvent to_trigger;
       derez.deserialize(to_trigger);
       IndexPartNode *parent = forest->get_node(handle);
-      IndexSpaceNode *child = parent->get_child(child_color);
+      RtEvent defer;
+      IndexSpaceNode *child = parent->get_child(child_color, &defer);
+      // If we got a deferral event then we need to make a continuation
+      // to avoid blocking the virtual channel for nested index tree requests
+      if (defer.exists())
+      {
+        DeferChildArgs args;
+        args.proxy_this = parent;
+        args.child_color = child_color;
+        args.target = target;
+        args.to_trigger = to_trigger;
+        args.source = source;
+        forest->runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY,
+                                                 NULL/*op*/, defer);
+      }
+      else
+      {
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(child->handle);
+          rez.serialize(target);
+          rez.serialize(to_trigger);
+        }
+        forest->runtime->send_index_partition_child_response(source, rez);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void IndexPartNode::defer_node_child_request(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const DeferChildArgs *dargs = (const DeferChildArgs*)args;
+      IndexSpaceNode *child = dargs->proxy_this->get_child(dargs->child_color);
       Serializer rez;
       {
         RezCheck z(rez);
         rez.serialize(child->handle);
-        rez.serialize(target);
-        rez.serialize(to_trigger);
+        rez.serialize(dargs->target);
+        rez.serialize(dargs->to_trigger);
       }
-      forest->runtime->send_index_partition_child_response(source, rez);
+      Runtime *runtime = dargs->proxy_this->context->runtime;
+      runtime->send_index_partition_child_response(dargs->source, rez);
     }
 
     //--------------------------------------------------------------------------
