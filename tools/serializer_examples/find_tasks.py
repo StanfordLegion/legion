@@ -46,7 +46,7 @@ def log_variant(task_id, variant_id, name):
     task_names[variant_id] = task_name
     meta_task_names[variant_id] = name
 
-def log_task_info(op_id, variant_id, proc_id, create, ready, start, stop):
+def log_task_info(op_id, task_id, variant_id, proc_id, create, ready, start, stop):
     assert variant_id in task_names
     task_name = task_names[variant_id]
     time_range = (start, stop)
@@ -84,6 +84,7 @@ callbacks = {
     "InstCreateInfo": noop,
     "InstUsageInfo": noop,
     "InstTimelineInfo": noop,
+    "PartitionInfo" : noop,
     "MessageInfo": noop,
     "MapperCallInfo": noop,
     "RuntimeCallInfo": noop,
