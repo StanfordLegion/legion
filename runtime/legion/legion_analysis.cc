@@ -1538,7 +1538,7 @@ namespace Legion {
         else if (!!remaining_fields)
           (*it)->remove_acquisition(op, node, remaining_fields);
         if (!remaining_fields)
-          return;
+          break;
       }
       if (!to_delete.empty())
       {
@@ -1785,7 +1785,7 @@ namespace Legion {
         else if (!!remaining_fields)
           (*it)->remove_restriction(op, node, remaining_fields);
         if (!remaining_fields)
-          return;
+          break;
       }
       if (!to_delete.empty())
       {

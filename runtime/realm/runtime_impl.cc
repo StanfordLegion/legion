@@ -60,6 +60,8 @@ static const void *ignore_gasnet_warning2 __attribute__((unused)) = (void *)_gas
 #include <unistd.h>
 #include <signal.h>
 
+#include <fstream>
+
 #define CHECK_PTHREAD(cmd) do { \
   int ret = (cmd); \
   if(ret != 0) { \
@@ -253,7 +255,15 @@ namespace Realm {
 
   static void realm_show_events(int signal)
   {
-    show_event_waiters(std::cout);
+    const char *filename = getenv("REALM_SHOW_EVENT_FILENAME");
+    if(filename) {
+      std::ofstream f(filename);
+      get_runtime()->optable.print_operations(f);
+      show_event_waiters(f);
+    } else {
+      get_runtime()->optable.print_operations(std::cout);
+      show_event_waiters(std::cout);
+    }
   }
 
   ////////////////////////////////////////////////////////////////////////

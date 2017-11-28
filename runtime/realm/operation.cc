@@ -265,6 +265,10 @@ namespace Realm {
   std::ostream& operator<<(std::ostream& os, const Operation *op)
   {
     op->print(os);
+    os << " status=" << op->status.result
+       << "(" << op->timeline.ready_time
+       << "," << op->timeline.start_time
+       << ") work=" << op->pending_work_items;
     if(!op->all_work_items.empty()) {
       os << " { ";
       std::set<Operation::AsyncWorkItem *>::const_iterator it = op->all_work_items.begin();
@@ -273,7 +277,7 @@ namespace Realm {
 	os << ", ";
 	(*it)->print(os);
       }
-      os << " }";
+      os << " }\n";
     }
     return os;
   }
@@ -577,6 +581,34 @@ namespace Realm {
     
   /*static*/ void OperationTable::register_handlers(void)
   {
+  }
+
+  void OperationTable::print_operations(std::ostream& os)
+  {
+#ifdef REALM_USE_OPERATION_TABLE
+    os << "OperationTable(node=" << my_node_id << ") {\n";
+
+    for(int subtable = 0; subtable < NUM_TABLES; subtable++) {
+      GASNetHSL& mutex = mutexes[subtable];
+      Table& table = tables[subtable];
+
+      // taking the lock on the subtable also guarantees that none of the
+      //  operations in the subtable will be deleted during our iteration
+      AutoHSLLock al(mutex);
+
+      for(Table::const_iterator it = table.begin();
+	  it != table.end();
+	  ++it) {
+	if(it->second.local_op) {
+	  os << "  " << it->first << ": " << it->second.local_op << "\n";
+	} else {
+	  os << "  " << it->first << ": remote - node=" << it->second.remote_node << "\n";
+	}
+      }
+    }
+
+    os << "}";
+#endif
   }
 
 

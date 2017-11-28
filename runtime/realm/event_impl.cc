@@ -178,6 +178,9 @@ namespace Realm {
 
     protected:
       const EventTriggeredCondition& cond;
+#ifdef REALM_EVENT_WAITER_BACKTRACE
+      mutable Backtrace backtrace;
+#endif
     };
 
     void add_callback(Callback& cb) const;
@@ -201,6 +204,9 @@ namespace Realm {
   EventTriggeredCondition::Callback::Callback(const EventTriggeredCondition& _cond)
     : cond(_cond)
   {
+#ifdef REALM_EVENT_WAITER_BACKTRACE
+    backtrace.capture_backtrace();
+#endif
   }
   
   EventTriggeredCondition::Callback::~Callback(void)
@@ -218,7 +224,12 @@ namespace Realm {
 
   void EventTriggeredCondition::Callback::print(std::ostream& os) const
   {
+#ifdef REALM_EVENT_WAITER_BACKTRACE
+    backtrace.lookup_symbols();
+    os << "EventTriggeredCondition (backtrace=" << backtrace << ")";
+#else
     os << "EventTriggeredCondition (thread unknown)";
+#endif
   }  
 
   Event EventTriggeredCondition::Callback::get_finish_event(void) const

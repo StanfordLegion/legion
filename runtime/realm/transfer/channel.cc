@@ -100,6 +100,10 @@ namespace Realm {
 	    return max_avail;
 	}
 
+	// recheck noncontig as well
+	if(start < first_noncontig)
+	  return 0;
+
 	// otherwise find the first span after us and then back up one to find
 	//  the one that might contain our 'start'
 	std::map<size_t, size_t>::const_iterator it = spans.upper_bound(start);
@@ -163,10 +167,34 @@ namespace Realm {
 	{
 	  AutoHSLLock al(mutex);
 
-	  if(pos < first_noncontig)
-	    first_noncontig = pos;
+	  // the checks above were done without the lock, so it is possible
+	  //  that by the time we've got the lock here, contig_amount has
+	  //  caught up to us
+	  if(__sync_bool_compare_and_swap(&contig_amount, pos, span_end)) {
+	    // see if any other spans are now contiguous as well
+	    while(!spans.empty()) {
+	      std::map<size_t, size_t>::iterator it = spans.begin();
+	      if(it->first == span_end) {
+		bool ok = __sync_bool_compare_and_swap(&contig_amount,
+						       span_end,
+						       span_end + it->second);
+		assert(ok);
+		span_end += it->second;
+		spans.erase(it);
+	      } else {
+		// this is the new first noncontig
+		first_noncontig = it->first;
+		break;
+	      }
+	    }
+	    if(spans.empty())
+	      first_noncontig = (size_t)-1;
+	  } else {
+	    if(pos < first_noncontig)
+	      first_noncontig = pos;
 
-	  spans[pos] = count;
+	    spans[pos] = count;
+	  }
 	}
 	
 	return 0; // no change to contig_amount
