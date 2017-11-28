@@ -36,6 +36,18 @@ namespace Realm {
       v.clear();
   }
 
+  template <typename K, typename V>
+  void delete_container_contents(std::map<K, V *>& m, bool clear_cont = true)
+  {
+    for(typename std::map<K, V *>::iterator it = m.begin();
+	it != m.end();
+	it++)
+      delete it->second;
+
+    if(clear_cont)
+      m.clear();
+  }
+
 
   // helper class that lets you build a formatted std::string as a single expression:
   //  /*std::string s =*/ stringbuilder() << ... << ... << ...;

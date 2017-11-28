@@ -334,7 +334,7 @@ namespace Realm {
       if(((RuntimeImpl *)impl)->reduce_op_table.count(redop_id) > 0)
 	return false;
 
-      ((RuntimeImpl *)impl)->reduce_op_table[redop_id] = redop;
+      ((RuntimeImpl *)impl)->reduce_op_table[redop_id] = redop->clone();
       return true;
     }
 
@@ -345,7 +345,7 @@ namespace Realm {
       if(((RuntimeImpl *)impl)->custom_serdez_table.count(serdez_id) > 0)
 	return false;
 
-      ((RuntimeImpl *)impl)->custom_serdez_table[serdez_id] = serdez;
+      ((RuntimeImpl *)impl)->custom_serdez_table[serdez_id] = serdez->clone();
       return true;
     }
 
@@ -747,6 +747,10 @@ namespace Realm {
 	sampling_profiler(true /*system default*/),
 	num_local_memories(0), num_local_ib_memories(0),
 	num_local_processors(0),
+#ifndef USE_GASNET
+	nongasnet_regmem_base(0),
+	nongasnet_reg_ib_mem_base(0),
+#endif
 	module_registrar(this)
     {
       machine = new MachineImpl;
@@ -757,6 +761,9 @@ namespace Realm {
       delete machine;
       delete core_reservations;
       delete core_map;
+
+      delete_container_contents(reduce_op_table);
+      delete_container_contents(custom_serdez_table);
     }
 
     Memory RuntimeImpl::next_local_memory_id(void)
@@ -1395,8 +1402,9 @@ namespace Realm {
 	char *regmem_base = ((char *)(seginfos[my_node_id].addr)) + (gasnet_mem_size_in_mb << 20);
 	delete[] seginfos;
 #else
-	char *regmem_base = (char *)(malloc(reg_mem_size_in_mb << 20));
-	assert(regmem_base != 0);
+	nongasnet_regmem_base = malloc(reg_mem_size_in_mb << 20);
+	assert(nongasnet_regmem_base != 0);
+	char *regmem_base = static_cast<char *>(nongasnet_regmem_base);
 #endif
 	Memory m = get_runtime()->next_local_memory_id();
 	regmem = new LocalCPUMemory(m,
@@ -1421,8 +1429,9 @@ namespace Realm {
                                 + (reg_mem_size_in_mb << 20);
 	delete[] seginfos;
 #else
-	char *reg_ib_mem_base = (char *)(malloc(reg_ib_mem_size_in_mb << 20));
-	assert(reg_ib_mem_base != 0);
+	nongasnet_reg_ib_mem_base = malloc(reg_ib_mem_size_in_mb << 20);
+	assert(nongasnet_reg_ib_mem_base != 0);
+	char *reg_ib_mem_base = static_cast<char *>(nongasnet_reg_ib_mem_base);
 #endif
 	Memory m = get_runtime()->next_local_ib_memory_id();
 	reg_ib_mem = new LocalCPUMemory(m,
@@ -2206,6 +2215,9 @@ namespace Realm {
 
 	  delete_container_contents(n.memories);
 	  delete_container_contents(n.processors);
+	  delete_container_contents(n.ib_memories);
+	  delete_container_contents(n.dma_channels);
+	  delete_container_contents(n.sparsity_maps);
 	}
 	
 	delete[] nodes;
@@ -2214,6 +2226,7 @@ namespace Realm {
 	delete local_barrier_free_list;
 	delete local_reservation_free_list;
 	delete local_proc_group_free_list;
+	delete_container_contents(local_sparsity_map_free_lists);
 
 	// same for code translators
 	delete_container_contents(code_translators);
@@ -2227,6 +2240,13 @@ namespace Realm {
 
 	module_registrar.unload_module_sofiles();
       }
+
+#ifndef USE_GASNET
+      if(nongasnet_regmem_base != 0)
+	free(nongasnet_regmem_base);
+      if(nongasnet_reg_ib_mem_base != 0)
+	free(nongasnet_reg_ib_mem_base);
+#endif
 
       if(!Threading::cleanup()) exit(1);
 

@@ -1741,6 +1741,14 @@ namespace Realm {
       final_values = 0;
     }
 
+    BarrierImpl::~BarrierImpl(void)
+    {
+      if(initial_value)
+	free(initial_value);
+      if(final_values)
+	free(final_values);
+    }
+
     void BarrierImpl::init(ID _me, unsigned _init_owner)
     {
       me = _me;
