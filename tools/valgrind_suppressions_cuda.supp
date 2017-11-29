@@ -1,0 +1,48 @@
+{
+   <cuInit internal undefined value>
+   Memcheck:Cond
+   ...
+   fun:cuInit
+}
+{
+   <cuInit internal leak>
+   Memcheck:Leak
+   fun:calloc
+   ...
+   fun:cuInit
+}
+{
+   <cuInit internal leak>
+   Memcheck:Leak
+   fun:malloc
+   ...
+   fun:cuInit
+}
+{
+   <cuInit internal leak>
+   Memcheck:Leak
+   fun:realloc
+   ...
+   fun:cuInit
+}
+{
+   <cuInit internal leak>
+   Memcheck:Leak
+   fun:calloc
+   ...
+   fun:cuCtxCreate_v2
+}
+{
+   <cuInit internal leak>
+   Memcheck:Leak
+   fun:calloc
+   ...
+   fun:cuMemHostRegister_v2
+}
+{
+   <cuInit internal leak>
+   Memcheck:Leak
+   fun:malloc
+   ...
+   fun:cuDeviceCanAccessPeer
+}

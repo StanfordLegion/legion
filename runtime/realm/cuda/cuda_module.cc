@@ -28,6 +28,10 @@
 #include "realm/activemsg.h"
 #include "realm/utils.h"
 
+#ifdef REALM_USE_VALGRIND_ANNOTATIONS
+#include <valgrind/memcheck.h>
+#endif
+
 #include <stdio.h>
 
 namespace Realm {
@@ -152,6 +156,9 @@ namespace Realm {
 	  copy->execute(this);
 	}
 
+	// TODO: recycle these
+	delete copy;
+
 	// no backpressure on copies yet - keep going until list is empty
       }
     }
@@ -272,6 +279,9 @@ namespace Realm {
                                         (CUdeviceptr)(((char*)src)+span_start),
                                         span_bytes,
                                         raw_stream) );
+#ifdef REALM_USE_VALGRIND_ANNOTATIONS
+	    VALGRIND_MAKE_MEM_DEFINED((((char*)dst)+span_start), span_bytes);
+#endif
             break;
           }
         case GPU_MEMCPY_DEVICE_TO_DEVICE:
@@ -2199,11 +2209,14 @@ namespace Realm {
       , cfg_pin_sysmem(true)
       , cfg_fences_use_callbacks(false)
       , cfg_suppress_hijack_warning(false)
-      , shared_worker(0), zcmem_cpu_base(0), zcib_cpu_base(0), zcmem(0)
+      , shared_worker(0), zcmem_cpu_base(0)
+      , zcib_cpu_base(0), zcmem(0)
     {}
       
     CudaModule::~CudaModule(void)
-    {}
+    {
+      delete_container_contents(gpu_info);
+    }
 
     /*static*/ Module *CudaModule::create_module(RuntimeImpl *runtime,
 						 std::vector<std::string>& cmdline)
@@ -2482,6 +2495,7 @@ namespace Realm {
 			   << ret;
 	    continue;
 	  }
+	  registered_host_ptrs.push_back(base);
 
 	  // now go through each GPU and verify that it got a GPU pointer (it may not match the CPU
 	  //  pointer, but that's ok because we'll never refer to it directly)
@@ -2549,6 +2563,22 @@ namespace Realm {
 	CHECK_CU( cuMemFreeHost(zcmem_cpu_base) );
       }
 
+      if(zcib_cpu_base) {
+	assert(!gpus.empty());
+	AutoGPUContext agc(gpus[0]);
+	CHECK_CU( cuMemFreeHost(zcib_cpu_base) );
+      }
+
+      // also unregister any host memory at this time
+      if(!registered_host_ptrs.empty()) {
+	AutoGPUContext agc(gpus[0]);
+	for(std::vector<void *>::const_iterator it = registered_host_ptrs.begin();
+	    it != registered_host_ptrs.end();
+	    ++it)
+	  CHECK_CU( cuMemHostUnregister(*it) );
+	registered_host_ptrs.clear();
+      }
+
       for(std::vector<GPU *>::iterator it = gpus.begin();
 	  it != gpus.end();
 	  it++)
@@ -2588,7 +2618,12 @@ namespace Realm {
     {}
 
     GlobalRegistrations::~GlobalRegistrations(void)
-    {}
+    {
+      delete_container_contents(variables);
+      delete_container_contents(functions);
+      // we don't own fat binary pointers, but we can forget them
+      fat_binaries.clear();
+    }
 
     /*static*/ GlobalRegistrations& GlobalRegistrations::get_global_registrations(void)
     {
