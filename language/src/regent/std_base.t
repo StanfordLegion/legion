@@ -14,9 +14,12 @@
 
 -- Regent Standard Library - Base Layer
 
+local config = require("regent/config")
 local data = require("common/data")
 
 local base = {}
+
+base.config, base.args = config.args()
 
 -- #####################################
 -- ## Legion Bindings
@@ -31,6 +34,599 @@ local c = terralib.includecstring([[
 #include <stdlib.h>
 ]])
 base.c = c
+
+-- #####################################
+-- ## Utilities
+-- #################
+
+terra base.assert_error(x : bool, message : rawstring)
+  if not x then
+    var stderr = c.fdopen(2, "w")
+    c.fprintf(stderr, "Errors reported during runtime.\n%s\n", message)
+    -- Just because it's stderr doesn't mean it's unbuffered...
+    c.fflush(stderr)
+    c.abort()
+  end
+end
+
+terra base.assert(x : bool, message : rawstring)
+  if not x then
+    var stderr = c.fdopen(2, "w")
+    c.fprintf(stderr, "assertion failed: %s\n", message)
+    -- Just because it's stderr doesn't mean it's unbuffered...
+    c.fflush(stderr)
+    c.abort()
+  end
+end
+
+terra base.domain_from_bounds_1d(start : c.legion_point_1d_t,
+                                 extent : c.legion_point_1d_t)
+  var rect = c.legion_rect_1d_t {
+    lo = start,
+    hi = c.legion_point_1d_t {
+      x = array(start.x[0] + extent.x[0] - 1),
+    },
+  }
+  return c.legion_domain_from_rect_1d(rect)
+end
+
+terra base.domain_from_bounds_2d(start : c.legion_point_2d_t,
+                                 extent : c.legion_point_2d_t)
+  var rect = c.legion_rect_2d_t {
+    lo = start,
+    hi = c.legion_point_2d_t {
+      x = array(start.x[0] + extent.x[0] - 1,
+                start.x[1] + extent.x[1] - 1),
+    },
+  }
+  return c.legion_domain_from_rect_2d(rect)
+end
+
+terra base.domain_from_bounds_3d(start : c.legion_point_3d_t,
+                                 extent : c.legion_point_3d_t)
+  var rect = c.legion_rect_3d_t {
+    lo = start,
+    hi = c.legion_point_3d_t {
+      x = array(start.x[0] + extent.x[0] - 1,
+                start.x[1] + extent.x[1] - 1,
+                start.x[2] + extent.x[2] - 1),
+    },
+  }
+  return c.legion_domain_from_rect_3d(rect)
+end
+
+-- #####################################
+-- ## Physical Privilege Helpers
+-- #################
+
+-- Physical privileges describe the privileges used by the actual
+-- Legion runtime, rather than the privileges used by Regent (as
+-- above). Some important differences from normal privileges:
+--
+--  * Physical privileges are strings (at least for the moment)
+--  * Unlike normal privileges, physical privileges form a lattice
+--    (with a corresponding meet operator)
+--  * "reads_writes" is a physical privilege (not a normal privilege),
+--    and is the top of the physical privilege lattice
+
+local function zero(value_type) return terralib.cast(value_type, 0) end
+local function one(value_type) return terralib.cast(value_type, 1) end
+local function min_value(value_type) return terralib.cast(value_type, -math.huge) end
+local function max_value(value_type) return terralib.cast(value_type, math.huge) end
+
+base.reduction_ops = terralib.newlist({
+    {op = "+", name = "plus", init = zero},
+    {op = "-", name = "minus", init = zero},
+    {op = "*", name = "times", init = one},
+    {op = "/", name = "divide", init = one},
+    {op = "max", name = "max", init = min_value},
+    {op = "min", name = "min", init = max_value},
+})
+
+base.reduction_types = terralib.newlist({
+    float,
+    double,
+    int32,
+    int64,
+})
+
+base.reduction_op_init = {}
+for _, op in ipairs(base.reduction_ops) do
+  base.reduction_op_init[op.op] = {}
+  for _, op_type in ipairs(base.reduction_types) do
+    base.reduction_op_init[op.op][op_type] = op.init(op_type)
+  end
+end
+
+-- Prefill the table of reduction op IDs.
+base.reduction_op_ids = {}
+do
+  local base_op_id = 101
+  for _, op in ipairs(base.reduction_ops) do
+    for _, op_type in ipairs(base.reduction_types) do
+      local op_id = base_op_id
+      base_op_id = base_op_id + 1
+      if not base.reduction_op_ids[op.op] then
+        base.reduction_op_ids[op.op] = {}
+      end
+      base.reduction_op_ids[op.op][op_type] = op_id
+    end
+  end
+end
+
+function base.is_reduction_op(privilege)
+  assert(type(privilege) == "string")
+  return string.sub(privilege, 1, string.len("reduces ")) == "reduces "
+end
+
+function base.get_reduction_op(privilege)
+  assert(type(privilege) == "string")
+  return string.sub(privilege, string.len("reduces ") + 1)
+end
+
+function base.meet_privilege(a, b)
+  if a == b then
+    return a
+  elseif not a then
+    return b
+  elseif not b then
+    return a
+  elseif a == "none" then
+    return b
+  elseif b == "none" then
+    return a
+  else
+    return "reads_writes"
+  end
+end
+
+function base.meet_coherence(a, b)
+  if a == b then
+    return a
+  elseif not a then
+    return b
+  elseif not b then
+    return a
+  else
+    assert(false)
+  end
+end
+
+function base.meet_flag(a, b)
+  if a == b then
+    return a
+  elseif not a or a == "no_flag" then
+    return b
+  elseif not b or b == "no_flag" then
+    return a
+  else
+    assert(false)
+  end
+end
+
+local function find_field_privilege(privileges, coherence_modes, flags,
+                                    region_type, field_path, field_type)
+  local field_privilege = "none"
+  for _, privilege_list in ipairs(privileges) do
+    for _, privilege in ipairs(privilege_list) do
+      assert(base.is_symbol(privilege.region))
+      assert(data.is_tuple(privilege.field_path))
+      if region_type == privilege.region:gettype() and
+        field_path:starts_with(privilege.field_path)
+      then
+        field_privilege = base.meet_privilege(field_privilege,
+                                              tostring(privilege.privilege))
+      end
+    end
+  end
+
+  local coherence_mode = "exclusive"
+  if coherence_modes[region_type] then
+    for prefix, coherence in coherence_modes[region_type]:items() do
+      if field_path:starts_with(prefix) then
+        coherence_mode = tostring(coherence)
+      end
+    end
+  end
+
+  local flag = "no_flag"
+  if flags[region_type] then
+    for prefix, flag_fields in flags[region_type]:items() do
+      if field_path:starts_with(prefix) then
+        for _, flag_kind in flag_fields:keys() do
+          flag = base.meet_flag(flag, tostring(flag_kind))
+        end
+      end
+    end
+  end
+
+  -- FIXME: Fow now, render write privileges as
+  -- read-write. Otherwise, write would get rendered as
+  -- write-discard, which would not be correct without explicit
+  -- user annotation.
+  if field_privilege == "writes" then
+    field_privilege = "reads_writes"
+  end
+
+  if base.is_reduction_op(field_privilege) then
+    local op = base.get_reduction_op(field_privilege)
+    if not (base.reduction_op_ids[op] and base.reduction_op_ids[op][field_type]) then
+      -- You could upgrade to reads_writes here, but this would never
+      -- have made it past the parser anyway.
+      assert(false)
+    end
+  end
+
+  return field_privilege, coherence_mode, flag
+end
+
+function base.find_task_privileges(region_type, task)
+  assert(base.types.type_supports_privileges(region_type))
+  assert(base.is_task(task))
+
+  local privileges = task:get_privileges()
+  local coherence_modes = task:get_coherence_modes()
+  local flags = task:get_flags()
+
+  local grouped_privileges = terralib.newlist()
+  local grouped_coherence_modes = terralib.newlist()
+  local grouped_flags = terralib.newlist()
+  local grouped_field_paths = terralib.newlist()
+  local grouped_field_types = terralib.newlist()
+
+  local field_paths, field_types = base.types.flatten_struct_fields(
+    region_type:fspace())
+
+  local privilege_index = data.newmap()
+  local privilege_next_index = 1
+  for i, field_path in ipairs(field_paths) do
+    local field_type = field_types[i]
+    local privilege, coherence, flag = find_field_privilege(
+      privileges, coherence_modes, flags, region_type, field_path, field_type)
+    local mode = data.newtuple(privilege, coherence, flag)
+    if privilege ~= "none" then
+      local index = privilege_index[mode]
+      if not index then
+        index = privilege_next_index
+        privilege_next_index = privilege_next_index + 1
+
+        -- Reduction privileges cannot be grouped, because the Legion
+        -- runtime does not know how to handle multi-field reductions.
+        if not base.is_reduction_op(privilege) then
+          privilege_index[mode] = index
+        end
+
+        grouped_privileges:insert(privilege)
+        grouped_coherence_modes:insert(coherence)
+        grouped_flags:insert(flag)
+        grouped_field_paths:insert(terralib.newlist())
+        grouped_field_types:insert(terralib.newlist())
+      end
+
+      grouped_field_paths[index]:insert(field_path)
+      grouped_field_types[index]:insert(field_type)
+    end
+  end
+
+  if #grouped_privileges == 0 then
+    grouped_privileges:insert("none")
+    grouped_coherence_modes:insert("exclusive")
+    grouped_flags:insert("no_flag")
+    grouped_field_paths:insert(terralib.newlist())
+    grouped_field_types:insert(terralib.newlist())
+  end
+
+  return grouped_privileges, grouped_field_paths, grouped_field_types,
+    grouped_coherence_modes, grouped_flags
+end
+
+function base.group_task_privileges_by_field_path(privileges, privilege_field_paths,
+                                                  privilege_field_types,
+                                                  privilege_coherence_modes,
+                                                  privilege_flags)
+  local privileges_by_field_path = {}
+  local coherence_modes_by_field_path
+  if privilege_coherence_modes ~= nil then
+    coherence_modes_by_field_path = {}
+  end
+  for i, privilege in ipairs(privileges) do
+    local field_paths = privilege_field_paths[i]
+    for _, field_path in ipairs(field_paths) do
+      privileges_by_field_path[field_path:hash()] = privilege
+      if coherence_modes_by_field_path ~= nil then
+        coherence_modes_by_field_path[field_path:hash()] =
+          privilege_coherence_modes[i]
+      end
+    end
+  end
+  return privileges_by_field_path, coherence_modes_by_field_path
+end
+
+local privilege_modes = {
+  none            = c.NO_ACCESS,
+  reads           = c.READ_ONLY,
+  writes          = c.WRITE_ONLY,
+  reads_writes    = c.READ_WRITE,
+}
+
+function base.privilege_mode(privilege)
+  local mode = privilege_modes[privilege]
+  if base.is_reduction_op(privilege) then
+    mode = c.REDUCE
+  end
+  assert(mode)
+  return mode
+end
+
+local coherence_modes = {
+  exclusive       = c.EXCLUSIVE,
+  atomic          = c.ATOMIC,
+  simultaneous    = c.SIMULTANEOUS,
+  relaxed         = c.RELAXED,
+}
+
+function base.coherence_mode(coherence)
+  local mode = coherence_modes[coherence]
+  assert(mode)
+  return mode
+end
+
+local flag_modes = {
+  no_flag         = c.NO_FLAG,
+  verified_flag   = c.VERIFIED_FLAG,
+  no_access_flag  = c.NO_ACCESS_FLAG,
+}
+
+function base.flag_mode(flag)
+  local mode = flag_modes[flag]
+  assert(mode)
+  return mode
+end
+
+-- #####################################
+-- ## Type Helpers
+-- #################
+
+base.types = {}
+
+function base.types.is_bounded_type(t)
+  return terralib.types.istype(t) and rawget(t, "is_bounded_type")
+end
+
+function base.types.is_index_type(t)
+  return terralib.types.istype(t) and rawget(t, "is_index_type")
+end
+
+function base.types.is_bounded_type(t)
+  return terralib.types.istype(t) and rawget(t, "is_bounded_type")
+end
+
+function base.types.is_index_type(t)
+  return terralib.types.istype(t) and rawget(t, "is_index_type")
+end
+
+function base.types.is_rect_type(t)
+  return terralib.types.istype(t) and rawget(t, "is_rect_type")
+end
+
+function base.types.is_ispace(t)
+  return terralib.types.istype(t) and rawget(t, "is_ispace")
+end
+
+function base.types.is_region(t)
+  return terralib.types.istype(t) and rawget(t, "is_region")
+end
+
+function base.types.is_partition(t)
+  return terralib.types.istype(t) and rawget(t, "is_partition")
+end
+
+function base.types.is_cross_product(t)
+  return terralib.types.istype(t) and rawget(t, "is_cross_product")
+end
+
+function base.types.is_vptr(t)
+  return terralib.types.istype(t) and rawget(t, "is_vpointer")
+end
+
+function base.types.is_sov(t)
+  return terralib.types.istype(t) and rawget(t, "is_struct_of_vectors")
+end
+
+function base.types.is_ref(t)
+  return terralib.types.istype(t) and rawget(t, "is_ref")
+end
+
+function base.types.is_rawref(t)
+  return terralib.types.istype(t) and rawget(t, "is_rawref")
+end
+
+function base.types.is_future(t)
+  return terralib.types.istype(t) and rawget(t, "is_future")
+end
+
+function base.types.is_list(t)
+  return terralib.types.istype(t) and rawget(t, "is_list")
+end
+
+function base.types.is_list_of_regions(t)
+  return base.types.is_list(t) and t:is_list_of_regions()
+end
+
+function base.types.is_list_of_partitions(t)
+  return base.types.is_list(t) and t:is_list_of_partitions()
+end
+
+function base.types.is_list_of_phase_barriers(t)
+  return base.types.is_list(t) and t:is_list_of_phase_barriers()
+end
+
+function base.types.is_phase_barrier(t)
+  return terralib.types.istype(t) and rawget(t, "is_phase_barrier")
+end
+
+function base.types.is_dynamic_collective(t)
+  return terralib.types.istype(t) and rawget(t, "is_dynamic_collective")
+end
+
+function base.types.is_unpack_result(t)
+  return terralib.types.istype(t) and rawget(t, "is_unpack_result")
+end
+
+function base.types.type_supports_privileges(t)
+  return base.types.is_region(t) or base.types.is_list_of_regions(t)
+end
+
+function base.types.type_supports_constraints(t)
+  return base.types.is_region(t) or base.types.is_partition(t) or
+    base.types.is_list_of_regions(t) or base.types.is_list_of_partitions(t)
+end
+
+function base.types.type_is_opaque_to_field_accesses(t)
+  return base.types.is_region(t) or base.types.is_partition(t) or
+    base.types.is_cross_product(t) or base.types.is_list(t)
+end
+
+function base.types.is_ctor(t)
+  return terralib.types.istype(t) and rawget(t, "is_ctor")
+end
+
+function base.types.is_fspace_instance(t)
+  return terralib.types.istype(t) and rawget(t, "is_fspace_instance")
+end
+
+function base.types.flatten_struct_fields(struct_type, pred)
+  assert(terralib.types.istype(struct_type))
+  local field_paths = terralib.newlist()
+  local field_types = terralib.newlist()
+
+  local function is_geometric_type(ty)
+    return base.types.is_index_type(ty) or base.types.is_rect_type(ty)
+  end
+
+  if (struct_type:isstruct() or base.types.is_fspace_instance(struct_type)) and
+     not is_geometric_type(struct_type) then
+    local entries = struct_type:getentries()
+    for _, entry in ipairs(entries) do
+      local entry_name = entry[1] or entry.field
+      -- FIXME: Fix for struct types with symbol fields.
+      assert(type(entry_name) == "string")
+      local entry_type = entry[2] or entry.type
+      local entry_field_paths, entry_field_types =
+        base.types.flatten_struct_fields(entry_type)
+      field_paths:insertall(
+        entry_field_paths:map(
+          function(entry_field_path)
+            return data.newtuple(entry_name) .. entry_field_path
+          end))
+      field_types:insertall(entry_field_types)
+    end
+  else
+    field_paths:insert(data.newtuple())
+    field_types:insert(struct_type)
+  end
+
+  return field_paths, field_types
+end
+
+-- #####################################
+-- ## Symbols
+-- #################
+
+local symbol = {}
+function symbol:__index(field)
+  local value = symbol[field]
+  if value ~= nil then return value end
+  error("symbol has no field '" .. field .. "' (in lookup)", 2)
+end
+
+function symbol:__newindex(field, value)
+  error("symbol has no field '" .. field .. "' (in assignment)", 2)
+end
+
+do
+  local next_id = 1
+  function base.newsymbol(symbol_type, symbol_name)
+    -- Swap around the arguments to allow either one to be optional.
+    if type(symbol_type) == "string" and symbol_name == nil then
+      symbol_type, symbol_name = nil, symbol_type
+    elseif symbol_type == nil and terralib.types.istype(symbol_name) then
+      symbol_type, symbol_name = symbol_name, nil
+    end
+    assert(symbol_type == nil or terralib.types.istype(symbol_type), "newsymbol expected argument 1 to be a type")
+    assert(symbol_name == nil or type(symbol_name) == "string", "newsymbol expected argument 2 to be a string")
+
+    local id = next_id
+    next_id = next_id + 1
+    return setmetatable({
+      symbol_type = symbol_type or false,
+      symbol_name = symbol_name or false,
+      symbol_symbol = false,
+      symbol_label = false,
+      symbol_id = id,
+    }, symbol)
+  end
+end
+
+function base.is_symbol(x)
+  return getmetatable(x) == symbol
+end
+
+function symbol:hasname()
+  return self.symbol_name or nil
+end
+
+function symbol:getname()
+  assert(self.symbol_name)
+  return self.symbol_name
+end
+
+function symbol:hastype()
+  return self.symbol_type or nil
+end
+
+function symbol:gettype()
+  assert(self.symbol_type)
+  return self.symbol_type
+end
+
+function symbol:settype(type)
+  assert(terralib.types.istype(type))
+  assert(not self.symbol_type)
+  assert(not self.symbol_symbol)
+  self.symbol_type = type
+end
+
+function symbol:getsymbol()
+  assert(self.symbol_type)
+  if not self.symbol_symbol then
+    self.symbol_symbol = terralib.newsymbol(self.symbol_type, self.symbol_name)
+  end
+  return self.symbol_symbol
+end
+
+function symbol:getlabel()
+  if not self.symbol_label then
+    self.symbol_label = terralib.newlabel(self.symbol_name)
+  end
+  return self.symbol_label
+end
+
+function symbol:hash()
+  return self
+end
+
+function symbol:__tostring()
+  if self:hasname() then
+    if base.config["debug"] then
+      return "$" .. tostring(self:getname()) .. "#" .. tostring(self.symbol_id)
+    else
+      return "$" .. tostring(self:getname())
+    end
+  else
+    return "$" .. tostring(self.symbol_id)
+  end
+end
 
 -- #####################################
 -- ## Variants

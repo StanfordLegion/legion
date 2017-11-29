@@ -14,28 +14,12 @@
 
 import "regent"
 
-local root_dir = arg[0]:match(".*/") or "./"
-local c = terralib.includec("embed.h", {"-I", root_dir})
-
-local fs = c.fs -- Get the field space from C
-
-task my_regent_task(r : region(fs))
-where reads writes(r) do
-  regentlib.c.printf("Hello from Regent!\n")
-end
-
--- Save tasks to libembed_tasks.so
-local embed_tasks_lib = "embed_tasks"
-do
-  local embed_tasks_h = root_dir .. "embed_tasks.h"
-  local embed_tasks_so = root_dir .. "libembed_tasks.so"
-  regentlib.save_tasks(embed_tasks_h, embed_tasks_so)
-end
+local embed_tasks_lib = require("embed_tasks")
 
 -- Compile and execute embed.cc
 local exe
+local root_dir = arg[0]:match(".*/") or "./"
 do
-  local root_dir = arg[0]:match(".*/") or "./"
   local runtime_dir = os.getenv("LG_RT_DIR") .. "/"
   local legion_dir = runtime_dir .. "legion/"
   local mapper_dir = runtime_dir .. "mappers/"
