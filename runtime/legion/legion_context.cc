@@ -10056,7 +10056,7 @@ namespace Legion {
         }
         RtBarrier &bar = clone_close_barriers[close_index][clone_index];
         close_bar = bar;
-        Runtime::advance_barrier(close_bar);
+        Runtime::advance_barrier(bar);
       }
       else // Not cloning so the close op knows the name
         close_bar = close->get_view_barrier();
