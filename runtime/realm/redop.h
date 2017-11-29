@@ -70,6 +70,8 @@ namespace Realm {
 
       virtual ~ReductionOpUntyped() {}
 
+      virtual ReductionOpUntyped *clone(void) const = 0;
+
     protected:
       ReductionOpUntyped(size_t _sizeof_lhs, size_t _sizeof_rhs,
 			 size_t _sizeof_list_entry,
@@ -100,6 +102,11 @@ namespace Realm {
 			     0,
 #endif
 			     true, true) {}
+
+      virtual ReductionOpUntyped *clone(void) const
+      {
+	return new ReductionOp<REDOP>;
+      }
 
       virtual void apply(void *lhs_ptr, const void *rhs_ptr, size_t count,
 			 bool exclusive = false) const

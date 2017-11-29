@@ -60,6 +60,13 @@ namespace Legion {
       delete mapper;
       mapper_lock.destroy_reservation();
       mapper_lock = Reservation::NO_RESERVATION;
+      // Free all the available MappingCallInfo's we were keeping around
+      for (std::vector<MappingCallInfo*>::iterator
+	     it = available_infos.begin(); it != available_infos.end(); it++)
+      {
+	delete *it;
+      }
+      available_infos.clear();
     }
 
     //--------------------------------------------------------------------------

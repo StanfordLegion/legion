@@ -330,8 +330,6 @@ namespace Realm {
         void print(std::ostream& os) const {os << "IBAllocOp"; };
       };
 
-      IBAllocOp* ib_req;
-      Event ib_completion;
       std::vector<Memory> mem_path;
       // </NEW_DMA>
 

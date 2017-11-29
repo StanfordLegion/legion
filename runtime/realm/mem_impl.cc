@@ -104,10 +104,22 @@ namespace Realm {
 
     MemoryImpl::~MemoryImpl(void)
     {
+      for(std::vector<RegionInstanceImpl *>::iterator it = local_instances.instances.begin();
+	  it != local_instances.instances.end();
+	  ++it)
+	if(*it)
+	  delete *it;
+
       for(std::map<NodeID, InstanceList *>::const_iterator it = instances_by_creator.begin();
 	  it != instances_by_creator.end();
-	  ++it)
+	  ++it) {
+	for(std::vector<RegionInstanceImpl *>::iterator it2 = it->second->instances.begin();
+	    it2 != it->second->instances.end();
+	    ++it2)
+	  if(*it2)
+	    delete *it2;
 	delete it->second;
+      }
 
 #ifdef REALM_PROFILE_MEMORY_USAGE
       printf("Memory " IDFMT " usage: peak=%zd (%.1f MB) footprint=%zd (%.1f MB)\n",

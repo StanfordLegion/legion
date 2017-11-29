@@ -363,7 +363,11 @@ namespace Realm {
       metadata.layout = 0;
     }
 
-    RegionInstanceImpl::~RegionInstanceImpl(void) {}
+    RegionInstanceImpl::~RegionInstanceImpl(void)
+    {
+      if(metadata.is_valid())
+	delete metadata.layout;
+    }
 
     void RegionInstanceImpl::notify_allocation(bool success, size_t offset)
     {

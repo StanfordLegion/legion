@@ -47,14 +47,16 @@ namespace Realm {
       template <typename REDOP>
       bool register_reduction(ReductionOpID redop_id)
       {
-	return register_reduction(redop_id, ReductionOpUntyped::create_reduction_op<REDOP>());
+	const ReductionOp<REDOP> redop;
+	return register_reduction(redop_id, &redop);
       }
 
       bool register_custom_serdez(CustomSerdezID serdez_id, const CustomSerdezUntyped *serdez);
       template <typename SERDEZ>
       bool register_custom_serdez(CustomSerdezID serdez_id)
       {
-	return register_custom_serdez(serdez_id, CustomSerdezUntyped::create_custom_serdez<SERDEZ>());
+	const CustomSerdezWrapper<SERDEZ> serdez;
+	return register_custom_serdez(serdez_id, &serdez);
       }
 
       Event collective_spawn(Processor target_proc, Processor::TaskFuncID task_id, 

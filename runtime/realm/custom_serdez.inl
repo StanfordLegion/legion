@@ -45,6 +45,11 @@ namespace Realm {
   public:
     CustomSerdezWrapper(void);
 
+    virtual CustomSerdezUntyped *clone(void) const
+    {
+      return new CustomSerdezWrapper<T>;
+    }
+
     // each operator exists in two forms: single-element and strided-array-of-elements
 
     // computes the number of bytes needed for the serialization of 'val'
