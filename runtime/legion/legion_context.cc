@@ -5758,39 +5758,7 @@ namespace Legion {
       DETAILED_PROFILER(runtime, INVALIDATE_REGION_TREE_CONTEXTS_CALL);
       // Send messages to invalidate any remote contexts
       if (!remote_instances.empty())
-      {
-        UniqueID local_uid = get_unique_id();
-        Serializer rez;
-        {
-          RezCheck z(rez);
-          rez.serialize(local_uid);
-          // If we have created requirements figure out what invalidations
-          // we have to send to the remote context
-          if (!created_requirements.empty())
-          {
-            std::map<unsigned,LogicalRegion> to_invalidate;
-            for (unsigned idx = 0; idx < created_requirements.size(); idx++)
-            {
-              if (!returnable_privileges[idx] || 
-                  was_created_requirement_deleted(created_requirements[idx]))
-                to_invalidate[idx] = created_requirements[idx].region;
-            }
-            rez.serialize<size_t>(to_invalidate.size());
-            for (std::map<unsigned,LogicalRegion>::const_iterator it = 
-                  to_invalidate.begin(); it != to_invalidate.end(); it++)
-            {
-              // Add the size of the original regions to the index
-              rez.serialize<unsigned>(it->first + regions.size());
-              rez.serialize(it->second);
-            }
-          }
-          else
-            rez.serialize<size_t>(0);
-        }
-        for (std::map<AddressSpaceID,RemoteContext*>::const_iterator it = 
-              remote_instances.begin(); it != remote_instances.end(); it++)
-          runtime->send_remote_context_release(it->first, rez);
-      }
+        invalidate_remote_contexts();
       // Invalidate all our region contexts
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
@@ -5844,17 +5812,7 @@ namespace Legion {
       }
       // Clean up our instance top views
       if (!instance_top_views.empty())
-      {
-        for (std::map<PhysicalManager*,InstanceView*>::const_iterator it = 
-              instance_top_views.begin(); it != instance_top_views.end(); it++)
-        {
-          if (it->first->is_owner())
-            it->first->unregister_active_context(this);
-          if (it->second->remove_base_resource_ref(CONTEXT_REF))
-            delete (it->second);
-        }
-        instance_top_views.clear();
-      } 
+        clear_instance_top_views();
       // Now we can free our region tree context
       runtime->free_region_tree_context(tree_context);
     }
@@ -6315,6 +6273,58 @@ namespace Legion {
         owner_task->trigger_children_complete();
       if (need_commit)
         owner_task->trigger_children_committed();
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::invalidate_remote_contexts(void)
+    //--------------------------------------------------------------------------
+    {
+      UniqueID local_uid = get_unique_id();
+      Serializer rez;
+      {
+        RezCheck z(rez);
+        rez.serialize(local_uid);
+        // If we have created requirements figure out what invalidations
+        // we have to send to the remote context
+        if (!created_requirements.empty())
+        {
+          std::map<unsigned,LogicalRegion> to_invalidate;
+          for (unsigned idx = 0; idx < created_requirements.size(); idx++)
+          {
+            if (!returnable_privileges[idx] || 
+                was_created_requirement_deleted(created_requirements[idx]))
+              to_invalidate[idx] = created_requirements[idx].region;
+          }
+          rez.serialize<size_t>(to_invalidate.size());
+          for (std::map<unsigned,LogicalRegion>::const_iterator it = 
+                to_invalidate.begin(); it != to_invalidate.end(); it++)
+          {
+            // Add the size of the original regions to the index
+            rez.serialize<unsigned>(it->first + regions.size());
+            rez.serialize(it->second);
+          }
+        }
+        else
+          rez.serialize<size_t>(0);
+      }
+      for (std::map<AddressSpaceID,RemoteContext*>::const_iterator it = 
+            remote_instances.begin(); it != remote_instances.end(); it++)
+        runtime->send_remote_context_release(it->first, rez);
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::clear_instance_top_views(void)
+    //--------------------------------------------------------------------------
+    {
+      for (std::map<PhysicalManager*,InstanceView*>::const_iterator it = 
+            instance_top_views.begin(); it != instance_top_views.end(); it++)
+      {
+        if (it->first->is_owner())
+          it->first->unregister_active_context(this);
+        if (it->second->remove_base_resource_ref(CONTEXT_REF))
+          delete (it->second);
+      }
+      instance_top_views.clear();
     }
 
     //--------------------------------------------------------------------------
@@ -6947,6 +6957,8 @@ namespace Legion {
         // context for the handling the meta-data management, 
         // otherwise we can only support this currently if we are
         // the context for the top-level task
+        // If you change this then also make sure that you 
+        // change invalidate_region_tree_contexts to match
         index -= owner_size;
         AutoLock priv_lock(privilege_lock,1,false/*exclusive*/);
         if ((index >= returnable_privileges.size()) ||
@@ -6963,6 +6975,44 @@ namespace Legion {
         }
         return this;
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplicateContext::invalidate_region_tree_contexts(void)
+    //--------------------------------------------------------------------------
+    {
+      // This does mostly the same thing as the InnerContext version
+      // but handles created requirements differently since we know
+      // that we kept those things in our context
+      DETAILED_PROFILER(runtime, INVALIDATE_REGION_TREE_CONTEXTS_CALL);
+      if (!remote_instances.empty())
+        invalidate_remote_contexts();
+      // Invalidate all our region contexts
+      for (unsigned idx = 0; idx < regions.size(); idx++)
+      {
+        if (IS_NO_ACCESS(regions[idx]))
+          continue;
+        runtime->forest->invalidate_current_context(tree_context,
+                                                    false/*users only*/,
+                                                    regions[idx].region);
+        if (!virtual_mapped[idx])
+          runtime->forest->invalidate_versions(tree_context, 
+                                               regions[idx].region);
+      }
+      if (!created_requirements.empty())
+      {
+        for (unsigned idx = 0; idx < created_requirements.size(); idx++)
+        {
+          runtime->forest->invalidate_current_context(tree_context,
+              false/*users only*/, created_requirements[idx].region);
+          runtime->forest->invalidate_versions(tree_context,
+                                   created_requirements[idx].region);
+        }
+      }
+      if (!instance_top_views.empty())
+        clear_instance_top_views();
+      // Now we can free our region tree context
+      runtime->free_region_tree_context(tree_context);
     }
 
     //--------------------------------------------------------------------------

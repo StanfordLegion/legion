@@ -1047,6 +1047,8 @@ namespace Legion {
       static void handle_version_owner_response(Deserializer &derez,
                                                 Runtime *runtime);
     public:
+      void invalidate_remote_contexts(void);
+      void clear_instance_top_views(void);
       void free_remote_contexts(void);
       void send_remote_context(AddressSpaceID remote_instance, 
                                RemoteContext *target);
@@ -1256,6 +1258,7 @@ namespace Legion {
       virtual void log_once(Realm::LoggerMessage &message) const;
     public:
       virtual InnerContext* find_parent_physical_context(unsigned index);
+      virtual void invalidate_region_tree_contexts(void);
     public:
       // Interface to operations performed by a context
       virtual IndexSpace create_index_space(RegionTreeForest *forest,

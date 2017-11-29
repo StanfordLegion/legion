@@ -1124,7 +1124,7 @@ namespace Legion {
       };
     public:
       ShardManager(Runtime *rt, ReplicationID repl_id, 
-                   bool control, size_t total_shards,
+                   bool control, bool top, size_t total_shards,
                    AddressSpaceID owner_space, SingleTask *original = NULL,
                    RtBarrier startup_barrier = RtBarrier::NO_RT_BARRIER);
       ShardManager(const ShardManager &rhs);
@@ -1211,6 +1211,7 @@ namespace Legion {
       const size_t total_shards;
       SingleTask *const original_task;
       const bool control_replicated;
+      const bool top_level_task;
     protected:
       Reservation                      manager_lock;
       // Inheritted from Mapper::SelectShardingFunctorInput

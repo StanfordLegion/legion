@@ -1505,6 +1505,9 @@ namespace Legion {
       // No need to hold references in general, but we do have to hold
       // them if we are the root child of a composite view subtree
       LegionMap<VersionState*,FieldMask>::aligned version_states;
+      // Only used on the owner node to track the set of version 
+      // states on which we hold valid references
+      std::vector<VersionState*> *valid_version_states;
     protected:
       // Keep track of the fields for which we still need captures
       FieldMask uncaptured_fields;

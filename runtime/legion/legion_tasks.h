@@ -832,6 +832,7 @@ namespace Legion {
       virtual void activate(void); 
       virtual void deactivate(void);
       virtual bool is_shard_task(void) const { return true; }
+      virtual bool is_top_level_task(void) const; 
     public:
       virtual void trigger_dependence_analysis(void);
       virtual void resolve_false(bool speculated, bool launched);

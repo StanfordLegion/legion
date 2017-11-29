@@ -6687,7 +6687,13 @@ namespace Legion {
         {
           for (std::vector<CompositeView*>::const_iterator it = 
                 to_erase.begin(); it != to_erase.end(); it++)
+          {
             nested_composite_views.erase(*it);
+            // Remove our nested valid and gc references
+            (*it)->remove_nested_valid_ref(did);
+            if ((*it)->remove_nested_gc_ref(did))
+              delete (*it);
+          }
         }
         if (!replacements.empty())
         {
@@ -6697,7 +6703,12 @@ namespace Legion {
             NestedViewMap::iterator finder =
               nested_composite_views.find(it->first);
             if (finder == nested_composite_views.end())
+            {
               nested_composite_views.insert(*it);
+              // We need both gc and valid references on nested things
+              it->first->add_nested_gc_ref(did, mutator);
+              it->first->add_nested_valid_ref(did, mutator);
+            }
             else
               finder->second |= it->second;
           }
@@ -6922,7 +6933,7 @@ namespace Legion {
                                  DistributedID own_did, bool root_own)
       : CompositeBase(node_lock), logical_node(node), parent(p), 
         owner_did(own_did), root_owner(root_own),
-        node_lock(Reservation::create_reservation())
+        node_lock(Reservation::create_reservation()), valid_version_states(NULL)
     //--------------------------------------------------------------------------
     {
     }
@@ -7379,11 +7390,9 @@ namespace Legion {
         {
           state->add_nested_resource_ref(owner_did);
           // If we're the root owner then we also have to add our
+          // gc ref, but no valid ref since we don't own it
           if (root_owner)
-          {
             state->add_nested_gc_ref(owner_did, &mutator);
-            state->add_nested_valid_ref(owner_did, &mutator);
-          }
         }
       }
     }
@@ -7399,7 +7408,6 @@ namespace Legion {
       {
         LocalReferenceMutator mutator;
         nargs->state->add_nested_gc_ref(nargs->owner_did, &mutator);
-        nargs->state->add_nested_valid_ref(nargs->owner_did, &mutator);
       }
     }
 
@@ -7496,7 +7504,10 @@ namespace Legion {
         if (root_owner)
         {
           state->add_nested_gc_ref(owner_did, mutator);
+          if (valid_version_states == NULL)
+            valid_version_states = new std::vector<VersionState*>();
           state->add_nested_valid_ref(owner_did, mutator);
+          valid_version_states->push_back(state);
         }
       }
       else
@@ -7534,9 +7545,15 @@ namespace Legion {
       assert(root_owner); // should only be called on the root owner
 #endif
       // No need to check for deletion, we know we're also holding gc refs
-      for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it =
-            version_states.begin(); it != version_states.end(); it++)
-        it->first->remove_nested_valid_ref(owner_did, mutator);
+      if (valid_version_states != NULL)
+      {
+        for (std::vector<VersionState*>::const_iterator it = 
+              valid_version_states->begin(); it != 
+              valid_version_states->end(); it++)
+          (*it)->remove_nested_valid_ref(owner_did, mutator);
+        delete valid_version_states;
+        valid_version_states = NULL;
+      }
     }
 
     //--------------------------------------------------------------------------

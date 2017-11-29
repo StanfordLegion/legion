@@ -3006,10 +3006,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ShardManager::ShardManager(Runtime *rt, ReplicationID id, bool control, 
-                               size_t total, AddressSpaceID owner, 
+                               bool top, size_t total, AddressSpaceID owner, 
                                SingleTask *original/*= NULL*/, RtBarrier bar)
       : runtime(rt), repl_id(id), owner_space(owner), total_shards(total),
-        original_task(original), control_replicated(control),
+        original_task(original),control_replicated(control),top_level_task(top),
         manager_lock(Reservation::create_reservation()), address_spaces(NULL),
         local_mapping_complete(0), remote_mapping_complete(0),
         trigger_local_complete(0), trigger_remote_complete(0),
@@ -3061,7 +3061,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     ShardManager::ShardManager(const ShardManager &rhs)
       : runtime(NULL), repl_id(0), owner_space(0), total_shards(0),
-        original_task(NULL), control_replicated(false)
+        original_task(NULL), control_replicated(false), top_level_task(false)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -3222,6 +3222,7 @@ namespace Legion {
         rez.serialize(repl_id);
         rez.serialize(total_shards);
         rez.serialize(control_replicated);
+        rez.serialize(top_level_task);
         rez.serialize(startup_barrier);
         address_spaces->pack_mapping(rez);
         if (control_replicated)
@@ -3643,11 +3644,13 @@ namespace Legion {
       derez.deserialize(total_shards);
       bool control_repl;
       derez.deserialize(control_repl);
+      bool top_level_task;
+      derez.deserialize(top_level_task);
       RtBarrier startup_barrier;
       derez.deserialize(startup_barrier);
       ShardManager *manager = 
-        new ShardManager(runtime, repl_id, control_repl, total_shards, 
-                         source, NULL/*original*/, startup_barrier);
+        new ShardManager(runtime, repl_id, control_repl, top_level_task,
+                total_shards, source, NULL/*original*/, startup_barrier);
       manager->unpack_shards_and_launch(derez);
     }
 

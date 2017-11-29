@@ -3514,7 +3514,7 @@ namespace Legion {
         if (!output.control_replication_map.empty())
         {
           shard_manager = new ShardManager(runtime, repl_context, true/*cr*/,
-                                 total_shards, runtime->address_space, this);
+              is_top_level_task(), total_shards, runtime->address_space, this);
           if (output.control_replication_map.size() != total_shards)
             REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                           "Mapper %s specified a non-empty control replication "
@@ -3559,7 +3559,7 @@ namespace Legion {
         else
         {
           shard_manager = new ShardManager(runtime, repl_context, false/*cr*/,
-                                  total_shards, runtime->address_space, this);
+              is_top_level_task(), total_shards, runtime->address_space, this);
           if (!Runtime::unsafe_mapper)
           {
             // Currently we only support non-control replication of 
@@ -6782,6 +6782,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    bool ShardTask::is_top_level_task(void) const
+    //--------------------------------------------------------------------------
+    {
+      return shard_manager->top_level_task;
     }
 
     //--------------------------------------------------------------------------
