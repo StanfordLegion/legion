@@ -1529,6 +1529,7 @@ namespace Legion {
     public:
       ShardTask *const owner_shard;
       ShardManager *const shard_manager;
+      const size_t total_shards;
     protected:
       // These barriers are used to identify when close operations are mapped
       std::vector<RtBarrier>  close_mapped_barriers;

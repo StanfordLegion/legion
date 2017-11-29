@@ -2321,20 +2321,8 @@ namespace Legion {
     void ReplMustEpochOp::deactivate(void)
     //--------------------------------------------------------------------------
     {
-      deactivate_must_epoch_op();
-      if (processor_broadcast != NULL)
-        delete processor_broadcast;
-      if (mapping_exchange != NULL)
-        delete mapping_exchange;
-      if (dependence_exchange != NULL)
-        delete dependence_exchange;
-      if (completion_exchange != NULL)
-        delete completion_exchange;
+      deactivate_must_epoch_op(); 
       shard_single_tasks.clear();
-#ifdef DEBUG_LEGION
-      if (sharding_collective != NULL)
-        delete sharding_collective;
-#endif
       runtime->free_repl_epoch_op(this);
     }
 
@@ -2489,6 +2477,27 @@ namespace Legion {
           local_mapped, local_complete, tasks_mapped, tasks_complete);
       // Then we can distribute the tasks
       distribute_replicate_tasks();
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplMustEpochOp::trigger_commit(void)
+    //--------------------------------------------------------------------------
+    {
+      // We have to delete these here to make sure that they are
+      // unregistered with the context before the context is deleted
+      if (processor_broadcast != NULL)
+        delete processor_broadcast;
+      if (mapping_exchange != NULL)
+        delete mapping_exchange;
+      if (dependence_exchange != NULL)
+        delete dependence_exchange;
+      if (completion_exchange != NULL)
+        delete completion_exchange;
+#ifdef DEBUG_LEGION
+      if (sharding_collective != NULL)
+        delete sharding_collective;
+#endif
+      MustEpochOp::trigger_commit();
     }
 
     //--------------------------------------------------------------------------
@@ -5708,13 +5717,11 @@ namespace Legion {
                                                             int stage) const
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(tasks_mapped.size() == tasks_complete.size());
-#endif
       rez.serialize<size_t>(tasks_mapped.size());
       for (std::set<RtEvent>::const_iterator it = 
             tasks_mapped.begin(); it != tasks_mapped.end(); it++)
         rez.serialize(*it);
+      rez.serialize<size_t>(tasks_complete.size());
       for (std::set<ApEvent>::const_iterator it = 
             tasks_complete.begin(); it != tasks_complete.end(); it++)
         rez.serialize(*it);
@@ -5725,15 +5732,17 @@ namespace Legion {
                                                  Deserializer &derez, int stage)
     //--------------------------------------------------------------------------
     {
-      size_t num_events;
-      derez.deserialize(num_events);
-      for (unsigned idx = 0; idx < num_events; idx++)
+      size_t num_mapped;
+      derez.deserialize(num_mapped);
+      for (unsigned idx = 0; idx < num_mapped; idx++)
       {
         RtEvent mapped;
         derez.deserialize(mapped);
         tasks_mapped.insert(mapped);
       }
-      for (unsigned idx = 0; idx < num_events; idx++)
+      size_t num_complete;
+      derez.deserialize(num_complete);
+      for (unsigned idx = 0; idx < num_complete; idx++)
       {
         ApEvent complete;
         derez.deserialize(complete);

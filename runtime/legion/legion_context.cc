@@ -6828,6 +6828,7 @@ namespace Legion {
                                    UniqueID ctx_uid, ShardManager *manager)
       : InnerContext(rt, owner, full, reqs, parent_indexes, virt_mapped, 
           ctx_uid), owner_shard(owner), shard_manager(manager),
+        total_shards(shard_manager->total_shards),
         next_close_mapped_bar_index(0), next_view_close_bar_index(0), 
         index_space_allocator_shard(0), index_partition_allocator_shard(0),
         field_space_allocator_shard(0), field_allocator_shard(0),
@@ -6846,19 +6847,20 @@ namespace Legion {
 #endif
       // Configure our collective settings
       shard_collective_radix = Runtime::legion_collective_radix;
-      configure_collective_settings(manager->total_shards, owner->shard_id,
+      configure_collective_settings(total_shards, owner->shard_id,
           shard_collective_radix, shard_collective_log_radix,
           shard_collective_stages, shard_collective_participating_shards,
           shard_collective_last_radix, shard_collective_last_log_radix);
       // Set up some other data structures we might need
       clone_close_creators.resize(CONTROL_REPLICATION_COMMUNICATION_BARRIERS);
       for (unsigned idx = 0; idx < clone_close_creators.size(); idx++)
-        clone_close_creators[idx] = idx % shard_manager->total_shards;
+        clone_close_creators[idx] = idx % total_shards;
     }
 
     //--------------------------------------------------------------------------
     ReplicateContext::ReplicateContext(const ReplicateContext &rhs)
-      : InnerContext(*this), owner_shard(NULL), shard_manager(NULL)
+      : InnerContext(*this), owner_shard(NULL), 
+        shard_manager(NULL), total_shards(0)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -6873,15 +6875,13 @@ namespace Legion {
       replication_lock = Reservation::NO_RESERVATION;
       // We delete the barriers that we created
       for (unsigned idx = owner_shard->shard_id; 
-            idx < close_mapped_barriers.size(); 
-            idx += shard_manager->total_shards)
+            idx < close_mapped_barriers.size(); idx += total_shards)
       {
         Realm::Barrier bar = close_mapped_barriers[idx];
         bar.destroy_barrier();
       }
       for (unsigned idx = owner_shard->shard_id;
-            idx < view_close_barriers.size(); 
-            idx += shard_manager->total_shards)
+            idx < view_close_barriers.size(); idx += total_shards)
       {
         Realm::Barrier bar = view_close_barriers[idx];
         bar.destroy_barrier();
@@ -6891,7 +6891,7 @@ namespace Legion {
         for (unsigned idx2 = 0; idx2 < clone_close_barriers[idx1].size();idx2++)
           flat_bars.push_back(clone_close_barriers[idx1][idx2]);
       for (unsigned idx = owner_shard->shard_id;
-            idx < flat_bars.size(); idx += shard_manager->total_shards)
+            idx < flat_bars.size(); idx += total_shards)
       {
         Realm::Barrier bar = flat_bars[idx];
         bar.destroy_barrier();
@@ -7061,7 +7061,7 @@ namespace Legion {
       Runtime::advance_barrier(creation_barrier);
       register_index_space_creation(handle);
       index_space_allocator_shard++;
-      if (index_space_allocator_shard == shard_manager->total_shards)
+      if (index_space_allocator_shard == total_shards)
         index_space_allocator_shard = 0;
       return handle;
     }
@@ -7117,7 +7117,7 @@ namespace Legion {
       register_index_space_creation(handle);
       // Update our allocator shard
       index_space_allocator_shard++;
-      if (index_space_allocator_shard == shard_manager->total_shards)
+      if (index_space_allocator_shard == total_shards)
         index_space_allocator_shard = 0;
       return handle;
     }
@@ -7173,7 +7173,7 @@ namespace Legion {
       register_index_space_creation(handle);
       // Update the index space allocator shard
       index_space_allocator_shard++;
-      if (index_space_allocator_shard == shard_manager->total_shards)
+      if (index_space_allocator_shard == total_shards)
         index_space_allocator_shard = 0;
       return handle;
     }
@@ -7227,7 +7227,7 @@ namespace Legion {
       register_index_space_creation(handle);
       // Update the allocation shard
       index_space_allocator_shard++;
-      if (index_space_allocator_shard == shard_manager->total_shards)
+      if (index_space_allocator_shard == total_shards)
         index_space_allocator_shard = 0;
       return handle;
     }
@@ -7367,7 +7367,7 @@ namespace Legion {
       Runtime::advance_barrier(pending_partition_barrier);
       // Update the allocation shard
       index_partition_allocator_shard++;
-      if (index_partition_allocator_shard == shard_manager->total_shards)
+      if (index_partition_allocator_shard == total_shards)
         index_partition_allocator_shard = 0;
       return pid;
     }
@@ -7504,7 +7504,7 @@ namespace Legion {
       Runtime::advance_barrier(pending_partition_barrier);
       // Update our allocation shard
       index_partition_allocator_shard++;
-      if (index_partition_allocator_shard == shard_manager->total_shards)
+      if (index_partition_allocator_shard == total_shards)
         index_partition_allocator_shard = 0;
       return pid;
     }
@@ -7640,7 +7640,7 @@ namespace Legion {
       Runtime::advance_barrier(pending_partition_barrier); 
       // Update our allocation shard
       index_partition_allocator_shard++;
-      if (index_partition_allocator_shard == shard_manager->total_shards)
+      if (index_partition_allocator_shard == total_shards)
         index_partition_allocator_shard = 0;
       return pid;
     }
@@ -7773,7 +7773,7 @@ namespace Legion {
       Runtime::advance_barrier(pending_partition_barrier);
       // Update our allocation shard
       index_partition_allocator_shard++;
-      if (index_partition_allocator_shard == shard_manager->total_shards)
+      if (index_partition_allocator_shard == total_shards)
         index_partition_allocator_shard = 0;
       return pid;
     }
@@ -7812,7 +7812,7 @@ namespace Legion {
         forest->create_pending_cross_product(handle1, handle2, handles,
                                              kind, partition_color, term_event,
                                              owner_shard->shard_id,
-                                             shard_manager->total_shards);
+                                             total_shards);
         // Now broadcast the chosen color to all the other shards
         ValueBroadcast<LegionColor> color_collective(this, COLLECTIVE_LOC_15);
         color_collective.broadcast(partition_color);
@@ -7830,7 +7830,7 @@ namespace Legion {
         forest->create_pending_cross_product(handle1, handle2, handles,
                                              kind, partition_color, term_event,
                                              owner_shard->shard_id,
-                                             shard_manager->total_shards);
+                                             total_shards);
       }
       part_op->initialize_cross_product(this, handle1, handle2,partition_color);
       // Now we can add the operation to the queue
@@ -7844,7 +7844,7 @@ namespace Legion {
       }
       // Update our allocation shard
       index_partition_allocator_shard++;
-      if (index_partition_allocator_shard == shard_manager->total_shards)
+      if (index_partition_allocator_shard == total_shards)
         index_partition_allocator_shard = 0;
       return partition_color;
     }
@@ -7998,7 +7998,7 @@ namespace Legion {
       Runtime::advance_barrier(pending_partition_barrier);
       // Update our allocation shard
       index_partition_allocator_shard++;
-      if (index_partition_allocator_shard == shard_manager->total_shards)
+      if (index_partition_allocator_shard == total_shards)
         index_partition_allocator_shard = 0;
       return pid;
     }
@@ -8100,8 +8100,7 @@ namespace Legion {
       Runtime::advance_barrier(creation_barrier);
       part_op->initialize_by_field(this, pending_partition_barrier,
                                    pid, handle, parent_priv, fid, id, tag,
-                                   owner_shard->shard_id,
-                                   shard_manager->total_shards);
+                                   owner_shard->shard_id, total_shards);
 #ifdef DEBUG_LEGION
       part_op->set_sharding_collective(new ShardingGatherCollective(this, 
                                     0/*owner shard*/, COLLECTIVE_LOC_38));
@@ -8130,7 +8129,7 @@ namespace Legion {
         remap_unmapped_regions(current_trace, unmapped_regions);
       // Update our allocation shard
       index_partition_allocator_shard++;
-      if (index_partition_allocator_shard == shard_manager->total_shards)
+      if (index_partition_allocator_shard == total_shards)
         index_partition_allocator_shard = 0;
       return pid;
     }
@@ -8267,7 +8266,7 @@ namespace Legion {
         remap_unmapped_regions(current_trace, unmapped_regions);
       // Update our allocation shard
       index_partition_allocator_shard++;
-      if (index_partition_allocator_shard == shard_manager->total_shards)
+      if (index_partition_allocator_shard == total_shards)
         index_partition_allocator_shard = 0;
       return pid;
     }
@@ -8404,7 +8403,7 @@ namespace Legion {
         remap_unmapped_regions(current_trace, unmapped_regions);
       // Update our allocation shard
       index_partition_allocator_shard++;
-      if (index_partition_allocator_shard == shard_manager->total_shards)
+      if (index_partition_allocator_shard == total_shards)
         index_partition_allocator_shard = 0;
       return pid;
     }
@@ -8550,7 +8549,7 @@ namespace Legion {
         remap_unmapped_regions(current_trace, unmapped_regions);
       // Update our allocation shard
       index_partition_allocator_shard++;
-      if (index_partition_allocator_shard == shard_manager->total_shards)
+      if (index_partition_allocator_shard == total_shards)
         index_partition_allocator_shard = 0;
       return pid;
     }
@@ -8689,7 +8688,7 @@ namespace Legion {
         remap_unmapped_regions(current_trace, unmapped_regions);
       // Update our allocation shard
       index_partition_allocator_shard++;
-      if (index_partition_allocator_shard == shard_manager->total_shards)
+      if (index_partition_allocator_shard == total_shards)
         index_partition_allocator_shard = 0;
       return pid;
     }
@@ -8799,7 +8798,7 @@ namespace Legion {
       Runtime::advance_barrier(creation_barrier);
       // Update our allocation shard
       index_partition_allocator_shard++;
-      if (index_partition_allocator_shard == shard_manager->total_shards)
+      if (index_partition_allocator_shard == total_shards)
         index_partition_allocator_shard = 0;
       return pid;
     }
@@ -8972,7 +8971,7 @@ namespace Legion {
       register_field_space_creation(space);
       // Update the allocator
       field_space_allocator_shard++;
-      if (field_space_allocator_shard == shard_manager->total_shards)
+      if (field_space_allocator_shard == total_shards)
         field_space_allocator_shard = 0;
       return space;
     }
@@ -9037,7 +9036,7 @@ namespace Legion {
       register_field_creation(space, fid, local);
       // Update the allocator
       field_allocator_shard++;
-      if (field_allocator_shard == shard_manager->total_shards)
+      if (field_allocator_shard == total_shards)
         field_allocator_shard = 0;
       return fid;
     }
@@ -9130,7 +9129,7 @@ namespace Legion {
       register_region_creation(handle);
       // Update the allocator shard
       logical_region_allocator_shard++;
-      if (logical_region_allocator_shard == shard_manager->total_shards)
+      if (logical_region_allocator_shard == total_shards)
         logical_region_allocator_shard = 0;
       return handle;
     }
@@ -9987,7 +9986,7 @@ namespace Legion {
       // Do the normal inner pack with replicate true
       InnerContext::pack_remote_context(rez, target, true/*replicate*/);
       // Then pack our additional information
-      rez.serialize<size_t>(shard_manager->total_shards);
+      rez.serialize<size_t>(total_shards);
       rez.serialize(shard_manager->repl_id);
     }
 
@@ -10037,7 +10036,7 @@ namespace Legion {
           {
             // We're the one to make it and broadcast it
             RtBarrier bar(
-                Realm::Barrier::create_barrier(shard_manager->total_shards));  
+                Realm::Barrier::create_barrier(total_shards));  
             // Broadcast it
             shard_manager->broadcast_clone_barrier(close_index, clone_index, 
                 bar, runtime->address_space);
@@ -10045,7 +10044,7 @@ namespace Legion {
           // Update for the next time around
           clone_close_creators[close_index]++;
           // Reset back to shard 0 if we wrap around
-          if (clone_close_creators[close_index] == shard_manager->total_shards)
+          if (clone_close_creators[close_index] == total_shards)
             clone_close_creators[close_index] = 0;
           // No matter if we made it or not we should be able to get it now
           RtBarrier bar = find_clone_barrier(close_index, clone_index);
@@ -10371,6 +10370,8 @@ namespace Legion {
       ReclaimFutureMapArgs args;
       args.ctx = this;
       args.impl = map;
+      // Add a reference to the context to prevent premature deletion
+      this->add_reference();
       runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY, map->op,
                           Runtime::protect_event(map->future_map_barrier));
     }
@@ -10422,6 +10423,8 @@ namespace Legion {
     {
       const ReclaimFutureMapArgs *recl_args = (const ReclaimFutureMapArgs*)arg;
       recl_args->ctx->unregister_future_map(recl_args->impl);
+      if (recl_args->ctx->remove_reference())
+        delete recl_args->ctx;
     }
 
     //--------------------------------------------------------------------------

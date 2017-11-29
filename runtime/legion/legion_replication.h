@@ -1024,6 +1024,7 @@ namespace Legion {
       virtual MapperManager* invoke_mapper(void);
       virtual void map_and_distribute(std::set<RtEvent> &tasks_mapped,
                                       std::set<ApEvent> &tasks_complete);
+      virtual void trigger_commit(void);
       void map_replicate_tasks(void) const;
       void distribute_replicate_tasks(void) const;
     public:
