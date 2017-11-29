@@ -9429,6 +9429,11 @@ namespace Legion {
       layout_constraints_lock = Reservation::NO_RESERVATION;
       memory_manager_lock.destroy_reservation();
       memory_manager_lock = Reservation::NO_RESERVATION; 
+      for (std::map<Memory,MemoryManager*>::const_iterator it =
+            memory_managers.begin(); it != memory_managers.end(); it++)
+      {
+        delete it->second;
+      }
       memory_managers.clear();
       projection_lock.destroy_reservation();
       projection_lock = Reservation::NO_RESERVATION;
