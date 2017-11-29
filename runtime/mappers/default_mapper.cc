@@ -1696,7 +1696,7 @@ namespace Legion {
       // Get the variant that we are going to use to map this task
       VariantInfo chosen = default_find_preferred_variant(task, ctx,
                         true/*needs tight bound*/, true/*cache*/, target_kind);
-      if (chosen.is_replicable)
+      if (chosen.is_replicable && (target_kind == Processor::LOC_PROC))
       {
         // Place on replicate on each node by default
         assert(remote_cpus.size() == total_nodes);
@@ -1771,13 +1771,16 @@ namespace Legion {
       }
       else
       {
-        log_mapper.warning("WARNING: Default mapper was unable to locate "
-                           "a replicable task variant for the top-level "
-                           "task during a multi-node execution! We STRONGLY "
-                           "encourage users to make their top-level tasks "
-                           "replicable to avoid sequential bottlenecks on "
-                           "one node during the execution of an "
-                           "application!");
+        // Only issue this warning for CPU processors for the moment
+        // since that's all our code above supports for control replication
+        if (target_kind == Processor::LOC_PROC)
+          log_mapper.warning("WARNING: Default mapper was unable to locate "
+                             "a replicable task variant for the top-level "
+                             "task during a multi-node execution! We STRONGLY "
+                             "encourage users to make their top-level tasks "
+                             "replicable to avoid sequential bottlenecks on "
+                             "one node during the execution of an "
+                             "application!");
         output.task_mappings.resize(1);
         map_task(ctx, task, input, output.task_mappings[0]);
       }

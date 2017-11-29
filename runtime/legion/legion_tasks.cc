@@ -3340,6 +3340,9 @@ namespace Legion {
         {
           PhysicalManager *manager = instances[idx].get_manager();
           if (manager->conflicts(constraints))
+          {
+            if (local_mapper == NULL)
+              local_mapper = runtime->find_mapper(current_proc, map_id);
             REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                           "Invalid mapper output. Mapper %s selected variant "
                           "%ld for task %s (ID %lld). But instance selected "
@@ -3347,6 +3350,7 @@ namespace Legion {
                           "corresponding constraints.", 
                           local_mapper->get_mapper_name(), impl->vid,
                           get_task_name(), get_unique_id(), it->first)
+          }
         }
       }
       // Now we can test against the execution constraints
@@ -3357,6 +3361,9 @@ namespace Legion {
       if (execution_constraints.processor_constraint.is_valid() &&
           (execution_constraints.processor_constraint.get_kind() != 
            this->target_proc.kind()))
+      {
+        if (local_mapper == NULL)
+          local_mapper = runtime->find_mapper(current_proc, map_id);
         REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                       "Invalid mapper output. Mapper %s selected variant %ld "
                       "for task %s (ID %lld). However, this variant has a "
@@ -3367,6 +3374,7 @@ namespace Legion {
                         execution_constraints.processor_constraint.get_kind()),
                       this->target_proc.id, Processor::get_kind_name(
                         this->target_proc.kind()))
+      }
       // Then check the colocation constraints
       for (std::vector<ColocationConstraint>::const_iterator con_it = 
             execution_constraints.colocation_constraints.begin(); con_it !=
@@ -3410,6 +3418,9 @@ namespace Legion {
           else
           {
             if (regions[*it].region.get_field_space() != handle)
+            {
+              if (local_mapper == NULL)
+                local_mapper = runtime->find_mapper(current_proc, map_id);
               REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                             "Invalid mapper output. Mapper %s selected variant "
                             "%ld for task %s (ID %lld). However, this variant "
@@ -3419,6 +3430,7 @@ namespace Legion {
                             local_mapper->get_mapper_name(), impl->vid, 
                             get_task_name(), get_unique_id(), 
                             *(con_it->indexes.begin()), *it)
+            }
           }
           instances[idx] = const_cast<InstanceSet*>(&physical_instances[*it]);
         }
@@ -3430,6 +3442,8 @@ namespace Legion {
           // Used for translating the indexes back from their linearized form
           std::vector<unsigned> lin_indexes(con_it->indexes.begin(),
                                             con_it->indexes.end());
+          if (local_mapper == NULL)
+            local_mapper = runtime->find_mapper(current_proc, map_id);
           REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                         "Invalid mapper output. Mapper %s selected variant "
                         "%ld for task %s (ID %lld). However, this variant "
