@@ -175,6 +175,7 @@ namespace Realm {
       static Barrier::timestamp_t barrier_adjustment_timestamp;
 
       BarrierImpl(void);
+      ~BarrierImpl(void);
 
       void init(ID _me, unsigned _init_owner);
 

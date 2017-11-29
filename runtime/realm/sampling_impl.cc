@@ -374,6 +374,9 @@ namespace Realm {
   {
     if(is_default)
       DefaultSamplerHandler::get_handler().remove_default_sampler(this);
+
+    delete sampling_start;
+    delete sampling_time;
   }
 
   void SamplingProfilerImpl::flush_data(void)

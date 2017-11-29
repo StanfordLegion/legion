@@ -192,6 +192,14 @@ function data.zip(...)
   return result
 end
 
+function data.flatten(list)
+  local result = terralib.newlist()
+  for _, sublist in ipairs(list) do
+    result:insertall(sublist)
+  end
+  return result
+end
+
 function data.dict(list)
   local result = {}
   for _, pair in ipairs(list) do

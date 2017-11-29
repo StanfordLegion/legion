@@ -28,6 +28,7 @@ namespace Realm {
   template <typename LT, typename IT>
   DynamicTableNodeBase<LT, IT>::DynamicTableNodeBase(int _level, IT _first_index, IT _last_index)
     : level(_level), first_index(_first_index), last_index(_last_index)
+    , next_alloced_node(0)
   {}
 
   template <typename LT, typename IT>
@@ -58,12 +59,20 @@ namespace Realm {
   template <typename ALLOCATOR>
   DynamicTable<ALLOCATOR>::DynamicTable(void)
     : root(0)
+    , first_alloced_node(0)
   {}
 
   template <typename ALLOCATOR>
   DynamicTable<ALLOCATOR>::~DynamicTable(void)
   {
-    delete root;
+    // instead of a recursive deletion search from the root, we follow the
+    //  list of nodes we allocated and delete directly
+    NodeBase *to_delete = first_alloced_node;
+    while(to_delete) {
+      NodeBase *next = to_delete->next_alloced_node;
+      delete to_delete;
+      to_delete = next;
+    }
   }
 
   template <typename ALLOCATOR>
@@ -155,6 +164,11 @@ namespace Realm {
       if(!root) {
 	// simple case - just create a root node at the level we want
 	root = new_tree_node(level_needed, 0, elems_addressable - 1, owner, free_list);
+	// we're always first to add a node, so no race conditions here
+	bool ok = __sync_bool_compare_and_swap(&first_alloced_node,
+					       0,
+					       root);
+	assert(ok);
       } else {
 	// some of the tree already exists - add new layers on top
 	while(root->level < level_needed) {
@@ -165,6 +179,15 @@ namespace Realm {
 	  typename ALLOCATOR::INNER_TYPE *inner = static_cast<typename ALLOCATOR::INNER_TYPE *>(parent);
 	  inner->elems[0] = root;
 	  root = parent;
+	  // this is not synchronized against threads that might be adding
+	  //  interior/leaf nodes, so CAS loop is required
+	  while(true) {
+	    NodeBase *cur_first = first_alloced_node;
+	    parent->next_alloced_node = cur_first;
+	    if(__sync_bool_compare_and_swap(&first_alloced_node,
+					    cur_first,
+					    parent)) break;
+	  }
 	}
       }
       n = root;
@@ -193,15 +216,25 @@ namespace Realm {
 	inner->lock.lock();
 
 	// now that lock is held, see if we really need to make new node
-	if(inner->elems[i] == 0) {
+	child = inner->elems[i];
+	if(child == 0) {
 	  int child_level = inner->level - 1;
 	  int child_shift = (ALLOCATOR::LEAF_BITS + child_level * ALLOCATOR::INNER_BITS);
 	  IT child_first = inner->first_index + (i << child_shift);
 	  IT child_last = inner->first_index + ((i + 1) << child_shift) - 1;
 
-	  inner->elems[i] = new_tree_node(child_level, child_first, child_last, owner, free_list);
+	  child = new_tree_node(child_level, child_first, child_last, owner, free_list);
+	  inner->elems[i] = child;
+	  // this is not synchronized against threads that might be adding
+	  //  parent or other interior/leaf nodes, so CAS loop is required
+	  while(true) {
+	    NodeBase *cur_first = first_alloced_node;
+	    child->next_alloced_node = cur_first;
+	    if(__sync_bool_compare_and_swap(&first_alloced_node,
+					    cur_first,
+					    child)) break;
+	  }
 	}
-	child = inner->elems[i];
 
 	inner->lock.unlock();
       }

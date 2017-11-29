@@ -147,6 +147,8 @@ namespace Realm {
 
     virtual ~CustomSerdezUntyped(void);
 
+    virtual CustomSerdezUntyped *clone(void) const = 0;
+
     // each operator exists in two forms: single-element and strided-array-of-elements
 
     // computes the number of bytes needed for the serialization of 'val'

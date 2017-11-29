@@ -370,6 +370,8 @@ namespace Legion {
       LG_RECLAIM_FUTURE_MAP_TASK_ID,
       LG_TIGHTEN_INDEX_SPACE_TASK_ID,
       LG_DEFER_VERSION_BROADCAST_TASK_ID,
+      LG_REMOTE_PHYSICAL_REQUEST_TASK_ID,
+      LG_REMOTE_PHYSICAL_RESPONSE_TASK_ID,
       LG_PROF_OUTPUT_TASK_ID,
       LG_MESSAGE_ID, // These two must be the last two
       LG_RETRY_SHUTDOWN_TASK_ID,
@@ -474,6 +476,8 @@ namespace Legion {
         "Reclaim Future Map",                                     \
         "Tighten Index Space",                                    \
         "Defer Version Broadcast",                                \
+        "Remote Physical Context Request",                        \
+        "Remote Physical Context Response",                       \
         "Legion Prof Early Output",                               \
         "Remote Message",                                         \
         "Retry Shutdown",                                         \

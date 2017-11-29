@@ -3433,6 +3433,8 @@ namespace Realm {
       }
 
       ChannelManager::~ChannelManager(void) {
+	// these are deleted by runtime now
+#if 0
         if (memcpy_channel)
           delete memcpy_channel;
         if (gasnet_read_channel)
@@ -3463,6 +3465,7 @@ namespace Realm {
         for (it = gpu_peer_fb_channels.begin(); it != gpu_peer_fb_channels.end(); it++) {
           delete it->second;
         }
+#endif
 #endif
       }
 

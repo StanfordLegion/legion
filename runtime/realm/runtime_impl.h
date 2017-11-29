@@ -237,8 +237,8 @@ namespace Realm {
     public:
       MachineImpl *machine;
 
-      std::map<ReductionOpID, const ReductionOpUntyped *> reduce_op_table;
-      std::map<CustomSerdezID, const CustomSerdezUntyped *> custom_serdez_table;
+      std::map<ReductionOpID, ReductionOpUntyped *> reduce_op_table;
+      std::map<CustomSerdezID, CustomSerdezUntyped *> custom_serdez_table;
 
 #ifdef NODE_LOGGING
       std::string prefix;
@@ -296,6 +296,12 @@ namespace Realm {
 
     protected:
       ID::IDType num_local_memories, num_local_ib_memories, num_local_processors;
+
+#ifndef USE_GASNET
+      // without gasnet, we fake registered memory with a normal malloc
+      void *nongasnet_regmem_base;
+      void *nongasnet_reg_ib_mem_base;
+#endif
 
       ModuleRegistrar module_registrar;
       std::vector<Module *> modules;
