@@ -510,7 +510,9 @@ namespace Legion {
       static inline bool physical_sort_func(
                          const std::pair<PhysicalInstance,unsigned> &left,
                          const std::pair<PhysicalInstance,unsigned> &right)
-    { return (left.second < right.second); }
+        { return (left.second < right.second); }
+      static inline bool point_sort_func(const Task *t1, const Task *t2)
+        { return (t1->index_point < t2->index_point); }
     protected:
       const Processor       local_proc;
       const Processor::Kind local_kind;

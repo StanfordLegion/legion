@@ -3498,9 +3498,12 @@ namespace Legion {
                             << " tasks to AS " << curr_as->first;
 
 	  // assign tasks in this group to processors in this space
-	  for(std::set<const Task *>::const_iterator it2 = it->begin();
-	      it2 != it->end();
-	      ++it2) {
+          // we sort them by their index point in order to ensure that
+          // this process is deterministic for dynamic control replication
+          std::vector<const Task*> point_tasks(it->begin(), it->end());
+          std::sort(point_tasks.begin(), point_tasks.end(), point_sort_func);
+          for (std::vector<const Task*>::const_iterator it2 = 
+                point_tasks.begin(); it2 != point_tasks.end(); ++it2) {
 	    target_procs[*it2] = curr_as->second.front();
 	    curr_as->second.pop_front();
 	    n_left--;
