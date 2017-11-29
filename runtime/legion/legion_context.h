@@ -1135,6 +1135,29 @@ namespace Legion {
      */
     class RemoteContext : public InnerContext {
     public:
+      struct RemotePhysicalRequestArgs :
+        public LgTaskArgs<RemotePhysicalRequestArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_REMOTE_PHYSICAL_REQUEST_TASK_ID;
+      public:
+        UniqueID context_uid;
+        RemoteContext *target;
+        unsigned index;
+        AddressSpaceID source;
+        RtUserEvent to_trigger;
+        Runtime *runtime;
+      };
+      struct RemotePhysicalResponseArgs : 
+        public LgTaskArgs<RemotePhysicalResponseArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_REMOTE_PHYSICAL_RESPONSE_TASK_ID;
+      public:
+        RemoteContext *target;
+        unsigned index;
+        UniqueID result_uid;
+        Runtime *runtime;
+      };
+    public:
       RemoteContext(Runtime *runtime, UniqueID context_uid);
       RemoteContext(const RemoteContext &rhs);
       virtual ~RemoteContext(void);
@@ -1167,9 +1190,11 @@ namespace Legion {
     public:
       static void handle_physical_request(Deserializer &derez,
                       Runtime *runtime, AddressSpaceID source);
+      static void defer_physical_request(const void *args);
       void set_physical_context_result(unsigned index, InnerContext *result);
       static void handle_physical_response(Deserializer &derez, 
                                            Runtime *runtime);
+      static void defer_physical_response(const void *args);
     protected:
       UniqueID parent_context_uid;
       TaskContext *parent_ctx;

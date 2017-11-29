@@ -13615,11 +13615,9 @@ namespace Legion {
                                                         Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      // This can't go on the context virtual channel due to the possiblility
-      // of deadlock in the case where we need to page in the result context
       find_messenger(target)->send_message(rez,
           SEND_REMOTE_CONTEXT_PHYSICAL_RESPONSE,
-          DEFAULT_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+          CONTEXT_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
     }
 
     //--------------------------------------------------------------------------
@@ -15302,6 +15300,9 @@ namespace Legion {
     void Runtime::free_distributed_id(DistributedID did)
     //--------------------------------------------------------------------------
     {
+      // Special case for did 0 on shutdown
+      if (did == 0)
+        return;
       did &= LEGION_DISTRIBUTED_ID_MASK;
 #ifdef DEBUG_LEGION
       // Should only be getting back our own DIDs
@@ -19525,6 +19526,10 @@ namespace Legion {
                               const void *userdata, size_t userlen, Processor p)
     //--------------------------------------------------------------------------
     {
+      // We can also finalize our virtual instance unless we're running with 
+      // separate runtime instances, in which case we'll just leak it
+      if (!Runtime::separate_runtime_instances)
+        VirtualManager::finalize_virtual_instance();
       // Finalize the runtime and then delete it
       Runtime *runtime = get_runtime(p);
       runtime->finalize_runtime();
@@ -20117,6 +20122,16 @@ namespace Legion {
         case LG_TIGHTEN_INDEX_SPACE_TASK_ID:
           {
             IndexSpaceNode::handle_tighten_index_space(args);
+            break;
+          }
+        case LG_REMOTE_PHYSICAL_REQUEST_TASK_ID:
+          {
+            RemoteContext::defer_physical_request(args);
+            break;
+          }
+        case LG_REMOTE_PHYSICAL_RESPONSE_TASK_ID:
+          {
+            RemoteContext::defer_physical_response(args);
             break;
           }
         case LG_PROF_OUTPUT_TASK_ID:

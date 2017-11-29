@@ -142,6 +142,8 @@ namespace Legion {
       : allocated_fields(mask), constraints(con), owner(NULL), total_dims(0)
     //--------------------------------------------------------------------------
     {
+      constraints->add_reference();
+      layout_lock = Reservation::NO_RESERVATION;
     }
 
     //--------------------------------------------------------------------------
@@ -159,8 +161,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       comp_cache.clear();
-      layout_lock.destroy_reservation();
-      layout_lock = Reservation::NO_RESERVATION;
+      if (layout_lock.exists())
+      {
+        layout_lock.destroy_reservation();
+        layout_lock = Reservation::NO_RESERVATION;
+      }
       if (constraints->remove_reference())
         delete (constraints);
     }
@@ -1829,8 +1834,6 @@ namespace Legion {
     VirtualManager::~VirtualManager(void)
     //--------------------------------------------------------------------------
     {
-      // this should never be deleted since it is a singleton
-      assert(false);
     }
 
     //--------------------------------------------------------------------------
@@ -1912,6 +1915,15 @@ namespace Legion {
       singleton = new VirtualManager(rt->forest, layout,pointer_constraint,did);
       // put a permenant resource reference on this so it is never deleted
       singleton->add_base_resource_ref(NEVER_GC_REF);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void VirtualManager::finalize_virtual_instance(void)
+    //--------------------------------------------------------------------------
+    {
+      VirtualManager *&singleton = get_singleton();
+      if (singleton->remove_base_resource_ref(NEVER_GC_REF))
+        delete singleton;
     }
 
     /////////////////////////////////////////////////////////////

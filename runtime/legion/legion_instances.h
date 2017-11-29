@@ -482,6 +482,7 @@ namespace Legion {
         { return get_singleton(); }
       static void initialize_virtual_instance(Runtime *runtime,
                                               DistributedID did);
+      static void finalize_virtual_instance(void);
     protected:
       static inline VirtualManager*& get_singleton(void)
       {

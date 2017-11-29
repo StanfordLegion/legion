@@ -7139,17 +7139,34 @@ namespace Legion {
       RtUserEvent to_trigger;
       derez.deserialize(to_trigger);
 
-      InnerContext *local = runtime->find_context(context_uid);
-      InnerContext *result = local->find_parent_physical_context(index);
+      // Always defer this in case it blocks, we can't block the virtual channel
+      RemotePhysicalRequestArgs args;
+      args.context_uid = context_uid;
+      args.target = target;
+      args.index = index;
+      args.source = source;
+      args.to_trigger = to_trigger;
+      args.runtime = runtime;
+      runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void RemoteContext::defer_physical_request(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const RemotePhysicalRequestArgs *rargs = 
+        (const RemotePhysicalRequestArgs*)args;
+      InnerContext *local = rargs->runtime->find_context(rargs->context_uid);
+      InnerContext *result = local->find_parent_physical_context(rargs->index);
       Serializer rez;
       {
         RezCheck z(rez);
-        rez.serialize(target);
-        rez.serialize(index);
+        rez.serialize(rargs->target);
+        rez.serialize(rargs->index);
         rez.serialize(result->context_uid);
-        rez.serialize(to_trigger);
+        rez.serialize(rargs->to_trigger);
       }
-      runtime->send_remote_context_physical_response(source, rez);
+      rargs->runtime->send_remote_context_physical_response(rargs->source, rez);
     }
 
     //--------------------------------------------------------------------------
@@ -7184,10 +7201,35 @@ namespace Legion {
       derez.deserialize(result_uid);
       RtUserEvent to_trigger;
       derez.deserialize(to_trigger);
+      InnerContext *result = runtime->find_context(result_uid, true/*weak*/);
+      if (result == NULL)
+      {
+        // Launch a continuation in case we need to page in the context
+        // We obviously can't block the virtual channel
+        RemotePhysicalResponseArgs args;
+        args.target = target;
+        args.index = index;
+        args.result_uid = result_uid;
+        args.runtime = runtime;
+        RtEvent done = 
+          runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY);
+        Runtime::trigger_event(to_trigger, done);
+      }
+      else
+      {
+        target->set_physical_context_result(index, result);
+        Runtime::trigger_event(to_trigger);
+      }
+    }
 
-      InnerContext *result = runtime->find_context(result_uid);
-      target->set_physical_context_result(index, result);
-      Runtime::trigger_event(to_trigger);
+    //--------------------------------------------------------------------------
+    /*static*/ void RemoteContext::defer_physical_response(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const RemotePhysicalResponseArgs *rargs = 
+        (const RemotePhysicalResponseArgs*)args;
+      InnerContext *result = rargs->runtime->find_context(rargs->result_uid);
+      rargs->target->set_physical_context_result(rargs->index, result);
     }
 
     /////////////////////////////////////////////////////////////
