@@ -6704,11 +6704,15 @@ namespace Legion {
         rez.serialize(it->second);
         // Always add a remote valid reference in case we get invalidated
         // by an advance before this message is received on the remote node
-#ifdef DEBUG_LEGION
-        assert(it->first->is_owner());
-#endif
         // This reference will be removed by the remote side after
         // it has registered the new version state
+        // The reason we don't need a mutator here is very subtle:
+        //  - If we're the owner, there are no effects
+        //  - If we're not the owner then the message will be put on
+        //    the virtual channel while we still hold our own valid 
+        //    reference here, so if we remove our valid reference
+        //    then it will be on the virtual channel after the add
+        //    so we can avoid premature collection
         it->first->add_base_valid_ref(REMOTE_DID_REF);
       }
     }
@@ -6757,12 +6761,24 @@ namespace Legion {
       // these can be fire and forget
       for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it = 
             current_update.begin(); it != current_update.end(); it++)
-        it->first->send_remote_valid_update(it->first->owner_space,
-                                            NULL, 1/*count*/, false/*add*/);
+      {
+        if (it->first->is_owner() && 
+            it->first->remove_base_valid_ref(REMOTE_DID_REF))
+          delete it->first;
+        else if (!it->first->is_owner())
+          it->first->send_remote_valid_update(it->first->owner_space,
+                                              NULL, 1/*count*/, false/*add*/);
+      }
       for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it = 
             previous_update.begin(); it != previous_update.end(); it++)
-        it->first->send_remote_valid_update(it->first->owner_space,
-                                            NULL, 1/*count*/, false/*add*/);
+      {
+        if (it->first->is_owner() && 
+            it->first->remove_base_valid_ref(REMOTE_DID_REF))
+          delete it->first;
+        else if (!it->first->is_owner())
+          it->first->send_remote_valid_update(it->first->owner_space,
+                                              NULL, 1/*count*/, false/*add*/);
+      }
       // Now we can trigger our done event
       Runtime::trigger_event(done);
     }
@@ -6798,13 +6814,8 @@ namespace Legion {
     {
       for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator
             it = source_infos.begin(); it != source_infos.end(); it++)
-      {
-#ifdef DEBUG_LEGION
-        assert(!it->first->is_owner());
-#endif
         target_infos[it->first->version_number].insert(it->first, 
                                             it->second, mutator);
-      }
     }
 
     //--------------------------------------------------------------------------
