@@ -6761,24 +6761,12 @@ namespace Legion {
       // these can be fire and forget
       for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it = 
             current_update.begin(); it != current_update.end(); it++)
-      {
-        if (it->first->is_owner() && 
-            it->first->remove_base_valid_ref(REMOTE_DID_REF))
-          delete it->first;
-        else if (!it->first->is_owner())
-          it->first->send_remote_valid_update(it->first->owner_space,
-                                              NULL, 1/*count*/, false/*add*/);
-      }
+        it->first->send_remote_valid_update(owner_space, NULL, 
+                                            1/*count*/, false/*add*/);
       for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it = 
             previous_update.begin(); it != previous_update.end(); it++)
-      {
-        if (it->first->is_owner() && 
-            it->first->remove_base_valid_ref(REMOTE_DID_REF))
-          delete it->first;
-        else if (!it->first->is_owner())
-          it->first->send_remote_valid_update(it->first->owner_space,
-                                              NULL, 1/*count*/, false/*add*/);
-      }
+        it->first->send_remote_valid_update(owner_space, NULL, 
+                                            1/*count*/, false/*add*/);
       // Now we can trigger our done event
       Runtime::trigger_event(done);
     }
