@@ -10477,8 +10477,27 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       LG_TASK_DESCRIPTIONS(lg_task_descriptions);
-      profiler = new LegionProfiler((local_utils.empty() ?
-                                     Processor::NO_PROC : utility_group),
+      // Check to see if we have any I/O processors, if we do then we'll do
+      // all our output on the I/O processors since we'll be writing to files 
+      // Otherwise we'll use our utility group, lacking even that then
+      // we'll just do it on whatever the executing processor is
+      Machine::ProcessorQuery local_io_procs(machine);
+      local_io_procs.local_address_space();
+      local_io_procs.only_kind(Processor::IO_PROC);
+      Processor target_proc_for_profiler = Processor::NO_PROC;
+      if (local_io_procs.count() > 1)
+      {
+        std::vector<Processor> io_procs;
+        for (Machine::ProcessorQuery::iterator it = local_io_procs.begin();
+              it != local_io_procs.end(); it++)
+          io_procs.push_back(*it);
+        target_proc_for_profiler = Processor::create_group(io_procs);
+      }
+      else if (local_io_procs.count() == 1)
+        target_proc_for_profiler = local_io_procs.first();
+      else if (!local_utils.empty())
+        target_proc_for_profiler = utility_group;
+      profiler = new LegionProfiler(target_proc_for_profiler,
                                     machine, this, LG_LAST_TASK_ID,
                                     lg_task_descriptions,
                                     Operation::LAST_OP_KIND,
@@ -21997,13 +22016,6 @@ namespace Legion {
         case LG_REMOTE_PHYSICAL_RESPONSE_TASK_ID:
           {
             RemoteContext::defer_physical_response(args);
-            break;
-          }
-        case LG_PROF_OUTPUT_TASK_ID:
-          {
-            const LegionProfiler::LgOutputTaskArgs *oargs = 
-              (const LegionProfiler::LgOutputTaskArgs*)args;
-            oargs->profiler->perform_intermediate_output();
             break;
           }
         case LG_RETRY_SHUTDOWN_TASK_ID:

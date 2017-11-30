@@ -319,12 +319,6 @@ namespace Legion {
         size_t id, id2;
         UniqueID op_id;
       };
-      struct LgOutputTaskArgs : public LgTaskArgs<LgOutputTaskArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_PROF_OUTPUT_TASK_ID;
-      public:
-        LegionProfiler *profiler;
-      };
     public:
       // Statically known information passed through the constructor
       // so that it can be deduplicated
@@ -421,9 +415,7 @@ namespace Legion {
       void decrement_total_outstanding_requests(unsigned cnt = 1);
 #endif
     public:
-      void increase_footprint(size_t diff);
-      bool decrease_footprint(size_t diff);
-      void perform_intermediate_output(void);
+      void update_footprint(size_t diff, LegionProfInstance *inst);
     private:
       void create_thread_local_profiling_instance(void);
     public:
@@ -447,10 +439,7 @@ namespace Legion {
 #endif
     private:
       // For knowing when we need to start dumping early
-      Processor local_io_proc;
       size_t total_memory_footprint;
-      bool output_pending; // not monotonic
-      bool finalizing; // monotonic
     };
 
     class DetailedProfiler {

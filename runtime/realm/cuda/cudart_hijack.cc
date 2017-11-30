@@ -54,7 +54,8 @@ namespace Realm {
 	std::cout << "unregistering fat binary " << fat_bin << ", handle = " << handle << std::endl;
 #endif
 	GlobalRegistrations::unregister_fat_binary(fat_bin);
-	// TODO: free storage for handle?
+
+	delete handle;
       }
 
       void __cudaRegisterVar(void **handle,

@@ -119,6 +119,7 @@ namespace Realm {
       std::vector<GPU *> gpus;
       void *zcmem_cpu_base, *zcib_cpu_base;
       GPUZCMemory *zcmem;
+      std::vector<void *> registered_host_ptrs;
     };
 
     REGISTER_REALM_MODULE(CudaModule);
