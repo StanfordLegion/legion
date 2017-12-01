@@ -3473,18 +3473,22 @@ local function generate_task_interfaces()
     tasks[variant.task] = true
   end
 
-  local task_iface = terralib.newlist()
+  local task_c_iface = terralib.newlist()
+  local task_cxx_iface = terralib.newlist()
   local task_impl = {}
   for task, _ in pairs(tasks) do
-    task_iface:insert(header_helper.generate_task_interface(task))
-    local name, impl = header_helper.generate_task_implementation(task)
-    task_impl[name] = impl
+    task_c_iface:insert(header_helper.generate_task_c_interface(task))
+    task_cxx_iface:insert(header_helper.generate_task_cxx_interface(task))
+    local definitions = header_helper.generate_task_implementation(task)
+    for _, definition in ipairs(definitions) do
+      task_impl[definition[1]] = definition[2]
+    end
   end
 
-  return task_iface:concat("\n\n"), task_impl
+  return task_c_iface:concat("\n\n"), task_cxx_iface:concat("\n\n"), task_impl
 end
 
-local function generate_header(header_filename, registration_name, task_iface)
+local function generate_header(header_filename, registration_name, task_c_iface, task_cxx_iface)
   local header_basename = header_helper.normalize_name(header_filename)
   return string.format(
 [[
@@ -3495,6 +3499,12 @@ local function generate_header(header_filename, registration_name, task_iface)
 
 #define LEGION_ENABLE_C_BINDINGS
 #include "legion.h"
+
+#ifdef __cplusplus
+#include "legion/legion_c_util.h"
+#endif
+
+// C API bindings
 
 #ifdef __cplusplus
 extern "C" {
@@ -3508,23 +3518,32 @@ void %s(void);
 }
 #endif
 
+// C++ API bindings
+
+#ifdef __cplusplus
+
+%s
+
+#endif
+
 #endif // __%s__
 ]],
   header_basename,
   header_basename,
   registration_name,
-  task_iface,
+  task_c_iface,
+  task_cxx_iface,
   header_basename)
 end
 
 local function write_header(header_filename)
   local registration_name = header_helper.normalize_name(header_filename) .. "_register"
 
-  local task_iface, task_impl = generate_task_interfaces()
+  local task_c_iface, task_cxx_iface, task_impl = generate_task_interfaces()
 
   local header = io.open(header_filename, "w")
   assert(header)
-  header:write(generate_header(header_filename, registration_name, task_iface))
+  header:write(generate_header(header_filename, registration_name, task_c_iface, task_cxx_iface))
   header:close()
 
   return registration_name, task_impl

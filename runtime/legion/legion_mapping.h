@@ -1598,7 +1598,7 @@ namespace Legion {
        * therefore must specify a 'chosen_functor' for the ShardingID.
        */
       struct MappingConstraint {
-        std::vector<Task*>                          constrained_tasks;
+        std::vector<const Task*>                    constrained_tasks;
         std::vector<unsigned>                       requirement_indexes;
         // tasks.size() == requirement_indexes.size()
       };

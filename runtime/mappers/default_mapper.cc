@@ -3520,7 +3520,7 @@ namespace Legion {
     Memory DefaultMapper::
       default_policy_select_constrained_instance_constraints(
                                   MapperContext ctx,
-                                  const std::vector</*const*/ Task *> &tasks,
+                                  const std::vector<const Task *> &tasks,
                                   const std::vector<unsigned> &req_indexes,
                                   const std::vector<Processor> &target_procs,
                                   const std::set<LogicalRegion> &needed_regions,
@@ -3773,7 +3773,7 @@ namespace Legion {
         std::set<FieldID> needed_fields;
         for (unsigned idx = 0; idx < constraint.constrained_tasks.size(); idx++)
         {
-          Task *task = constraint.constrained_tasks[idx];
+          const Task *task = constraint.constrained_tasks[idx];
           unsigned req_idx = constraint.requirement_indexes[idx];
           needed_regions.insert(task->regions[req_idx].region);
           needed_fields.insert(task->regions[req_idx].privilege_fields.begin(),
@@ -3783,7 +3783,7 @@ namespace Legion {
 	// Now delegate to a policy routine to decide on a memory and layout
 	// constraints for this constrained instance
 	std::vector<Processor> target_procs;
-	for(std::vector<Task *>::const_iterator it = 
+	for(std::vector<const Task *>::const_iterator it = 
             constraint.constrained_tasks.begin();
 	    it != constraint.constrained_tasks.end();
 	    ++it)

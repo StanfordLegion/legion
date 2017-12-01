@@ -30,9 +30,7 @@ where reads writes(r.{x, y}), reads(r.z) do
 end
 
 -- Save tasks to libembed_tasks.so
-local embed_tasks_lib = "embed_tasks"
-local embed_tasks_h = root_dir .. embed_tasks_lib .. ".h"
-local embed_tasks_so = root_dir .. "lib" .. embed_tasks_lib .. ".so"
+local embed_tasks_h = root_dir .. "embed_tasks.h"
+local embed_tasks_so = root_dir .. "libembed_tasks.so"
 regentlib.save_tasks(embed_tasks_h, embed_tasks_so)
-
-return embed_tasks_lib
+return "embed_tasks"
