@@ -6896,6 +6896,10 @@ namespace Legion {
         Realm::Barrier bar = flat_bars[idx];
         bar.destroy_barrier();
       }
+      // We clear out instance top view here since we know that all
+      // our sibling shards are done at this point too
+      if (!instance_top_views.empty())
+        clear_instance_top_views();
     }
 
     //--------------------------------------------------------------------------
@@ -7008,9 +7012,10 @@ namespace Legion {
           runtime->forest->invalidate_versions(tree_context,
                                    created_requirements[idx].region);
         }
-      }
-      if (!instance_top_views.empty())
-        clear_instance_top_views();
+      } 
+      // Cannot clear our instance top view references until we are deleted 
+      // as we might still need to help out our other sibling shards
+      
       // Now we can free our region tree context
       runtime->free_region_tree_context(tree_context);
     }
