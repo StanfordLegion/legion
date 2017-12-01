@@ -3476,8 +3476,10 @@ local function generate_task_interfaces()
   local task_impl = {}
   for task, _ in pairs(tasks) do
     task_iface:insert(header_helper.generate_task_interface(task))
-    local name, impl = header_helper.generate_task_implementation(task)
-    task_impl[name] = impl
+    local definitions = header_helper.generate_task_implementation(task)
+    for _, definition in ipairs(definitions) do
+      task_impl[definition[1]] = definition[2]
+    end
   end
 
   return task_iface:concat("\n\n"), task_impl

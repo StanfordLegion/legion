@@ -56,7 +56,15 @@ void top_level_task(const Task *task,
   legion_context_t c_context = CObjectWrapper::wrap(&c_ctx);
   legion_logical_region_t c_region = CObjectWrapper::wrap(region);
   legion_field_id_t c_fields[3] = {FID_X, FID_Y, FID_Z};
-  my_regent_task_call(c_runtime, c_context, c_region, c_region, c_fields, 3, 12345);
+
+  {
+    my_regent_task_launcher_t launcher = my_regent_task_launcher_create(legion_predicate_true(), 0, 0);
+    my_regent_task_launcher_add_argument_r(launcher, c_region, c_region, c_fields, 3, false);
+    my_regent_task_launcher_add_argument_x(launcher, 12345, false);
+    legion_future_t f = my_regent_task_launcher_execute(c_runtime, c_context, launcher);
+    my_regent_task_launcher_destroy(launcher);
+    legion_future_destroy(f);
+  }
 }
 
 int main(int argc, char **argv)

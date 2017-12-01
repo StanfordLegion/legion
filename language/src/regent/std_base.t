@@ -390,63 +390,63 @@ end
 base.types = {}
 
 function base.types.is_bounded_type(t)
-  return terralib.types.istype(t) and rawget(t, "is_bounded_type")
+  return terralib.types.istype(t) and rawget(t, "is_bounded_type") or false
 end
 
 function base.types.is_index_type(t)
-  return terralib.types.istype(t) and rawget(t, "is_index_type")
+  return terralib.types.istype(t) and rawget(t, "is_index_type") or false
 end
 
 function base.types.is_bounded_type(t)
-  return terralib.types.istype(t) and rawget(t, "is_bounded_type")
+  return terralib.types.istype(t) and rawget(t, "is_bounded_type") or false
 end
 
 function base.types.is_index_type(t)
-  return terralib.types.istype(t) and rawget(t, "is_index_type")
+  return terralib.types.istype(t) and rawget(t, "is_index_type") or false
 end
 
 function base.types.is_rect_type(t)
-  return terralib.types.istype(t) and rawget(t, "is_rect_type")
+  return terralib.types.istype(t) and rawget(t, "is_rect_type") or false
 end
 
 function base.types.is_ispace(t)
-  return terralib.types.istype(t) and rawget(t, "is_ispace")
+  return terralib.types.istype(t) and rawget(t, "is_ispace") or false
 end
 
 function base.types.is_region(t)
-  return terralib.types.istype(t) and rawget(t, "is_region")
+  return terralib.types.istype(t) and rawget(t, "is_region") or false
 end
 
 function base.types.is_partition(t)
-  return terralib.types.istype(t) and rawget(t, "is_partition")
+  return terralib.types.istype(t) and rawget(t, "is_partition") or false
 end
 
 function base.types.is_cross_product(t)
-  return terralib.types.istype(t) and rawget(t, "is_cross_product")
+  return terralib.types.istype(t) and rawget(t, "is_cross_product") or false
 end
 
 function base.types.is_vptr(t)
-  return terralib.types.istype(t) and rawget(t, "is_vpointer")
+  return terralib.types.istype(t) and rawget(t, "is_vpointer") or false
 end
 
 function base.types.is_sov(t)
-  return terralib.types.istype(t) and rawget(t, "is_struct_of_vectors")
+  return terralib.types.istype(t) and rawget(t, "is_struct_of_vectors") or false
 end
 
 function base.types.is_ref(t)
-  return terralib.types.istype(t) and rawget(t, "is_ref")
+  return terralib.types.istype(t) and rawget(t, "is_ref") or false
 end
 
 function base.types.is_rawref(t)
-  return terralib.types.istype(t) and rawget(t, "is_rawref")
+  return terralib.types.istype(t) and rawget(t, "is_rawref") or false
 end
 
 function base.types.is_future(t)
-  return terralib.types.istype(t) and rawget(t, "is_future")
+  return terralib.types.istype(t) and rawget(t, "is_future") or false
 end
 
 function base.types.is_list(t)
-  return terralib.types.istype(t) and rawget(t, "is_list")
+  return terralib.types.istype(t) and rawget(t, "is_list") or false
 end
 
 function base.types.is_list_of_regions(t)
@@ -462,15 +462,15 @@ function base.types.is_list_of_phase_barriers(t)
 end
 
 function base.types.is_phase_barrier(t)
-  return terralib.types.istype(t) and rawget(t, "is_phase_barrier")
+  return terralib.types.istype(t) and rawget(t, "is_phase_barrier") or false
 end
 
 function base.types.is_dynamic_collective(t)
-  return terralib.types.istype(t) and rawget(t, "is_dynamic_collective")
+  return terralib.types.istype(t) and rawget(t, "is_dynamic_collective") or false
 end
 
 function base.types.is_unpack_result(t)
-  return terralib.types.istype(t) and rawget(t, "is_unpack_result")
+  return terralib.types.istype(t) and rawget(t, "is_unpack_result") or false
 end
 
 function base.types.type_supports_privileges(t)
@@ -488,11 +488,11 @@ function base.types.type_is_opaque_to_field_accesses(t)
 end
 
 function base.types.is_ctor(t)
-  return terralib.types.istype(t) and rawget(t, "is_ctor")
+  return terralib.types.istype(t) and rawget(t, "is_ctor") or false
 end
 
 function base.types.is_fspace_instance(t)
-  return terralib.types.istype(t) and rawget(t, "is_fspace_instance")
+  return terralib.types.istype(t) and rawget(t, "is_fspace_instance") or false
 end
 
 function base.types.flatten_struct_fields(struct_type, pred)
