@@ -1403,7 +1403,7 @@ namespace Legion {
        * the mapping tag passed at the callsite in 'mapping_tag'.
        */
       struct MappingConstraint {
-        std::vector<Task*>                          constrained_tasks;
+        std::vector<const Task*>                    constrained_tasks;
         std::vector<unsigned>                       requirement_indexes;
         // tasks.size() == requirement_indexes.size()
       };
