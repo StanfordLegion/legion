@@ -1571,7 +1571,14 @@ namespace Legion {
       size_t footprint = __sync_add_and_fetch(&total_memory_footprint, diff);
       if (footprint > output_footprint_threshold)
       {
-        diff = inst->dump_inter(serializer);
+        if (!serializer->is_thread_safe())
+        {
+          // Need a lock to protect the serializer
+          AutoLock p_lock(profiler_lock);
+          diff = inst->dump_inter(serializer);
+        }
+        else
+          diff = inst->dump_inter(serializer);
 #ifdef DEBUG_LEGION
 #ifndef NDEBUG
         footprint = 
