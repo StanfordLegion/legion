@@ -65,31 +65,31 @@ local function get_task_params(task)
 
       local param_type = param:gettype()
 
-      local primary_type, primary_ctype
+      local terra_type, c_type, cxx_type
       if base.types.is_region(param_type) then
-        primary_type, primary_ctype = c.legion_logical_region_t, "legion_logical_region_t"
+        terra_type, c_type, cxx_type = c.legion_logical_region_t, "legion_logical_region_t", "Legion::LogicalRegion"
       elseif base.types.is_ispace(param_type) then
-        primary_type, primary_ctype = c.legion_index_space_t, "legion_index_space_t"
+        terra_type, c_type, cxx_type = c.legion_index_space_t, "legion_index_space_t", "Legion::IndexSpace"
       elseif param_type == int32 then
-        primary_type, primary_ctype = int32, "int32_t"
+        terra_type, c_type, cxx_type = int32, "int32_t",  "int32_t"
       elseif param_type == int64 then
-        primary_type, primary_ctype = int64, "int64_t"
+        terra_type, c_type, cxx_type = int64, "int64_t", "int64_t"
       elseif param_type == uint32 then
-        primary_type, primary_ctype = uint32, "uint32_t"
+        terra_type, c_type, cxx_type = uint32, "uint32_t", "uint32_t"
       elseif param_type == uint64 then
-        primary_type, primary_ctype = uint64, "uint64_t"
+        terra_type, c_type, cxx_type = uint64, "uint64_t", "uint64_t"
       else
         assert(false, "unknown type " .. tostring(param_type))
       end
 
-      assert(primary_type and primary_ctype)
-      result:insert({primary_type, primary_ctype, param:getname()})
+      assert(terra_type and c_type and cxx_type)
+      result:insert({terra_type, c_type, cxx_type, param:getname()})
 
       -- Add secondary symbols for special types
       if base.types.is_region(param_type) then
-        result:insert({c.legion_logical_region_t, "legion_logical_region_t", param:getname() .. "_parent"})
-        result:insert({&c.legion_field_id_t, "legion_field_id_t *", param:getname() .. "_fields"})
-        result:insert({c.size_t, "size_t", param:getname() .. "_num_fields"})
+        result:insert({c.legion_logical_region_t, "legion_logical_region_t", "Legion::LogicalRegion", param:getname() .. "_parent"})
+        result:insert({&c.legion_field_id_t, "const legion_field_id_t *", "const std::vector<Legion::FieldID> &", param:getname() .. "_fields"})
+        result:insert({c.size_t, "size_t", false, param:getname() .. "_num_fields"})
       end
 
       return result
@@ -99,8 +99,19 @@ end
 local function render_c_params(param_list)
   local result = terralib.newlist()
   for _, param in ipairs(param_list) do
-    local param_type, param_ctype, param_name = unpack(param)
-    result:insert(param_ctype .. " " .. header_helper.normalize_name(param_name))
+    local terra_type, c_type, cxx_type, param_name = unpack(param)
+    result:insert(c_type .. " " .. header_helper.normalize_name(param_name))
+  end
+  return result
+end
+
+local function render_cxx_params(param_list)
+  local result = terralib.newlist()
+  for _, param in ipairs(param_list) do
+    local terra_type, c_type, cxx_type, param_name = unpack(param)
+    if cxx_type then
+      result:insert(cxx_type .. " " .. header_helper.normalize_name(param_name))
+    end
   end
   return result
 end
@@ -111,7 +122,18 @@ local function render_c_proto(name, args, return_type)
     return_type, name, args:concat(", "))
 end
 
-function header_helper.generate_task_interface(task)
+local function render_c_def(name, args, return_type, body)
+  if return_type == nil then return_type = "" end
+  local result = terralib.newlist()
+  result:insert(string.format(
+    "%s %s(%s) {",
+    return_type, name, args:concat(", ")))
+  result:insertall(body:map(function(line) return "  " .. line end))
+  result:insert("}")
+  return result
+end
+
+function header_helper.generate_task_c_interface(task)
   local name = get_launcher_name(task)
 
   local launcher_type = name .. "_t"
@@ -150,7 +172,7 @@ function header_helper.generate_task_interface(task)
 
   local params = get_task_params(task)
   for _, param_list in ipairs(params) do
-    local param_name = header_helper.normalize_name(param_list[1][3])
+    local param_name = header_helper.normalize_name(param_list[1][4])
     local add_name = name .. "_add_argument_" .. param_name
     local add_args = render_c_params(param_list)
     add_args:insert(1, launcher_type .. " launcher")
@@ -160,6 +182,119 @@ function header_helper.generate_task_interface(task)
   end
 
   return result:concat("\n\n")
+end
+
+function header_helper.generate_task_cxx_interface(task)
+  local name = get_launcher_name(task)
+
+  local c_launcher_type = name .. "_t"
+
+  local c_create_name = name .. "_create"
+  local c_destroy_name = name .. "_destroy"
+  local c_execute_name = name .. "_execute"
+
+  local launcher_type = name
+
+  local predicate_field = "predicate"
+  local launcher_field = "launcher"
+
+  local ctor_name = launcher_type
+  local dtor_name = "~" .. launcher_type
+  local execute_name = "execute"
+
+  local ctor_args = terralib.newlist({
+    "Legion::Predicate pred = Legion::Predicate::TRUE_PRED",
+    "Legion::MapperID id = 0",
+    "Legion::MappingTagID tag = 0",
+  })
+  local ctor_def = render_c_def(
+    ctor_name, ctor_args, nil,
+    terralib.newlist({
+      "predicate = new Legion::Predicate(pred);",
+      "launcher = " .. c_create_name .. "(Legion::CObjectWrapper::wrap(predicate), id, tag);",
+    }))
+
+  local dtor_args = terralib.newlist()
+  local dtor_def = render_c_def(
+    dtor_name, dtor_args, nil,
+    terralib.newlist({
+      c_destroy_name .. "(launcher);",
+      "delete predicate;",
+    }))
+
+  local execute_args = terralib.newlist({
+    "Legion::Runtime *runtime",
+    "Legion::Context ctx",
+  })
+  local execute_def = render_c_def(
+    execute_name, execute_args, "Legion::Future",
+    terralib.newlist({
+        "legion_runtime_t c_runtime = Legion::CObjectWrapper::wrap(runtime);",
+        "Legion::CContext c_ctx(ctx);",
+        "legion_context_t c_context = Legion::CObjectWrapper::wrap(&c_ctx);",
+        "legion_future_t c_future = " .. c_execute_name .. "(c_runtime, c_context, launcher);",
+        "Legion::Future future = *Legion::CObjectWrapper::unwrap(c_future);",
+        "legion_future_destroy(c_future);",
+        "return future;",
+    }))
+
+  local body = terralib.newlist()
+  body:insertall(ctor_def)
+  body:insertall(dtor_def)
+  body:insertall(execute_def)
+
+  local task_param_symbols = task:get_param_symbols()
+  local params = get_task_params(task)
+  for i, param_list in ipairs(params) do
+    local param_name = header_helper.normalize_name(param_list[1][4])
+    local param_type = task_param_symbols[i]:gettype()
+
+    local c_add_name = name .. "_add_argument_" .. param_name
+    local add_name = "add_argument_" .. param_name
+
+    local add_args = render_cxx_params(param_list)
+    add_args:insert("bool overwrite = false")
+
+    local actions = terralib.newlist()
+
+    local c_add_args
+    if base.types.is_region(param_type) then
+      local region = param_list[1][4]
+      local parent = param_list[2][4]
+      local fields = param_list[3][4]
+      actions:insert("legion_logical_region_t c_region = Legion::CObjectWrapper::wrap(" .. region .. ");")
+      actions:insert("legion_logical_region_t c_parent = Legion::CObjectWrapper::wrap(" .. parent .. ");")
+      actions:insert("const legion_field_id_t *c_fields = &(" .. fields .. ".front());")
+      actions:insert("size_t c_num_fields = " .. fields .. ".size();")
+      c_add_args = terralib.newlist({"c_region", "c_parent", "c_fields", "c_num_fields"})
+    else
+      c_add_args = param_list:map(
+        function(param)
+          local terra_type, c_type, cxx_type, param_name = unpack(param)
+          return param_name
+        end)
+    end
+
+    c_add_args:insert(1, "launcher")
+    c_add_args:insert("overwrite")
+
+    actions:insert(
+      string.format("%s(%s);", c_add_name, c_add_args:concat(", ")))
+
+    local add_def = render_c_def(add_name, add_args, "void", actions)
+    body:insertall(add_def)
+  end
+
+  local result = terralib.newlist()
+  result:insert(string.format("class %s {", launcher_type))
+  result:insert("public:")
+  result:insertall(body:map(function(line) return "  " .. line end))
+  result:insert("private:")
+  result:insert(string.format("  Legion::Predicate *%s;", predicate_field))
+  result:insert(string.format("  %s %s;", c_launcher_type, launcher_field))
+  result:insert("};")
+
+  return result:concat("\n")
 end
 
 local function make_internal_launcher_state_types(params_struct_type)
@@ -184,7 +319,7 @@ local function make_create_launcher(task, launcher_name,
     -- Important: use calloc to ensure the param map is zeroed.
     var params_struct = [&params_struct_type](
       c.calloc(1, [terralib.sizeof(params_struct_type)]))
-    base.assert(params_struct ~= nil, ["malloc failed in " .. helper_name])
+    base.assert(params_struct ~= nil, ["calloc failed in " .. helper_name])
 
     var task_args : c.legion_task_argument_t
     task_args.args = params_struct
@@ -197,8 +332,9 @@ local function make_create_launcher(task, launcher_name,
       c.malloc([terralib.sizeof(state_type)]))
     base.assert(launcher_state ~= nil, ["malloc failed in " .. helper_name])
 
-    var args_provided = [&int8](c.malloc([#params]))
-    base.assert(args_provided ~= nil, ["malloc failed in " .. helper_name])
+    -- Important: use calloc to ensure provided map is zeroed.
+    var args_provided = [&int8](c.calloc([#params], 1))
+    base.assert(args_provided ~= nil, ["calloc failed in " .. helper_name])
 
     launcher_state.launcher = launcher
     launcher_state.task_args = params_struct
@@ -232,7 +368,7 @@ local function make_execute_launcher(launcher_name, wrapper_type, state_type, pa
     var launcher_state = [&state_type](wrapper.impl)
     [data.mapi(
        function(i, param_list)
-         local param_name = param_list[1][3]
+         local param_name = param_list[1][4]
          return quote
            base.assert(
                launcher_state.args_provided[i] == 1,
@@ -252,12 +388,12 @@ local function make_add_argument(launcher_name, wrapper_type, state_type,
                                  task, params_struct_type,
                                  param_i, param_list, task_param_symbol,
                                  param_field_id)
-  local param_name = header_helper.normalize_name(param_list[1][3])
+  local param_name = header_helper.normalize_name(param_list[1][4])
 
   local param_symbol = param_list:map(
     function(param)
-      local param_type, param_ctype, param_name = unpack(param)
-      return terralib.newsymbol(param_type, param_name)
+      local terra_type, c_type, cxx_type, param_name = unpack(param)
+      return terralib.newsymbol(terra_type, param_name)
     end)
 
   local param_type = task_param_symbol:gettype()
@@ -441,8 +577,8 @@ local function OLD_generate_task_implementation(task)
     function(param_list)
       return param_list:map(
         function(param)
-          local param_type, param_ctype, param_name = unpack(param)
-          return terralib.newsymbol(param_type, param_name)
+          local terra_type, c_type, cxx_type, param_name = unpack(param)
+          return terralib.newsymbol(terra_type, param_name)
         end)
     end)
 

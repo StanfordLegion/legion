@@ -19,7 +19,6 @@ local embed_tasks_lib = require("embed_tasks")
 -- Compile and execute embed.cc
 local exe
 local root_dir = arg[0]:match(".*/") or "./"
-os.execute("cat " .. root_dir .. "embed_tasks.h")
 do
   local runtime_dir = os.getenv("LG_RT_DIR") .. "/"
   local legion_dir = runtime_dir .. "legion/"
