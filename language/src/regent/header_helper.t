@@ -181,8 +181,9 @@ local function make_create_launcher(task, launcher_name,
   local terra helper(pred : c.legion_predicate_t,
                      id : c.legion_mapper_id_t,
                      tag : c.legion_mapping_tag_id_t)
+    -- Important: use calloc to ensure the param map is zeroed.
     var params_struct = [&params_struct_type](
-      c.malloc([terralib.sizeof(params_struct_type)]))
+      c.calloc(1, [terralib.sizeof(params_struct_type)]))
     base.assert(params_struct ~= nil, ["malloc failed in " .. helper_name])
 
     var task_args : c.legion_task_argument_t
