@@ -41,6 +41,7 @@ namespace Legion {
       LegionProfSerializer() {};
       virtual ~LegionProfSerializer() {};
 
+      virtual bool is_thread_safe(void) const = 0;
       // You must override the following functions in your implementation
       virtual void serialize(const LegionProfDesc::MessageDesc&) = 0;
       virtual void serialize(const LegionProfDesc::MapperCallDesc&) = 0;
@@ -82,6 +83,7 @@ namespace Legion {
 
       void writePreamble();
 
+      bool is_thread_safe(void) const { return false; }
       // Serialize Methods
       void serialize(const LegionProfDesc::MessageDesc&);
       void serialize(const LegionProfDesc::MapperCallDesc&);
@@ -157,6 +159,7 @@ namespace Legion {
       LegionProfASCIISerializer();
       ~LegionProfASCIISerializer();
 
+      bool is_thread_safe(void) const { return true; }
       // Serialize Methods
       void serialize(const LegionProfDesc::MessageDesc&);
       void serialize(const LegionProfDesc::MapperCallDesc&);
