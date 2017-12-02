@@ -1318,7 +1318,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (use_target_processor)
+      {
+        set_current_proc(target_proc);
         runtime->add_to_ready_queue(target_proc, this, wait_on);
+      }
       else
         runtime->add_to_ready_queue(current_proc, this, wait_on);
     }
