@@ -41,7 +41,7 @@ public:
   // instances constrained by a must epoch launch
   virtual Memory default_policy_select_constrained_instance_constraints(
 				    MapperContext ctx,
-				    const std::vector</*const*/ Legion::Task *> &tasks,
+				    const std::vector<const Legion::Task *> &tasks,
 				    const std::vector<unsigned> &req_indexes,
 				    const std::vector<Processor> &target_procs,
 				    const std::set<LogicalRegion> &needed_regions,
