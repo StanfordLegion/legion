@@ -2576,7 +2576,7 @@ namespace Legion {
       bool                                speculated;
     public:
       // Parent task (only guaranteed to be good for one recursion)
-      Task*                               parent_task;
+      const Task*                         parent_task;
     };
 
     /**
@@ -2613,7 +2613,7 @@ namespace Legion {
       DomainPoint                       index_point;
     public:
       // Parent task for the copy operation
-      Task*                             parent_task;
+      const Task*                       parent_task;
     };
 
     /**
@@ -2645,7 +2645,7 @@ namespace Legion {
       LayoutConstraintID                layout_constraint_id; 
     public:
       // Parent task for the inline operation
-      Task*                             parent_task;
+      const Task*                       parent_task;
     };
 
     /**
@@ -2678,7 +2678,7 @@ namespace Legion {
       std::vector<PhaseBarrier>         arrive_barriers;
     public:
       // Parent task for the acquire operation
-      Task*                             parent_task;
+      const Task*                       parent_task;
     };
 
     /**
@@ -2711,7 +2711,7 @@ namespace Legion {
       std::vector<PhaseBarrier>         arrive_barriers;
     public:
       // Parent task for the release operation
-      Task*                             parent_task;
+      const Task*                       parent_task;
     };
 
     /**
@@ -2743,7 +2743,7 @@ namespace Legion {
       RegionRequirement                 requirement;
     public:
       // Parent task for the inline operation
-      Task*                             parent_task;
+      const Task*                       parent_task;
     };
 
     /**
@@ -2780,7 +2780,7 @@ namespace Legion {
       DomainPoint                       index_point;
     public:
       // Parent task for the fill operation
-      Task*                           parent_task;
+      const Task*                       parent_task;
     };
 
     /**
@@ -2825,7 +2825,7 @@ namespace Legion {
       DomainPoint                         index_point;
     public:
       // Parent task for the partition operation
-      Task*                               parent_task;
+      const Task*                         parent_task;
     };
 
     //==========================================================================
