@@ -1291,6 +1291,35 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void MapperManager::invoke_must_epoch_select_sharding_functor(
+                                MustEpochOp *op,
+                                Mapper::SelectShardingFunctorInput *input,
+                                Mapper::MustEpochShardingFunctorOutput *output,
+                                bool first_invocation,
+                                MappingCallInfo *info)
+    //--------------------------------------------------------------------------
+    {
+      if (info == NULL)
+      {
+        RtEvent continuation_precondition;
+        info = begin_mapper_call(MUST_EPOCH_SELECT_SHARDING_FUNCTOR_CALL,
+                              op, first_invocation, continuation_precondition);
+        if (continuation_precondition.exists())
+        {
+          MapperContinuation3<MustEpochOp,
+                      Mapper::SelectShardingFunctorInput, 
+                      Mapper::MustEpochShardingFunctorOutput,
+                      &MapperManager::invoke_must_epoch_select_sharding_functor>
+                            continuation(this, op, input, output, info);
+          continuation.defer(runtime, continuation_precondition, op);
+          return;
+        }
+      }
+      mapper->select_sharding_functor(info, *op, *input, *output);
+      finish_mapper_call(info);
+    }
+
+    //--------------------------------------------------------------------------
     void MapperManager::invoke_map_must_epoch(MustEpochOp *op,
                                             Mapper::MapMustEpochInput *input,
                                             Mapper::MapMustEpochOutput *output,

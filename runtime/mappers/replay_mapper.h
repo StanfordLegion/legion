@@ -341,6 +341,11 @@ namespace Legion {
                                         const SelectTunableInput&   input,
                                               SelectTunableOutput&  output);
     public: // Must epoch mapping
+      virtual void select_sharding_functor(
+                                 const MapperContext                   ctx,
+                                 const MustEpoch&                      epoch,
+                                 const SelectShardingFunctorInput&     input,
+                                       MustEpochShardingFunctorOutput& output);
       virtual void map_must_epoch(const MapperContext           ctx,
                                   const MapMustEpochInput&      input,
                                         MapMustEpochOutput&     output);

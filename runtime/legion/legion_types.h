@@ -131,6 +131,7 @@ namespace Legion {
   class Close;
   class Fill;
   class Partition;
+  class MustEpoch;
   class Runtime;
   class MPILegionHandshake;
   // For backwards compatibility
@@ -530,6 +531,7 @@ namespace Legion {
       FILL_SELECT_SHARDING_FUNCTOR_CALL,
       CONFIGURE_CONTEXT_CALL,
       SELECT_TUNABLE_VALUE_CALL,
+      MUST_EPOCH_SELECT_SHARDING_FUNCTOR_CALL,
       MAP_MUST_EPOCH_CALL,
       MAP_DATAFLOW_GRAPH_CALL,
       SELECT_TASKS_TO_MAP_CALL,
@@ -590,6 +592,7 @@ namespace Legion {
       "select sharding functor (for fill)",         \
       "configure_context",                          \
       "select_tunable_value",                       \
+      "select sharding functor (for must epoch)",   \
       "map_must_epoch",                             \
       "map_dataflow_graph",                         \
       "select_tasks_to_map",                        \
@@ -1614,7 +1617,7 @@ namespace Legion {
     class FutureBroadcast;
     class FutureExchange;
     class FutureNameExchange;
-    class MustEpochProcessorBroadcast;
+    class MustEpochMappingBroadcast;
     class MustEpochMappingExchange;
 
 #define FRIEND_ALL_RUNTIME_CLASSES                          \
@@ -1716,6 +1719,7 @@ namespace Legion {
     friend class Internal::InstanceBuilder;                 \
     friend class Internal::FutureNameExchange;              \
     friend class Internal::MustEpochMappingExchange;        \
+    friend class Internal::MustEpochMappingBroadcast;       \
     friend class BindingLib::Utility;                       \
     friend class CObjectWrapper;                  
 

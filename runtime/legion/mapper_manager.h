@@ -296,6 +296,11 @@ namespace Legion {
                                        bool first_invocation = true,
                                        MappingCallInfo *info = NULL);
     public: // must epoch and graph mapper calls
+      void invoke_must_epoch_select_sharding_functor(MustEpochOp *op,
+                              Mapper::SelectShardingFunctorInput *input,
+                              Mapper::MustEpochShardingFunctorOutput *output,
+                              bool first_invocation = true,
+                              MappingCallInfo *info = NULL);                           
       void invoke_map_must_epoch(MustEpochOp *op,
                                  Mapper::MapMustEpochInput *input,
                                  Mapper::MapMustEpochOutput *output,

@@ -10049,14 +10049,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     MustEpochOp::MustEpochOp(Runtime *rt)
-      : Operation(rt)
+      : Operation(rt), MustEpoch()
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     MustEpochOp::MustEpochOp(const MustEpochOp &rhs)
-      : Operation(NULL)
+      : Operation(NULL), MustEpoch()
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -10076,6 +10076,27 @@ namespace Legion {
       // should never be called
       assert(false);
       return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    UniqueID MustEpochOp::get_unique_id(void) const
+    //--------------------------------------------------------------------------
+    {
+      return unique_op_id;
+    }
+
+    //--------------------------------------------------------------------------
+    unsigned MustEpochOp::get_context_index(void) const
+    //--------------------------------------------------------------------------
+    {
+      return context_index;
+    }
+
+    //--------------------------------------------------------------------------
+    int MustEpochOp::get_depth(void) const
+    //--------------------------------------------------------------------------
+    {
+      return (parent_ctx->get_depth() + 1); 
     }
 
     //--------------------------------------------------------------------------
@@ -10121,8 +10142,11 @@ namespace Legion {
         index_tasks[idx]->must_epoch_task = true;
       }
       index_triggered.resize(index_tasks.size(), false);
-      mapper_id = launcher.map_id;
-      mapper_tag = launcher.mapping_tag;
+      map_id = launcher.map_id;
+      tag = launcher.mapping_tag;
+      if (launch_space.exists())
+        runtime->forest->find_launch_space_domain(launch_space, launch_domain);
+      parent_task = ctx->get_task();
       // Make a new future map for storing our results
       // We'll fill it in later
       result_map = FutureMap(create_future_map(ctx, launch_space));
@@ -10203,8 +10227,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       activate_operation();
-      mapper_id = 0;
-      mapper_tag = 0;
+      map_id = 0;
+      tag = 0;
+      parent_task = NULL;
+      launch_domain = Domain();
+      individual_tasks.clear();
+      index_space_tasks.clear();
       // Set to 1 to include the triggers we get for our operation
       remaining_subop_completes = 1;
       remaining_subop_commits = 1;
@@ -10410,7 +10438,7 @@ namespace Legion {
         triggering_complete = true;
       }
       // Fill in the rest of the inputs to the mapper call
-      input.mapping_tag = mapper_tag;
+      input.mapping_tag = tag;
       input.tasks.insert(input.tasks.end(), single_tasks.begin(),
                                             single_tasks.end());
       // Also resize the outputs so the mapper knows what it is doing
@@ -10496,7 +10524,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       Processor mapper_proc = parent_ctx->get_executing_processor();
-      MapperManager *mapper = runtime->find_mapper(mapper_proc, mapper_id);
+      MapperManager *mapper = runtime->find_mapper(mapper_proc, map_id);
       // We've got all our meta-data set up so go ahead and issue the call
       mapper->invoke_map_must_epoch(this, &input, &output);
       return mapper;

@@ -1848,7 +1848,8 @@ namespace Legion {
      * these operations and ensures that they can all
      * be run in parallel or it reports an error.
      */
-    class MustEpochOp : public Operation, public LegionHeapify<MustEpochOp> {
+    class MustEpochOp : public Operation, public MustEpoch,
+                        public LegionHeapify<MustEpochOp> {
     public:
       static const AllocationType alloc_type = MUST_EPOCH_OP_ALLOC;
     public:
@@ -1902,6 +1903,11 @@ namespace Legion {
       virtual ~MustEpochOp(void);
     public:
       MustEpochOp& operator=(const MustEpochOp &rhs);
+    public:
+      // From MustEpoch
+      virtual UniqueID get_unique_id(void) const;
+      virtual unsigned get_context_index(void) const;
+      virtual int get_depth(void) const;
     public:
       FutureMap initialize(TaskContext *ctx,
                            const MustEpochLauncher &launcher,
@@ -2002,8 +2008,6 @@ namespace Legion {
     protected:
       Mapper::MapMustEpochInput    input;
       Mapper::MapMustEpochOutput   output;
-      MapperID                     mapper_id;
-      MappingTagID                 mapper_tag;
     protected:
       FutureMap result_map;
       unsigned remaining_subop_completes;

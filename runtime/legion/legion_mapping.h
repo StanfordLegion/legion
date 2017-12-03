@@ -970,7 +970,7 @@ namespace Legion {
        * ----------------------------------------------------------------------
        * This mapper call is invoked whenever the enclosing parent
        * task for the copy being launched has been control replicated
-       * and it's up to the mapper for this task to pick a sharding
+       * and it's up to the mapper for this copy to pick a sharding
        * functor to determine which shard will own the point(s) of the
        * copy. The mapper must return the same sharding functor for all
        * instances of the copy. The runtime will verify this in debug mode
@@ -1580,6 +1580,36 @@ namespace Legion {
     public: // Mapping collections of operations 
       /**
        * ----------------------------------------------------------------------
+       *  Select Sharding Functor 
+       * ----------------------------------------------------------------------
+       * This mapper call is invoked whenever the enclosing parent
+       * task for the must epoch operation being launched has been 
+       * control replicated and it's up to the mapper for this must epoch
+       * operation to pick a sharding functor to determine which shard will 
+       * own the point(s) of the must epoch operation . The mapper must return 
+       * the same sharding functor for all instances of the must epoch 
+       * operation. The runtime will verify this in debug mode
+       * but not in release mode. For this mapper call the mapper must 
+       * also choose whether to perform the map_must_epoch call as a collective
+       * operation or not. If it chooses to perform it as a collective then we 
+       * will do one map_must_epoch call on each shard with the constraints 
+       * that apply to the points owned by the shard. The default is not to
+       * perform the map must epoch call as a collective operation.
+       */
+      struct MustEpochShardingFunctorOutput :
+              public SelectShardingFunctorOutput {
+        bool                                    collective_map_must_epoch_call;
+      };
+      //------------------------------------------------------------------------
+      virtual void select_sharding_functor(
+                              const MapperContext                   ctx,
+                              const MustEpoch&                      epoch,
+                              const SelectShardingFunctorInput&     input,
+                                    MustEpochShardingFunctorOutput& output) = 0;
+      //------------------------------------------------------------------------
+
+      /**
+       * ----------------------------------------------------------------------
        *  Map Must Epoch 
        * ----------------------------------------------------------------------
        * The map_must_epoch mapper call is invoked for mapping groups of
@@ -1592,10 +1622,24 @@ namespace Legion {
        * must abide by the mapping constraints specified in the 'constraints' 
        * field which says which logical regions in different tasks must be 
        * mapped to the same physical instance. The mapper is also given 
-       * the mapping tag passed at the callsite in 'mapping_tag'. Finally,
-       * if the 'shard_mapping' input is not empty then this must epoch
-       * operation was launched in a control replicated context and it 
-       * therefore must specify a 'chosen_functor' for the ShardingID.
+       * the mapping tag passed at the callsite in 'mapping_tag'.
+       *
+       * A special case of map_must_epoch is when it is called as a collective
+       * mapping call for a must epoch launch performed inside of a control
+       * replicated parent task. This behavior is controlled by the result
+       * of select_sharding_functor for the must epoch operation (see above).
+       * In this case map_must_epoch will only be given 'tasks' owned by its
+       * shard and 'constraints' that apply to those 'tasks'. The mapper must
+       * still pick 'task_processors' and these processor must be unique with
+       * respect to any chosen for other 'tasks' by other mappers. The runime
+       * will check this property in debug mode. For constraints, the mapper
+       * may also pick optional 'constraint_mappings' for its constraints or
+       * rely on another mapper to pick them (it's up to the mapper to 
+       * determine which mapper instance picks thems). The mapper can then
+       * specify a 'weight' for each constraint mapping. The runtime will 
+       * do a collective reduction across all the 'constraint_mappings' taking
+       * the mappings with the highest weights and the lowest shard ID when
+       * the weights are the same.
        */
       struct MappingConstraint {
         std::vector<const Task*>                    constrained_tasks;
@@ -1606,12 +1650,15 @@ namespace Legion {
         std::vector<const Task*>                    tasks;
         std::vector<MappingConstraint>              constraints;
         MappingTagID                                mapping_tag;
+        // For collective map_must_epoch only
         std::vector<Processor>                      shard_mapping;
+        ShardID                                     local_shard;
       };
       struct MapMustEpochOutput {
         std::vector<Processor>                      task_processors;
         std::vector<std::vector<PhysicalInstance> > constraint_mappings;
-        ShardingID                                  chosen_functor; 
+        // For collective map_must_epoch only
+        std::vector<int>                            weights;
       };
       //------------------------------------------------------------------------
       virtual void map_must_epoch(const MapperContext           ctx,

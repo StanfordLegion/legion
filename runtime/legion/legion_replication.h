@@ -449,27 +449,36 @@ namespace Legion {
     };
 
     /**
-     * \class MustEpochProcessorBroadcast 
-     * A class for broadcasting the processor mapping for
-     * a must epoch launch
+     * \class MustEpochMappingBroadcast 
+     * A class for broadcasting the results of the mapping decisions
+     * for a map must epoch call on a single node
      */
-    class MustEpochProcessorBroadcast : public BroadcastCollective {
+    class MustEpochMappingBroadcast : public BroadcastCollective {
     public:
-      MustEpochProcessorBroadcast(ReplicateContext *ctx, ShardID origin,
-                                  CollectiveIndexLocation loc);
-      MustEpochProcessorBroadcast(const MustEpochProcessorBroadcast &rhs);
-      virtual ~MustEpochProcessorBroadcast(void);
+      MustEpochMappingBroadcast(ReplicateContext *ctx, ShardID origin,
+                                CollectiveID collective_id);
+      MustEpochMappingBroadcast(const MustEpochMappingBroadcast &rhs);
+      virtual ~MustEpochMappingBroadcast(void);
     public:
-      MustEpochProcessorBroadcast& operator=(
-                                  const MustEpochProcessorBroadcast &rhs);
+      MustEpochMappingBroadcast& operator=(
+                                  const MustEpochMappingBroadcast &rhs);
     public:
       virtual void pack_collective(Serializer &rez) const;
       virtual void unpack_collective(Deserializer &derez);
     public:
-      void broadcast_processors(const std::vector<Processor> &processors);
-      bool validate_processors(const std::vector<Processor> &processors);
+      void broadcast(const std::vector<Processor> &processor_mapping,
+         const std::vector<std::vector<Mapping::PhysicalInstance> > &mappings);
+      void receive_results(std::vector<Processor> &processor_mapping,
+               const std::vector<unsigned> &constraint_indexes,
+               std::vector<std::vector<Mapping::PhysicalInstance> > &mappings,
+               std::map<PhysicalManager*,std::pair<unsigned,bool> > &acquired);
     protected:
-      std::vector<Processor> origin_processors;
+      std::vector<Processor> processors;
+      std::vector<std::vector<DistributedID> > instances;
+    protected:
+      RtUserEvent local_done_event;
+      mutable std::set<RtEvent> done_events;
+      std::set<PhysicalManager*> held_references;
     };
 
     /**
@@ -479,8 +488,14 @@ namespace Legion {
      */
     class MustEpochMappingExchange : public AllGatherCollective {
     public:
+      struct ConstraintInfo {
+        std::vector<DistributedID> instances;
+        ShardID                    origin_shard;
+        int                        weight;
+      };
+    public:
       MustEpochMappingExchange(ReplicateContext *ctx,
-                               CollectiveIndexLocation loc);
+                               CollectiveID collective_id);
       MustEpochMappingExchange(const MustEpochMappingExchange &rhs);
       virtual ~MustEpochMappingExchange(void);
     public:
@@ -491,13 +506,16 @@ namespace Legion {
     public:
       void exchange_must_epoch_mappings(ShardID shard_id, 
               size_t total_shards, size_t total_constraints,
+              const std::vector<const Task*> &local_tasks,
+              const std::vector<const Task*> &all_tasks,
+                    std::vector<Processor> &processor_mapping,
+              const std::vector<unsigned> &constraint_indexes,
               std::vector<std::vector<Mapping::PhysicalInstance> > &mappings,
+              const std::vector<int> &mapping_weights,
               std::map<PhysicalManager*,std::pair<unsigned,bool> > &acquired);
     protected:
-      std::map<unsigned/*constraint index*/,
-               std::vector<DistributedID> > instances;
-      std::vector<std::vector<Mapping::PhysicalInstance> > results;
-      std::set<RtEvent> ready_events;
+      std::map<DomainPoint,Processor> processors;
+      std::map<unsigned/*constraint index*/,ConstraintInfo> constraints;
     protected:
       RtUserEvent local_done_event;
       std::set<RtEvent> done_events;
@@ -1015,7 +1033,7 @@ namespace Legion {
       ReplMustEpochOp(const ReplMustEpochOp &rhs);
       virtual ~ReplMustEpochOp(void);
     public:
-      ReplMustEpochOp& operator=(const ReplMustEpochOp &rhs);
+      ReplMustEpochOp& operator=(const ReplMustEpochOp &rhs); 
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -1036,7 +1054,8 @@ namespace Legion {
     protected:
       ShardingID sharding_functor;
       Domain index_domain;
-      MustEpochProcessorBroadcast *processor_broadcast;
+      CollectiveID mapping_collective_id;
+      MustEpochMappingBroadcast *mapping_broadcast;
       MustEpochMappingExchange *mapping_exchange;
       MustEpochDependenceExchange *dependence_exchange;
       MustEpochCompletionExchange *completion_exchange;

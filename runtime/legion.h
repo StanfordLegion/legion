@@ -2523,6 +2523,7 @@ namespace Legion {
         CLOSE_MAPPABLE,
         FILL_MAPPABLE,
         PARTITION_MAPPABLE,
+        MUST_EPOCH_MAPPABLE,
       };
       virtual MappableType get_mappable_type(void) const = 0;
       virtual const Task* as_task(void) const = 0;
@@ -2533,6 +2534,7 @@ namespace Legion {
       virtual const Close* as_close(void) const = 0;
       virtual const Fill* as_fill(void) const = 0;
       virtual const Partition* as_partition(void) const = 0;
+      virtual const MustEpoch* as_must_epoch(void) const = 0;
     public:
       MapperID                                  map_id;
       MappingTagID                              tag;
@@ -2563,6 +2565,7 @@ namespace Legion {
       virtual const Close* as_close(void) const { return NULL; }
       virtual const Fill* as_fill(void) const { return NULL; }
       virtual const Partition* as_partition(void) const { return NULL; }
+      virtual const MustEpoch* as_must_epoch(void) const { return NULL; }
     public:
       // Task argument information
       Processor::TaskFuncID task_id; 
@@ -2615,6 +2618,7 @@ namespace Legion {
       virtual const Close* as_close(void) const { return NULL; }
       virtual const Fill* as_fill(void) const { return NULL; }
       virtual const Partition* as_partition(void) const { return NULL; }
+      virtual const MustEpoch* as_must_epoch(void) const { return NULL; }
     public:
       // Copy Launcher arguments
       std::vector<RegionRequirement>    src_requirements;
@@ -2652,6 +2656,7 @@ namespace Legion {
       virtual const Close* as_close(void) const { return NULL; }
       virtual const Fill* as_fill(void) const { return NULL; }
       virtual const Partition* as_partition(void) const { return NULL; }
+      virtual const MustEpoch* as_must_epoch(void) const { return NULL; }
     public:
       // Inline Launcher arguments
       RegionRequirement                 requirement;
@@ -2684,6 +2689,7 @@ namespace Legion {
       virtual const Close* as_close(void) const { return NULL; }
       virtual const Fill* as_fill(void) const { return NULL; }
       virtual const Partition* as_partition(void) const { return NULL; }
+      virtual const MustEpoch* as_must_epoch(void) const { return NULL; }
     public:
       // Acquire Launcher arguments
       LogicalRegion                     logical_region;
@@ -2717,6 +2723,7 @@ namespace Legion {
       virtual const Close* as_close(void) const { return NULL; }
       virtual const Fill* as_fill(void) const { return NULL; }
       virtual const Partition* as_partition(void) const { return NULL; }
+      virtual const MustEpoch* as_must_epoch(void) const { return NULL; }
     public:
       // Release Launcher arguments
       LogicalRegion                     logical_region;
@@ -2754,6 +2761,7 @@ namespace Legion {
       virtual const Close* as_close(void) const { return this; }
       virtual const Fill* as_fill(void) const { return NULL; }
       virtual const Partition* as_partition(void) const { return NULL; }
+      virtual const MustEpoch* as_must_epoch(void) const { return NULL; }
     public:
       // Synthesized region requirement
       RegionRequirement                 requirement;
@@ -2783,6 +2791,7 @@ namespace Legion {
       virtual const Close* as_close(void) const { return NULL; }
       virtual const Fill* as_fill(void) const { return this; }
       virtual const Partition* as_partition(void) const { return NULL; }
+      virtual const MustEpoch* as_must_epoch(void) const { return NULL; }
     public:
       // Synthesized region requirement
       RegionRequirement               requirement;
@@ -2821,6 +2830,7 @@ namespace Legion {
       virtual const Close* as_close(void) const { return NULL; }
       virtual const Fill* as_fill(void) const { return NULL; }
       virtual const Partition* as_partition(void) const { return this; }
+      virtual const MustEpoch* as_must_epoch(void) const { return NULL; }
     public:
       enum PartitionKind {
         BY_FIELD, // create partition by field
@@ -2842,6 +2852,39 @@ namespace Legion {
     public:
       // Parent task for the partition operation
       const Task*                         parent_task;
+    };
+
+    /**
+     * \class MustEpoch
+     * This class represents a must-epoch operation
+     * for the original launchers. See the must
+     * epoch launcher for more information.
+     */
+    class MustEpoch : public Mappable {
+    protected:
+      FRIEND_ALL_RUNTIME_CLASSES
+      MustEpoch(void);
+    public:
+      virtual MappableType get_mappable_type(void) const 
+        { return MUST_EPOCH_MAPPABLE; }
+      virtual const Task* as_task(void) const { return NULL; }
+      virtual const Copy* as_copy(void) const { return NULL; }
+      virtual const InlineMapping* as_inline(void) const { return NULL; }
+      virtual const Acquire* as_acquire(void) const { return NULL; }
+      virtual const Release* as_release(void) const { return NULL; }
+      virtual const Close* as_close(void) const { return NULL; }
+      virtual const Fill* as_fill(void) const { return NULL; }
+      virtual const Partition* as_partition(void) const { return NULL; }
+      virtual const MustEpoch* as_must_epoch(void) const { return this; }
+    public:
+      std::vector<const Task*>                  individual_tasks;
+      std::vector<const Task*>                  index_space_tasks;
+    public:
+      // Index space of points for the must epoch operation
+      Domain                                    launch_domain;
+    public:
+      // Parent task for the must epoch operation
+      const Task*                               parent_task;
     };
 
     //==========================================================================

@@ -2308,7 +2308,8 @@ namespace Legion {
       activate_must_epoch_op();
       sharding_functor = UINT_MAX;
       index_domain = Domain::NO_DOMAIN;
-      processor_broadcast = NULL;
+      mapping_collective_id = 0;
+      mapping_broadcast = NULL;
       mapping_exchange = NULL;
       dependence_exchange = NULL;
       completion_exchange = NULL;
@@ -2348,40 +2349,46 @@ namespace Legion {
     MapperManager* ReplMustEpochOp::invoke_mapper(void)
     //--------------------------------------------------------------------------
     {
+      Processor mapper_proc = parent_ctx->get_executing_processor();
+      MapperManager *mapper = runtime->find_mapper(mapper_proc, map_id);
 #ifdef DEBUG_LEGION
       ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
       assert(repl_ctx != NULL);
 #else
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
-      // Fill in the shard map so that we get the sharding ID
-      input.shard_mapping = repl_ctx->shard_manager->shard_mapping; 
-      output.chosen_functor = UINT_MAX;
-      // Shard the constraints so that each mapper call handles 
-      // a subset of the constraints when performing the mapping 
-      std::vector<Mapper::MappingConstraint> local_constraints;
-      for (unsigned idx = repl_ctx->owner_shard->shard_id; 
-            idx < input.constraints.size(); 
-            idx += repl_ctx->shard_manager->total_shards)
-        local_constraints.push_back(input.constraints[idx]);
-      const size_t total_constraints = input.constraints.size();
-      input.constraints = local_constraints;
-      output.constraint_mappings.resize(input.constraints.size());
-      // Do the mapper call
-      Processor mapper_proc = parent_ctx->get_executing_processor();
-      MapperManager *mapper = runtime->find_mapper(mapper_proc, mapper_id);
-      // We've got all our meta-data set up so go ahead and issue the call
-      mapper->invoke_map_must_epoch(this, &input, &output);
-      // Check that we have a sharding ID
-      if (output.chosen_functor == UINT_MAX)
-        REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
-            "Invalid mapper output from invocation of "
-            "'map_must_epoch' on mapper %s. Mapper failed to specify "
-            "a valid sharding ID for a must epoch operation in control "
-            "replicated context of task %s (UID %lld).",
-            mapper->get_mapper_name(), repl_ctx->get_task_name(),
-            repl_ctx->get_unique_id())
-      sharding_functor = output.chosen_functor;
+      // First get the sharding function to use for this mapper
+      bool collective_map_must_epoch_call;
+      {
+        this->individual_tasks.resize(indiv_tasks.size());
+        for (unsigned idx = 0; idx < indiv_tasks.size(); idx++)
+          this->individual_tasks[idx] = indiv_tasks[idx];
+        this->index_space_tasks.resize(index_tasks.size());
+        for (unsigned idx = 0; idx < index_tasks.size(); idx++)
+          this->index_space_tasks[idx] = index_tasks[idx];
+        Mapper::SelectShardingFunctorInput sharding_input;
+        sharding_input.shard_mapping = repl_ctx->shard_manager->shard_mapping;
+        Mapper::MustEpochShardingFunctorOutput sharding_output;
+        sharding_output.chosen_functor = UINT_MAX;
+        sharding_output.collective_map_must_epoch_call = false;
+        mapper->invoke_must_epoch_select_sharding_functor(this,
+                                      &sharding_input, &sharding_output);
+        // We can clear these now that we don't need them anymore
+        individual_tasks.clear();
+        index_space_tasks.clear();
+        // Check that we have a sharding ID
+        if (sharding_output.chosen_functor == UINT_MAX)
+          REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+              "Invalid mapper output from invocation of "
+              "'map_must_epoch' on mapper %s. Mapper failed to specify "
+              "a valid sharding ID for a must epoch operation in control "
+              "replicated context of task %s (UID %lld).",
+              mapper->get_mapper_name(), repl_ctx->get_task_name(),
+              repl_ctx->get_unique_id())
+        this->sharding_functor = sharding_output.chosen_functor;
+        collective_map_must_epoch_call = 
+          sharding_output.collective_map_must_epoch_call;
+      }
 #ifdef DEBUG_LEGION
       // Check that the sharding IDs are all the same
       assert(sharding_collective != NULL);
@@ -2396,10 +2403,6 @@ namespace Legion {
                       parent_ctx->get_unique_id());
         assert(false); 
       }
-      assert(processor_broadcast != NULL);
-      assert(mapping_exchange != NULL);
-      assert(dependence_exchange != NULL);
-      assert(result_map.impl != NULL);
       ReplFutureMapImpl *impl = 
           dynamic_cast<ReplFutureMapImpl*>(result_map.impl);
       assert(impl != NULL);
@@ -2411,16 +2414,8 @@ namespace Legion {
       ShardingFunction *sharding_function = 
         repl_ctx->shard_manager->find_sharding_function(sharding_functor);
       impl->set_sharding_function(sharding_function);
-      // Broadcast the processor decisions from shard 0
-      // so we can check that they are all the same
-      if (repl_ctx->owner_shard->shard_id == 0)
-        processor_broadcast->broadcast_processors(output.task_processors);
-      // Exchange the constraint mappings so that all ops have all the mappings
-      mapping_exchange->exchange_must_epoch_mappings(
-          repl_ctx->owner_shard->shard_id,repl_ctx->shard_manager->total_shards,
-          total_constraints, output.constraint_mappings,
-          *get_acquired_instances_ref());
-      // Compute the set of single tasks that are local to our shard
+      // Next we want to do the map must epoch call
+      // First find all the tasks that we own on this shard
       for (std::vector<SingleTask*>::const_iterator it = 
             single_tasks.begin(); it != single_tasks.end(); it++)
       {
@@ -2431,14 +2426,83 @@ namespace Legion {
           continue;
         shard_single_tasks.insert(*it);
       }
-      // Receive processor decisions from shard 0
-      if ((repl_ctx->owner_shard->shard_id != 0) &&
-          !processor_broadcast->validate_processors(output.task_processors))
-        REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
-                      "Mapper %s chose different processor mappings "
-                      "for 'map_must_epoch' call across different shards in "
-                      "task %s (UID %lld).", mapper->get_mapper_name(),
-                      parent_ctx->get_task_name(), parent_ctx->get_unique_id());
+      // Find the set of constraints that apply to our local set of tasks
+      std::vector<Mapper::MappingConstraint> local_constraints;
+      std::vector<unsigned> original_constraint_indexes;
+      for (unsigned idx = 0; idx < input.constraints.size(); idx++)
+      {
+        bool is_local = false;
+        for (std::vector<const Task*>::const_iterator it = 
+              input.constraints[idx].constrained_tasks.begin(); it !=
+              input.constraints[idx].constrained_tasks.end(); it++)
+        {
+          SingleTask *single = static_cast<SingleTask*>(const_cast<Task*>(*it));
+          if (shard_single_tasks.find(single) == shard_single_tasks.end())
+            continue;
+          is_local = true;
+          break;
+        }
+        if (is_local)
+        {
+          local_constraints.push_back(input.constraints[idx]);
+          original_constraint_indexes.push_back(idx);
+        }
+      }
+      if (collective_map_must_epoch_call)
+      {
+        // Update the input tasks for our subset
+        std::vector<const Task*> all_tasks(shard_single_tasks.begin(),
+                                           shard_single_tasks.end());
+        input.tasks.swap(all_tasks);
+        // Sort them again by their index points to for determinism
+        std::sort(input.tasks.begin(), input.tasks.end(), single_task_sorter);
+        // Update the constraints to contain just our subset
+        const size_t total_constraints = input.constraints.size();
+        input.constraints.swap(local_constraints);
+        // Fill in our shard mapping and local shard info
+        input.shard_mapping = repl_ctx->shard_manager->shard_mapping;
+        input.local_shard = repl_ctx->owner_shard->shard_id;
+        // Update the outputs
+        output.task_processors.resize(input.tasks.size());
+        output.constraint_mappings.resize(input.constraints.size());
+        output.weights.resize(input.constraints.size());
+        // Now we can do the mapper call
+        mapper->invoke_map_must_epoch(this, &input, &output);
+        // Now we need to exchange our mapping decisions between all the shards
+#ifdef DEBUG_LEGION
+        assert(mapping_exchange == NULL);
+        assert(mapping_collective_id > 0);
+#endif
+        mapping_exchange = 
+          new MustEpochMappingExchange(repl_ctx, mapping_collective_id);
+        mapping_exchange->exchange_must_epoch_mappings(
+                  repl_ctx->owner_shard->shard_id,
+                  repl_ctx->shard_manager->total_shards, total_constraints,
+                  input.tasks, all_tasks, output.task_processors,
+                  original_constraint_indexes, output.constraint_mappings,
+                  output.weights, *get_acquired_instances_ref());
+      }
+      else
+      {
+#ifdef DEBUG_LEGION
+        assert(mapping_broadcast == NULL);
+        assert(mapping_collective_id > 0);
+#endif
+        mapping_broadcast = new MustEpochMappingBroadcast(repl_ctx, 
+                                  0/*owner shard*/, mapping_collective_id);
+        // Do the mapper call on shard 0 and then broadcast the results
+        if (repl_ctx->owner_shard->shard_id == 0)
+        {
+          mapper->invoke_map_must_epoch(this, &input, &output);
+          mapping_broadcast->broadcast(output.task_processors,
+                                       output.constraint_mappings);
+        }
+        else
+          mapping_broadcast->receive_results(output.task_processors,
+              original_constraint_indexes, output.constraint_mappings,
+              *get_acquired_instances_ref());
+      }
+      // No need to do any checks, the base class handles that
       return mapper;
     }
 
@@ -2485,8 +2549,8 @@ namespace Legion {
     {
       // We have to delete these here to make sure that they are
       // unregistered with the context before the context is deleted
-      if (processor_broadcast != NULL)
-        delete processor_broadcast;
+      if (mapping_broadcast != NULL)
+        delete mapping_broadcast;
       if (mapping_exchange != NULL)
         delete mapping_exchange;
       if (dependence_exchange != NULL)
@@ -2630,7 +2694,7 @@ namespace Legion {
         if (!contains_all)
         {
           Processor mapper_proc = parent_ctx->get_executing_processor();
-          MapperManager *mapper = runtime->find_mapper(mapper_proc, mapper_id);
+          MapperManager *mapper = runtime->find_mapper(mapper_proc, map_id);
           REPORT_LEGION_FATAL(ERROR_INVALID_MAPPER_OUTPUT,
                               "Mapper %s specified a slice for a must epoch "
                               "launch in control replicated task %s "
@@ -2676,13 +2740,16 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(processor_broadcast == NULL);
+      assert(mapping_collective_id == 0);
+      assert(mapping_broadcast == NULL);
       assert(mapping_exchange == NULL);
       assert(dependence_exchange == NULL);
+      assert(completion_exchange == NULL);
 #endif
-      processor_broadcast = 
-        new MustEpochProcessorBroadcast(ctx,0/*owner shard*/,COLLECTIVE_LOC_58);
-      mapping_exchange = new MustEpochMappingExchange(ctx, COLLECTIVE_LOC_59);
+      // We can't actually make a collective for the mapping yet because we 
+      // don't know if we are going to broadcast or exchange so we just get
+      // a collective ID that we will use later 
+      mapping_collective_id = ctx->get_next_collective_index(COLLECTIVE_LOC_58);
       dependence_exchange = 
         new MustEpochDependenceExchange(ctx, COLLECTIVE_LOC_70);
       completion_exchange = 
@@ -5325,16 +5392,16 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    MustEpochProcessorBroadcast::MustEpochProcessorBroadcast(
-            ReplicateContext *ctx, ShardID origin, CollectiveIndexLocation loc)
-      : BroadcastCollective(loc, ctx, origin)
+    MustEpochMappingBroadcast::MustEpochMappingBroadcast(
+            ReplicateContext *ctx, ShardID origin, CollectiveID collective_id)
+      : BroadcastCollective(ctx, collective_id, origin)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
-    MustEpochProcessorBroadcast::MustEpochProcessorBroadcast(
-                                         const MustEpochProcessorBroadcast &rhs)
+    MustEpochMappingBroadcast::MustEpochMappingBroadcast(
+                                           const MustEpochMappingBroadcast &rhs)
       : BroadcastCollective(rhs)
     //--------------------------------------------------------------------------
     {
@@ -5343,14 +5410,33 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    MustEpochProcessorBroadcast::~MustEpochProcessorBroadcast(void)
+    MustEpochMappingBroadcast::~MustEpochMappingBroadcast(void)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(local_done_event.exists());
+#endif
+      if (!done_events.empty())
+        Runtime::trigger_event(local_done_event,
+            Runtime::merge_events(done_events));
+      else
+        Runtime::trigger_event(local_done_event);
+      // This should only happen on the owner node
+      if (!held_references.empty())
+      {
+        // Wait for all the other shards to be done
+        local_done_event.lg_wait();
+        // Now we can remove our held references
+        for (std::set<PhysicalManager*>::const_iterator it = 
+              held_references.begin(); it != held_references.end(); it++)
+          if ((*it)->remove_base_valid_ref(REPLICATION_REF))
+            delete (*it);
+      }
     }
     
     //--------------------------------------------------------------------------
-    MustEpochProcessorBroadcast& MustEpochProcessorBroadcast::operator=(
-                                         const MustEpochProcessorBroadcast &rhs)
+    MustEpochMappingBroadcast& MustEpochMappingBroadcast::operator=(
+                                           const MustEpochMappingBroadcast &rhs)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -5359,47 +5445,145 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MustEpochProcessorBroadcast::pack_collective(Serializer &rez) const
+    void MustEpochMappingBroadcast::pack_collective(Serializer &rez) const
     //--------------------------------------------------------------------------
     {
-      rez.serialize<size_t>(origin_processors.size());
-      for (unsigned idx = 0; idx < origin_processors.size(); idx++)
-        rez.serialize(origin_processors[idx]);
+      RtUserEvent next_done = Runtime::create_rt_user_event();
+      done_events.insert(next_done);
+      rez.serialize(next_done);
+      rez.serialize<size_t>(processors.size());
+      for (unsigned idx = 0; idx < processors.size(); idx++)
+        rez.serialize(processors[idx]);
+      rez.serialize<size_t>(instances.size());
+      for (unsigned idx = 0; idx < instances.size(); idx++)
+      {
+        const std::vector<DistributedID> &dids = instances[idx];
+        rez.serialize<size_t>(dids.size());
+        for (std::vector<DistributedID>::const_iterator it = 
+              dids.begin(); it != dids.end(); it++)
+          rez.serialize(*it);
+      }
     }
 
     //--------------------------------------------------------------------------
-    void MustEpochProcessorBroadcast::unpack_collective(Deserializer &derez)
+    void MustEpochMappingBroadcast::unpack_collective(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
+      derez.deserialize(local_done_event);
       size_t num_procs;
       derez.deserialize(num_procs);
-      origin_processors.resize(num_procs);
+      processors.resize(num_procs);
       for (unsigned idx = 0; idx < num_procs; idx++)
-        derez.deserialize(origin_processors[idx]);
+        derez.deserialize(processors[idx]);
+      size_t num_constraints;
+      derez.deserialize(num_constraints);
+      instances.resize(num_constraints);
+      for (unsigned idx1 = 0; idx1 < num_constraints; idx1++)
+      {
+        size_t num_dids;
+        derez.deserialize(num_dids);
+        std::vector<DistributedID> &dids = instances[idx1];
+        dids.resize(num_dids);
+        for (unsigned idx2 = 0; idx2 < num_dids; idx2++)
+          derez.deserialize(dids[idx2]);
+      }
     }
 
     //--------------------------------------------------------------------------
-    void MustEpochProcessorBroadcast::broadcast_processors(
-                                       const std::vector<Processor> &processors)
+    void MustEpochMappingBroadcast::broadcast(
+           const std::vector<Processor> &processor_mapping,
+           const std::vector<std::vector<Mapping::PhysicalInstance> > &mappings)
     //--------------------------------------------------------------------------
     {
-      origin_processors = processors;
+#ifdef DEBUG_LEGION
+      assert(!local_done_event.exists());
+#endif
+      local_done_event = Runtime::create_rt_user_event();
+      processors = processor_mapping;
+      instances.resize(mappings.size());
+      // Add valid references to all the physical instances that we will
+      // hold until all the must epoch operations are done with the exchange
+      WrapperReferenceMutator mutator(done_events);
+      for (unsigned idx1 = 0; idx1 < mappings.size(); idx1++)
+      {
+        std::vector<DistributedID> &dids = instances[idx1];
+        dids.resize(mappings[idx1].size());
+        for (unsigned idx2 = 0; idx2 < dids.size(); idx2++)
+        {
+          const Mapping::PhysicalInstance &inst = mappings[idx1][idx2];
+          dids[idx2] = inst.impl->did;
+          if (held_references.find(inst.impl) != held_references.end())
+            continue;
+          inst.impl->add_base_valid_ref(REPLICATION_REF, &mutator);
+          held_references.insert(inst.impl);
+        }
+      }
       perform_collective_async();
     }
 
     //--------------------------------------------------------------------------
-    bool MustEpochProcessorBroadcast::validate_processors(
-                                       const std::vector<Processor> &processors)
+    void MustEpochMappingBroadcast::receive_results(
+                std::vector<Processor> &processor_mapping,
+                const std::vector<unsigned> &constraint_indexes,
+                std::vector<std::vector<Mapping::PhysicalInstance> > &mappings,
+                std::map<PhysicalManager*,std::pair<unsigned,bool> > &acquired)
     //--------------------------------------------------------------------------
     {
       perform_collective_wait();
+      // Just grab all the processors since we still need them
+      processor_mapping = processors;
+      // We are a little smarter with the mappings since we know exactly
+      // which ones we are actually going to need for our local points
+      std::set<RtEvent> ready_events;
+      Runtime *runtime = manager->runtime;
+      for (std::vector<unsigned>::const_iterator it = 
+            constraint_indexes.begin(); it != constraint_indexes.end(); it++)
+      {
 #ifdef DEBUG_LEGION
-      assert(origin_processors.size() == processors.size());
+        assert((*it) < instances.size());
+        assert((*it) < mappings.size());
 #endif
-      for (unsigned idx = 0; idx < processors.size(); idx++)
-        if (processors[idx] != origin_processors[idx])
-          return false;
-      return true;
+        const std::vector<DistributedID> &dids = instances[*it];
+        std::vector<Mapping::PhysicalInstance> &mapping = mappings[*it];
+        mapping.resize(dids.size());
+        for (unsigned idx = 0; idx < dids.size(); idx++)
+        {
+          RtEvent ready;
+          mapping[idx].impl = 
+            runtime->find_or_request_physical_manager(dids[idx], ready);
+          if (!ready.has_triggered())
+            ready_events.insert(ready);   
+        }
+      }
+      // Have to wait for the ready events to trigger before we can add
+      // our references safely
+      if (!ready_events.empty())
+      {
+        RtEvent ready = Runtime::merge_events(ready_events);
+        if (!ready.has_triggered())
+          ready.lg_wait();
+      }
+      // Lastly we need to put acquire references on any of local instances
+      WrapperReferenceMutator mutator(done_events);
+      for (unsigned idx = 0; idx < constraint_indexes.size(); idx++)
+      {
+        const unsigned constraint_index = constraint_indexes[idx];
+        const std::vector<Mapping::PhysicalInstance> &mapping = 
+          mappings[constraint_index];
+        // Also grab an acquired reference to these instances
+        for (std::vector<Mapping::PhysicalInstance>::const_iterator it = 
+              mapping.begin(); it != mapping.end(); it++)
+        {
+          // If we already had a reference to this instance
+          // then we don't need to add any additional ones
+          if (acquired.find(it->impl) != acquired.end())
+            continue;
+          it->impl->add_base_resource_ref(INSTANCE_MAPPER_REF);
+          it->impl->add_base_valid_ref(MAPPING_ACQUIRE_REF, &mutator);
+          acquired[it->impl] = 
+            std::pair<unsigned,bool>(1/*count*/, false/*created*/);
+        }
+      }
     }
 
     /////////////////////////////////////////////////////////////
@@ -5408,8 +5592,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     MustEpochMappingExchange::MustEpochMappingExchange(ReplicateContext *ctx,
-                                                 CollectiveIndexLocation loc)
-      : AllGatherCollective(loc, ctx)
+                                                 CollectiveID collective_id)
+      : AllGatherCollective(ctx, collective_id)
     //--------------------------------------------------------------------------
     {
     }
@@ -5462,14 +5646,23 @@ namespace Legion {
                                                          int stage) const
     //--------------------------------------------------------------------------
     {
-      rez.serialize<size_t>(instances.size());
-      for (std::map<unsigned,std::vector<DistributedID> >::const_iterator it = 
-            instances.begin(); it != instances.end(); it++)
+      rez.serialize<size_t>(processors.size());
+      for (std::map<DomainPoint,Processor>::const_iterator it = 
+            processors.begin(); it != processors.end(); it++)
       {
         rez.serialize(it->first);
-        rez.serialize<size_t>(it->second.size());
-        for (unsigned idx = 0; idx < it->second.size(); idx++)
-          rez.serialize(it->second[idx]);
+        rez.serialize(it->second);
+      }
+      rez.serialize<size_t>(constraints.size());
+      for (std::map<unsigned,ConstraintInfo>::const_iterator it = 
+            constraints.begin(); it != constraints.end(); it++)
+      {
+        rez.serialize(it->first);
+        rez.serialize<size_t>(it->second.instances.size());
+        for (unsigned idx = 0; idx < it->second.instances.size(); idx++)
+          rez.serialize(it->second.instances[idx]);
+        rez.serialize(it->second.origin_shard);
+        rez.serialize(it->second.weight);
       }
       rez.serialize<size_t>(done_events.size());
       for (std::set<RtEvent>::const_iterator it = 
@@ -5482,31 +5675,51 @@ namespace Legion {
                                                            int stage)
     //--------------------------------------------------------------------------
     {
-      Runtime *runtime = manager->runtime;
+      size_t num_procs;
+      derez.deserialize(num_procs);
+      for (unsigned idx = 0; idx < num_procs; idx++)
+      {
+        DomainPoint point;
+        derez.deserialize(point);
+        derez.deserialize(processors[point]);
+      }
       size_t num_mappings;
       derez.deserialize(num_mappings);
       for (unsigned idx1 = 0; idx1 < num_mappings; idx1++)
       {
         unsigned constraint_index;
         derez.deserialize(constraint_index);
-#ifdef DEBUG_LEGION
-        assert(constraint_index < results.size());
-#endif
-        std::vector<DistributedID> &dids = instances[constraint_index];
-        std::vector<Mapping::PhysicalInstance> &mapping = 
-          results[constraint_index];
-        size_t num_instances;
-        derez.deserialize(num_instances);
-        dids.resize(num_instances);
-        mapping.resize(num_instances);
-        for (unsigned idx2 = 0; idx2 < num_instances; idx2++)
+        std::map<unsigned,ConstraintInfo>::iterator
+          finder = constraints.find(constraint_index);
+        if (finder == constraints.end())
         {
-          derez.deserialize(dids[idx2]);
-          RtEvent ready;
-          mapping[idx2].impl = 
-            runtime->find_or_request_physical_manager(dids[idx2], ready);
-          if (!ready.has_triggered())
-            ready_events.insert(ready);
+          // Can unpack directly since we're first
+          ConstraintInfo &info = constraints[constraint_index];
+          size_t num_dids;
+          derez.deserialize(num_dids);
+          info.instances.resize(num_dids);
+          for (unsigned idx2 = 0; idx2 < num_dids; idx2++)
+            derez.deserialize(info.instances[idx2]);
+          derez.deserialize(info.origin_shard);
+          derez.deserialize(info.weight);
+        }
+        else
+        {
+          // Unpack into a temporary
+          ConstraintInfo info;
+          size_t num_dids;
+          derez.deserialize(num_dids);
+          info.instances.resize(num_dids);
+          for (unsigned idx2 = 0; idx2 < num_dids; idx2++)
+            derez.deserialize(info.instances[idx2]);
+          derez.deserialize(info.origin_shard);
+          derez.deserialize(info.weight);
+          // Only keep the result if we have a larger weight
+          // or we have the same weight and a smaller shard
+          if ((info.weight > finder->second.weight) ||
+              ((info.weight == finder->second.weight) &&
+               (info.origin_shard < finder->second.origin_shard)))
+            finder->second = info;
         }
       }
       size_t num_done;
@@ -5522,11 +5735,19 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void MustEpochMappingExchange::exchange_must_epoch_mappings(
                 ShardID shard_id, size_t total_shards, size_t total_constraints,
+                const std::vector<const Task*> &local_tasks,
+                const std::vector<const Task*> &all_tasks,
+                      std::vector<Processor> &processor_mapping,
+                const std::vector<unsigned> &constraint_indexes,
                 std::vector<std::vector<Mapping::PhysicalInstance> > &mappings,
+                const std::vector<int> &mapping_weights,
                 std::map<PhysicalManager*,std::pair<unsigned,bool> > &acquired)
     //--------------------------------------------------------------------------
     {
-      results.resize(total_constraints);
+#ifdef DEBUG_LEGION
+      assert(local_tasks.size() == processor_mapping.size());
+      assert(constraint_indexes.size() == mappings.size());
+#endif
       // Add valid references to all the physical instances that we will
       // hold until all the must epoch operations are done with the exchange
       WrapperReferenceMutator mutator(done_events);
@@ -5548,23 +5769,77 @@ namespace Legion {
       // Then we can add our instances to the set and do the exchange
       {
         AutoLock c_lock(collective_lock);
-        unsigned constraint_index = shard_id;
-        for (unsigned idx1 = 0; idx1 < mappings.size(); 
-              idx1++, constraint_index+=total_shards)
+        for (unsigned idx = 0; idx < local_tasks.size(); idx++)
         {
+          const Task *task = local_tasks[idx];
+#ifdef DEBUG_LEGION
+          assert(processors.find(task->index_point) == processors.end());
+#endif
+          processors[task->index_point] = processor_mapping[idx];
+        }
+        for (unsigned idx1 = 0; idx1 < mappings.size(); idx1++)
+        {
+          const unsigned constraint_index = constraint_indexes[idx1]; 
 #ifdef DEBUG_LEGION
           assert(constraint_index < total_constraints);
 #endif
-          results[constraint_index] = mappings[idx1];
-          std::vector<DistributedID> &dids = instances[constraint_index];
-          dids.resize(mappings[idx1].size());
-          for (unsigned idx2 = 0; idx2 < mappings[idx1].size(); idx2++)
-            dids[idx2] = mappings[idx1][idx2].impl->did;
+          std::map<unsigned,ConstraintInfo>::iterator
+            finder = constraints.find(constraint_index);
+          // Only add it if it doesn't exist or it has a lower weight
+          // or it has the same weight and is a lower shard
+          if ((finder == constraints.end()) || 
+              (mapping_weights[idx1] > finder->second.weight) ||
+              ((mapping_weights[idx1] == finder->second.weight) &&
+               (shard_id < finder->second.origin_shard)))
+          {
+            ConstraintInfo &info = constraints[constraint_index];
+            info.instances.resize(mappings[idx1].size());
+            for (unsigned idx2 = 0; idx2 < mappings[idx1].size(); idx2++)
+              info.instances[idx2] = mappings[idx1][idx2].impl->did;
+            info.origin_shard = shard_id;
+            info.weight = mapping_weights[idx1];
+          }
         }
         // Also update the local done events
         done_events.insert(local_done_event);
       }
       perform_collective_sync();
+      // Start fetching the all the mapping results to get them in flight
+      mappings.clear();
+      mappings.resize(total_constraints);
+      std::set<RtEvent> ready_events;
+      Runtime *runtime = manager->runtime;
+      // We only need to get the results for local constraints as we 
+      // know that we aren't going to care about any of the rest
+      for (unsigned idx1 = 0; idx1 < constraint_indexes.size(); idx1++)
+      {
+        const unsigned constraint_index = constraint_indexes[idx1];
+        const std::vector<DistributedID> &dids = 
+          constraints[constraint_index].instances;
+        std::vector<Mapping::PhysicalInstance> &mapping = 
+          mappings[constraint_index];
+        mapping.resize(dids.size());
+        for (unsigned idx2 = 0; idx2 < dids.size(); idx2++)
+        {
+          RtEvent ready;
+          mapping[idx2].impl = 
+            runtime->find_or_request_physical_manager(dids[idx2], ready);
+          if (!ready.has_triggered())
+            ready_events.insert(ready);   
+        }
+      }
+      // Update the processor mapping
+      processor_mapping.resize(all_tasks.size());
+      for (unsigned idx = 0; idx < all_tasks.size(); idx++)
+      {
+        const Task *task = all_tasks[idx];
+        std::map<DomainPoint,Processor>::const_iterator finder = 
+          processors.find(task->index_point);
+#ifdef DEBUG_LEGION
+        assert(finder != processors.end());
+#endif
+        processor_mapping[idx] = finder->second;
+      }
       // Wait for all the instances to be ready
       if (!ready_events.empty())
       {
@@ -5572,12 +5847,15 @@ namespace Legion {
         if (!ready.has_triggered())
           ready.lg_wait();
       }
-      mappings.swap(results);
-      // Lastly we have to update the acquired instance references
-      for (unsigned idx = 0; idx < mappings.size(); idx++)
+      // Lastly we need to put acquire references on any of local instances
+      for (unsigned idx = 0; idx < constraint_indexes.size(); idx++)
       {
+        const unsigned constraint_index = constraint_indexes[idx];
+        const std::vector<Mapping::PhysicalInstance> &mapping = 
+          mappings[constraint_index];
+        // Also grab an acquired reference to these instances
         for (std::vector<Mapping::PhysicalInstance>::const_iterator it = 
-              mappings[idx].begin(); it != mappings[idx].end(); it++)
+              mapping.begin(); it != mapping.end(); it++)
         {
           // If we already had a reference to this instance
           // then we don't need to add any additional ones

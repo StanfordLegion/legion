@@ -3593,6 +3593,23 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void DefaultMapper::select_sharding_functor(
+                                 const MapperContext                   ctx,
+                                 const MustEpoch&                      epoch,
+                                 const SelectShardingFunctorInput&     input,
+                                       MustEpochShardingFunctorOutput& output)
+    //--------------------------------------------------------------------------
+    {
+      log_mapper.spew("Default select_sharding_functor for Must Epoch in %s",
+                      get_mapper_name());
+      output.chosen_functor = 0; // use the default functor
+      // The default mapper currently doesn't support a collective
+      // map_must_epoch call as its algorithm requires global information
+      // about the must epoch launch to work correctly
+      output.collective_map_must_epoch_call = false;
+    }
+
+    //--------------------------------------------------------------------------
     void DefaultMapper::map_must_epoch(const MapperContext           ctx,
                                        const MapMustEpochInput&      input,
                                              MapMustEpochOutput&     output)
@@ -3822,10 +3839,6 @@ namespace Legion {
 	}
 	constraint_mapping.push_back(inst);
       }
-      // If we're in a control replicated context then use the
-      // base cyclic sharding function to stripe the points
-      if (!input.shard_mapping.empty())
-        output.chosen_functor = 0;
     }
 
     //--------------------------------------------------------------------------
