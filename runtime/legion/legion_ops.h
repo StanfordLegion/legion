@@ -2663,11 +2663,15 @@ namespace Legion {
       RestrictInfo restrict_info;
       const char *file_name;
       std::map<FieldID,const char*> field_map;
+      std::map<FieldID,void*> field_pointers_map;
       LegionFileMode file_mode;
       PhysicalRegion region;
       unsigned parent_req_index;
       std::set<RtEvent> map_applied_conditions;
       InstanceManager *file_instance;
+      int layout_flag;  // SOA 0, AOS 1
+      unsigned char* aos_base_ptr;
+      size_t aos_stride;
     };
 
     /**

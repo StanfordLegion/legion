@@ -13753,12 +13753,52 @@ namespace Legion {
           }
         case EXTERNAL_C_ARRAY:
           {
-            assert(false); // TODO: Implement this
+            if (launcher.field_pointers.empty()) 
+            {
+              REPORT_LEGION_WARNING(LEGION_WARNING_HDF5_ATTACH_OPERATION,
+                            "ARRAY ATTACH OPERATION ISSUED WITH NO "
+                            "FIELD MAPPINGS IN TASK %s (ID %lld)! DID YOU "
+                            "FORGET THEM?!?", parent_ctx->get_task_name(),
+                            parent_ctx->get_unique_id());
+            }
+            layout_flag = launcher.layout_flag;
+            aos_base_ptr = launcher.aos_base_ptr;
+            aos_stride = launcher.aos_stride;
+            // Construct the region requirement for this task
+            requirement = RegionRequirement(launcher.handle, WRITE_DISCARD, 
+                                            EXCLUSIVE, launcher.parent);
+            for (std::map<FieldID,void*>::const_iterator it = 
+                  launcher.field_pointers.begin(); it != 
+                  launcher.field_pointers.end(); it++)
+            {
+              requirement.add_field(it->first);
+              field_pointers_map[it->first] = it->second;
+            }
             break;
           }
         case EXTERNAL_FORTRAN_ARRAY:
           {
-            assert(false); // TODO implement this
+            if (launcher.field_pointers.empty()) 
+            {
+              REPORT_LEGION_WARNING(LEGION_WARNING_HDF5_ATTACH_OPERATION,
+                            "ARRAY ATTACH OPERATION ISSUED WITH NO "
+                            "FIELD MAPPINGS IN TASK %s (ID %lld)! DID YOU "
+                            "FORGET THEM?!?", parent_ctx->get_task_name(),
+                            parent_ctx->get_unique_id());
+            }
+            layout_flag = launcher.layout_flag;
+            aos_base_ptr = launcher.aos_base_ptr;
+            aos_stride = launcher.aos_stride;
+            // Construct the region requirement for this task
+            requirement = RegionRequirement(launcher.handle, WRITE_DISCARD, 
+                                            EXCLUSIVE, launcher.parent);
+            for (std::map<FieldID,void*>::const_iterator it = 
+                  launcher.field_pointers.begin(); it != 
+                  launcher.field_pointers.end(); it++)
+            {
+              requirement.add_field(it->first);
+              field_pointers_map[it->first] = it->second;
+            }
             break;
           }
         default:
@@ -13801,6 +13841,7 @@ namespace Legion {
         free(const_cast<char*>(it->second));
       }
       field_map.clear();
+      field_pointers_map.clear();
       region = PhysicalRegion();
       privilege_path.clear();
       version_info.clear();
@@ -13996,12 +14037,46 @@ namespace Legion {
           }
         case EXTERNAL_C_ARRAY:
           {
-            assert(false);
+            // First build the set of field paths
+            std::vector<Realm::FieldID> field_ids(field_pointers_map.size());
+            std::vector<void*> field_pointers(field_pointers_map.size());
+            unsigned idx = 0;
+            for (std::map<FieldID,void*>::const_iterator it = 
+                  field_pointers_map.begin(); 
+                  it != field_pointers_map.end(); 
+                  it++, idx++)
+            {
+              field_ids[idx] = it->first;
+              field_pointers[idx] = it->second;
+            }
+            // Now ask the low-level runtime to create the instance
+            result = node->create_array_instance(resource, field_ids, sizes, 
+                                                 field_pointers, layout_flag, 
+                                                 aos_base_ptr, aos_stride);
+            constraints.specialized_constraint = 
+              SpecializedConstraint(NORMAL_SPECIALIZE);
             break;
           }
         case EXTERNAL_FORTRAN_ARRAY:
           {
-            assert(false);
+            // First build the set of field paths
+            std::vector<Realm::FieldID> field_ids(field_pointers_map.size());
+            std::vector<void*> field_pointers(field_pointers_map.size());
+            unsigned idx = 0;
+            for (std::map<FieldID,void*>::const_iterator it = 
+                  field_pointers_map.begin(); 
+                  it != field_pointers_map.end(); 
+                  it++, idx++)
+            {
+              field_ids[idx] = it->first;
+              field_pointers[idx] = it->second;
+            }
+            // Now ask the low-level runtime to create the instance
+            result = node->create_array_instance(resource, field_ids, sizes, 
+                                                 field_pointers, layout_flag, 
+                                                 aos_base_ptr, aos_stride);
+            constraints.specialized_constraint = 
+              SpecializedConstraint(NORMAL_SPECIALIZE);
             break;
           }
         default:
@@ -14351,11 +14426,11 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(!manager->is_reduction_manager()); 
 #endif
-      InstanceManager *inst_manager = manager->as_instance_manager(); 
-      if (!inst_manager->is_attached_file())
+      //InstanceManager *inst_manager = manager->as_instance_manager(); 
+      /*if (!inst_manager->is_attached_file())
         REPORT_LEGION_ERROR(ERROR_ILLEGAL_DETACH_OPERATION,
                       "Illegal detach operation on a physical region which "
-                      "was not attached!")
+                      "was not attached!") */
       std::set<RtEvent> applied_conditions;
       ApEvent detach_event = 
         runtime->forest->detach_file(requirement, this, 0/*idx*/, 

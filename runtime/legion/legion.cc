@@ -5837,6 +5837,69 @@ namespace Legion {
     {
       runtime->detach_external_resource(ctx, region);
     }
+    
+    //--------------------------------------------------------------------------
+    PhysicalRegion Runtime::attach_array_soa(Context ctx,
+                                             LogicalRegion handle,
+                                             LogicalRegion parent,
+                              const std::map<FieldID,void*> &field_pointer_map,
+                                             int c_f_layout_flag)
+    //--------------------------------------------------------------------------
+    {
+      ExternalResource resource;
+      if (c_f_layout_flag == 0) {
+        resource = EXTERNAL_FORTRAN_ARRAY;
+      } else {
+        resource = EXTERNAL_C_ARRAY;
+      }
+      AttachLauncher launcher(resource, handle, parent);
+      launcher.attach_array(field_pointer_map, 0);
+      launcher.aos_base_ptr = NULL;
+      launcher.aos_stride = 0;
+      return runtime->attach_external_resource(ctx, launcher);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::detach_array(Context ctx, PhysicalRegion region)
+    //--------------------------------------------------------------------------
+    {
+      runtime->detach_external_resource(ctx, region);
+    }
+    
+    //--------------------------------------------------------------------------
+    PhysicalRegion Runtime::attach_array_aos(Context ctx,
+                                             LogicalRegion handle,
+                                             LogicalRegion parent,
+                                             const void* array_ptr,
+                                             size_t stride,
+                                const std::map<FieldID, size_t> &field_offset,
+                                             int c_f_layout_flag)
+    //--------------------------------------------------------------------------
+    {
+      unsigned char* base_ptr = (unsigned char*)array_ptr; 
+      std::map<FieldID, size_t>::const_iterator it_offset 
+                                                = field_offset.begin();
+      std::map<FieldID,void*> field_pointer_map;
+      while(it_offset != field_offset.end())
+      {
+          size_t offset = it_offset->second;
+          FieldID fid = it_offset->first;
+          unsigned char *ptr = base_ptr + offset;
+          field_pointer_map[fid] = ptr;
+          it_offset ++;
+      }
+      ExternalResource resource;
+      if (c_f_layout_flag == 0) {
+        resource = EXTERNAL_FORTRAN_ARRAY;
+      } else {
+        resource = EXTERNAL_C_ARRAY;
+      }
+      AttachLauncher launcher(resource, handle, parent);
+      launcher.attach_array(field_pointer_map, 1);
+      launcher.aos_base_ptr = base_ptr;
+      launcher.aos_stride = stride;
+      return runtime->attach_external_resource(ctx, launcher);
+    }
 
     //--------------------------------------------------------------------------
     void Runtime::issue_copy_operation(Context ctx,const CopyLauncher &launcher)

@@ -2765,6 +2765,56 @@ namespace Legion {
 #endif
       return result;
     }
+    
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    PhysicalInstance IndexSpaceNodeT<DIM,T>::create_array_instance(
+                                    ExternalResource resource,
+                                    const std::vector<Realm::FieldID> &field_ids,
+                                    const std::vector<size_t> &field_sizes,
+                                    const std::vector<void*> &field_pointers,
+                                    int layout_flag, unsigned char* aos_base_ptr, 
+                                    size_t aos_stride)
+    //--------------------------------------------------------------------------
+    {
+      DETAILED_PROFILER(context->runtime, REALM_CREATE_INSTANCE_CALL);
+      // Have to wait for the index space to be ready if necessary
+      Realm::IndexSpace<DIM,T> local_space;
+      get_realm_index_space(local_space, true/*tight*/);
+      // No profiling for these kinds of instances currently
+      Realm::ProfilingRequestSet requests;
+      int c_f_resource = 0;
+      if (resource == EXTERNAL_C_ARRAY) {
+        c_f_resource = 1;
+      }
+      PhysicalInstance result;
+      if (layout_flag == 0) 
+      { // SOA
+        LgEvent ready(PhysicalInstance::
+                          create_array_instance_SOA(result, 
+				                                            local_space,
+                                                    field_ids,
+							                                      field_sizes,
+							                                      field_pointers,
+							                                      c_f_resource,
+							                                      requests));
+        ready.lg_wait();
+      } 
+      else 
+      { // AOS
+        LgEvent ready(PhysicalInstance::
+                          create_array_instance_AOS(result, 
+				                                            local_space,
+                                                    field_ids,
+							                                      field_sizes,
+							                                      field_pointers,
+							                                      aos_base_ptr, aos_stride,
+                                                    c_f_resource,
+							                                      requests));
+        ready.lg_wait();
+      }
+      return result;
+    }
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>

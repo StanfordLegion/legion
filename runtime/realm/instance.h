@@ -175,6 +175,27 @@ namespace Realm {
 				      const ProfilingRequestSet& prs,
 				      Event wait_on = Event::NO_EVENT);
 #endif
+              
+    template <int N, typename T>
+    static Event create_array_instance_SOA(RegionInstance& inst,
+				      const IndexSpace<N,T>& space,
+              const std::vector<FieldID> &field_ids,
+				      const std::vector<size_t> &field_sizes,
+				      const std::vector<void*> &field_pointers,
+				      int resource,
+				      const ProfilingRequestSet& prs,
+				      Event wait_on = Event::NO_EVENT);
+              
+    template <int N, typename T>
+    static Event create_array_instance_AOS(RegionInstance& inst,
+				      const IndexSpace<N,T>& space,
+              const std::vector<FieldID> &field_ids,
+				      const std::vector<size_t> &field_sizes,
+				      const std::vector<void*> &field_pointers,
+				      unsigned char* aos_base_ptr, size_t aos_stride,
+              int resource,
+				      const ProfilingRequestSet& prs,
+				      Event wait_on = Event::NO_EVENT);
 
     void destroy(Event wait_on = Event::NO_EVENT) const;
 

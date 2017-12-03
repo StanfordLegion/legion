@@ -1,5 +1,5 @@
 #------------------------------------------------------------------------------#
-# Copyright 2017 Kitware, Inc.
+# Copyright 2017 Los Alamos National Laboratory
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -15,31 +15,25 @@
 #------------------------------------------------------------------------------#
 
 cmake_minimum_required(VERSION 3.1)
+project(LegionExample_attach_2darray_c_fortran_layout)
 
+include(CheckCXXCompilerFlag)
+
+check_cxx_compiler_flag( "-std=c++11" CXX11_COMPILER)
+
+if(CXX11_COMPILER)
+  set(CMAKE_CXX_STANDARD 11)
+else()
+  message(FATAL_ERROR "C++11 compatible compiler not found")
+endif()
+
+# Only search if were building stand-alone and not as part of Legion
 if(NOT Legion_SOURCE_DIR)
   find_package(Legion REQUIRED)
 endif()
 
-add_subdirectory(attach_file)
-add_subdirectory(circuit)
-add_subdirectory(dynamic_registration)
-add_subdirectory(ghost)
-add_subdirectory(ghost_pull)
-add_subdirectory(realm_saxpy)
-add_subdirectory(realm_stencil)
-add_subdirectory(spmd_cgsolver)
-add_subdirectory(virtual_map)
-add_subdirectory(attach_2darray_c_fortran_layout)
-add_subdirectory(attach_array_daxpy)
-
-if(Legion_USE_GASNet)
-  add_subdirectory(mpi_interop)
-endif()
-
-if(Legion_USE_CUDA)
-  add_subdirectory(thrust_interop)
-endif()
-
-if(Legion_USE_Python)
-  add_subdirectory(python_interop)
+add_executable(attach_2darray attach_2darray.cc)
+target_link_libraries(attach_2darray Legion::Legion)
+if(Legion_ENABLE_TESTING)
+  add_test(NAME attach_2darray COMMAND $<TARGET_FILE:attach_2darray>) 
 endif()
