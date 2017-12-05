@@ -47,13 +47,14 @@ namespace Realm {
     get_symbol(this->PyByteArray_FromStringAndSize, "PyByteArray_FromStringAndSize");
 
     get_symbol(this->PyEval_InitThreads, "PyEval_InitThreads");
+    get_symbol(this->PyEval_RestoreThread, "PyEval_RestoreThread");
+    get_symbol(this->PyEval_SaveThread, "PyEval_SaveThread");
+
     get_symbol(this->PyThreadState_New, "PyThreadState_New");
     get_symbol(this->PyThreadState_Clear, "PyThreadState_Clear");
     get_symbol(this->PyThreadState_Delete, "PyThreadState_Delete");
     get_symbol(this->PyThreadState_Get, "PyThreadState_Get");
     get_symbol(this->PyThreadState_Swap, "PyThreadState_Swap");
-    get_symbol(this->PyEval_RestoreThread, "PyEval_RestoreThread");
-    get_symbol(this->PyEval_SaveThread, "PyEval_SaveThread");
 
     get_symbol(this->PyErr_PrintEx, "PyErr_PrintEx");
 

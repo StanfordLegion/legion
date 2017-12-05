@@ -53,13 +53,14 @@ namespace Realm {
     PyObject *(*PyByteArray_FromStringAndSize)(const char *, Py_ssize_t);
 
     void (*PyEval_InitThreads)(void);
+    void (*PyEval_RestoreThread)(PyThreadState *);
+    PyThreadState *(*PyEval_SaveThread)(void);
+
     PyThreadState *(*PyThreadState_New)(PyInterpreterState *);
     void (*PyThreadState_Clear)(PyThreadState *);
     void (*PyThreadState_Delete)(PyThreadState *);
     PyThreadState *(*PyThreadState_Get)(void);
     PyThreadState *(*PyThreadState_Swap)(PyThreadState *);
-    void (*PyEval_RestoreThread)(PyThreadState *);
-    PyThreadState *(*PyEval_SaveThread)(void);
 
     void (*PyErr_PrintEx)(int set_sys_last_vars);
 
