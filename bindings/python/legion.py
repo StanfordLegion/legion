@@ -15,10 +15,13 @@
 # limitations under the License.
 #
 
-from __future__ import print_function
+from __future__ import absolute_import, division, print_function, unicode_literals
 
 import cffi
-import cPickle
+try:
+    import cPickle as pickle
+except ImportError:
+    import pickle
 import collections
 import itertools
 import numpy
@@ -28,13 +31,13 @@ import subprocess
 import sys
 import threading
 
-_pickle_version = cPickle.HIGHEST_PROTOCOL # Use latest Pickle protocol
+_pickle_version = pickle.HIGHEST_PROTOCOL # Use latest Pickle protocol
 
 root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
 runtime_dir = os.path.join(root_dir, 'runtime')
 legion_dir = os.path.join(runtime_dir, 'legion')
 
-header = subprocess.check_output(['gcc', '-I', runtime_dir, '-E', '-P', os.path.join(legion_dir, 'legion_c.h')])
+header = subprocess.check_output(['gcc', '-I', runtime_dir, '-E', '-P', os.path.join(legion_dir, 'legion_c.h')]).decode('utf-8')
 
 # Hack: Fix for Ubuntu 16.04 versions of standard library headers:
 header = re.sub(r'typedef struct {.+?} max_align_t;', '', header, flags=re.DOTALL)
@@ -108,7 +111,7 @@ class Future(object):
             value_size = c.legion_future_get_untyped_size(self.handle)
             assert value_size > 0
             value_str = ffi.unpack(ffi.cast('char *', value_ptr), value_size)
-            value = cPickle.loads(value_str)
+            value = pickle.loads(value_str)
             return value
         else:
             expected_size = ffi.sizeof(self.value_type)
@@ -507,7 +510,7 @@ class Task (object):
             arg_size = c.legion_task_get_arglen(task[0])
 
         if arg_size > 0:
-            args = cPickle.loads(ffi.unpack(arg_ptr, arg_size))
+            args = pickle.loads(ffi.unpack(arg_ptr, arg_size))
         else:
             args = ()
 
@@ -553,7 +556,7 @@ class Task (object):
 
         # Encode result in Pickle format.
         if result is not None:
-            result_str = cPickle.dumps(result, protocol=_pickle_version)
+            result_str = pickle.dumps(result, protocol=_pickle_version)
             result_size = len(result_str)
             result_ptr = ffi.new('char[]', result_size)
             ffi.buffer(result_ptr, result_size)[:] = result_str
@@ -582,14 +585,16 @@ class Task (object):
         options[0].inner = self.inner
         options[0].idempotent = self.idempotent
 
+        task_name = ('%s.%s' % (self.body.__module__, self.body.__name__))
+
         task_id = c.legion_runtime_preregister_task_variant_python_source(
             ffi.cast('legion_task_id_t', -1), # AUTO_GENERATE_ID
-            '%s.%s' % (self.body.__module__, self.body.__name__),
+            task_name.encode('utf-8'),
             execution_constraints,
             layout_constraints,
             options[0],
-            self.body.__module__,
-            self.body.__name__,
+            self.body.__module__.encode('utf-8'),
+            self.body.__name__.encode('utf-8'),
             ffi.NULL,
             0)
 
@@ -622,7 +627,7 @@ class _TaskLauncher(object):
         task_args = ffi.new('legion_task_argument_t *')
         task_args_buffer = None
         if self.calling_convention == 'python':
-            arg_str = cPickle.dumps(args, protocol=_pickle_version)
+            arg_str = pickle.dumps(args, protocol=_pickle_version)
             task_args_buffer = ffi.new('char[]', arg_str)
             task_args[0].args = task_args_buffer
             task_args[0].arglen = len(arg_str)
