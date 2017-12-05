@@ -31,6 +31,17 @@ import subprocess
 import sys
 import threading
 
+# Python 3.x compatibility:
+try:
+    long
+except NameError:
+    long = int
+
+try:
+    xrange
+except NameError:
+    xrange = range
+
 _pickle_version = pickle.HIGHEST_PROTOCOL # Use latest Pickle protocol
 
 root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
