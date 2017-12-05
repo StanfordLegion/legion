@@ -91,12 +91,16 @@ endif()
 # Python
 #------------------------------------------------------------------------------#
 option(Legion_USE_Python "Use Python" OFF)
+set(Legion_Python_VERSION "2.7" CACHE STRING "Python version to use")
 if(Legion_USE_Python)
-  set(Python_ADDITIONAL_VERSIONS 2.7)
+  set(Python_ADDITIONAL_VERSIONS ${Legion_Python_VERSION})
   find_package(PythonLibs REQUIRED)
 
   # define variable for realm_defines.h
   set(REALM_USE_PYTHON ON)
+
+  string(REPLACE "." ";" PYTHON_VERSION_SPLIT ${PYTHONLIBS_VERSION_STRING})
+  list(GET PYTHON_VERSION_SPLIT 0 PYTHON_VERSION_MAJOR)
 endif()
 
 #------------------------------------------------------------------------------#
