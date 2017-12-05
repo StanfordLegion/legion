@@ -20,12 +20,8 @@
 #include "legion.h"
 using namespace Legion;
 
-template<typename FT, int N, typename T = coord_t>
-using AccessorRO = FieldAccessor<READ_ONLY,FT,N,T,
-                                 Realm::AffineAccessor<FT,N,T> >;
-template<typename FT, int N, typename T = coord_t>
-using AccessorWD = FieldAccessor<WRITE_DISCARD,FT,N,T,
-                                 Realm::AffineAccessor<FT,N,T> >;
+typedef FieldAccessor<READ_ONLY,double,2,coord_t,
+                      Realm::AffineAccessor<double,2,coord_t> > AccessorRO;
 
 enum TaskIDs {
   TOP_LEVEL_TASK_ID,
@@ -202,7 +198,7 @@ void read_field_task(const Task *task,
   const int num_elements = *((const int*)task->args);
   int i = 0;
   
-  const AccessorRO<double,2> acc(regions[0], fid);
+  const AccessorRO acc(regions[0], fid);
 
   Rect<2> rect = runtime->get_index_space_domain(ctx, 
                   task->regions[0].region.get_index_space());
