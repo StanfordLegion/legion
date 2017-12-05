@@ -3550,6 +3550,9 @@ namespace Legion {
                                             LegionFileMode m)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(resource == EXTERNAL_POSIX_FILE);
+#endif
       file_name = name;
       mode = m;
       file_fields = fields;
@@ -3561,36 +3564,84 @@ namespace Legion {
                                 LegionFileMode m)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(resource == EXTERNAL_HDF5_FILE);
+#endif
       file_name = name;
       mode = m;
       field_files = field_map;
     }
+
+    //--------------------------------------------------------------------------
+    inline void AttachLauncher::attach_array_aos(void *base, bool column_major,
+                                            const std::vector<FieldID> &fields,
+                                            Memory mem, size_t alignment)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(resource == EXTERNAL_INSTANCE);
+#endif
+      constraints.add_constraint(PointerConstraint(mem, uintptr_t(base)));
+      constraints.add_constraint(MemoryConstraint(mem.kind()));
+      constraints.add_constraint(
+          FieldConstraint(fields, true/*contiugous*/, true/*inorder*/));
+      std::vector<DimensionKind> dim_order(4);
+      // Field dimension first for AOS
+      dim_order[0] = DIM_F;
+      if (column_major)
+      {
+        dim_order[1] = DIM_X;
+        dim_order[2] = DIM_Y;
+        dim_order[3] = DIM_Z;
+      }
+      else
+      {
+        dim_order[1] = DIM_Z;
+        dim_order[2] = DIM_Y;
+        dim_order[3] = DIM_X;
+      }
+      constraints.add_constraint(
+          OrderingConstraint(dim_order, false/*contiguous*/));
+      for (std::vector<FieldID>::const_iterator it = fields.begin();
+            it != fields.end(); it++)
+        constraints.add_constraint(AlignmentConstraint(*it, GE_EK, alignment));
+      privilege_fields.insert(fields.begin(), fields.end());
+    }
     
     //--------------------------------------------------------------------------
-    inline void AttachLauncher::
-                attach_array(const std::map<FieldID,void*> &field_pointer_map,
-                                int layoutflag)
+    inline void AttachLauncher::attach_array_soa(void *base, bool column_major,
+                                            const std::vector<FieldID> &fields,
+                                            Memory mem, size_t alignment)
     //--------------------------------------------------------------------------
     {
-      file_name = "ARRAY";
-      layout_flag = layoutflag;
-      field_pointers = field_pointer_map;
-    }
-
-    //--------------------------------------------------------------------------
-    inline void AttachLauncher::add_field_pointer(FieldID fid, void *ptr)
-    //--------------------------------------------------------------------------
-    {
-      field_pointers[fid] = ptr;
-    }
-
-    //--------------------------------------------------------------------------
-    inline void AttachLauncher::set_pitch(unsigned dim, size_t pitch)
-    //--------------------------------------------------------------------------
-    {
-      if (pitches.size() <= dim)
-        pitches.resize(dim+1, 0);
-      pitches[dim] = pitch;
+#ifdef DEBUG_LEGION
+      assert(resource == EXTERNAL_INSTANCE);
+#endif
+      constraints.add_constraint(PointerConstraint(mem, uintptr_t(base)));
+      constraints.add_constraint(MemoryConstraint(mem.kind()));
+      constraints.add_constraint(
+          FieldConstraint(fields, true/*contiugous*/, true/*inorder*/));
+      std::vector<DimensionKind> dim_order(4);
+      if (column_major)
+      {
+        dim_order[0] = DIM_X;
+        dim_order[1] = DIM_Y;
+        dim_order[2] = DIM_Z;
+      }
+      else
+      {
+        dim_order[0] = DIM_Z;
+        dim_order[1] = DIM_Y;
+        dim_order[2] = DIM_X;
+      }
+      // Field dimension last for SOA 
+      dim_order[3] = DIM_F;
+      constraints.add_constraint(
+          OrderingConstraint(dim_order, false/*contiguous*/));
+      for (std::vector<FieldID>::const_iterator it = fields.begin();
+            it != fields.end(); it++)
+        constraints.add_constraint(AlignmentConstraint(*it, GE_EK, alignment));
+      privilege_fields.insert(fields.begin(), fields.end());
     }
 
     //--------------------------------------------------------------------------

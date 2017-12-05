@@ -3024,28 +3024,29 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    InstanceManager* RegionTreeForest::create_file_instance(AttachOp *attach_op,
-                                                   const RegionRequirement &req)
+    InstanceManager* RegionTreeForest::create_external_instance(
+                             AttachOp *attach_op, const RegionRequirement &req,
+                             const std::vector<FieldID> &field_set)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(req.handle_type == SINGULAR);
 #endif
       RegionNode *attach_node = get_node(req.region);
-      return attach_node->column_source->create_file_instance(
-          req.privilege_fields, attach_node, attach_op);
+      return attach_node->column_source->create_external_instance(
+                                field_set, attach_node, attach_op);
     }
 
     //--------------------------------------------------------------------------
-    InstanceRef RegionTreeForest::attach_file(AttachOp *attach_op, 
-                                              unsigned index,
-                                              const RegionRequirement &req,
-                                              InstanceManager *file_instance,
-                                              VersionInfo &version_info,
-                                              std::set<RtEvent> &map_applied)
+    InstanceRef RegionTreeForest::attach_external(AttachOp *attach_op, 
+                                                 unsigned index,
+                                                 const RegionRequirement &req,
+                                                 InstanceManager *ext_instance,
+                                                 VersionInfo &version_info,
+                                                 std::set<RtEvent> &map_applied)
     //--------------------------------------------------------------------------
     {
-      DETAILED_PROFILER(runtime, REGION_TREE_PHYSICAL_ATTACH_FILE_CALL);
+      DETAILED_PROFILER(runtime, REGION_TREE_PHYSICAL_ATTACH_EXTERNAL_CALL);
 #ifdef DEBUG_LEGION
       assert(req.handle_type == SINGULAR);
 #endif
@@ -3054,14 +3055,14 @@ namespace Legion {
       RegionNode *attach_node = get_node(req.region);
       UniqueID logical_ctx_uid = attach_op->get_context()->get_context_uid();
       // Perform the attachment
-      return attach_node->attach_file(ctx.get_id(), context, logical_ctx_uid,  
-                                      file_instance->layout->allocated_fields, 
-                                      req, file_instance, 
-                                      version_info, map_applied);
+      return attach_node->attach_external(ctx.get_id(), context,logical_ctx_uid,
+                                        ext_instance->layout->allocated_fields, 
+                                        req, ext_instance, 
+                                        version_info, map_applied);
     }
 
     //--------------------------------------------------------------------------
-    ApEvent RegionTreeForest::detach_file(const RegionRequirement &req,
+    ApEvent RegionTreeForest::detach_external(const RegionRequirement &req,
                                           DetachOp *detach_op,
                                           unsigned index,
                                           VersionInfo &version_info,
@@ -3069,7 +3070,7 @@ namespace Legion {
                                           std::set<RtEvent> &map_applied_events)
     //--------------------------------------------------------------------------
     {
-      DETAILED_PROFILER(runtime, REGION_TREE_PHYSICAL_DETACH_FILE_CALL);
+      DETAILED_PROFILER(runtime, REGION_TREE_PHYSICAL_DETACH_EXTERNAL_CALL);
 #ifdef DEBUG_LEGION
       assert(req.handle_type == SINGULAR);
 #endif
@@ -3078,8 +3079,8 @@ namespace Legion {
       RegionNode *detach_node = get_node(req.region);
       UniqueID logical_ctx_uid = detach_op->get_context()->get_context_uid();
       // Perform the detachment
-      return detach_node->detach_file(ctx.get_id(), context, logical_ctx_uid, 
-                                      version_info, ref, map_applied_events);
+      return detach_node->detach_external(ctx.get_id(), context,logical_ctx_uid,
+                                          version_info, ref,map_applied_events);
     }
 
     //--------------------------------------------------------------------------
@@ -8515,23 +8516,23 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    InstanceManager* FieldSpaceNode::create_file_instance(
-                                         const std::set<FieldID> &create_fields, 
+    InstanceManager* FieldSpaceNode::create_external_instance(
+                                         const std::vector<FieldID> &field_set,
                                          RegionNode *node, AttachOp *attach_op)
     //--------------------------------------------------------------------------
     {
-      std::vector<FieldID> field_set(create_fields.begin(),create_fields.end());
-      std::vector<size_t> field_sizes(create_fields.size());
-      std::vector<unsigned> mask_index_map(create_fields.size());
-      std::vector<CustomSerdezID> serdez(create_fields.size());
+      std::vector<size_t> field_sizes(field_set.size());
+      std::vector<unsigned> mask_index_map(field_set.size());
+      std::vector<CustomSerdezID> serdez(field_set.size());
       FieldMask file_mask;
       compute_field_layout(field_set, field_sizes, 
                            mask_index_map, serdez, file_mask);
       // Now make the instance, this should always succeed
+      ApEvent ready_event;
       LayoutConstraintSet constraints;
       PhysicalInstance inst = 
-        attach_op->create_instance(node->row_source,
-				   field_set, field_sizes, constraints);
+        attach_op->create_instance(node->row_source, field_set, field_sizes, 
+                                   constraints, ready_event);
       // Pull out the pointer constraint so that we can use it separately
       // and not have it included in the layout constraints
       PointerConstraint pointer_constraint = constraints.pointer_constraint;
@@ -8551,7 +8552,6 @@ namespace Legion {
       }
 #ifdef DEBUG_LEGION
       assert(layout != NULL);
-   //   assert(layout->constraints->specialized_constraint.is_file());
 #endif
       DistributedID did = context->runtime->get_available_distributed_id(false);
       MemoryManager *memory = 
@@ -8561,8 +8561,8 @@ namespace Legion {
                                          memory, inst, node->row_source, 
                                          false/*own*/, node, layout, 
                                          pointer_constraint,
-                                         true/*register now*/, 
-                                         ApEvent::NO_AP_EVENT,
+                                         true/*register now*/, ready_event,
+                                         true/*external instance*/,
                                          Reservation::create_reservation());
 #ifdef DEBUG_LEGION
       assert(result != NULL);
@@ -14949,13 +14949,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    InstanceRef RegionNode::attach_file(ContextID ctx, InnerContext *parent_ctx, 
-                                        const UniqueID logical_ctx_uid,
-                                        const FieldMask &attach_mask,
-                                        const RegionRequirement &req,
-                                        InstanceManager *instance_manager,
-                                        VersionInfo &version_info,
-                                        std::set<RtEvent> &map_applied_events)
+    InstanceRef RegionNode::attach_external(ContextID ctx, 
+                                          InnerContext *parent_ctx, 
+                                          const UniqueID logical_ctx_uid,
+                                          const FieldMask &attach_mask,
+                                          const RegionRequirement &req,
+                                          InstanceManager *instance_manager,
+                                          VersionInfo &version_info,
+                                          std::set<RtEvent> &map_applied_events)
     //--------------------------------------------------------------------------
     {
       // We're effectively writing to this region by doing the attach
@@ -14981,11 +14982,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ApEvent RegionNode::detach_file(ContextID ctx, InnerContext *context, 
-                                    const UniqueID logical_ctx_uid,  
-                                    VersionInfo &version_info, 
-                                    const InstanceRef &ref,
-                                    std::set<RtEvent> &map_applied_events)
+    ApEvent RegionNode::detach_external(ContextID ctx, InnerContext *context, 
+                                        const UniqueID logical_ctx_uid,  
+                                        VersionInfo &version_info, 
+                                        const InstanceRef &ref,
+                                        std::set<RtEvent> &map_applied_events)
     //--------------------------------------------------------------------------
     {
       InstanceView *view = convert_reference(ref, context);

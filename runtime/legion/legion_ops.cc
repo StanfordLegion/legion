@@ -13751,54 +13751,28 @@ namespace Legion {
             file_mode = launcher.mode;
             break;
           }
-        case EXTERNAL_C_ARRAY:
+        case EXTERNAL_INSTANCE:
           {
-            if (launcher.field_pointers.empty()) 
-            {
-              REPORT_LEGION_WARNING(LEGION_WARNING_HDF5_ATTACH_OPERATION,
-                            "ARRAY ATTACH OPERATION ISSUED WITH NO "
-                            "FIELD MAPPINGS IN TASK %s (ID %lld)! DID YOU "
+            layout_constraint_set = launcher.constraints;  
+            const std::set<FieldID> &fields = launcher.privilege_fields;
+            if (fields.empty())
+              REPORT_LEGION_WARNING(LEGION_WARNING_EXTERNAL_ATTACH_OPERATION,
+                            "EXTERNAL ARRAY ATTACH OPERATION ISSUED WITH NO "
+                            "PRIVILEGE FIELDS IN TASK %s (ID %lld)! DID YOU "
                             "FORGET THEM?!?", parent_ctx->get_task_name(),
-                            parent_ctx->get_unique_id());
-            }
-            layout_flag = launcher.layout_flag;
-            aos_base_ptr = launcher.aos_base_ptr;
-            aos_stride = launcher.aos_stride;
+                            parent_ctx->get_unique_id())
+            if (!layout_constraint_set.pointer_constraint.is_valid)
+              REPORT_LEGION_ERROR(ERROR_ATTACH_OPERATION_MISSING_POINTER,
+                            "EXTERNAL ARRAY ATTACH OPERATION ISSUED WITH NO "
+                            "POINTER CONSTRAINT IN TASK %s (ID %lld)!",
+                            parent_ctx->get_task_name(), 
+                            parent_ctx->get_unique_id())
             // Construct the region requirement for this task
             requirement = RegionRequirement(launcher.handle, WRITE_DISCARD, 
                                             EXCLUSIVE, launcher.parent);
-            for (std::map<FieldID,void*>::const_iterator it = 
-                  launcher.field_pointers.begin(); it != 
-                  launcher.field_pointers.end(); it++)
-            {
-              requirement.add_field(it->first);
-              field_pointers_map[it->first] = it->second;
-            }
-            break;
-          }
-        case EXTERNAL_FORTRAN_ARRAY:
-          {
-            if (launcher.field_pointers.empty()) 
-            {
-              REPORT_LEGION_WARNING(LEGION_WARNING_HDF5_ATTACH_OPERATION,
-                            "ARRAY ATTACH OPERATION ISSUED WITH NO "
-                            "FIELD MAPPINGS IN TASK %s (ID %lld)! DID YOU "
-                            "FORGET THEM?!?", parent_ctx->get_task_name(),
-                            parent_ctx->get_unique_id());
-            }
-            layout_flag = launcher.layout_flag;
-            aos_base_ptr = launcher.aos_base_ptr;
-            aos_stride = launcher.aos_stride;
-            // Construct the region requirement for this task
-            requirement = RegionRequirement(launcher.handle, WRITE_DISCARD, 
-                                            EXCLUSIVE, launcher.parent);
-            for (std::map<FieldID,void*>::const_iterator it = 
-                  launcher.field_pointers.begin(); it != 
-                  launcher.field_pointers.end(); it++)
-            {
-              requirement.add_field(it->first);
-              field_pointers_map[it->first] = it->second;
-            }
+            for (std::set<FieldID>::const_iterator it = 
+                  fields.begin(); it != fields.end(); it++)
+              requirement.add_field(*it);
             break;
           }
         default:
@@ -13822,7 +13796,7 @@ namespace Legion {
     {
       activate_operation();
       file_name = NULL;
-      file_instance = NULL;
+      external_instance = NULL;
     }
 
     //--------------------------------------------------------------------------
@@ -13916,12 +13890,31 @@ namespace Legion {
                       requirement.region.index_space.id,
                       requirement.region.field_space.id,
                       requirement.region.tree_id)
+      switch (resource)
+      {
+        case EXTERNAL_POSIX_FILE:
+        case EXTERNAL_HDF5_FILE:
+          {
+            external_instance = 
+              runtime->forest->create_external_instance(this, requirement, 
+                                              requirement.instance_fields);
+            break;
+          }
+        case EXTERNAL_INSTANCE:
+          {
+            external_instance = 
+              runtime->forest->create_external_instance(this, requirement,
+                        layout_constraint_set.field_constraint.field_set);
+            break;
+          }
+        default:
+          assert(false);
+      }
+      external_instance->memory_manager->record_created_instance(
+        external_instance, false/*acquire*/, 0/*mapper id*/, 
+        parent_ctx->get_executing_processor(), 0/*priority*/, false/*remote*/);
       // Tell the parent that we added the restriction
-      file_instance = runtime->forest->create_file_instance(this, requirement);
-      file_instance->memory_manager->record_created_instance(
-          file_instance, false, 0, parent_ctx->get_executing_processor(),
-          GC_NEVER_PRIORITY, false);
-      parent_ctx->add_restriction(this, file_instance, requirement);
+      parent_ctx->add_restriction(this, external_instance, requirement);
     }
 
     //--------------------------------------------------------------------------
@@ -13944,9 +13937,9 @@ namespace Legion {
     void AttachOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
-      InstanceRef result = runtime->forest->attach_file(this, 0/*idx*/,
+      InstanceRef result = runtime->forest->attach_external(this, 0/*idx*/,
                                                         requirement,
-                                                        file_instance,
+                                                        external_instance,
                                                         version_info,
                                                         map_applied_conditions);
 #ifdef DEBUG_LEGION
@@ -13993,8 +13986,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PhysicalInstance AttachOp::create_instance(IndexSpaceNode *node,
-  	     const std::vector<FieldID> &field_set,
-             const std::vector<size_t> &sizes, LayoutConstraintSet &constraints)
+                                         const std::vector<FieldID> &field_set,
+                                         const std::vector<size_t> &sizes, 
+                                               LayoutConstraintSet &constraints,
+                                               ApEvent &ready_event)
     //--------------------------------------------------------------------------
     {
       PhysicalInstance result = PhysicalInstance::NO_INST;
@@ -14009,10 +14004,18 @@ namespace Legion {
             {
 	      field_ids[idx] = *it;
             }
-            result = node->create_file_instance(file_name,
-					field_ids, sizes, file_mode);
+            result = node->create_file_instance(file_name, field_ids, sizes, 
+                                                file_mode, ready_event);
             constraints.specialized_constraint = 
               SpecializedConstraint(GENERIC_FILE_SPECIALIZE);           
+            constraints.field_constraint = 
+              FieldConstraint(requirement.privilege_fields, 
+                              false/*contiguous*/, false/*inorder*/);
+            constraints.memory_constraint = 
+              MemoryConstraint(result.get_location().kind());
+            // TODO: Fill in the other constraints: 
+            // OrderingConstraint, SplittingConstraints DimensionConstraints,
+            // AlignmentConstraints, OffsetConstraints
             break;
           }
         case EXTERNAL_HDF5_FILE:
@@ -14030,51 +14033,38 @@ namespace Legion {
             // Now ask the low-level runtime to create the instance
             result = node->create_hdf5_instance(file_name,
 					field_ids, sizes, field_files,
-                                        (file_mode == LEGION_FILE_READ_ONLY));
+                                        (file_mode == LEGION_FILE_READ_ONLY),
+                                        ready_event);
             constraints.specialized_constraint = 
               SpecializedConstraint(HDF5_FILE_SPECIALIZE);
+            constraints.field_constraint = 
+              FieldConstraint(requirement.privilege_fields, 
+                              false/*contiguous*/, false/*inorder*/);
+            constraints.memory_constraint = 
+              MemoryConstraint(result.get_location().kind());
+            // TODO: Fill in the other constraints: 
+            // OrderingConstraint, SplittingConstraints DimensionConstraints,
+            // AlignmentConstraints, OffsetConstraints
             break;
           }
-        case EXTERNAL_C_ARRAY:
+        case EXTERNAL_INSTANCE:
           {
-            // First build the set of field paths
-            std::vector<Realm::FieldID> field_ids(field_pointers_map.size());
-            std::vector<void*> field_pointers(field_pointers_map.size());
-            unsigned idx = 0;
-            for (std::map<FieldID,void*>::const_iterator it = 
-                  field_pointers_map.begin(); 
-                  it != field_pointers_map.end(); 
-                  it++, idx++)
-            {
-              field_ids[idx] = it->first;
-              field_pointers[idx] = it->second;
-            }
-            // Now ask the low-level runtime to create the instance
-            result = node->create_array_instance(resource, field_ids, sizes, 
-                                                 field_pointers, layout_flag, 
-                                                 aos_base_ptr, aos_stride);
-            constraints.specialized_constraint = 
-              SpecializedConstraint(NORMAL_SPECIALIZE);
-            break;
-          }
-        case EXTERNAL_FORTRAN_ARRAY:
-          {
-            // First build the set of field paths
-            std::vector<Realm::FieldID> field_ids(field_pointers_map.size());
-            std::vector<void*> field_pointers(field_pointers_map.size());
-            unsigned idx = 0;
-            for (std::map<FieldID,void*>::const_iterator it = 
-                  field_pointers_map.begin(); 
-                  it != field_pointers_map.end(); 
-                  it++, idx++)
-            {
-              field_ids[idx] = it->first;
-              field_pointers[idx] = it->second;
-            }
-            // Now ask the low-level runtime to create the instance
-            result = node->create_array_instance(resource, field_ids, sizes, 
-                                                 field_pointers, layout_flag, 
-                                                 aos_base_ptr, aos_stride);
+            // Create the Instance Layout Generic object for realm
+            Realm::InstanceLayoutConstraints realm_constraints;
+            // Get some help from the instance builder to make this
+            InstanceBuilder::convert_layout_constraints(layout_constraint_set,
+                                          field_set, sizes, realm_constraints);
+            const PointerConstraint &pointer = 
+                                      layout_constraint_set.pointer_constraint;
+#ifdef DEBUG_LEGION
+            assert(pointer.is_valid);
+#endif
+            Realm::InstanceLayoutGeneric *ilg = 
+              node->create_layout(realm_constraints, 
+                  layout_constraint_set.ordering_constraint);
+            result = node->create_external_instance(pointer.memory, pointer.ptr,
+                                                    ilg, ready_event);
+            constraints = layout_constraint_set;
             constraints.specialized_constraint = 
               SpecializedConstraint(NORMAL_SPECIALIZE);
             break;
@@ -14085,15 +14075,6 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(result.exists());
 #endif      
-      constraints.field_constraint = 
-        FieldConstraint(requirement.privilege_fields, 
-                        false/*contiguous*/, false/*inorder*/);
-      constraints.memory_constraint = 
-        MemoryConstraint(result.get_location().kind());
-      // TODO: Fill in the other constraints: 
-      // OrderingConstraint, SplittingConstraints DimensionConstraints,
-      // AlignmentConstraints, OffsetConstraints
-      // Fill in the rest of the constraints
       if (Runtime::legion_spy_enabled)
       {
         for (std::set<FieldID>::const_iterator it = 
@@ -14426,14 +14407,14 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(!manager->is_reduction_manager()); 
 #endif
-      //InstanceManager *inst_manager = manager->as_instance_manager(); 
-      /*if (!inst_manager->is_attached_file())
+      InstanceManager *inst_manager = manager->as_instance_manager(); 
+      if (!inst_manager->is_external_instance())
         REPORT_LEGION_ERROR(ERROR_ILLEGAL_DETACH_OPERATION,
                       "Illegal detach operation on a physical region which "
-                      "was not attached!") */
+                      "was not attached!")
       std::set<RtEvent> applied_conditions;
       ApEvent detach_event = 
-        runtime->forest->detach_file(requirement, this, 0/*idx*/, 
+        runtime->forest->detach_external(requirement, this, 0/*idx*/, 
                                      version_info,reference,applied_conditions);
       version_info.apply_mapping(applied_conditions);
       if (!applied_conditions.empty())

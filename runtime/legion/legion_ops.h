@@ -2650,8 +2650,10 @@ namespace Legion {
       virtual void record_reference_mutation_effect(RtEvent event);
     public:
       PhysicalInstance create_instance(IndexSpaceNode *node,
-	const std::vector<FieldID> &field_set,
-        const std::vector<size_t> &field_sizes, LayoutConstraintSet &cons);
+                                       const std::vector<FieldID> &field_set,
+                                       const std::vector<size_t> &field_sizes,
+                                             LayoutConstraintSet &cons,
+                                             ApEvent &ready_event);
     protected:
       void check_privilege(void);
       void compute_parent_index(void);
@@ -2668,10 +2670,8 @@ namespace Legion {
       PhysicalRegion region;
       unsigned parent_req_index;
       std::set<RtEvent> map_applied_conditions;
-      InstanceManager *file_instance;
-      int layout_flag;  // SOA 0, AOS 1
-      unsigned char* aos_base_ptr;
-      size_t aos_stride;
+      InstanceManager *external_instance;
+      LayoutConstraintSet layout_constraint_set;
     };
 
     /**

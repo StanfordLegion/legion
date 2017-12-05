@@ -88,80 +88,88 @@ void top_level_task(const Task *task,
   Rect<1> elem_rect(0,num_elements-1);
   IndexSpace is = runtime->create_index_space(ctx, elem_rect); 
   runtime->attach_name(is, "is");
-  FieldSpace input_fs = runtime->create_field_space(ctx);
-  runtime->attach_name(input_fs, "input_fs");
+  FieldSpace fs = runtime->create_field_space(ctx);
+  runtime->attach_name(fs, "fs");
   {
     FieldAllocator allocator = 
-      runtime->create_field_allocator(ctx, input_fs);
+      runtime->create_field_allocator(ctx, fs);
     allocator.allocate_field(sizeof(double),FID_X);
-    runtime->attach_name(input_fs, FID_X, "X");
+    runtime->attach_name(fs, FID_X, "X");
     allocator.allocate_field(sizeof(double),FID_Y);
-    runtime->attach_name(input_fs, FID_Y, "Y");
-  }
-  FieldSpace output_fs = runtime->create_field_space(ctx);
-  runtime->attach_name(output_fs, "output_fs");
-  {
-    FieldAllocator allocator = 
-      runtime->create_field_allocator(ctx, output_fs);
+    runtime->attach_name(fs, FID_Y, "Y");
     allocator.allocate_field(sizeof(double),FID_Z);
-    runtime->attach_name(output_fs, FID_Z, "Z");
+    runtime->attach_name(fs, FID_Z, "Z");
   }
-  LogicalRegion input_lr = runtime->create_logical_region(ctx, is, input_fs);
+  LogicalRegion input_lr = runtime->create_logical_region(ctx, is, fs);
   runtime->attach_name(input_lr, "input_lr");
-  LogicalRegion output_lr = runtime->create_logical_region(ctx, is, output_fs);
+  LogicalRegion output_lr = runtime->create_logical_region(ctx, is, fs);
   runtime->attach_name(output_lr, "output_lr");
   
   PhysicalRegion xy_pr, z_pr;
-  double *x_ptr = NULL;
-  double *y_ptr = NULL;
   double *z_ptr = NULL;
+  double *xy_ptr = NULL;
   double *xyz_ptr = NULL;
-
+  const Memory local_sysmem = Machine::MemoryQuery(Machine::get_machine())
+      .has_affinity_to(runtime->get_executing_processor(ctx))
+      .only_kind(Memory::SYSTEM_MEM)
+      .first();
   if (soa_flag == 0) 
   { // SOA
-    double *y_ptr = (double*)malloc(sizeof(double)*(num_elements));
-    double *x_ptr = (double*)malloc(sizeof(double)*(num_elements));
-    double *z_ptr = (double*)malloc(sizeof(double)*(num_elements));
+    xy_ptr = (double*)malloc(2*sizeof(double)*(num_elements));
+    z_ptr = (double*)malloc(sizeof(double)*(num_elements));
     for (int j = 0; j < num_elements; j++ ) {
-        x_ptr[j] = drand48();
-        y_ptr[j] = drand48();
-        z_ptr[j] = drand48();
+        xy_ptr[j]               = drand48();
+        xy_ptr[num_elements+j]  = drand48();
+        z_ptr[j]                = drand48();
     }
-    std::map<FieldID,void*> field_pointer_map_xy;
-    field_pointer_map_xy[FID_X] = x_ptr;
-    field_pointer_map_xy[FID_Y] = y_ptr;
-    printf("Attach SOA array fid %d, ptr %p, fid %d, ptr %p\n", 
-           FID_X, x_ptr, FID_Y, y_ptr);  
-    xy_pr = runtime->attach_array_soa(ctx, input_lr, input_lr, 
-                                      field_pointer_map_xy, 0); 
-  
-    std::map<FieldID,void*> field_pointer_map_z;
-    field_pointer_map_z[FID_Z] = z_ptr;
-    printf("Attach SOA array fid %d, ptr %p\n", FID_Z, z_ptr);
-    z_pr = runtime->attach_array_soa(ctx, output_lr, output_lr, 
-                                     field_pointer_map_z, 0);
-    
+    {
+      printf("Attach SOA array fid %d, fid %d, ptr %p\n", 
+           FID_X, FID_Y, xy_ptr);
+      AttachLauncher launcher(EXTERNAL_INSTANCE, input_lr, input_lr);
+      std::vector<FieldID> attach_fields(2);
+      attach_fields[0] = FID_X;
+      attach_fields[1] = FID_Y;
+      launcher.attach_array_soa(xy_ptr, false/*column major*/,
+                                attach_fields, local_sysmem);
+      xy_pr = runtime->attach_external_resource(ctx, launcher);
+    }
+    { 
+      printf("Attach SOA array fid %d, ptr %p\n", FID_Z, z_ptr);
+      AttachLauncher launcher(EXTERNAL_INSTANCE, output_lr, output_lr);
+      std::vector<FieldID> attach_fields(1);
+      attach_fields[0] = FID_Z;
+      launcher.attach_array_soa(z_ptr, false/*column major*/,
+                                attach_fields, local_sysmem);
+      z_pr = runtime->attach_external_resource(ctx, launcher);
+    }
   } 
   else 
   { // AOS
     daxpy_t *xyz_ptr = (daxpy_t*)malloc(sizeof(daxpy_t)*(num_elements));
-  
-    std::map<FieldID, size_t> offset_input;
-    offset_input[FID_X] = 0;
-    offset_input[FID_Y] = sizeof(double);
-
-    xy_pr = runtime->attach_array_aos(ctx, input_lr, input_lr, 
-                                      xyz_ptr, sizeof(daxpy_t), 
-                                      offset_input, 0);
-  
-    std::map<FieldID, size_t> offset_output;
-    offset_output[FID_Z] = 2*sizeof(double);
-  
-    z_pr = runtime->attach_array_aos(ctx, output_lr, output_lr, 
-                                     xyz_ptr, sizeof(daxpy_t), 
-                                     offset_output, 0);
+    std::vector<FieldID> layout_constraint_fields(3);
+    layout_constraint_fields[0] = FID_X;
+    layout_constraint_fields[1] = FID_Y;
+    layout_constraint_fields[2] = FID_Z;
+    // Need separate attaches for different logical regions,
+    // each launcher gets all the fields in the layout constraint
+    // but only requests privileges on fields for its logical region
     printf("Attach AOS array ptr %p\n", xyz_ptr);  
+    {
+      AttachLauncher launcher(EXTERNAL_INSTANCE, input_lr, input_lr);
+      launcher.attach_array_aos(xyz_ptr, false/*column major*/,
+                                layout_constraint_fields, local_sysmem);
+      launcher.privilege_fields.erase(FID_Z);
+      xy_pr = runtime->attach_external_resource(ctx, launcher);
     }
+    {
+      AttachLauncher launcher(EXTERNAL_INSTANCE, output_lr, output_lr);
+      launcher.attach_array_aos(xyz_ptr, false/*column major*/,
+                                layout_constraint_fields, local_sysmem);
+      launcher.privilege_fields.erase(FID_X);
+      launcher.privilege_fields.erase(FID_Y);
+      z_pr = runtime->attach_external_resource(ctx, launcher);
+    }
+  }
   
   // In addition to using rectangles and domains for launching index spaces
   // of tasks (see example 02), Legion also uses them for performing 
@@ -310,16 +318,14 @@ void top_level_task(const Task *task,
   Future fu = runtime->execute_task(ctx, check_launcher);
   fu.wait();
 
-  runtime->detach_array(ctx, xy_pr);
-  runtime->detach_array(ctx, z_pr);
+  runtime->detach_external_resource(ctx, xy_pr);
+  runtime->detach_external_resource(ctx, z_pr);
   runtime->destroy_logical_region(ctx, input_lr);
   runtime->destroy_logical_region(ctx, output_lr);
-  runtime->destroy_field_space(ctx, input_fs);
-  runtime->destroy_field_space(ctx, output_fs);
+  runtime->destroy_field_space(ctx, fs);
   runtime->destroy_index_space(ctx, is);
   if (xyz_ptr == NULL) free(xyz_ptr);
-  if (x_ptr == NULL) free(x_ptr);
-  if (y_ptr == NULL) free(y_ptr);
+  if (xy_ptr == NULL) free(xy_ptr);
   if (z_ptr == NULL) free(z_ptr);
 }
 
@@ -384,8 +390,9 @@ void check_task(const Task *task,
 
   Rect<1> rect = runtime->get_index_space_domain(ctx,
                   task->regions[0].region.get_index_space());
+  const void *ptr = acc_z.ptr(rect.lo);
   printf("Checking results... xptr %p, y_ptr %p, z_ptr %p...\n", 
-          acc_x.ptr(rect.lo), acc_y.ptr(rect.lo), acc_z.ptr(rect.lo));
+          acc_x.ptr(rect.lo), acc_y.ptr(rect.lo), ptr);
   bool all_passed = true;
   for (PointInRectIterator<1> pir(rect); pir(); pir++)
   {

@@ -92,35 +92,56 @@ void top_level_task(const Task *task,
       val += 1.0;
   }
   
+  const Memory local_sysmem = Machine::MemoryQuery(Machine::get_machine())
+      .has_affinity_to(runtime->get_executing_processor(ctx))
+      .only_kind(Memory::SYSTEM_MEM)
+      .first();
   /* attach array */
-  std::map<FieldID, size_t> offset_x;
-  offset_x[FID_X] = 0;
-  printf("Attach AOS array in fortran layout, fid %d, ptr %p\n", 
-         FID_X, xy_ptr);  
-  PhysicalRegion pr_x = runtime->attach_array_aos(ctx, input_lr, input_lr, 
-                                                  xy_ptr, sizeof(xy_t), 
-                                                  offset_x, 0);
-  
-  std::map<FieldID, size_t> offset_y;
-  offset_y[FID_Y] = sizeof(double);
-  printf("Attach AOS array in c layout, fid %d, ptr %p\n", 
-         FID_Y, ((unsigned char*)(xy_ptr))+sizeof(double));  
-  PhysicalRegion pr_y = runtime->attach_array_aos(ctx, input_lr, input_lr, 
-                                                  xy_ptr, sizeof(xy_t), 
-                                                  offset_y, 1);
-  
-  std::map<FieldID,void*> field_pointer_map_a;
-  field_pointer_map_a[FID_A] = a_ptr;
-  printf("Attach SOA array in fortran layout, fid %d, ptr %p\n", 
-         FID_A, a_ptr);  
-  PhysicalRegion pr_a = runtime->attach_array_soa(ctx, input_lr, input_lr, 
-                                                  field_pointer_map_a, 0); 
-  
-  std::map<FieldID,void*> field_pointer_map_b;
-  field_pointer_map_b[FID_B] = b_ptr;
-  printf("Attach SOA array in c layout, fid %d, ptr %p\n", FID_B, b_ptr);  
-  PhysicalRegion pr_b = runtime->attach_array_soa(ctx, input_lr, input_lr, 
-                                                  field_pointer_map_b, 1); 
+  PhysicalRegion pr_x;
+  {
+    printf("Attach AOS array in fortran layout, fid %d, ptr %p\n", 
+            FID_X, xy_ptr);
+    AttachLauncher launcher(EXTERNAL_INSTANCE, input_lr, input_lr);
+    std::vector<FieldID> fields(2);
+    fields[0] = FID_X;
+    fields[1] = FID_Y;
+    launcher.attach_array_aos(xy_ptr, true/*column major*/,
+                              fields, local_sysmem);
+    launcher.privilege_fields.erase(FID_Y);
+    pr_x = runtime->attach_external_resource(ctx, launcher);
+  }
+  PhysicalRegion pr_y; 
+  {
+    printf("Attach AOS array in c layout, fid %d, ptr %p\n", 
+            FID_Y, ((unsigned char*)(xy_ptr))+sizeof(double));
+    AttachLauncher launcher(EXTERNAL_INSTANCE, input_lr, input_lr);
+    std::vector<FieldID> fields(2);
+    fields[0] = FID_X;
+    fields[1] = FID_Y;
+    launcher.attach_array_aos(xy_ptr, false/*column major*/,
+                              fields, local_sysmem);
+    launcher.privilege_fields.erase(FID_X);
+    pr_y = runtime->attach_external_resource(ctx, launcher);
+  }
+  PhysicalRegion pr_a;
+  {
+    printf("Attach SOA array in fortran layout, fid %d, ptr %p\n", 
+            FID_A, a_ptr);
+    AttachLauncher launcher(EXTERNAL_INSTANCE, input_lr, input_lr);
+    std::vector<FieldID> fields(1, FID_A);
+    launcher.attach_array_soa(a_ptr, true/*column major*/,
+                              fields, local_sysmem);
+    pr_a = runtime->attach_external_resource(ctx, launcher);
+  }
+  PhysicalRegion pr_b;
+  {
+    printf("Attach SOA array in c layout, fid %d, ptr %p\n", FID_B, b_ptr);
+    AttachLauncher launcher(EXTERNAL_INSTANCE, input_lr, input_lr);
+    std::vector<FieldID> fields(1, FID_B);
+    launcher.attach_array_soa(b_ptr, false/*column major*/,
+                              fields, local_sysmem);
+    pr_b = runtime->attach_external_resource(ctx, launcher);
+  }
 
   TaskLauncher read_launcher(READ_FIELD_TASK_ID, 
                              TaskArgument(&num_elements, 
@@ -150,10 +171,10 @@ void top_level_task(const Task *task,
   fa.wait();
   fb.wait();
 
-  runtime->detach_array(ctx, pr_x);
-  runtime->detach_array(ctx, pr_y);
-  runtime->detach_array(ctx, pr_a);
-  runtime->detach_array(ctx, pr_b);
+  runtime->detach_external_resource(ctx, pr_x);
+  runtime->detach_external_resource(ctx, pr_y);
+  runtime->detach_external_resource(ctx, pr_a);
+  runtime->detach_external_resource(ctx, pr_b);
   runtime->destroy_logical_region(ctx, input_lr);
   runtime->destroy_field_space(ctx, input_fs);
   runtime->destroy_index_space(ctx, is);
