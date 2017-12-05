@@ -137,7 +137,6 @@ namespace Realm {
 	gsize = max(gsize, offset + it2->size);
 	if((it2->alignment > 1) && ((galign % it2->alignment) != 0))
 	  galign = lcm(galign, size_t(it2->alignment));
-        printf("Field %d has offset %ld\n", it2->field_id, offset);	
 	field_offsets[it2->field_id] = offset;
 	field_sizes[it2->field_id] = it2->size;
       }
