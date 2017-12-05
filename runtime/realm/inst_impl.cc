@@ -160,6 +160,40 @@ namespace Realm {
       return ready_event;
     }
 
+    /*static*/ Event RegionInstance::create_external(RegionInstance &inst,
+                                                     Memory memory, uintptr_t base,
+                                                     InstanceLayoutGeneric *ilg,
+						     const ProfilingRequestSet& prs,
+						     Event wait_on)
+    {
+      MemoryImpl *m_impl = get_runtime()->get_memory_impl(memory);
+      RegionInstanceImpl *impl = m_impl->new_instance();
+
+      // This actually doesn't have any bytes used in realm land
+      ilg->bytes_used = 0;
+      impl->metadata.layout = ilg;
+      
+      if (!prs.empty()) {
+        impl->requests = prs;
+        impl->measurements.import_requests(impl->requests);
+        if(impl->measurements.wants_measurement<ProfilingMeasurements::InstanceTimeline>())
+          impl->timeline.record_create_time();
+      }
+
+      // This is a little scary because the result could be negative, but we know
+      // that unsigned undeflow produces correct results mod 2^64 so its ok
+      // Pray that we never have to debug this
+      unsigned char *impl_base = 
+        (unsigned char*)m_impl->get_direct_ptr(0/*offset*/, 0/*size*/);
+      size_t inst_offset = (size_t)(((unsigned char*)base) - impl_base);
+      impl->notify_allocation(true/*success*/, inst_offset);
+
+      inst = impl->me;
+      log_inst.info() << "external instance created: inst=" << inst;
+      log_inst.debug() << "external instance layout: inst=" << inst << " layout=" << *ilg;
+      return Event::NO_EVENT;
+    }
+
     void RegionInstance::destroy(Event wait_on /*= Event::NO_EVENT*/) const
     {
       // we can immediately turn this into a (possibly-preconditioned) request to

@@ -1898,9 +1898,14 @@ namespace Legion {
       inline void attach_hdf5(const char *file_name,
                               const std::map<FieldID,const char*> &field_map,
                               LegionFileMode mode);
-    public:
-      inline void add_field_pointer(FieldID fid, void *ptr);
-      inline void set_pitch(unsigned dim, size_t pitch);
+      // Helper methods for AOS and SOA arrays, but it is totally 
+      // acceptable to fill in the layout constraint set manually
+      inline void attach_array_aos(void *base, bool column_major,
+                                   const std::vector<FieldID> &fields,
+                                   Memory mem, size_t alignment = 16);
+      inline void attach_array_soa(void *base, bool column_major,
+                                   const std::vector<FieldID> &fields,
+                                   Memory mem, size_t alignment = 16);
     public:
       ExternalResource                              resource;
       LogicalRegion                                 handle;
@@ -1912,9 +1917,9 @@ namespace Legion {
       std::vector<FieldID>                          file_fields; // normal files
       std::map<FieldID,/*file name*/const char*>    field_files; // hdf5 files
     public:
-      // Data for arrays
-      std::map<FieldID,/*pointers*/void*>           field_pointers;
-      std::vector<size_t/*bytes*/>                  pitches;
+      // Data for external instances
+      LayoutConstraintSet                           constraints;
+      std::set<FieldID>                             privilege_fields;
     public:
       // Inform the runtime about any static dependences
       // These will be ignored outside of static traces

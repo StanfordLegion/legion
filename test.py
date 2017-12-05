@@ -58,6 +58,8 @@ legion_cxx_tests = [
     ['examples/realm_stencil/realm_stencil', ['-ll:cpu', '4']],
     ['examples/spmd_cgsolver/spmd_cgsolver', ['-ll:cpu', '4', '-perproc']],
     ['examples/virtual_map/virtual_map', []],
+    ['examples/attach_2darray_c_fortran_layout/attach_2darray', []],
+    ['examples/attach_array_daxpy/attach_array_daxpy', []],
 
     # Tests
     ['test/rendering/rendering', ['-i', '2', '-n', '64', '-ll:cpu', '4']],

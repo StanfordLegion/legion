@@ -126,7 +126,11 @@ namespace Realm {
     if(block_size > 1)
       block_size = 0;
     InstanceLayoutConstraints ilc(field_sizes, block_size);
-    InstanceLayoutGeneric *layout = InstanceLayoutGeneric::choose_instance_layout(space, ilc);
+    // We use fortran order here
+    int dim_order[N];
+    for (int i = 0; i < N; i++)
+      dim_order[i] = i;
+    InstanceLayoutGeneric *layout = InstanceLayoutGeneric::choose_instance_layout(space, ilc, dim_order);
     return create_instance(inst, memory, layout, reqs, wait_on);
   }
 
@@ -143,7 +147,11 @@ namespace Realm {
     if(block_size > 1)
       block_size = 0;
     InstanceLayoutConstraints ilc(field_sizes, block_size);
-    InstanceLayoutGeneric *layout = InstanceLayoutGeneric::choose_instance_layout(space, ilc);
+    // We use fortran order here
+    int dim_order[N];
+    for (int i = 0; i < N; i++)
+      dim_order[i] = i;
+    InstanceLayoutGeneric *layout = InstanceLayoutGeneric::choose_instance_layout(space, ilc, dim_order);
     return create_instance(inst, memory, layout, reqs, wait_on);
   }
 

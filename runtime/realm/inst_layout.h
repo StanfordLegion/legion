@@ -70,7 +70,8 @@ namespace Realm {
 
     template <int N, typename T>
     static InstanceLayoutGeneric *choose_instance_layout(IndexSpace<N,T> is,
-							 const InstanceLayoutConstraints& ilc);
+							 const InstanceLayoutConstraints& ilc,
+                                                         const int dim_order[N]);
 
     size_t bytes_used;
     size_t alignment_reqd;

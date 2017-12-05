@@ -175,6 +175,12 @@ namespace Realm {
 				      const ProfilingRequestSet& prs,
 				      Event wait_on = Event::NO_EVENT);
 #endif
+              
+    static Event create_external(RegionInstance& inst,
+				 Memory memory, uintptr_t base,
+				 InstanceLayoutGeneric *ilg,
+				 const ProfilingRequestSet& prs,
+				 Event wait_on = Event::NO_EVENT);
 
     void destroy(Event wait_on = Event::NO_EVENT) const;
 
