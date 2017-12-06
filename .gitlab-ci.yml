@@ -56,8 +56,14 @@ variables:
 
 .openmp: &openmp
   USE_OPENMP: "1"
-.python: &python
+.python2: &python2
   USE_PYTHON: "1"
+.python3: &python3
+  USE_PYTHON: "1"
+  # FIXME: It would be nice to find a better way to do this,
+  # but the alternatives look scary
+  PYTHON_LIB: "/usr/lib/x86_64-linux-gnu/libpython3.4m.so"
+  PYTHON_VERSION_MAJOR: "3"
 .hdf5: &hdf5
   USE_HDF: "1"
 .llvm: &llvm
@@ -234,10 +240,14 @@ gcc49_cxx98_debug_openmp_regent:
   variables:
     <<: [*gcc49, *terra38, *debug, *cxx98_normal, *openmp, *regent]
 #   * Python
-gcc49_cxx98_debug_python_legion:
+gcc49_cxx98_debug_python2_legion:
   <<: [*linux, *image, *tests]
   variables:
-    <<: [*gcc49, *terra38, *debug, *cxx98_normal, *python, *legion]
+    <<: [*gcc49, *terra38, *debug, *cxx98_normal, *python2, *legion]
+gcc49_cxx98_debug_python3_legion:
+  <<: [*linux, *image, *tests]
+  variables:
+    <<: [*gcc49, *terra38, *debug, *cxx98_normal, *python3, *legion]
 #   * LLVM
 gcc49_cxx98_debug_llvm_cmake_legion:
   <<: [*linux, *image, *tests]
@@ -340,10 +350,14 @@ clang38_cxx98_debug_openmp_regent:
   variables:
     <<: [*clang38, *terra38, *debug, *cxx98_normal, *openmp, *regent]
 #   * Python
-clang38_cxx98_debug_python_legion:
+clang38_cxx98_debug_python2_legion:
   <<: [*linux, *image, *tests]
   variables:
-    <<: [*clang38, *terra38, *debug, *cxx98_normal, *python, *legion]
+    <<: [*clang38, *terra38, *debug, *cxx98_normal, *python2, *legion]
+clang38_cxx98_debug_python3_legion:
+  <<: [*linux, *image, *tests]
+  variables:
+    <<: [*clang38, *terra38, *debug, *cxx98_normal, *python3, *legion]
 #   * LLVM
 clang38_cxx98_debug_llvm_cmake_legion:
   <<: [*linux, *image, *tests]

@@ -1579,11 +1579,6 @@ function type_check.expr_partition_by_field(cx, node)
   local colors = type_check.expr(cx, node.colors)
   local colors_type = std.check_read(cx, colors)
 
-  if not region_type:is_opaque() then
-    report.error(node, "type mismatch in argument 1: expected region of ispace(ptr) but got " ..
-                tostring(region_type))
-  end
-
   if #region.fields ~= 1 then
     report.error(node, "type mismatch in argument 1: expected 1 field but got " ..
                 tostring(#region.fields))

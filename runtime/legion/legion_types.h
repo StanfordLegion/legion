@@ -1062,8 +1062,8 @@ namespace Legion {
       REGION_TREE_PHYSICAL_REDUCE_ACROSS_CALL,
       REGION_TREE_PHYSICAL_CONVERT_MAPPING_CALL,
       REGION_TREE_PHYSICAL_FILL_FIELDS_CALL,
-      REGION_TREE_PHYSICAL_ATTACH_FILE_CALL,
-      REGION_TREE_PHYSICAL_DETACH_FILE_CALL,
+      REGION_TREE_PHYSICAL_ATTACH_EXTERNAL_CALL,
+      REGION_TREE_PHYSICAL_DETACH_EXTERNAL_CALL,
       REGION_NODE_REGISTER_LOGICAL_USER_CALL,
       REGION_NODE_CLOSE_LOGICAL_NODE_CALL,
       REGION_NODE_SIPHON_LOGICAL_CHILDREN_CALL,
@@ -1220,8 +1220,8 @@ namespace Legion {
       "Region Tree Physical Reduce Across",                           \
       "Region Tree Physical Convert Mapping",                         \
       "Region Tree Physical Fill Fields",                             \
-      "Region Tree Physical Attach File",                             \
-      "Region Tree Physical Detach File",                             \
+      "Region Tree Physical Attach External",                         \
+      "Region Tree Physical Detach External",                         \
       "Region Node Register Logical User",                            \
       "Region Node Close Logical Node",                               \
       "Region Node Siphon Logical Children",                          \

@@ -3074,12 +3074,32 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     Realm::InstanceLayoutGeneric* IndexSpaceNodeT<DIM,T>::create_layout(
-                                    const Realm::InstanceLayoutConstraints &ilc)
+                                    const Realm::InstanceLayoutConstraints &ilc,
+                                    const OrderingConstraint &constraint)
     //--------------------------------------------------------------------------
     {
       Realm::IndexSpace<DIM,T> local_is;
       get_realm_index_space(local_is, true/*tight*/);
-      return Realm::InstanceLayoutGeneric::choose_instance_layout(local_is,ilc);
+      int dim_order[DIM];
+      // Construct the dimension ordering
+      unsigned next_dim = 0;
+      for (std::vector<DimensionKind>::const_iterator it = 
+            constraint.ordering.begin(); it != constraint.ordering.end(); it++)
+      {
+        // Skip the field dimension we already handled it
+        if ((*it) == DIM_F)
+          continue;
+        if ((*it) > DIM_F)
+          assert(false); // TODO: handle split dimensions
+        if ((*it) >= DIM) // Skip dimensions bigger than ours
+          continue;
+        dim_order[next_dim++] = *it;
+      }
+#ifdef DEBUG_LEGION
+      assert(next_dim == DIM); // should have filled them all in
+#endif
+      return Realm::InstanceLayoutGeneric::choose_instance_layout(local_is,
+                                                            ilc, dim_order);
     }
 
     //--------------------------------------------------------------------------
@@ -3088,7 +3108,8 @@ namespace Legion {
                                          const char *file_name,
                                          const std::vector<Realm::FieldID> &field_ids,
                                          const std::vector<size_t> &field_sizes,
-                                         legion_file_mode_t file_mode)
+                                         legion_file_mode_t file_mode,
+                                         ApEvent &ready_event)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(context->runtime, REALM_CREATE_INSTANCE_CALL);
@@ -3098,13 +3119,8 @@ namespace Legion {
       // No profiling for these kinds of instances currently
       Realm::ProfilingRequestSet requests;
       PhysicalInstance result;
-      LgEvent ready(PhysicalInstance::create_file_instance(result, file_name, 
-							   local_space,
-							   field_ids,
-							   field_sizes,
-							   file_mode, requests));
-      // TODO
-      ready.lg_wait();
+      ready_event = ApEvent(PhysicalInstance::create_file_instance(result, 
+          file_name, local_space, field_ids, field_sizes, file_mode, requests));
       return result;
     }
 
@@ -3115,7 +3131,7 @@ namespace Legion {
 				    const std::vector<Realm::FieldID> &field_ids,
                                     const std::vector<size_t> &field_sizes,
                                     const std::vector<const char*> &field_files,
-                                    bool read_only)
+                                    bool read_only, ApEvent &ready_event)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(context->runtime, REALM_CREATE_INSTANCE_CALL);
@@ -3126,15 +3142,9 @@ namespace Legion {
       Realm::ProfilingRequestSet requests;
       PhysicalInstance result;
 #ifdef USE_HDF
-      LgEvent ready(PhysicalInstance::create_hdf5_instance(result, file_name, 
-							   local_space,
-							   field_ids,
-							   field_sizes,
-							   field_files,
-							   read_only,
-							   requests));
-      // TODO
-      ready.lg_wait();
+      ready_event = ApEvent(PhysicalInstance::create_hdf5_instance(result, 
+                            file_name, local_space, field_ids, field_sizes,
+		            field_files, read_only, requests));
 #else
       assert(0 && "no HDF5 support");
       result = PhysicalInstance::NO_INST;
@@ -3142,6 +3152,26 @@ namespace Legion {
       return result;
     }
 
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    PhysicalInstance IndexSpaceNodeT<DIM,T>::create_external_instance(
+                                          Memory memory, uintptr_t base,
+                                          Realm::InstanceLayoutGeneric *ilg,
+                                          ApEvent &ready_event)
+    //--------------------------------------------------------------------------
+    {
+      DETAILED_PROFILER(context->runtime, REALM_CREATE_INSTANCE_CALL);
+      // Have to wait for the index space to be ready if necessary
+      Realm::IndexSpace<DIM,T> local_space;
+      get_realm_index_space(local_space, true/*tight*/);
+      // No profiling for these kinds of instances currently
+      Realm::ProfilingRequestSet requests;
+      PhysicalInstance result;
+      ready_event = ApEvent(PhysicalInstance::create_external(result,
+                                        memory, base, ilg, requests));
+      return result;
+    }
+    
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     void IndexSpaceNodeT<DIM,T>::get_launch_space_domain(Domain &launch_domain)

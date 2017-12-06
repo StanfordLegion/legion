@@ -5748,6 +5748,9 @@ namespace Legion {
             instances.begin(); it != instances.end(); it++)
       {
         PhysicalManager *target_manager = it->manager;
+        // Garbage collector is not allowed to delete external instances
+        if (target_manager->is_external_instance())
+          continue;
         if (target_manager->try_active_deletion())
         {
           record_deleted_instance(target_manager);

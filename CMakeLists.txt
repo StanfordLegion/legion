@@ -92,14 +92,15 @@ endif()
 #------------------------------------------------------------------------------#
 option(Legion_USE_Python "Use Python" OFF)
 if(Legion_USE_Python)
-  set(Python_ADDITIONAL_VERSIONS 2.7)
+  # Note: Legion now supports several versions, so no need to be so forceful
+  # set(Python_ADDITIONAL_VERSIONS 2.7)
   find_package(PythonLibs REQUIRED)
-  install(FILES ${Legion_SOURCE_DIR}/bindings/python/legion.py
-    DESTINATION ${CMAKE_INSTALL_DATADIR}/Legion/python
-  )
 
   # define variable for realm_defines.h
   set(REALM_USE_PYTHON ON)
+
+  string(REPLACE "." ";" PYTHON_VERSION_SPLIT ${PYTHONLIBS_VERSION_STRING})
+  list(GET PYTHON_VERSION_SPLIT 0 PYTHON_VERSION_MAJOR)
 endif()
 
 #------------------------------------------------------------------------------#
@@ -290,8 +291,9 @@ export(PACKAGE Legion)
 #------------------------------------------------------------------------------#
 # Examples and Applications
 #------------------------------------------------------------------------------#
-option(Legion_BUILD_ALL "Build all Legion examples, tutorials and tests" OFF)
+option(Legion_BUILD_ALL "Build all Legion bindings, examples, tutorials and tests" OFF)
 option(Legion_BUILD_APPS "Build Legion sample applications" OFF)
+option(Legion_BUILD_BINDINGS "Build Legion language bindings" OFF)
 option(Legion_BUILD_EXAMPLES "Build Legion examples" OFF)
 option(Legion_BUILD_TUTORIAL "Build Legion tutorial" OFF)
 option(Legion_BUILD_TESTS "Build Legion tests" OFF)
@@ -301,7 +303,7 @@ if(Legion_ENABLE_TESTING)
   # if Legion_TEST_LAUNCHER is set, split the string into a list
   separate_arguments(Legion_TEST_LAUNCHER)
 endif()
-if(Legion_BUILD_ALL OR Legion_BUILD_APPS OR Legion_BUILD_EXAMPLES OR Legion_BUILD_TUTORIAL OR Legion_BUILD_TESTS)
+if(Legion_BUILD_ALL OR Legion_BUILD_APPS OR Legion_BUILD_BINDINGS OR Legion_BUILD_EXAMPLES OR Legion_BUILD_TUTORIAL OR Legion_BUILD_TESTS)
   # Make a namespaced alias so in-build examples can use it the same way as if
   # it were imported
   add_library(Legion::Legion ALIAS Legion)
@@ -320,6 +322,9 @@ if(Legion_BUILD_ALL OR Legion_BUILD_APPS OR Legion_BUILD_EXAMPLES OR Legion_BUIL
 
   if(Legion_BUILD_ALL OR Legion_BUILD_APPS)
     add_subdirectory(apps)
+  endif()
+  if(Legion_BUILD_ALL OR Legion_BUILD_BINDINGS)
+    add_subdirectory(bindings)
   endif()
   if(Legion_BUILD_ALL OR Legion_BUILD_EXAMPLES)
     add_subdirectory(examples)

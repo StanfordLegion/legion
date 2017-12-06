@@ -5892,7 +5892,7 @@ namespace Legion {
     {
       runtime->detach_external_resource(ctx, region);
     }
-
+    
     //--------------------------------------------------------------------------
     void Runtime::issue_copy_operation(Context ctx,const CopyLauncher &launcher)
     //--------------------------------------------------------------------------

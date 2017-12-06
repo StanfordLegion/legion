@@ -58,6 +58,8 @@ legion_cxx_tests = [
     ['examples/realm_stencil/realm_stencil', ['-ll:cpu', '4']],
     ['examples/spmd_cgsolver/spmd_cgsolver', ['-ll:cpu', '4', '-perproc']],
     ['examples/virtual_map/virtual_map', []],
+    ['examples/attach_2darray_c_fortran_layout/attach_2darray', []],
+    ['examples/attach_array_daxpy/attach_array_daxpy', []],
 
     # Tests
     ['test/rendering/rendering', ['-i', '2', '-n', '64', '-ll:cpu', '4']],
@@ -80,6 +82,9 @@ legion_openmp_cxx_tests = [
 ]
 
 legion_python_cxx_tests = [
+    # Bindings
+    ['bindings/python/legion_python', ['hello', '-ll:py', '1']],
+
     # Examples
     ['examples/python_interop/python_interop', ['-ll:py', '1']],
 
@@ -165,7 +170,13 @@ def run_test_legion_openmp_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread
     run_cxx(legion_openmp_cxx_tests, flags, launcher, root_dir, bin_dir, env, thread_count)
 
 def run_test_legion_python_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
-    flags = ['-logfile', 'out_%.log']
+    # Hack: legion_python currently requires the module name to come first
+    flags = [] # ['-logfile', 'out_%.log']
+    # Hack: Fix up the environment so that Python can find all the examples.
+    env = dict(list(env.items()) + [
+        ('PYTHONPATH', ':'.join([os.path.join(root_dir, 'bindings', 'python'),
+                                 os.path.join(root_dir, 'bindings', 'python', 'examples')])),
+    ])
     run_cxx(legion_python_cxx_tests, flags, launcher, root_dir, bin_dir, env, thread_count)
 
 def run_test_legion_hdf_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):

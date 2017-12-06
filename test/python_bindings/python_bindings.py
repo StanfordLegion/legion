@@ -34,8 +34,8 @@ def inc(R, step):
     # Sanity check that the values written by init are here, and that
     # they follow the same array ordering.
     print(R.x)
-    for x in xrange(0, 4):
-        for y in xrange(0, 4):
+    for x in range(0, 4):
+        for y in range(0, 4):
             assert int(R.x[x][y]) == x*4 + y
 
     numpy.add(R.x, step, out=R.x)

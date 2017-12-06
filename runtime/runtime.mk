@@ -217,6 +217,7 @@ ifeq ($(strip $(USE_PYTHON)),1)
       ifeq ($(PYTHON_EXE),)
         $(error cannot find python - set PYTHON_ROOT if not in PATH)
       endif
+      PYTHON_VERSION_MAJOR := $(shell $(PYTHON_EXE) -c 'import sys; print(sys.version_info.major)')
       PYTHON_ROOT := $(dir $(PYTHON_EXE))
     endif
 
@@ -244,7 +245,15 @@ ifeq ($(strip $(USE_PYTHON)),1)
       else
         CC_FLAGS += -DREALM_PYTHON_LIB="\"$(PYTHON_LIB)\""
       endif
+    else
+      CC_FLAGS += -DREALM_PYTHON_LIB="\"$(PYTHON_LIB)\""
     endif
+  endif
+
+  ifndef PYTHON_VERSION_MAJOR
+    $(error cannot auto-detect Python version - please set PYTHON_VERSION_MAJOR)
+  else
+    CC_FLAGS += -DREALM_PYTHON_VERSION_MAJOR=$(PYTHON_VERSION_MAJOR)
   endif
 
   CC_FLAGS += -DREALM_USE_PYTHON

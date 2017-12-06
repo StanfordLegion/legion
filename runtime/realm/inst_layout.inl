@@ -75,7 +75,8 @@ namespace Realm {
 
   template <int N, typename T>
   inline /*static*/ InstanceLayoutGeneric *InstanceLayoutGeneric::choose_instance_layout(IndexSpace<N,T> is,
-											 const InstanceLayoutConstraints& ilc)
+											 const InstanceLayoutConstraints& ilc,
+                                                                                         const int dim_order[N])
   {
     InstanceLayout<N,T> *layout = new InstanceLayout<N,T>;
     layout->bytes_used = 0;
@@ -136,7 +137,6 @@ namespace Realm {
 	gsize = max(gsize, offset + it2->size);
 	if((it2->alignment > 1) && ((galign % it2->alignment) != 0))
 	  galign = lcm(galign, size_t(it2->alignment));
-	
 	field_offsets[it2->field_id] = offset;
 	field_sizes[it2->field_id] = it2->size;
       }
@@ -175,12 +175,13 @@ namespace Realm {
 	//  existing pieces
 	size_t piece_start = round_up(layout->bytes_used, galign);
 	piece->offset = piece_start;
-	// always do fortran order for now
 	size_t stride = gsize;
 	for(int i = 0; i < N; i++) {
-	  piece->strides[i] = stride;
-	  piece->offset -= bloated.lo[i] * stride;
-	  stride *= (bloated.hi[i] - bloated.lo[i] + 1);
+          const int dim = dim_order[i];
+          assert((0 <= dim) && (dim < N));
+	  piece->strides[dim] = stride;
+	  piece->offset -= bloated.lo[dim] * stride;
+	  stride *= (bloated.hi[dim] - bloated.lo[dim] + 1);
 	}
 
 	// final value of stride is total bytes used by piece - use that
