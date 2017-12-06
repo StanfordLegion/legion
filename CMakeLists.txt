@@ -91,9 +91,9 @@ endif()
 # Python
 #------------------------------------------------------------------------------#
 option(Legion_USE_Python "Use Python" OFF)
-set(Legion_Python_VERSION "2.7" CACHE STRING "Python version to use")
 if(Legion_USE_Python)
-  set(Python_ADDITIONAL_VERSIONS ${Legion_Python_VERSION})
+  # Note: Legion now supports several versions, so no need to be so forceful
+  # set(Python_ADDITIONAL_VERSIONS 2.7)
   find_package(PythonLibs REQUIRED)
 
   # define variable for realm_defines.h
