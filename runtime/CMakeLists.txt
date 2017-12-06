@@ -194,7 +194,7 @@ endif()
 
 if(Legion_USE_Python)
   target_compile_definitions(RealmRuntime PRIVATE REALM_PYTHON_LIB="${PYTHON_LIBRARIES}")
-  target_compile_definitions(RealmRuntime PRIVATE REALM_PYTHON_VERSION_MAJOR="${PYTHON_VERSION_MAJOR}")
+  target_compile_definitions(RealmRuntime PRIVATE REALM_PYTHON_VERSION_MAJOR=${PYTHON_VERSION_MAJOR})
 endif()
 
 set_target_properties(RealmRuntime PROPERTIES OUTPUT_NAME realm)

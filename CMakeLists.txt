@@ -303,7 +303,7 @@ if(Legion_ENABLE_TESTING)
   # if Legion_TEST_LAUNCHER is set, split the string into a list
   separate_arguments(Legion_TEST_LAUNCHER)
 endif()
-if(Legion_BUILD_ALL OR Legion_BUILD_APPS OR Legion_BINDINGS OR Legion_BUILD_EXAMPLES OR Legion_BUILD_TUTORIAL OR Legion_BUILD_TESTS)
+if(Legion_BUILD_ALL OR Legion_BUILD_APPS OR Legion_BUILD_BINDINGS OR Legion_BUILD_EXAMPLES OR Legion_BUILD_TUTORIAL OR Legion_BUILD_TESTS)
   # Make a namespaced alias so in-build examples can use it the same way as if
   # it were imported
   add_library(Legion::Legion ALIAS Legion)
