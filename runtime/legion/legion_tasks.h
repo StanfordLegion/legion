@@ -172,11 +172,11 @@ namespace Legion {
     public:
       bool is_remote(void) const;
       inline bool is_stolen(void) const { return (steal_count > 0); }
-      inline bool is_locally_mapped(void) const { return map_locally; }
+      inline bool is_origin_mapped(void) const { return map_origin; }
       inline bool is_replicated(void) const { return replicate; }
     public:
       void set_current_proc(Processor current);
-      inline void set_locally_mapped(bool local) { map_locally = local; }
+      inline void set_origin_mapped(bool origin) { map_origin = origin; }
       inline void set_replicated(bool repl) { replicate = repl; }
       inline void set_target_proc(Processor next) { target_proc = next; } 
     protected:
@@ -323,7 +323,7 @@ namespace Legion {
       bool commit_received;
     protected:
       bool options_selected;
-      bool map_locally;
+      bool map_origin;
       bool replicate;
     protected:
       // For managing predication
@@ -979,7 +979,7 @@ namespace Legion {
     public:
       virtual void record_reference_mutation_effect(RtEvent event);
     public:
-      void record_locally_mapped_slice(SliceTask *local_slice);
+      void record_origin_mapped_slice(SliceTask *local_slice);
     public:
       void return_slice_mapped(unsigned points, long long denom,
                                RtEvent applied_condition, 
@@ -1009,7 +1009,7 @@ namespace Legion {
       unsigned committed_points;
     protected:
       std::vector<RegionTreePath> privilege_paths;
-      std::deque<SliceTask*> locally_mapped_slices;
+      std::deque<SliceTask*> origin_mapped_slices;
     protected:
       std::set<RtEvent> map_applied_conditions;
       std::set<ApEvent> completion_preconditions;
@@ -1159,7 +1159,7 @@ namespace Legion {
       IndexTask *index_owner;
       ApEvent index_complete;
       UniqueID remote_unique_id;
-      bool locally_mapped;
+      bool origin_mapped;
       bool need_versioning_analysis;
       UniqueID remote_owner_uid;
     protected:

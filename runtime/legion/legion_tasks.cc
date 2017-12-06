@@ -727,7 +727,7 @@ namespace Legion {
       children_commit = false;
       stealable = false;
       options_selected = false;
-      map_locally = false;
+      map_origin = false;
       replicate = false;
       true_guard = PredEvent::NO_PRED_EVENT;
       false_guard = PredEvent::NO_PRED_EVENT;
@@ -799,8 +799,8 @@ namespace Legion {
 #endif
       for (unsigned idx = 0; idx < regions.size(); idx++)
         rez.serialize(parent_req_indexes[idx]);
-      rez.serialize(map_locally);
-      if (map_locally)
+      rez.serialize(map_origin);
+      if (map_origin)
       {
         rez.serialize<size_t>(atomic_locks.size());
         for (std::map<Reservation,bool>::const_iterator it = 
@@ -836,8 +836,8 @@ namespace Legion {
       parent_req_indexes.resize(regions.size());
       for (unsigned idx = 0; idx < parent_req_indexes.size(); idx++)
         derez.deserialize(parent_req_indexes[idx]);
-      derez.deserialize(map_locally);
-      if (map_locally)
+      derez.deserialize(map_origin);
+      if (map_origin)
       {
         size_t num_atomic;
         derez.deserialize(num_atomic);
@@ -882,13 +882,20 @@ namespace Legion {
             std::set<RtEvent> ready_events;
             if (task->unpack_task(derez, current, ready_events))
             {
+              RtEvent ready;
               if (!ready_events.empty())
+                ready = Runtime::merge_events(ready_events);
+              // Origin mapped tasks can go straight to launching 
+              // themselves since they are already mapped
+              if (task->is_origin_mapped())
               {
-                RtEvent ready = Runtime::merge_events(ready_events);
-                rt->add_to_ready_queue(current, task, ready);
+                ProcessorManager::TriggerTaskArgs trigger_args;
+                trigger_args.op = task;
+                rt->issue_runtime_meta_task(trigger_args, 
+                    LG_THROUGHPUT_PRIORITY, task, ready);
               }
               else
-                rt->add_to_ready_queue(current, task);
+                rt->add_to_ready_queue(current, task, ready);
             }
             break;
           }
@@ -898,13 +905,20 @@ namespace Legion {
             std::set<RtEvent> ready_events;
             if (task->unpack_task(derez, current, ready_events))
             {
+              RtEvent ready;
               if (!ready_events.empty())
+                ready = Runtime::merge_events(ready_events);
+              // Origin mapped tasks can go straight to launching 
+              // themselves since they are already mapped
+              if (task->is_origin_mapped())
               {
-                RtEvent ready = Runtime::merge_events(ready_events);
-                rt->add_to_ready_queue(current, task, ready);
+                ProcessorManager::TriggerTaskArgs trigger_args;
+                trigger_args.op = task;
+                rt->issue_runtime_meta_task(trigger_args, 
+                    LG_THROUGHPUT_PRIORITY, task, ready);
               }
               else
-                rt->add_to_ready_queue(current, task);
+                rt->add_to_ready_queue(current, task, ready);
             }
             break;
           }
@@ -1001,7 +1015,7 @@ namespace Legion {
       options_selected = true;
       target_proc = options.initial_proc;
       stealable = options.stealable;
-      map_locally = options.map_locally;
+      map_origin = options.map_locally;
       replicate = options.replicate;
       if (replicate && !Runtime::unsafe_mapper)
       {
@@ -1855,7 +1869,7 @@ namespace Legion {
       this->stealable = can_steal;
       this->speculated = rhs->speculated;
       this->parent_task = rhs->parent_task;
-      this->map_locally = rhs->map_locally;
+      this->map_origin = rhs->map_origin;
       this->replicate = rhs->replicate;
       // From TaskOp
       this->atomic_locks = rhs->atomic_locks;
@@ -2163,7 +2177,7 @@ namespace Legion {
     bool TaskOp::prepare_steal(void)
     //--------------------------------------------------------------------------
     {
-      if (is_locally_mapped())
+      if (is_origin_mapped())
         return false;
       if (!is_remote())
         early_map_task();
@@ -2498,7 +2512,7 @@ namespace Legion {
       DETAILED_PROFILER(runtime, PACK_SINGLE_TASK_CALL);
       RezCheck z(rez);
       pack_base_task(rez, target);
-      if (map_locally)
+      if (map_origin)
       {
         rez.serialize(selected_variant);
         rez.serialize(task_priority);
@@ -2532,7 +2546,7 @@ namespace Legion {
       DETAILED_PROFILER(runtime, UNPACK_SINGLE_TASK_CALL);
       DerezCheck z(derez);
       unpack_base_task(derez, ready_events);
-      if (map_locally)
+      if (map_origin)
       {
         derez.deserialize(selected_variant);
         derez.deserialize(task_priority);
@@ -2611,9 +2625,9 @@ namespace Legion {
         if (distribute_task())
         {
           // Still local
-          if (is_locally_mapped())
+          if (is_origin_mapped())
           {
-            // Remote and locally mapped means
+            // Remote and origin mapped means
             // we were already mapped so we can
             // just launch the task
             launch_task();
@@ -2649,7 +2663,7 @@ namespace Legion {
           // remotely in which case we need to do the
           // mapping now, otherwise we can defer it
           // until the task ends up on the target processor
-          if (is_locally_mapped() && target_proc.exists() &&
+          if (is_origin_mapped() && target_proc.exists() &&
               !runtime->is_local(target_proc))
           {
             RtEvent done_mapping = perform_mapping();
@@ -3615,7 +3629,7 @@ namespace Legion {
           ShardTask *shard = shard_manager->create_shard(shard_idx, target);
           shard->clone_single_from(this);
           // Shard tasks are always effectively mapped locally
-          shard->map_locally = true;
+          shard->map_origin = true;
           // Finalize the mapping output
           shard->finalize_map_task_output(input,output.task_mappings[shard_idx],
                                           must_epoch_owner, valid_instances);
@@ -3995,7 +4009,7 @@ namespace Legion {
         return;
       }
       // If we haven't computed our virtual mapping information
-      // yet (e.g. because we mapped locally) then we have to
+      // yet (e.g. because we origin mapped) then we have to
       // do that now
       if (virtual_mapped.size() != regions.size())
       {
@@ -4541,9 +4555,9 @@ namespace Legion {
         // Figure out whether this task is local or remote
         else if (!runtime->is_local(slice->target_proc))
         {
-          // We can only send it away if it is not locally mapped
+          // We can only send it away if it is not origin mapped
           // otherwise it has to stay here until it is fully mapped
-          if (!slice->is_locally_mapped())
+          if (!slice->is_origin_mapped())
             runtime->send_task(slice);
           else
             slice->enqueue_ready_task(false/*use target*/);
@@ -4596,8 +4610,8 @@ namespace Legion {
                this->predicate_false_size);
       }
       // Copy over the version infos that we need, we can skip this if
-      // we are remote and locally mapped
-      if (!is_remote() || !is_locally_mapped())
+      // we are remote and origin mapped
+      if (!is_remote() || !is_origin_mapped())
       {
         this->version_infos.resize(rhs->version_infos.size());
         for (unsigned idx = 0; idx < this->version_infos.size(); idx++)
@@ -4622,7 +4636,7 @@ namespace Legion {
           // Still local
           if (is_sliced())
           {
-            if (is_locally_mapped())
+            if (is_origin_mapped())
               launch_task();
             else
               map_and_launch();
@@ -4640,7 +4654,7 @@ namespace Legion {
         // by the map_must_epoch call
         if (must_epoch == NULL)
           early_map_task();
-        if (is_locally_mapped())
+        if (is_origin_mapped())
         {
           if (is_sliced())
           {
@@ -5161,9 +5175,9 @@ namespace Legion {
       // Figure out whether this task is local or remote
       else if (!runtime->is_local(target_proc))
       {
-        // We can only send it away if it is not locally mapped
+        // We can only send it away if it is not origin mapped
         // otherwise it has to stay here until it is fully mapped
-        if (!is_locally_mapped())
+        if (!is_origin_mapped())
           runtime->send_task(this);
         else
           enqueue_ready_task(false/*use target*/);
@@ -5184,8 +5198,8 @@ namespace Legion {
       // paths otherwise we can use our existing privilege paths
       if (is_remote())
       {
-        // If we're remote and locally mapped, then we are already done
-        if (is_locally_mapped())
+        // If we're remote and origin mapped, then we are already done
+        if (is_origin_mapped())
           return RtEvent::NO_RT_EVENT;
         for (unsigned idx = 0; idx < regions.size(); idx++)
         {
@@ -5409,7 +5423,7 @@ namespace Legion {
     bool IndividualTask::is_stealable(void) const
     //--------------------------------------------------------------------------
     {
-      return ((!map_locally) && stealable);
+      return ((!map_origin) && stealable);
     }
 
     //--------------------------------------------------------------------------
@@ -5719,7 +5733,7 @@ namespace Legion {
       rez.serialize(remote_owner_uid);
       rez.serialize(top_level_task);
       rez.serialize<bool>(is_repl_individual_task());
-      if (!is_locally_mapped())
+      if (!is_origin_mapped())
       {
         // have to pack all version info (e.g. split masks)
         std::vector<bool> full_version_infos(regions.size(), true);
@@ -5802,7 +5816,7 @@ namespace Legion {
       // Check to see if we had no virtual mappings and everything
       // was pre-mapped and we're remote then we can mark this
       // task as being mapped
-      if (is_locally_mapped() && is_leaf())
+      if (is_origin_mapped() && is_leaf())
         complete_mapping();
       // Have to do this before resolving speculation in case
       // we get cleaned up after the resolve speculation call
@@ -6546,7 +6560,7 @@ namespace Legion {
       pack_single_task(rez, runtime->find_address_space(target));
       rez.serialize(point_termination); 
 #ifdef DEBUG_LEGION
-      assert(is_locally_mapped()); // should be locally mapped if we're here
+      assert(is_origin_mapped()); // should be origin mapped if we're here
 #endif
       pack_version_infos(rez, version_infos, virtual_mapped);
       // Return false since point tasks should always be deactivated
@@ -6570,7 +6584,7 @@ namespace Legion {
       parent_task = parent_ctx->get_task();
       // Check to see if we are locally mapped and we are a leaf with no
       // virtual instances in which case we are already known to be mapped
-      if (is_locally_mapped() && is_leaf() && !has_virtual_instances())
+      if (is_origin_mapped() && is_leaf() && !has_virtual_instances())
       {
         slice_owner->record_child_mapped(RtEvent::NO_RT_EVENT,
                                          ApEvent::NO_AP_EVENT);
@@ -7337,15 +7351,15 @@ namespace Legion {
     {
       deactivate_multi();
       privilege_paths.clear();
-      if (!locally_mapped_slices.empty())
+      if (!origin_mapped_slices.empty())
       {
         for (std::deque<SliceTask*>::const_iterator it = 
-              locally_mapped_slices.begin(); it != 
-              locally_mapped_slices.end(); it++)
+              origin_mapped_slices.begin(); it != 
+              origin_mapped_slices.end(); it++)
         {
           (*it)->deactivate();
         }
-        locally_mapped_slices.clear();
+        origin_mapped_slices.clear();
       } 
       // Remove our reference to the future map
       future_map = FutureMap(); 
@@ -7855,7 +7869,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, INDEX_DISTRIBUTE_CALL);
-      if (is_locally_mapped())
+      if (is_origin_mapped())
       {
         // This will only get called if we had slices that couldn't map, but
         // they have now all mapped
@@ -7887,7 +7901,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, INDEX_PERFORM_MAPPING_CALL);
-      // This will only get called if we had slices that failed to map locally
+      // This will only get called if we had slices that failed to origin map 
 #ifdef DEBUG_LEGION
       assert(!slices.empty());
 #endif
@@ -8204,11 +8218,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndexTask::record_locally_mapped_slice(SliceTask *local_slice)
+    void IndexTask::record_origin_mapped_slice(SliceTask *local_slice)
     //--------------------------------------------------------------------------
     {
       AutoLock o_lock(op_lock);
-      locally_mapped_slices.push_back(local_slice);
+      origin_mapped_slices.push_back(local_slice);
     }
 
     //--------------------------------------------------------------------------
@@ -8351,10 +8365,10 @@ namespace Legion {
           for (unsigned pidx = 0; pidx < points; pidx++)
             derez.deserialize(handles[pidx]);
         }
-        // otherwise it was locally mapped so we are already done
+        // otherwise it was origin mapped so we are already done
       }
 #ifdef DEBUG_LEGION
-      if (!is_locally_mapped())
+      if (!is_origin_mapped())
       {
         std::map<DomainPoint,std::vector<LogicalRegion> > local_requirements;
         for (unsigned idx = 0; idx < points; idx++)
@@ -8597,7 +8611,7 @@ namespace Legion {
       index_owner = NULL;
       remote_owner_uid = 0;
       remote_unique_id = get_unique_id();
-      locally_mapped = false;
+      origin_mapped = false;
       need_versioning_analysis = true;
     }
 
@@ -8612,10 +8626,10 @@ namespace Legion {
       for (std::vector<PointTask*>::const_iterator it = points.begin();
             it != points.end(); it++)
       {
-        // Check to see if we are locally mapped or not which 
+        // Check to see if we are origin mapped or not which 
         // determines whether we should commit this operation or
         // just deactivate it like normal
-        if (is_locally_mapped() && !is_remote())
+        if (is_origin_mapped() && !is_remote())
           (*it)->deactivate();
         else
           (*it)->commit_operation(true/*deactivate*/);
@@ -8697,10 +8711,10 @@ namespace Legion {
 #endif
       // Once we return from this function we'll be done with versioning
       need_versioning_analysis = false;
-      // If we're locally mapped and already remote then we know
+      // If we're origin mapped and already remote then we know
       // we are done mapping so there is no need to do any
       // versioning computation
-      if (is_remote() && is_locally_mapped())
+      if (is_remote() && is_origin_mapped())
         return RtEvent::NO_RT_EVENT;
       std::set<RtEvent> ready_events;
       for (unsigned idx = 0; idx < regions.size(); idx++)
@@ -8843,7 +8857,7 @@ namespace Legion {
     bool SliceTask::is_stealable(void) const
     //--------------------------------------------------------------------------
     {
-      return ((!map_locally) && stealable);
+      return ((!map_origin) && stealable);
     }
 
     //--------------------------------------------------------------------------
@@ -8936,10 +8950,10 @@ namespace Legion {
       rez.serialize(index_owner);
       rez.serialize(index_complete);
       rez.serialize(remote_unique_id);
-      rez.serialize(locally_mapped);
+      rez.serialize(origin_mapped);
       rez.serialize(remote_owner_uid);
       rez.serialize(internal_space);
-      if (is_locally_mapped())
+      if (is_origin_mapped())
       {
         // If we've mapped everything and there are no virtual mappings
         // then we can just send the version numbers
@@ -8982,12 +8996,12 @@ namespace Legion {
           rez.serialize<DistributedID>(0);
       }
       bool deactivate_now = true;
-      if (!is_remote() && is_locally_mapped())
+      if (!is_remote() && is_origin_mapped())
       {
-        // If we're not remote and locally mapped then we need
+        // If we're not remote and origin mapped then we need
         // to hold onto these version infos until we are done
         // with the whole index space task, so tell our owner
-        index_owner->record_locally_mapped_slice(this);
+        index_owner->record_origin_mapped_slice(this);
         deactivate_now = false;
       }
       else
@@ -9015,7 +9029,7 @@ namespace Legion {
       derez.deserialize(index_owner);
       derez.deserialize(index_complete);
       derez.deserialize(remote_unique_id); 
-      derez.deserialize(locally_mapped);
+      derez.deserialize(origin_mapped);
       derez.deserialize(remote_owner_uid);
       derez.deserialize(internal_space);
       unpack_version_infos(derez, version_infos, ready_events);
@@ -9372,10 +9386,10 @@ namespace Legion {
           }
         }
 
-        // Only need to send something back if this wasn't mapped locally
+        // Only need to send something back if this wasn't origin mapped 
         // wclee: also need to send back if there were some non-leaf point tasks
         // because they haven't recorded themselves as mapped
-        if (!is_locally_mapped() || has_nonleaf_point)
+        if (!is_origin_mapped() || has_nonleaf_point)
         {
           Serializer rez;
           pack_remote_mapped(rez, applied_condition);
@@ -9395,7 +9409,7 @@ namespace Legion {
             for (unsigned pidx = 0; pidx < points.size(); pidx++)
               handles[pidx] = points[pidx]->regions[idx].region;
           }
-          // otherwise it was locally mapped so we are already done
+          // otherwise it was origin mapped so we are already done
         }
 #ifdef DEBUG_LEGION
         // In debug mode, get all our point region requirements and
@@ -9519,7 +9533,7 @@ namespace Legion {
           rez.serialize(points[pidx]->regions[idx].region);
       }
 #ifdef DEBUG_LEGION
-      if (!is_locally_mapped())
+      if (!is_origin_mapped())
       {
         for (std::vector<PointTask*>::const_iterator it = 
               points.begin(); it != points.end(); it++)
