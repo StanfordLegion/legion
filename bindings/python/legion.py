@@ -33,14 +33,19 @@ import threading
 
 # Python 3.x compatibility:
 try:
-    long
+    long # Python 2
 except NameError:
-    long = int
+    long = int  # Python 3
 
 try:
-    xrange
+    xrange # Python 2
 except NameError:
-    xrange = range
+    xrange = range # Python 3
+
+try:
+    zip_longest = itertools.izip_longest # Python 2
+except:
+    zip_longest = itertools.zip_longest # Python 3
 
 _pickle_version = pickle.HIGHEST_PROTOCOL # Use latest Pickle protocol
 
@@ -266,7 +271,7 @@ class Fspace(object):
             field_id = c.legion_field_allocator_allocate_field(
                 alloc, field_type.size, field_id)
             c.legion_field_id_attach_name(
-                _my.ctx.runtime, handle, field_id, field_name, False)
+                _my.ctx.runtime, handle, field_id, field_name.encode('utf-8'), False)
             field_ids[field_name] = field_id
             field_types[field_name] = field_type
         c.legion_field_allocator_destroy(alloc)
@@ -802,7 +807,7 @@ class IndexLaunch(object):
 
         if self.saved_args is None:
             self.saved_args = args
-        for arg, saved_arg in itertools.izip_longest(args, self.saved_args):
+        for arg, saved_arg in zip_longest(args, self.saved_args):
             # TODO: Add support for region arguments
             if isinstance(arg, Region) or isinstance(arg, RegionField):
                 raise Exception('TODO: Support region arguments to an IndexLaunch')
