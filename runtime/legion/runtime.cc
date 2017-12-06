@@ -2817,7 +2817,7 @@ namespace Legion {
           for (std::list<TaskOp*>::const_iterator it = 
                 target_list.begin(); it != target_list.end(); it++)
           {
-            if ((*it)->is_stealable() && !(*it)->is_locally_mapped())
+            if ((*it)->is_stealable() && !(*it)->is_origin_mapped())
               mapper_tasks.push_back(*it);
           }
         }

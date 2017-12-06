@@ -10067,11 +10067,11 @@ namespace Legion {
     void MustEpochOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
-      // First mark that each of the tasks will be locally mapped
+      // First mark that each of the tasks will be origin mapped
       for (unsigned idx = 0; idx < indiv_tasks.size(); idx++)
-        indiv_tasks[idx]->set_locally_mapped(true);
+        indiv_tasks[idx]->set_origin_mapped(true);
       for (unsigned idx = 0; idx < index_tasks.size(); idx++)
-        index_tasks[idx]->set_locally_mapped(true);
+        index_tasks[idx]->set_origin_mapped(true);
       // Call trigger execution on each of our sub-operations, since they
       // each have marked that they have a must_epoch owner, they will
       // not actually map and launch, but instead will register all the base
