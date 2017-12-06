@@ -1576,7 +1576,9 @@ namespace Realm {
 	  generation = gen_triggered;
 
 	  // we'll free the event unless it's maxed out on poisoned generations
-	  free_event = (num_poisoned_generations < POISONED_GENERATION_LIMIT);
+	  //  or generation count
+	  free_event = ((num_poisoned_generations < POISONED_GENERATION_LIMIT) &&
+			(generation < ((1U << ID::EVENT_GENERATION_WIDTH) - 1)));
 	}
 
 	// any remote nodes to notify?
