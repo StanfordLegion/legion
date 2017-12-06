@@ -24,6 +24,12 @@ endif()
 
 add_executable(legion_python main.cc)
 target_link_libraries(legion_python Legion::Legion)
+install(TARGETS legion_python
+  LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+  ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+  RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+)
+
 install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/legion.py
   DESTINATION ${CMAKE_INSTALL_DATADIR}/Legion/python
 )
