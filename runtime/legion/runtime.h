@@ -672,6 +672,7 @@ namespace Legion {
       public:
         std::list<TaskOp*> ready_queue;
         RtEvent deferral_event;
+        bool added_tasks;
       };
       // State for each mapper for scheduling purposes
       std::map<MapperID,MapperState> mapper_states;
