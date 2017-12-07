@@ -3126,10 +3126,15 @@ namespace Legion {
             state.owned_tasks++;
             MapperState &map_state = mapper_states[stealer];
             if (map_state.ready_queue.empty())
+            {
+              // Clear any deferral event if we are changing state
+              map_state.deferral_event = RtEvent::NO_RT_EVENT;
               increment_active_mappers();
+            }
             // Otherwise the state hasn't actually changed so
             // we can't actually clear any deferral events
             map_state.ready_queue.push_back(temp_stolen[idx]);
+            map_state.added_tasks = true;
           }
         }
 
@@ -3197,16 +3202,14 @@ namespace Legion {
       state.owned_tasks++;
       // Also update the queue for the mapper
       MapperState &map_state = mapper_states[task->map_id];
-      if (map_state.ready_queue.empty())
-        increment_active_mappers();
-      else if (map_state.deferral_event.exists())
+      if (map_state.ready_queue.empty() || map_state.deferral_event.exists())
       {
-        // If we have a deferral event then we can clear it because
-        // the state has changed and we can increment the active mappers
+        // Clear our deferral event since we are changing state
         map_state.deferral_event = RtEvent::NO_RT_EVENT;
         increment_active_mappers();
       }
       map_state.ready_queue.push_back(task);
+      map_state.added_tasks = true;
     }
 
     //--------------------------------------------------------------------------
@@ -3265,6 +3268,8 @@ namespace Legion {
               visible_generations.push_back((*it)->get_generation());
             }  
           }
+          // Set our flag to check for added tasks while we do the mapper call
+          map_state.added_tasks = false;
         }
         // Do this before anything else in case we don't have any tasks
         if (!stealing_disabled)
@@ -3285,12 +3290,18 @@ namespace Legion {
             // Put this on the list of the deferred mappers
             AutoLock q_lock(queue_lock);
             MapperState &map_state = mapper_states[map_id];
+            // We have to check to see if any new tasks were added to 
+            // the ready queue while we were doing our mapper call, if 
+            // they were then we need to invoke select_tasks_to_map again
+            if (!map_state.added_tasks)
+            {
 #ifdef DEBUG_LEGION
-            assert(!map_state.deferral_event.exists());
+              assert(!map_state.deferral_event.exists());
 #endif
-            map_state.deferral_event = wait_on;
-            // Decrement the number of active mappers
-            decrement_active_mappers();
+              map_state.deferral_event = wait_on;
+              // Decrement the number of active mappers
+              decrement_active_mappers();
+            }
           }
           else // Very bad, error message
             REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,

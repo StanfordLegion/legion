@@ -94,6 +94,7 @@ option(Legion_USE_Python "Use Python" OFF)
 if(Legion_USE_Python)
   # Note: Legion now supports several versions, so no need to be so forceful
   # set(Python_ADDITIONAL_VERSIONS 2.7)
+  find_package(PythonInterp REQUIRED) # Needed to invoke setup.py for install
   find_package(PythonLibs REQUIRED)
 
   # define variable for realm_defines.h

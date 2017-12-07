@@ -2093,124 +2093,136 @@ std.rect1d = std.rect_type(std.int1d)
 std.rect2d = std.rect_type(std.int2d)
 std.rect3d = std.rect_type(std.int3d)
 
-local next_ispace_id = 1
-function std.ispace(index_type)
-  assert(terralib.types.istype(index_type) and std.is_index_type(index_type),
-         "Ispace type requires index type")
+do
+  local next_ispace_id = 1
+  function std.ispace(index_type)
+    assert(terralib.types.istype(index_type) and std.is_index_type(index_type),
+           "Ispace type requires index type")
 
-  local st = terralib.types.newstruct("ispace")
-  st.entries = terralib.newlist({
-      { "impl", c.legion_index_space_t },
-  })
+    local st = terralib.types.newstruct("ispace")
+    st.entries = terralib.newlist({
+        { "impl", c.legion_index_space_t },
+    })
 
-  st.is_ispace = true
-  st.index_type = index_type
-  st.dim = index_type.dim
+    st.is_ispace = true
+    st.index_type = index_type
+    st.dim = index_type.dim
 
-  function st:is_opaque()
-    return self.index_type:is_opaque()
-  end
+    function st:is_opaque()
+      return self.index_type:is_opaque()
+    end
 
-  function st:force_cast(from, to, expr)
-    assert(std.is_ispace(from) and std.is_ispace(to))
-    return `([to] { impl = [expr].impl })
-  end
+    function st:force_cast(from, to, expr)
+      assert(std.is_ispace(from) and std.is_ispace(to))
+      return `([to] { impl = [expr].impl })
+    end
 
-  if std.config["debug"] then
     local id = next_ispace_id
     next_ispace_id = next_ispace_id + 1
-    function st.metamethods.__typename(st)
-      return "ispace#" .. tostring(id) .. "(" .. tostring(st.index_type) .. ")"
-    end
-  else
-    function st.metamethods.__typename(st)
-      return "ispace(" .. tostring(st.index_type) .. ")"
-    end
-  end
 
-  return st
+    local hash_value = "__ispace_#" .. tostring(id)
+    function st:hash()
+      return hash_value
+    end
+
+    if std.config["debug"] then
+      function st.metamethods.__typename(st)
+        return "ispace#" .. tostring(id) .. "(" .. tostring(st.index_type) .. ")"
+      end
+    else
+      function st.metamethods.__typename(st)
+        return "ispace(" .. tostring(st.index_type) .. ")"
+      end
+    end
+
+    return st
+  end
 end
 
-local next_region_id = 1
-function std.region(ispace_symbol, fspace_type)
-  if fspace_type == nil then
-    fspace_type = ispace_symbol
-    ispace_symbol = std.newsymbol(std.ispace(std.ptr))
-  end
-  if terralib.types.istype(ispace_symbol) then
-    ispace_symbol = std.newsymbol(ispace_symbol)
-  end
+do
+  local next_region_id = 1
+  function std.region(ispace_symbol, fspace_type)
+    if fspace_type == nil then
+      fspace_type = ispace_symbol
+      ispace_symbol = std.newsymbol(std.ispace(std.ptr))
+    end
+    if terralib.types.istype(ispace_symbol) then
+      ispace_symbol = std.newsymbol(ispace_symbol)
+    end
 
-  if not std.is_symbol(ispace_symbol) then
-    error("region expected ispace as argument 1, got " .. tostring(ispace_symbol), 2)
-  end
-  if not terralib.types.istype(fspace_type) then
-    error("region expected fspace as argument 2, got " .. tostring(fspace_type), 2)
-  end
-  if std.is_list_of_regions(fspace_type) then
-    error("region expected fspace to not be a list, got " .. tostring(fspace_type), 2)
-  end
+    if not std.is_symbol(ispace_symbol) then
+      error("region expected ispace as argument 1, got " .. tostring(ispace_symbol), 2)
+    end
+    if not terralib.types.istype(fspace_type) then
+      error("region expected fspace as argument 2, got " .. tostring(fspace_type), 2)
+    end
+    if std.is_list_of_regions(fspace_type) then
+      error("region expected fspace to not be a list, got " .. tostring(fspace_type), 2)
+    end
 
-  local st = terralib.types.newstruct("region")
-  st.entries = terralib.newlist({
-      { "impl", c.legion_logical_region_t },
-  })
+    local st = terralib.types.newstruct("region")
+    st.entries = terralib.newlist({
+        { "impl", c.legion_logical_region_t },
+    })
 
-  st.is_region = true
-  st.ispace_symbol = ispace_symbol
-  st.fspace_type = fspace_type
+    st.is_region = true
+    st.ispace_symbol = ispace_symbol
+    st.fspace_type = fspace_type
 
-  function st:ispace()
-    local ispace = self.ispace_symbol:gettype()
-    assert(terralib.types.istype(ispace) and
-             std.is_ispace(ispace),
-           "Parition type requires ispace")
-    return ispace
-  end
+    function st:ispace()
+      local ispace = self.ispace_symbol:gettype()
+      assert(terralib.types.istype(ispace) and
+               std.is_ispace(ispace),
+             "Parition type requires ispace")
+      return ispace
+    end
 
-  function st:is_opaque()
-    return self:ispace():is_opaque()
-  end
+    function st:is_opaque()
+      return self:ispace():is_opaque()
+    end
 
-  function st:fspace()
-    return st.fspace_type
-  end
+    function st:fspace()
+      return st.fspace_type
+    end
 
-  -- For API compatibility with std.list:
-  function st:list_depth()
-    return 0
-  end
+    -- For API compatibility with std.list:
+    function st:list_depth()
+      return 0
+    end
 
-  function st:force_cast(from, to, expr)
-    assert(std.is_region(from) and std.is_region(to))
-    return `([to] { impl = [expr].impl })
-  end
+    function st:force_cast(from, to, expr)
+      assert(std.is_region(from) and std.is_region(to))
+      return `([to] { impl = [expr].impl })
+    end
 
-  function st:hash()
-    return self
-  end
-
-  if std.config["debug"] then
     local id = next_region_id
     next_region_id = next_region_id + 1
-    function st.metamethods.__typename(st)
-      if st:is_opaque() then
-        return "region#" .. tostring(id) .. "(" .. tostring(st.fspace_type) .. ")"
-      else
-        return "region#" .. tostring(id) .. "(" .. tostring((st.ispace_symbol:hasname() and st.ispace_symbol) or st:ispace()) .. ", " .. tostring(st.fspace_type) .. ")"
-      end
-    end
-  else
-    function st.metamethods.__typename(st)
-      if st:is_opaque() then
-        return "region(" .. tostring(st.fspace_type) .. ")"
-      else
-        return "region(" .. tostring((st.ispace_symbol:hasname() and st.ispace_symbol) or st:ispace()) .. ", " .. tostring(st.fspace_type) .. ")"
-      end
-    end
-  end
 
-  return st
+    local hash_value = "__region_#" .. tostring(id)
+    function st:hash()
+      return hash_value
+    end
+
+    if std.config["debug"] then
+      function st.metamethods.__typename(st)
+        if st:is_opaque() then
+          return "region#" .. tostring(id) .. "(" .. tostring(st.fspace_type) .. ")"
+        else
+          return "region#" .. tostring(id) .. "(" .. tostring((st.ispace_symbol:hasname() and st.ispace_symbol) or st:ispace()) .. ", " .. tostring(st.fspace_type) .. ")"
+        end
+      end
+    else
+      function st.metamethods.__typename(st)
+        if st:is_opaque() then
+          return "region(" .. tostring(st.fspace_type) .. ")"
+        else
+          return "region(" .. tostring((st.ispace_symbol:hasname() and st.ispace_symbol) or st:ispace()) .. ", " .. tostring(st.fspace_type) .. ")"
+        end
+      end
+    end
+
+    return st
+  end
 end
 
 std.wild_type = terralib.types.newstruct("wild_type")
@@ -2236,119 +2248,124 @@ local function get_subregion_index(i)
   end
 end
 
-function std.partition(disjointness, region_symbol, colors_symbol)
-  if colors_symbol == nil then
-    colors_symbol = std.newsymbol(std.ispace(std.ptr))
-  end
-  if terralib.types.istype(colors_symbol) then
-    colors_symbol = std.newsymbol(colors_symbol)
-  end
-
-  assert(disjointness:is(ast.disjointness_kind),
-         "Partition type requires disjointness to be one of disjoint or aliased")
-  assert(std.is_symbol(region_symbol),
-         "Partition type requires region to be a symbol")
-  if region_symbol:hastype() then
-    assert(terralib.types.istype(region_symbol:gettype()) and
-             std.is_region(region_symbol:gettype()),
-           "Parition type requires region")
-  end
-  assert(std.is_symbol(colors_symbol),
-         "Partition type requires colors to be a symbol")
-  if colors_symbol:hastype() then
-    assert(terralib.types.istype(colors_symbol:gettype()) and
-             std.is_ispace(colors_symbol:gettype()),
-           "Parition type requires colors")
-  end
-
-  local st = terralib.types.newstruct("partition")
-  st.entries = terralib.newlist({
-      { "impl", c.legion_logical_partition_t },
-  })
-
-  st.is_partition = true
-  st.disjointness = disjointness
-  st.parent_region_symbol = region_symbol
-  st.colors_symbol = colors_symbol
-  st.subregions = data.newmap()
-
-  function st:is_disjoint()
-    return self.disjointness:is(ast.disjointness_kind.Disjoint)
-  end
-
-  function st:partition()
-    return self
-  end
-
-  function st:parent_region()
-    local region = self.parent_region_symbol:gettype()
-    assert(terralib.types.istype(region) and
-             std.is_region(region),
-           "Parition type requires region")
-    return region
-  end
-
-  function st:colors()
-    local colors = self.colors_symbol:gettype()
-    assert(terralib.types.istype(colors) and
-             std.is_ispace(colors),
-           "Parition type requires colors")
-    return colors
-  end
-
-  function st:fspace()
-    return self:parent_region():fspace()
-  end
-
-  function st:subregions_constant()
-    return self.subregions
-  end
-
-  function st:subregion_constant(i)
-    local i = get_subregion_index(i)
-    if not self.subregions[i] then
-      self.subregions[i] = self:subregion_dynamic()
+do
+  local next_partition_id = 1
+  function std.partition(disjointness, region_symbol, colors_symbol)
+    if colors_symbol == nil then
+      colors_symbol = std.newsymbol(std.ispace(std.ptr))
     end
-    return self.subregions[i]
-  end
+    if terralib.types.istype(colors_symbol) then
+      colors_symbol = std.newsymbol(colors_symbol)
+    end
 
-  function st:subregion_dynamic()
-    local parent = self:parent_region()
-    return std.region(
-      std.newsymbol(std.ispace(parent:ispace().index_type)),
-      parent.fspace_type)
-  end
+    assert(disjointness:is(ast.disjointness_kind),
+           "Partition type requires disjointness to be one of disjoint or aliased")
+    assert(std.is_symbol(region_symbol),
+           "Partition type requires region to be a symbol")
+    if region_symbol:hastype() then
+      assert(terralib.types.istype(region_symbol:gettype()) and
+               std.is_region(region_symbol:gettype()),
+             "Parition type requires region")
+    end
+    assert(std.is_symbol(colors_symbol),
+           "Partition type requires colors to be a symbol")
+    if colors_symbol:hastype() then
+      assert(terralib.types.istype(colors_symbol:gettype()) and
+               std.is_ispace(colors_symbol:gettype()),
+             "Parition type requires colors")
+    end
 
-  function st:force_cast(from, to, expr)
-    assert(std.is_partition(from) and std.is_partition(to))
-    return `([to] { impl = [expr].impl })
-  end
+    local st = terralib.types.newstruct("partition")
+    st.entries = terralib.newlist({
+        { "impl", c.legion_logical_partition_t },
+    })
 
-  function st:hash()
-    return self
-  end
+    st.is_partition = true
+    st.disjointness = disjointness
+    st.parent_region_symbol = region_symbol
+    st.colors_symbol = colors_symbol
+    st.subregions = data.newmap()
 
-  if std.config["debug"] then
-    local id = next_region_id
-    next_region_id = next_region_id + 1
-    function st.metamethods.__typename(st)
-      if st:colors():is_opaque() then
-        return "partition#" .. tostring(id) .. "(" .. tostring(st.disjointness) .. ", " .. tostring(st.parent_region_symbol) .. ")"
-      else
-        return "partition#" .. tostring(id) .. "(" .. tostring(st.disjointness) .. ", " .. tostring(st.parent_region_symbol) .. ", " .. tostring((st.colors_symbol:hasname() and st.colors_symbol) or st:colors()) .. ")"
+    function st:is_disjoint()
+      return self.disjointness:is(ast.disjointness_kind.Disjoint)
+    end
+
+    function st:partition()
+      return self
+    end
+
+    function st:parent_region()
+      local region = self.parent_region_symbol:gettype()
+      assert(terralib.types.istype(region) and
+               std.is_region(region),
+             "Parition type requires region")
+      return region
+    end
+
+    function st:colors()
+      local colors = self.colors_symbol:gettype()
+      assert(terralib.types.istype(colors) and
+               std.is_ispace(colors),
+             "Parition type requires colors")
+      return colors
+    end
+
+    function st:fspace()
+      return self:parent_region():fspace()
+    end
+
+    function st:subregions_constant()
+      return self.subregions
+    end
+
+    function st:subregion_constant(i)
+      local i = get_subregion_index(i)
+      if not self.subregions[i] then
+        self.subregions[i] = self:subregion_dynamic()
+      end
+      return self.subregions[i]
+    end
+
+    function st:subregion_dynamic()
+      local parent = self:parent_region()
+      return std.region(
+        std.newsymbol(std.ispace(parent:ispace().index_type)),
+        parent.fspace_type)
+    end
+
+    function st:force_cast(from, to, expr)
+      assert(std.is_partition(from) and std.is_partition(to))
+      return `([to] { impl = [expr].impl })
+    end
+
+    local id = next_partition_id
+    next_partition_id = next_partition_id + 1
+
+    local hash_value = "__partition_#" .. tostring(id)
+    function st:hash()
+      return hash_value
+    end
+
+    if std.config["debug"] then
+      function st.metamethods.__typename(st)
+        if st:colors():is_opaque() then
+          return "partition#" .. tostring(id) .. "(" .. tostring(st.disjointness) .. ", " .. tostring(st.parent_region_symbol) .. ")"
+        else
+          return "partition#" .. tostring(id) .. "(" .. tostring(st.disjointness) .. ", " .. tostring(st.parent_region_symbol) .. ", " .. tostring((st.colors_symbol:hasname() and st.colors_symbol) or st:colors()) .. ")"
+        end
+      end
+    else
+      function st.metamethods.__typename(st)
+        if st:colors():is_opaque() then
+          return "partition(" .. tostring(st.disjointness) .. ", " .. tostring(st.parent_region_symbol) .. ")"
+        else
+          return "partition(" .. tostring(st.disjointness) .. ", " .. tostring(st.parent_region_symbol) .. ", " .. tostring((st.colors_symbol:hasname() and st.colors_symbol) or st:colors()) .. ")"
+        end
       end
     end
-  else
-    function st.metamethods.__typename(st)
-      if st:colors():is_opaque() then
-        return "partition(" .. tostring(st.disjointness) .. ", " .. tostring(st.parent_region_symbol) .. ")"
-      else
-        return "partition(" .. tostring(st.disjointness) .. ", " .. tostring(st.parent_region_symbol) .. ", " .. tostring((st.colors_symbol:hasname() and st.colors_symbol) or st:colors()) .. ")"
-      end
-    end
-  end
 
-  return st
+    return st
+  end
 end
 
 function std.cross_product(...)
