@@ -49,11 +49,40 @@ except:
 
 _pickle_version = pickle.HIGHEST_PROTOCOL # Use latest Pickle protocol
 
-root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
-runtime_dir = os.path.join(root_dir, 'runtime')
-legion_dir = os.path.join(runtime_dir, 'legion')
+def find_legion_header():
+    def try_prefix(prefix_dir):
+        legion_h_path = os.path.join(prefix_dir, 'legion.h')
+        if os.path.exists(legion_h_path):
+            return prefix_dir, legion_h_path
 
-header = subprocess.check_output(['gcc', '-I', runtime_dir, '-E', '-P', os.path.join(legion_dir, 'legion_c.h')]).decode('utf-8')
+    # For in-source builds, find the header relative to the bindings
+    root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
+    runtime_dir = os.path.join(root_dir, 'runtime')
+    result = try_prefix(runtime_dir)
+    if result:
+        return result
+
+    # If this was installed to a non-standard prefix, we might be able
+    # to guess from the directory structures
+    if os.path.basename(root_dir) == 'lib':
+        include_dir = os.path.join(os.path.dirname(root_dir), 'include')
+        result = try_prefix(include_dir)
+        if result:
+            return result
+
+    # Otherwise we have to hope that Legion is installed in a standard location
+    result = try_prefix('/usr/include')
+    if result:
+        return result
+
+    result = try_prefix('/usr/local/include')
+    if result:
+        return result
+
+    raise Exception('Unable to locate legion.h header file')
+
+prefix_dir, legion_h_path = find_legion_header()
+header = subprocess.check_output(['gcc', '-I', prefix_dir, '-E', '-P', legion_h_path]).decode('utf-8')
 
 # Hack: Fix for Ubuntu 16.04 versions of standard library headers:
 header = re.sub(r'typedef struct {.+?} max_align_t;', '', header, flags=re.DOTALL)
