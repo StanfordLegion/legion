@@ -2093,6 +2093,7 @@ std.rect1d = std.rect_type(std.int1d)
 std.rect2d = std.rect_type(std.int2d)
 std.rect3d = std.rect_type(std.int3d)
 
+do
 local next_ispace_id = 1
 function std.ispace(index_type)
   assert(terralib.types.istype(index_type) and std.is_index_type(index_type),
@@ -2130,7 +2131,9 @@ function std.ispace(index_type)
 
   return st
 end
+end
 
+do
 local next_region_id = 1
 function std.region(ispace_symbol, fspace_type)
   if fspace_type == nil then
@@ -2212,6 +2215,7 @@ function std.region(ispace_symbol, fspace_type)
 
   return st
 end
+end
 
 std.wild_type = terralib.types.newstruct("wild_type")
 std.wild = std.newsymbol(std.wild_type, "wild")
@@ -2236,6 +2240,8 @@ local function get_subregion_index(i)
   end
 end
 
+do
+local next_partition_id = 1
 function std.partition(disjointness, region_symbol, colors_symbol)
   if colors_symbol == nil then
     colors_symbol = std.newsymbol(std.ispace(std.ptr))
@@ -2329,8 +2335,8 @@ function std.partition(disjointness, region_symbol, colors_symbol)
   end
 
   if std.config["debug"] then
-    local id = next_region_id
-    next_region_id = next_region_id + 1
+    local id = next_partition_id
+    next_partition_id = next_partition_id + 1
     function st.metamethods.__typename(st)
       if st:colors():is_opaque() then
         return "partition#" .. tostring(id) .. "(" .. tostring(st.disjointness) .. ", " .. tostring(st.parent_region_symbol) .. ")"
@@ -2349,6 +2355,7 @@ function std.partition(disjointness, region_symbol, colors_symbol)
   end
 
   return st
+end
 end
 
 function std.cross_product(...)
