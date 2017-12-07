@@ -2117,9 +2117,15 @@ do
       return `([to] { impl = [expr].impl })
     end
 
+    local id = next_ispace_id
+    next_ispace_id = next_ispace_id + 1
+
+    local hash_value = "__ispace_#" .. tostring(id)
+    function st:hash()
+      return hash_value
+    end
+
     if std.config["debug"] then
-      local id = next_ispace_id
-      next_ispace_id = next_ispace_id + 1
       function st.metamethods.__typename(st)
         return "ispace#" .. tostring(id) .. "(" .. tostring(st.index_type) .. ")"
       end
@@ -2189,13 +2195,15 @@ do
       return `([to] { impl = [expr].impl })
     end
 
+    local id = next_region_id
+    next_region_id = next_region_id + 1
+
+    local hash_value = "__region_#" .. tostring(id)
     function st:hash()
-      return self
+      return hash_value
     end
 
     if std.config["debug"] then
-      local id = next_region_id
-      next_region_id = next_region_id + 1
       function st.metamethods.__typename(st)
         if st:is_opaque() then
           return "region#" .. tostring(id) .. "(" .. tostring(st.fspace_type) .. ")"
@@ -2330,13 +2338,15 @@ do
       return `([to] { impl = [expr].impl })
     end
 
+    local id = next_partition_id
+    next_partition_id = next_partition_id + 1
+
+    local hash_value = "__partition_#" .. tostring(id)
     function st:hash()
-      return self
+      return hash_value
     end
 
     if std.config["debug"] then
-      local id = next_partition_id
-      next_partition_id = next_partition_id + 1
       function st.metamethods.__typename(st)
         if st:colors():is_opaque() then
           return "partition#" .. tostring(id) .. "(" .. tostring(st.disjointness) .. ", " .. tostring(st.parent_region_symbol) .. ")"
