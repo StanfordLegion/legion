@@ -88,6 +88,7 @@ namespace Legion {
       NEW_OPAQUE_WRAPPER(legion_copy_launcher_t, CopyLauncher *);
       NEW_OPAQUE_WRAPPER(legion_acquire_launcher_t, AcquireLauncher *);
       NEW_OPAQUE_WRAPPER(legion_release_launcher_t, ReleaseLauncher *);
+      NEW_OPAQUE_WRAPPER(legion_attach_launcher_t, AttachLauncher *);
       NEW_OPAQUE_WRAPPER(legion_must_epoch_launcher_t, MustEpochLauncher *);
       NEW_OPAQUE_WRAPPER(legion_physical_region_t, PhysicalRegion *);
       NEW_OPAQUE_WRAPPER(legion_accessor_array_1d_t, ArrayAccessor1D *);
