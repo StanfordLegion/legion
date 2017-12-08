@@ -10108,40 +10108,7 @@ namespace Legion {
     {
       // Initialize this operation
       initialize_operation(ctx, true/*track*/);
-      // Initialize operations for everything in the launcher
-      // Note that we do not track these operations as we want them all to
-      // appear as a single operation to the parent context in order to
-      // avoid deadlock with the maximum window size.
-      indiv_tasks.resize(launcher.single_tasks.size());
-      for (unsigned idx = 0; idx < launcher.single_tasks.size(); idx++)
-      {
-        indiv_tasks[idx] = runtime->get_available_individual_task(true);
-        indiv_tasks[idx]->initialize_task(ctx, launcher.single_tasks[idx],
-                                          check_privileges, false/*track*/);
-        indiv_tasks[idx]->set_must_epoch(this, idx, true/*register*/);
-        // If we have a trace, set it for this operation as well
-        if (trace != NULL)
-          indiv_tasks[idx]->set_trace(trace, !trace->is_fixed(), NULL);
-        indiv_tasks[idx]->must_epoch_task = true;
-      }
-      indiv_triggered.resize(indiv_tasks.size(), false);
-      index_tasks.resize(launcher.index_tasks.size());
-      for (unsigned idx = 0; idx < launcher.index_tasks.size(); idx++)
-      {
-        IndexSpace launch_space = launcher.index_tasks[idx].launch_space;
-        if (!launch_space.exists())
-          launch_space = runtime->find_or_create_index_launch_space(
-                      launcher.index_tasks[idx].launch_domain);
-        index_tasks[idx] = runtime->get_available_index_task(true);
-        index_tasks[idx]->initialize_task(ctx, launcher.index_tasks[idx],
-                          launch_space, check_privileges, false/*track*/);
-        index_tasks[idx]->set_must_epoch(this, indiv_tasks.size()+idx, 
-                                         true/*register*/);
-        if (trace != NULL)
-          index_tasks[idx]->set_trace(trace, !trace->is_fixed(), NULL);
-        index_tasks[idx]->must_epoch_task = true;
-      }
-      index_triggered.resize(index_tasks.size(), false);
+      instantiate_tasks(ctx, check_privileges, launcher); 
       map_id = launcher.map_id;
       tag = launcher.mapping_tag;
       if (launch_space.exists())
@@ -10189,6 +10156,47 @@ namespace Legion {
       return new FutureMapImpl(ctx, this, runtime,
             runtime->get_available_distributed_id(true/*need continuation*/),
             runtime->address_space);
+    }
+
+    //--------------------------------------------------------------------------
+    void MustEpochOp::instantiate_tasks(TaskContext *ctx, bool check_privileges,
+                                        const MustEpochLauncher &launcher)
+    //--------------------------------------------------------------------------
+    {
+      // Initialize operations for everything in the launcher
+      // Note that we do not track these operations as we want them all to
+      // appear as a single operation to the parent context in order to
+      // avoid deadlock with the maximum window size.
+      indiv_tasks.resize(launcher.single_tasks.size());
+      for (unsigned idx = 0; idx < launcher.single_tasks.size(); idx++)
+      {
+        indiv_tasks[idx] = runtime->get_available_individual_task(true);
+        indiv_tasks[idx]->initialize_task(ctx, launcher.single_tasks[idx],
+                                          check_privileges, false/*track*/);
+        indiv_tasks[idx]->set_must_epoch(this, idx, true/*register*/);
+        // If we have a trace, set it for this operation as well
+        if (trace != NULL)
+          indiv_tasks[idx]->set_trace(trace, !trace->is_fixed(), NULL);
+        indiv_tasks[idx]->must_epoch_task = true;
+      }
+      indiv_triggered.resize(indiv_tasks.size(), false);
+      index_tasks.resize(launcher.index_tasks.size());
+      for (unsigned idx = 0; idx < launcher.index_tasks.size(); idx++)
+      {
+        IndexSpace launch_space = launcher.index_tasks[idx].launch_space;
+        if (!launch_space.exists())
+          launch_space = runtime->find_or_create_index_launch_space(
+                      launcher.index_tasks[idx].launch_domain);
+        index_tasks[idx] = runtime->get_available_index_task(true);
+        index_tasks[idx]->initialize_task(ctx, launcher.index_tasks[idx],
+                          launch_space, check_privileges, false/*track*/);
+        index_tasks[idx]->set_must_epoch(this, indiv_tasks.size()+idx, 
+                                         true/*register*/);
+        if (trace != NULL)
+          index_tasks[idx]->set_trace(trace, !trace->is_fixed(), NULL);
+        index_tasks[idx]->must_epoch_task = true;
+      }
+      index_triggered.resize(index_tasks.size(), false);
     }
 
     //--------------------------------------------------------------------------

@@ -1916,6 +1916,9 @@ namespace Legion {
       // control replicated version of must epoch op
       virtual FutureMapImpl* create_future_map(TaskContext *ctx,
                                                IndexSpace launch_space);
+      // Another virtual method to override for control replication
+      virtual void instantiate_tasks(TaskContext *ctx, bool check_privileges,
+                                     const MustEpochLauncher &launcher);
       void find_conflicted_regions(
           std::vector<PhysicalRegion> &unmapped); 
     public:

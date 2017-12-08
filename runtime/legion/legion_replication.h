@@ -644,6 +644,8 @@ namespace Legion {
       virtual void unpack_remote_versions(Deserializer &derez);
     public:
       void initialize_replication(ReplicateContext *ctx);
+      void set_sharding_function(ShardingID functor,ShardingFunction *function);
+      void perform_unowned_shard(ReplicateContext *ctx);
     protected:
       ShardID owner_shard;
       ShardingID sharding_functor;
@@ -689,6 +691,7 @@ namespace Legion {
       virtual void resolve_false(bool speculated, bool launched);
     public:
       void initialize_replication(ReplicateContext *ctx, IndexSpace launch_sp);
+      void set_sharding_function(ShardingID functor,ShardingFunction *function);
       virtual FutureMapImpl* create_future_map(TaskContext *ctx);
     protected:
       ShardingID sharding_functor;
@@ -1039,22 +1042,28 @@ namespace Legion {
       virtual void deactivate(void);
       virtual FutureMapImpl* create_future_map(TaskContext *ctx,
                                                IndexSpace launch_space);
+      virtual void instantiate_tasks(TaskContext *ctx, bool check_privileges,
+                                     const MustEpochLauncher &launcher);
       virtual MapperManager* invoke_mapper(void);
       virtual void map_and_distribute(std::set<RtEvent> &tasks_mapped,
                                       std::set<ApEvent> &tasks_complete);
+      virtual void trigger_prepipeline_stage(void);
       virtual void trigger_commit(void);
       void map_replicate_tasks(void) const;
       void distribute_replicate_tasks(void) const;
     public:
       void initialize_collectives(ReplicateContext *ctx);
+      inline const Domain& get_index_domain(void) const { return index_domain; }
     public:
       static IndexSpace create_temporary_launch_space(Runtime *runtime,
                                   RegionTreeForest *forest, Context ctx, 
                                   const MustEpochLauncher &launcher);
     protected:
       ShardingID sharding_functor;
+      ShardingFunction *sharding_function;
       Domain index_domain;
       CollectiveID mapping_collective_id;
+      bool collective_map_must_epoch_call;
       MustEpochMappingBroadcast *mapping_broadcast;
       MustEpochMappingExchange *mapping_exchange;
       MustEpochDependenceExchange *dependence_exchange;

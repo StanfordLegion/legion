@@ -13,6 +13,7 @@
  * limitations under the License.
  */
 
+#include "legion/legion_trace.h"
 #include "legion/legion_views.h"
 #include "legion/legion_context.h"
 #include "legion/legion_replication.h"
@@ -276,21 +277,26 @@ namespace Legion {
 #else
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
-      // Do the mapper call to get the sharding function to use
-      if (mapper == NULL)
-        mapper = runtime->find_mapper(current_proc, map_id); 
-      Mapper::SelectShardingFunctorInput* input = repl_ctx->shard_manager;
-      Mapper::SelectShardingFunctorOutput output;
-      output.chosen_functor = UINT_MAX;
-      mapper->invoke_task_select_sharding_functor(this, input, &output);
-      if (output.chosen_functor == UINT_MAX)
-        REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
-                      "Mapper %s failed to pick a valid sharding functor for "
-                      "task %s (UID %lld)", mapper->get_mapper_name(),
-                      get_task_name(), get_unique_id())
-      this->sharding_functor = output.chosen_functor;
-      sharding_function = 
-        repl_ctx->shard_manager->find_sharding_function(sharding_functor);
+      // We might be able to skip this if the sharding function was already
+      // picked for us which occurs when we're part of a must-epoch launch
+      if (sharding_function == NULL)
+      {
+        // Do the mapper call to get the sharding function to use
+        if (mapper == NULL)
+          mapper = runtime->find_mapper(current_proc, map_id); 
+        Mapper::SelectShardingFunctorInput* input = repl_ctx->shard_manager;
+        Mapper::SelectShardingFunctorOutput output;
+        output.chosen_functor = UINT_MAX;
+        mapper->invoke_task_select_sharding_functor(this, input, &output);
+        if (output.chosen_functor == UINT_MAX)
+          REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                        "Mapper %s failed to pick a valid sharding functor for "
+                        "task %s (UID %lld)", mapper->get_mapper_name(),
+                        get_task_name(), get_unique_id())
+        this->sharding_functor = output.chosen_functor;
+        sharding_function = 
+          repl_ctx->shard_manager->find_sharding_function(sharding_functor);
+      }
 #ifdef DEBUG_LEGION
       assert(sharding_function != NULL);
       // In debug mode we check to make sure that all the mappers
@@ -328,45 +334,50 @@ namespace Legion {
         LegionSpy::log_owner_shard(get_unique_id(), owner_shard);
       // If we own it we go on the queue, otherwise we complete early
       if (owner_shard != repl_ctx->owner_shard->shard_id)
-      {
-        // We don't own it, so we can pretend like we
-        // mapped and executed this task already
-        // Before we can do that though we have to get the version state
-        // names for any writes so we can update our local state
-        VersioningInfoBroadcast version_broadcast(repl_ctx, 
-                      versioning_collective_id, owner_shard);
-        version_broadcast.wait_for_states(map_applied_conditions);
-        const UniqueID logical_context_uid = parent_ctx->get_context_uid();
-        for (unsigned idx = 0; idx < regions.size(); idx++)
-        {
-          if (IS_WRITE(regions[idx]))
-          {
-            const VersioningSet<> &remote_advance_states = 
-              version_broadcast.find_advance_states(idx);
-            const RegionRequirement &req = regions[idx];
-            const bool parent_is_upper_bound = (req.region == req.parent);
-            runtime->forest->advance_remote_versions(this, idx, req,
-                parent_is_upper_bound, logical_context_uid, 
-                remote_advance_states, map_applied_conditions);
-          }
-        }
-        if (!map_applied_conditions.empty())
-        {
-          RtEvent map_applied = Runtime::merge_events(map_applied_conditions);
-          complete_mapping(map_applied);
-          // Record the map applied precondition in the versioning
-          // broadcast as well so we know when it is safe to remove
-          // our valid references
-          version_broadcast.record_precondition(map_applied);
-        }
-        else
-          complete_mapping();
-        complete_execution();
-        trigger_children_complete();
-        trigger_children_committed();
-      }
+        perform_unowned_shard(repl_ctx);
       else // We own it, so it goes on the ready queue
         IndividualTask::trigger_ready();
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplIndividualTask::perform_unowned_shard(ReplicateContext *repl_ctx)
+    //--------------------------------------------------------------------------
+    {
+      // We don't own it, so we can pretend like we
+      // mapped and executed this task already
+      // Before we can do that though we have to get the version state
+      // names for any writes so we can update our local state
+      VersioningInfoBroadcast version_broadcast(repl_ctx, 
+                    versioning_collective_id, owner_shard);
+      version_broadcast.wait_for_states(map_applied_conditions);
+      const UniqueID logical_context_uid = parent_ctx->get_context_uid();
+      for (unsigned idx = 0; idx < regions.size(); idx++)
+      {
+        if (IS_WRITE(regions[idx]))
+        {
+          const VersioningSet<> &remote_advance_states = 
+            version_broadcast.find_advance_states(idx);
+          const RegionRequirement &req = regions[idx];
+          const bool parent_is_upper_bound = (req.region == req.parent);
+          runtime->forest->advance_remote_versions(this, idx, req,
+              parent_is_upper_bound, logical_context_uid, 
+              remote_advance_states, map_applied_conditions);
+        }
+      }
+      if (!map_applied_conditions.empty())
+      {
+        RtEvent map_applied = Runtime::merge_events(map_applied_conditions);
+        complete_mapping(map_applied);
+        // Record the map applied precondition in the versioning
+        // broadcast as well so we know when it is safe to remove
+        // our valid references
+        version_broadcast.record_precondition(map_applied);
+      }
+      else
+        complete_mapping();
+      complete_execution();
+      trigger_children_complete();
+      trigger_children_committed();
     }
 
     //--------------------------------------------------------------------------
@@ -374,6 +385,33 @@ namespace Legion {
                                          MustEpochOp *must_epoch_owner/*=NULL*/)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(sharding_function != NULL);
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+      // If we're part of a must epoch operation see if we're the owner
+      // and if not then just do the normal broadcast receive
+      if (must_epoch_owner != NULL)
+      {
+#ifdef DEBUG_LEGION
+        ReplMustEpochOp *repl_epoch_owner = 
+          dynamic_cast<ReplMustEpochOp*>(must_epoch_owner);
+        assert(repl_epoch_owner != NULL);
+#else
+        ReplMustEpochOp *repl_epoch_owner = 
+          static_cast<ReplMustEpochOp*>(must_epoch_owner);
+#endif
+        owner_shard = sharding_function->find_owner(index_point, 
+                          repl_epoch_owner->get_index_domain());
+        if (owner_shard != repl_ctx->owner_shard->shard_id)
+        {
+          perform_unowned_shard(repl_ctx); 
+          return RtEvent::NO_RT_EVENT;
+        }
+      }
       // See if we need to do any versioning computations first
       RtEvent version_ready_event = perform_versioning_analysis();
       if (version_ready_event.exists() && !version_ready_event.has_triggered())
@@ -386,14 +424,6 @@ namespace Legion {
       // the final versions yet and can't do the broadcast
       if (result.exists())
         return result;
-      // Next let's do everything we need to in order to capture the
-      // versioning informaton we need to send to avoid the completion race
-#ifdef DEBUG_LEGION
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
-      assert(repl_ctx != NULL);
-#else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
-#endif
       // Then broadcast the versioning results for any region requirements
       // that are writes which are going to advance the version numbers
       // Have to new this on the heap in case we have to defer it
@@ -409,7 +439,9 @@ namespace Legion {
       }
       // Have to wait for the mapping to be complete before sending to 
       // guarantee correctness of mapping dependences on remote nodes
-      if (map_wait.has_triggered())
+      // Must epoch launches don't need to wait as their mapping dependences
+      // are handled by a different mechanism
+      if (map_wait.has_triggered() || (must_epoch_owner != NULL))
       {
         version_broadcast->perform_collective_async();
         delete version_broadcast;
@@ -454,18 +486,21 @@ namespace Legion {
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
       // Before doing the normal thing we have to exchange broadcast/receive
-      // the future result
-      if (owner_shard == repl_ctx->owner_shard->shard_id)
+      // the future result, can skip this though if we're part of a must epoch
+      if (must_epoch == NULL)
       {
-        FutureBroadcast future_collective(repl_ctx, 
-                                          future_collective_id, owner_shard);
-        future_collective.broadcast_future(future_store, future_size);
-      }
-      else
-      {
-        FutureBroadcast future_collective(repl_ctx, 
-                                          future_collective_id, owner_shard);
-        future_collective.receive_future(result.impl);
+        if (owner_shard == repl_ctx->owner_shard->shard_id)
+        {
+          FutureBroadcast future_collective(repl_ctx, 
+                                            future_collective_id, owner_shard);
+          future_collective.broadcast_future(future_store, future_size);
+        }
+        else
+        {
+          FutureBroadcast future_collective(repl_ctx, 
+                                            future_collective_id, owner_shard);
+          future_collective.receive_future(result.impl);
+        }
       }
       IndividualTask::trigger_task_complete();
     }
@@ -501,6 +536,19 @@ namespace Legion {
         ctx->get_next_collective_index(COLLECTIVE_LOC_0);
       future_collective_id = 
         ctx->get_next_collective_index(COLLECTIVE_LOC_1);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplIndividualTask::set_sharding_function(ShardingID functor,
+                                                   ShardingFunction *function)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(must_epoch != NULL);
+      assert(sharding_function == NULL);
+#endif
+      sharding_functor = functor;
+      sharding_function = function;
     }
 
     /////////////////////////////////////////////////////////////
@@ -579,21 +627,26 @@ namespace Legion {
 #else
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
-      // Do the mapper call to get the sharding function to use
-      if (mapper == NULL)
-        mapper = runtime->find_mapper(current_proc, map_id); 
-      Mapper::SelectShardingFunctorInput* input = repl_ctx->shard_manager;
-      Mapper::SelectShardingFunctorOutput output;
-      output.chosen_functor = UINT_MAX;
-      mapper->invoke_task_select_sharding_functor(this, input, &output);
-      if (output.chosen_functor == UINT_MAX)
-        REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
-                      "Mapper %s failed to pick a valid sharding functor for "
-                      "task %s (UID %lld)", mapper->get_mapper_name(),
-                      get_task_name(), get_unique_id())
-      this->sharding_functor = output.chosen_functor;
-      sharding_function = 
-        repl_ctx->shard_manager->find_sharding_function(sharding_functor);
+      // We might be able to skip this if the sharding function was already
+      // picked for us which occurs when we're part of a must-epoch launch
+      if (sharding_function == NULL)
+      {
+        // Do the mapper call to get the sharding function to use
+        if (mapper == NULL)
+          mapper = runtime->find_mapper(current_proc, map_id); 
+        Mapper::SelectShardingFunctorInput* input = repl_ctx->shard_manager;
+        Mapper::SelectShardingFunctorOutput output;
+        output.chosen_functor = UINT_MAX;
+        mapper->invoke_task_select_sharding_functor(this, input, &output);
+        if (output.chosen_functor == UINT_MAX)
+          REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                        "Mapper %s failed to pick a valid sharding functor for "
+                        "task %s (UID %lld)", mapper->get_mapper_name(),
+                        get_task_name(), get_unique_id())
+        this->sharding_functor = output.chosen_functor;
+        sharding_function = 
+          repl_ctx->shard_manager->find_sharding_function(sharding_functor);
+      }
 #ifdef DEBUG_LEGION
       assert(sharding_function != NULL);
       assert(sharding_collective != NULL);
@@ -751,6 +804,19 @@ namespace Legion {
         reduction_collective = 
           new FutureExchange(ctx, reduction_state_size, COLLECTIVE_LOC_53);
       launch_space = launch_sp;
+    } 
+
+    //--------------------------------------------------------------------------
+    void ReplIndexTask::set_sharding_function(ShardingID functor,
+                                              ShardingFunction *function)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(must_epoch != NULL);
+      assert(sharding_function == NULL);
+#endif
+      sharding_functor = functor;
+      sharding_function = function;
     }
 
     //--------------------------------------------------------------------------
@@ -2307,8 +2373,10 @@ namespace Legion {
     {
       activate_must_epoch_op();
       sharding_functor = UINT_MAX;
+      sharding_function = NULL;
       index_domain = Domain::NO_DOMAIN;
       mapping_collective_id = 0;
+      collective_map_must_epoch_call = false;
       mapping_broadcast = NULL;
       mapping_exchange = NULL;
       dependence_exchange = NULL;
@@ -2325,6 +2393,66 @@ namespace Legion {
       deactivate_must_epoch_op(); 
       shard_single_tasks.clear();
       runtime->free_repl_epoch_op(this);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplMustEpochOp::instantiate_tasks(TaskContext *ctx, 
+                       bool check_privileges, const MustEpochLauncher &launcher)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(ctx);
+#endif
+      // Initialize operations for everything in the launcher
+      // Note that we do not track these operations as we want them all to
+      // appear as a single operation to the parent context in order to
+      // avoid deadlock with the maximum window size.
+      indiv_tasks.resize(launcher.single_tasks.size());
+      for (unsigned idx = 0; idx < launcher.single_tasks.size(); idx++)
+      {
+        ReplIndividualTask *task = 
+          runtime->get_available_repl_individual_task(true);
+        task->initialize_task(ctx, launcher.single_tasks[idx],
+                              check_privileges, false/*track*/);
+        task->set_must_epoch(this, idx, true/*register*/);
+        // If we have a trace, set it for this operation as well
+        if (trace != NULL)
+          task->set_trace(trace, !trace->is_fixed(), NULL);
+        task->must_epoch_task = true;
+        task->initialize_replication(repl_ctx);
+#ifdef DEBUG_LEGION
+        task->set_sharding_collective(new ShardingGatherCollective(repl_ctx,
+                                      0/*owner shard*/, COLLECTIVE_LOC_59));
+#endif
+        indiv_tasks[idx] = task;
+      }
+      indiv_triggered.resize(indiv_tasks.size(), false);
+      index_tasks.resize(launcher.index_tasks.size());
+      for (unsigned idx = 0; idx < launcher.index_tasks.size(); idx++)
+      {
+        IndexSpace launch_space = launcher.index_tasks[idx].launch_space;
+        if (!launch_space.exists())
+          launch_space = runtime->find_or_create_index_launch_space(
+                      launcher.index_tasks[idx].launch_domain);
+        ReplIndexTask *task = runtime->get_available_repl_index_task(true);
+        task->initialize_task(ctx, launcher.index_tasks[idx],
+                          launch_space, check_privileges, false/*track*/);
+        task->set_must_epoch(this, indiv_tasks.size()+idx, 
+                                         true/*register*/);
+        if (trace != NULL)
+          task->set_trace(trace, !trace->is_fixed(), NULL);
+        task->must_epoch_task = true;
+        task->initialize_replication(repl_ctx, launch_space);
+#ifdef DEBUG_LEGION
+        task->set_sharding_collective(new ShardingGatherCollective(repl_ctx,
+                                      0/*owner shard*/, COLLECTIVE_LOC_59));
+#endif
+        index_tasks[idx] = task;
+      }
+      index_triggered.resize(index_tasks.size(), false);
     }
 
     //--------------------------------------------------------------------------
@@ -2357,64 +2485,7 @@ namespace Legion {
 #else
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
-      // First get the sharding function to use for this mapper
-      bool collective_map_must_epoch_call;
-      {
-        this->individual_tasks.resize(indiv_tasks.size());
-        for (unsigned idx = 0; idx < indiv_tasks.size(); idx++)
-          this->individual_tasks[idx] = indiv_tasks[idx];
-        this->index_space_tasks.resize(index_tasks.size());
-        for (unsigned idx = 0; idx < index_tasks.size(); idx++)
-          this->index_space_tasks[idx] = index_tasks[idx];
-        Mapper::SelectShardingFunctorInput sharding_input;
-        sharding_input.shard_mapping = repl_ctx->shard_manager->shard_mapping;
-        Mapper::MustEpochShardingFunctorOutput sharding_output;
-        sharding_output.chosen_functor = UINT_MAX;
-        sharding_output.collective_map_must_epoch_call = false;
-        mapper->invoke_must_epoch_select_sharding_functor(this,
-                                      &sharding_input, &sharding_output);
-        // We can clear these now that we don't need them anymore
-        individual_tasks.clear();
-        index_space_tasks.clear();
-        // Check that we have a sharding ID
-        if (sharding_output.chosen_functor == UINT_MAX)
-          REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
-              "Invalid mapper output from invocation of "
-              "'map_must_epoch' on mapper %s. Mapper failed to specify "
-              "a valid sharding ID for a must epoch operation in control "
-              "replicated context of task %s (UID %lld).",
-              mapper->get_mapper_name(), repl_ctx->get_task_name(),
-              repl_ctx->get_unique_id())
-        this->sharding_functor = sharding_output.chosen_functor;
-        collective_map_must_epoch_call = 
-          sharding_output.collective_map_must_epoch_call;
-      }
-#ifdef DEBUG_LEGION
-      // Check that the sharding IDs are all the same
-      assert(sharding_collective != NULL);
-      // Contribute the result
-      sharding_collective->contribute(this->sharding_functor);
-      if (sharding_collective->is_target() && 
-          !sharding_collective->validate(this->sharding_functor))
-      {
-        log_run.error("ERROR: Mapper %s chose different sharding functions "
-                      "for must epoch launch in %s (UID %lld)", 
-                      mapper->get_mapper_name(), parent_ctx->get_task_name(),
-                      parent_ctx->get_unique_id());
-        assert(false); 
-      }
-      ReplFutureMapImpl *impl = 
-          dynamic_cast<ReplFutureMapImpl*>(result_map.impl);
-      assert(impl != NULL);
-#else
-      ReplFutureMapImpl *impl = 
-          static_cast<ReplFutureMapImpl*>(result_map.impl);
-#endif
-      // Set the future map sharding functor
-      ShardingFunction *sharding_function = 
-        repl_ctx->shard_manager->find_sharding_function(sharding_functor);
-      impl->set_sharding_function(sharding_function);
-      // Next we want to do the map must epoch call
+      // We want to do the map must epoch call
       // First find all the tasks that we own on this shard
       for (std::vector<SingleTask*>::const_iterator it = 
             single_tasks.begin(); it != single_tasks.end(); it++)
@@ -2544,6 +2615,89 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ReplMustEpochOp::trigger_prepipeline_stage(void)
+    //--------------------------------------------------------------------------
+    {
+      Processor mapper_proc = parent_ctx->get_executing_processor();
+      MapperManager *mapper = runtime->find_mapper(mapper_proc, map_id);
+#ifdef DEBUG_LEGION
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+      // Select our sharding functor and then do the base call
+      this->individual_tasks.resize(indiv_tasks.size());
+      for (unsigned idx = 0; idx < indiv_tasks.size(); idx++)
+        this->individual_tasks[idx] = indiv_tasks[idx];
+      this->index_space_tasks.resize(index_tasks.size());
+      for (unsigned idx = 0; idx < index_tasks.size(); idx++)
+        this->index_space_tasks[idx] = index_tasks[idx];
+      Mapper::SelectShardingFunctorInput sharding_input;
+      sharding_input.shard_mapping = repl_ctx->shard_manager->shard_mapping;
+      Mapper::MustEpochShardingFunctorOutput sharding_output;
+      sharding_output.chosen_functor = UINT_MAX;
+      sharding_output.collective_map_must_epoch_call = false;
+      mapper->invoke_must_epoch_select_sharding_functor(this,
+                                    &sharding_input, &sharding_output);
+      // We can clear these now that we don't need them anymore
+      individual_tasks.clear();
+      index_space_tasks.clear();
+      // Check that we have a sharding ID
+      if (sharding_output.chosen_functor == UINT_MAX)
+        REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+            "Invalid mapper output from invocation of "
+            "'map_must_epoch' on mapper %s. Mapper failed to specify "
+            "a valid sharding ID for a must epoch operation in control "
+            "replicated context of task %s (UID %lld).",
+            mapper->get_mapper_name(), repl_ctx->get_task_name(),
+            repl_ctx->get_unique_id())
+      this->sharding_functor = sharding_output.chosen_functor;
+      this->collective_map_must_epoch_call = 
+        sharding_output.collective_map_must_epoch_call;
+#ifdef DEBUG_LEGION
+      assert(sharding_function == NULL);
+      // Check that the sharding IDs are all the same
+      assert(sharding_collective != NULL);
+      // Contribute the result
+      sharding_collective->contribute(this->sharding_functor);
+      if (sharding_collective->is_target() && 
+          !sharding_collective->validate(this->sharding_functor))
+      {
+        log_run.error("ERROR: Mapper %s chose different sharding functions "
+                      "for must epoch launch in %s (UID %lld)", 
+                      mapper->get_mapper_name(), parent_ctx->get_task_name(),
+                      parent_ctx->get_unique_id());
+        assert(false); 
+      }
+      ReplFutureMapImpl *impl = 
+          dynamic_cast<ReplFutureMapImpl*>(result_map.impl);
+      assert(impl != NULL);
+#else
+      ReplFutureMapImpl *impl = 
+          static_cast<ReplFutureMapImpl*>(result_map.impl);
+#endif
+      // Set the future map sharding functor
+      sharding_function = 
+        repl_ctx->shard_manager->find_sharding_function(sharding_functor);
+      impl->set_sharding_function(sharding_function);
+      // Set the sharding functor for all the point and index tasks too
+      for (unsigned idx = 0; idx < indiv_tasks.size(); idx++)
+      {
+        ReplIndividualTask *task = 
+          static_cast<ReplIndividualTask*>(indiv_tasks[idx]);
+        task->set_sharding_function(sharding_functor, sharding_function);
+      }
+      for (unsigned idx = 0; idx < index_tasks.size(); idx++)
+      {
+        ReplIndexTask *task = static_cast<ReplIndexTask*>(index_tasks[idx]);
+        task->set_sharding_function(sharding_functor, sharding_function);
+      }
+      // Then we can do the normal prepipeline stage
+      MustEpochOp::trigger_prepipeline_stage();
+    }
+
+    //--------------------------------------------------------------------------
     void ReplMustEpochOp::trigger_commit(void)
     //--------------------------------------------------------------------------
     {
@@ -2588,17 +2742,27 @@ namespace Legion {
       // computed on the individual tasks while we are mapping them
       for (unsigned idx = 0; idx < single_tasks.size(); idx++)
       {
+        bool own_point = true;
         // Check to see if it is one of the ones that we own
         if (shard_single_tasks.find(single_tasks[idx]) == 
             shard_single_tasks.end())
         {
+          // We don't own this point
+          // We still need to do some work for individual tasks
+          // to exchange versioning information, but no such 
+          // work is necessary for point tasks
           SingleTask *task = single_tasks[idx];
-          // Do the stuff to record that this is mapped and executed
-          task->complete_mapping(mapped_events[task->index_point]);
-          task->complete_execution();
-          task->trigger_children_complete();
-          task->trigger_children_committed();
-          continue;
+          if (dynamic_cast<ReplIndividualTask*>(single_tasks[idx]) == NULL)
+          {
+            // Do the stuff to record that this is mapped and executed
+            task->complete_mapping(mapped_events[task->index_point]);
+            task->complete_execution();
+            task->trigger_children_complete();
+            task->trigger_children_committed();
+            continue;
+          }
+          else // We're going to fall through, but we don't own this point
+            own_point = false;
         }
         // Figure out our preconditions
         std::set<RtEvent> preconditions;
@@ -2622,10 +2786,13 @@ namespace Legion {
         else
           done = runtime->issue_runtime_meta_task(args, 
                 LG_DEFERRED_THROUGHPUT_PRIORITY, args.owner);
-        // We can trigger our completion event once the task is done
-        RtUserEvent mapped = mapped_events[single_tasks[idx]->index_point];
-        Runtime::trigger_event(mapped, done);
         local_mapped_events.insert(done);
+        if (own_point)
+        {
+          // We can trigger our completion event once the task is done
+          RtUserEvent mapped = mapped_events[single_tasks[idx]->index_point];
+          Runtime::trigger_event(mapped, done);
+        }
       }
       // Now we have to wait for all our mapping operations to be done
       if (!local_mapped_events.empty())

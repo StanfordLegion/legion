@@ -5711,8 +5711,10 @@ namespace Legion {
             for (VersioningSet<>::iterator it = repl_states->begin();
                   it != repl_states->end(); it++)
             {
-              if (it->first->version_number != next_version)
-                continue;
+              // This doesn't hold if we are doing a must-epoch exchange
+              // See the ghost exchange example
+              //if (it->first->version_number != next_version)
+              //  continue;
               if (it->second != version_overlap)
                 continue;
               new_state = it->first;
@@ -5760,8 +5762,10 @@ namespace Legion {
             for (VersioningSet<>::iterator it = repl_states->begin();
                   it != repl_states->end(); it++)
             {
-              if (it->first->version_number != init_version)
-                continue;
+              // This doesn't hold if we are doing a must-epoch exchange
+              // See the ghost exchange example
+              //if (it->first->version_number != init_version)
+              //  continue;
               if (it->second != current_filter)
                 continue;
               new_state = it->first;
