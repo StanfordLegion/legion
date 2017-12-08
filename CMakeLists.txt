@@ -212,6 +212,12 @@ mark_as_advanced(Legion_MAX_FIELDS)
 # define variable for legion_defines.h
 set(MAX_FIELDS ${Legion_MAX_FIELDS})
 
+option(Legion_ENABLE_TLS "Enable support for TLS storage of Legion context" OFF)
+mark_as_advanced(Legion_ENABLE_TLS)
+
+# define variable for legion_defines.h
+set(ENABLE_LEGION_TLS ${Legion_ENABLE_TLS})
+
 #------------------------------------------------------------------------------#
 # Runtime library targets
 #------------------------------------------------------------------------------#
