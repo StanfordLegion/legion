@@ -91,6 +91,17 @@ ffi = cffi.FFI()
 ffi.cdef(header)
 c = ffi.dlopen(None)
 
+# Returns true if this module is running inside of a Legion
+# executable. If false, then other Legion functionality should not be
+# expected to work.
+def inside_legion_executable():
+    try:
+        c.legion_get_current_time_in_micros()
+    except AttributeError:
+        return False
+    else:
+        return True
+
 # The Legion context is stored in thread-local storage. This assumes
 # that the Python processor maintains the invariant that every task
 # corresponds to one and only one thread.
