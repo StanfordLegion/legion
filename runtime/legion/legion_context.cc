@@ -5520,14 +5520,8 @@ namespace Legion {
                                           const RegionRequirement &req)
     //--------------------------------------------------------------------------
     {
-      if (!runtime->forest->remove_restriction(coherence_restrictions, op, req))
-        // We failed to remove the restriction
-        REPORT_LEGION_ERROR(ERROR_ILLEGAL_DETACH_OPERATION,
-          "Illegal detach operation (ID %lld) performed in "
-                      "task %s (ID %lld). Detach was performed on an region "
-                      "that had not previously been attached.",
-                      op->get_unique_op_id(), get_task_name(),
-                      get_unique_id())
+      // Try to remove the restriction, it is alright if it fails
+      runtime->forest->remove_restriction(coherence_restrictions, op, req);
     }
 
     //--------------------------------------------------------------------------

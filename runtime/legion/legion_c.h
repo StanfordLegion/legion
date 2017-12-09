@@ -64,6 +64,7 @@ extern "C" {
   NEW_OPAQUE_TYPE(legion_copy_launcher_t);
   NEW_OPAQUE_TYPE(legion_acquire_launcher_t);
   NEW_OPAQUE_TYPE(legion_release_launcher_t);
+  NEW_OPAQUE_TYPE(legion_attach_launcher_t);
   NEW_OPAQUE_TYPE(legion_must_epoch_launcher_t);
   NEW_OPAQUE_TYPE(legion_physical_region_t);
   NEW_OPAQUE_TYPE(legion_accessor_array_1d_t);
@@ -2463,6 +2464,53 @@ extern "C" {
   legion_release_launcher_add_arrival_barrier(
     legion_release_launcher_t launcher,
     legion_phase_barrier_t bar);
+
+  // -----------------------------------------------------------------------
+  // Attach/Detach Operations
+  // -----------------------------------------------------------------------
+
+  /**
+   * @return Caller takes ownership of return value.
+   *
+   * @see Legion::AttachLauncher::AttachLauncher()
+   */
+  legion_attach_launcher_t
+  legion_attach_launcher_create(
+    legion_logical_region_t logical_region,
+    legion_logical_region_t parent_region,
+    legion_external_resource_t resource);
+
+  /**
+   * @param handle Caller must have ownership of parameter `handle`.
+   *
+   * @see Legion::AttachLauncher::~AttachLauncher()
+   */
+  void
+  legion_attach_launcher_destroy(legion_attach_launcher_t handle);
+
+  /**
+   * @return Caller takes ownership of return value.
+   *
+   * @see Legion::Runtime::attach_external_resource()
+   */
+  legion_physical_region_t
+  legion_attach_launcher_execute(legion_runtime_t runtime,
+                                 legion_context_t ctx,
+                                 legion_attach_launcher_t launcher);
+
+  /**
+   * @see Legion::AttachLauncher::attach_array_soa()
+   */
+  void
+  legion_attach_launcher_add_cpu_soa_field(legion_attach_launcher_t launcher,
+                                           legion_field_id_t fid,
+                                           void *base_ptr,
+                                           bool column_major);
+
+  void
+  legion_detach_external_resource(legion_runtime_t runtime,
+                                  legion_context_t ctx,
+                                  legion_physical_region_t handle);
 
   // -----------------------------------------------------------------------
   // Must Epoch Operations

@@ -1506,6 +1506,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool PhysicalRegionImpl::is_external_region(void) const
+    //--------------------------------------------------------------------------
+    {
+      if (references.empty())
+        return false;
+      for (unsigned idx = 0; idx < references.size(); idx++)
+        if (!references[idx].get_manager()->is_external_instance())
+          return false;
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
     LogicalRegion PhysicalRegionImpl::get_logical_region(void) const
     //--------------------------------------------------------------------------
     {

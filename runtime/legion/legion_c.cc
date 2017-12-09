@@ -2902,6 +2902,73 @@ legion_release_launcher_add_arrival_barrier(
 }
 
 // -----------------------------------------------------------------------
+// Attach/Detach Operations
+// -----------------------------------------------------------------------
+
+legion_attach_launcher_t
+legion_attach_launcher_create(legion_logical_region_t logical_region_,
+                              legion_logical_region_t parent_region_,
+                              legion_external_resource_t resource)
+{
+  LogicalRegion logical_region = CObjectWrapper::unwrap(logical_region_);
+  LogicalRegion parent_region = CObjectWrapper::unwrap(parent_region_);
+
+  AttachLauncher *launcher = 
+    new AttachLauncher(resource, logical_region, parent_region);
+  return CObjectWrapper::wrap(launcher);
+}
+
+void
+legion_attach_launcher_destroy(legion_attach_launcher_t handle_)
+{
+  AttachLauncher *handle = CObjectWrapper::unwrap(handle_);
+
+  delete handle;
+}
+
+legion_physical_region_t
+legion_attach_launcher_execute(legion_runtime_t runtime_,
+                               legion_context_t ctx_,
+                               legion_attach_launcher_t launcher_)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+  AttachLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+
+  PhysicalRegion region = runtime->attach_external_resource(ctx, *launcher);
+  return CObjectWrapper::wrap(new PhysicalRegion(region));
+}
+
+void
+legion_attach_launcher_add_cpu_soa_field(legion_attach_launcher_t launcher_,
+                                         legion_field_id_t fid,
+                                         void *base_ptr,
+                                         bool column_major)
+{
+  AttachLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+
+  std::vector<FieldID> fields(1, fid);
+  // Find the memory that we are using
+  const Memory local_sysmem = Machine::MemoryQuery(Machine::get_machine())
+      .has_affinity_to(Processor::get_executing_processor())
+      .only_kind(Memory::SYSTEM_MEM)
+      .first();
+  launcher->attach_array_soa(base_ptr, column_major, fields, local_sysmem);
+}
+
+void
+legion_detach_external_resource(legion_runtime_t runtime_,
+                                legion_context_t ctx_,
+                                legion_physical_region_t handle_)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+  PhysicalRegion *handle = CObjectWrapper::unwrap(handle_);
+
+  runtime->detach_external_resource(ctx, *handle);
+}
+
+// -----------------------------------------------------------------------
 // Must Epoch Operations
 // -----------------------------------------------------------------------
 

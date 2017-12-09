@@ -14515,7 +14515,17 @@ namespace Legion {
       requirement = region.impl->get_requirement();
       // Delay getting a reference until trigger_mapping().  This means we
       //  have to keep region
+      if (!region.is_valid())
+        region.wait_until_valid();
       this->region = region; 
+      // Check to see if this is a valid detach operation
+      if (!region.impl->is_external_region())
+        REPORT_LEGION_ERROR(ERROR_ILLEGAL_DETACH_OPERATION,
+          "Illegal detach operation (ID %lld) performed in "
+                      "task %s (ID %lld). Detach was performed on an region "
+                      "that had not previously been attached.",
+                      get_unique_op_id(), parent_ctx->get_task_name(),
+                      parent_ctx->get_unique_id())
       if (Runtime::legion_spy_enabled)
         LegionSpy::log_detach_operation(parent_ctx->get_unique_id(),
                                         unique_op_id);
