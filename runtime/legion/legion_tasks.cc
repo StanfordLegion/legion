@@ -5732,7 +5732,17 @@ namespace Legion {
       rez.serialize(remote_unique_id);
       rez.serialize(remote_owner_uid);
       rez.serialize(top_level_task);
-      rez.serialize<bool>(is_repl_individual_task());
+      if (!is_remote())
+      {
+        // We're a remote replicate if we're replicated and we're
+        // not part of a must epoch launch which is handled differently
+        if (is_repl_individual_task() && (must_epoch == NULL))
+          rez.serialize<bool>(true);
+        else
+          rez.serialize<bool>(false);
+      }
+      else
+        rez.serialize<bool>(remote_replicate);
       if (!is_origin_mapped())
       {
         // have to pack all version info (e.g. split masks)
@@ -5959,7 +5969,9 @@ namespace Legion {
       derez.deserialize(applied);
       if (applied.exists())
         map_applied_conditions.insert(applied);
-      if (is_repl_individual_task())
+      // Only have remote versions if we were replicated 
+      // and not part of a must epoch launch
+      if (is_repl_individual_task() && (must_epoch == NULL))
         unpack_remote_versions(derez);
       if (!map_applied_conditions.empty())
         complete_mapping(Runtime::merge_events(map_applied_conditions));
