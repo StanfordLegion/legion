@@ -1786,8 +1786,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     CopyLauncher::CopyLauncher(Predicate pred /*= Predicate::TRUE_PRED*/,
                                MapperID mid /*=0*/, MappingTagID t /*=0*/)
-      : predicate(pred), map_id(mid), tag(t), static_dependences(NULL),
-        silence_warnings(false)
+      : predicate(pred), map_id(mid), tag(t), point(DomainPoint(0)),
+        static_dependences(NULL), silence_warnings(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -1864,7 +1864,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     FillLauncher::FillLauncher(void)
       : handle(LogicalRegion::NO_REGION), parent(LogicalRegion::NO_REGION),
-        map_id(0), tag(0), static_dependences(NULL), silence_warnings(false)
+        map_id(0), tag(0), point(DomainPoint(0)), static_dependences(NULL), 
+        silence_warnings(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -1875,7 +1876,8 @@ namespace Legion {
                                Predicate pred /*= Predicate::TRUE_PRED*/,
                                MapperID id /*=0*/, MappingTagID t /*=0*/)
       : handle(h), parent(p), argument(arg), predicate(pred), map_id(id), 
-        tag(t), static_dependences(NULL), silence_warnings(false)
+        tag(t), point(DomainPoint(0)), static_dependences(NULL), 
+        silence_warnings(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -1885,7 +1887,7 @@ namespace Legion {
                                Predicate pred /*= Predicate::TRUE_PRED*/,
                                MapperID id /*=0*/, MappingTagID t /*=0*/)
       : handle(h), parent(p), future(f), predicate(pred), map_id(id), tag(t), 
-        static_dependences(NULL), silence_warnings(false) 
+        point(DomainPoint(0)), static_dependences(NULL), silence_warnings(false) 
     //--------------------------------------------------------------------------
     {
     }
