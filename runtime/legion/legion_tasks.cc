@@ -2958,9 +2958,7 @@ namespace Legion {
                       "implementation of task %s (ID %lld).",
                       "map_task", mapper->get_mapper_name(), get_task_name(),
                       get_unique_id())
-      // Now that we know which variant to use, we can validate it
-      if (!Runtime::unsafe_mapper)
-        validate_variant_selection(mapper, variant_impl, "map_task");
+      // Save variant validation until we know which instances we'll be using 
 #ifdef DEBUG_LEGION
       // Check to see if any premapped region mappings changed
       if (!premapped_instances.empty())
@@ -3293,7 +3291,10 @@ namespace Legion {
           }
         }
       }
-      early_mapped_regions.clear();
+      // Now that we have our physical instances we can validate the variant
+      if (!Runtime::unsafe_mapper)
+        validate_variant_selection(mapper, variant_impl, "map_task");
+      early_mapped_regions.clear(); 
       // Record anything else that needs to be recorded 
       selected_variant = output.chosen_variant;
       task_priority = output.task_priority;
