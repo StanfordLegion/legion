@@ -854,9 +854,9 @@ function codegen.map_task(rules, automata, state_id, signature, mapper_state_typ
             var [region_var] = c.legion_region_requirement_get_region([req_var])
 
             var need_allocation = not c.bishop_instance_cache_has_cached_instances(
-                [instance_cache_var], [idx - 1], [region_var])
+                [instance_cache_var], [idx - 1], [region_var], [target.value])
             var [inst_var] = c.bishop_instance_cache_get_cached_instances(
-                [instance_cache_var], [idx - 1], [region_var])
+                [instance_cache_var], [idx - 1], [region_var], [target.value])
             if not need_allocation then
               var success =
                 c.legion_mapper_runtime_acquire_instances([rt_var], [ctx_var],
