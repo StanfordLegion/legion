@@ -618,6 +618,6 @@ clean::
 endif
 
 ifeq ($(strip $(USE_LLVM)),1)
-llvmjit_internal.o : CC_FLAGS += $(LLVM_CXXFLAGS)
-%/llvmjit_internal.o : CC_FLAGS += $(LLVM_CXXFLAGS)
+llvmjit_internal.cc.o : CC_FLAGS += $(LLVM_CXXFLAGS)
+%/llvmjit_internal.cc.o : CC_FLAGS += $(LLVM_CXXFLAGS)
 endif
