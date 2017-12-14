@@ -93,6 +93,7 @@ namespace Legion {
       inline IndexTreeID get_tree_id(void) const { return tid; }
       inline bool exists(void) const { return (id != 0); }
       inline TypeTag get_type_tag(void) const { return type_tag; }
+      inline int get_dim(void) const;
     protected:
       friend std::ostream& operator<<(std::ostream& os, 
                                       const IndexSpace& is);
@@ -148,6 +149,7 @@ namespace Legion {
       inline IndexTreeID get_tree_id(void) const { return tid; }
       inline bool exists(void) const { return (id != 0); }
       inline TypeTag get_type_tag(void) const { return type_tag; }
+      inline int get_dim(void) const;
     protected:
       friend std::ostream& operator<<(std::ostream& os, 
                                       const IndexPartition& ip);
@@ -245,6 +247,7 @@ namespace Legion {
       inline bool exists(void) const { return (tree_id != 0); } 
       inline TypeTag get_type_tag(void) const 
         { return index_space.get_type_tag(); }
+      inline int get_dim(void) const { return index_space.get_dim(); }
     protected:
       friend std::ostream& operator<<(std::ostream& os, 
                                       const LogicalRegion& lr);
@@ -313,6 +316,7 @@ namespace Legion {
       inline bool exists(void) const { return (tree_id != 0); }
       inline TypeTag get_type_tag(void) const 
         { return index_partition.get_type_tag(); }
+      inline int get_dim(void) const { return index_partition.get_dim(); }
     protected:
       friend std::ostream& operator<<(std::ostream& os, 
                                       const LogicalPartition& lp);
