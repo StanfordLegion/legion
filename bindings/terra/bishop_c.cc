@@ -304,21 +304,6 @@ bishop_instance_cache_create()
   return cache_;
 }
 
-bool
-bishop_instance_cache_has_cached_instances(bishop_instance_cache_t cache_,
-                                           size_t idx,
-                                           legion_logical_region_t lr_,
-                                           legion_memory_t memory_)
-{
-  InstanceCache *cache = (InstanceCache*)cache_.impl;
-
-  LogicalRegion lr = CObjectWrapper::unwrap(lr_);
-  Memory memory = CObjectWrapper::unwrap(memory_);
-  InstanceCacheKey key(idx, std::make_pair(lr, memory));
-  InstanceCache::iterator finder = cache->find(key);
-  return finder != cache->end();
-}
-
 legion_physical_instance_t*
 bishop_instance_cache_get_cached_instances(bishop_instance_cache_t cache_,
                                            size_t idx,
@@ -332,15 +317,39 @@ bishop_instance_cache_get_cached_instances(bishop_instance_cache_t cache_,
   InstanceCacheKey key(idx, std::make_pair(lr, memory));
   InstanceCache::iterator finder = cache->find(key);
   if (finder == cache->end())
+    return NULL;
+  else
+  // TODO: Some layout constraints may require multiple instances
+    return finder->second;
+}
+
+bool
+bishop_instance_cache_register_instances(bishop_instance_cache_t cache_,
+                                         size_t idx,
+                                         legion_logical_region_t lr_,
+                                         legion_memory_t memory_,
+                                         legion_physical_instance_t *instances)
+{
+  InstanceCache *cache = (InstanceCache*)cache_.impl;
+
+  LogicalRegion lr = CObjectWrapper::unwrap(lr_);
+  Memory memory = CObjectWrapper::unwrap(memory_);
+  InstanceCacheKey key(idx, std::make_pair(lr, memory));
+  InstanceCache::iterator finder = cache->find(key);
+  if (finder != cache->end())
   {
-    // TODO: Some layout constraints may require multiple instances
-    legion_physical_instance_t *instances =
-      (legion_physical_instance_t*)malloc(sizeof(legion_physical_instance_t));
-    (*cache)[key] = instances;
-    return instances;
+#ifdef DEBUG_LEGION
+    assert(CObjectWrapper::unwrap(*finder->second)->get_instance_id() ==
+        CObjectWrapper::unwrap(*instances)->get_instance_id());
+#endif
+    return false;
   }
   else
-    return finder->second;
+  {
+    // TODO: Some layout constraints may require multiple instances
+    (*cache)[key] = instances;
+    return true;
+  }
 }
 
 typedef std::map<Domain, std::vector<Mapper::TaskSlice> > SliceCache;

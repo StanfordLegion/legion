@@ -2182,7 +2182,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    InnerContext* InnerContext::find_parent_physical_context(unsigned index)
+    InnerContext* InnerContext::find_parent_physical_context(unsigned index,
+                                                          LogicalRegion *handle)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -2195,9 +2196,13 @@ namespace Legion {
         // See if it is virtual mapped
         if (virtual_mapped[index])
           return find_parent_context()->find_parent_physical_context(
-                                            parent_req_indexes[index]);
+                                            parent_req_indexes[index], handle);
         else // We mapped a physical instance so we're it
+        {
+          if (handle != NULL)
+            *handle = regions[index].region;
           return this;
+        }
       }
       else // We created it
       {
@@ -2213,7 +2218,11 @@ namespace Legion {
             returnable_privileges[index])
           return find_top_context();
         else
+        {
+          if (handle != NULL)
+            *handle = created_requirements[index].region;
           return this;
+        }
       }
     }
 
@@ -6931,7 +6940,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    InnerContext* ReplicateContext::find_parent_physical_context(unsigned index)
+    InnerContext* ReplicateContext::find_parent_physical_context(unsigned index,
+                                                          LogicalRegion *handle)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -6946,7 +6956,11 @@ namespace Legion {
           return find_parent_context()->find_parent_physical_context(
                                             parent_req_indexes[index]);
         else // We mapped a physical instance so we're it
+        {
+          if (handle != NULL)
+            *handle = regions[index].region;
           return this;
+        }
       }
       else // We created it
       {
@@ -6971,6 +6985,8 @@ namespace Legion {
                                 owner_task->get_task_name(),
                                 owner_task->get_unique_id())
         }
+        if (handle != NULL)
+          *handle = created_requirements[index].region;
         return this;
       }
     }
@@ -10862,7 +10878,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    InnerContext* RemoteContext::find_parent_physical_context(unsigned index)
+    InnerContext* RemoteContext::find_parent_physical_context(unsigned index,
+                                                          LogicalRegion *handle)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -10875,9 +10892,13 @@ namespace Legion {
         // See if it is virtual mapped
         if (virtual_mapped[index])
           return find_parent_context()->find_parent_physical_context(
-                                            parent_req_indexes[index]);
+                                            parent_req_indexes[index], handle);
         else // We mapped a physical instance so we're it
+        {
+          if (handle != NULL)
+            *handle = regions[index].region;
           return this;
+        }
       }
       else // We created it
       {
@@ -10891,7 +10912,18 @@ namespace Legion {
           std::map<unsigned,InnerContext*>::const_iterator finder = 
             physical_contexts.find(index);
           if (finder != physical_contexts.end())
+          {
+            if (handle != NULL)
+            {
+              std::map<unsigned,LogicalRegion>::const_iterator handle_finder =
+                physical_handles.find(index);
+#ifdef DEBUG_LEGION
+              assert(handle_finder != physical_handles.end());
+#endif
+              *handle = handle_finder->second;
+            }
             return finder->second;
+          }
           std::map<unsigned,RtEvent>::const_iterator pending_finder = 
             pending_physical_contexts.find(index);
           if (pending_finder == pending_physical_contexts.end())
@@ -10922,11 +10954,32 @@ namespace Legion {
         wait_on.lg_wait();
         // When we wake up it should be there
         AutoLock rem_lock(remote_lock, 1, false/*exclusive*/);
+        // Get the handle if we need it
+        if (handle != NULL)
+        {
+          std::map<unsigned,LogicalRegion>::const_iterator handle_finder =
+            physical_handles.find(index);
+#ifdef DEBUG_LEGION
+          assert(handle_finder != physical_handles.end());
+#endif
+          *handle = handle_finder->second;
+        }
 #ifdef DEBUG_LEGION
         assert(physical_contexts.find(index) != physical_contexts.end());
 #endif
         return physical_contexts[index]; 
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteContext::record_using_physical_context(LogicalRegion handle)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(handle.exists());
+#endif
+      AutoLock rem_lock(remote_lock);
+      local_physical_contexts.insert(handle);
     }
 
     //--------------------------------------------------------------------------
@@ -10974,6 +11027,11 @@ namespace Legion {
           if (!virtual_mapped[idx])
             runtime->forest->invalidate_versions(tree_context, 
                                                  regions[idx].region);
+        // Also invalidate any of our local physical context regions
+        for (std::set<LogicalRegion>::const_iterator it = 
+              local_physical_contexts.begin(); it != 
+              local_physical_contexts.end(); it++)
+          runtime->forest->invalidate_versions(tree_context, *it);
       }
       else
         runtime->forest->invalidate_all_versions(tree_context);
@@ -11216,13 +11274,19 @@ namespace Legion {
       const RemotePhysicalRequestArgs *rargs = 
         (const RemotePhysicalRequestArgs*)args;
       InnerContext *local = rargs->runtime->find_context(rargs->context_uid);
-      InnerContext *result = local->find_parent_physical_context(rargs->index);
+      LogicalRegion handle = LogicalRegion::NO_REGION;
+      InnerContext *result = 
+        local->find_parent_physical_context(rargs->index, &handle);
+      // Also need the logical region to send back so we can tell the 
+      // possibly remote context the name of the top-level region
+      // so it can invalidate it when it's done using it
       Serializer rez;
       {
         RezCheck z(rez);
         rez.serialize(rargs->target);
         rez.serialize(rargs->index);
         rez.serialize(result->context_uid);
+        rez.serialize(handle);
         rez.serialize(rargs->to_trigger);
       }
       rargs->runtime->send_remote_context_physical_response(rargs->source, rez);
@@ -11230,14 +11294,17 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RemoteContext::set_physical_context_result(unsigned index,
-                                                    InnerContext *result)
+                                                    InnerContext *result,
+                                                    LogicalRegion handle)
     //--------------------------------------------------------------------------
     {
       AutoLock rem_lock(remote_lock);
 #ifdef DEBUG_LEGION
       assert(physical_contexts.find(index) == physical_contexts.end());
+      assert(physical_handles.find(index) == physical_handles.end());
 #endif
       physical_contexts[index] = result;
+      physical_handles[index] = handle;
       std::map<unsigned,RtEvent>::iterator finder = 
         pending_physical_contexts.find(index);
 #ifdef DEBUG_LEGION
@@ -11258,6 +11325,8 @@ namespace Legion {
       derez.deserialize(index);
       UniqueID result_uid;
       derez.deserialize(result_uid);
+      LogicalRegion handle;
+      derez.deserialize(handle);
       RtUserEvent to_trigger;
       derez.deserialize(to_trigger);
       InnerContext *result = runtime->find_context(result_uid, true/*weak*/);
@@ -11269,6 +11338,7 @@ namespace Legion {
         args.target = target;
         args.index = index;
         args.result_uid = result_uid;
+        args.handle = handle;
         args.runtime = runtime;
         RtEvent done = 
           runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY);
@@ -11276,7 +11346,11 @@ namespace Legion {
       }
       else
       {
-        target->set_physical_context_result(index, result);
+        target->set_physical_context_result(index, result, handle);
+        // Also have to tell the actual context someone is using it
+        // in case it is also remote
+        if (handle.exists())
+          result->record_using_physical_context(handle);
         Runtime::trigger_event(to_trigger);
       }
     }
@@ -11288,7 +11362,12 @@ namespace Legion {
       const RemotePhysicalResponseArgs *rargs = 
         (const RemotePhysicalResponseArgs*)args;
       InnerContext *result = rargs->runtime->find_context(rargs->result_uid);
-      rargs->target->set_physical_context_result(rargs->index, result);
+      rargs->target->set_physical_context_result(rargs->index, result,
+          rargs->handle);
+      // Also have to tell the actual context someone is using it
+      // in case it is also remote
+      if (rargs->handle.exists())
+        result->record_using_physical_context(rargs->handle);
     }
 
     /////////////////////////////////////////////////////////////
@@ -12405,7 +12484,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    InnerContext* LeafContext::find_parent_physical_context(unsigned index)
+    InnerContext* LeafContext::find_parent_physical_context(unsigned index,
+                                                          LogicalRegion *handle)
     //--------------------------------------------------------------------------
     {
       assert(false);
@@ -13652,13 +13732,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    InnerContext* InlineContext::find_parent_physical_context(unsigned index)
+    InnerContext* InlineContext::find_parent_physical_context(unsigned index,
+                                                          LogicalRegion *handle)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(index < parent_req_indexes.size());
 #endif
-      return enclosing->find_parent_physical_context(parent_req_indexes[index]);
+      return enclosing->find_parent_physical_context(parent_req_indexes[index],
+                                                     handle);
     }
 
     //--------------------------------------------------------------------------

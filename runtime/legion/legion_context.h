@@ -367,7 +367,10 @@ namespace Legion {
 #endif
     public:
       virtual InnerContext* find_parent_logical_context(unsigned index) = 0;
-      virtual InnerContext* find_parent_physical_context(unsigned index) = 0;
+      virtual InnerContext* find_parent_physical_context(unsigned index,
+                                          LogicalRegion *handle = NULL) = 0;
+      // No-op for most contexts except remote ones
+      virtual void record_using_physical_context(LogicalRegion handle) { }
       virtual void find_parent_version_info(unsigned index, unsigned depth, 
                 const FieldMask &version_mask, InnerContext *context,
                 VersionInfo &version_info, std::set<RtEvent> &ready_events) = 0;
@@ -978,7 +981,8 @@ namespace Legion {
 #endif
     public:
       virtual InnerContext* find_parent_logical_context(unsigned index);
-      virtual InnerContext* find_parent_physical_context(unsigned index);
+      virtual InnerContext* find_parent_physical_context(unsigned index,
+                                          LogicalRegion *handle = NULL);
       virtual void find_parent_version_info(unsigned index, unsigned depth, 
                   const FieldMask &version_mask, InnerContext *context,
                   VersionInfo &version_info, std::set<RtEvent> &ready_events);
@@ -1257,7 +1261,8 @@ namespace Legion {
       virtual void print_once(FILE *f, const char *message) const;
       virtual void log_once(Realm::LoggerMessage &message) const;
     public:
-      virtual InnerContext* find_parent_physical_context(unsigned index);
+      virtual InnerContext* find_parent_physical_context(unsigned index,
+                                          LogicalRegion *handle = NULL);
       virtual void invalidate_region_tree_contexts(void);
     public:
       // Interface to operations performed by a context
@@ -1640,6 +1645,7 @@ namespace Legion {
         RemoteContext *target;
         unsigned index;
         UniqueID result_uid;
+        LogicalRegion handle;
         Runtime *runtime;
       };
     public:
@@ -1666,7 +1672,9 @@ namespace Legion {
       virtual void find_parent_version_info(unsigned index, unsigned depth, 
                   const FieldMask &version_mask, InnerContext *context,
                   VersionInfo &version_info, std::set<RtEvent> &ready_events);
-      virtual InnerContext* find_parent_physical_context(unsigned index);
+      virtual InnerContext* find_parent_physical_context(unsigned index,
+                                                LogicalRegion *handle = NULL);
+      virtual void record_using_physical_context(LogicalRegion handle);
       virtual InstanceView* create_instance_top_view(PhysicalManager *manager,
                                                      AddressSpaceID source);
       virtual void invalidate_region_tree_contexts(void);
@@ -1683,7 +1691,9 @@ namespace Legion {
       static void handle_physical_request(Deserializer &derez,
                       Runtime *runtime, AddressSpaceID source);
       static void defer_physical_request(const void *args);
-      void set_physical_context_result(unsigned index, InnerContext *result);
+      void set_physical_context_result(unsigned index, 
+                                       InnerContext *result,
+                                       LogicalRegion handle);
       static void handle_physical_response(Deserializer &derez, 
                                            Runtime *runtime);
       static void defer_physical_response(const void *args);
@@ -1703,7 +1713,9 @@ namespace Legion {
     protected:
       // Cached physical contexts recorded from the owner
       std::map<unsigned/*index*/,InnerContext*> physical_contexts;
+      std::map<unsigned/*index*/,LogicalRegion> physical_handles;
       std::map<unsigned,RtEvent> pending_physical_contexts;
+      std::set<LogicalRegion> local_physical_contexts;
     protected:
       // For remote replicate contexts
       size_t total_shards;
@@ -2001,7 +2013,8 @@ namespace Legion {
 #endif
     public:
       virtual InnerContext* find_parent_logical_context(unsigned index);
-      virtual InnerContext* find_parent_physical_context(unsigned index);
+      virtual InnerContext* find_parent_physical_context(unsigned index,
+                                          LogicalRegion *handle = NULL);
       virtual void find_parent_version_info(unsigned index, unsigned depth, 
                   const FieldMask &version_mask, InnerContext *context,
                   VersionInfo &version_info, std::set<RtEvent> &ready_events);
@@ -2344,7 +2357,8 @@ namespace Legion {
 #endif
     public:
       virtual InnerContext* find_parent_logical_context(unsigned index);
-      virtual InnerContext* find_parent_physical_context(unsigned index);
+      virtual InnerContext* find_parent_physical_context(unsigned index,
+                                          LogicalRegion *handle = NULL);
       virtual void find_parent_version_info(unsigned index, unsigned depth, 
                   const FieldMask &version_mask, InnerContext *context,
                   VersionInfo &version_info, std::set<RtEvent> &ready_events);

@@ -744,7 +744,7 @@ function codegen.map_task(rules, automata, state_id, signature, mapper_state_typ
       end
 
       local level = rule_properties[idx].create.value
-      if privilege == c.REDUCE or level == "demand" or level == "forbid" then
+      if privilege == c.REDUCE or level == "demand" then
         local layout_var = terralib.newsymbol(c.legion_layout_constraint_set_t)
         local layout_init = quote
           [layout_var] = c.legion_layout_constraint_set_create()
@@ -788,25 +788,12 @@ function codegen.map_task(rules, automata, state_id, signature, mapper_state_typ
         end
 
         local inst_var = terralib.newsymbol(c.legion_physical_instance_t)
-        local inst_creation
-        if level == "demand" then
-          inst_creation = quote
-            var success =
-              c.legion_mapper_runtime_create_physical_instance_layout_constraint(
-                [rt_var], [ctx_var], [target.value], [layout_var], &[region_var],
-                1, &[inst_var], true, 0)
-            std.assert(success, "instance creation should succeed")
-          end
-        elseif level == "forbid" then
-          inst_creation = quote
-            var success =
-              c.legion_mapper_runtime_find_physical_instance_layout_constraint(
-                [rt_var], [ctx_var], [target.value], [layout_var], &[region_var],
-                1, &[inst_var], true, false)
-            std.assert(success, "instance creation should succeed")
-          end
-        else
-          assert(false, "unreachable")
+        local inst_creation = quote
+          var success =
+            c.legion_mapper_runtime_create_physical_instance_layout_constraint(
+              [rt_var], [ctx_var], [target.value], [layout_var], &[region_var],
+              1, &[inst_var], true, 0)
+          std.assert(success, "instance creation must succeed")
         end
 
         body = quote
@@ -824,27 +811,52 @@ function codegen.map_task(rules, automata, state_id, signature, mapper_state_typ
           end
         end
       else
-        assert(privilege ~= c.REDUCE and level == "allow")
+        assert(privilege ~= c.REDUCE and (level == "allow" or level == "forbid"))
 
         local inst_var = terralib.newsymbol(&c.legion_physical_instance_t)
+        local layout_var = terralib.newsymbol(c.legion_layout_constraint_set_t)
+        local cache_success_var = terralib.newsymbol(bool)
         local cache_init = quote
-          var layout = c.legion_layout_constraint_set_create()
+          --- TODO: Some layout constraints may require multiple instances
+          [inst_var] = [&c.legion_physical_instance_t](
+              c.malloc([terralib.sizeof(c.legion_physical_instance_t)]))
+          var [layout_var] = c.legion_layout_constraint_set_create()
           var fields_size = [#signature.reqs[idx].fields]
           var [fields_var]
           c.legion_region_requirement_get_privilege_fields([req_var], [fields_var],
               fields_size)
-          c.legion_layout_constraint_set_add_field_constraint(layout, [fields_var],
+          c.legion_layout_constraint_set_add_field_constraint([layout_var], [fields_var],
               fields_size, false, false)
           var dims : uint[4]
           dims[0], dims[1], dims[2], dims[3] = c.DIM_X, c.DIM_Y, c.DIM_Z, c.DIM_F
-          c.legion_layout_constraint_set_add_ordering_constraint(layout, dims, 4, false)
+          c.legion_layout_constraint_set_add_ordering_constraint([layout_var], dims, 4, false)
+        end
 
-          var created : bool
-          var success =
-            c.legion_mapper_runtime_find_or_create_physical_instance_layout_constraint(
-              [rt_var], [ctx_var], [target.value], layout, &[region_var],
-              1, [inst_var], &created, true, 0, false)
-          std.assert(success, "instance creation should succeed")
+        if level == "forbid" then
+          cache_init = quote
+            [cache_init]
+            var success =
+              c.legion_mapper_runtime_find_physical_instance_layout_constraint(
+                [rt_var], [ctx_var], [target.value], [layout_var], &[region_var],
+                1, [inst_var], true, false)
+            std.assert(success, "instance must be found")
+          end
+        else
+          cache_init = quote
+            [cache_init]
+            var created : bool
+            var success =
+              c.legion_mapper_runtime_find_or_create_physical_instance_layout_constraint(
+                [rt_var], [ctx_var], [target.value], [layout_var], &[region_var],
+                1, [inst_var], &created, true, 0, false)
+            std.assert(success, "instance creation must succeed")
+          end
+        end
+        cache_init = quote
+          [cache_init]
+          [cache_success_var] =
+            c.bishop_instance_cache_register_instances([instance_cache_var], [idx - 1],
+              [region_var], [target.value], [inst_var])
         end
 
         body = quote
@@ -854,26 +866,25 @@ function codegen.map_task(rules, automata, state_id, signature, mapper_state_typ
             var [req_var] = c.legion_task_get_region([task_var], [idx - 1])
             var [region_var] = c.legion_region_requirement_get_region([req_var])
 
-            var need_allocation = not c.bishop_instance_cache_has_cached_instances(
-                [instance_cache_var], [idx - 1], [region_var], [target.value])
+            var [cache_success_var] = true
             var [inst_var] = c.bishop_instance_cache_get_cached_instances(
                 [instance_cache_var], [idx - 1], [region_var], [target.value])
-            if not need_allocation then
+            if [inst_var] ~= [&c.legion_physical_instance_t](nil) then
               var success =
                 c.legion_mapper_runtime_acquire_instances([rt_var], [ctx_var],
                     [inst_var], 1)
-              need_allocation = not success
-            end
-
-            if need_allocation then
+              std.assert(success, "instance acquire must succeed")
+            else
               -- TODO: invalidate cached instances
               [cache_init]
               c.bishop_logger_debug(
                 "[map_task] initialize instance cache for region %d", [idx - 1])
             end
-
             c.legion_map_task_output_chosen_instances_add([map_task_output_var],
               [inst_var], 1)
+            if not[cache_success_var] then
+              c.free([inst_var])
+            end
           end
         end
       end
