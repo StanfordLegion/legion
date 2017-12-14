@@ -557,15 +557,15 @@ endif
 SSH	:= ssh
 SCP	:= scp
 
-GEN_OBJS	:= $(GEN_SRC:.cc=.o)
-LOW_RUNTIME_OBJS:= $(LOW_RUNTIME_SRC:.cc=.o)
-HIGH_RUNTIME_OBJS:=$(HIGH_RUNTIME_SRC:.cc=.o)
-MAPPER_OBJS	:= $(MAPPER_SRC:.cc=.o)
-ASM_OBJS	:= $(ASM_SRC:.S=.o)
+GEN_OBJS	:= $(GEN_SRC:.cc=.cc.o)
+LOW_RUNTIME_OBJS:= $(LOW_RUNTIME_SRC:.cc=.cc.o)
+HIGH_RUNTIME_OBJS:=$(HIGH_RUNTIME_SRC:.cc=.cc.o)
+MAPPER_OBJS	:= $(MAPPER_SRC:.cc=.cc.o)
+ASM_OBJS	:= $(ASM_SRC:.S=.S.o)
 # Only compile the gpu objects if we need to 
 ifeq ($(strip $(USE_CUDA)),1)
-GEN_GPU_OBJS	:= $(GEN_GPU_SRC:.cu=.o)
-GPU_RUNTIME_OBJS:= $(GPU_RUNTIME_SRC:.cu=.o)
+GEN_GPU_OBJS	:= $(GEN_GPU_SRC:.cu=.cu.o)
+GPU_RUNTIME_OBJS:= $(GPU_RUNTIME_SRC:.cu=.cu.o)
 else
 GEN_GPU_OBJS	:=
 GPU_RUNTIME_OBJS:=
@@ -592,25 +592,25 @@ $(SLIB_REALM) : $(LOW_RUNTIME_OBJS)
 	rm -f $@
 	$(AR) rc $@ $^
 
-$(GEN_OBJS) : %.o : %.cc
+$(GEN_OBJS) : %.cc.o : %.cc
 	$(CXX) -o $@ -c $< $(CC_FLAGS) $(INC_FLAGS)
 
-$(ASM_OBJS) : %.o : %.S
+$(ASM_OBJS) : %.S.o : %.S
 	$(CXX) -o $@ -c $< $(CC_FLAGS) $(INC_FLAGS)
 
-$(LOW_RUNTIME_OBJS) : %.o : %.cc
+$(LOW_RUNTIME_OBJS) : %.cc.o : %.cc
 	$(CXX) -o $@ -c $< $(CC_FLAGS) $(INC_FLAGS)
 
-$(HIGH_RUNTIME_OBJS) : %.o : %.cc
+$(HIGH_RUNTIME_OBJS) : %.cc.o : %.cc
 	$(CXX) -o $@ -c $< $(CC_FLAGS) $(INC_FLAGS)
 
-$(MAPPER_OBJS) : %.o : %.cc
+$(MAPPER_OBJS) : %.cc.o : %.cc
 	$(CXX) -o $@ -c $< $(CC_FLAGS) $(INC_FLAGS)
 
-$(GEN_GPU_OBJS) : %.o : %.cu
+$(GEN_GPU_OBJS) : %.cu.o : %.cu
 	$(NVCC) -o $@ -c $< $(NVCC_FLAGS) $(INC_FLAGS)
 
-$(GPU_RUNTIME_OBJS): %.o : %.cu
+$(GPU_RUNTIME_OBJS): %.cu.o : %.cu
 	$(NVCC) -o $@ -c $< $(NVCC_FLAGS) $(INC_FLAGS)
 
 clean::
@@ -619,6 +619,6 @@ clean::
 endif
 
 ifeq ($(strip $(USE_LLVM)),1)
-llvmjit_internal.o : CC_FLAGS += $(LLVM_CXXFLAGS)
-%/llvmjit_internal.o : CC_FLAGS += $(LLVM_CXXFLAGS)
+llvmjit_internal.cc.o : CC_FLAGS += $(LLVM_CXXFLAGS)
+%/llvmjit_internal.cc.o : CC_FLAGS += $(LLVM_CXXFLAGS)
 endif

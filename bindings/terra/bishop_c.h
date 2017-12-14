@@ -140,12 +140,14 @@ bishop_instance_cache_create();
 bool
 bishop_instance_cache_has_cached_instances(bishop_instance_cache_t,
                                            size_t,
-                                           legion_logical_region_t);
+                                           legion_logical_region_t,
+                                           legion_memory_t);
 
 legion_physical_instance_t*
 bishop_instance_cache_get_cached_instances(bishop_instance_cache_t,
                                            size_t,
-                                           legion_logical_region_t);
+                                           legion_logical_region_t,
+                                           legion_memory_t);
 
 typedef struct bishop_slice_cache_t {
   void *impl;

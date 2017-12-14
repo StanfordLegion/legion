@@ -292,7 +292,8 @@ bishop_physical_region_get_fields(legion_physical_region_t pr_)
   return fields_;
 }
 
-typedef std::map<std::pair<size_t, LogicalRegion>,
+typedef std::pair<size_t, std::pair<LogicalRegion, Memory> > InstanceCacheKey;
+typedef std::map<InstanceCacheKey,
                  legion_physical_instance_t*> InstanceCache;
 
 bishop_instance_cache_t
@@ -306,12 +307,14 @@ bishop_instance_cache_create()
 bool
 bishop_instance_cache_has_cached_instances(bishop_instance_cache_t cache_,
                                            size_t idx,
-                                           legion_logical_region_t lr_)
+                                           legion_logical_region_t lr_,
+                                           legion_memory_t memory_)
 {
   InstanceCache *cache = (InstanceCache*)cache_.impl;
 
   LogicalRegion lr = CObjectWrapper::unwrap(lr_);
-  std::pair<size_t, LogicalRegion> key(idx, lr);
+  Memory memory = CObjectWrapper::unwrap(memory_);
+  InstanceCacheKey key(idx, std::make_pair(lr, memory));
   InstanceCache::iterator finder = cache->find(key);
   return finder != cache->end();
 }
@@ -319,12 +322,14 @@ bishop_instance_cache_has_cached_instances(bishop_instance_cache_t cache_,
 legion_physical_instance_t*
 bishop_instance_cache_get_cached_instances(bishop_instance_cache_t cache_,
                                            size_t idx,
-                                           legion_logical_region_t lr_)
+                                           legion_logical_region_t lr_,
+                                           legion_memory_t memory_)
 {
   InstanceCache *cache = (InstanceCache*)cache_.impl;
 
   LogicalRegion lr = CObjectWrapper::unwrap(lr_);
-  std::pair<size_t, LogicalRegion> key(idx, lr);
+  Memory memory = CObjectWrapper::unwrap(memory_);
+  InstanceCacheKey key(idx, std::make_pair(lr, memory));
   InstanceCache::iterator finder = cache->find(key);
   if (finder == cache->end())
   {

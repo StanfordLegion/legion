@@ -2274,6 +2274,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    inline int IndexSpace::get_dim(void) const
+    //--------------------------------------------------------------------------
+    {
+      return Internal::NT_TemplateHelper::get_dim(type_tag);
+    }
+
+    //--------------------------------------------------------------------------
     template<int DIM, typename T>
     IndexSpaceT<DIM,T>::IndexSpaceT(IndexSpaceID id, IndexTreeID tid)
       : IndexSpace(id, tid, 
@@ -2387,6 +2394,13 @@ namespace Legion {
       if (id < rhs.id)
         return false;
       return (tid > rhs.tid);
+    }
+
+    //--------------------------------------------------------------------------
+    inline int IndexPartition::get_dim(void) const
+    //--------------------------------------------------------------------------
+    {
+      return Internal::NT_TemplateHelper::get_dim(type_tag);
     }
 
     //--------------------------------------------------------------------------

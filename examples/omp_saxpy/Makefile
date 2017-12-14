@@ -42,7 +42,7 @@ LD_FLAGS	?=
 
 # compile our blas implementation with OpenMP flags
 ifeq ($(strip $(USE_OPENMP)),1)
-simple_blas.o : CC_FLAGS += -fopenmp
+simple_blas.cc.o : CC_FLAGS += -fopenmp
 endif
 
 ###########################################################################
