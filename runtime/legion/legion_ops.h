@@ -1307,7 +1307,8 @@ namespace Legion {
       virtual PhysicalManager* select_temporary_instance(PhysicalManager *dst,
                               unsigned index, const FieldMask &needed_fields);
     protected:
-      void invoke_mapper(const InstanceSet &valid_instances);
+      // Make this virtual so we can override it for control replication
+      virtual void invoke_mapper(const InstanceSet &valid_instances);
       virtual void add_copy_profiling_request(
                                           Realm::ProfilingRequestSet &reqeusts);
       virtual void handle_profiling_response(

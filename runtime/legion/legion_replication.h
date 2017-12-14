@@ -747,6 +747,7 @@ namespace Legion {
       void set_repl_close_info(unsigned close_index,
                                RtBarrier mapped_barrier,RtBarrier view_barrier);
       virtual void trigger_dependence_analysis(void);
+      virtual void invoke_mapper(const InstanceSet &valid_instances);
       virtual void complete_close_mapping(CompositeView *view,
                     RtEvent precondition = RtEvent::NO_RT_EVENT);
     public:

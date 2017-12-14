@@ -991,6 +991,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ReplInterCloseOp::invoke_mapper(const InstanceSet &valid_instances)
+    //--------------------------------------------------------------------------
+    {
+      // Currently we do nothing for this as it is very difficult to shard
+      // a close operation and distributed any instances we want to update
+    }
+
+    //--------------------------------------------------------------------------
     void ReplInterCloseOp::complete_close_mapping(CompositeView *view,
                                                   RtEvent precondition)
     //--------------------------------------------------------------------------
