@@ -18,7 +18,6 @@
 #define __DEFAULT_MAPPER_H__
 
 #include "legion.h"
-#include "legion/legion_mapping.h"
 #include "mappers/mapping_utilities.h"
 
 #include <stdlib.h>
