@@ -179,12 +179,6 @@ function std.add_constraint(cx, lhs, rhs, op, symmetric)
   if std.is_cross_product(rhs) then rhs = rhs:partition() end
   assert(std.type_supports_constraints(lhs))
   assert(std.type_supports_constraints(rhs))
-  if not cx.constraints[op] then
-    cx.constraints[op] = {}
-  end
-  if not cx.constraints[op][lhs] then
-    cx.constraints[op][lhs] = {}
-  end
   cx.constraints[op][lhs][rhs] = true
   if symmetric then
     std.add_constraint(cx, rhs, lhs, op, false)
@@ -209,8 +203,8 @@ function std.search_constraint_predicate(cx, region, visited, predicate)
   end
   visited[region] = true
 
-  if cx.constraints[std.subregion] and cx.constraints[std.subregion][region] then
-    for subregion, _ in pairs(cx.constraints[std.subregion][region]) do
+  if cx.constraints:has(std.subregion) and cx.constraints[std.subregion]:has(region) then
+    for subregion, _ in cx.constraints[std.subregion][region]:items() do
       local result = std.search_constraint_predicate(
         cx, subregion, visited, predicate)
       if result then return result end
@@ -283,8 +277,8 @@ function std.search_constraint(cx, region, constraint, visited, reflexive, symme
         return true
       end
 
-      if cx.constraints[constraint.op] and
-        cx.constraints[constraint.op][region] and
+      if cx.constraints:has(constraint.op) and
+        cx.constraints[constraint.op]:has(region) and
         cx.constraints[constraint.op][region][constraint.rhs]
       then
         return true

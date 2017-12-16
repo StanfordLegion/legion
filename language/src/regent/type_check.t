@@ -59,7 +59,7 @@ function context:new_task_scope(expected_return_type)
   local cx = {
     type_env = self.type_env:new_local_scope(),
     privileges = data.newmap(),
-    constraints = {},
+    constraints = data.new_recursive_map(2),
     region_universe = data.newmap(),
     expected_return_type = {expected_return_type},
     fixup_nodes = terralib.newlist(),
