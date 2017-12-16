@@ -51,9 +51,6 @@
 #define __WRAPPER_MAPPER_h__
 
 #include "legion.h"
-#include "legion/legion_mapping.h"
-
-
 
 #include <stdlib.h>
 #include <assert.h>

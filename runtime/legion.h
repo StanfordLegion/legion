@@ -7009,6 +7009,10 @@ namespace Legion {
 }; // namespace Legion
 
 #include "legion/legion.inl"
+// Include this here so we get the mapper interface in the header file
+// We have to put it here though since the mapper interface depends
+// on the rest of the legion interface
+#include "legion/legion_mapping.h"
 
 #endif // __LEGION_RUNTIME_H__
 #endif // defined LEGION_ENABLE_CXX_BINDINGS

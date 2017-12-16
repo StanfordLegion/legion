@@ -17,7 +17,6 @@
 #define __REPLAY_MAPPER_H__
 
 #include "legion.h"
-#include "legion/legion_mapping.h"
 
 #include <stdlib.h>
 #include <assert.h>
