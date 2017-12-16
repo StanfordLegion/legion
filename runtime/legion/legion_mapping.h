@@ -488,7 +488,6 @@ namespace Legion {
         TaskPriority                                task_priority;  // = 0
         TaskPriority                                profiling_priority; // = 0
         bool                                        postmap_task; // = false
-        std::map<ShardID,Processor>                 control_replication_map;
       };
       //------------------------------------------------------------------------
       virtual void map_task(const MapperContext      ctx,
