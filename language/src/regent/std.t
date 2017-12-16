@@ -2362,6 +2362,8 @@ do
   end
 end
 
+do
+local next_cross_product_id = 1
 function std.cross_product(...)
   local partition_symbols = terralib.newlist({...})
   assert(#partition_symbols >= 2, "Cross product type requires at least 2 arguments")
@@ -2460,8 +2462,12 @@ function std.cross_product(...)
     return `([to] { impl = [expr].impl, product = [expr].product, colors = [expr].colors })
   end
 
+  local id = next_cross_product_id
+  next_cross_product_id = next_cross_product_id + 1
+
+  local hash_value = "__cross_product_#" .. tostring(id)
   function st:hash()
-    return self
+    return hash_value
   end
 
   function st.metamethods.__typename(st)
@@ -2469,6 +2475,7 @@ function std.cross_product(...)
   end
 
   return st
+end
 end
 
 std.vptr = terralib.memoize(function(width, points_to_type, ...)
@@ -2665,6 +2672,8 @@ std.future = terralib.memoize(function(result_type)
   return st
 end)
 
+do
+local next_list_id = 1
 std.list = terralib.memoize(function(element_type, partition_type, privilege_depth, region_root, shallow, barrier_depth)
   if not terralib.types.istype(element_type) then
     error("list expected a type as argument 1, got " .. tostring(element_type))
@@ -2800,8 +2809,26 @@ std.list = terralib.memoize(function(element_type, partition_type, privilege_dep
     return `([&self.element_type]([value].__data))
   end
 
+  if not std.is_list(element_type) then
+    terra st:num_leaves() : uint64
+      return self.__size
+    end
+  else
+    terra st:num_leaves() : uint64
+      var sum : uint64 = 0
+      for i = 0, self.__size do
+        sum = sum + [st:data(self)][i]:num_leaves()
+      end
+      return sum
+    end
+  end
+
+  local id = next_list_id
+  next_list_id = next_list_id + 1
+
+  local hash_value = "__list_#" .. tostring(id)
   function st:hash()
-    return self
+    return hash_value
   end
 
   function st:force_cast(from, to, expr)
@@ -2830,22 +2857,9 @@ std.list = terralib.memoize(function(element_type, partition_type, privilege_dep
     end
   end
 
-  if not std.is_list(element_type) then
-    terra st:num_leaves() : uint64
-      return self.__size
-    end
-  else
-    terra st:num_leaves() : uint64
-      var sum : uint64 = 0
-      for i = 0, self.__size do
-        sum = sum + [st:data(self)][i]:num_leaves()
-      end
-      return sum
-    end
-  end
-
   return st
 end)
+end
 
 do
   local st = terralib.types.newstruct("phase_barrier")
