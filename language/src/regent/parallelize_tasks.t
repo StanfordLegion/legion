@@ -3243,7 +3243,7 @@ function parallelize_tasks.top_task(global_cx, node)
   task:set_type(task_type)
   task:set_param_symbols(
     params:map(function(param) return param.symbol end))
-  local region_universe = {}
+  local region_universe = node.prototype:get_region_universe():copy()
   local privileges = terralib.newlist()
   local coherence_modes = data.new_recursive_map(1)
   --node.prototype:get_coherence_modes():map_list(function(region, map)
@@ -3253,9 +3253,6 @@ function parallelize_tasks.top_task(global_cx, node)
   --  end)
   --end)
   privileges:insertall(orig_privileges)
-  for region, _ in pairs(node.prototype:get_region_universe()) do
-    region_universe[region] = true
-  end
   -- FIXME: Workaround for the current limitation in SPMD transformation
   local field_set = {}
   for idx = 1, #task_cx.stencils do
