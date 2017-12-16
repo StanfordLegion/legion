@@ -319,6 +319,10 @@ function data.map:__newindex(k, v)
   self:put(k, v)
 end
 
+function data.map:has(k)
+  return self.__values_by_hash[data.hash(k)]
+end
+
 function data.map:get(k)
   return self.__values_by_hash[data.hash(k)]
 end
@@ -425,6 +429,10 @@ function data.default_map:__index(k)
     if lookup ~= nil then self:put(k, lookup) end
   end
   return lookup
+end
+
+function data.default_map:has(k)
+  return data.map.get(self, k)
 end
 
 function data.default_map:get(k)
