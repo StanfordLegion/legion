@@ -1361,6 +1361,15 @@ namespace Legion {
     void ReplCopyOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
+      // A little trick to avoid the completion race for once we call
+      // the base CopyOp trigger_mapping call: we add a user event to the
+      // map applied events which means the operation isn't mapped until 
+      // we actually trigger this event, which we can do after we gather
+      // the data that we need
+      RtUserEvent prevent_completion_race = Runtime::create_rt_user_event();
+      map_applied_conditions.insert(prevent_completion_race);
+      // Do the base trigger mapping
+      CopyOp::trigger_mapping();
 #ifdef DEBUG_LEGION
       ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
       assert(repl_ctx != NULL);
@@ -1369,8 +1378,6 @@ namespace Legion {
 #endif
       const ShardID owner_shard = 
         sharding_function->find_owner(index_point, index_domain);
-      // Grab the vesioning info before we do the mapping in 
-      // case that kicks off the completion process
       // Have to new this on the heap in case we end up needing to defer it
       VersioningInfoBroadcast *version_broadcast = new VersioningInfoBroadcast(
                                repl_ctx, versioning_collective_id, owner_shard);
@@ -1381,8 +1388,8 @@ namespace Legion {
         version_broadcast->pack_advance_states(idx, dst_versions[idx]);
       // Have to make a copy to avoid completion race
       RtEvent map_wait = get_mapped_event();
-      // Do the base trigger mapping
-      CopyOp::trigger_mapping();
+      // Now that we have all our information, we can trigger our map user event
+      Runtime::trigger_event(prevent_completion_race);
       // See if we can send the result now or need to defer it
       if (map_wait.has_triggered())
       {
