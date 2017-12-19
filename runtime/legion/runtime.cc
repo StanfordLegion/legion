@@ -12390,6 +12390,11 @@ namespace Legion {
       // See if we need to make a new variant ID
       if (vid == AUTO_GENERATE_ID) // Make a variant ID to use
         vid = task_impl->get_unique_variant_id();
+      else if (vid == 0)
+        REPORT_LEGION_ERROR(ERROR_RESERVED_VARIANT_ID,
+                      "Error registering variant for task ID %d with "
+                      "variant ID 0. Variant ID 0 is reserved for task "
+                      "generators.", registrar.task_id)
       // Make our variant and add it to the set of variants
       VariantImpl *impl = new VariantImpl(this, vid, task_impl, 
                                           registrar, ret, realm,
@@ -19108,6 +19113,11 @@ namespace Legion {
       // See if we need to pick a variant
       if (vid == AUTO_GENERATE_ID)
         vid = pending_table.size() + 1;
+      else if (vid == 0)
+        REPORT_LEGION_ERROR(ERROR_RESERVED_VARIANT_ID,
+                      "Error preregistering variant for task ID %d with "
+                      "variant ID 0. Variant ID 0 is reserved for task "
+                      "generators.", registrar.task_id)
       // Offset by the runtime tasks
       pending_table.push_back(new PendingVariantRegistration(vid, has_ret,
                               registrar, user_data, user_data_size, 
