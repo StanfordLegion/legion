@@ -6152,7 +6152,7 @@ local lift_unary_op_to_futures = terralib.memoize(
     task:set_conditions({})
     task:set_param_constraints(node.constraints)
     task:set_constraints({})
-    task:set_region_universe({})
+    task:set_region_universe(data.newmap())
     return codegen.entry(node)
   end)
 
@@ -6249,7 +6249,7 @@ local lift_binary_op_to_futures = terralib.memoize(
     task:set_conditions({})
     task:set_param_constraints(node.constraints)
     task:set_constraints({})
-    task:set_region_universe({})
+    task:set_region_universe(data.newmap())
     return codegen.entry(node)
   end)
 
