@@ -76,11 +76,11 @@ endif
 TESTARGS_ctxswitch := -ll:io 1 -t 20 -i 10000
 TESTARGS_proc_group := -ll:cpu 4
 
-REALM_OBJS := $(patsubst %.cc,%.o,$(notdir $(LOW_RUNTIME_SRC))) \
+REALM_OBJS := $(patsubst %.cc,%.o,$(notdir $(REALM_SRC))) \
               $(patsubst %.S,%.o,$(notdir $(ASM_SRC)))
 EMPTY :=
 SPACE := $(EMPTY) $(EMPTY)
-RUNTIME_VPATH := $(subst $(SPACE),:,$(sort $(dir $(LOW_RUNTIME_SRC))))
+RUNTIME_VPATH := $(subst $(SPACE),:,$(sort $(dir $(REALM_SRC))))
 vpath %.cc .:$(RUNTIME_VPATH)
 vpath %.S .:$(RUNTIME_VPATH)
 #VPATH = .:$(RUNTIME_VPATH)
