@@ -179,12 +179,6 @@ function std.add_constraint(cx, lhs, rhs, op, symmetric)
   if std.is_cross_product(rhs) then rhs = rhs:partition() end
   assert(std.type_supports_constraints(lhs))
   assert(std.type_supports_constraints(rhs))
-  if not cx.constraints[op] then
-    cx.constraints[op] = {}
-  end
-  if not cx.constraints[op][lhs] then
-    cx.constraints[op][lhs] = {}
-  end
   cx.constraints[op][lhs][rhs] = true
   if symmetric then
     std.add_constraint(cx, rhs, lhs, op, false)
@@ -209,8 +203,8 @@ function std.search_constraint_predicate(cx, region, visited, predicate)
   end
   visited[region] = true
 
-  if cx.constraints[std.subregion] and cx.constraints[std.subregion][region] then
-    for subregion, _ in pairs(cx.constraints[std.subregion][region]) do
+  if cx.constraints:has(std.subregion) and cx.constraints[std.subregion]:has(region) then
+    for subregion, _ in cx.constraints[std.subregion][region]:items() do
       local result = std.search_constraint_predicate(
         cx, subregion, visited, predicate)
       if result then return result end
@@ -283,8 +277,8 @@ function std.search_constraint(cx, region, constraint, visited, reflexive, symme
         return true
       end
 
-      if cx.constraints[constraint.op] and
-        cx.constraints[constraint.op][region] and
+      if cx.constraints:has(constraint.op) and
+        cx.constraints[constraint.op]:has(region) and
         cx.constraints[constraint.op][region][constraint.rhs]
       then
         return true
@@ -2368,6 +2362,8 @@ do
   end
 end
 
+do
+local next_cross_product_id = 1
 function std.cross_product(...)
   local partition_symbols = terralib.newlist({...})
   assert(#partition_symbols >= 2, "Cross product type requires at least 2 arguments")
@@ -2466,8 +2462,12 @@ function std.cross_product(...)
     return `([to] { impl = [expr].impl, product = [expr].product, colors = [expr].colors })
   end
 
+  local id = next_cross_product_id
+  next_cross_product_id = next_cross_product_id + 1
+
+  local hash_value = "__cross_product_#" .. tostring(id)
   function st:hash()
-    return self
+    return hash_value
   end
 
   function st.metamethods.__typename(st)
@@ -2475,6 +2475,7 @@ function std.cross_product(...)
   end
 
   return st
+end
 end
 
 std.vptr = terralib.memoize(function(width, points_to_type, ...)
@@ -2671,6 +2672,8 @@ std.future = terralib.memoize(function(result_type)
   return st
 end)
 
+do
+local next_list_id = 1
 std.list = terralib.memoize(function(element_type, partition_type, privilege_depth, region_root, shallow, barrier_depth)
   if not terralib.types.istype(element_type) then
     error("list expected a type as argument 1, got " .. tostring(element_type))
@@ -2806,8 +2809,26 @@ std.list = terralib.memoize(function(element_type, partition_type, privilege_dep
     return `([&self.element_type]([value].__data))
   end
 
+  if not std.is_list(element_type) then
+    terra st:num_leaves() : uint64
+      return self.__size
+    end
+  else
+    terra st:num_leaves() : uint64
+      var sum : uint64 = 0
+      for i = 0, self.__size do
+        sum = sum + [st:data(self)][i]:num_leaves()
+      end
+      return sum
+    end
+  end
+
+  local id = next_list_id
+  next_list_id = next_list_id + 1
+
+  local hash_value = "__list_#" .. tostring(id)
   function st:hash()
-    return self
+    return hash_value
   end
 
   function st:force_cast(from, to, expr)
@@ -2836,22 +2857,9 @@ std.list = terralib.memoize(function(element_type, partition_type, privilege_dep
     end
   end
 
-  if not std.is_list(element_type) then
-    terra st:num_leaves() : uint64
-      return self.__size
-    end
-  else
-    terra st:num_leaves() : uint64
-      var sum : uint64 = 0
-      for i = 0, self.__size do
-        sum = sum + [st:data(self)][i]:num_leaves()
-      end
-      return sum
-    end
-  end
-
   return st
 end)
+end
 
 do
   local st = terralib.types.newstruct("phase_barrier")

@@ -13085,7 +13085,7 @@ namespace Legion {
       ApEvent sync_precondition = compute_sync_precondition();
       ApEvent done_event = 
           runtime->forest->fill_fields(this, requirement, 
-                                       0/*idx*/, value, value_size, 
+                                       0/*idx*/, result, result_size, 
                                        version_info, restrict_info, 
                                        mapped_instances, sync_precondition,
                                        map_applied_conditions,
