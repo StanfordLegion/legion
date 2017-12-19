@@ -39,128 +39,170 @@ namespace Realm {
   
   inline LoggerMessage Logger::spew(void)
   {
-    if((REALM_LOGGING_MIN_LEVEL > LEVEL_SPEW) ||  // static early out
-    (log_level > LEVEL_SPEW))                  // dynamic early out
+#if REALM_LOGGING_MIN_LEVEL > LEVEL_SPEW // static early out
     return LoggerMessage();
+#else
+    if(log_level > LEVEL_SPEW)          // dynamic early out
+      return LoggerMessage();
     
     return LoggerMessage(this, true, LEVEL_SPEW);
+#endif
   }
   
   inline LoggerMessage Logger::spew(LoggerMessageID messageID)
   {
-    if((REALM_LOGGING_MIN_LEVEL > LEVEL_SPEW) ||  // static early out
-    (log_level > LEVEL_SPEW))                  // dynamic early out
+#if REALM_LOGGING_MIN_LEVEL > LEVEL_SPEW // static early out
     return LoggerMessage();
+#else
+    if(log_level > LEVEL_SPEW)           // dynamic early out
+      return LoggerMessage();
     
     return LoggerMessage(messageID, this, true, LEVEL_SPEW);
+#endif
   }
   
   inline LoggerMessage Logger::debug(void)
   {
-    if((REALM_LOGGING_MIN_LEVEL > LEVEL_DEBUG) ||  // static early out
-    (log_level > LEVEL_DEBUG))                  // dynamic early out
+#if REALM_LOGGING_MIN_LEVEL > LEVEL_DEBUG // static early out
     return LoggerMessage();
+#else
+    if(log_level > LEVEL_DEBUG)           // dynamic early out
+      return LoggerMessage();
     
     return LoggerMessage(this, true, LEVEL_DEBUG);
+#endif
   }
   
   inline LoggerMessage Logger::debug(LoggerMessageID messageID)
   {
-    if((REALM_LOGGING_MIN_LEVEL > LEVEL_DEBUG) ||  // static early out
-    (log_level > LEVEL_DEBUG))                  // dynamic early out
+#if REALM_LOGGING_MIN_LEVEL > LEVEL_DEBUG // static early out
     return LoggerMessage();
+#else
+    if(log_level > LEVEL_DEBUG)           // dynamic early out
+      return LoggerMessage();
     
     return LoggerMessage(messageID, this, true, LEVEL_DEBUG);
+#endif
   }
   
   inline LoggerMessage Logger::info(void)
   {
-    if((REALM_LOGGING_MIN_LEVEL > LEVEL_INFO) ||  // static early out
-    (log_level > LEVEL_INFO))                  // dynamic early out
+#if REALM_LOGGING_MIN_LEVEL > LEVEL_INFO // static early out
     return LoggerMessage();
+#else
+    if(log_level > LEVEL_INFO)           // dynamic early out
+      return LoggerMessage();
     
     return LoggerMessage(this, true, LEVEL_INFO);
+#endif
   }
   
   inline LoggerMessage Logger::info(LoggerMessageID messageID)
   {
-    if((REALM_LOGGING_MIN_LEVEL > LEVEL_INFO) ||  // static early out
-    (log_level > LEVEL_INFO))                  // dynamic early out
+#if REALM_LOGGING_MIN_LEVEL > LEVEL_INFO // static early out
     return LoggerMessage();
+#else
+    if(log_level > LEVEL_INFO)           // dynamic early out
+      return LoggerMessage();
     
     return LoggerMessage(messageID, this, true, LEVEL_INFO);
+#endif
   }
   
   inline LoggerMessage Logger::print(void)
   {
-    if((REALM_LOGGING_MIN_LEVEL > LEVEL_PRINT) ||  // static early out
-    (log_level > LEVEL_PRINT))                  // dynamic early out
+#if REALM_LOGGING_MIN_LEVEL > LEVEL_PRINT // static early out
     return LoggerMessage();
+#else
+    if(log_level > LEVEL_PRINT)          // dynamic early out
+      return LoggerMessage();
     
     return LoggerMessage(this, true, LEVEL_PRINT);
+#endif
   }
   
   inline LoggerMessage Logger::print(LoggerMessageID messageID)
   {
-    if((REALM_LOGGING_MIN_LEVEL > LEVEL_PRINT) ||  // static early out
-    (log_level > LEVEL_PRINT))                  // dynamic early out
+#if REALM_LOGGING_MIN_LEVEL > LEVEL_PRINT // static early out
     return LoggerMessage();
+#else
+    if(log_level > LEVEL_PRINT)           // dynamic early out
+      return LoggerMessage();
     
     return LoggerMessage(messageID, this, true, LEVEL_PRINT);
+#endif
   }
   
   inline LoggerMessage Logger::warning(void)
   {
-    if((REALM_LOGGING_MIN_LEVEL > LEVEL_WARNING) ||  // static early out
-    (log_level > LEVEL_WARNING))                  // dynamic early out
+#if REALM_LOGGING_MIN_LEVEL > LEVEL_WARNING // static early out
     return LoggerMessage();
+#else
+    if(log_level > LEVEL_WARNING)           // dynamic early out
+      return LoggerMessage();
     
     return LoggerMessage(this, true, LEVEL_WARNING);
+#endif
   }
   
   inline LoggerMessage Logger::warning(LoggerMessageID messageID)
   {
-    if((REALM_LOGGING_MIN_LEVEL > LEVEL_WARNING) ||  // static early out
-    (log_level > LEVEL_WARNING))                  // dynamic early out
+#if REALM_LOGGING_MIN_LEVEL > LEVEL_WARNING // static early out
     return LoggerMessage();
+#else
+    if(log_level > LEVEL_WARNING)           // dynamic early out
+      return LoggerMessage();
     
     return LoggerMessage(messageID, this, true, LEVEL_WARNING);
+#endif
   }
   
   inline LoggerMessage Logger::error(void)
   {
-    if((REALM_LOGGING_MIN_LEVEL > LEVEL_ERROR) ||  // static early out
-    (log_level > LEVEL_ERROR))                  // dynamic early out
+#if REALM_LOGGING_MIN_LEVEL > LEVEL_ERROR // static early out
     return LoggerMessage();
+#else
+    if(log_level > LEVEL_ERROR)           // dynamic early out
+      return LoggerMessage();
     
     return LoggerMessage(this, true, LEVEL_ERROR);
+#endif
   }
   
   inline LoggerMessage Logger::error(LoggerMessageID messageID)
   {
-    if((REALM_LOGGING_MIN_LEVEL > LEVEL_ERROR) ||  // static early out
-    (log_level > LEVEL_ERROR))                  // dynamic early out
+#if REALM_LOGGING_MIN_LEVEL > LEVEL_ERROR // static early out
     return LoggerMessage();
+#else
+    if(log_level > LEVEL_ERROR)           // dynamic early out
+      return LoggerMessage();
     
     return LoggerMessage(messageID, this, true, LEVEL_ERROR);
+#endif
   }
   
   inline LoggerMessage Logger::fatal(void)
   {
-    if((REALM_LOGGING_MIN_LEVEL > LEVEL_FATAL) ||  // static early out
-    (log_level > LEVEL_FATAL))                  // dynamic early out
+#if REALM_LOGGING_MIN_LEVEL > LEVEL_FATAL // static early out
     return LoggerMessage();
+#else
+    if(log_level > LEVEL_FATAL)           // dynamic early out
+      return LoggerMessage();
     
     return LoggerMessage(this, true, LEVEL_FATAL);
+#endif
   }
   
   inline LoggerMessage Logger::fatal(LoggerMessageID messageID)
   {
-    if((REALM_LOGGING_MIN_LEVEL > LEVEL_FATAL) ||  // static early out
-    (log_level > LEVEL_FATAL))                  // dynamic early out
+#if REALM_LOGGING_MIN_LEVEL > LEVEL_FATAL // static early out
     return LoggerMessage();
+#else
+    if(log_level > LEVEL_FATAL)           // dynamic early out
+      return LoggerMessage();
     
     return LoggerMessage(messageID, this, true, LEVEL_FATAL);
+#endif
   }
   
   // use this only if you want a dynamic level for some reason
@@ -186,179 +228,193 @@ namespace Realm {
   // old printf-style interface
   inline void Logger::spew(const char *fmt, ...)
   {
-    if((REALM_LOGGING_MIN_LEVEL > LEVEL_SPEW) ||  // static early out
-    (log_level > LEVEL_SPEW))                  // dynamic early out
-    return;
+#if REALM_LOGGING_MIN_LEVEL <= LEVEL_SPEW // static early out
+    if(log_level > LEVEL_SPEW)            // dynamic early out
+      return;
     
     va_list args;
     va_start(args, fmt);
     spew().vprintf(fmt, args);
     va_end(args);
+#endif
   }
     
     static const int LENGTH_LONGEST_FORMAT_STRING = 8 * 1024;
   
   inline void Logger::spew(LoggerMessageID messageID, const char *fmt, ...)
   {
-    if((REALM_LOGGING_MIN_LEVEL > LEVEL_SPEW) ||  // static early out
-    (log_level > LEVEL_SPEW))                  // dynamic early out
-    return;
+#if REALM_LOGGING_MIN_LEVEL <= LEVEL_SPEW // static early out
+    if(log_level > LEVEL_SPEW)            // dynamic early out
+      return;
     
     va_list args;
     va_start(args, fmt);
       char buffer[LENGTH_LONGEST_FORMAT_STRING];
       spew().vprintf("spew", messageID, fmt, args).vprintf("spew", messageID, formatLink("spew", messageID, buffer), args);
     va_end(args);
+#endif
   }
   
   inline void Logger::debug(const char *fmt, ...)
   {
-    if((REALM_LOGGING_MIN_LEVEL > LEVEL_DEBUG) ||  // static early out
-    (log_level > LEVEL_DEBUG))                  // dynamic early out
-    return;
+#if REALM_LOGGING_MIN_LEVEL <= LEVEL_DEBUG // static early out
+    if(log_level > LEVEL_DEBUG)            // dynamic early out
+      return;
     
     va_list args;
     va_start(args, fmt);
     debug().vprintf(fmt, args);
     va_end(args);
+#endif
   }
   
   inline void Logger::debug(LoggerMessageID messageID, const char *fmt, ...)
   {
-    if((REALM_LOGGING_MIN_LEVEL > LEVEL_DEBUG) ||  // static early out
-    (log_level > LEVEL_DEBUG))                  // dynamic early out
-    return;
+#if REALM_LOGGING_MIN_LEVEL <= LEVEL_DEBUG // static early out
+    if(log_level > LEVEL_DEBUG)            // dynamic early out
+      return;
     
     va_list args;
     va_start(args, fmt);
       char buffer[LENGTH_LONGEST_FORMAT_STRING];
       debug().vprintf("debug", messageID, fmt, args).vprintf("debug", messageID, formatLink("debug", messageID, buffer), args);
     va_end(args);
+#endif
   }
   
   inline void Logger::info(const char *fmt, ...)
   {
-    if((REALM_LOGGING_MIN_LEVEL > LEVEL_INFO) ||  // static early out
-    (log_level > LEVEL_INFO))                  // dynamic early out
-    return;
+#if REALM_LOGGING_MIN_LEVEL <= LEVEL_INFO // static early out
+    if(log_level > LEVEL_INFO)            // dynamic early out
+      return;
     
     va_list args;
     va_start(args, fmt);
     info().vprintf(fmt, args);
     va_end(args);
+#endif
   }
   
   inline void Logger::info(LoggerMessageID messageID, const char *fmt, ...)
   {
-    if((REALM_LOGGING_MIN_LEVEL > LEVEL_INFO) ||  // static early out
-    (log_level > LEVEL_INFO))                  // dynamic early out
-    return;
+#if REALM_LOGGING_MIN_LEVEL <= LEVEL_INFO // static early out
+    if(log_level > LEVEL_INFO)            // dynamic early out
+      return;
     
     va_list args;
     va_start(args, fmt);
       char buffer[LENGTH_LONGEST_FORMAT_STRING];
       info().vprintf("info", messageID, fmt, args).vprintf("info", messageID, formatLink("info", messageID, buffer), args);
     va_end(args);
+#endif
   }
   
   inline void Logger::print(const char *fmt, ...)
   {
-    if((REALM_LOGGING_MIN_LEVEL > LEVEL_PRINT) ||  // static early out
-    (log_level > LEVEL_PRINT))                  // dynamic early out
-    return;
+#if REALM_LOGGING_MIN_LEVEL <= LEVEL_PRINT // static early out
+    if(log_level > LEVEL_PRINT)            // dynamic early out
+      return;
     
     va_list args;
     va_start(args, fmt);
     print().vprintf(fmt, args);
     va_end(args);
+#endif
   }
   
   inline void Logger::print(LoggerMessageID messageID, const char *fmt, ...)
   {
-    if((REALM_LOGGING_MIN_LEVEL > LEVEL_PRINT) ||  // static early out
-    (log_level > LEVEL_PRINT))                  // dynamic early out
-    return;
+#if REALM_LOGGING_MIN_LEVEL <= LEVEL_PRINT // static early out
+    if(log_level > LEVEL_PRINT)            // dynamic early out
+      return;
     
     va_list args;
     va_start(args, fmt);
       char buffer[LENGTH_LONGEST_FORMAT_STRING];
       print().vprintf("print", messageID, fmt, args).vprintf("print", messageID, formatLink("print", messageID, buffer), args);
     va_end(args);
+#endif
   }
   
   inline void Logger::warning(const char *fmt, ...)
   {
-    if((REALM_LOGGING_MIN_LEVEL > LEVEL_WARNING) ||  // static early out
-    (log_level > LEVEL_WARNING))                  // dynamic early out
-    return;
+#if REALM_LOGGING_MIN_LEVEL <= LEVEL_WARNING // static early out
+    if(log_level > LEVEL_WARNING)            // dynamic early out
+      return;
     
     va_list args;
     va_start(args, fmt);
     warning().vprintf(fmt, args);
     va_end(args);
+#endif
   }
   
   inline void Logger::warning(LoggerMessageID messageID, const char *fmt, ...)
   {
-    if((REALM_LOGGING_MIN_LEVEL > LEVEL_WARNING) ||  // static early out
-    (log_level > LEVEL_WARNING))                  // dynamic early out
-    return;
+#if REALM_LOGGING_MIN_LEVEL <= LEVEL_WARNING // static early out
+    if(log_level > LEVEL_WARNING)            // dynamic early out
+      return;
     
     va_list args;
     va_start(args, fmt);
       char buffer[LENGTH_LONGEST_FORMAT_STRING];
       warning().vprintf("warning", messageID, fmt, args).vprintf("warning", messageID, formatLink("warning", messageID, buffer), args);
     va_end(args);
+#endif
   }
   
   inline void Logger::error(const char *fmt, ...)
   {
-    if((REALM_LOGGING_MIN_LEVEL > LEVEL_ERROR) ||  // static early out
-    (log_level > LEVEL_ERROR))                  // dynamic early out
-    return;
+#if REALM_LOGGING_MIN_LEVEL <= LEVEL_ERROR // static early out
+    if(log_level > LEVEL_ERROR)            // dynamic early out
+      return;
     
     va_list args;
     va_start(args, fmt);
     error().vprintf(fmt, args);
     va_end(args);
+#endif
   }
   
   inline void Logger::error(LoggerMessageID messageID, const char *fmt, ...)
   {
-    if((REALM_LOGGING_MIN_LEVEL > LEVEL_ERROR) ||  // static early out
-    (log_level > LEVEL_ERROR))                  // dynamic early out
-    return;
+#if REALM_LOGGING_MIN_LEVEL <= LEVEL_ERROR // static early out
+    if(log_level > LEVEL_ERROR)            // dynamic early out
+      return;
     
     va_list args;
     va_start(args, fmt);
       char buffer[LENGTH_LONGEST_FORMAT_STRING];
       error().vprintf("error", messageID, fmt, args).vprintf("error", messageID, formatLink("error", messageID, buffer), args);
     va_end(args);
+#endif
   }
   
   inline void Logger::fatal(const char *fmt, ...)
   {
-    if((REALM_LOGGING_MIN_LEVEL > LEVEL_FATAL) ||  // static early out
-    (log_level > LEVEL_FATAL))                  // dynamic early out
-    return;
+#if REALM_LOGGING_MIN_LEVEL <= LEVEL_FATAL // static early out
+    if(log_level > LEVEL_FATAL)            // dynamic early out
+      return;
     
     va_list args;
     va_start(args, fmt);
     fatal().vprintf(fmt, args);
     va_end(args);
+#endif
   }
   
   inline void Logger::fatal(LoggerMessageID messageID, const char *fmt, ...)
   {
-    if((REALM_LOGGING_MIN_LEVEL > LEVEL_FATAL) ||  // static early out
-    (log_level > LEVEL_FATAL))                  // dynamic early out
-    return;
+#if REALM_LOGGING_MIN_LEVEL <= LEVEL_FATAL // static early out
+    if(log_level > LEVEL_FATAL)            // dynamic early out
+      return;
     
     va_list args;
     va_start(args, fmt);
       char buffer[LENGTH_LONGEST_FORMAT_STRING];
       fatal().vprintf("fatal", messageID, fmt, args).vprintf("fatal", messageID, formatLink("fatal", messageID, buffer), args);
     va_end(args);
+#endif
   }
   
   ////////////////////////////////////////////////////////////////////////
