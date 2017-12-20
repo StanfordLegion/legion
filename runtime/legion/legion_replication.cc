@@ -4335,7 +4335,7 @@ namespace Legion {
         received_notifications(0)
     //--------------------------------------------------------------------------
     {
-      if (local_shard == target)
+      if (expected_notifications > 1)
         done_event = Runtime::create_rt_user_event();
     }
 
@@ -4343,6 +4343,10 @@ namespace Legion {
     GatherCollective::~GatherCollective(void)
     //--------------------------------------------------------------------------
     {
+      // Always make sure that we are done before being deleted in 
+      // case we still have messages to receive and pass on
+      if (done_event.exists() && !done_event.has_triggered())
+        done_event.lg_wait();
     }
 
     //--------------------------------------------------------------------------
@@ -4361,10 +4365,10 @@ namespace Legion {
       }
       if (done)
       {
-        if (local_shard == target)
-          Runtime::trigger_event(done_event);
-        else
+        if (local_shard != target)
           send_message();
+        if (done_event.exists())
+          Runtime::trigger_event(done_event);
       }
     }
 
@@ -4396,10 +4400,10 @@ namespace Legion {
       }
       if (done)
       {
-        if (local_shard == target)
-          Runtime::trigger_event(done_event);
-        else
+        if (local_shard != target)
           send_message();
+        if (done_event.exists())
+          Runtime::trigger_event(done_event);
       }
     }
 
