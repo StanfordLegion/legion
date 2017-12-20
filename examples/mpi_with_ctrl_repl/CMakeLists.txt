@@ -1,5 +1,5 @@
 #------------------------------------------------------------------------------#
-# Copyright 2017 Kitware, Inc.
+# Copyright 2017 Stanford University
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -15,32 +15,18 @@
 #------------------------------------------------------------------------------#
 
 cmake_minimum_required(VERSION 3.1)
+project(LegionExample_mpi_with_ctrl_repl)
 
+# Only search if were building stand-alone and not as part of Legion
 if(NOT Legion_SOURCE_DIR)
   find_package(Legion REQUIRED)
 endif()
 
-add_subdirectory(attach_file)
-add_subdirectory(circuit)
-add_subdirectory(dynamic_registration)
-add_subdirectory(ghost)
-add_subdirectory(ghost_pull)
-add_subdirectory(realm_saxpy)
-add_subdirectory(realm_stencil)
-add_subdirectory(spmd_cgsolver)
-add_subdirectory(virtual_map)
-add_subdirectory(attach_2darray_c_fortran_layout)
-add_subdirectory(attach_array_daxpy)
+find_package(MPI REQUIRED)
 
-if(Legion_USE_GASNet)
-  add_subdirectory(mpi_interop)
-  add_subdirectory(mpi_with_ctrl_repl)
-endif()
-
-if(Legion_USE_CUDA)
-  add_subdirectory(thrust_interop)
-endif()
-
-if(Legion_USE_Python)
-  add_subdirectory(python_interop)
+add_executable(mpi_with_ctrl_repl mpi_with_ctrl_repl.cc)
+target_link_libraries(mpi_with_ctrl_repl Legion::Legion ${MPI_CXX_LIBRARIES})
+target_include_directories(mpi_with_ctrl_repl PRIVATE ${MPI_C_INCLUDE_PATH})
+if(Legion_ENABLE_TESTING)
+  add_test(NAME mpi_with_ctrl_repl COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:mpi_with_ctrl_repl>)
 endif()

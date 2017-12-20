@@ -71,6 +71,7 @@ if platform.system() != 'Darwin':
 legion_gasnet_cxx_tests = [
     # Examples
     ['examples/mpi_interop/mpi_interop', []],
+    ['examples/mpi_with_ctrl_repl/mpi_with_ctrl_repl', []],
 ]
 
 legion_openmp_cxx_tests = [
