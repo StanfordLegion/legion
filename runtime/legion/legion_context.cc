@@ -10019,7 +10019,13 @@ namespace Legion {
                                             InterCloseOp *op, bool clone)
     //--------------------------------------------------------------------------
     {
-      // This better be a repl close operation or something is badly wrong
+      // We can have non-control replication close operations here in the
+      // case of virtual mappings, in these cases we can just ignore it
+      // since the close operation is from a child task and do the normal
+      // InnerContext creation of the composite view
+      if (!op->is_replicate_close())
+        return InnerContext::create_composite_view(node, version_info,
+                                                   closed_tree, op, clone);
 #ifdef DEBUG_LEGION
       ReplInterCloseOp *close = dynamic_cast<ReplInterCloseOp*>(op);
       assert(close != NULL);

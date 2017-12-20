@@ -1316,6 +1316,9 @@ namespace Legion {
       // A callback to help out control replication
       virtual void complete_close_mapping(CompositeView *view,
                     RtEvent precondition = RtEvent::NO_RT_EVENT);
+    public:
+      // A check for whether this is a replicate close op
+      virtual bool is_replicate_close(void) const { return false; }
     protected:
       friend class PointCloseOp;
       FieldMask close_mask;

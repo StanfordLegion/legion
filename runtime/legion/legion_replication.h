@@ -751,6 +751,7 @@ namespace Legion {
       virtual void invoke_mapper(const InstanceSet &valid_instances);
       virtual void complete_close_mapping(CompositeView *view,
                     RtEvent precondition = RtEvent::NO_RT_EVENT);
+      virtual bool is_replicate_close(void) const { return true; }
     public:
       inline RtBarrier get_view_barrier(void) const { return view_barrier; }
       inline unsigned get_close_index(void) const { return close_index; }
