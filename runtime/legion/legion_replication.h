@@ -149,6 +149,7 @@ namespace Legion {
       virtual void unpack_collective(Deserializer &derez) = 0;
     public:
       void perform_collective_async(void);
+      // Make sure to call this in the destructor of anything not the target
       void perform_collective_wait(void);
       virtual void handle_collective_message(Deserializer &derez);
       inline bool is_target(void) const { return (target == local_shard); }

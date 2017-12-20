@@ -4343,10 +4343,6 @@ namespace Legion {
     GatherCollective::~GatherCollective(void)
     //--------------------------------------------------------------------------
     {
-      // Always make sure that we are done before being deleted in 
-      // case we still have messages to receive and pass on
-      if (done_event.exists() && !done_event.has_triggered())
-        done_event.lg_wait();
     }
 
     //--------------------------------------------------------------------------
@@ -4376,10 +4372,7 @@ namespace Legion {
     void GatherCollective::perform_collective_wait(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(local_shard == target); // should only be called on the target
-#endif
-      if (!done_event.has_triggered())
+      if (done_event.exists() && !done_event.has_triggered())
         done_event.lg_wait();
     }
 
@@ -5043,6 +5036,8 @@ namespace Legion {
     ShardingGatherCollective::~ShardingGatherCollective(void)
     //--------------------------------------------------------------------------
     {
+      // Make sure that we wait in case we still have messages to pass on
+      perform_collective_wait();
     }
 
     //--------------------------------------------------------------------------
@@ -5228,6 +5223,8 @@ namespace Legion {
     FieldDescriptorGather::~FieldDescriptorGather(void)
     //--------------------------------------------------------------------------
     {
+      // Make sure that we wait in case we still have messages to pass on
+      perform_collective_wait();
     }
 
     //--------------------------------------------------------------------------
