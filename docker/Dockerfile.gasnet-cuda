@@ -1,4 +1,4 @@
-# Regent + Legion with CUDA but no GASNET
+# Regent + Legion with GASNet and CUDA
 
 FROM ubuntu:16.04
 
@@ -21,8 +21,30 @@ RUN apt-get update -qq && \
       mesa-common-dev \
       libblas-dev liblapack-dev libhdf5-dev \
       module-init-tools \
-      gdb vim && \
+      gdb vim \
+      openmpi-bin openssh-client openssh-server libopenmpi-dev && \
     apt-get clean
+
+# InfiniBand
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    dapl2-utils \
+    ibutils \
+    ibverbs-utils \
+    infiniband-diags \
+    libdapl-dev \
+    libibcm-dev \
+    libibverbs1-dbg \
+    libibverbs-dev \
+    libmlx4-1-dbg \
+    libmlx4-dev \
+    libmlx5-1-dbg \
+    libmlx5-dev \
+    librdmacm-dev \
+    opensm
+
+# Build GASNet
+RUN git clone -b master https://github.com/StanfordLegion/gasnet.git /usr/local/gasnet
+RUN make -C /usr/local/gasnet/ -e CONDUIT=ibv
 
 # Build LLVM and Clang
 RUN wget http://releases.llvm.org/3.8.1/llvm-3.8.1.src.tar.xz && \
@@ -50,7 +72,7 @@ ENV CUDA /usr/local/cuda
 
 # Install Regent.
 RUN git clone -b master https://github.com/StanfordLegion/legion.git /usr/local/legion
-RUN LLVM_CONFIG=llvm-config /usr/local/legion/language/install.py --rdir=auto --cuda && \
+RUN LLVM_CONFIG=llvm-config GASNET=/usr/local/gasnet/release CONDUIT=ibv /usr/local/legion/language/install.py --rdir=auto --gasnet --cuda && \
     ln -s /usr/local/legion/language/regent.py /usr/local/bin/regent
 
 # Configure container startup.
