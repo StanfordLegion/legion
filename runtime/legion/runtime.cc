@@ -12605,7 +12605,19 @@ namespace Legion {
     {
       // First forward the message onto any remote nodes
       int base = index * radix;
-      int init = source.address_space();
+      int init;
+      if (Runtime::separate_runtime_instances)
+      {
+        std::map<Processor,Runtime*>::const_iterator finder = 
+          runtime_map->find(source);
+#ifdef DEBUG_LEGION
+        // only works with a single process
+        assert(finder != runtime_map->end()); 
+#endif
+        init = finder->second->address_space;
+      }
+      else
+        init = source.address_space();
       // The runtime stride is the same as the number of nodes
       const int total_nodes = runtime_stride;
       for (int r = 1; r <= radix; r++)
