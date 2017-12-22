@@ -261,6 +261,10 @@ namespace Legion {
 
     size_t get_volume(void) const;
 
+    DomainPoint lo(void) const;
+
+    DomainPoint hi(void) const;
+
     // Intersects this Domain with another Domain and returns the result.
     Domain intersection(const Domain &other) const;
 

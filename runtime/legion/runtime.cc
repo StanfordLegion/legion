@@ -1825,6 +1825,56 @@ namespace Legion {
       }
     }
 
+    //--------------------------------------------------------------------------
+    void PhysicalRegionImpl::fail_bounds_check(Domain dom, FieldID fid,
+                                               PrivilegeMode mode)
+    //--------------------------------------------------------------------------
+    {
+      char rect_string[256];
+      sprintf(rect_string," (");
+      for (int d = 0; d < dom.get_dim(); d++)
+      {
+        char buffer[32];
+        if (d == 0)
+          sprintf(buffer,"%lld", dom.lo()[0]);
+        else
+          sprintf(buffer,",%lld", dom.lo()[d]);
+        strcat(rect_string, buffer);
+      }
+      strcat(rect_string,") - (");
+      for (int d = 0; d < dom.get_dim(); d++)
+      {
+        char buffer[32];
+        if (d == 0)
+          sprintf(buffer,"%lld", dom.hi()[0]);
+        else
+          sprintf(buffer,",%lld", dom.hi()[d]);
+        strcat(rect_string, buffer);
+      }
+      strcat(rect_string,")");
+      switch (mode)
+      {
+        case READ_ONLY:
+          {
+            REPORT_LEGION_ERROR(ERROR_ACCESSOR_BOUNDS_CHECK, 
+                          "Bounds check failure getting a read-only reference "
+                          "to rect %s from field %d in task %s\n", 
+                          rect_string, fid, context->get_task_name())
+            break;
+          }
+        case READ_WRITE:
+          {
+            REPORT_LEGION_ERROR(ERROR_ACCESSOR_BOUNDS_CHECK, 
+                          "Bounds check failure geting a reference to rect %s "
+                          "from field %d in task %s\n", rect_string, fid,
+                          context->get_task_name())
+            break;
+          }
+        default:
+          assert(false);
+      }
+    }
+
     /////////////////////////////////////////////////////////////
     // Grant Impl 
     /////////////////////////////////////////////////////////////

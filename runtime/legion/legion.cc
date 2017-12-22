@@ -2567,6 +2567,14 @@ namespace Legion {
       impl->fail_bounds_check(p, fid, mode);
     }
 
+    //--------------------------------------------------------------------------
+    void PhysicalRegion::fail_bounds_check(Domain d, FieldID fid,
+                                           PrivilegeMode mode) const
+    //--------------------------------------------------------------------------
+    {
+      impl->fail_bounds_check(d, fid, mode);
+    }
+
 #ifdef __GNUC__
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"

@@ -2240,6 +2240,8 @@ namespace Legion {
                                               ReductionOpID redop = 0) const;
       void fail_bounds_check(DomainPoint p, FieldID fid,
                              PrivilegeMode mode) const;
+      void fail_bounds_check(Domain d, FieldID fid,
+                             PrivilegeMode mode) const;
     protected:
       void get_bounds(void *realm_is, TypeTag type_tag) const;
     };
@@ -2255,12 +2257,14 @@ namespace Legion {
      * READ_ONLY
      *  - FT read(const Point<N,T>&) const
      *  - const FT* ptr(const Point<N,T>&) const (Affine Accessor only)
+     *  - const FT* ptr(const Rect<N,T>&) const (Affine Accessor only)
      *  - const FT& operator[](const Point<N,T>&) const (Affine Accessor only)
      *
      * READ_WRITE
      *  - FT read(const Point<N,T>&) const
      *  - void write(const Point<N,T>&, FT val) const
      *  - FT* ptr(const Point<N,T>&) const (Affine Accessor only)
+     *  - FT* ptr(const Rect<N,T>&) const (Affine Accessor only)
      *  - FT& operator[](const Point<N,T>&) const (Affine Accessor only)
      *  - template<typename REDOP> void reduce(const Point<N,T>&, REDOP::RHS);
      *    (Affine Accessor only)
@@ -2268,6 +2272,7 @@ namespace Legion {
      *  WRITE_DISCARD
      *  - void write(const Point<N,T>&, FT val) const
      *  - FT* ptr(const Point<N,T>&) const (Affine Accessor only)
+     *  - FT* ptr(const Rect<N,T>&) const (Affine Accessor only)
      *  - FT& operator[](const Point<N,T>&) const (Affine Accessor only)
      *
      * REDUCE

@@ -1044,6 +1044,20 @@ namespace Legion {
           return accessor.ptr(p); 
         }
       __CUDA_HD__
+      inline const FT* ptr(const Rect<N,T>& r) const
+        {
+          if (!accessor.is_dense_arbitrary(r))
+          {
+            fprintf(stderr, 
+                "ERROR: Illegal request for pointer of non-dense rectangle\n");
+#ifdef DEBUG_LEGION
+            assert(false);
+#endif
+            exit(ERROR_NON_DENSE_RECTANGLE);
+          }
+          return accessor.ptr(r.lo);
+        }
+      __CUDA_HD__
       inline const FT& operator[](const Point<N,T>& p) const
         { 
           return accessor[p]; 
@@ -1123,6 +1137,32 @@ namespace Legion {
           return accessor.ptr(p); 
         }
       __CUDA_HD__
+      inline const FT* ptr(const Rect<N,T>& r) const
+        {
+#ifdef __CUDA_ARCH__
+          if (gpu_warning)
+          {
+            if (!bounds.dense())
+              printf("WARNING: GPU bounds check is imprecise\n");
+            gpu_warning = false;
+          }
+          assert(bounds.bounds.contains(r));
+#else
+          if (!bounds.contains_all(r)) 
+            field_region.fail_bounds_check(DomainPoint(r), field, READ_ONLY);
+#endif
+          if (!accessor.is_dense_arbitrary(r))
+          {
+            fprintf(stderr, 
+                "ERROR: Illegal request for pointer of non-dense rectangle\n");
+#ifdef DEBUG_LEGION
+            assert(false);
+#endif
+            exit(ERROR_NON_DENSE_RECTANGLE);
+          }
+          return accessor.ptr(r.lo);
+        }
+      __CUDA_HD__
       inline const FT& operator[](const Point<N,T>& p) const
         { 
 #ifdef __CUDA_ARCH__
@@ -1189,6 +1229,20 @@ namespace Legion {
       inline const FT* ptr(const Point<1,T>& p) const
         { 
           return accessor.ptr(p); 
+        }
+      __CUDA_HD__
+      inline const FT* ptr(const Rect<1,T>& r) const
+        {
+          if (!accessor.is_dense_arbitrary(r))
+          {
+            fprintf(stderr, 
+                "ERROR: Illegal request for pointer of non-dense rectangle\n");
+#ifdef DEBUG_LEGION
+            assert(false);
+#endif
+            exit(ERROR_NON_DENSE_RECTANGLE);
+          }
+          return accessor.ptr(r.lo); 
         }
       __CUDA_HD__
       inline const FT& operator[](const Point<1,T>& p) const
@@ -1261,6 +1315,32 @@ namespace Legion {
           return accessor.ptr(p); 
         }
       __CUDA_HD__
+      inline const FT* ptr(const Rect<1,T>& r) const
+        {
+#ifdef __CUDA_ARCH__
+          if (gpu_warning)
+          {
+            if (!bounds.dense())
+              printf("WARNING: GPU bounds check is imprecise\n");
+            gpu_warning = false;
+          }
+          assert(bounds.bounds.contains(r));
+#else
+          if (!bounds.contains_all(r)) 
+            field_region.fail_bounds_check(DomainPoint(r), field, READ_ONLY);
+#endif
+          if (!accessor.is_dense_arbitrary(r))
+          {
+            fprintf(stderr, 
+                "ERROR: Illegal request for pointer of non-dense rectangle\n");
+#ifdef DEBUG_LEGION
+            assert(false);
+#endif
+            exit(ERROR_NON_DENSE_RECTANGLE);
+          }
+          return accessor.ptr(r.lo);
+        }
+      __CUDA_HD__
       inline const FT& operator[](const Point<1,T>& p) const
         { 
 #ifdef __CUDA_ARCH__
@@ -1322,6 +1402,20 @@ namespace Legion {
       inline FT* ptr(const Point<N,T>& p) const
         { 
           return accessor.ptr(p); 
+        }
+      __CUDA_HD__
+      inline FT* ptr(const Rect<N,T>& r) const
+        {
+          if (!accessor.is_dense_arbitrary(r))
+          {
+            fprintf(stderr, 
+                "ERROR: Illegal request for pointer of non-dense rectangle\n");
+#ifdef DEBUG_LEGION
+            assert(false);
+#endif
+            exit(ERROR_NON_DENSE_RECTANGLE);
+          }
+          return accessor.ptr(r.lo);
         }
       __CUDA_HD__
       inline FT& operator[](const Point<N,T>& p) const
@@ -1426,6 +1520,32 @@ namespace Legion {
           return accessor.ptr(p); 
         }
       __CUDA_HD__
+      inline FT* ptr(const Rect<N,T>& r) const
+        {
+#ifdef __CUDA_ARCH__
+          if (gpu_warning)
+          {
+            if (!bounds.dense())
+              printf("WARNING: GPU bounds check is imprecise\n");
+            gpu_warning = false;
+          }
+          assert(bounds.bounds.contains(r));
+#else
+          if (!bounds.contains_all(r)) 
+            field_region.fail_bounds_check(Domain(r), field, READ_WRITE);
+#endif
+          if (!accessor.is_dense_arbitrary(r))
+          {
+            fprintf(stderr, 
+                "ERROR: Illegal request for pointer of non-dense rectangle\n");
+#ifdef DEBUG_LEGION
+            assert(false);
+#endif
+            exit(ERROR_NON_DENSE_RECTANGLE);
+          }
+          return accessor.ptr(r.lo);
+        }
+      __CUDA_HD__
       inline FT& operator[](const Point<N,T>& p) const
         { 
 #ifdef __CUDA_ARCH__
@@ -1515,6 +1635,20 @@ namespace Legion {
       inline FT* ptr(const Point<1,T>& p) const
         { 
           return accessor.ptr(p); 
+        }
+      __CUDA_HD__
+      inline FT* ptr(const Rect<1,T>& r) const
+        {
+          if (!accessor.is_dense_arbitrary(r))
+          {
+            fprintf(stderr, 
+                "ERROR: Illegal request for pointer of non-dense rectangle\n");
+#ifdef DEBUG_LEGION
+            assert(false);
+#endif
+            exit(ERROR_NON_DENSE_RECTANGLE);
+          }
+          return accessor.ptr(r.lo);
         }
       __CUDA_HD__
       inline FT& operator[](const Point<1,T>& p) const
@@ -1610,6 +1744,32 @@ namespace Legion {
           return accessor.ptr(p); 
         }
       __CUDA_HD__
+      inline FT* ptr(const Rect<1,T>& r) const
+        {
+#ifdef __CUDA_ARCH__
+          if (gpu_warning)
+          {
+            if (!bounds.dense())
+              printf("WARNING: GPU bounds check is imprecise\n");
+            gpu_warning = false;
+          }
+          assert(bounds.bounds.contains(r));
+#else
+          if (!bounds.contains_all(r)) 
+            field_region.fail_bounds_check(Domain(r), field, READ_WRITE);
+#endif
+          if (!accessor.is_dense_arbitrary(r))
+          {
+            fprintf(stderr, 
+                "ERROR: Illegal request for pointer of non-dense rectangle\n");
+#ifdef DEBUG_LEGION
+            assert(false);
+#endif
+            exit(ERROR_NON_DENSE_RECTANGLE);
+          }
+          return accessor.ptr(r.lo);
+        }
+      __CUDA_HD__
       inline FT& operator[](const Point<1,T>& p) const
         { 
 #ifdef __CUDA_ARCH__
@@ -1689,6 +1849,20 @@ namespace Legion {
       inline FT* ptr(const Point<N,T>& p) const
         { 
           return accessor.ptr(p); 
+        }
+      __CUDA_HD__
+      inline FT* ptr(const Rect<N,T>& r) const
+        {
+          if (!accessor.is_dense_arbitrary(r))
+          {
+            fprintf(stderr, 
+                "ERROR: Illegal request for pointer of non-dense rectangle\n");
+#ifdef DEBUG_LEGION
+            assert(false);
+#endif
+            exit(ERROR_NON_DENSE_RECTANGLE);
+          }
+          return accessor.ptr(r);
         }
       __CUDA_HD__
       inline FT& operator[](const Point<N,T>& p) const
@@ -1787,6 +1961,32 @@ namespace Legion {
           return accessor.ptr(p); 
         }
       __CUDA_HD__
+      inline FT* ptr(const Rect<N,T>& r) const 
+        {
+#ifdef __CUDA_ARCH__
+          if (gpu_warning)
+          {
+            if (!bounds.dense())
+              printf("WARNING: GPU bounds check is imprecise\n");
+            gpu_warning = false;
+          }
+          assert(bounds.bounds.contains(r));
+#else
+          if (!bounds.contains_all(r)) 
+            field_region.fail_bounds_check(Domain(r), field, READ_WRITE);
+#endif
+          if (!accessor.is_dense_arbitrary(r))
+          {
+            fprintf(stderr, 
+                "ERROR: Illegal request for pointer of non-dense rectangle\n");
+#ifdef DEBUG_LEGION
+            assert(false);
+#endif
+            exit(ERROR_NON_DENSE_RECTANGLE);
+          }
+          return accessor.ptr(r.lo);
+        }
+      __CUDA_HD__
       inline FT& operator[](const Point<N,T>& p) const
         { 
 #ifdef __CUDA_ARCH__
@@ -1858,6 +2058,20 @@ namespace Legion {
       inline FT* ptr(const Point<1,T>& p) const
         { 
           return accessor.ptr(p); 
+        }
+      __CUDA_HD__
+      inline FT* ptr(const Rect<1,T>& r) const
+        {
+          if (!accessor.is_dense_arbitrary(r))
+          {
+            fprintf(stderr, 
+                "ERROR: Illegal request for pointer of non-dense rectangle\n");
+#ifdef DEBUG_LEGION
+            assert(false);
+#endif
+            exit(ERROR_NON_DENSE_RECTANGLE);
+          }
+          return accessor.ptr(r.lo);
         }
       __CUDA_HD__
       inline FT& operator[](const Point<1,T>& p) const
@@ -1945,6 +2159,32 @@ namespace Legion {
             field_region.fail_bounds_check(DomainPoint(p), field, READ_WRITE);
 #endif
           return accessor.ptr(p); 
+        }
+      __CUDA_HD__
+      inline FT* ptr(const Rect<1,T>& r) const
+        {
+#ifdef __CUDA_ARCH__
+          if (gpu_warning)
+          {
+            if (!bounds.dense())
+              printf("WARNING: GPU bounds check is imprecise\n");
+            gpu_warning = false;
+          }
+          assert(bounds.bounds.contains(r));
+#else
+          if (!bounds.contains_all(r)) 
+            field_region.fail_bounds_check(Domain(r), field, READ_WRITE);
+#endif
+          if (!accessor.is_dense_arbitrary(r))
+          {
+            fprintf(stderr, 
+                "ERROR: Illegal request for pointer of non-dense rectangle\n");
+#ifdef DEBUG_LEGION
+            assert(false);
+#endif
+            exit(ERROR_NON_DENSE_RECTANGLE);
+          }
+          return accessor.ptr(r.lo);
         }
       __CUDA_HD__
       inline FT& operator[](const Point<1,T>& p) const
@@ -2160,6 +2400,20 @@ namespace Legion {
       inline FT* ptr(const Point<N,T> &p) const
         {
           return accessor.ptr(p);
+        }
+      __CUDA_HD__
+      inline FT* ptr(const Rect<N,T>& r) const
+        {
+          if (!accessor.is_dense_arbitrary(r))
+          {
+            fprintf(stderr, 
+                "ERROR: Illegal request for pointer of non-dense rectangle\n");
+#ifdef DEBUG_LEGION
+            assert(false);
+#endif
+            exit(ERROR_NON_DENSE_RECTANGLE);
+          }
+          return accessor.ptr(r.lo);
         }
       __CUDA_HD__
       inline FT& operator[](const Point<N,T> &p) const
