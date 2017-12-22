@@ -4226,6 +4226,7 @@ namespace Legion {
     {
       AutoLock l_lock(lookup_lock);
 #ifdef DEBUG_LEGION
+      assert(index_part_requests.find(part) == index_part_requests.end());
       std::map<IndexPartition,IndexPartNode*>::iterator finder = 
         index_parts.find(part);
       assert(finder != index_parts.end());
