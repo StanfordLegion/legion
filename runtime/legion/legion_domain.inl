@@ -870,6 +870,28 @@ namespace Legion {
   }
 
   //----------------------------------------------------------------------------
+  inline DomainPoint Domain::lo(void) const
+  //----------------------------------------------------------------------------
+  {
+    DomainPoint result;
+    result.dim = dim;
+    for (int i = 0; i < dim; i++)
+      result[i] = rect_data[i];
+    return result;
+  }
+
+  //----------------------------------------------------------------------------
+  inline DomainPoint Domain::hi(void) const
+  //----------------------------------------------------------------------------
+  {
+    DomainPoint result;
+    result.dim = dim;
+    for (int i = 0; i < dim; i++)
+      result[i] = rect_data[dim+i];
+    return result;
+  }
+
+  //----------------------------------------------------------------------------
   inline Domain Domain::intersection(const Domain &other) const
   //----------------------------------------------------------------------------
   {
