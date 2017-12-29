@@ -504,8 +504,10 @@ namespace Legion {
           args.pid = pid;
           args.disjointness_collective = part_result; 
           args.owner = false;
+          // We only need to wait for the creation to be ready 
+          // if we're not the owner
           disjointness_event = runtime->issue_runtime_meta_task(args,
-                                     LG_DEFERRED_THROUGHPUT_PRIORITY);
+              LG_DEFERRED_THROUGHPUT_PRIORITY, NULL, creation_ready);
         }
 #ifdef DEBUG_LEGION
         else
