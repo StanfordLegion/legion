@@ -287,7 +287,9 @@ def driver(prefix_dir, llvm_version, terra_url, terra_branch, insecure):
     assert os.path.exists(gasnet_build_result)
 
     cmake_exe = None
-    if llvm_use_cmake:
+    if subprocess.call(["which", "cmake"]) == 0:
+        cmake_exe = "cmake"
+    if llvm_use_cmake and cmake_exe is None:
         cmake_dir = os.path.realpath(os.path.join(prefix_dir, 'cmake'))
         cmake_install_dir = os.path.join(cmake_dir, 'cmake-3.7.2-Linux-x86_64')
         if not os.path.exists(cmake_dir):
