@@ -162,6 +162,7 @@ namespace Realm {
 	DESTROYED_SUCCESSFULLY,
 	CORRUPTED,
 	MEMORY_LOST,
+	INSTANCE_COUNT_EXCEEDED,
       };
 
       Result result;
