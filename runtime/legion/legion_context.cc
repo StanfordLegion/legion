@@ -145,7 +145,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(idx < physical_regions.size());
+      assert(idx < regions.size()); // should be one of our original regions
 #endif
       return physical_regions[idx];
     } 
@@ -181,13 +181,6 @@ namespace Legion {
       created_requirements.push_back(new_req);
       // Created regions always return privileges that they make
       returnable_privileges.push_back(true);
-      // Make a new unmapped physical region if we aren't done executing yet
-      if (!task_executed)
-        physical_regions.push_back(PhysicalRegion(
-              new PhysicalRegionImpl(created_requirements.back(), 
-                ApEvent::NO_AP_EVENT, false/*mapped*/, this, 
-                owner_task->map_id, owner_task->tag, 
-                is_leaf_context(), false/*virtual mapped*/, runtime)));
     }
 
     //--------------------------------------------------------------------------
@@ -956,7 +949,7 @@ namespace Legion {
       for (unsigned our_idx = 0; our_idx < physical_regions.size(); our_idx++)
       {
         // skip any regions which are not mapped
-        if (!physical_regions[our_idx].impl->is_mapped())
+        if (!physical_regions[our_idx].is_mapped())
           continue;
         const RegionRequirement &our_req = 
           physical_regions[our_idx].impl->get_requirement();
@@ -976,7 +969,7 @@ namespace Legion {
       for (std::list<PhysicalRegion>::const_iterator it = 
             inline_regions.begin(); it != inline_regions.end(); it++)
       {
-        if (!it->impl->is_mapped())
+        if (!it->is_mapped())
           continue;
         const RegionRequirement &our_req = it->impl->get_requirement();
 #ifdef DEBUG_LEGION
@@ -1008,7 +1001,7 @@ namespace Legion {
       for (unsigned our_idx = 0; our_idx < physical_regions.size(); our_idx++)
       {
         // Skip any regions which are not mapped
-        if (!physical_regions[our_idx].impl->is_mapped())
+        if (!physical_regions[our_idx].is_mapped())
           continue;
         const RegionRequirement &our_req = 
           physical_regions[our_idx].impl->get_requirement();
@@ -1036,7 +1029,7 @@ namespace Legion {
       for (std::list<PhysicalRegion>::const_iterator it = 
             inline_regions.begin(); it != inline_regions.end(); it++)
       {
-        if (!it->impl->is_mapped())
+        if (!it->is_mapped())
           continue;
         const RegionRequirement &our_req = it->impl->get_requirement();
 #ifdef DEBUG_LEGION
@@ -1074,7 +1067,7 @@ namespace Legion {
       for (unsigned our_idx = 0; our_idx < physical_regions.size(); our_idx++)
       {
         // skip any regions which are not mapped
-        if (!physical_regions[our_idx].impl->is_mapped())
+        if (!physical_regions[our_idx].is_mapped())
           continue;
         const RegionRequirement &our_req = 
           physical_regions[our_idx].impl->get_requirement();
@@ -1106,7 +1099,7 @@ namespace Legion {
       for (std::list<PhysicalRegion>::const_iterator it = 
             inline_regions.begin(); it != inline_regions.end(); it++)
       {
-        if (!it->impl->is_mapped())
+        if (!it->is_mapped())
           continue;
         const RegionRequirement &our_req = it->impl->get_requirement();
 #ifdef DEBUG_LEGION
@@ -1178,7 +1171,7 @@ namespace Legion {
       for (unsigned our_idx = 0; our_idx < physical_regions.size(); our_idx++)
       {
         // skip any regions which are not mapped
-        if (!physical_regions[our_idx].impl->is_mapped())
+        if (!physical_regions[our_idx].is_mapped())
           continue;
         const RegionRequirement &our_req = 
           physical_regions[our_idx].impl->get_requirement();
@@ -1195,7 +1188,7 @@ namespace Legion {
       for (std::list<PhysicalRegion>::const_iterator it = 
             inline_regions.begin(); it != inline_regions.end(); it++)
       {
-        if (!it->impl->is_mapped())
+        if (!it->is_mapped())
           continue;
         const RegionRequirement &our_req = it->impl->get_requirement();
 #ifdef DEBUG_LEGION
@@ -1341,7 +1334,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(idx < physical_regions.size());
 #endif
-      return physical_regions[idx].impl->is_mapped();
+      return physical_regions[idx].is_mapped();
     }
 
     //--------------------------------------------------------------------------
@@ -1468,13 +1461,6 @@ namespace Legion {
           req.privilege_fields.begin(), req.privilege_fields.end());
       // This is not a returnable privilege requirement
       returnable_privileges.push_back(false);
-      // Make a new unmapped physical region if we're not done executing yet
-      if (!task_executed)
-        physical_regions.push_back(PhysicalRegion(
-              new PhysicalRegionImpl(created_requirements.back(),
-                ApEvent::NO_AP_EVENT, false/*mapped*/, this, 
-                owner_task->map_id, owner_task->tag, 
-                is_leaf_context(), false/*virtual mapped*/, runtime)));
       return int(regions.size() + created_requirements.size() - 1);
     }
 
@@ -1792,7 +1778,7 @@ namespace Legion {
       for (std::vector<PhysicalRegion>::const_iterator it = 
             physical_regions.begin(); it != physical_regions.end(); it++)
       {
-        if (it->impl->is_mapped())
+        if (it->is_mapped())
           it->impl->unmap_region();
       }
       // Also unmap any of our inline mapped physical regions
@@ -1800,7 +1786,7 @@ namespace Legion {
             tracked::const_iterator it = inline_regions.begin();
             it != inline_regions.end(); it++)
       {
-        if (it->impl->is_mapped())
+        if (it->is_mapped())
           it->impl->unmap_region();
       }
     } 
@@ -3871,7 +3857,7 @@ namespace Legion {
       AutoRuntimeCall call(this);
       // Check to see if the region is already mapped,
       // if it is then we are done
-      if (region.impl->is_mapped())
+      if (region.is_mapped())
         return;
       MapOp *map_op = runtime->get_available_map_op(true);
       map_op->initialize(this, region);
@@ -3884,7 +3870,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if ((region.impl == NULL) || !region.impl->is_mapped())
+      if (!region.is_mapped())
         return;
       unregister_inline_mapped_region(region);
       region.impl->unmap_region();
@@ -4198,7 +4184,7 @@ namespace Legion {
       detach_op->initialize_detach(this, region);
       runtime->add_to_dependence_queue(this, executing_processor, detach_op);
       // If the region is still mapped, then unmap it
-      if (region.impl->is_mapped())
+      if (region.is_mapped())
       {
         unregister_inline_mapped_region(region);
         region.impl->unmap_region();
@@ -6101,11 +6087,6 @@ namespace Legion {
               children_commit_invoked = true;
             }
           }
-          // Finally unmap any of our mapped physical instances
-#ifdef DEBUG_LEGION
-          assert((regions.size() + 
-                    created_requirements.size()) == physical_regions.size());
-#endif
         }
         if (!preconditions.empty())
           single_task->handle_post_mapped(Runtime::merge_events(preconditions));
@@ -8433,14 +8414,10 @@ namespace Legion {
         }
       }
       // Finally unmap any physical regions that we mapped
-#ifdef DEBUG_LEGION
-      assert((regions.size() + 
-                created_requirements.size()) == physical_regions.size());
-#endif
       for (std::vector<PhysicalRegion>::const_iterator it = 
             physical_regions.begin(); it != physical_regions.end(); it++)
       {
-        if (it->impl->is_mapped())
+        if (it->is_mapped())
           it->impl->unmap_region();
       }
       // Mark that we are done executing this operation
