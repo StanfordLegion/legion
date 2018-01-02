@@ -2958,6 +2958,8 @@ namespace Realm {
 	    unsigned bw = 0; // TODO
 	    unsigned latency = 0;
 	    add_path(fbm, fbm, bw, latency, false, false);
+
+	    break;
 	  }
 
 	case XferDes::XFER_GPU_PEER_FB:
