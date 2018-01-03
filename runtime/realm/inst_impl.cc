@@ -93,6 +93,29 @@ namespace Realm {
     {
       MemoryImpl *m_impl = get_runtime()->get_memory_impl(memory);
       RegionInstanceImpl *impl = m_impl->new_instance();
+      // we can fail to get a valid pointer if we are out of instance slots
+      if(!impl) {
+	inst = RegionInstance::NO_INST;
+	// import the profiling requests to see if anybody is paying attention to
+	//  failure
+	ProfilingMeasurementCollection pmc;
+	pmc.import_requests(prs);
+	if(pmc.wants_measurement<ProfilingMeasurements::InstanceStatus>()) {
+	  ProfilingMeasurements::InstanceStatus stat;
+	  stat.result = ProfilingMeasurements::InstanceStatus::INSTANCE_COUNT_EXCEEDED;
+	  stat.error_code = 0;
+	  pmc.add_measurement(stat);
+	} else {
+	  // fatal error
+	  log_inst.fatal() << "FATAL: instance count exceeded for memory " << memory;
+	  assert(0);
+	}
+	// generate a poisoned event for completion
+	GenEventImpl *ev = GenEventImpl::create_genevent();
+	Event ready_event = ev->current_event();
+	GenEventImpl::trigger(ready_event, true /*poisoned*/);
+	return ready_event;
+      }
 
       impl->metadata.layout = ilg;
       
@@ -521,6 +544,28 @@ namespace Realm {
 
       // send any remaining incomplete profiling responses
       measurements.send_responses(requests);
+
+      // send any required invalidation messages for metadata
+      bool recycle_now = metadata.initiate_cleanup(me.id);
+      if(recycle_now)
+	recycle_instance();
+    }
+
+    void RegionInstanceImpl::recycle_instance(void)
+    {
+      // delete an existing layout, if present
+      if(metadata.layout) {
+	delete metadata.layout;
+	metadata.layout = 0;
+      }
+
+      // set the offset back to the "unallocated" value
+      metadata.inst_offset = size_t(-1);
+
+      measurements.clear();
+
+      MemoryImpl *m_impl = get_runtime()->get_memory_impl(memory);
+      m_impl->release_instance(me);
     }
 
     // helper function to figure out which field we're in
@@ -603,21 +648,6 @@ namespace Realm {
       base = ((char *)base) - (stride * affine->bounds.lo[0]);
      
       return true;
-    }
-
-    void RegionInstanceImpl::finalize_instance(void)
-    {
-      if (!requests.empty()) {
-        if (measurements.wants_measurement<
-                          ProfilingMeasurements::InstanceTimeline>()) {
-	  // set the instance ID correctly now - it wasn't available at construction time
-          timeline.instance = me;
-          timeline.record_delete_time();
-          measurements.add_measurement(timeline);
-        }
-        measurements.send_responses(requests);
-        requests.clear();
-      }
     }
 
     void *RegionInstanceImpl::Metadata::serialize(size_t& out_size) const

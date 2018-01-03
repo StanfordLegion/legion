@@ -19,6 +19,7 @@ Logger log_app("app");
 enum {
   TOP_LEVEL_TASK = Processor::TASK_ID_FIRST_AVAILABLE+0,
   MEMSPEED_TASK,
+  COPYPROF_TASK,
 };
 
 struct SpeedTestArgs {
@@ -29,7 +30,31 @@ struct SpeedTestArgs {
   Machine::AffinityDetails affinity;
 };
 
+struct CopyProfResult {
+  long long *nanoseconds;
+  UserEvent done;
+};
+
+void copy_profiling_task(const void *args, size_t arglen, 
+			 const void *userdata, size_t userlen, Processor p)
+{
+  ProfilingResponse resp(args, arglen);
+  assert(resp.user_data_size() == sizeof(CopyProfResult));
+  const CopyProfResult *result = static_cast<const CopyProfResult *>(resp.user_data());
+
+  ProfilingMeasurements::OperationTimeline timeline;
+  if(resp.get_measurement(timeline)) {
+    *(result->nanoseconds) = timeline.complete_time - timeline.start_time;
+    result->done.trigger();
+  } else {
+    log_app.fatal() << "no operation timeline in profiling response!";
+    assert(0);
+  }
+}
+
 static size_t buffer_size = 64 << 20; // should be bigger than any cache in system
+static bool do_tasks = true;   // should tasks accessing memories be tested
+static bool do_copies = true;  // should DMAs between memories be tested
 
 void memspeed_cpu_task(const void *args, size_t arglen, 
 		       const void *userdata, size_t userlen, Processor p)
@@ -193,12 +218,14 @@ void top_level_task(const void *args, size_t arglen,
   size_t elements = buffer_size / sizeof(void *);
   IndexSpace<1> d = Rect<1>(0, elements - 1);
 
-  // iterate over memories, create and instance, and then let each processor beat on it
+  // build the list of memories that we want to test
+  std::vector<Memory> memories;
   Machine machine = Machine::get_machine();
   for(Machine::MemoryQuery::iterator it = Machine::MemoryQuery(machine).begin(); it; ++it) {
     Memory m = *it;
     size_t capacity = m.capacity();
-    if(capacity < buffer_size) {
+    // we need two instances if we're doing copy testing
+    if(capacity < (buffer_size * (do_copies ? 2 : 1))) {
       log_app.info() << "skipping memory " << m << " (kind=" << m.kind() << ") - insufficient capacity";
       continue;
     }
@@ -211,49 +238,150 @@ void top_level_task(const void *args, size_t arglen,
       continue;
     }
 
-    log_app.print() << "Memory: " << m << " Kind:" << m.kind() << " Capacity: " << capacity;
-    std::vector<size_t> field_sizes(1, sizeof(void *));
-    RegionInstance inst;
-    RegionInstance::create_instance(inst, m, d,
-				    std::vector<size_t>(1, sizeof(void *)),
-				    0 /*SOA*/,
-				    ProfilingRequestSet()).wait();
-    assert(inst.exists());
+    log_app.print() << "Memory: " << m << " Kind:" << m.kind() << " Capacity: " << m.capacity();
+    memories.push_back(m);
+  }
+  
+  // iterate over memories, create an instance, and then let each processor beat on it
+  if(do_tasks) {
+    for(std::vector<Memory>::const_iterator it = memories.begin();
+	it != memories.end();
+	++it) {
+      Memory m = *it;
+      std::vector<size_t> field_sizes(1, sizeof(void *));
+      RegionInstance inst;
+      RegionInstance::create_instance(inst, m, d,
+				      std::vector<size_t>(1, sizeof(void *)),
+				      0 /*SOA*/,
+				      ProfilingRequestSet()).wait();
+      assert(inst.exists());
 
-    // clear the instance first - this should also take care of faulting it in
-    void *fill_value = 0;
-    std::vector<CopySrcDstField> sdf(1);
-    sdf[0].inst = inst;
-    sdf[0].field_id = 0;
-    sdf[0].size = sizeof(void *);
-    d.fill(sdf, ProfilingRequestSet(), &fill_value, sizeof(fill_value)).wait();
+      // clear the instance first - this should also take care of faulting it in
+      void *fill_value = 0;
+      std::vector<CopySrcDstField> sdf(1);
+      sdf[0].inst = inst;
+      sdf[0].field_id = 0;
+      sdf[0].size = sizeof(void *);
+      d.fill(sdf, ProfilingRequestSet(), &fill_value, sizeof(fill_value)).wait();
 
-    Machine::ProcessorQuery pq = Machine::ProcessorQuery(machine).has_affinity_to(m);
-    for(Machine::ProcessorQuery::iterator it2 = pq.begin(); it2; ++it2) {
-      Processor p = *it2;
+      Machine::ProcessorQuery pq = Machine::ProcessorQuery(machine).has_affinity_to(m);
+      for(Machine::ProcessorQuery::iterator it2 = pq.begin(); it2; ++it2) {
+	Processor p = *it2;
 
-      SpeedTestArgs cargs;
-      cargs.mem = m;
-      cargs.inst = inst;
-      cargs.elements = elements;
-      cargs.reps = 8;
-      bool ok = machine.has_affinity(p, m, &cargs.affinity);
-      assert(ok);
+	SpeedTestArgs cargs;
+	cargs.mem = m;
+	cargs.inst = inst;
+	cargs.elements = elements;
+	cargs.reps = 8;
+	bool ok = machine.has_affinity(p, m, &cargs.affinity);
+	assert(ok);
 
-      log_app.info() << "  Affinity: " << p << " BW: " << cargs.affinity.bandwidth
-		     << " Latency: " << cargs.affinity.latency;
+	log_app.info() << "  Affinity: " << p << "->" << m << " BW: " << cargs.affinity.bandwidth
+		       << " Latency: " << cargs.affinity.latency;
 
-      if(supported_proc_kinds.count(p.kind()) == 0) {
-	log_app.info() << "processor " << p << " is of unsupported kind " << p.kind() << " - skipping";
-	continue;
+	if(supported_proc_kinds.count(p.kind()) == 0) {
+	  log_app.info() << "processor " << p << " is of unsupported kind " << p.kind() << " - skipping";
+	  continue;
+	}
+
+	Event e = p.spawn(MEMSPEED_TASK, &cargs, sizeof(cargs));
+
+	e.wait();
       }
 
-      Event e = p.spawn(MEMSPEED_TASK, &cargs, sizeof(cargs));
-
-      e.wait();
+      inst.destroy();
     }
+  }
 
-    inst.destroy();
+  if(do_copies) {
+    std::vector<size_t> field_sizes(1, sizeof(void *));
+
+    void *fill_value = 0;
+    std::vector<CopySrcDstField> src(1);
+    src[0].field_id = 0;
+    src[0].size = sizeof(void *);
+    std::vector<CopySrcDstField> dst(1);
+    dst[0].field_id = 0;
+    dst[0].size = sizeof(void *);
+    
+    for(std::vector<Memory>::const_iterator it = memories.begin();
+	it != memories.end();
+	++it) {
+      Memory m1 = *it;
+
+      RegionInstance inst1;
+      RegionInstance::create_instance(inst1, m1, d,
+				      std::vector<size_t>(1, sizeof(void *)),
+				      0 /*SOA*/,
+				      ProfilingRequestSet()).wait();
+      assert(inst1.exists());
+
+      // clear the instance first - this should also take care of faulting it in
+      src[0].inst = inst1;
+      d.fill(src, ProfilingRequestSet(), &fill_value, sizeof(fill_value)).wait();
+
+      for(std::vector<Memory>::const_iterator it2 = memories.begin();
+	it2 != memories.end();
+	++it2) {
+	Memory m2 = *it2;
+
+	RegionInstance inst2;
+	RegionInstance::create_instance(inst2, m2, d,
+					std::vector<size_t>(1, sizeof(void *)),
+					0 /*SOA*/,
+					ProfilingRequestSet()).wait();
+	assert(inst2.exists());
+
+	// clear the instance first - this should also take care of faulting it in
+	dst[0].inst = inst2;
+	d.fill(dst, ProfilingRequestSet(), &fill_value, sizeof(fill_value)).wait();
+
+	// now perform two instance-to-instance copies
+
+	// copy #1 - full copy
+	long long full_copy_time = -1;
+	UserEvent full_copy_done = UserEvent::create_user_event();
+	{
+	  CopyProfResult result;
+	  result.nanoseconds = &full_copy_time;
+	  result.done = full_copy_done;      
+	  ProfilingRequestSet prs;
+	  prs.add_request(p, COPYPROF_TASK, &result, sizeof(CopyProfResult))
+	    .add_measurement<ProfilingMeasurements::OperationTimeline>();
+	  d.copy(src, dst, prs).wait();
+	}
+
+	// copy #2 - single-element copy
+	long long short_copy_time = -1;
+	UserEvent short_copy_done = UserEvent::create_user_event();
+	{
+	  CopyProfResult result;
+	  result.nanoseconds = &short_copy_time;
+	  result.done = short_copy_done;      
+	  ProfilingRequestSet prs;
+	  prs.add_request(p, COPYPROF_TASK, &result, sizeof(CopyProfResult))
+	    .add_measurement<ProfilingMeasurements::OperationTimeline>();
+	  Rect<1>(0, 0).copy(src, dst, prs).wait();
+	}
+
+	// wait for both results
+	full_copy_done.wait();
+	short_copy_done.wait();
+
+	// latency is estimated as time to perfom single copy
+	double latency = short_copy_time;
+
+	// bandwidth is estimated based on extra time taken by full copy
+	double bw = (1.0 * elements * field_sizes[0] /
+		     (full_copy_time - short_copy_time));
+
+	log_app.info() << "copy " << m1 << " -> " << m2 << ": bw:" << bw << " lat:" << latency;
+
+	inst2.destroy();
+      }
+
+      inst1.destroy();
+    }
   }
 }
 
@@ -302,6 +430,12 @@ int main(int argc, char **argv)
 				   0, 0).wait();
   supported_proc_kinds.insert(Processor::TOC_PROC);
 #endif
+
+  Processor::register_task_by_kind(Processor::LOC_PROC, false /*!global*/,
+				   COPYPROF_TASK,
+				   CodeDescriptor(copy_profiling_task),
+				   ProfilingRequestSet(),
+				   0, 0).wait();
 
   // select a processor to run the top level task on
   Processor p = Machine::ProcessorQuery(Machine::get_machine())

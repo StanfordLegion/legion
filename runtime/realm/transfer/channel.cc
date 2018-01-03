@@ -401,8 +401,7 @@ namespace Realm {
 	       src_serdez_op->max_serialized_size)
 	      break;
 
-	    // some sort of per-channel max request size?
-	    size_t max_bytes = 1 << 20;
+	    size_t max_bytes = max_req_size;
 
 	    size_t src_bytes = src_iter->step(max_bytes, src_info, flags,
 					      true /*tentative*/);
@@ -488,8 +487,7 @@ namespace Realm {
 	      }
 	    }
 
-	    // some sort of per-channel max request size?
-	    size_t max_bytes = 1 << 20;
+	    size_t max_bytes = max_req_size;
 
 	    size_t dst_bytes = dst_iter->step(max_bytes, dst_info, flags,
 					      !input_data_done);
@@ -555,8 +553,7 @@ namespace Realm {
 	  } else {
 	    // either no serialization or simultaneous serdez
 
-	    // some sort of per-channel max request size?
-	    size_t max_bytes = 1 << 20;
+	    size_t max_bytes = max_req_size;
 
 	    // if we're not the first in the chain, and we know the total bytes
 	    //  written by the predecessor, don't exceed that
@@ -1701,8 +1698,7 @@ namespace Realm {
 	  assert(src_serdez_op == 0);
 	  assert(dst_serdez_op == 0);
 
-	  // some sort of per-channel max request size?
-	  size_t max_bytes = 1 << 20;
+	  size_t max_bytes = max_req_size;
 
 	  // if we're not the first in the chain, and we know the total bytes
 	  //  written by the predecessor, don't exceed that
@@ -2958,6 +2954,8 @@ namespace Realm {
 	    unsigned bw = 0; // TODO
 	    unsigned latency = 0;
 	    add_path(fbm, fbm, bw, latency, false, false);
+
+	    break;
 	  }
 
 	case XferDes::XFER_GPU_PEER_FB:
@@ -3832,6 +3830,11 @@ namespace Realm {
           case XferDes::XFER_GPU_TO_FB:
           case XferDes::XFER_GPU_IN_FB:
           case XferDes::XFER_GPU_PEER_FB:
+	    // special case - IN_FB transfers ignore the max_req_size and pick
+	    //   a large enough value to do copies in a single try
+	    // consider changing this if/when a GPU can prioritize work streams
+	    if(_kind == XferDes::XFER_GPU_IN_FB)
+	      _max_req_size = 1ULL << 40; // 1 TB
             xd = new GPUXferDes(_dma_request, _launch_node,
 				_guid, _pre_xd_guid, _next_xd_guid,
 				_next_max_rw_gap,

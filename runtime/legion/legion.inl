@@ -3489,6 +3489,28 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    inline void CopyLauncher::set_gather(RegionTreeID in_tid, FieldID in_fid, 
+                                         ReductionOpID r /*= 0*/)
+    //--------------------------------------------------------------------------
+    {
+      redop = r;
+      copy_kind = (redop == 0) ? GATHER_COPY : GATHER_REDUCE_COPY;
+      indirect_tid = in_tid;
+      indirect_fid = in_fid;
+    }
+
+    //--------------------------------------------------------------------------
+    inline void CopyLauncher::set_scatter(RegionTreeID in_tid, FieldID in_fid, 
+                                          ReductionOpID r /*= 0*/)
+    //--------------------------------------------------------------------------
+    {
+      redop = r;
+      copy_kind = (redop == 0) ? SCATTER_COPY : SCATTER_REDUCE_COPY;
+      indirect_tid = in_tid;
+      indirect_fid = in_fid;
+    }
+
+    //--------------------------------------------------------------------------
     inline void CopyLauncher::add_grant(Grant g)
     //--------------------------------------------------------------------------
     {
@@ -3560,6 +3582,28 @@ namespace Legion {
       assert(idx < dst_requirements.size());
 #endif
       dst_requirements[idx].add_field(fid, inst);
+    }
+
+    //--------------------------------------------------------------------------
+    inline void IndexCopyLauncher::set_gather(RegionTreeID in_tid, 
+                                        FieldID in_fid, ReductionOpID r /*= 0*/)
+    //--------------------------------------------------------------------------
+    {
+      redop = r;
+      copy_kind = (redop == 0) ? GATHER_COPY : GATHER_REDUCE_COPY;
+      indirect_tid = in_tid;
+      indirect_fid = in_fid;
+    }
+
+    //--------------------------------------------------------------------------
+    inline void IndexCopyLauncher::set_scatter(RegionTreeID in_tid, 
+                                        FieldID in_fid, ReductionOpID r /*= 0*/)
+    //--------------------------------------------------------------------------
+    {
+      redop = r;
+      copy_kind = (redop == 0) ? SCATTER_COPY : SCATTER_REDUCE_COPY;
+      indirect_tid = in_tid;
+      indirect_fid = in_fid;
     }
 
     //--------------------------------------------------------------------------

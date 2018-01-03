@@ -159,7 +159,8 @@ namespace Realm {
 	it != prs.requests.end();
 	it++) {
       if((*it)->requested_measurements.empty()) {
-	// TODO: respond to empty requests immediately?
+	// send responses to empty requests immediately (no point in waiting)
+	send_response(**it);
       } else {
 	for(std::set<ProfilingMeasurementID>::const_iterator it2 = (*it)->requested_measurements.begin();
 	    it2 != (*it)->requested_measurements.end();

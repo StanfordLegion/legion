@@ -130,7 +130,7 @@ __global__ void gpu_latency_setup_kernel(int *buffer, size_t delta, size_t eleme
   size_t step = blockDim.x * gridDim.x;
   while(ofs < elements) {
     size_t tgt = ofs + delta;
-    if(tgt > elements)
+    while(tgt >= elements)
       tgt -= elements;
     buffer[ofs] = tgt;
     ofs += step;
