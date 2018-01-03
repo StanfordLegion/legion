@@ -1773,7 +1773,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     CopyLauncher::CopyLauncher(Predicate pred /*= Predicate::TRUE_PRED*/,
                                MapperID mid /*=0*/, MappingTagID t /*=0*/)
-      : predicate(pred), map_id(mid), tag(t), static_dependences(NULL),
+      : predicate(pred), map_id(mid), tag(t), copy_kind(NORMAL_COPY),
+        indirect_tid(0), indirect_fid(0), redop(0), static_dependences(NULL), 
         silence_warnings(false)
     //--------------------------------------------------------------------------
     {
@@ -1787,7 +1788,8 @@ namespace Legion {
     IndexCopyLauncher::IndexCopyLauncher(void) 
       : launch_domain(Domain::NO_DOMAIN), launch_space(IndexSpace::NO_SPACE),
         predicate(Predicate::TRUE_PRED), map_id(0), tag(0),
-        static_dependences(NULL), silence_warnings(false)
+        copy_kind(NORMAL_COPY), indirect_tid(0), indirect_fid(0), redop(0),
+        static_dependences(NULL),silence_warnings(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -1797,7 +1799,9 @@ namespace Legion {
                                     Predicate pred /*= Predicate::TRUE_PRED*/,
                                     MapperID mid /*=0*/, MappingTagID t /*=0*/) 
       : launch_domain(dom), launch_space(IndexSpace::NO_SPACE), predicate(pred),
-        map_id(mid),tag(t), static_dependences(NULL), silence_warnings(false)
+        map_id(mid),tag(t), copy_kind(NORMAL_COPY), indirect_tid(0),
+        indirect_fid(0), redop(0), static_dependences(NULL), 
+        silence_warnings(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -1807,7 +1811,9 @@ namespace Legion {
                                     Predicate pred /*= Predicate::TRUE_PRED*/,
                                     MapperID mid /*=0*/, MappingTagID t /*=0*/) 
       : launch_domain(Domain::NO_DOMAIN), launch_space(space), predicate(pred),
-        map_id(mid),tag(t), static_dependences(NULL), silence_warnings(false)
+        map_id(mid),tag(t), copy_kind(NORMAL_COPY), indirect_tid(0), 
+        indirect_fid(0), redop(0), static_dependences(NULL), 
+        silence_warnings(false)
     //--------------------------------------------------------------------------
     {
     }

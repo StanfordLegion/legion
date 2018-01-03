@@ -662,6 +662,14 @@ typedef enum legion_partition_kind_t {
   COMPUTE_KIND,
 } legion_partition_kind_t;
 
+typedef enum legion_copy_kind_t {
+  NORMAL_COPY,
+  GATHER_COPY,
+  SCATTER_COPY,
+  GATHER_REDUCE_COPY,
+  SCATTER_REDUCE_COPY,
+} legion_copy_kind_t;
+
 typedef enum legion_external_resource_t {
   EXTERNAL_POSIX_FILE,
   EXTERNAL_HDF5_FILE,
