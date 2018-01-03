@@ -264,7 +264,8 @@ namespace Realm {
     }
   }
 
-  void ProfilingMeasurementCollection::clear(void) {
+  void ProfilingMeasurementCollection::clear_measurements(void)
+  {
     measurements.clear();
 
     // also have to restore the counts
@@ -277,6 +278,14 @@ namespace Realm {
 	  it2++)
 	measurements_left[*it2]++;
     }
+  }
+
+  void ProfilingMeasurementCollection::clear(void)
+  {
+    measurements.clear();
+    measurements_left.clear();
+    requested_measurements.clear();
+    completed_requests_present = false;
   }
 
   

@@ -314,6 +314,9 @@ namespace Realm {
     void send_responses(const ProfilingRequestSet& prs);
     void clear(void);
 
+    // clears only recorded measurements (keeps request info)
+    void clear_measurements(void);
+
     template <typename T>
     bool wants_measurement(void) const;
 
