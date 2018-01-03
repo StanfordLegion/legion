@@ -940,13 +940,22 @@ namespace Legion {
       virtual bool check_field_size(size_t field_size, bool range) = 0;
     public:
       virtual ApEvent issue_copy(Operation *op, 
+#ifdef LEGION_SPY
+                  const std::vector<Realm::CopySrcDstField> &src_fields,
+                  const std::vector<Realm::CopySrcDstField> &dst_fields,
+#else
                   const std::vector<CopySrcDstField> &src_fields,
                   const std::vector<CopySrcDstField> &dst_fields,
+#endif
                   ApEvent precondition, PredEvent predicate_guard,
                   IndexTreeNode *intersect = NULL,
                   ReductionOpID redop = 0, bool reduction_fold = true) = 0;
       virtual ApEvent issue_fill(Operation *op,
+#ifdef LEGION_SPY
+                  const std::vector<Realm::CopySrcDstField> &dst_fields,
+#else
                   const std::vector<CopySrcDstField> &dst_fields,
+#endif
                   const void *fill_value, size_t fill_size,
                   ApEvent precondition, PredEvent predicate_guard,
                   IndexTreeNode *intersect = NULL) = 0;
@@ -1167,13 +1176,22 @@ namespace Legion {
       virtual bool check_field_size(size_t field_size, bool range);
     public:
       virtual ApEvent issue_copy(Operation *op, 
+#ifdef LEGION_SPY
+                  const std::vector<Realm::CopySrcDstField> &src_fields,
+                  const std::vector<Realm::CopySrcDstField> &dst_fields,
+#else
                   const std::vector<CopySrcDstField> &src_fields,
                   const std::vector<CopySrcDstField> &dst_fields,
+#endif
                   ApEvent precondition, PredEvent predicate_guard,
                   IndexTreeNode *intersect = NULL,
                   ReductionOpID redop = 0, bool reduction_fold = true);
       virtual ApEvent issue_fill(Operation *op,
+#ifdef LEGION_SPY
+                  const std::vector<Realm::CopySrcDstField> &dst_fields,
+#else
                   const std::vector<CopySrcDstField> &dst_fields,
+#endif
                   const void *fill_value, size_t fill_size,
                   ApEvent precondition, PredEvent predicate_guard,
                   IndexTreeNode *intersect = NULL);

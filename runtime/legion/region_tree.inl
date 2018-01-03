@@ -2479,8 +2479,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     ApEvent IndexSpaceNodeT<DIM,T>::issue_copy(Operation *op,
+#ifdef LEGION_SPY
+                        const std::vector<Realm::CopySrcDstField> &src_fields,
+                        const std::vector<Realm::CopySrcDstField> &dst_fields,
+#else
                         const std::vector<CopySrcDstField> &src_fields,
                         const std::vector<CopySrcDstField> &dst_fields,
+#endif
                         ApEvent precondition, PredEvent predicate_guard,
                         IndexTreeNode *intersect/*=NULL*/,
                         ReductionOpID redop /*=0*/,bool reduction_fold/*=true*/)
@@ -2595,7 +2600,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     ApEvent IndexSpaceNodeT<DIM,T>::issue_fill(Operation *op,
+#ifdef LEGION_SPY
+                        const std::vector<Realm::CopySrcDstField> &dst_fields,
+#else
                         const std::vector<CopySrcDstField> &dst_fields,
+#endif
                         const void *fill_value, size_t fill_size,
                         ApEvent precondition, PredEvent predicate_guard,
                         IndexTreeNode *intersect)

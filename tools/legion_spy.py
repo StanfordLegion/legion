@@ -7478,15 +7478,21 @@ class InstanceUser(object):
         return self.coher == RELAXED
 
 class Instance(object):
-    __slots__ = ['state', 'handle', 'memory', 'region', 'fields', 
+    __slots__ = ['state', 'use_event', 'handle', 'memory', 'region', 'fields', 
                  'redop', 'verification_users', 'processor', 
                  'creator', 'uses', 'creator_regions', 'specialized_constraint',
                  'memory_constraint', 'field_constraint', 'ordering_constraint',
                  'splitting_constraints', 'dimension_constraints',
                  'alignment_constraints', 'offset_constraints']
-    def __init__(self, state, handle):
+    def __init__(self, state, use_event):
         self.state = state
-        self.handle = handle
+        # Instances are uniquely identified by their use event since Realm
+        # can recycle physical instance IDs
+        self.use_event = use_event
+        if self.use_event == 0:
+            self.handle = 0 # Virtual Instance
+        else:
+            self.handle = None 
         self.memory = None
         self.region = None # Upper bound region
         self.creator_regions = None # Regions contributing to upper bound
@@ -7513,6 +7519,9 @@ class Instance(object):
             return "Instance "+hex(self.handle)
 
     __repr__ = __str__
+
+    def set_handle(self, handle):
+        self.handle = handle
 
     def set_memory(self, memory):
         self.memory = memory
@@ -8776,53 +8785,53 @@ predicate_use_pat       = re.compile(
     prefix+"Predicate Use (?P<uid>[0-9]+) (?P<pred>[0-9]+)")
 # Physical instance and mapping decision patterns
 instance_pat            = re.compile(
-    prefix+"Physical Instance (?P<iid>[0-9a-f]+) (?P<mid>[0-9a-f]+) (?P<redop>[0-9]+)")
+    prefix+"Physical Instance (?P<eid>[0-9a-f]+) (?P<iid>[0-9a-f]+) (?P<mid>[0-9a-f]+) (?P<redop>[0-9]+)")
 instance_region_pat     = re.compile(
-    prefix+"Physical Instance Region (?P<iid>[0-9a-f]+) (?P<ispace>[0-9]+) "
+    prefix+"Physical Instance Region (?P<eid>[0-9a-f]+) (?P<ispace>[0-9]+) "
            "(?P<fspace>[0-9]+) (?P<tid>[0-9]+)")
 instance_field_pat      = re.compile(
-    prefix+"Physical Instance Field (?P<iid>[0-9a-f]+) (?P<fid>[0-9]+)")
+    prefix+"Physical Instance Field (?P<eid>[0-9a-f]+) (?P<fid>[0-9]+)")
 instance_creator_pat    = re.compile(
-    prefix+"Physical Instance Creator (?P<iid>[0-9a-f]+) (?P<uid>[0-9]+) "
+    prefix+"Physical Instance Creator (?P<eid>[0-9a-f]+) (?P<uid>[0-9]+) "
            "(?P<proc>[0-9a-f]+)")
 instance_creator_region_pat = re.compile(
-    prefix+"Physical Instance Creation Region (?P<iid>[0-9a-f]+) (?P<ispace>[0-9]+) "
+    prefix+"Physical Instance Creation Region (?P<eid>[0-9a-f]+) (?P<ispace>[0-9]+) "
            "(?P<fspace>[0-9]+) (?P<tid>[0-9]+)")
 specialized_constraint_pat = re.compile(
-    prefix+"Instance Specialized Constraint (?P<iid>[0-9a-f]+) (?P<kind>[0-9]+) "
+    prefix+"Instance Specialized Constraint (?P<eid>[0-9a-f]+) (?P<kind>[0-9]+) "
            "(?P<redop>[0-9]+)")
 memory_constraint_pat   = re.compile(
-    prefix+"Instance Memory Constraint (?P<iid>[0-9a-f]+) (?P<kind>[0-9]+)")
+    prefix+"Instance Memory Constraint (?P<eid>[0-9a-f]+) (?P<kind>[0-9]+)")
 field_constraint_pat    = re.compile(
-    prefix+"Instance Field Constraint (?P<iid>[0-9a-f]+) (?P<contig>[0-1]) "
+    prefix+"Instance Field Constraint (?P<eid>[0-9a-f]+) (?P<contig>[0-1]) "
            "(?P<inorder>[0-1]) (?P<fields>[0-9]+)")
 field_constraint_field_pat = re.compile(
-    prefix+"Instance Field Constraint Field (?P<iid>[0-9a-f]+) (?P<fid>[0-9]+)")
+    prefix+"Instance Field Constraint Field (?P<eid>[0-9a-f]+) (?P<fid>[0-9]+)")
 ordering_constraint_pat = re.compile(
-    prefix+"Instance Ordering Constraint (?P<iid>[0-9a-f]+) (?P<contig>[0-1]) "
+    prefix+"Instance Ordering Constraint (?P<eid>[0-9a-f]+) (?P<contig>[0-1]) "
            "(?P<dims>[0-9]+)")
 ordering_constraint_dim_pat = re.compile(
-    prefix+"Instance Ordering Constraint Dimension (?P<iid>[0-9a-f]+) (?P<dim>[0-9]+)")
+    prefix+"Instance Ordering Constraint Dimension (?P<eid>[0-9a-f]+) (?P<dim>[0-9]+)")
 splitting_constraint_pat = re.compile(
-    prefix+"Instance Splitting Constraint (?P<iid>[0-9a-f]+) (?P<dim>[0-9]+) "
+    prefix+"Instance Splitting Constraint (?P<eid>[0-9a-f]+) (?P<dim>[0-9]+) "
            "(?P<value>[0-9]+) (?P<chunks>[0-1])")
 dimension_constraint_pat = re.compile(
-    prefix+"Instance Dimension Constraint (?P<iid>[0-9a-f]+) (?P<dim>[0-9]+) "
+    prefix+"Instance Dimension Constraint (?P<eid>[0-9a-f]+) (?P<dim>[0-9]+) "
            "(?P<eqk>[0-9]+) (?P<value>[0-9]+)")
 alignment_constraint_pat = re.compile(
-    prefix+"Instance Alignment Constraint (?P<iid>[0-9a-f]+) (?P<fid>[0-9]+) "
+    prefix+"Instance Alignment Constraint (?P<eid>[0-9a-f]+) (?P<fid>[0-9]+) "
            "(?P<eqk>[0-9]+) (?P<align>[0-9]+)")
 offset_constraint_pat = re.compile(
-    prefix+"Instance Offset Constraint (?P<iid>[0-9a-f]+) (?P<fid>[0-9]+) "
+    prefix+"Instance Offset Constraint (?P<eid>[0-9a-f]+) (?P<fid>[0-9]+) "
            "(?P<offset>[0-9]+)")
 variant_decision_pat    = re.compile(
     prefix+"Variant Decision (?P<uid>[0-9]+) (?P<vid>[0-9]+)")
 mapping_decision_pat    = re.compile(
     prefix+"Mapping Decision (?P<uid>[0-9]+) (?P<idx>[0-9]+) (?P<fid>[0-9]+) "
-           "(?P<iid>[0-9a-f]+)")
+           "(?P<eid>[0-9a-f]+)")
 post_decision_pat       = re.compile(
     prefix+"Post Mapping Decision (?P<uid>[0-9]+) (?P<idx>[0-9]+) (?P<fid>[0-9]+) "
-           "(?P<iid>[0-9a-f]+)")
+           "(?P<eid>[0-9a-f]+)")
 task_priority_pat       = re.compile(
     prefix+"Task Priority (?P<uid>[0-9]+) (?P<priority>-?[0-9]+)") # Handle negatives
 task_processor_pat      = re.compile(
@@ -8831,7 +8840,7 @@ task_premapping_pat     = re.compile(
     prefix+"Task Premapping (?P<uid>[0-9]+) (?P<index>[0-9]+)")
 temporary_decision_pat  = re.compile(
     prefix+"Temporary Instance (?P<uid>[0-9]+) (?P<idx>[0-9]+) (?P<fid>[0-9]+) "
-           "(?P<iid>[0-9a-f]+)")
+           "(?P<eid>[0-9a-f]+)")
 tunable_pat             = re.compile(
     prefix+"Task Tunable (?P<uid>[0-9]+) (?P<idx>[0-9]+) (?P<bytes>[0-9]+) "
            "(?P<value>[0-9a-f]+)")
@@ -9122,89 +9131,90 @@ def parse_legion_spy_line(line, state):
     m = instance_pat.match(line)
     if m is not None:
         mem = state.get_memory(int(m.group('mid'),16))
-        inst = state.get_instance(int(m.group('iid'),16))
+        inst = state.get_instance(int(m.group('eid'),16))
+        inst.set_handle(int(m.group('iid'),16))
         inst.set_memory(mem)
         inst.set_redop(int(m.group('redop')))
         return True
     m = instance_region_pat.match(line)
     if m is not None:
-        inst = state.get_instance(int(m.group('iid'),16))
+        inst = state.get_instance(int(m.group('eid'),16))
         region = state.get_region(int(m.group('ispace')), 
             int(m.group('fspace')), int(m.group('tid')))
         inst.set_region(region)
         return True
     m = instance_field_pat.match(line)
     if m is not None:
-        inst = state.get_instance(int(m.group('iid'),16))
+        inst = state.get_instance(int(m.group('eid'),16))
         inst.add_field(int(m.group('fid')))
         return True
     m = instance_creator_pat.match(line)
     if m is not None:
-        inst = state.get_instance(int(m.group('iid'),16))
+        inst = state.get_instance(int(m.group('eid'),16))
         proc = state.get_processor(int(m.group('proc'),16))
         inst.set_creator(int(m.group('uid')), proc)
         return True
     m = instance_creator_region_pat.match(line)
     if m is not None:
-        inst = state.get_instance(int(m.group('iid'),16))
+        inst = state.get_instance(int(m.group('eid'),16))
         region = state.get_region(int(m.group('ispace')), 
             int(m.group('fspace')), int(m.group('tid')))
         inst.add_creator_region(region)
         return True
     m = specialized_constraint_pat.match(line)
     if m is not None:
-        inst = state.get_instance(int(m.group('iid'),16))
+        inst = state.get_instance(int(m.group('eid'),16))
         inst.set_specialized_constraint(int(m.group('kind')),
                                         int(m.group('redop')))
         return True
     m = memory_constraint_pat.match(line)
     if m is not None:
-        inst = state.get_instance(int(m.group('iid'),16))
+        inst = state.get_instance(int(m.group('eid'),16))
         inst.set_memory_constraint(int(m.group('kind')))
         return True
     m = field_constraint_pat.match(line)
     if m is not None:
-        inst = state.get_instance(int(m.group('iid'),16))
+        inst = state.get_instance(int(m.group('eid'),16))
         inst.set_field_constraint(int(m.group('contig')), 
             int(m.group('inorder')), int(m.group('fields')))
         return True
     m = field_constraint_field_pat.match(line)
     if m is not None:
-        inst = state.get_instance(int(m.group('iid'),16))
+        inst = state.get_instance(int(m.group('eid'),16))
         inst.add_field_constraint_field(int(m.group('fid')))
         return True
     m = ordering_constraint_pat.match(line)
     if m is not None:
-        inst = state.get_instance(int(m.group('iid'),16))
+        inst = state.get_instance(int(m.group('eid'),16))
         inst.set_ordering_constraint(int(m.group('contig')), 
                                      int(m.group('dims')))
         return True
     m = ordering_constraint_dim_pat.match(line)
     if m is not None:
-        inst = state.get_instance(int(m.group('iid'),16))
+        inst = state.get_instance(int(m.group('eid'),16))
         inst.add_ordering_constraint_dim(int(m.group('dim')))
         return True
     m = splitting_constraint_pat.match(line)
     if m is not None:
-        inst = state.get_instance(int(m.group('iid'),16))
+        inst = state.get_instance(int(m.group('eid'),16))
         inst.add_splitting_constraint(int(m.group('dim')),
             int(m.group('value')), int(m.group('chunks')))
         return True
     m = dimension_constraint_pat.match(line)
     if m is not None:
-        inst = state.get_instance(int(m.group('iid'),16))
+        inst = state.get_instance(int(m.group('eid'),16))
         inst.add_dimesion_constraint(int(m.group('dim')),
             int(m.group('eqk')), int(m.group('value')))
         return True
     m = alignment_constraint_pat.match(line)
     if m is not None:
-        inst = state.get_instance(int(m.group('iid'),16))
+        inst = state.get_instance(int(m.group('eid'),16))
         inst.add_alignment_constraint(int(m.group('fid')),
             int(m.group('eqk')), int(m.group('align')))
         return True
     m = offset_constraint_pat.match(line)
     if m is not None:
-        inst = state.get_instance(int(m.group('iid'),16))
+        inst = state.get_instance(int(m.group('eid'),16))
         inst.add_offset_constraint(int(m.group('fid')),
             int(m.group('offset')))
         return True
@@ -9217,14 +9227,14 @@ def parse_legion_spy_line(line, state):
     m = mapping_decision_pat.match(line)
     if m is not None:
         op = state.get_operation(int(m.group('uid')))
-        inst = state.get_instance(int(m.group('iid'),16))
+        inst = state.get_instance(int(m.group('eid'),16))
         op.add_mapping_decision(int(m.group('idx')),
             int(m.group('fid')), inst)
         return True
     m = post_decision_pat.match(line)
     if m is not None:
         task = state.get_task(int(m.group('uid')))
-        inst = state.get_instance(int(m.group('iid'),16))
+        inst = state.get_instance(int(m.group('eid'),16))
         task.add_postmapping(int(m.group('idx')),
             int(m.group('fid')), inst)
         return True
@@ -9247,7 +9257,7 @@ def parse_legion_spy_line(line, state):
     m = temporary_decision_pat.match(line)
     if m is not None:
         op = state.get_operation(int(m.group('uid')))
-        inst = state.get_instance(int(m.group('iid'),16))
+        inst = state.get_instance(int(m.group('eid'),16))
         op.add_temporary_instance(int(m.group('idx')),
             int(m.group('fid')), inst)
         return True
@@ -10385,11 +10395,11 @@ class State(object):
         self.projection_functions[pid] = result
         return result
 
-    def get_instance(self, iid):
-        if iid in self.instances:
-            return self.instances[iid]
-        result = Instance(self, iid)
-        self.instances[iid] = result
+    def get_instance(self, eid):
+        if eid in self.instances:
+            return self.instances[eid]
+        result = Instance(self, eid)
+        self.instances[eid] = result
         return result
 
     def get_event(self, iid):

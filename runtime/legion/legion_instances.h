@@ -54,15 +54,15 @@ namespace Legion {
     public:
       LayoutDescription& operator=(const LayoutDescription &rhs);
     public:
-      void log_instance_layout(PhysicalInstance inst) const;
+      void log_instance_layout(ApEvent inst_event) const;
     public:
       void compute_copy_offsets(const FieldMask &copy_mask, 
-                                PhysicalInstance inst,
+                                PhysicalManager *manager,
                                 std::vector<CopySrcDstField> &fields);
-      void compute_copy_offsets(FieldID copy_field, PhysicalInstance inst,
+      void compute_copy_offsets(FieldID copy_field, PhysicalManager *manager,
                                 std::vector<CopySrcDstField> &fields);
       void compute_copy_offsets(const std::vector<FieldID> &copy_fields,
-                                PhysicalInstance inst,
+                                PhysicalManager *manager,
                                 std::vector<CopySrcDstField> &fields);
     public:
       void get_fields(std::set<FieldID> &fields) const;
@@ -138,6 +138,7 @@ namespace Legion {
       inline ListReductionManager* as_list_manager(void) const;
       inline VirtualManager* as_virtual_manager(void) const;
     public:
+      virtual ApEvent get_use_event(void) const = 0;
       virtual size_t get_instance_size(void) const = 0;
       virtual void notify_active(ReferenceMutator *mutator);
       virtual void notify_inactive(ReferenceMutator *mutator);
@@ -267,7 +268,7 @@ namespace Legion {
     public:
       virtual size_t get_instance_size(void) const;
     public:
-      inline ApEvent get_use_event(void) const { return use_event; }
+      virtual ApEvent get_use_event(void) const { return use_event; }
       inline Reservation get_read_only_mapping_reservation(void) const
         { return read_only_mapping_reservation; }
     public:
@@ -309,7 +310,8 @@ namespace Legion {
                        const PointerConstraint &constraint,
                        IndexSpaceNode *inst_domain, bool own_domain,
                        RegionNode *region_node, ReductionOpID redop, 
-                       const ReductionOp *op, bool register_now);
+                       const ReductionOp *op, ApEvent use_event,
+                       bool register_now);
       virtual ~ReductionManager(void);
     public:
       virtual LegionRuntime::Accessor::RegionAccessor<
@@ -332,7 +334,7 @@ namespace Legion {
           RegionTreeNode *intersect) = 0;
       virtual Domain get_pointer_space(void) const = 0;
     public:
-      virtual ApEvent get_use_event(void) const = 0;
+      virtual ApEvent get_use_event(void) const { return use_event; }
     public:
       virtual void send_manager(AddressSpaceID target);
     public:
@@ -350,6 +352,7 @@ namespace Legion {
     public:
       const ReductionOp *const op;
       const ReductionOpID redop;
+      const ApEvent use_event;
     protected:
       Reservation manager_lock;
 #if 0
@@ -377,7 +380,7 @@ namespace Legion {
                            IndexSpaceNode *inst_domain, bool own_domain,
                            RegionNode *node, ReductionOpID redop, 
                            const ReductionOp *op, Domain dom,
-                           bool register_now);
+                           ApEvent use_event, bool register_now);
       ListReductionManager(const ListReductionManager &rhs);
       virtual ~ListReductionManager(void);
     public:
@@ -400,8 +403,6 @@ namespace Legion {
           RegionTreeNode *dst, ApEvent precondition, PredEvent pred_guard,
           bool reduction_fold, bool precise_domain, RegionTreeNode *intersect);
       virtual Domain get_pointer_space(void) const;
-    public:
-      virtual ApEvent get_use_event(void) const;
     protected:
       const Domain ptr_space;
     };
@@ -447,8 +448,6 @@ namespace Legion {
           bool reduction_fold, bool precise_domain, RegionTreeNode *intersect);
       virtual Domain get_pointer_space(void) const;
     public:
-      virtual ApEvent get_use_event(void) const;
-    public:
       const ApEvent use_event;
     };
 
@@ -475,6 +474,7 @@ namespace Legion {
         LegionRuntime::Accessor::AccessorType::Generic>
           get_field_accessor(FieldID fid) const;
     public: 
+      virtual ApEvent get_use_event(void) const;
       virtual size_t get_instance_size(void) const;
       virtual void send_manager(AddressSpaceID target);
       virtual InstanceView* create_instance_top_view(InnerContext *context,

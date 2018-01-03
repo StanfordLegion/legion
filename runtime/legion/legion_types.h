@@ -1607,7 +1607,6 @@ namespace Legion {
     const LegionColor INVALID_COLOR = LLONG_MAX;
     // This is only needed internally
     typedef Realm::RegionInstance PhysicalInstance;
-    typedef Realm::CopySrcDstField CopySrcDstField;
     // Helper for encoding templates
     struct NT_TemplateHelper : 
       public Realm::DynamicTemplates::ListProduct2<Realm::DIMCOUNTS, 
@@ -1917,6 +1916,18 @@ namespace Legion {
   public:
     Realm::Barrier::timestamp_t timestamp;
   }; 
+
+  namespace Internal {
+#ifdef LEGION_SPY
+    // Need a custom version of these for Legion Spy to track instance events
+    struct CopySrcDstField : public Realm::CopySrcDstField {
+    public:
+      ApEvent inst_event;
+    };
+#else
+    typedef Realm::CopySrcDstField CopySrcDstField;
+#endif
+  }; // Internal namespace
   
   // A class for preventing serialization of Legion objects
   // which cannot be serialized

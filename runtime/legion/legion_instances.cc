@@ -181,7 +181,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LayoutDescription::log_instance_layout(PhysicalInstance inst) const
+    void LayoutDescription::log_instance_layout(ApEvent inst_event) const
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -191,12 +191,12 @@ namespace Legion {
       owner->get_field_ids(allocated_fields, fields);
       for (std::vector<FieldID>::const_iterator it = fields.begin();
             it != fields.end(); it++)
-        LegionSpy::log_physical_instance_field(inst.id, *it);
+        LegionSpy::log_physical_instance_field(inst_event, *it);
     }
 
     //--------------------------------------------------------------------------
     void LayoutDescription::compute_copy_offsets(const FieldMask &copy_mask,
-                                                 PhysicalInstance instance,
+                                                 PhysicalManager *manager,
                                            std::vector<CopySrcDstField> &fields)
     //--------------------------------------------------------------------------
     {
@@ -244,6 +244,10 @@ namespace Legion {
       unsigned offset = fields.size();
       fields.resize(offset + pop_count);
       int next_start = 0;
+      const PhysicalInstance instance = manager->instance;
+#ifdef LEGION_SPY
+      const ApEvent inst_event = manager->get_use_event();
+#endif
       for (int idx = 0; idx < pop_count; idx++)
       {
         int index = compressed.find_next_set(next_start);
@@ -253,12 +257,15 @@ namespace Legion {
         field.inst = instance;
         // We'll start looking again at the next index after this one
         next_start = index + 1;
+#ifdef LEGION_SPY
+        field.inst_event = inst_event;
+#endif
       }
     } 
 
     //--------------------------------------------------------------------------
     void LayoutDescription::compute_copy_offsets(FieldID fid, 
-                PhysicalInstance instance, std::vector<CopySrcDstField> &fields)
+                 PhysicalManager *manager, std::vector<CopySrcDstField> &fields)
     //--------------------------------------------------------------------------
     {
       std::map<FieldID,unsigned>::const_iterator finder = 
@@ -269,18 +276,25 @@ namespace Legion {
       fields.push_back(field_infos[finder->second]);
       // Since instances are annonymous in layout descriptions we
       // have to fill them in when we add the field info
-      fields.back().inst = instance;
+      fields.back().inst = manager->instance;
+#ifdef LEGION_SPY
+      fields.back().inst_event = manager->get_use_event();
+#endif
     }
 
     //--------------------------------------------------------------------------
     void LayoutDescription::compute_copy_offsets(
                                    const std::vector<FieldID> &copy_fields, 
-                                   PhysicalInstance instance,
+                                   PhysicalManager *manager,
                                    std::vector<CopySrcDstField> &fields)
     //--------------------------------------------------------------------------
     {
       unsigned offset = fields.size();
       fields.resize(offset + copy_fields.size());
+      const PhysicalInstance instance = manager->instance;
+#ifdef LEGION_SPY
+      const ApEvent inst_event = manager->get_use_event();
+#endif
       for (unsigned idx = 0; idx < copy_fields.size(); idx++)
       {
         std::map<FieldID,unsigned>::const_iterator
@@ -293,6 +307,9 @@ namespace Legion {
         // Since instances are annonymous in layout descriptions we
         // have to fill them in when we add the field info
         info.inst = instance;
+#ifdef LEGION_SPY
+        info.inst_event = inst_event;
+#endif
       }
     }
 
@@ -534,54 +551,55 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(Runtime::legion_spy_enabled);
 #endif
-      LegionSpy::log_physical_instance_creator(instance.id, creator_id,proc.id);
+      const ApEvent inst_event = get_use_event();
+      LegionSpy::log_physical_instance_creator(inst_event, creator_id, proc.id);
       for (unsigned idx = 0; idx < regions.size(); idx++)
-        LegionSpy::log_physical_instance_creation_region(instance.id, 
+        LegionSpy::log_physical_instance_creation_region(inst_event, 
                                                          regions[idx]);
       const LayoutConstraints *constraints = layout->constraints;
-      LegionSpy::log_instance_specialized_constraint(instance.id,
+      LegionSpy::log_instance_specialized_constraint(inst_event,
           constraints->specialized_constraint.kind, 
           constraints->specialized_constraint.redop);
 #ifdef DEBUG_HIGH_LEVEL
       assert(constraints->memory_constraint.has_kind);
 #endif
       if (constraints->memory_constraint.is_valid())
-        LegionSpy::log_instance_memory_constraint(instance.id,
+        LegionSpy::log_instance_memory_constraint(inst_event,
             constraints->memory_constraint.kind);
-      LegionSpy::log_instance_field_constraint(instance.id,
+      LegionSpy::log_instance_field_constraint(inst_event,
           constraints->field_constraint.contiguous, 
           constraints->field_constraint.inorder,
           constraints->field_constraint.field_set.size());
       for (std::vector<FieldID>::const_iterator it = 
             constraints->field_constraint.field_set.begin(); it !=
             constraints->field_constraint.field_set.end(); it++)
-        LegionSpy::log_instance_field_constraint_field(instance.id, *it);
-      LegionSpy::log_instance_ordering_constraint(instance.id,
+        LegionSpy::log_instance_field_constraint_field(inst_event, *it);
+      LegionSpy::log_instance_ordering_constraint(inst_event,
           constraints->ordering_constraint.contiguous,
           constraints->ordering_constraint.ordering.size());
       for (std::vector<DimensionKind>::const_iterator it = 
             constraints->ordering_constraint.ordering.begin(); it !=
             constraints->ordering_constraint.ordering.end(); it++)
-        LegionSpy::log_instance_ordering_constraint_dimension(instance.id, *it);
+        LegionSpy::log_instance_ordering_constraint_dimension(inst_event, *it);
       for (std::vector<SplittingConstraint>::const_iterator it = 
             constraints->splitting_constraints.begin(); it !=
             constraints->splitting_constraints.end(); it++)
-        LegionSpy::log_instance_splitting_constraint(instance.id,
+        LegionSpy::log_instance_splitting_constraint(inst_event,
                                 it->kind, it->value, it->chunks);
       for (std::vector<DimensionConstraint>::const_iterator it = 
             constraints->dimension_constraints.begin(); it !=
             constraints->dimension_constraints.end(); it++)
-        LegionSpy::log_instance_dimension_constraint(instance.id,
+        LegionSpy::log_instance_dimension_constraint(inst_event,
                                     it->kind, it->eqk, it->value);
       for (std::vector<AlignmentConstraint>::const_iterator it = 
             constraints->alignment_constraints.begin(); it !=
             constraints->alignment_constraints.end(); it++)
-        LegionSpy::log_instance_alignment_constraint(instance.id,
+        LegionSpy::log_instance_alignment_constraint(inst_event,
                                 it->fid, it->eqk, it->alignment);
       for (std::vector<OffsetConstraint>::const_iterator it = 
             constraints->offset_constraints.begin(); it != 
             constraints->offset_constraints.end(); it++)
-        LegionSpy::log_instance_offset_constraint(instance.id,
+        LegionSpy::log_instance_offset_constraint(inst_event,
                                           it->fid, it->offset);
     }
 
@@ -958,7 +976,7 @@ namespace Legion {
       : PhysicalManager(ctx, mem, desc, constraint, 
                         encode_instance_did(did, external_instance), 
                         owner_space, node, inst, instance_domain, 
-                        own, register_now),use_event(u_event),
+                        own, register_now), use_event(u_event),
                         read_only_mapping_reservation(read_only_reservation)
     //--------------------------------------------------------------------------
     {
@@ -974,9 +992,12 @@ namespace Legion {
 #endif
       if (Runtime::legion_spy_enabled)
       {
-        LegionSpy::log_physical_instance(inst.id, mem->memory.id, 0);
-        LegionSpy::log_physical_instance_region(inst.id, region_node->handle);
-        layout->log_instance_layout(inst);
+#ifdef DEBUG_LEGION
+        assert(use_event.exists());
+#endif
+        LegionSpy::log_physical_instance(use_event, inst.id, mem->memory.id, 0);
+        LegionSpy::log_physical_instance_region(use_event, region_node->handle);
+        layout->log_instance_layout(use_event);
       }
     }
 
@@ -1081,7 +1102,7 @@ namespace Legion {
       assert(layout != NULL);
 #endif
       // Pass in our physical instance so the layout knows how to specialize
-      layout->compute_copy_offsets(copy_mask, instance, fields);
+      layout->compute_copy_offsets(copy_mask, this, fields);
     }
 
     //--------------------------------------------------------------------------
@@ -1093,7 +1114,7 @@ namespace Legion {
       assert(layout != NULL);
 #endif
       // Pass in our physical instance so the layout knows how to specialize
-      layout->compute_copy_offsets(fid, instance, fields);
+      layout->compute_copy_offsets(fid, this, fields);
     }
 
     //--------------------------------------------------------------------------
@@ -1106,7 +1127,7 @@ namespace Legion {
       assert(layout != NULL);
 #endif
       // Pass in our physical instance so the layout knows how to specialize
-      layout->compute_copy_offsets(copy_fields, instance, fields);
+      layout->compute_copy_offsets(copy_fields, this, fields);
     }
 
     //--------------------------------------------------------------------------
@@ -1120,7 +1141,7 @@ namespace Legion {
       assert(src_indexes.size() == dst_indexes.size());
 #endif
       std::vector<CopySrcDstField> dst_fields;
-      layout->compute_copy_offsets(dst_mask, instance, dst_fields);
+      layout->compute_copy_offsets(dst_mask, this, dst_fields);
 #ifdef DEBUG_LEGION
       assert(dst_fields.size() == dst_indexes.size());
 #endif
@@ -1241,17 +1262,23 @@ namespace Legion {
                                        const PointerConstraint &constraint,
                                        IndexSpaceNode *inst_domain,bool own_dom,
                                        RegionNode *node, ReductionOpID red, 
-                                       const ReductionOp *o, bool register_now)
+                                       const ReductionOp *o, ApEvent u_event,
+                                       bool register_now)
       : PhysicalManager(ctx, mem, desc, constraint, did, owner_space, 
                         node, inst, inst_domain, own_dom, register_now),
-        op(o), redop(red), manager_lock(Reservation::create_reservation())
+        op(o), redop(red), use_event(u_event),
+        manager_lock(Reservation::create_reservation())
     //--------------------------------------------------------------------------
     {  
       if (Runtime::legion_spy_enabled)
       {
-        LegionSpy::log_physical_instance(inst.id, mem->memory.id, redop);
-        LegionSpy::log_physical_instance_region(inst.id, region_node->handle);
-        layout->log_instance_layout(inst);
+#ifdef DEBUG_LEGION
+        assert(use_event.exists());
+#endif
+        LegionSpy::log_physical_instance(use_event, inst.id, 
+                                         mem->memory.id, redop);
+        LegionSpy::log_physical_instance_region(use_event, region_node->handle);
+        layout->log_instance_layout(use_event);
       }
     }
 
@@ -1291,7 +1318,7 @@ namespace Legion {
         rez.serialize(region_node->handle);
         rez.serialize<bool>(is_foldable());
         rez.serialize(get_pointer_space());
-        rez.serialize(get_use_event());
+        rez.serialize(use_event);
         layout->pack_layout_description(rez, target);
         pointer_constraint.serialize(rez);
       }
@@ -1365,14 +1392,14 @@ namespace Legion {
                                                    pointer_constraint, 
                                                    inst_dom, false/*owner*/,
                                                    target_node, redop, op,
-                                                   ptr_space,
+                                                   ptr_space, use_event,
                                                    false/*reg now*/);
         else
           man = new ListReductionManager(runtime->forest, did, 
                                          owner_space, memory, inst,
                                          layout, pointer_constraint, inst_dom,
                                          false/*own*/, target_node, redop,op,
-                                         ptr_space, false/*reg now*/);
+                                         ptr_space, use_event,false/*reg now*/);
       }
       man->register_with_runtime(NULL/*no remote registration needed*/);
     }
@@ -1525,11 +1552,11 @@ namespace Legion {
                                                RegionNode *node,
                                                ReductionOpID red,
                                                const ReductionOp *o, 
-                                               Domain dom, 
+                                               Domain dom, ApEvent use_event, 
                                                bool register_now)
       : ReductionManager(ctx, encode_reduction_list_did(did), owner_space, 
                          mem, inst, desc, cons, d, own_dom, node, 
-                         red, o, register_now), ptr_space(dom)
+                         red, o, use_event, register_now), ptr_space(dom)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -1551,7 +1578,7 @@ namespace Legion {
     ListReductionManager::ListReductionManager(const ListReductionManager &rhs)
       : ReductionManager(NULL, 0, 0, NULL,
                          PhysicalInstance::NO_INST, NULL,rhs.pointer_constraint,
-                         NULL, false, NULL, 0, NULL, false),
+                         NULL, false, NULL, 0, NULL,ApEvent::NO_AP_EVENT,false),
         ptr_space(Domain::NO_DOMAIN)
     //--------------------------------------------------------------------------
     {
@@ -1646,13 +1673,6 @@ namespace Legion {
       return ptr_space;
     }
 
-    //--------------------------------------------------------------------------
-    ApEvent ListReductionManager::get_use_event(void) const
-    //--------------------------------------------------------------------------
-    {
-      return ApEvent::NO_AP_EVENT;
-    }
-
     /////////////////////////////////////////////////////////////
     // FoldReductionManager 
     /////////////////////////////////////////////////////////////
@@ -1673,7 +1693,7 @@ namespace Legion {
                                                bool register_now)
       : ReductionManager(ctx, encode_reduction_fold_did(did), owner_space, 
                          mem, inst, desc, cons, d, own_dom, node, 
-                         red, o, register_now), use_event(u_event)
+                         red, o, u_event, register_now)
     //--------------------------------------------------------------------------
     {
       if (!is_owner())
@@ -1692,8 +1712,7 @@ namespace Legion {
     FoldReductionManager::FoldReductionManager(const FoldReductionManager &rhs)
       : ReductionManager(NULL, 0, 0, NULL,
                          PhysicalInstance::NO_INST, NULL,rhs.pointer_constraint,
-                         NULL, false, NULL, 0, NULL, false),
-        use_event(ApEvent::NO_AP_EVENT)
+                         NULL, false, NULL, 0, NULL, ApEvent::NO_AP_EVENT,false)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -1771,7 +1790,7 @@ namespace Legion {
       assert(instance.exists());
       assert(layout != NULL);
 #endif
-      layout->compute_copy_offsets(reduce_mask, instance, fields);
+      layout->compute_copy_offsets(reduce_mask, this, fields);
     }
 
     //--------------------------------------------------------------------------
@@ -1795,13 +1814,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return Domain::NO_DOMAIN;
-    }
-
-    //--------------------------------------------------------------------------
-    ApEvent FoldReductionManager::get_use_event(void) const
-    //--------------------------------------------------------------------------
-    {
-      return use_event;
     }
 
     /////////////////////////////////////////////////////////////
@@ -1866,6 +1878,13 @@ namespace Legion {
       // should never be called
       assert(false);
       return PhysicalInstance::NO_INST.get_accessor();
+    }
+
+    //--------------------------------------------------------------------------
+    ApEvent VirtualManager::get_use_event(void) const
+    //--------------------------------------------------------------------------
+    {
+      return ApEvent::NO_AP_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -2007,6 +2026,14 @@ namespace Legion {
       // If we couldn't make it then we are done
       if (!instance.exists())
         return NULL;
+      // For Legion Spy we need a unique ready event if it doesn't already
+      // exist so we can uniquely identify the instance
+      if (!ready.exists() && Runtime::legion_spy_enabled)
+      {
+        ApUserEvent rename_ready = Runtime::create_ap_user_event();
+        Runtime::trigger_event(rename_ready);
+        ready = rename_ready;
+      }
       // If we successfully made the instance then Realm 
       // took over ownership of the layout
       own_realm_layout = false;
@@ -2074,6 +2101,15 @@ namespace Legion {
                             "Illegal request for a reduction instance "
                             "containing multiple fields. Only a single field "
                             "is currently permitted for reduction instances.")
+            ApUserEvent filled_and_ready = Runtime::create_ap_user_event();
+            result = new FoldReductionManager(forest, did, local_space,
+                                              memory_manager, 
+                                              instance, layout, 
+                                              pointer_constraint, 
+                                              instance_domain, own_domain,
+                                              ancestor, redop_id,
+                                              reduction_op, filled_and_ready,
+                                              true/*register now*/);
             // Before we can actually use this instance, we have to 
             // initialize it with a fill operation of the proper value
             // Don't record this fill operation because it is just part
@@ -2085,26 +2121,26 @@ namespace Legion {
             {
               const std::vector<FieldID> &fill_fields = 
                 constraints.field_constraint.get_field_set();
-              layout->compute_copy_offsets(fill_fields, instance, dsts);
+              layout->compute_copy_offsets(fill_fields, result, dsts);
             }
-            ApEvent filled_and_ready =
+#ifdef LEGION_SPY
+            std::vector<Realm::CopySrcDstField> realm_dsts(dsts.size());
+            for (unsigned idx = 0; idx < dsts.size(); idx++)
+              realm_dsts[idx] = dsts[idx];
+            ApEvent filled =
+              instance_domain->issue_fill(NULL/*op*/, realm_dsts, fill_buffer,
+                                          reduction_op->sizeof_rhs, ready,
+                                          PredEvent::NO_PRED_EVENT);
+#else
+            ApEvent filled =
               instance_domain->issue_fill(NULL/*op*/, dsts, fill_buffer,
                                           reduction_op->sizeof_rhs, ready,
-                                          PredEvent::NO_PRED_EVENT
-#ifdef LEGION_SPY
-                                          , 0/*fill uid*/
+                                          PredEvent::NO_PRED_EVENT);
 #endif
-                                          );
             // We can free the buffer after we've issued the fill
             free(fill_buffer);
-            result = new FoldReductionManager(forest, did, local_space,
-                                              memory_manager, 
-                                              instance, layout, 
-                                              pointer_constraint, 
-                                              instance_domain, own_domain,
-                                              ancestor, redop_id,
-                                              reduction_op, filled_and_ready,
-                                              true/*register now*/); 
+            // Trigger our filled_and_ready event
+            Runtime::trigger_event(filled_and_ready, filled);
             break;
           }
         case REDUCTION_LIST_SPECIALIZE:
