@@ -344,6 +344,13 @@ namespace Realm {
 	  const size_t chunk_size = 8;
 	  size_t old_size = local_instances.instances.size();
 	  size_t new_size = old_size + chunk_size;
+	  if(new_size > (1 << ID::INSTANCE_INDEX_WIDTH)) {
+	    new_size = (1 << ID::INSTANCE_INDEX_WIDTH);
+	    if(old_size == new_size) {
+	      // completely out of slots - nothing we can do
+	      return 0;
+	    }
+	  }
 	  local_instances.instances.resize(new_size, 0);
 	  local_instances.free_list.resize(chunk_size - 1);
 	  for(size_t i = 0; i < chunk_size - 1; i++)
@@ -375,6 +382,18 @@ namespace Realm {
 	log_inst.info() << "reusing local instance: " << inst_impl->me;
 
       return inst_impl;
+    }
+
+    // releases a deleted instance so that it can be reused
+    void MemoryImpl::release_instance(RegionInstance inst)
+    {
+      int inst_idx = ID(inst).instance.inst_idx;
+
+      log_inst.info() << "releasing local instance: " << inst;
+      {
+	AutoHSLLock al(local_instances.mutex);
+	local_instances.free_list.push_back(inst_idx);
+      }
     }
 
     // attempt to allocate storage for the specified instance

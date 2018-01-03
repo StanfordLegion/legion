@@ -56,6 +56,7 @@ namespace Realm {
       static const int NODE_FIELD_WIDTH = 16;
       static const unsigned MAX_NODE_ID = (1U << NODE_FIELD_WIDTH) - 2; // reserve all 1's for special cases
       static const int EVENT_GENERATION_WIDTH = 20;
+      static const int INSTANCE_INDEX_WIDTH = 16;
 
       struct FMT_Event {
 #ifdef REALM_REVERSE_ID_FIELDS
@@ -138,9 +139,9 @@ namespace Realm {
 	IDType owner_node : 16;
 	IDType creator_node : 16;
 	IDType mem_idx : 12;
-	IDType inst_idx : 16;
+	IDType inst_idx : INSTANCE_INDEX_WIDTH;
 #else
-	IDType inst_idx : 16;
+	IDType inst_idx : INSTANCE_INDEX_WIDTH;
 	IDType mem_idx : 12;
 	IDType creator_node : 16;
 	IDType owner_node : 16;

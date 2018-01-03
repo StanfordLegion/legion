@@ -95,6 +95,9 @@ namespace Realm {
       // adds a new instance to this memory, to be filled in by caller
       RegionInstanceImpl *new_instance(void);
 
+      // releases a deleted instance so that it can be reused
+      void release_instance(RegionInstance inst);
+      
       // attempt to allocate storage for the specified instance
       virtual bool allocate_instance_storage(RegionInstance i,
 					     size_t bytes, size_t alignment,

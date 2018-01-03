@@ -401,6 +401,8 @@ namespace Realm {
     if(id.is_instance()) {
       RegionInstanceImpl *impl = get_runtime()->get_instance_impl(args.id);
       last_ack = impl->metadata.handle_inval_ack(args.node);
+      if(last_ack)
+	impl->recycle_instance();
     } else {
       assert(0);
     }

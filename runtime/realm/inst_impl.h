@@ -64,7 +64,8 @@ namespace Realm {
 
       Event request_metadata(void) { return metadata.request_data(ID(me).instance.creator_node, me.id); }
 
-      void finalize_instance(void);
+      // called once storage has been released and all remote metadata is invalidated
+      void recycle_instance(void);
 
     public: //protected:
       friend class RegionInstance;
