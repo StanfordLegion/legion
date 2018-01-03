@@ -612,7 +612,6 @@ namespace Legion {
 #endif
       log_garbage.spew("Force deleting physical instance " IDFMT " in memory "
                        IDFMT "", instance.id, memory_manager->memory.id);
-      // Can still delete Legion Spy instances here since we're shutting down
 #ifndef DISABLE_GC
       std::vector<PhysicalInstance::DestroyedField> serdez_fields;
       layout->compute_destroyed_fields(serdez_fields); 
