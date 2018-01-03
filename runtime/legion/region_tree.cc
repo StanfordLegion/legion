@@ -2983,27 +2983,15 @@ namespace Legion {
         PhysicalManager *manager = inst.get_manager();
         std::vector<FieldID> valid_fields;
         node->get_field_ids(valid_mask, valid_fields);
-        if (manager->is_virtual_manager())
+        for (std::vector<FieldID>::const_iterator it = valid_fields.begin();
+              it != valid_fields.end(); it++)
         {
-#ifdef DEBUG_LEGION
-          assert(!postmapping);
-#endif
-          for (std::vector<FieldID>::const_iterator it = valid_fields.begin();
-                it != valid_fields.end(); it++)
-            LegionSpy::log_mapping_decision(uid, index, *it, 0/*iid*/);
-        }
-        else
-        {
-          for (std::vector<FieldID>::const_iterator it = valid_fields.begin();
-                it != valid_fields.end(); it++)
-          {
-            if (postmapping)
-              LegionSpy::log_post_mapping_decision(uid, index, *it,
-                                                   manager->instance.id);
-            else
-              LegionSpy::log_mapping_decision(uid, index, *it,
-                                              manager->instance.id);
-          }
+          if (postmapping)
+            LegionSpy::log_post_mapping_decision(uid, index, *it,
+                                                 manager->get_use_event());
+          else
+            LegionSpy::log_mapping_decision(uid, index, *it,
+                                            manager->get_use_event());
         }
       }
     }
@@ -14179,18 +14167,25 @@ namespace Legion {
                         ReductionOpID redop /*=0*/,bool reduction_fold/*=true*/)
     //--------------------------------------------------------------------------
     {
-      ApEvent result = row_source->issue_copy(op, src_fields, dst_fields,
-          precondition, predicate_guard, 
+#ifdef LEGION_SPY
+      // Have to convert back to Realm structures because C++ is dumb  
+      std::vector<Realm::CopySrcDstField> realm_src_fields(src_fields.size());
+      for (unsigned idx = 0; idx < src_fields.size(); idx++)
+        realm_src_fields[idx] = src_fields[idx];
+      std::vector<Realm::CopySrcDstField> realm_dst_fields(dst_fields.size());
+      for (unsigned idx = 0; idx < dst_fields.size(); idx++)
+        realm_dst_fields[idx] = dst_fields[idx];
+      ApEvent result = row_source->issue_copy(op, realm_src_fields, 
+          realm_dst_fields, precondition, predicate_guard, 
           (intersect == NULL) ? NULL : intersect->get_row_source(),
           redop, reduction_fold);
-#ifdef LEGION_SPY
       LegionSpy::log_copy_events(op->get_unique_op_id(), handle, 
                                  precondition, result);
       for (unsigned idx = 0; idx < src_fields.size(); idx++)
         LegionSpy::log_copy_field(result, src_fields[idx].field_id,
-                                  src_fields[idx].inst.id,
+                                  src_fields[idx].inst_event,
                                   dst_fields[idx].field_id,
-                                  dst_fields[idx].inst.id, redop);
+                                  dst_fields[idx].inst_event, redop);
       if (intersect != NULL)
       {
         if (intersect->is_region())
@@ -14207,8 +14202,13 @@ namespace Legion {
               node->handle.field_space.id, node->handle.tree_id);
         }
       }
-#endif
       return result;
+#else
+      return row_source->issue_copy(op, src_fields, dst_fields,
+          precondition, predicate_guard, 
+          (intersect == NULL) ? NULL : intersect->get_row_source(),
+          redop, reduction_fold);
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -14222,15 +14222,20 @@ namespace Legion {
                         RegionTreeNode *intersect)
     //--------------------------------------------------------------------------
     {
-      ApEvent result = row_source->issue_fill(op, dst_fields,
+      
+#ifdef LEGION_SPY
+      // Have to convert back to Realm data structures because C++ is dumb
+      std::vector<Realm::CopySrcDstField> realm_dst_fields(dst_fields.size());
+      for (unsigned idx = 0; idx < dst_fields.size(); idx++)
+        realm_dst_fields[idx] = dst_fields[idx];
+      ApEvent result = row_source->issue_fill(op, realm_dst_fields,
           fill_value, fill_size, precondition, predicate_guard,
           (intersect == NULL) ? NULL : intersect->get_row_source());
-#ifdef LEGION_SPY
       LegionSpy::log_fill_events(op->get_unique_op_id(), handle, 
                                  precondition, result, fill_uid);
       for (unsigned idx = 0; idx < dst_fields.size(); idx++)
         LegionSpy::log_fill_field(result, dst_fields[idx].field_id,
-                                  dst_fields[idx].inst.id);
+                                  dst_fields[idx].inst_event);
       if (intersect != NULL)
       {
         if (intersect->is_region())
@@ -14247,8 +14252,12 @@ namespace Legion {
               node->handle.field_space.id, node->handle.tree_id);
         }
       }
-#endif
       return result;
+#else
+      return row_source->issue_fill(op, dst_fields,
+          fill_value, fill_size, precondition, predicate_guard,
+          (intersect == NULL) ? NULL : intersect->get_row_source());
+#endif
     }
 
     //--------------------------------------------------------------------------

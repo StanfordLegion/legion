@@ -625,7 +625,7 @@ namespace Legion {
             it != fields.end(); it++)
       {
         LegionSpy::log_temporary_instance(unique_op_id, index, 
-                                          *it, result->instance.id);
+                                          *it, result->get_use_event());
       }
     }
 
@@ -7922,7 +7922,8 @@ namespace Legion {
         for (std::set<FieldID>::const_iterator it = 
               requirement.privilege_fields.begin(); it !=
               requirement.privilege_fields.end(); it++)
-          LegionSpy::log_mapping_decision(unique_op_id, 0/*idx*/, *it,0/*iid*/);
+          LegionSpy::log_mapping_decision(unique_op_id, 0/*idx*/, *it,
+                                          ApEvent::NO_AP_EVENT/*inst event*/);
       }
     }
     
@@ -14301,15 +14302,20 @@ namespace Legion {
         default:
           assert(false);
       }
-#ifdef DEBUG_LEGION
-      assert(result.exists());
-#endif      
       if (Runtime::legion_spy_enabled)
       {
+        // We always need a unique ready event for Legion Spy
+        if (!ready_event.exists())
+        {
+          ApUserEvent rename_ready = Runtime::create_ap_user_event();
+          Runtime::trigger_event(rename_ready);
+          ready_event = rename_ready;
+        }
         for (std::set<FieldID>::const_iterator it = 
               requirement.privilege_fields.begin(); it !=
               requirement.privilege_fields.end(); it++)
-          LegionSpy::log_mapping_decision(unique_op_id,0/*idx*/,*it,result.id);
+          LegionSpy::log_mapping_decision(unique_op_id, 0/*idx*/, 
+                                          *it, ready_event);
       }
       return result;
     }

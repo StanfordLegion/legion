@@ -540,109 +540,112 @@ namespace Legion {
       }
 
       // Logger call for physical instances
-      static inline void log_physical_instance(IDType inst_id, IDType mem_id,
+      static inline void log_physical_instance(ApEvent inst_event,
+                                               IDType inst_id, IDType mem_id,
                                                ReductionOpID redop)
       {
-        log_spy.print("Physical Instance " IDFMT " " IDFMT " %d", 
-		      inst_id, mem_id, redop);
+        log_spy.print("Physical Instance " IDFMT " " IDFMT " " IDFMT " %d", 
+		      inst_event.id, inst_id, mem_id, redop);
       }
 
-      static inline void log_physical_instance_region(IDType inst_id, 
+      static inline void log_physical_instance_region(ApEvent inst_event, 
                                                       LogicalRegion handle)
       {
         log_spy.print("Physical Instance Region " IDFMT " %d %d %d",
-                      inst_id, handle.get_index_space().get_id(), 
+                      inst_event.id, handle.get_index_space().get_id(), 
                       handle.get_field_space().get_id(), handle.get_tree_id());
       }
 
-      static inline void log_physical_instance_field(IDType inst_id,
+      static inline void log_physical_instance_field(ApEvent inst_event,
                                                      FieldID field_id)
       {
-        log_spy.print("Physical Instance Field " IDFMT " %d", inst_id,field_id);
+        log_spy.print("Physical Instance Field " IDFMT " %d", 
+                      inst_event.id, field_id);
       }
 
-      static inline void log_physical_instance_creator(IDType inst_id, 
+      static inline void log_physical_instance_creator(ApEvent inst_event, 
                                            UniqueID creator_id, IDType proc_id)
       {
         log_spy.print("Physical Instance Creator " IDFMT " %lld " IDFMT "",
-                      inst_id, creator_id, proc_id);
+                      inst_event.id, creator_id, proc_id);
       }
 
-      static inline void log_physical_instance_creation_region(IDType inst_id,
-                                                         LogicalRegion handle)
+      static inline void log_physical_instance_creation_region(
+                                      ApEvent inst_event, LogicalRegion handle)
       {
         log_spy.print("Physical Instance Creation Region " IDFMT " %d %d %d",
-                      inst_id, handle.get_index_space().get_id(), 
+                      inst_event.id, handle.get_index_space().get_id(), 
                       handle.get_field_space().get_id(), handle.get_tree_id());
       }
 
-      static inline void log_instance_specialized_constraint(IDType inst_id,
+      static inline void log_instance_specialized_constraint(ApEvent inst_event,
                                   SpecializedKind kind, ReductionOpID redop)
       {
         log_spy.print("Instance Specialized Constraint " IDFMT " %d %d",
-                      inst_id, kind, redop);
+                      inst_event.id, kind, redop);
       }
 
-      static inline void log_instance_memory_constraint(IDType inst_id,
+      static inline void log_instance_memory_constraint(ApEvent inst_event,
                                                      Memory::Kind kind)
       {
-        log_spy.print("Instance Memory Constraint " IDFMT " %d", inst_id, kind);
+        log_spy.print("Instance Memory Constraint " IDFMT " %d", 
+                      inst_event.id, kind);
       }
 
-      static inline void log_instance_field_constraint(IDType inst_id,
+      static inline void log_instance_field_constraint(ApEvent inst_event,
                       bool contiguous, bool inorder, size_t num_fields)
       {
         log_spy.print("Instance Field Constraint " IDFMT " %d %d %zd",
-            inst_id, (contiguous ? 1 : 0), (inorder ? 1 : 0), num_fields);
+            inst_event.id, (contiguous ? 1 : 0), (inorder ? 1 : 0), num_fields);
       }
 
-      static inline void log_instance_field_constraint_field(IDType inst_id,
+      static inline void log_instance_field_constraint_field(ApEvent inst_event,
                                                              FieldID fid)
       {
         log_spy.print("Instance Field Constraint Field " IDFMT " %d",
-                      inst_id, fid);
+                      inst_event.id, fid);
       }
 
-      static inline void log_instance_ordering_constraint(IDType inst_id,
+      static inline void log_instance_ordering_constraint(ApEvent inst_event,
                                   bool contiguous, size_t num_dimensions)
       {
         log_spy.print("Instance Ordering Constraint " IDFMT " %d %zd",
-                      inst_id, (contiguous ? 1 : 0), num_dimensions);
+                      inst_event.id, (contiguous ? 1 : 0), num_dimensions);
       }
 
       static inline void log_instance_ordering_constraint_dimension(
-                                    IDType inst_id, DimensionKind dim)
+                                    ApEvent inst_event, DimensionKind dim)
       {
         log_spy.print("Instance Ordering Constraint Dimension " IDFMT " %d",
-                      inst_id, dim);
+                      inst_event.id, dim);
       }
 
-      static inline void log_instance_splitting_constraint(IDType inst_id,
+      static inline void log_instance_splitting_constraint(ApEvent inst_event,
                               DimensionKind dim, size_t value, bool chunks)
       {
         log_spy.print("Instance Splitting Constraint " IDFMT " %d %zd %d",
-                      inst_id, dim, value, (chunks ? 1 : 0));
+                      inst_event.id, dim, value, (chunks ? 1 : 0));
       }
 
-      static inline void log_instance_dimension_constraint(IDType inst_id,
+      static inline void log_instance_dimension_constraint(ApEvent inst_event,
                         DimensionKind dim, EqualityKind eqk, size_t value)
       {
         log_spy.print("Instance Dimension Constraint " IDFMT " %d %d %zd",
-                      inst_id, dim, eqk, value);
+                      inst_event.id, dim, eqk, value);
       }
 
-      static inline void log_instance_alignment_constraint(IDType inst_id,
+      static inline void log_instance_alignment_constraint(ApEvent inst_event,
                           FieldID fid, EqualityKind eqk, size_t alignment)
       {
         log_spy.print("Instance Alignment Constraint " IDFMT " %d %d %zd",
-                      inst_id, fid, eqk, alignment);
+                      inst_event.id, fid, eqk, alignment);
       }
 
-      static inline void log_instance_offset_constraint(IDType inst_id,
+      static inline void log_instance_offset_constraint(ApEvent inst_event,
                                       FieldID fid, long offset)
       {
         log_spy.print("Instance Offset Constraint " IDFMT " %d %ld",
-                      inst_id, fid, offset);
+                      inst_event.id, fid, offset);
       }
 
       // Logger calls for mapping decisions
@@ -652,24 +655,24 @@ namespace Legion {
       }
 
       static inline void log_mapping_decision(UniqueID unique_id, 
-                                  unsigned index, FieldID fid, IDType inst_id)
+                                unsigned index, FieldID fid, ApEvent inst_event)
       {
         log_spy.print("Mapping Decision %llu %d %d " IDFMT "", unique_id,
-		      index, fid, inst_id);
+		      index, fid, inst_event.id);
       }
 
       static inline void log_post_mapping_decision(UniqueID unique_id, 
-                                  unsigned index, FieldID fid, IDType inst_id)
+                                unsigned index, FieldID fid, ApEvent inst_event)
       {
         log_spy.print("Post Mapping Decision %llu %d %d " IDFMT "", unique_id,
-		      index, fid, inst_id);
+		      index, fid, inst_event.id);
       }
 
       static inline void log_temporary_instance(UniqueID unique_id,
-                                  unsigned index, FieldID fid, IDType inst_id)
+                                unsigned index, FieldID fid, ApEvent inst_event)
       {
         log_spy.print("Temporary Instance %llu %d %d " IDFMT "", unique_id,
-                      index, fid, inst_id);
+                      index, fid, inst_event.id);
       }
 
       static inline void log_task_priority(UniqueID unique_id, 
@@ -813,11 +816,11 @@ namespace Legion {
       }
 
       static inline void log_copy_field(LgEvent post, FieldID src_fid,
-                                        IDType src, FieldID dst_fid,
-                                        IDType dst, ReductionOpID redop)
+                                        ApEvent src_event, FieldID dst_fid,
+                                        ApEvent dst_event, ReductionOpID redop)
       {
         log_spy.print("Copy Field " IDFMT " %d " IDFMT " %d " IDFMT " %d",
-                      post.id, src_fid, src, dst_fid, dst, redop);
+                  post.id, src_fid, src_event.id, dst_fid, dst_event.id, redop);
       }
 
       static inline void log_copy_intersect(LgEvent post, int is_region,
@@ -839,10 +842,11 @@ namespace Legion {
 		      pre.id, post.id, fill_unique_id);
       }
 
-      static inline void log_fill_field(LgEvent post, FieldID fid, IDType dst)
+      static inline void log_fill_field(LgEvent post, 
+                                        FieldID fid, ApEvent dst_event)
       {
         log_spy.print("Fill Field " IDFMT " %d " IDFMT, 
-                      post.id, fid, dst);
+                      post.id, fid, dst_event.id);
       }
 
       static inline void log_fill_intersect(LgEvent post, int is_region,
