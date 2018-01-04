@@ -986,6 +986,32 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void MapperManager::invoke_memoize_operation(Mapper::MemoizeInput *input,
+                                                 Mapper::MemoizeOutput *output,
+                                                 bool first_invocation,
+                                                 MappingCallInfo *info)
+    //--------------------------------------------------------------------------
+    {
+      if (info == NULL)
+      {
+        RtEvent continuation_precondition;
+        info = begin_mapper_call(MEMOIZE_OPERATION_CALL,
+                             NULL, first_invocation, continuation_precondition);
+        if (continuation_precondition.exists())
+        {
+          MapperContinuation2<Mapper::MemoizeInput,
+                              Mapper::MemoizeOutput,
+                              &MapperManager::invoke_memoize_operation>
+                                continuation(this, input, output, info);
+          continuation.defer(runtime, continuation_precondition);
+          return;
+        }
+      }
+      mapper->memoize_operation(info, *input, *output);
+      finish_mapper_call(info);
+    }
+
+    //--------------------------------------------------------------------------
     void MapperManager::invoke_select_tasks_to_map(
                                     Mapper::SelectMappingInput *input,
                                     Mapper::SelectMappingOutput *output,

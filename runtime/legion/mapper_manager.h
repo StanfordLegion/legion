@@ -239,6 +239,11 @@ namespace Legion {
                                      Mapper::MapDataflowGraphOutput *output,
                                      bool first_invocation = true,
                                      MappingCallInfo *info = NULL);
+    public: // memoization mapper calls
+      void invoke_memoize_operation(Mapper::MemoizeInput *input,
+                                    Mapper::MemoizeOutput *output,
+                                    bool first_invocation = true,
+                                    MappingCallInfo *info = NULL);
     public: // scheduling and stealing mapper calls
       void invoke_select_tasks_to_map(Mapper::SelectMappingInput *input,
                                       Mapper::SelectMappingOutput *output,

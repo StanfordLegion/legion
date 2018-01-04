@@ -1286,6 +1286,29 @@ namespace Legion {
                                       const MapDataflowGraphInput&  input,
                                             MapDataflowGraphOutput& output) = 0;
       //------------------------------------------------------------------------
+
+    public: // Memoizing physical analyses of operations
+      /**
+       * ----------------------------------------------------------------------
+       *  Memoize Operation
+       * ----------------------------------------------------------------------
+       * The memoize_operation mapper call asks the mapper to decide if the
+       * physical analysis of the operation should be memoized. Operations
+       * that are not being logically traced cannot be memoized.
+       *
+       */
+      struct MemoizeInput {
+        bool traced;
+      };
+      struct MemoizeOutput {
+        bool memoize;
+      };
+      //------------------------------------------------------------------------
+      virtual void memoize_operation(const MapperContext  ctx,
+                                     const MemoizeInput&  input,
+                                           MemoizeOutput& output) = 0;
+      //------------------------------------------------------------------------
+
     public: // Mapping control 
       /**
        * ----------------------------------------------------------------------
