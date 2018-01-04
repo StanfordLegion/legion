@@ -189,6 +189,7 @@ namespace Legion {
       void send_stage(int stage);
       void construct_message(ShardID target, int stage, Serializer &rez) const;
       bool arrive_stage(int stage);
+      void update_current_stage(int stage);
       void unpack_stage(int stage, Deserializer &derez);
       void complete_exchange(void);
     public: 
@@ -201,7 +202,10 @@ namespace Legion {
       const bool participating; 
     private:
       RtUserEvent done_event;
-      std::vector<int> stage_notifications;
+      int current_stage;
+      int current_notifications;
+      // Stages have to trigger in order so buffer anything that is not current
+      std::map<int/*stage*/,int/*count*/> pending_notifications;
       bool prefix_stage_notification; // Only two arrivals so 1 bit necessary
     };
 

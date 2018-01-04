@@ -4457,16 +4457,16 @@ namespace Legion {
         shard_collective_last_log_radix(
             ctx->get_shard_collective_last_log_radix()),
         participating(int(local_shard) < shard_collective_participating_shards),
+        current_stage(-1), current_notifications(0),
         prefix_stage_notification(false)
     //--------------------------------------------------------------------------
     { 
-      if (participating)
-      {
 #ifdef DEBUG_LEGION
+      if (participating)
         assert(shard_collective_stages > 0);
+      current_notifications = ((current_stage+1) == shard_collective_stages) ? 
+        shard_collective_last_radix : shard_collective_radix;
 #endif
-        stage_notifications.resize(shard_collective_stages, 0);
-      }
       if (manager->total_shards > 1)
         done_event = Runtime::create_rt_user_event();
     }
@@ -4484,16 +4484,16 @@ namespace Legion {
         shard_collective_last_log_radix(
             ctx->get_shard_collective_last_log_radix()),
         participating(int(local_shard) < shard_collective_participating_shards),
+        current_stage(-1), current_notifications(0), 
         prefix_stage_notification(false)
     //--------------------------------------------------------------------------
     {
-      if (participating)
-      {
 #ifdef DEBUG_LEGION
+      if (participating)
         assert(shard_collective_stages > 0);
+      current_notifications = ((current_stage+1) == shard_collective_stages) ? 
+        shard_collective_last_radix : shard_collective_radix;
 #endif
-        stage_notifications.resize(shard_collective_stages, 0);
-      }
       if (manager->total_shards > 1)
         done_event = Runtime::create_rt_user_event();
     }
@@ -4642,6 +4642,7 @@ namespace Legion {
           construct_message(target, stage, rez);
           manager->send_collective_message(target, rez);
         }
+        update_current_stage(stage);
       }
       else
       {
@@ -4656,6 +4657,8 @@ namespace Legion {
           construct_message(target, stage, rez);
           manager->send_collective_message(target, rez);
         }
+        // Once we've sent the messages we can update the current stage
+        update_current_stage(stage);
       }
     }
 
@@ -4694,22 +4697,73 @@ namespace Legion {
       {
         AutoLock c_lock(collective_lock);
 #ifdef DEBUG_LEGION
-        assert(stage < int(stage_notifications.size()));
+        assert(stage < shard_collective_stages);
 #endif
-        stage_notifications[stage]++;   
-        if (stage < (shard_collective_stages-1))
+        // Check to see if we are the current stage or not
+        // If not then we just save our notification and we're done
+        if (stage != current_stage)
         {
-#ifdef DEBUG_LEGION
-          assert(stage_notifications[stage] <= shard_collective_radix);
-#endif
-          return (stage_notifications[stage] == shard_collective_radix); 
+          std::map<int,int>::iterator finder = 
+            pending_notifications.find(stage);
+          if (finder != pending_notifications.end())
+            finder->second++;
+          else
+            pending_notifications[stage] = 1;
+          // Not done yet
+          return false;
         }
         else
         {
+          // We are the current stage, so update the count
+          current_notifications++;
+          if (stage < (shard_collective_stages-1))
+          {
 #ifdef DEBUG_LEGION
-          assert(stage_notifications[stage] <= shard_collective_last_radix);
+            assert(current_notifications <= shard_collective_radix);
 #endif
-          return (stage_notifications[stage] == shard_collective_last_radix);
+            return (current_notifications == shard_collective_radix);
+          }
+          else
+          {
+#ifdef DEBUG_LEGION
+            assert(current_notifications <= shard_collective_last_radix);
+#endif
+            return (current_notifications == shard_collective_last_radix);
+          }
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void AllGatherCollective::update_current_stage(int stage)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock c_lock(collective_lock);
+#ifdef DEBUG_LEGION
+      // Stages must trigger in order
+      assert((current_stage + 1) == stage);
+      assert(stage < shard_collective_stages);
+      if ((current_stage+1) == shard_collective_stages)
+        assert(current_notifications == shard_collective_last_radix);
+      else
+        assert(current_notifications == shard_collective_radix);
+#endif
+      current_stage = stage;
+      current_notifications = 0;
+      // See if we have any pending notifications for this stage
+      if (!pending_notifications.empty())
+      {
+        std::map<int,int>::iterator next = pending_notifications.begin();
+        if (next->first == current_stage)
+        {
+          current_notifications = next->second;
+#ifdef DEBUG_LEGION
+          if ((current_stage+1) == shard_collective_stages)
+            assert(current_notifications < shard_collective_last_radix);
+          else
+            assert(current_notifications < shard_collective_radix);
+#endif
+          pending_notifications.erase(next);
         }
       }
     }
