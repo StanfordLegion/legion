@@ -304,19 +304,6 @@ namespace Legion {
     void Operation::execute_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
-      //fprintf(stderr, "execute_dependence_analysis: %p\n", this);
-      if (trace != NULL && trace->get_physical_trace() != NULL)
-      {
-        if (get_operation_kind() == Operation::COPY_OP_KIND ||
-            get_operation_kind() == Operation::FILL_OP_KIND ||
-            get_operation_kind() == Operation::DYNAMIC_COLLECTIVE_OP_KIND)
-          set_memoizing();
-      }
-      //if (trace == NULL &&
-      //    get_operation_kind() != Operation::TRACE_CAPTURE_OP_KIND &&
-      //    get_operation_kind() != Operation::TRACE_COMPLETE_OP_KIND &&
-      //    get_operation_kind() != Operation::TRACE_REPLAY_OP_KIND)
-      //  parent_ctx->invalidate_trace_cache();
 #ifdef DEBUG_LEGION
       assert(!memoizing || trace != NULL);
 #endif
