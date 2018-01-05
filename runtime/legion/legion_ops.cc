@@ -3535,7 +3535,8 @@ namespace Legion {
       Processor mapper_proc = parent_ctx->get_executing_processor();
       MapperManager *mapper = runtime->find_mapper(mapper_proc, map_id);
       mapper->invoke_memoize_operation(&input, &output);
-      memoizing = output.memoize;
+      memoizing = output.memoize && !Runtime::no_tracing &&
+        !Runtime::no_physical_tracing;
     }
 
     //--------------------------------------------------------------------------
@@ -9690,7 +9691,8 @@ namespace Legion {
       Processor mapper_proc = parent_ctx->get_executing_processor();
       MapperManager *mapper = runtime->find_mapper(mapper_proc, mapper_id);
       mapper->invoke_memoize_operation(&input, &output);
-      memoizing = output.memoize;
+      memoizing = output.memoize && !Runtime::no_tracing &&
+        !Runtime::no_physical_tracing;
     }
 
     //--------------------------------------------------------------------------
@@ -12286,7 +12288,8 @@ namespace Legion {
       Processor mapper_proc = parent_ctx->get_executing_processor();
       MapperManager *mapper = runtime->find_mapper(mapper_proc, map_id);
       mapper->invoke_memoize_operation(&input, &output);
-      memoizing = output.memoize;
+      memoizing = output.memoize && !Runtime::no_tracing &&
+        !Runtime::no_physical_tracing;
     }
 
     //--------------------------------------------------------------------------
