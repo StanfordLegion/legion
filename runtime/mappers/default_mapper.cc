@@ -329,6 +329,7 @@ namespace Legion {
       output.stealable = stealing_enabled; 
       // Unlike in the past, this is now the best choice
       output.map_locally = false;
+      output.memoize = task.has_trace() && memoize;
     }
 
     //--------------------------------------------------------------------------
@@ -3338,7 +3339,7 @@ namespace Legion {
                                                 MemoizeOutput& output)
     //--------------------------------------------------------------------------
     {
-      output.memoize = memoize;
+      output.memoize = input.traced && memoize;
     }
 
     //--------------------------------------------------------------------------
