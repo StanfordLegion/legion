@@ -802,6 +802,8 @@ namespace Legion {
       void activate_copy(void);
       void deactivate_copy(void);
       void log_copy_requirements(void) const;
+    protected:
+      void invoke_memoize_operation(void);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -1652,6 +1654,8 @@ namespace Legion {
       DynamicCollectiveOp& operator=(const DynamicCollectiveOp &rhs);
     public:
       Future initialize(TaskContext *ctx, const DynamicCollective &dc);
+    protected:
+      void invoke_memoize_operation(MapperID map_id);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -2308,6 +2312,8 @@ namespace Legion {
         { return requirement; }
       void activate_fill(void);
       void deactivate_fill(void);
+    protected:
+      void invoke_memoize_operation(void);
     public:
       virtual void activate(void);
       virtual void deactivate(void);

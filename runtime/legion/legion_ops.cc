@@ -3328,6 +3328,7 @@ namespace Legion {
                                launcher.dst_requirements.size(), 
                              launcher.static_dependences,
                              launcher.predicate);
+      invoke_memoize_operation();
       src_requirements.resize(launcher.src_requirements.size());
       dst_requirements.resize(launcher.dst_requirements.size());
       src_versions.resize(launcher.src_requirements.size());
@@ -3534,6 +3535,20 @@ namespace Legion {
       if (Runtime::legion_spy_enabled)
         LegionSpy::log_copy_operation(parent_ctx->get_unique_id(),
                                       unique_op_id);
+    }
+
+    //--------------------------------------------------------------------------
+    void CopyOp::invoke_memoize_operation(void)
+    //--------------------------------------------------------------------------
+    {
+      Mapper::MemoizeInput  input;
+      Mapper::MemoizeOutput output;
+      input.traced = trace != NULL;
+      output.memoize = false;
+      Processor mapper_proc = parent_ctx->get_executing_processor();
+      MapperManager *mapper = runtime->find_mapper(mapper_proc, map_id);
+      mapper->invoke_memoize_operation(&input, &output);
+      memoizing = output.memoize;
     }
 
     //--------------------------------------------------------------------------
@@ -9662,6 +9677,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       initialize_operation(ctx, true/*track*/);
+      invoke_memoize_operation(ctx->owner_task->map_id);
       future = Future(new FutureImpl(runtime, true/*register*/,
             runtime->get_available_distributed_id(true), 
             runtime->address_space, this));
@@ -9674,6 +9690,20 @@ namespace Legion {
                                  future.impl->get_ready_event(), empty_point);
       }
       return future;
+    }
+
+    //--------------------------------------------------------------------------
+    void DynamicCollectiveOp::invoke_memoize_operation(MapperID mapper_id)
+    //--------------------------------------------------------------------------
+    {
+      Mapper::MemoizeInput  input;
+      Mapper::MemoizeOutput output;
+      input.traced = trace != NULL;
+      output.memoize = false;
+      Processor mapper_proc = parent_ctx->get_executing_processor();
+      MapperManager *mapper = runtime->find_mapper(mapper_proc, mapper_id);
+      mapper->invoke_memoize_operation(&input, &output);
+      memoizing = output.memoize;
     }
 
     //--------------------------------------------------------------------------
@@ -12228,6 +12258,7 @@ namespace Legion {
       parent_task = ctx->get_task();
       initialize_speculation(ctx, true/*track*/, 1, 
                              launcher.static_dependences, launcher.predicate);
+      invoke_memoize_operation();
       requirement = RegionRequirement(launcher.handle, WRITE_DISCARD,
                                       EXCLUSIVE, launcher.parent);
       requirement.privilege_fields = launcher.fields;
@@ -12255,6 +12286,20 @@ namespace Legion {
           LegionSpy::log_future_use(unique_op_id, 
                                     future.impl->get_ready_event());
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void FillOp::invoke_memoize_operation(void)
+    //--------------------------------------------------------------------------
+    {
+      Mapper::MemoizeInput  input;
+      Mapper::MemoizeOutput output;
+      input.traced = trace != NULL;
+      output.memoize = false;
+      Processor mapper_proc = parent_ctx->get_executing_processor();
+      MapperManager *mapper = runtime->find_mapper(mapper_proc, map_id);
+      mapper->invoke_memoize_operation(&input, &output);
+      memoizing = output.memoize;
     }
 
     //--------------------------------------------------------------------------
