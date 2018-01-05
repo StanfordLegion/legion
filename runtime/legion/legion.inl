@@ -3489,23 +3489,21 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    inline void CopyLauncher::set_gather(RegionTreeID in_tid, FieldID in_fid, 
-                                         ReductionOpID r /*= 0*/)
+    inline void CopyLauncher::set_gather_field(RegionTreeID in_tid, 
+                                               FieldID in_fid) 
     //--------------------------------------------------------------------------
     {
-      redop = r;
-      copy_kind = (redop == 0) ? GATHER_COPY : GATHER_REDUCE_COPY;
+      copy_kind = GATHER_COPY;
       indirect_tid = in_tid;
       indirect_fid = in_fid;
     }
 
     //--------------------------------------------------------------------------
-    inline void CopyLauncher::set_scatter(RegionTreeID in_tid, FieldID in_fid, 
-                                          ReductionOpID r /*= 0*/)
+    inline void CopyLauncher::set_scatter_field(RegionTreeID in_tid, 
+                                                FieldID in_fid) 
     //--------------------------------------------------------------------------
     {
-      redop = r;
-      copy_kind = (redop == 0) ? SCATTER_COPY : SCATTER_REDUCE_COPY;
+      copy_kind = SCATTER_COPY;
       indirect_tid = in_tid;
       indirect_fid = in_fid;
     }
@@ -3585,23 +3583,21 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    inline void IndexCopyLauncher::set_gather(RegionTreeID in_tid, 
-                                        FieldID in_fid, ReductionOpID r /*= 0*/)
+    inline void IndexCopyLauncher::set_gather_field(RegionTreeID in_tid, 
+                                                    FieldID in_fid)
     //--------------------------------------------------------------------------
     {
-      redop = r;
-      copy_kind = (redop == 0) ? GATHER_COPY : GATHER_REDUCE_COPY;
+      copy_kind = GATHER_COPY;
       indirect_tid = in_tid;
       indirect_fid = in_fid;
     }
 
     //--------------------------------------------------------------------------
-    inline void IndexCopyLauncher::set_scatter(RegionTreeID in_tid, 
-                                        FieldID in_fid, ReductionOpID r /*= 0*/)
+    inline void IndexCopyLauncher::set_scatter_field(RegionTreeID in_tid, 
+                                                     FieldID in_fid)
     //--------------------------------------------------------------------------
     {
-      redop = r;
-      copy_kind = (redop == 0) ? SCATTER_COPY : SCATTER_REDUCE_COPY;
+      copy_kind = SCATTER_COPY;
       indirect_tid = in_tid;
       indirect_fid = in_fid;
     }
