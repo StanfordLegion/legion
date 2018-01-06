@@ -4610,7 +4610,7 @@ namespace Legion {
        * The trace ID need only be local to the enclosing context.
        * Traces are currently not permitted to be nested.
        */
-      void begin_trace(Context ctx, TraceID tid, bool memoize = true);
+      void begin_trace(Context ctx, TraceID tid);
       /**
        * Mark the end of trace that was being performed.
        */

@@ -4000,10 +4000,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::begin_trace(Context ctx, TraceID tid, bool memoize)
+    void Runtime::begin_trace(Context ctx, TraceID tid)
     //--------------------------------------------------------------------------
     {
-      runtime->begin_trace(ctx, tid, memoize);
+      runtime->begin_trace(ctx, tid);
     }
 
     //--------------------------------------------------------------------------

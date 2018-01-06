@@ -187,7 +187,7 @@ namespace Legion {
         unsigned count;
       }; 
     public:
-      DynamicTrace(TraceID tid, TaskContext *ctx, bool memoize);
+      DynamicTrace(TraceID tid, TaskContext *ctx);
       DynamicTrace(const DynamicTrace &rhs);
       virtual ~DynamicTrace(void);
     public:

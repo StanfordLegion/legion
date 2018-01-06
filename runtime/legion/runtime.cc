@@ -12302,7 +12302,7 @@ namespace Legion {
     }
     
     //--------------------------------------------------------------------------
-    void Runtime::begin_trace(Context ctx, TraceID tid, bool memoize)
+    void Runtime::begin_trace(Context ctx, TraceID tid)
     //--------------------------------------------------------------------------
     {
       if (ctx == DUMMY_CONTEXT)
@@ -12314,7 +12314,7 @@ namespace Legion {
 #endif
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
-      ctx->begin_trace(tid, memoize);
+      ctx->begin_trace(tid);
     }
     
     //--------------------------------------------------------------------------

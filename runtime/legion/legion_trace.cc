@@ -34,9 +34,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     LegionTrace::LegionTrace(TaskContext *c)
-      : ctx(c), physical_trace(NULL), last_memoized(0)
+      : ctx(c), last_memoized(0)
     //--------------------------------------------------------------------------
     {
+      physical_trace = new PhysicalTrace(c->owner_task->runtime);
     }
 
     //--------------------------------------------------------------------------
@@ -436,12 +437,10 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    DynamicTrace::DynamicTrace(TraceID t, TaskContext *c, bool memoize)
+    DynamicTrace::DynamicTrace(TraceID t, TaskContext *c)
       : LegionTrace(c), tid(t), fixed(false), tracing(true)
     //--------------------------------------------------------------------------
     {
-      if (memoize)
-        physical_trace = new PhysicalTrace(c->runtime);
     }
 
     //--------------------------------------------------------------------------

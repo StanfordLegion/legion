@@ -5458,7 +5458,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InnerContext::begin_trace(TraceID tid, bool memoize)
+    void InnerContext::begin_trace(TraceID tid)
     //--------------------------------------------------------------------------
     {
       if (Runtime::no_tracing) return;
@@ -5485,8 +5485,7 @@ namespace Legion {
       if (finder == traces.end())
       {
         // Trace does not exist yet, so make one and record it
-        dynamic_trace =
-          new DynamicTrace(tid, this, memoize && !Runtime::no_physical_tracing);
+        dynamic_trace = new DynamicTrace(tid, this);
         dynamic_trace->add_reference();
         traces[tid] = dynamic_trace;
       }
@@ -8772,7 +8771,7 @@ namespace Legion {
 
 
     //--------------------------------------------------------------------------
-    void LeafContext::begin_trace(TraceID tid, bool memoize)
+    void LeafContext::begin_trace(TraceID tid)
     //--------------------------------------------------------------------------
     {
       log_task.error("Illegal Legion begin trace call in leaf task %s "
@@ -9978,10 +9977,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InlineContext::begin_trace(TraceID tid, bool memoize)
+    void InlineContext::begin_trace(TraceID tid)
     //--------------------------------------------------------------------------
     {
-      enclosing->begin_trace(tid, memoize);
+      enclosing->begin_trace(tid);
     }
 
     //--------------------------------------------------------------------------
