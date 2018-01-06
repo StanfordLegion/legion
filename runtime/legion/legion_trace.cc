@@ -34,7 +34,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     LegionTrace::LegionTrace(TaskContext *c)
-      : ctx(c), physical_trace(NULL)
+      : ctx(c), physical_trace(NULL), last_memoized(0)
     //--------------------------------------------------------------------------
     {
     }
@@ -133,6 +133,7 @@ namespace Legion {
         target.first->remove_mapping_reference(target.second);
       }
       operations.clear();
+      last_memoized = 0;
       frontiers.clear();
 #ifdef LEGION_SPY
       current_uids.clear();
@@ -220,37 +221,22 @@ namespace Legion {
     {
       std::pair<Operation*,GenerationID> key(op,gen);
       const unsigned index = operations.size();
-      if (op->is_memoizing())
+      if (!Runtime::no_physical_tracing &&
+          op->is_memoizing() && !op->is_internal_op())
       {
-        if (physical_trace == NULL)
+        if (index != last_memoized)
         {
-          if (index != 0)
-          {
-            MessageDescriptor INCOMPLETE_PHYSICAL_TRACING(3801, "undefined");
-            log_run.error(INCOMPLETE_PHYSICAL_TRACING.id(),
-                "Invalid memoization request. A trace cannot be partially "
-                "memoized. Please change the mapper to request memoization "
-                "for all the tasks in your trace");
+          MessageDescriptor INCOMPLETE_PHYSICAL_TRACING(3801, "undefined");
+          log_run.error(INCOMPLETE_PHYSICAL_TRACING.id(),
+              "Invalid memoization request. A trace cannot be partially "
+              "memoized. Please change the mapper to request memoization "
+              "for all the tasks in your trace");
 #ifdef DEBUG_LEGION
-            assert(false);
+          assert(false);
 #endif
-            exit(ERROR_INCOMPLETE_PHYSICAL_TRACING);
-          }
-          physical_trace = new PhysicalTrace(op->runtime);
+          exit(ERROR_INCOMPLETE_PHYSICAL_TRACING);
         }
-        op->set_trace_local_id(index);
-      }
-      else if (!op->is_internal_op() && physical_trace != NULL)
-      {
-        MessageDescriptor INCOMPLETE_PHYSICAL_TRACING(3802, "undefined");
-        log_run.error(INCOMPLETE_PHYSICAL_TRACING.id(),
-            "Invalid memoization request. A trace cannot be partially "
-            "memoized. Please change the mapper to request memoization "
-            "for all the tasks in your trace");
-#ifdef DEBUG_LEGION
-        assert(false);
-#endif
-        exit(ERROR_INCOMPLETE_PHYSICAL_TRACING);
+        last_memoized = index + 1;
       }
 
       if (!op->is_internal_op())
@@ -531,31 +517,12 @@ namespace Legion {
     {
       std::pair<Operation*,GenerationID> key(op,gen);
       const unsigned index = operations.size();
-      if (!Runtime::no_physical_tracing)
+      if (!Runtime::no_physical_tracing &&
+          op->is_memoizing() && !op->is_internal_op())
       {
-        if (op->is_memoizing())
+        if (index != last_memoized)
         {
-          if (physical_trace == NULL)
-          {
-            if (index != 0)
-            {
-              MessageDescriptor INCOMPLETE_PHYSICAL_TRACING(3801, "undefined");
-              log_run.error(INCOMPLETE_PHYSICAL_TRACING.id(),
-                  "Invalid memoization request. A trace cannot be partially "
-                  "memoized. Please change the mapper to request memoization "
-                  "for all the tasks in your trace");
-#ifdef DEBUG_LEGION
-              assert(false);
-#endif
-              exit(ERROR_INCOMPLETE_PHYSICAL_TRACING);
-            }
-            physical_trace = new PhysicalTrace(op->runtime);
-          }
-          op->set_trace_local_id(index);
-        }
-        else if (!op->is_internal_op() && physical_trace != NULL)
-        {
-          MessageDescriptor INCOMPLETE_PHYSICAL_TRACING(3802, "undefined");
+          MessageDescriptor INCOMPLETE_PHYSICAL_TRACING(3801, "undefined");
           log_run.error(INCOMPLETE_PHYSICAL_TRACING.id(),
               "Invalid memoization request. A trace cannot be partially "
               "memoized. Please change the mapper to request memoization "
@@ -565,6 +532,7 @@ namespace Legion {
 #endif
           exit(ERROR_INCOMPLETE_PHYSICAL_TRACING);
         }
+        last_memoized = index + 1;
       }
 
       // Only need to save this in the map if we are not done tracing

@@ -28,7 +28,6 @@ $HAS_GPUS = $GPUs.size > 0
 task#calculate_new_currents[index=$i],
 task#distribute_charge[index=$i],
 task#update_voltages[index=$i] {
-  memoize : true;
   target : $HAS_GPUS ? $GPUs[$i % $GPUs.size] : $CPUs[$i % $CPUs.size];
 }
 
