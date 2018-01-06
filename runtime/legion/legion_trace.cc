@@ -237,6 +237,7 @@ namespace Legion {
 #endif
           exit(ERROR_INCOMPLETE_PHYSICAL_TRACING);
         }
+        op->set_trace_local_id(index);
         last_memoized = index + 1;
       }
 
@@ -485,6 +486,7 @@ namespace Legion {
       assert(tracing);
 #endif
       operations.clear();
+      last_memoized = 0;
       op_map.clear();
       internal_dependences.clear();
       tracing = false;
@@ -531,6 +533,7 @@ namespace Legion {
 #endif
           exit(ERROR_INCOMPLETE_PHYSICAL_TRACING);
         }
+        op->set_trace_local_id(index);
         last_memoized = index + 1;
       }
 
