@@ -90,7 +90,7 @@ namespace Legion {
           } } while(0);
 #define BOOL_ARG(argname, varname) do {       \
           if (!strcmp(argv[i], argname)) {    \
-            varname = (atoi(argv[++i]) != 0); \
+            varname = true;                   \
             continue;                         \
           } } while(0);
           INT_ARG("-dm:thefts", max_steals_per_theft);
