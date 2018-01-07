@@ -1599,10 +1599,10 @@ namespace Legion {
       inline void add_dst_field(unsigned idx, FieldID fid, bool inst = true);
     public:
       // Specify gather/scatter properties
-      inline void set_gather(RegionTreeID indirect_tid, FieldID indirect_fid,
-                             ReductionOpID redop = 0);
-      inline void set_scatter(RegionTreeID indirect_tid, FieldID indirect_fid,
-                              ReductionOpID redop = 0);
+      inline void set_gather_field(RegionTreeID indirect_tid, 
+                                   FieldID indirect_fid);
+      inline void set_scatter_field(RegionTreeID indirect_tid, 
+                                    FieldID indirect_fid);
     public:
       inline void add_grant(Grant g);
       inline void add_wait_barrier(PhaseBarrier bar);
@@ -1625,8 +1625,6 @@ namespace Legion {
       // Indirect field for scatter/gather through a field
       RegionTreeID                    indirect_tid;
       FieldID                         indirect_fid;
-      // Reduction operation for scatter/gather
-      ReductionOpID                   redop;
     public:
       // Inform the runtime about any static dependences
       // These will be ignored outside of static traces
@@ -1659,10 +1657,10 @@ namespace Legion {
       inline void add_dst_field(unsigned idx, FieldID fid, bool inst = true);
      public:
       // Specify gather/scatter copy properties
-      inline void set_gather(RegionTreeID indirect_tid, FieldID indirect_fid,
-                             ReductionOpID redop = 0);
-      inline void set_scatter(RegionTreeID indirect_tid, FieldID indirect_fid,
-                              ReductionOpID redop = 0);
+      inline void set_gather_field(RegionTreeID indirect_tid, 
+                                   FieldID indirect_fid);
+      inline void set_scatter_field(RegionTreeID indirect_tid, 
+                                    FieldID indirect_fid);
     public:
       inline void add_grant(Grant g);
       inline void add_wait_barrier(PhaseBarrier bar);
@@ -1686,8 +1684,6 @@ namespace Legion {
       // Indirect field for scatter/gather through a field
       RegionTreeID                    indirect_tid;
       FieldID                         indirect_fid;
-      // Reduction operation for scatter/gather
-      ReductionOpID                   redop;
     public:
       // Inform the runtime about any static dependences
       // These will be ignored outside of static traces
