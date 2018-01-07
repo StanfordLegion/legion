@@ -384,6 +384,7 @@ namespace Legion {
     protected:
       std::set<ApEvent> ready_events;
       std::vector<FieldDataDescriptor> descriptors;
+      bool used;
     };
 
     /**

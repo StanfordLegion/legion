@@ -441,7 +441,7 @@ namespace Legion {
       // guarantee correctness of mapping dependences on remote nodes
       // Must epoch launches don't need to wait as their mapping dependences
       // are handled by a different mechanism
-      if (map_wait.has_triggered() || (must_epoch_owner != NULL))
+      if (must_epoch_owner != NULL)
       {
         version_broadcast->perform_collective_async();
         delete version_broadcast;
@@ -2154,10 +2154,9 @@ namespace Legion {
       }
       else
       {
-        // Figure out whether this shard owns this point
-        ShardID owner_shard = function->find_owner(index_point, index_domain); 
+        // Shard 0 always owns dependent partition operations
         // If we own it we go on the queue, otherwise we complete early
-        if (owner_shard != repl_ctx->owner_shard->shard_id)
+        if (repl_ctx->owner_shard->shard_id != 0)
         {
           // We don't own it, so we can pretend like we
           // mapped and executed this task already
@@ -2269,7 +2268,7 @@ namespace Legion {
           return ApEvent::NO_AP_EVENT;
       }
       else // singular so just do the normal thing
-        return forest->create_partition_by_image(op, pid, projection, 
+        return forest->create_partition_by_image_range(op, pid, projection, 
                                                  instances, instances_ready);
     }
 
@@ -2306,7 +2305,7 @@ namespace Legion {
           return ApEvent::NO_AP_EVENT;
       }
       else // singular so just do the normal thing
-        return forest->create_partition_by_image(op, pid, projection, 
+        return forest->create_partition_by_preimage(op, pid, projection, 
                                                  instances, instances_ready);
     }
     
@@ -2343,7 +2342,7 @@ namespace Legion {
           return ApEvent::NO_AP_EVENT;
       }
       else // singular so just do the normal thing
-        return forest->create_partition_by_image(op, pid, projection, 
+        return forest->create_partition_by_preimage_range(op, pid, projection, 
                                                  instances, instances_ready);
     }
 
@@ -5258,7 +5257,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     FieldDescriptorGather::FieldDescriptorGather(ReplicateContext *ctx,
                              ShardID target, CollectiveIndexLocation loc)
-      : GatherCollective(loc, ctx, target)
+      : GatherCollective(loc, ctx, target), used(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -5278,7 +5277,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Make sure that we wait in case we still have messages to pass on
-      perform_collective_wait();
+      if (used)
+        perform_collective_wait();
     }
 
     //--------------------------------------------------------------------------
@@ -5330,6 +5330,7 @@ namespace Legion {
                                   const std::vector<FieldDataDescriptor> &descs)
     //--------------------------------------------------------------------------
     {
+      used = true;
       {
         AutoLock c_lock(collective_lock);
         ready_events.insert(ready_event);

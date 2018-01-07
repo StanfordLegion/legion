@@ -10322,10 +10322,9 @@ namespace Legion {
       AutoLock repl_lock(replication_lock); 
       std::map<CollectiveID,ShardCollective*>::iterator finder =
         collectives.find(collective->collective_index);
-#ifdef DEBUG_LEGION
-      assert(finder != collectives.end());
-#endif
-      collectives.erase(finder);
+      // Sometimes collectives are not used
+      if (finder != collectives.end())
+        collectives.erase(finder);
     }
 
     //--------------------------------------------------------------------------
