@@ -63,25 +63,58 @@ namespace Legion {
       op->set_trace_local_id(index);
       operations.push_back(key);
       Operation::OpKind kind = op->get_operation_kind();
+      op->resolve_speculation();
       switch (kind)
       {
         case Operation::FILL_OP_KIND :
           {
-            op->trigger_resolution();
             op->complete_mapping();
             op->complete_execution();
             break;
           }
         case Operation::DYNAMIC_COLLECTIVE_OP_KIND :
           {
-            op->trigger_resolution();
             op->trigger_mapping();
+            break;
+          }
+        case Operation::COPY_OP_KIND :
+          {
+            op->add_mapping_reference(op->get_generation());
+            physical_trace->get_current_template()->register_operation(op);
+            op->complete_mapping();
+            break;
+          }
+        case Operation::TASK_OP_KIND :
+          {
+            TaskOp *task = NULL;
+#ifdef DEBUG_LEGION
+            task = dynamic_cast<TaskOp*>(op);
+            assert(task != NULL);
+#else
+            task = static_cast<TaskOp*>(op);
+#endif
+            if (task->get_task_kind() == TaskOp::INDEX_TASK_KIND)
+            {
+              IndexTask *index_task = NULL;
+#ifdef DEBUG_LEGION
+              index_task = dynamic_cast<IndexTask*>(task);
+              assert(index_task != NULL);
+#else
+              index_task = static_cast<IndexTask*>(task);
+#endif
+              index_task->slice_index_space_for_replay(this);
+            }
+            else
+            {
+              op->add_mapping_reference(op->get_generation());
+              physical_trace->get_current_template()->register_operation(op);
+              op->complete_mapping();
+            }
             break;
           }
         default:
           {
-            op->add_mapping_reference(op->get_generation());
-            physical_trace->get_current_template()->register_operation(op);
+            assert(false);
             break;
           }
       }
@@ -1731,11 +1764,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::register_operation(Operation *op)
+    inline void PhysicalTemplate::register_operation(Operation *op)
     //--------------------------------------------------------------------------
     {
       DomainPoint color;
-      DETAILED_PROFILER(task->runtime, PHYSICAL_TRACE_EXECUTE_CALL);
+      register_operation(op, color);
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTemplate::register_operation(
+                                        Operation *op, const DomainPoint &color)
+    //--------------------------------------------------------------------------
+    {
       TraceLocalId key(op->get_trace_local_id(), color);
       {
         // TODO: Index operations should be sliced here.
@@ -1753,6 +1793,7 @@ namespace Legion {
     void PhysicalTemplate::execute_all()
     //--------------------------------------------------------------------------
     {
+      DETAILED_PROFILER(task->runtime, PHYSICAL_TRACE_EXECUTE_CALL);
       for (std::vector<Instruction*>::const_iterator it = instructions.begin();
            it != instructions.end(); ++it)
         (*it)->execute();
@@ -3602,8 +3643,6 @@ namespace Legion {
 #else
       CopyOp *copy = static_cast<CopyOp*>(operations[lhs]);
 #endif
-      copy->trigger_resolution();
-      copy->complete_mapping();
       copy->complete_copy_execution(events[rhs]);
       copy->remove_mapping_reference(copy->get_generation());
     }
@@ -3664,7 +3703,6 @@ namespace Legion {
 #else
       SingleTask *task = static_cast<SingleTask*>(operations[op_key]);
 #endif
-      task->trigger_resolution();
       if (!task->arrive_barriers.empty())
       {
         ApEvent done_event = task->get_task_completion();
@@ -3676,7 +3714,6 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(task->is_leaf() && !task->has_virtual_instances());
 #endif
-      task->complete_mapping();
       task->launch_task();
       task->remove_mapping_reference(task->get_generation());
     }

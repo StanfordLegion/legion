@@ -4525,6 +4525,22 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void MultiTask::slice_index_space_for_replay(LegionTrace *trace)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(memoizing);
+#endif
+      SliceTask *new_slice = this->clone_as_slice_task(internal_domain,
+                                                       target_proc,
+                                                       false,
+                                                       false, 1LL);
+      slices.push_back(new_slice);
+      new_slice->enumerate_points();
+      new_slice->register_points_for_replay(trace);
+    }
+
+    //--------------------------------------------------------------------------
     void MultiTask::trigger_slices(void)
     //--------------------------------------------------------------------------
     {
@@ -8804,6 +8820,21 @@ namespace Legion {
       num_uncomplete_points = points.size();
       num_uncommitted_points = points.size();
     } 
+
+    //--------------------------------------------------------------------------
+    void SliceTask::register_points_for_replay(LegionTrace *trace)
+    //--------------------------------------------------------------------------
+    {
+      for (unsigned idx = 0; idx < points.size(); idx++)
+      {
+        Operation *op = static_cast<Operation*>(points[idx]);
+        op->add_mapping_reference(op->get_generation());
+        trace->get_physical_trace()->get_current_template()->register_operation(
+            op, points[idx]->get_domain_point());
+        points[idx]->complete_mapping();
+        record_child_mapped(RtEvent::NO_RT_EVENT, ApEvent::NO_AP_EVENT);
+      }
+    }
 
     //--------------------------------------------------------------------------
     const void* SliceTask::get_predicate_false_result(size_t &result_size)

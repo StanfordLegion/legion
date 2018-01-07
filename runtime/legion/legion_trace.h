@@ -422,6 +422,7 @@ namespace Legion {
     public:
       bool check_preconditions();
       void register_operation(Operation *op);
+      void register_operation(Operation *op, const DomainPoint &color);
       void execute_all();
       void finalize();
       void optimize();

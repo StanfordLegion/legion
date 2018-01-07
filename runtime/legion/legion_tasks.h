@@ -515,6 +515,7 @@ namespace Legion {
     public:
       bool is_sliced(void) const;
       void slice_index_space(void);
+      void slice_index_space_for_replay(LegionTrace *trace);
       void trigger_slices(void);
       void clone_multi_from(MultiTask *task, const Domain &d, Processor p,
                             bool recurse, bool stealable);
@@ -979,6 +980,7 @@ namespace Legion {
       virtual void register_must_epoch(void);
       PointTask* clone_as_point_task(const DomainPoint &point);
       void enumerate_points(void);
+      void register_points_for_replay(LegionTrace *trace);
       const void* get_predicate_false_result(size_t &result_size);
     public:
       RtEvent perform_versioning_analysis(void);
