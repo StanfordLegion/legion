@@ -379,6 +379,8 @@ namespace Realm {
 	  
 	  TransferIterator::AddressInfo src_info, dst_info;
 	  size_t read_bytes, write_bytes, read_seq, write_seq;
+	  size_t write_pad_bytes = 0;
+	  size_t read_pad_bytes = 0;
 
 	  // handle serialization-only and deserialization-only cases 
 	  //  specially, because they have uncertainty in how much data
@@ -618,9 +620,32 @@ namespace Realm {
 					      dimension_mismatch_possible);
 	    if(dst_bytes == 0) {
 	      // not enough space for even one element
-	      src_iter->cancel_step();
-	      // TODO: put this XD to sleep until we do have data
-	      break;
+
+	      // if this happens when the input is an IB, the output is not,
+	      //  and the input doesn't seem to be limited by max_bytes, this
+	      //  is (probably?) the case that requires padding on the input
+	      //  side
+	      if((pre_xd_guid != XFERDES_NO_GUID) &&
+		 (next_xd_guid == XFERDES_NO_GUID) &&
+		 (src_bytes < max_bytes)) {
+		log_xd.info() << "padding input buffer by " << src_bytes << " bytes";
+		src_info.bytes_per_chunk = 0;
+		src_info.num_lines = 1;
+		src_info.num_planes = 1;
+		dst_info.bytes_per_chunk = 0;
+		dst_info.num_lines = 1;
+		dst_info.num_planes = 1;
+		read_pad_bytes = src_bytes;
+		src_bytes = 0;
+		dimension_mismatch_possible = false;
+		// src iterator will be confirmed below
+		//src_iter->confirm_step();
+		// dst didn't actually take a step, so we don't need to cancel it
+	      } else {
+		src_iter->cancel_step();
+		// TODO: put this XD to sleep until we do have data
+		break;
+	      }
 	    }
 
 	    // does source now need to be shrunk?
@@ -631,6 +656,33 @@ namespace Realm {
 	      //  posisble
 	      src_bytes = src_iter->step(dst_bytes, src_info, flags,
 					 dimension_mismatch_possible);
+	      if(src_bytes == 0) {
+		// corner case that should occur only with a destination 
+		//  intermediate buffer - no transfer, but pad to boundary
+		//  destination wants as long as we're not being limited by
+		//  max_bytes
+		assert((pre_xd_guid == XFERDES_NO_GUID) &&
+		       (next_xd_guid != XFERDES_NO_GUID));
+		if(dst_bytes < max_bytes) {
+		  log_xd.info() << "padding output buffer by " << dst_bytes << " bytes";
+		  src_info.bytes_per_chunk = 0;
+		  src_info.num_lines = 1;
+		  src_info.num_planes = 1;
+		  dst_info.bytes_per_chunk = 0;
+		  dst_info.num_lines = 1;
+		  dst_info.num_planes = 1;
+		  write_pad_bytes = dst_bytes;
+		  dst_bytes = 0;
+		  dimension_mismatch_possible = false;
+		  // src didn't actually take a step, so we don't need to cancel it
+		  dst_iter->confirm_step();
+		} else {
+		  // retry later
+		  // src didn't actually take a step, so we don't need to cancel it
+		  dst_iter->cancel_step();
+		  break;
+		}
+	      }
 	      // a mismatch is still possible if the source is 2+D and the
 	      //  destination wants to stop mid-span
 	      if(src_bytes < dst_bytes) {
@@ -736,12 +788,12 @@ namespace Realm {
 				src_info.num_lines *
 				src_info.num_planes);
 	    read_seq = read_bytes_total;
-	    read_bytes = act_bytes;
-	    read_bytes_total += act_bytes;
+	    read_bytes = act_bytes + read_pad_bytes;
+	    read_bytes_total += read_bytes;
 
 	    write_seq = write_bytes_total;
-	    write_bytes = act_bytes;
-	    write_bytes_total += act_bytes;
+	    write_bytes = act_bytes + write_pad_bytes;
+	    write_bytes_total += write_bytes;
 	    write_bytes_cons = write_bytes_total; // completion detection uses this
 	  }
 
