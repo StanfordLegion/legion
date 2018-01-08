@@ -4140,10 +4140,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    inline void TaskVariantRegistrar::set_replicable(bool is_rep/*= true*/)
+    inline void TaskVariantRegistrar::set_replicable(bool is_repl/*= true*/)
     //--------------------------------------------------------------------------
     {
-      replicable_variant = is_rep;
+      replicable_variant = is_repl;
     }
 
     //--------------------------------------------------------------------------
