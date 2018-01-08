@@ -8216,12 +8216,6 @@ namespace Legion {
                       "permitted to be both inner and leaf tasks "
                       "simultaneously.", variant_name, vid,
                       owner->get_name(), owner->task_id);
-      if (replicable_variant && !idempotent_variant)
-        REPORT_LEGION_ERROR(ERROR_REPLICABLE_NOT_IDEMPOTENT,
-                      "Task variant %s (ID %ld) of task %s (ID %d) cannot "
-                      "be replicable without also being idempotent. Are "
-                      "you sure this variant is actually replicable?",
-                      variant_name, vid, owner->get_name(), owner->task_id);
       if (Runtime::record_registration)
         log_run.print("Task variant %s of task %s (ID %d) has Realm ID %ld",
               variant_name, owner->get_name(), owner->task_id, descriptor_id);
