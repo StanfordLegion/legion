@@ -4140,6 +4140,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    inline void TaskVariantRegistrar::set_replicable(bool is_repl/*= true*/)
+    //--------------------------------------------------------------------------
+    {
+      replicable_variant = is_repl;
+    }
+
+    //--------------------------------------------------------------------------
     template<typename T>
     inline T Future::get_result(bool silence_warnings) const
     //--------------------------------------------------------------------------

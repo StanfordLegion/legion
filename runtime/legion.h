@@ -56,6 +56,10 @@
 // temporary helper macro to turn link errors into runtime errors
 #define UNIMPLEMENTED_METHOD(retval) do { assert(0); return retval; } while(0)
 
+// There will be a new implementation of this for control replication
+#define LEGION_PRINT_ONCE(runtime, ctx, file, fmt, ...)   \
+  fprintf(file, fmt, ##__VA_ARGS__);            
+
 /**
  * \namespace Legion
  * Namespace for all Legion runtime objects
@@ -1972,6 +1976,7 @@ namespace Legion {
       inline void set_leaf(bool is_leaf = true);
       inline void set_inner(bool is_inner = true);
       inline void set_idempotent(bool is_idempotent = true);
+      inline void set_replicable(bool is_replicable = true);
     public:
       TaskID                            task_id;
       GeneratorContext                  generator;
@@ -1984,6 +1989,7 @@ namespace Legion {
       bool                              leaf_variant;
       bool                              inner_variant;
       bool                              idempotent_variant;
+      bool                              replicable_variant;
     };
 
     //==========================================================================
