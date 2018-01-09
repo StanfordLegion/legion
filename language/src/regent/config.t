@@ -33,7 +33,6 @@ local default_options = {
   ["openmp"] = false,
   ["openmp-strict"] = false,
   ["skip-empty-tasks"] = true,
-  ["licm-scratch-fields"] = true,
   ["vectorize"] = true,
   ["vectorize-unsafe"] = false,
 
