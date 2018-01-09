@@ -13,7 +13,7 @@
 -- limitations under the License.
 
 -- fails-with:
--- annotations_inner.rg:25: task is not a valid inner task
+-- annotations_task_inner.rg:25: task is not a valid inner task
 -- task f()
 --    ^
 

@@ -13,7 +13,7 @@
 -- limitations under the License.
 
 -- fails-with:
--- annotations_leaf.rg:25: task is not a valid leaf task
+-- annotations_task_leaf.rg:25: task is not a valid leaf task
 -- task f()
 --    ^
 
