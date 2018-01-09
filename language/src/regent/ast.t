@@ -79,8 +79,8 @@ ast.annotation:leaf("Forbid", {"value"}, true)
 ast.annotation:leaf("Unroll", {"value"}, true)
 
 -- Annotation: Sets
-ast.annotation:leaf("Set", {"cuda", "external", "inline", "openmp",
-                            "parallel", "spmd", "trace", "vectorize"},
+ast.annotation:leaf("Set", {"cuda", "external", "inline", "inner", "leaf",
+                            "openmp", "parallel", "spmd", "trace", "vectorize"},
                     false, true)
 
 function ast.default_annotations()
@@ -89,6 +89,8 @@ function ast.default_annotations()
     cuda = allow,
     external = allow,
     inline = allow,
+    inner = allow,
+    leaf = allow,
     openmp = allow,
     parallel = allow,
     spmd = allow,
