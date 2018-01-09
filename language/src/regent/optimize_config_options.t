@@ -544,7 +544,9 @@ function optimize_config_options.top_task(cx, node)
   local leaf = analyze_leaf(cx, node.body) and std.config["leaf"]
   local inner = analyze_inner(cx, node.body) and std.config["inner"] and not leaf
   local idempotent = analyze_idempotent(cx, node.body) and std.config["idempotent"]
-  local replicable = analyze_replicable(cx, node.body) and std.config["replicable"]
+  local replicable = analyze_replicable(cx, node.body) and
+    idempotent and -- Replicable tasks must also be idempotent
+    std.config["replicable"]
 
   if std.config["leaf"] and not leaf and
     node.annotations.leaf:is(ast.annotation.Demand)
@@ -558,13 +560,24 @@ function optimize_config_options.top_task(cx, node)
     report.error(node, "task is not a valid inner task")
   end
 
+  if std.config["idempotent"] and not idempotent and
+    node.annotations.idempotent:is(ast.annotation.Demand)
+  then
+    report.error(node, "task is not a valid idempotent task")
+  end
+
+  if std.config["replicable"] and not replicable and
+    node.annotations.replicable:is(ast.annotation.Demand)
+  then
+    report.error(node, "task is not a valid replicable task")
+  end
+
   return node {
     config_options = ast.TaskConfigOptions {
       leaf = leaf,
       inner = inner,
       idempotent = idempotent,
-      -- Replicable tasks must also be idempotent
-      replicable = idempotent and replicable,
+      replicable = replicable,
     },
   }
 end

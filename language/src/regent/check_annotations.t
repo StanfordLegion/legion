@@ -193,10 +193,12 @@ local function check_annotations_node(cx)
             data.set({
               "cuda",
               "external",
+              "idempotent",
               "inline",
               "inner",
               "leaf",
               "parallel",
+              "replicable",
             }))
 
     -- Miscellaneous:

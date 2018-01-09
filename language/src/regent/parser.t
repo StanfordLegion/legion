@@ -59,6 +59,8 @@ function parser.annotation_name(p, required)
     return "cuda", values
   elseif p:nextif("__external") then
     return "external"
+  elseif p:nextif("__idempotent") then
+    return "idempotent"
   elseif p:nextif("__inline") then
     return "inline"
   elseif p:nextif("__inner") then
@@ -69,6 +71,8 @@ function parser.annotation_name(p, required)
     return "openmp"
   elseif p:nextif("__parallel") then
     return "parallel"
+  elseif p:nextif("__replicable") then
+    return "replicable"
   elseif p:nextif("__spmd") then
     return "spmd"
   elseif p:nextif("__trace") then
