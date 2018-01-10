@@ -2045,6 +2045,9 @@ namespace Legion {
       // Methods for introspecting index space trees 
       // For documentation see methods of the same name in Runtime
       //------------------------------------------------------------------------
+      bool has_index_partition(MapperContext ctx,
+                               IndexSpace parent, Color c) const;
+
       IndexPartition get_index_partition(MapperContext ctx,
                                          IndexSpace parent, Color color) const;
 
@@ -2069,7 +2072,10 @@ namespace Legion {
                                   IndexSpace sp, std::set<Color> &colors) const;
 
       bool is_index_partition_disjoint(MapperContext ctx, 
-                                                 IndexPartition p) const;
+                                       IndexPartition p) const;
+
+      bool is_index_partition_complete(MapperContext ctx,
+                                       IndexPartition p) const;
 
       Color get_index_space_color(MapperContext ctx, 
                                             IndexSpace handle) const;

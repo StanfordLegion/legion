@@ -827,6 +827,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool MapperRuntime::has_index_partition(MapperContext ctx,
+                                           IndexSpace parent, Color color) const
+    //--------------------------------------------------------------------------
+    {
+      return ctx->manager->has_index_partition(ctx, parent, color);
+    }
+
+    //--------------------------------------------------------------------------
     IndexPartition MapperRuntime::get_index_partition(MapperContext ctx,
                                            IndexSpace parent, Color color) const
     //--------------------------------------------------------------------------
@@ -896,6 +904,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return ctx->manager->is_index_partition_disjoint(ctx, p);
+    }
+
+    //--------------------------------------------------------------------------
+    bool MapperRuntime::is_index_partition_complete(MapperContext ctx,
+                                                    IndexPartition p) const
+    //--------------------------------------------------------------------------
+    {
+      return ctx->manager->is_index_partition_complete(ctx, p);
     }
 
     //--------------------------------------------------------------------------
