@@ -467,21 +467,14 @@ namespace Legion {
                              ContextID dst_physical_ctx);
       void record_issue_copy(PhysicalTraceInfo &trace_info,
                              Operation* op, ApEvent &lhs,
-                             IndexSpaceNode *domain,
-#ifdef LEGION_SPY
-                          const std::vector<Realm::CopySrcDstField>& src_fields,
-                          const std::vector<Realm::CopySrcDstField>& dst_fields,
-#else
+                             RegionNode *node,
                              const std::vector<CopySrcDstField>& src_fields,
                              const std::vector<CopySrcDstField>& dst_fields,
-#endif
                              ApEvent precondition,
-#ifdef LEGION_SPY
-                             LogicalRegion handle,
+                             PredEvent predicate_guard,
                              RegionTreeNode *intersect,
-#endif
-                             ReductionOpID redop = 0,
-                             bool reduction_fold = true);
+                             ReductionOpID redop,
+                             bool reduction_fold);
       void record_empty_copy(CompositeView *src,
                              const FieldMask &src_mask,
                              MaterializedView *dst,
@@ -505,18 +498,15 @@ namespace Legion {
                                           CopyOp *copy, ApEvent rhs);
       void record_issue_fill(PhysicalTraceInfo &trace_info,
                              Operation *op, ApEvent &lhs,
-                             IndexSpaceNode *domain,
-#ifdef LEGION_SPY
-                             const std::vector<Realm::CopySrcDstField> &fields,
-#else
+                             RegionNode *node,
                              const std::vector<CopySrcDstField> &fields,
-#endif
                              const void *fill_buffer, size_t fill_size,
-                             ApEvent precondition
+                             ApEvent precondition,
+                             PredEvent predicate_guard,
 #ifdef LEGION_SPY
-                             , LogicalRegion handle
+                             UniqueID fill_uid,
 #endif
-                             );
+                             RegionTreeNode *intersect);
 
     private:
       void record_ready_view(PhysicalTraceInfo &trace_info,
@@ -748,34 +738,17 @@ namespace Legion {
      *                             events[precondition_idx]);
      */
     struct IssueFill : public Instruction {
-      IssueFill(PhysicalTemplate &tpl,
-                unsigned lhs, IndexSpaceNode *domain,
-                const TraceLocalId &op_key,
-#ifdef LEGION_SPY
-                const std::vector<Realm::CopySrcDstField> &fields,
-#else
-                const std::vector<CopySrcDstField> &fields,
-#endif
-                const ReductionOp *reduction_op,
-                unsigned precondition_idx
-#ifdef LEGION_SPY
-                , LogicalRegion handle
-#endif
-                );
       IssueFill(PhysicalTemplate& tpl,
-                unsigned lhs, IndexSpaceNode *domain,
+                unsigned lhs, RegionNode *node,
                 const TraceLocalId &op_key,
-#ifdef LEGION_SPY
-                const std::vector<Realm::CopySrcDstField> &fields,
-#else
                 const std::vector<CopySrcDstField> &fields,
-#endif
                 const void *fill_buffer, size_t fill_size,
-                unsigned precondition_idx
+                unsigned precondition_idx,
+                PredEvent predicate_guard,
 #ifdef LEGION_SPY
-                , LogicalRegion handle
+                UniqueID fill_uid,
 #endif
-                );
+                RegionTreeNode *intersect);
       virtual ~IssueFill();
       virtual void execute();
       virtual std::string to_string();
@@ -809,19 +782,17 @@ namespace Legion {
     private:
       friend struct PhysicalTemplate;
       unsigned lhs;
-      IndexSpaceNode *domain;
+      RegionNode *node;
       TraceLocalId op_key;
-#ifdef LEGION_SPY
-      std::vector<Realm::CopySrcDstField> fields;
-#else
       std::vector<CopySrcDstField> fields;
-#endif
       void *fill_buffer;
       size_t fill_size;
       unsigned precondition_idx;
+      PredEvent predicate_guard;
 #ifdef LEGION_SPY
-      LogicalRegion handle;
+      UniqueID fill_uid;
 #endif
+      RegionTreeNode *intersect;
     };
 
     /**
@@ -835,20 +806,12 @@ namespace Legion {
      */
     struct IssueCopy : public Instruction {
       IssueCopy(PhysicalTemplate &tpl,
-                unsigned lhs, IndexSpaceNode *domain,
+                unsigned lhs, RegionNode *node,
                 const TraceLocalId &op_key,
-#ifdef LEGION_SPY
-                const std::vector<Realm::CopySrcDstField>& src_fields,
-                const std::vector<Realm::CopySrcDstField>& dst_fields,
-#else
                 const std::vector<CopySrcDstField>& src_fields,
                 const std::vector<CopySrcDstField>& dst_fields,
-#endif
-                unsigned precondition_idx,
-#ifdef LEGION_SPY
-                LogicalRegion handle,
+                unsigned precondition_idx, PredEvent predicate_guard,
                 RegionTreeNode *intersect,
-#endif
                 ReductionOpID redop, bool reduction_fold);
       virtual void execute();
       virtual std::string to_string();
@@ -882,20 +845,13 @@ namespace Legion {
     private:
       friend struct PhysicalTemplate;
       unsigned lhs;
-      IndexSpaceNode *domain;
+      RegionNode *node;
       TraceLocalId op_key;
-#ifdef LEGION_SPY
-      std::vector<Realm::CopySrcDstField> src_fields;
-      std::vector<Realm::CopySrcDstField> dst_fields;
-#else
       std::vector<CopySrcDstField> src_fields;
       std::vector<CopySrcDstField> dst_fields;
-#endif
       unsigned precondition_idx;
-#ifdef LEGION_SPY
-      LogicalRegion handle;
+      PredEvent predicate_guard;
       RegionTreeNode *intersect;
-#endif
       ReductionOpID redop;
       bool reduction_fold;
     };

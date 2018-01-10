@@ -14113,6 +14113,7 @@ namespace Legion {
                         ReductionOpID redop /*=0*/,bool reduction_fold/*=true*/)
     //--------------------------------------------------------------------------
     {
+      ApEvent result;
 #ifdef LEGION_SPY
       // Have to convert back to Realm structures because C++ is dumb  
       std::vector<Realm::CopySrcDstField> realm_src_fields(src_fields.size());
@@ -14121,7 +14122,7 @@ namespace Legion {
       std::vector<Realm::CopySrcDstField> realm_dst_fields(dst_fields.size());
       for (unsigned idx = 0; idx < dst_fields.size(); idx++)
         realm_dst_fields[idx] = dst_fields[idx];
-      ApEvent result = row_source->issue_copy(op, realm_src_fields, 
+      result = row_source->issue_copy(op, realm_src_fields, 
           realm_dst_fields, precondition, predicate_guard, 
           (intersect == NULL) ? NULL : intersect->get_row_source(),
           redop, reduction_fold);
@@ -14148,13 +14149,22 @@ namespace Legion {
               node->handle.field_space.id, node->handle.tree_id);
         }
       }
-      return result;
 #else
-      return row_source->issue_copy(op, src_fields, dst_fields,
+      result = row_source->issue_copy(op, src_fields, dst_fields,
           precondition, predicate_guard, trace_info,
           (intersect == NULL) ? NULL : intersect->get_row_source(),
           redop, reduction_fold);
 #endif
+      if (trace_info.tracing)
+      {
+#ifdef DEBUG_LEGION
+        assert(!predicate_guard.exists());
+#endif
+        trace_info.tpl->record_issue_copy(trace_info, op, result, this,
+            src_fields, dst_fields, precondition, predicate_guard, intersect,
+            redop, reduction_fold);
+      }
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -14169,12 +14179,13 @@ namespace Legion {
                         RegionTreeNode *intersect)
     //--------------------------------------------------------------------------
     {
+      ApEvent result;
 #ifdef LEGION_SPY
       // Have to convert back to Realm data structures because C++ is dumb
       std::vector<Realm::CopySrcDstField> realm_dst_fields(dst_fields.size());
       for (unsigned idx = 0; idx < dst_fields.size(); idx++)
         realm_dst_fields[idx] = dst_fields[idx];
-      ApEvent result = row_source->issue_fill(op, realm_dst_fields,
+      result = row_source->issue_fill(op, realm_dst_fields,
           fill_value, fill_size, precondition, predicate_guard,
           (intersect == NULL) ? NULL : intersect->get_row_source());
       LegionSpy::log_fill_events(op->get_unique_op_id(), handle, 
@@ -14198,12 +14209,24 @@ namespace Legion {
               node->handle.field_space.id, node->handle.tree_id);
         }
       }
-      return result;
 #else
-      return row_source->issue_fill(op, dst_fields,
+      result = row_source->issue_fill(op, dst_fields,
           fill_value, fill_size, precondition, predicate_guard, trace_info,
           (intersect == NULL) ? NULL : intersect->get_row_source());
 #endif
+      if (trace_info.tracing)
+      {
+#ifdef DEBUG_LEGION
+        assert(!predicate_guard.exists());
+#endif
+        trace_info.tpl->record_issue_fill(trace_info, op, result, this,
+            dst_fields, fill_value, fill_size, precondition, predicate_guard,
+#ifdef LEGION_SPY
+            fill_uid,
+#endif
+            intersect);
+      }
+      return result;
     }
 
     //--------------------------------------------------------------------------
