@@ -19,6 +19,8 @@
 #include "legion/legion_spy.h"
 #include "legion/legion_trace.h"
 #include "legion/legion_tasks.h"
+#include "legion/legion_instances.h"
+#include "legion/legion_views.h"
 #include "legion/legion_context.h"
 
 namespace Legion {
@@ -257,17 +259,10 @@ namespace Legion {
           op->is_memoizing() && !op->is_internal_op())
       {
         if (index != last_memoized)
-        {
-          MessageDescriptor INCOMPLETE_PHYSICAL_TRACING(3801, "undefined");
-          log_run.error(INCOMPLETE_PHYSICAL_TRACING.id(),
+          REPORT_LEGION_ERROR(ERROR_INCOMPLETE_PHYSICAL_TRACING,
               "Invalid memoization request. A trace cannot be partially "
               "memoized. Please change the mapper to request memoization "
               "for all the tasks in your trace");
-#ifdef DEBUG_LEGION
-          assert(false);
-#endif
-          exit(ERROR_INCOMPLETE_PHYSICAL_TRACING);
-        }
         op->set_trace_local_id(index);
         last_memoized = index + 1;
       }
@@ -553,17 +548,10 @@ namespace Legion {
           op->is_memoizing() && !op->is_internal_op())
       {
         if (index != last_memoized)
-        {
-          MessageDescriptor INCOMPLETE_PHYSICAL_TRACING(3801, "undefined");
-          log_run.error(INCOMPLETE_PHYSICAL_TRACING.id(),
+          REPORT_LEGION_ERROR(ERROR_INCOMPLETE_PHYSICAL_TRACING,
               "Invalid memoization request. A trace cannot be partially "
               "memoized. Please change the mapper to request memoization "
               "for all the tasks in your trace");
-#ifdef DEBUG_LEGION
-          assert(false);
-#endif
-          exit(ERROR_INCOMPLETE_PHYSICAL_TRACING);
-        }
         op->set_trace_local_id(index);
         last_memoized = index + 1;
       }
@@ -1604,9 +1592,9 @@ namespace Legion {
             continue;
           // FIXME: This code will not work as expected if the projection
           //        goes deeper than one level
-          const ColorPoint &color = node->get_row_source()->color;
+          const LegionColor &color = node->get_row_source()->color;
           if ((fit->projection != 0 &&
-               fit->projection_domain.contains(color.get_point())) ||
+               fit->projection_space->contains_color(color)) ||
               fit->open_children.find(color) != fit->open_children.end())
             fields -= overlap;
         }
@@ -1630,7 +1618,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     /*static*/ bool PhysicalTemplate::check_logical_open(RegionTreeNode *node,
                                                          ContextID ctx,
-                                    LegionMap<Domain, FieldMask>::aligned projs)
+                           LegionMap<IndexSpaceNode*, FieldMask>::aligned projs)
     //--------------------------------------------------------------------------
     {
       const LogicalState &state = node->get_logical_state(ctx);
@@ -1642,8 +1630,8 @@ namespace Legion {
           continue;
         if (fit->projection != 0)
         {
-          LegionMap<Domain, FieldMask>::aligned::iterator finder =
-            projs.find(fit->projection_domain);
+          LegionMap<IndexSpaceNode*, FieldMask>::aligned::iterator finder =
+            projs.find(fit->projection_space);
           if (finder != projs.end())
           {
             FieldMask overlap = finder->second & fit->valid_fields;
@@ -1671,7 +1659,7 @@ namespace Legion {
           return false;
 
       for (std::map<std::pair<RegionTreeNode*, ContextID>,
-                    LegionMap<Domain, FieldMask>::aligned>::iterator it =
+           LegionMap<IndexSpaceNode*, FieldMask>::aligned>::iterator it =
            previous_projections.begin(); it !=
            previous_projections.end(); ++it)
         if (!check_logical_open(it->first.first, it->first.second, it->second))
@@ -2092,13 +2080,21 @@ namespace Legion {
               {
                 for (unsigned idx = 0; idx < copy->src_fields.size(); ++idx)
                 {
-                  const Domain::CopySrcDstField &field =
+#ifdef LEGION_SPY
+                  const Realm::CopySrcDstField &field =
+#else
+                  const CopySrcDstField &field =
+#endif
                     copy->src_fields[idx];
                   find_last_users(field.inst, field.field_id, users);
                 }
                 for (unsigned idx = 0; idx < copy->dst_fields.size(); ++idx)
                 {
-                  const Domain::CopySrcDstField &field =
+#ifdef LEGION_SPY
+                  const Realm::CopySrcDstField &field =
+#else
+                  const CopySrcDstField &field =
+#endif
                     copy->dst_fields[idx];
                   find_last_users(field.inst, field.field_id, users);
                 }
@@ -2120,7 +2116,12 @@ namespace Legion {
               {
                 for (unsigned idx = 0; idx < fill->fields.size(); ++idx)
                 {
-                  const Domain::CopySrcDstField &field = fill->fields[idx];
+#ifdef LEGION_SPY
+                  const Realm::CopySrcDstField &field =
+#else
+                  const CopySrcDstField &field =
+#endif
+                    fill->fields[idx];
                   find_last_users(field.inst, field.field_id, users);
                 }
                 if (users.size() == 1)
@@ -2501,9 +2502,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void PhysicalTemplate::record_issue_copy(PhysicalTraceInfo &trace_info,
                                              Operation* op, ApEvent &lhs,
-                                             const Domain &domain,
-                         const std::vector<Domain::CopySrcDstField>& src_fields,
-                         const std::vector<Domain::CopySrcDstField>& dst_fields,
+                                             IndexSpaceNode *domain,
+#ifdef LEGION_SPY
+                          const std::vector<Realm::CopySrcDstField>& src_fields,
+                          const std::vector<Realm::CopySrcDstField>& dst_fields,
+#else
+                                 const std::vector<CopySrcDstField>& src_fields,
+                                 const std::vector<CopySrcDstField>& dst_fields,
+#endif
                                              ApEvent precondition,
 #ifdef LEGION_SPY
                                              LogicalRegion handle,
@@ -2541,12 +2547,22 @@ namespace Legion {
 
       for (unsigned idx = 0; idx < src_fields.size(); ++idx)
       {
-        const Domain::CopySrcDstField &field = src_fields[idx];
+#ifdef LEGION_SPY
+        const Realm::CopySrcDstField &field =
+#else
+        const CopySrcDstField &field =
+#endif
+          src_fields[idx];
         record_last_user(field.inst, field.field_id, lhs_, true);
       }
       for (unsigned idx = 0; idx < dst_fields.size(); ++idx)
       {
-        const Domain::CopySrcDstField &field = dst_fields[idx];
+#ifdef LEGION_SPY
+        const Realm::CopySrcDstField &field =
+#else
+        const CopySrcDstField &field =
+#endif
+          dst_fields[idx];
         record_last_user(field.inst, field.field_id, lhs_, false);
       }
 
@@ -2678,21 +2694,30 @@ namespace Legion {
         const ReductionOp *reduction_op =
           Runtime::get_reduction_op(reduction_view->get_redop());
 
-        std::vector<Domain::CopySrcDstField> fields;
+        std::vector<CopySrcDstField> fields;
         {
           std::vector<FieldID> fill_fields;
           layout->get_fields(fill_fields);
-          layout->compute_copy_offsets(fill_fields, manager->get_instance(),
-              fields);
+          layout->compute_copy_offsets(fill_fields, manager, fields);
         }
+
+#ifdef LEGION_SPY
+        std::vector<Realm::CopySrcDstField> realm_fields(fields.size());
+        for (unsigned idx = 0; idx < fields.size(); idx++)
+          realm_fields[idx] = fields[idx];
+#endif
 
         unsigned lhs_ = events.size();
         events.push_back(ApEvent());
 
         instructions.push_back(
-            new IssueFill(*this, lhs_, manager->instance_domain,
-                          op_key, fields, reduction_op,
-                          ready_event_idx
+            new IssueFill(*this, lhs_, manager->instance_domain, op_key,
+#ifdef LEGION_SPY
+                          realm_fields,
+#else
+                          fields,
+#endif
+                          reduction_op, ready_event_idx
 #ifdef LEGION_SPY
                           , manager->region_node->handle
 #endif
@@ -2822,8 +2847,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void PhysicalTemplate::record_issue_fill(PhysicalTraceInfo &trace_info,
                                              Operation *op, ApEvent &lhs,
-                                             const Domain &domain,
-                             const std::vector<Domain::CopySrcDstField> &fields,
+                                             IndexSpaceNode *domain,
+#ifdef LEGION_SPY
+                              const std::vector<Realm::CopySrcDstField> &fields,
+#else
+                                     const std::vector<CopySrcDstField> &fields,
+#endif
                                              const void *fill_buffer,
                                              size_t fill_size,
                                              ApEvent precondition
@@ -3110,10 +3139,15 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IssueCopy::IssueCopy(PhysicalTemplate& tpl,
-                         unsigned l, const Domain &dom,
+                         unsigned l, IndexSpaceNode *dom,
                          const TraceLocalId& key,
-                         const std::vector<Domain::CopySrcDstField>& s,
-                         const std::vector<Domain::CopySrcDstField>& d,
+#ifdef LEGION_SPY
+                         const std::vector<Realm::CopySrcDstField>& s,
+                         const std::vector<Realm::CopySrcDstField>& d,
+#else
+                         const std::vector<CopySrcDstField>& s,
+                         const std::vector<CopySrcDstField>& d,
+#endif
                          unsigned pi,
 #ifdef LEGION_SPY
                          LogicalRegion h, RegionTreeNode *i,
@@ -3147,15 +3181,10 @@ namespace Legion {
       Operation *op = operations[op_key];
       Realm::ProfilingRequestSet requests;
       if (op->runtime->profiler != NULL)
-      {
         op->runtime->profiler->add_copy_request(requests, op);
-        if (src_fields.size() > 1)
-          op->runtime->profiler->increment_total_outstanding_requests(
-              src_fields.size()-1);
-      }
       ApEvent precondition = events[precondition_idx];
-      ApEvent result = ApEvent(domain.copy(src_fields, dst_fields, requests,
-            precondition, redop, reduction_fold));
+      ApEvent result; /* = domain->replay_copy(src_fields, dst_fields, requests,
+            precondition, redop, reduction_fold);*/
 #ifdef LEGION_SPY
       if (!result.exists())
       {
@@ -3210,7 +3239,7 @@ namespace Legion {
       for (unsigned idx = 0; idx < src_fields.size(); ++idx)
       {
         ss << "(" << std::hex << src_fields[idx].inst.id
-           << "," << std::dec << src_fields[idx].offset
+           << "," << std::dec << src_fields[idx].subfield_offset
            << "," << src_fields[idx].size
            << "," << src_fields[idx].field_id
            << "," << src_fields[idx].serdez_id << ")";
@@ -3220,7 +3249,7 @@ namespace Legion {
       for (unsigned idx = 0; idx < dst_fields.size(); ++idx)
       {
         ss << "(" << std::hex << dst_fields[idx].inst.id
-           << "," << std::dec << dst_fields[idx].offset
+           << "," << std::dec << dst_fields[idx].subfield_offset
            << "," << dst_fields[idx].size
            << "," << dst_fields[idx].field_id
            << "," << dst_fields[idx].serdez_id << ")";
@@ -3259,9 +3288,13 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    IssueFill::IssueFill(PhysicalTemplate& tpl, unsigned l, const Domain &d,
+    IssueFill::IssueFill(PhysicalTemplate& tpl, unsigned l, IndexSpaceNode *d,
                          const TraceLocalId &key,
-                         const std::vector<Domain::CopySrcDstField> &f,
+#ifdef LEGION_SPY
+                         const std::vector<Realm::CopySrcDstField> &f,
+#else
+                         const std::vector<CopySrcDstField> &f,
+#endif
                          const ReductionOp *reduction_op, unsigned pi
 #ifdef LEGION_SPY
                          , LogicalRegion h
@@ -3285,9 +3318,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IssueFill::IssueFill(PhysicalTemplate& tpl, unsigned l, const Domain &d,
+    IssueFill::IssueFill(PhysicalTemplate& tpl, unsigned l, IndexSpaceNode *d,
                          const TraceLocalId &key,
-                         const std::vector<Domain::CopySrcDstField> &f,
+#ifdef LEGION_SPY
+                         const std::vector<Realm::CopySrcDstField> &f,
+#else
+                         const std::vector<CopySrcDstField> &f,
+#endif
                          const void *fb, size_t fs, unsigned pi
 #ifdef LEGION_SPY
                          , LogicalRegion h
@@ -3334,8 +3371,8 @@ namespace Legion {
         op->runtime->profiler->add_fill_request(requests,
                                                 op->get_unique_op_id());
 
-      ApEvent result = ApEvent(domain.fill(fields, requests, fill_buffer, fill_size,
-            precondition));
+      ApEvent result; /* = domain->replay_fill(fields, requests, fill_buffer,
+          fill_size, precondition); */
 #ifdef LEGION_SPY
       if (!result.exists())
       {
@@ -3361,7 +3398,7 @@ namespace Legion {
       for (unsigned idx = 0; idx < fields.size(); ++idx)
       {
         ss << "(" << std::hex << fields[idx].inst.id
-           << "," << std::dec << fields[idx].offset
+           << "," << std::dec << fields[idx].subfield_offset
            << "," << fields[idx].size
            << "," << fields[idx].field_id
            << "," << fields[idx].serdez_id << ")";

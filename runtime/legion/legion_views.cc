@@ -23,6 +23,7 @@
 #include "legion/legion_instances.h"
 #include "legion/legion_views.h"
 #include "legion/legion_analysis.h"
+#include "legion/legion_trace.h"
 #include "legion/legion_context.h"
 
 namespace Legion {

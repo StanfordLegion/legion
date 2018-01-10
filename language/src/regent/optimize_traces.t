@@ -80,15 +80,13 @@ local function apply_tracing_node(cx)
       inner_stats:insertall(node.block.stats)
       inner_stats:insert(
         ast.typed.stat.Assignment {
-          lhs = terralib.newlist {
-            ast.typed.expr.ID {
-              value = future_var,
-              expr_type = std.rawref(&future_type),
-              annotations = ast.default_annotations(),
-              span = node.span,
-            }
+          lhs = ast.typed.expr.ID {
+            value = future_var,
+            expr_type = std.rawref(&future_type),
+            annotations = ast.default_annotations(),
+            span = node.span,
           },
-          rhs = terralib.newlist { call },
+          rhs = call,
           annotations = ast.default_annotations(),
           span = node.span,
         }
@@ -104,9 +102,9 @@ local function apply_tracing_node(cx)
 
       outer_stats:insert(
         ast.typed.stat.Var {
-          symbols = terralib.newlist { future_var },
-          types = terralib.newlist { future_type },
-          values = terralib.newlist { call },
+          symbol = future_var,
+          type = future_type,
+          value = call,
           annotations = ast.default_annotations(),
           span = node.span,
       })

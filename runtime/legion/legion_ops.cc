@@ -11944,6 +11944,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(!mapped_instances.empty()); 
 #endif
+      PhysicalTraceInfo trace_info;
       // Then we can register our mapped_instances
       runtime->forest->physical_register_only(requirement, 
                                               version_info, restrict_info,
@@ -11953,7 +11954,8 @@ namespace Legion {
                                               true/*read only locks*/,
                                               map_applied_conditions,
                                               mapped_instances,
-                                              NULL/*no projection info*/
+                                              NULL/*no projection info*/,
+                                              trace_info
 #ifdef DEBUG_LEGION
                                               , get_logging_name()
                                               , unique_op_id

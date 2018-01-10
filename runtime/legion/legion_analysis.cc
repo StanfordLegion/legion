@@ -2807,7 +2807,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void FieldState::print_state(TreeStateLogger *logger,
-                                 const FieldMask &capture_mask) const
+                                 const FieldMask &capture_mask,
+                                 RegionNode *node) const
     //--------------------------------------------------------------------------
     {
       switch (open_state)
@@ -2883,32 +2884,111 @@ namespace Legion {
         if (!overlap)
           continue;
         char *mask_buffer = overlap.to_string();
-        switch (it->first.get_dim())
+        logger->log("Color %d   Mask %s", it->first, mask_buffer);
+        free(mask_buffer);
+      }
+      logger->up();
+    }
+
+    //--------------------------------------------------------------------------
+    void FieldState::print_state(TreeStateLogger *logger,
+                                 const FieldMask &capture_mask,
+                                 PartitionNode *node) const
+    //--------------------------------------------------------------------------
+    {
+      switch (open_state)
+      {
+        case NOT_OPEN:
+          {
+            logger->log("Field State: NOT OPEN (%ld)", 
+                        open_children.size());
+            break;
+          }
+        case OPEN_READ_WRITE:
+          {
+            logger->log("Field State: OPEN READ WRITE (%ld)", 
+                        open_children.size());
+            break;
+          }
+        case OPEN_READ_ONLY:
+          {
+            logger->log("Field State: OPEN READ-ONLY (%ld)", 
+                        open_children.size());
+            break;
+          }
+        case OPEN_SINGLE_REDUCE:
+          {
+            logger->log("Field State: OPEN SINGLE REDUCE Mode %d (%ld)", 
+                        redop, open_children.size());
+            break;
+          }
+        case OPEN_MULTI_REDUCE:
+          {
+            logger->log("Field State: OPEN MULTI REDUCE Mode %d (%ld)", 
+                        redop, open_children.size());
+            break;
+          }
+        case OPEN_READ_ONLY_PROJ:
+          {
+            logger->log("Field State: OPEN READ-ONLY PROJECTION %d",
+                        projection->projection_id);
+            break;
+          }
+        case OPEN_READ_WRITE_PROJ:
+          {
+            logger->log("Field State: OPEN READ WRITE PROJECTION %d",
+                        projection->projection_id);
+            break;
+          }
+        case OPEN_READ_WRITE_PROJ_DISJOINT_SHALLOW:
+          {
+            logger->log("Field State: OPEN READ WRITE PROJECTION (Disjoint Shallow) %d",
+                        projection->projection_id);
+            break;
+          }
+        case OPEN_REDUCE_PROJ:
+          {
+            logger->log("Field State: OPEN REDUCE PROJECTION %d Mode %d",
+                        projection->projection_id, redop);
+            break;
+          }
+        case OPEN_REDUCE_PROJ_DIRTY:
+          {
+            logger->log("Field State: OPEN REDUCE PROJECTION (Dirty) %d Mode %d",
+                        projection->projection_id, redop);
+            break;
+          }
+        default:
+          assert(false);
+      }
+      logger->down();
+      for (LegionMap<LegionColor,FieldMask>::aligned::const_iterator it = 
+            open_children.begin(); it != open_children.end(); it++)
+      {
+        DomainPoint color =
+          node->row_source->color_space->delinearize_color_to_point(it->first);
+        FieldMask overlap = it->second & capture_mask;
+        if (!overlap)
+          continue;
+        char *mask_buffer = overlap.to_string();
+        switch (color.get_dim())
         {
-          case 0:
-            {
-              logger->log("Color %d   Mask %s", 
-                          it->first.get_index(), mask_buffer);
-              break;
-            }
           case 1:
             {
               logger->log("Color %d   Mask %s", 
-                          it->first[0], mask_buffer);
+                          color[0], mask_buffer);
               break;
             }
           case 2:
             {
               logger->log("Color (%d,%d)   Mask %s", 
-                          it->first[0], it->first[1],
-                          mask_buffer);
+                          color[0], color[1], mask_buffer);
               break;
             }
           case 3:
             {
               logger->log("Color (%d,%d,%d)   Mask %s", 
-                          it->first[0], it->first[1],
-                          it->first[2], mask_buffer);
+                          color[0], color[1], color[2], mask_buffer);
               break;
             }
           default:
@@ -3395,10 +3475,10 @@ namespace Legion {
 
     void ClosedNode::record_closed_tree(const FieldMask &fields,
                                         ContextID logical_ctx,
-                         LegionMap<std::pair<RegionTreeNode*,ContextID>,
-                                   FieldMask>::aligned &nodes,
-                         std::map<std::pair<RegionTreeNode*,ContextID>,
-                                  LegionMap<Domain,FieldMask>::aligned> &projs)
+                 LegionMap<std::pair<RegionTreeNode*,ContextID>,
+                           FieldMask>::aligned &nodes,
+                 std::map<std::pair<RegionTreeNode*,ContextID>,
+                          LegionMap<IndexSpaceNode*,FieldMask>::aligned> &projs)
     //--------------------------------------------------------------------------
     {
       std::pair<RegionTreeNode*,ContextID> key(node, logical_ctx);
@@ -3413,23 +3493,23 @@ namespace Legion {
         return;
       }
       std::map<std::pair<RegionTreeNode*,ContextID>,
-               LegionMap<Domain,FieldMask>::aligned>::iterator finder =
+               LegionMap<IndexSpaceNode*,FieldMask>::aligned>::iterator finder =
                  projs.find(key);
       for (std::map<ProjectionFunction*,
-                    LegionMap<Domain,FieldMask>::aligned>::const_iterator pit =
-            projections.begin(); pit != projections.end(); pit++)
+           LegionMap<IndexSpaceNode*,FieldMask>::aligned>::const_iterator pit =
+           projections.begin(); pit != projections.end(); pit++)
       {
-        for (LegionMap<Domain,FieldMask>::aligned::const_iterator it =
+        for (LegionMap<IndexSpaceNode*,FieldMask>::aligned::const_iterator it =
               pit->second.begin(); it != pit->second.end(); it++)
         {
           FieldMask overlap = it->second & fields;
           if (!overlap) continue;
           if (finder == projs.end())
           {
-            projs[key] = LegionMap<Domain,FieldMask>::aligned();
+            projs[key] = LegionMap<IndexSpaceNode*,FieldMask>::aligned();
             finder = projs.find(key);
           }
-          LegionMap<Domain,FieldMask>::aligned::iterator finder2 =
+          LegionMap<IndexSpaceNode*,FieldMask>::aligned::iterator finder2 =
             finder->second.find(it->first);
           if (finder2 == finder->second.end())
             finder->second[it->first] = overlap;

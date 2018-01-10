@@ -2123,6 +2123,7 @@ namespace Legion {
                 constraints.field_constraint.get_field_set();
               layout->compute_copy_offsets(fill_fields, result, dsts);
             }
+            PhysicalTraceInfo info;
 #ifdef LEGION_SPY
             std::vector<Realm::CopySrcDstField> realm_dsts(dsts.size());
             for (unsigned idx = 0; idx < dsts.size(); idx++)
@@ -2130,12 +2131,12 @@ namespace Legion {
             ApEvent filled =
               instance_domain->issue_fill(NULL/*op*/, realm_dsts, fill_buffer,
                                           reduction_op->sizeof_rhs, ready,
-                                          PredEvent::NO_PRED_EVENT);
+                                          PredEvent::NO_PRED_EVENT, info);
 #else
             ApEvent filled =
               instance_domain->issue_fill(NULL/*op*/, dsts, fill_buffer,
                                           reduction_op->sizeof_rhs, ready,
-                                          PredEvent::NO_PRED_EVENT);
+                                          PredEvent::NO_PRED_EVENT, info);
 #endif
             // We can free the buffer after we've issued the fill
             free(fill_buffer);

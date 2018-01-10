@@ -555,7 +555,11 @@ namespace Legion {
       bool projection_domain_dominates(IndexSpaceNode *next_space) const;
     public:
       void print_state(TreeStateLogger *logger, 
-                       const FieldMask &capture_mask) const;
+                       const FieldMask &capture_mask,
+                       RegionNode *node) const;
+      void print_state(TreeStateLogger *logger, 
+                       const FieldMask &capture_mask,
+                       PartitionNode *node) const;
     public:
       OpenState open_state;
       ReductionOpID redop;
@@ -697,7 +701,8 @@ namespace Legion {
           LegionMap<std::pair<RegionTreeNode*,ContextID>,
                     FieldMask>::aligned &closed_nodes,
           std::map<std::pair<RegionTreeNode*,ContextID>,
-                   LegionMap<Domain,FieldMask>::aligned> &closed_projections);
+                   LegionMap<IndexSpaceNode*,FieldMask>::aligned>
+                   &closed_projections);
     public:
       RegionTreeNode *const node;
     protected:

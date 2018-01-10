@@ -15603,7 +15603,7 @@ namespace Legion {
               state.field_states.begin(); it != 
               state.field_states.end(); it++)
         {
-          it->print_state(logger, capture_mask);
+          it->print_state(logger, capture_mask, this);
           if (it->valid_fields * capture_mask)
             continue;
           for (LegionMap<LegionColor,FieldMask>::aligned::const_iterator 
@@ -16518,37 +16518,10 @@ namespace Legion {
     {
       const char* disjointness =
         row_source->is_disjoint() ? "disjoint" : "aliased";
-      DomainPoint color = row_source->get_domain_point_color();
-      switch (row_source->color.get_dim())
-      {
-        case 1:
-          {
-            logger->log("Partition Node (" IDFMT ",%d,%d) Color %d "
-                        "%s at depth %d", 
-              handle.index_partition.id, handle.field_space.id,handle.tree_id,
-              color[0], disjointness,
-              get_depth());
-            break;
-          }
-        case 2:
-          {
-            logger->log("Partition Node (" IDFMT ",%d,%d) Color (%d,%d) "
-                        "%s at depth %d", 
-              handle.index_partition.id, handle.field_space.id,handle.tree_id,
-              color[0], color[1], disjointness, get_depth());
-            break;
-          }
-        case 3:
-          {
-            logger->log("Partition Node (" IDFMT ",%d,%d) Color (%d,%d,%d) "
-                        "%s at depth %d", 
-              handle.index_partition.id, handle.field_space.id,handle.tree_id,
-              color[0], color[2], color[2], disjointness, get_depth());
-            break;
-          }
-        default:
-          assert(false);
-      }
+      logger->log("Partition Node (" IDFMT ",%d,%d) Color %d "
+          "%s at depth %d", 
+          handle.index_partition.id, handle.field_space.id,handle.tree_id,
+          row_source->color, disjointness, get_depth());
     }
 
     //--------------------------------------------------------------------------
@@ -16597,7 +16570,7 @@ namespace Legion {
               state.field_states.begin(); it != 
               state.field_states.end(); it++)
         {
-          it->print_state(logger, capture_mask);
+          it->print_state(logger, capture_mask, this);
           if (it->valid_fields * capture_mask)
             continue;
           for (LegionMap<LegionColor,FieldMask>::aligned::const_iterator 

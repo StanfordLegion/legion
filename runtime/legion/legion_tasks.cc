@@ -1022,16 +1022,9 @@ namespace Legion {
       memoizing = options.memoize && !Runtime::no_tracing &&
         !Runtime::no_physical_tracing;
       if (trace == NULL && memoizing)
-      {
-        MessageDescriptor INVALID_PHYSICAL_TRACING(3800, "undefined");
-        log_run.error(INVALID_PHYSICAL_TRACING.id(),
+        REPORT_LEGION_ERROR(ERROR_INVALID_PHYSICAL_TRACING,
             "Invalid mapper output from 'select_task_options'. Mapper requested"
             " memoization of a task that is not being traced.");
-#ifdef DEBUG_LEGION
-        assert(false);
-#endif
-        exit(ERROR_INVALID_PHYSICAL_TRACING);
-      }
       map_origin = options.map_locally;
       if (parent_priority != options.parent_priority)
       {
@@ -4319,7 +4312,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(memoizing);
 #endif
-      SliceTask *new_slice = this->clone_as_slice_task(internal_domain,
+      SliceTask *new_slice = this->clone_as_slice_task(internal_space,
                                                        target_proc,
                                                        false,
                                                        false, 1LL);
