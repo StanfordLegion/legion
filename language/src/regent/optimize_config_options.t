@@ -544,9 +544,7 @@ function optimize_config_options.top_task(cx, node)
   local leaf = analyze_leaf(cx, node.body) and std.config["leaf"]
   local inner = analyze_inner(cx, node.body) and std.config["inner"] and not leaf
   local idempotent = analyze_idempotent(cx, node.body) and std.config["idempotent"]
-  local replicable = analyze_replicable(cx, node.body) and
-    idempotent and -- Replicable tasks must also be idempotent
-    std.config["replicable"]
+  local replicable = analyze_replicable(cx, node.body) and std.config["replicable"]
 
   if std.config["leaf"] and not leaf and
     node.annotations.leaf:is(ast.annotation.Demand)
