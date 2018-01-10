@@ -191,6 +191,10 @@ namespace Legion {
   template<unsigned int MAX> class AVXBitMask;
   template<unsigned int MAX> class AVXTLBitMask;
 #endif
+#ifdef __ALTIVEC__
+  template<unsigned int MAX> class PPCBitMask;
+  template<unsigned int MAX> class PPCTLBitMask;
+#endif
   template<typename T, unsigned LOG2MAX> class BitPermutation;
   template<typename IT, typename DT, bool BIDIR = false> class IntegerSet;
 
@@ -1673,6 +1677,16 @@ namespace Legion {
                     LEGION_FIELD_MASK_FIELD_SHIFT,
                     LEGION_FIELD_MASK_FIELD_MASK> FieldMask;
 #endif
+#elif defined(__ALTIVEC__)
+#if (MAX_FIELDS > 128)
+    typedef PPCTLBitMask<MAX_FIELDS> FieldMask;
+#elif (MAX_FIELDS > 64)
+    typedef PPCBitMask<MAX_FIELDS> FieldMask;
+#else
+    typedef BitMask<LEGION_FIELD_MASK_FIELD_TYPE,MAX_FIELDS,
+                    LEGION_FIELD_MASK_FIELD_SHIFT,
+                    LEGION_FIELD_MASK_FIELD_MASK> FieldMask;
+#endif
 #else
 #if (MAX_FIELDS > 64)
     typedef TLBitMask<LEGION_FIELD_MASK_FIELD_TYPE,MAX_FIELDS,
@@ -1720,6 +1734,16 @@ namespace Legion {
                     LEGION_NODE_MASK_NODE_SHIFT,
                     LEGION_NODE_MASK_NODE_MASK> NodeMask;
 #endif
+#elif defined(__ALTIVEC__)
+#if (MAX_NUM_NODES > 128)
+    typedef PPCTLBitMask<MAX_NUM_NODES> NodeMask;
+#elif (MAX_NUM_NODES > 64)
+    typedef PPCBitMask<MAX_NUM_NODES> NodeMask;
+#else
+    typedef BitMask<LEGION_NODE_MASK_NODE_TYPE,MAX_NUM_NODES,
+                    LEGION_NODE_MASK_NODE_SHIFT,
+                    LEGION_NODE_MASK_NODE_MASK> NodeMask;
+#endif
 #else
 #if (MAX_NUM_NODES > 64)
     typedef TLBitMask<LEGION_NODE_MASK_NODE_TYPE,MAX_NUM_NODES,
@@ -1760,6 +1784,16 @@ namespace Legion {
     typedef SSETLBitMask<MAX_NUM_PROCS> ProcessorMask;
 #elif (MAX_NUM_PROCS > 64)
     typedef SSEBitMask<MAX_NUM_PROCS> ProcessorMask;
+#else
+    typedef BitMask<LEGION_PROC_MASK_PROC_TYPE,MAX_NUM_PROCS,
+                    LEGION_PROC_MASK_PROC_SHIFT,
+                    LEGION_PROC_MASK_PROC_MASK> ProcessorMask;
+#endif
+#elif defined(__ALTIVEC__)
+#if (MAX_NUM_PROCS > 128)
+    typedef PPCTLBitMask<MAX_NUM_PROCS> ProcessorMask;
+#elif (MAX_NUM_PROCS > 64)
+    typedef PPCBitMask<MAX_NUM_PROCS> ProcessorMask;
 #else
     typedef BitMask<LEGION_PROC_MASK_PROC_TYPE,MAX_NUM_PROCS,
                     LEGION_PROC_MASK_PROC_SHIFT,
