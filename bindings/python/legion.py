@@ -102,6 +102,13 @@ def inside_legion_executable():
     else:
         return True
 
+def input_args():
+    raw_args = c.legion_runtime_get_input_args()
+    args = []
+    for i in range(raw_args.argc):
+        args.append(ffi.string(raw_args.argv[i]))
+    return args
+
 # The Legion context is stored in thread-local storage. This assumes
 # that the Python processor maintains the invariant that every task
 # corresponds to one and only one thread.
