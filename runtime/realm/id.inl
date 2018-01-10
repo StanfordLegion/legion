@@ -1,4 +1,4 @@
-/* Copyright 2017 Stanford University, NVIDIA Corporation
+/* Copyright 2018 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,7 +16,7 @@
 // INCLDUED FROM id.h - DO NOT INCLUDE THIS DIRECTLY
 
 // this is a nop, but it's for the benefit of IDEs trying to parse this file
-#include "id.h"
+#include "realm/id.h"
 
 namespace Realm {
 
@@ -43,6 +43,11 @@ namespace Realm {
   inline bool ID::operator==(const ID& rhs) const 
   {
     return this->id == rhs.id;
+  }
+
+  inline bool ID::operator!=(const ID& rhs) const 
+  {
+    return this->id != rhs.id;
   }
 
   template <class T>
@@ -190,6 +195,21 @@ namespace Realm {
   inline bool ID::is_idxspace(void) const
   {
     return this->idxspace.type_tag == FMT_IdxSpace::TAG_VALUE;
+  }
+
+  /*static*/ inline ID ID::make_sparsity(unsigned owner_node, unsigned creator_node, unsigned sparsity_idx)
+  {
+    ID id;
+    id.sparsity.type_tag = FMT_Sparsity::TAG_VALUE;
+    id.sparsity.owner_node = owner_node;
+    id.sparsity.creator_node = creator_node;
+    id.sparsity.sparsity_idx = sparsity_idx;
+    return id;
+  }
+
+  inline bool ID::is_sparsity(void) const
+  {
+    return this->sparsity.type_tag == FMT_Sparsity::TAG_VALUE;
   }
 
   /*static*/ inline ID ID::make_allocator(unsigned owner_node, unsigned creator_node, unsigned allocator_idx)

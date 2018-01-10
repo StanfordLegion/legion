@@ -1,4 +1,4 @@
-/* Copyright 2017 Stanford University
+/* Copyright 2018 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,8 +21,6 @@
 #include "legion.h"
 
 using namespace Legion;
-using namespace LegionRuntime::Accessor;
-using namespace LegionRuntime::Arrays;
 
 enum TaskIDs {
   TOP_LEVEL_TASK_ID,
@@ -43,9 +41,8 @@ void top_level_task(const Task *task,
   //sprintf(input_file, "/scratch/sdb1_ext4/input.dat");
   sprintf(input_file, "input.dat");
 
-  Rect<1> rect_A(Point<1>(0), Point<1>(1023));
-  IndexSpace is_A = runtime->create_index_space(ctx,
-                          Domain::from_rect<1>(rect_A));
+  Rect<1> rect_A(0,1023);
+  IndexSpace is_A = runtime->create_index_space(ctx, rect_A);
   FieldSpace fs_A = runtime->create_field_space(ctx);
   {
     FieldAllocator allocator = 

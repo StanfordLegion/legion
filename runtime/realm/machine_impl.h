@@ -1,4 +1,4 @@
-/* Copyright 2017 Stanford University, NVIDIA Corporation
+/* Copyright 2018 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,11 +18,11 @@
 #ifndef REALM_MACHINE_IMPL_H
 #define REALM_MACHINE_IMPL_H
 
-#include "machine.h"
+#include "realm/machine.h"
 
-#include "legion_types.h"
-#include "legion_utilities.h"
-#include "activemsg.h"
+#include "legion/legion_types.h"
+#include "legion/legion_utilities.h"
+#include "realm/activemsg.h"
 
 #include <vector>
 #include <set>
@@ -321,18 +321,19 @@ namespace Realm {
 
   // active messages
 
-  enum {
+  enum NodeAnnounceTag {
     NODE_ANNOUNCE_DONE = 0,
     NODE_ANNOUNCE_PROC, // PROC id kind
     NODE_ANNOUNCE_MEM,  // MEM id size
     NODE_ANNOUNCE_IB_MEM, // IB_MEM id size
     NODE_ANNOUNCE_PMA,  // PMA proc_id mem_id bw latency
     NODE_ANNOUNCE_MMA,  // MMA mem1_id mem2_id bw latency
+    NODE_ANNOUNCE_DMA_CHANNEL,
   };
 
   struct NodeAnnounceMessage {
     struct RequestArgs : public BaseMedium {
-      gasnet_node_t node_id;
+      NodeID node_id;
       unsigned num_procs;
       unsigned num_memories;
       unsigned num_ib_memories;
@@ -344,7 +345,7 @@ namespace Realm {
 				       RequestArgs,
 				       handle_request> Message;
 
-    static void send_request(gasnet_node_t target, unsigned num_procs,
+    static void send_request(NodeID target, unsigned num_procs,
 			     unsigned num_memories, unsigned num_ib_memories,
 			     const void *data, size_t datalen, int payload_mode);
 

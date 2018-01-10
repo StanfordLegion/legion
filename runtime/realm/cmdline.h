@@ -1,4 +1,4 @@
-/* Copyright 2017 Stanford University, NVIDIA Corporation
+/* Copyright 2018 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -35,6 +35,8 @@ namespace Realm {
 
     template <typename T>
     CommandLineParser& add_option_string(const std::string& optname, T& target, bool keep = false);
+
+    CommandLineParser& add_option_string(const std::string& optname, char *target, size_t maxlen, bool keep = false);
 
     template <typename T>
     CommandLineParser& add_option_stringlist(const std::string& optname, T& target, bool keep = false);
@@ -85,13 +87,16 @@ namespace Realm {
   class StringCommandLineOption : public CommandLineOption {
   public:
     StringCommandLineOption(const std::string& _optname, bool _keep, std::string& _target);
+    StringCommandLineOption(const std::string& _optname, bool _keep, char *_target, size_t _maxlen);
     
     virtual bool parse_argument(std::vector<std::string>& cmdline,
 				std::vector<std::string>::iterator& pos);
     virtual bool parse_argument(int& pos, int argc, const char *argv[]);
 
   protected:
-    std::string& target;
+    std::string *target_str;
+    char *target_array;
+    size_t target_arrlen;
   };
 
   class StringListCommandLineOption : public CommandLineOption {
@@ -135,7 +140,7 @@ namespace Realm {
 
 }; // namespace Realm
 
-#include "cmdline.inl"
+#include "realm/cmdline.inl"
 
 #endif // ifndef REALM_CMDLINE_H
 

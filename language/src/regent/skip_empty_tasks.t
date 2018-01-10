@@ -1,4 +1,4 @@
--- Copyright 2017 Stanford University
+-- Copyright 2018 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -75,9 +75,9 @@ function skip_empty_tasks.stat_expr(cx, node)
     else
       local arg_symbol = std.newsymbol(arg_type)
       local arg_var = ast.typed.stat.Var {
-        symbols = terralib.newlist({arg_symbol}),
-        types = terralib.newlist({arg_type}),
-        values = terralib.newlist({arg}),
+        symbol = arg_symbol,
+        type = arg_type,
+        value = arg,
         annotations = ast.default_annotations(),
         span = arg.span,
       }

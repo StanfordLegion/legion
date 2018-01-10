@@ -1,4 +1,4 @@
-/* Copyright 2017 Stanford University
+/* Copyright 2018 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,12 +17,11 @@
 #include <cstdio>
 #include <cassert>
 #include <cstdlib>
+#define LEGION_ENABLE_C_BINDINGS
 #include "legion.h"
-#include "legion_c.h"
+#include "mappers/default_mapper.h"
 
 using namespace Legion;
-using namespace LegionRuntime::Accessor;
-using namespace LegionRuntime::Arrays;
 
 #ifdef REALM_USE_LLVM
 #include "realm/llvmjit/llvmjit.h"
@@ -117,7 +116,12 @@ const char llvm_ir[] =
   "declare void @legion_task_postamble(%struct.legion_runtime_t, %struct.legion_context_t, i8*, i64)\n"
   "@.str = private unnamed_addr constant [31 x i8] c\"hello from llvm wrapped task!\\0A\\00\", align 1\n"
   "define void @body(%struct.legion_task_t %task, %struct.legion_physical_region_t* %regions, i32 %num_regions, %struct.legion_context_t %ctx, %struct.legion_runtime_t %runtime) {\n"
-  "  %1 = call i32 (i8*, ...)* @printf(i8* getelementptr inbounds ([31 x i8]* @.str, i32 0, i32 0))\n"
+  "  %1 = bitcast [31 x i8]* @.str to i8*\n"
+#if REALM_LLVM_VERSION >= 37
+  "  %2 = call i32 (i8*, ...) @printf(i8* %1)\n"
+#else
+  "  %2 = call i32 (i8*, ...)* @printf(i8* %1)\n"
+#endif
   "  ret void\n"
   "}\n"
   "define void @llvm_wrapper(i8* %data, i64 %datalen, i8* %userdata, i64 %userlen, i64 %proc_id) {\n"
@@ -127,11 +131,19 @@ const char llvm_ir[] =
   "  %ctx_ptr = alloca %struct.legion_context_t, align 8\n"
   "  %runtime_ptr = alloca %struct.legion_runtime_t, align 8\n"
   "  call void @legion_task_preamble(i8* %data, i64 %datalen, i64 %proc_id, %struct.legion_task_t* %task_ptr, %struct.legion_physical_region_t** %regions_ptr, i32* %num_regions_ptr, %struct.legion_context_t* %ctx_ptr, %struct.legion_runtime_t* %runtime_ptr)\n"
+#if REALM_LLVM_VERSION >= 37
+  "  %task = load %struct.legion_task_t, %struct.legion_task_t* %task_ptr\n"
+  "  %regions = load %struct.legion_physical_region_t*, %struct.legion_physical_region_t** %regions_ptr\n"
+  "  %num_regions = load i32, i32* %num_regions_ptr\n"
+  "  %ctx = load %struct.legion_context_t, %struct.legion_context_t* %ctx_ptr\n"
+  "  %runtime = load %struct.legion_runtime_t, %struct.legion_runtime_t* %runtime_ptr\n"
+#else
   "  %task = load %struct.legion_task_t* %task_ptr\n"
   "  %regions = load %struct.legion_physical_region_t** %regions_ptr\n"
   "  %num_regions = load i32* %num_regions_ptr\n"
   "  %ctx = load %struct.legion_context_t* %ctx_ptr\n"
   "  %runtime = load %struct.legion_runtime_t* %runtime_ptr\n"
+#endif
   "  call void @body(%struct.legion_task_t %task, %struct.legion_physical_region_t* %regions, i32 %num_regions, %struct.legion_context_t %ctx, %struct.legion_runtime_t %runtime)\n"
   "  call void @legion_task_postamble(%struct.legion_runtime_t %runtime, %struct.legion_context_t %ctx, i8* null, i64 0)\n"
   "  ret void\n"
@@ -160,23 +172,35 @@ void top_level_task(const Task *task,
 
   LayoutConstraintID soa_layout_id = runtime->register_layout(layout_registrar);
 
+#ifdef USE_LIBDL
+  // rely on dladdr/dlsym to make function pointers portable for global
+  //  task registration
+  bool global_taskreg = true;
+#else
+  // function pointers will not be portable, so limit tasks to local node
+  const bool global_taskreg = false;
+#endif
+
   // Dynamically register some more tasks
   TaskVariantRegistrar init_registrar(INIT_FIELD_TASK_ID,
-                                      "cpu_init_variant");
+                                      "cpu_init_variant",
+				      global_taskreg);
   // Add our constraints
   init_registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC))
       .add_layout_constraint_set(0/*index*/, soa_layout_id);
   runtime->register_task_variant<init_field_task>(init_registrar);
 
   TaskVariantRegistrar stencil_registrar(STENCIL_TASK_ID,
-                                         "cpu_stencil_variant");
+                                         "cpu_stencil_variant",
+					 global_taskreg);
   stencil_registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC))
       .add_layout_constraint_set(0/*index*/, soa_layout_id)
       .add_layout_constraint_set(1/*index*/, soa_layout_id);
   runtime->register_task_variant<stencil_task>(stencil_registrar);
 
   TaskVariantRegistrar check_registrar(CHECK_TASK_ID,
-                                       "cpu_check_variant");
+                                       "cpu_check_variant",
+				       global_taskreg);
   check_registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC))
       .add_layout_constraint_set(0/*index*/, soa_layout_id)
       .add_layout_constraint_set(1/*index*/, soa_layout_id);
@@ -184,7 +208,7 @@ void top_level_task(const Task *task,
 
   TaskVariantRegistrar wrapped_cpp_registrar(WRAPPED_CPP_TASK_ID,
 					     "wrapped_cpp_variant",
-					      true /*global*/);
+					     global_taskreg);
   wrapped_cpp_registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
   const char cpp_msg[] = "user data for cpp task";
   runtime->register_task_variant(wrapped_cpp_registrar,
@@ -193,7 +217,7 @@ void top_level_task(const Task *task,
 
   TaskVariantRegistrar wrapped_c_registrar(WRAPPED_C_TASK_ID,
 					   "wrapped_c_variant",
-					   true /*global*/);
+					   global_taskreg);
   wrapped_c_registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
   const char c_msg[] = "user data for c task";
   runtime->register_task_variant(wrapped_c_registrar,
@@ -201,8 +225,10 @@ void top_level_task(const Task *task,
 				 c_msg, sizeof(c_msg));
 
 #ifdef REALM_USE_LLVM
-  TaskVariantRegistrar wrapped_llvm_registrar(WRAPPED_LLVM_TASK_ID, true/*global*/,
-					      "wrapped_llvm_variant");
+  // LLVM IR is portable, so we can do global registration even without libdl
+  TaskVariantRegistrar wrapped_llvm_registrar(WRAPPED_LLVM_TASK_ID,
+					      "wrapped_llvm_variant",
+					      true /*global*/);
   wrapped_llvm_registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
   const char llvm_msg[] = "user data for llvm task";
   CodeDescriptor llvm_cd(Realm::Type::from_cpp_type<Processor::TaskFuncPtr>());
@@ -226,6 +252,8 @@ void top_level_task(const Task *task,
   {
     int val = 55;
     TaskLauncher l(WRAPPED_CPP_TASK_ID, TaskArgument(&val, sizeof(val)));
+    if (!global_taskreg)
+      l.tag |= Legion::Mapping::DefaultMapper::SAME_ADDRESS_SPACE;
     Future f = runtime->execute_task(ctx, l);
     f.get_void_result();
   }
@@ -233,6 +261,8 @@ void top_level_task(const Task *task,
   {
     int val = 66;
     TaskLauncher l(WRAPPED_C_TASK_ID, TaskArgument(&val, sizeof(val)));
+    if (!global_taskreg)
+      l.tag |= Legion::Mapping::DefaultMapper::SAME_ADDRESS_SPACE;
     Future f = runtime->execute_task(ctx, l);
     f.get_void_result();
   }
@@ -262,128 +292,43 @@ void top_level_task(const Task *task,
   printf("Running stencil computation for %d elements...\n", num_elements);
   printf("Partitioning data into %d sub-regions...\n", num_subregions);
 
-  // For this example we'll create a single logical region with two
-  // fields.  We'll initialize the field identified by 'FID_VAL' with
-  // our input data and then compute the derivatives stencil values 
-  // and write them into the field identified by 'FID_DERIV'.
-  Rect<1> elem_rect(Point<1>(0),Point<1>(num_elements-1));
-  IndexSpace is = runtime->create_index_space(ctx, 
-                          Domain::from_rect<1>(elem_rect));
-  
+  Rect<1> elem_rect(0,num_elements-1);
+  IndexSpaceT<1> is = runtime->create_index_space(ctx, elem_rect);
   LogicalRegion stencil_lr = runtime->create_logical_region(ctx, is, fs);
   
-  // Make our color_domain based on the number of subregions
-  // that we want to create.
-  Rect<1> color_bounds(Point<1>(0),Point<1>(num_subregions-1));
-  Domain color_domain = Domain::from_rect<1>(color_bounds);
+  Rect<1> color_bounds(0,num_subregions-1);
+  IndexSpaceT<1> color_is = runtime->create_index_space(ctx, color_bounds);
 
-  // In this example we need to create two partitions: one disjoint
-  // partition for describing the output values that are going to
-  // be computed by each sub-task that we launch and a second
-  // aliased partition which will describe the input values needed
-  // for performing each task.  Note that for the second partition
-  // each subregion will be a superset of its corresponding region
-  // in the first partition, but will also require two 'ghost' cells
-  // on each side.  The need for these ghost cells means that the
-  // subregions in the second partition will be aliased.
-  IndexPartition disjoint_ip, ghost_ip;
-  {
-    const int lower_bound = num_elements/num_subregions;
-    const int upper_bound = lower_bound+1;
-    const int number_small = num_subregions - (num_elements % num_subregions);
-    DomainColoring disjoint_coloring, ghost_coloring;
-    int index = 0;
-    // Iterate over all the colors and compute the entry
-    // for both partitions for each color.
-    for (int color = 0; color < num_subregions; color++)
-    {
-      int num_elmts = color < number_small ? lower_bound : upper_bound;
-      assert((index+num_elmts) <= num_elements);
-      Rect<1> subrect(Point<1>(index),Point<1>(index+num_elmts-1));
-      disjoint_coloring[color] = Domain::from_rect<1>(subrect);
-      // Now compute the points assigned to this color for
-      // the second partition.  Here we need a superset of the
-      // points that we just computed including the two additional
-      // points on each side.  We handle the edge cases by clamping
-      // values to their minimum and maximum values.  This creates
-      // four cases of clamping both above and below, clamping below,
-      // clamping above, and no clamping.
-      if (index < 2)
-      {
-        if ((index+num_elmts+2) > num_elements)
-        {
-          // Clamp both
-          Rect<1> ghost_rect(Point<1>(0),Point<1>(num_elements-1));
-          ghost_coloring[color] = Domain::from_rect<1>(ghost_rect);
-        }
-        else
-        {
-          // Clamp below
-          Rect<1> ghost_rect(Point<1>(0),Point<1>(index+num_elmts+1));
-          ghost_coloring[color] = Domain::from_rect<1>(ghost_rect);
-        }
-      }
-      else
-      {
-        if ((index+num_elmts+2) > num_elements)
-        {
-          // Clamp above
-          Rect<1> ghost_rect(Point<1>(index-2),Point<1>(num_elements-1));
-          ghost_coloring[color] = Domain::from_rect<1>(ghost_rect);
-        }
-        else
-        {
-          // Normal case
-          Rect<1> ghost_rect(Point<1>(index-2),Point<1>(index+num_elmts+1));
-          ghost_coloring[color] = Domain::from_rect<1>(ghost_rect);
-        }
-      }
-      index += num_elmts;
-    }
-    // Once we've computed both of our colorings then we can
-    // create our partitions.  Note that we tell the runtime
-    // that one is disjoint will the second one is not.
-    disjoint_ip = runtime->create_index_partition(ctx, is, color_domain,
-                                    disjoint_coloring, true/*disjoint*/);
-    ghost_ip = runtime->create_index_partition(ctx, is, color_domain,
-                                    ghost_coloring, false/*disjoint*/);
-  }
+  IndexPartition disjoint_ip = 
+    runtime->create_equal_partition(ctx, is, color_is);
+  const int block_size = (num_elements + num_subregions - 1) / num_subregions;
+  Transform<1,1> transform;
+  transform[0][0] = block_size;
+  Rect<1> extent(-2, block_size + 1);
+  IndexPartition ghost_ip = 
+    runtime->create_partition_by_restriction(ctx, is, color_is, transform, extent);
 
-  // Once we've created our index partitions, we can get the
-  // corresponding logical partitions for the stencil_lr
-  // logical region.
   LogicalPartition disjoint_lp = 
     runtime->get_logical_partition(ctx, stencil_lr, disjoint_ip);
   LogicalPartition ghost_lp = 
     runtime->get_logical_partition(ctx, stencil_lr, ghost_ip);
 
-  // Our launch domain will again be isomorphic to our coloring domain.
-  Domain launch_domain = color_domain;
   ArgumentMap arg_map;
 
-  // First initialize the 'FID_VAL' field with some data
-  IndexLauncher init_launcher(INIT_FIELD_TASK_ID, launch_domain,
+  IndexLauncher init_launcher(INIT_FIELD_TASK_ID, color_is,
                               TaskArgument(NULL, 0), arg_map);
+  if (!global_taskreg)
+    init_launcher.tag |= Legion::Mapping::DefaultMapper::SAME_ADDRESS_SPACE;
   init_launcher.add_region_requirement(
       RegionRequirement(disjoint_lp, 0/*projection ID*/,
                         WRITE_DISCARD, EXCLUSIVE, stencil_lr));
   init_launcher.add_field(0, FID_VAL);
   runtime->execute_index_space(ctx, init_launcher);
 
-  // Now we're going to launch our stencil computation.  We
-  // specify two region requirements for the stencil task.
-  // Each region requirement is upper bounded by one of our
-  // two partitions.  The first region requirement requests
-  // read-only privileges on the ghost partition.  Note that
-  // because we are only requesting read-only privileges, all
-  // of our sub-tasks in the index space launch will be 
-  // non-interfering.  The second region requirement asks for
-  // read-write privileges on the disjoint partition for
-  // the 'FID_DERIV' field.  Again this meets with the 
-  // mandate that all points in our index space task
-  // launch be non-interfering.
-  IndexLauncher stencil_launcher(STENCIL_TASK_ID, launch_domain,
+  IndexLauncher stencil_launcher(STENCIL_TASK_ID, color_is,
        TaskArgument(&num_elements, sizeof(num_elements)), arg_map);
+  if (!global_taskreg)
+    stencil_launcher.tag |= Legion::Mapping::DefaultMapper::SAME_ADDRESS_SPACE;
   stencil_launcher.add_region_requirement(
       RegionRequirement(ghost_lp, 0/*projection ID*/,
                         READ_ONLY, EXCLUSIVE, stencil_lr));
@@ -394,9 +339,10 @@ void top_level_task(const Task *task,
   stencil_launcher.add_field(1, FID_DERIV);
   runtime->execute_index_space(ctx, stencil_launcher);
 
-  // Finally, we launch a single task to check the results.
   TaskLauncher check_launcher(CHECK_TASK_ID, 
       TaskArgument(&num_elements, sizeof(num_elements)));
+  if (!global_taskreg)
+    check_launcher.tag |= Legion::Mapping::DefaultMapper::SAME_ADDRESS_SPACE;
   check_launcher.add_region_requirement(
       RegionRequirement(stencil_lr, READ_ONLY, EXCLUSIVE, stencil_lr));
   check_launcher.add_field(0, FID_VAL);
@@ -405,7 +351,6 @@ void top_level_task(const Task *task,
   check_launcher.add_field(1, FID_DERIV);
   runtime->execute_task(ctx, check_launcher);
 
-  // Clean up our region, index space, and field space
   runtime->destroy_logical_region(ctx, stencil_lr);
   runtime->destroy_field_space(ctx, fs);
   runtime->destroy_index_space(ctx, is);
@@ -424,16 +369,12 @@ void init_field_task(const Task *task,
   const int point = task->index_point.point_data[0];
   printf("Initializing field %d for block %d...\n", fid, point);
 
-  RegionAccessor<AccessorType::Generic, double> acc = 
-    regions[0].get_field_accessor(fid).typeify<double>();
+  const FieldAccessor<WRITE_DISCARD,double,1> acc(regions[0], fid);
 
-  Domain dom = runtime->get_index_space_domain(ctx, 
-      task->regions[0].region.get_index_space());
-  Rect<1> rect = dom.get_rect<1>();
-  for (GenericPointInRectIterator<1> pir(rect); pir; pir++)
-  {
-    acc.write(DomainPoint::from_point<1>(pir.p), drand48());
-  }
+  Rect<1> rect = runtime->get_index_space_domain(ctx,
+                  task->regions[0].region.get_index_space());
+  for (PointInRectIterator<1> pir(rect); pir(); pir++)
+    acc[*pir] = drand48();
 }
 
 // Our stencil tasks is interesting because it
@@ -454,18 +395,11 @@ void stencil_task(const Task *task,
   FieldID read_fid = *(task->regions[0].privilege_fields.begin());
   FieldID write_fid = *(task->regions[1].privilege_fields.begin());
 
-  RegionAccessor<AccessorType::Generic, double> read_acc = 
-    regions[0].get_field_accessor(read_fid).typeify<double>();
-  RegionAccessor<AccessorType::Generic, double> write_acc = 
-    regions[1].get_field_accessor(write_fid).typeify<double>();
+  const FieldAccessor<READ_ONLY,double,1> read_acc(regions[0], read_fid);
+  const FieldAccessor<WRITE_DISCARD,double,1> write_acc(regions[1], write_fid);
 
-  Domain dom = runtime->get_index_space_domain(ctx,
-      task->regions[1].region.get_index_space());
-  Rect<1> rect = dom.get_rect<1>();
-  const DomainPoint zero = DomainPoint::from_point<1>(Point<1>(0));
-  const DomainPoint max = DomainPoint::from_point<1>(Point<1>(max_elements-1));
-  const Point<1> one(1);
-  const Point<1> two(2);
+  Rect<1> rect = runtime->get_index_space_domain(ctx,
+                  task->regions[1].region.get_index_space());
   // If we are on the edges of the entire space we are 
   // operating over, then we're going to do the slow
   // path which checks for clamping when necessary.
@@ -476,43 +410,43 @@ void stencil_task(const Task *task,
     printf("Running slow stencil path for point %d...\n", point);
     // Note in the slow path that there are checks which
     // perform clamps when necessary before reading values.
-    for (GenericPointInRectIterator<1> pir(rect); pir; pir++)
+    for (PointInRectIterator<1> pir(rect); pir(); pir++)
     {
       double l2, l1, r1, r2;
-      if (pir.p[0] < 2)
-        l2 = read_acc.read(zero);
+      if (pir[0] < 2)
+        l2 = read_acc[0];
       else
-        l2 = read_acc.read(DomainPoint::from_point<1>(pir.p-two));
-      if (pir.p[0] < 1)
-        l1 = read_acc.read(zero);
+        l2 = read_acc[*pir - 2];
+      if (pir[0] < 1)
+        l1 = read_acc[0];
       else
-        l1 = read_acc.read(DomainPoint::from_point<1>(pir.p-one));
-      if (pir.p[0] > (max_elements-2))
-        r1 = read_acc.read(max);
+        l1 = read_acc[*pir - 1];
+      if (pir[0] > (max_elements-2))
+        r1 = read_acc[max_elements-1];
       else
-        r1 = read_acc.read(DomainPoint::from_point<1>(pir.p+one));
-      if (pir.p[0] > (max_elements-3))
-        r2 = read_acc.read(max);
+        r1 = read_acc[*pir + 1];
+      if (pir[0] > (max_elements-3))
+        r2 = read_acc[max_elements-1];
       else
-        r2 = read_acc.read(DomainPoint::from_point<1>(pir.p+two));
+        r2 = read_acc[*pir + 2];
       
       double result = (-l2 + 8.0*l1 - 8.0*r1 + r2) / 12.0;
-      write_acc.write(DomainPoint::from_point<1>(pir.p), result);
+      write_acc[*pir] = result;
     }
   }
   else
   {
     printf("Running fast stencil path for point %d...\n", point);
     // In the fast path, we don't need any checks
-    for (GenericPointInRectIterator<1> pir(rect); pir; pir++)
+    for (PointInRectIterator<1> pir(rect); pir(); pir++)
     {
-      double l2 = read_acc.read(DomainPoint::from_point<1>(pir.p-two));
-      double l1 = read_acc.read(DomainPoint::from_point<1>(pir.p-one));
-      double r1 = read_acc.read(DomainPoint::from_point<1>(pir.p+one));
-      double r2 = read_acc.read(DomainPoint::from_point<1>(pir.p+two));
+      double l2 = read_acc[*pir - 2];
+      double l1 = read_acc[*pir - 1];
+      double r1 = read_acc[*pir + 1];
+      double r2 = read_acc[*pir + 2];
 
       double result = (-l2 + 8.0*l1 - 8.0*r1 + r2) / 12.0;
-      write_acc.write(DomainPoint::from_point<1>(pir.p), result);
+      write_acc[*pir] = result;
     }
   }
 }
@@ -531,43 +465,36 @@ void check_task(const Task *task,
   FieldID src_fid = *(task->regions[0].privilege_fields.begin());
   FieldID dst_fid = *(task->regions[1].privilege_fields.begin());
 
-  RegionAccessor<AccessorType::Generic, double> src_acc = 
-    regions[0].get_field_accessor(src_fid).typeify<double>();
-  RegionAccessor<AccessorType::Generic, double> dst_acc = 
-    regions[1].get_field_accessor(dst_fid).typeify<double>();
+  const FieldAccessor<READ_ONLY,double,1> src_acc(regions[0], src_fid);
+  const FieldAccessor<READ_ONLY,double,1> dst_acc(regions[1], dst_fid);
 
-  Domain dom = runtime->get_index_space_domain(ctx,
-      task->regions[1].region.get_index_space());
-  Rect<1> rect = dom.get_rect<1>();
-  const DomainPoint zero = DomainPoint::from_point<1>(Point<1>(0));
-  const DomainPoint max = DomainPoint::from_point<1>(Point<1>(max_elements-1));
-  const Point<1> one(1);
-  const Point<1> two(2);
+  Rect<1> rect = runtime->get_index_space_domain(ctx,
+                  task->regions[1].region.get_index_space());
 
   // This is the checking task so we can just do the slow path
   bool all_passed = true;
-  for (GenericPointInRectIterator<1> pir(rect); pir; pir++)
+  for (PointInRectIterator<1> pir(rect); pir(); pir++)
   {
     double l2, l1, r1, r2;
-    if (pir.p[0] < 2)
-      l2 = src_acc.read(zero);
+    if (pir[0] < 2)
+      l2 = src_acc[0];
     else
-      l2 = src_acc.read(DomainPoint::from_point<1>(pir.p-two));
-    if (pir.p[0] < 1)
-      l1 = src_acc.read(zero);
+      l2 = src_acc[*pir - 2];
+    if (pir[0] < 1)
+      l1 = src_acc[0];
     else
-      l1 = src_acc.read(DomainPoint::from_point<1>(pir.p-one));
-    if (pir.p[0] > (max_elements-2))
-      r1 = src_acc.read(max);
+      l1 = src_acc[*pir - 1];
+    if (pir[0] > (max_elements-2))
+      r1 = src_acc[max_elements-1];
     else
-      r1 = src_acc.read(DomainPoint::from_point<1>(pir.p+one));
-    if (pir.p[0] > (max_elements-3))
-      r2 = src_acc.read(max);
+      r1 = src_acc[*pir + 1];
+    if (pir[0] > (max_elements-3))
+      r2 = src_acc[max_elements-1];
     else
-      r2 = src_acc.read(DomainPoint::from_point<1>(pir.p+two));
+      r2 = src_acc[*pir + 2];
     
     double expected = (-l2 + 8.0*l1 - 8.0*r1 + r2) / 12.0;
-    double received = dst_acc.read(DomainPoint::from_point<1>(pir.p));
+    double received = dst_acc[*pir];
     // Probably shouldn't bitwise compare floating point
     // numbers but the order of operations are the same so they
     // should be bitwise equal.

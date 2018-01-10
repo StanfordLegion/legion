@@ -1,4 +1,4 @@
--- Copyright 2017 Stanford University, NVIDIA Corporation
+-- Copyright 2018 Stanford University, NVIDIA Corporation
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -251,12 +251,9 @@ local function validate_vars_node(cx)
       cx:pop_local_scope()
 
     elseif node:is(ast.typed.stat.Var) then
-      continuation(node.values)
-      cx:intern_variables(node, node.symbols)
-      for i, symbol in ipairs(node.symbols) do
-        local var_type = node.types[i]
-        cx:check_variable(node, symbol, var_type)
-      end
+      continuation(node.value)
+      cx:intern_variable(node, node.symbol)
+      cx:check_variable(node, node.symbol, node.type)
 
     elseif node:is(ast.typed.stat.VarUnpack) then
       continuation(node.value)

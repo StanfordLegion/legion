@@ -1,4 +1,4 @@
-/* Copyright 2017 Stanford University, NVIDIA Corporation
+/* Copyright 2018 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,11 +18,11 @@
 #ifndef REALM_METADATA_H
 #define REALM_METADATA_H
 
-#include "event.h"
-#include "id.h"
-#include "nodeset.h"
+#include "realm/event.h"
+#include "realm/id.h"
+#include "realm/nodeset.h"
 
-#include "activemsg.h"
+#include "realm/activemsg.h"
 
 namespace Realm {
 
@@ -40,9 +40,12 @@ namespace Realm {
 		   STATE_CLEANUP };
 
       bool is_valid(void) const { return state == STATE_VALID; }
+      
+      // used by owner, may need to send responses to early requests
+      void mark_valid(NodeSet& early_reqs);
 
-      void mark_valid(void); // used by owner
-      void handle_request(int requestor);
+      // returns true if a response should be sent immediately (i.e. data is valid)
+      bool handle_request(int requestor);
 
       // returns an Event for when data will be valid
       Event request_data(int owner, ID::IDType id);
@@ -75,7 +78,7 @@ namespace Realm {
 					RequestArgs,
 					handle_request> Message;
 
-      static void send_request(gasnet_node_t target, ID::IDType id);
+      static void send_request(NodeID target, ID::IDType id);
     };
 
     struct MetadataResponseMessage {
@@ -89,8 +92,10 @@ namespace Realm {
 					 RequestArgs,
 					 handle_request> Message;
 
-      static void send_request(gasnet_node_t target, ID::IDType id, 
+      static void send_request(NodeID target, ID::IDType id, 
 			       const void *data, size_t datalen, int payload_mode);
+      static void broadcast_request(const NodeSet& targets, ID::IDType id,
+				    const void *data, size_t datalen);
     };
 
     struct MetadataInvalidateMessage {
@@ -105,13 +110,13 @@ namespace Realm {
 					RequestArgs,
 					handle_request> Message;
 
-      static void send_request(gasnet_node_t target, ID::IDType id);
+      static void send_request(NodeID target, ID::IDType id);
       static void broadcast_request(const NodeSet& targets, ID::IDType id);
     };
 
     struct MetadataInvalidateAckMessage {
       struct RequestArgs {
-	gasnet_node_t node;
+	NodeID node;
 	ID::IDType id;
       };
 
@@ -121,7 +126,7 @@ namespace Realm {
 					RequestArgs,
 					handle_request> Message;
 
-      static void send_request(gasnet_node_t target, ID::IDType id);
+      static void send_request(NodeID target, ID::IDType id);
     };
     
 }; // namespace Realm

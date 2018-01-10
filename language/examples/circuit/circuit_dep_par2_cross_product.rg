@@ -1,4 +1,4 @@
--- Copyright 2017 Stanford University
+-- Copyright 2018 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -35,7 +35,7 @@ fspace Node {
   leakage       : float,
   charge        : float,
   node_voltage  : float,
-  is_private    : int,
+  is_private    : int1d,
 }
 
 fspace Wire(rpn : region(Node),
@@ -63,7 +63,7 @@ where reads(rpn.node_voltage, rsn.node_voltage, rgn.node_voltage,
       reads writes(rw.{current, voltage})
 do
   var recip_dt : float = 1.0 / DT
-  __demand(__vectorize)
+  --__demand(__vectorize)
   for w in rw do
     var temp_v : float[WIRE_SEGMENTS + 1]
     var temp_i : float[WIRE_SEGMENTS]
@@ -164,9 +164,9 @@ task toplevel()
   var pn_private = pn_equal - pn_shared
   var pn_ghost = (image(rn, pw_crossing_out, rw.out_ptr) | image(rn, pw_crossing_in, rw.in_ptr)) - pn_shared
 
-  fill(rn.is_private, 0)
+  fill(rn.is_private, [int1d](0))
   for i in colors do
-    fill((pn_private[i]).is_private, 1)
+    fill((pn_private[i]).is_private, [int1d](1))
   end
 
   var pn_top = partition(rn.is_private, ispace(int1d, 2))

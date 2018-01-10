@@ -1,4 +1,4 @@
-/* Copyright 2017 Stanford University, NVIDIA Corporation
+/* Copyright 2018 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13,17 +13,17 @@
  * limitations under the License.
  */
 
-#include "openmp_module.h"
+#include "realm/openmp/openmp_module.h"
 
-#include "openmp_threadpool.h"
+#include "realm/openmp/openmp_threadpool.h"
 
-#include "../numa/numasysif.h"
-#include "logging.h"
-#include "cmdline.h"
-#include "proc_impl.h"
-#include "threads.h"
-#include "runtime_impl.h"
-#include "utils.h"
+#include "realm/numa/numasysif.h"
+#include "realm/logging.h"
+#include "realm/cmdline.h"
+#include "realm/proc_impl.h"
+#include "realm/threads.h"
+#include "realm/runtime_impl.h"
+#include "realm/utils.h"
 
 namespace Realm {
 
@@ -263,7 +263,7 @@ namespace Realm {
 	  // create affinities between this processor and system/reg memories
 	  // if the memory is one we created, use the kernel-reported distance
 	  // to adjust the answer
-	  std::vector<MemoryImpl *>& local_mems = runtime->nodes[gasnet_mynode()].memories;
+	  std::vector<MemoryImpl *>& local_mems = runtime->nodes[my_node_id].memories;
 	  for(std::vector<MemoryImpl *>::iterator it2 = local_mems.begin();
 	      it2 != local_mems.end();
 	      ++it2) {

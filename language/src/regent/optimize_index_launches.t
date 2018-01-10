@@ -1,4 +1,4 @@
--- Copyright 2017 Stanford University
+-- Copyright 2018 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -345,8 +345,8 @@ local function optimize_loop_body(cx, node, report_pass, report_fail)
     end
     if not analyze_is_side_effect_free(cx, stat) then
       if not (i == #node.block.stats - 1 and
-              #stat.values == 1 and
-              stat.values[1]:is(ast.typed.expr.Call)) then
+              stat.value and
+              stat.value:is(ast.typed.expr.Call)) then
         report_fail(stat, "loop optimization failed: preamble statement is not side-effect free")
         return
       else
@@ -355,13 +355,9 @@ local function optimize_loop_body(cx, node, report_pass, report_fail)
     end
 
     if call_stat == nil then
-      for i, symbol in ipairs(stat.symbols) do
-        local value = stat.values[i]
-        if value and not analyze_is_loop_invariant(loop_cx, value) then
-          loop_cx:add_loop_variable(symbol)
-        end
+      if stat.value and not analyze_is_loop_invariant(loop_cx, stat.value) then
+        loop_cx:add_loop_variable(stat.symbol)
       end
-
       preamble:insert(stat)
     end
   end
@@ -371,13 +367,11 @@ local function optimize_loop_body(cx, node, report_pass, report_fail)
   local reduce_lhs, reduce_op = false, false
   if call_stat ~= nil then
     if body:is(ast.typed.stat.Reduce) and
-      #body.lhs == 1 and
-      #body.rhs == 1 and
-      body.rhs[1]:is(ast.typed.expr.ID) and
-      call_stat.symbols[1] == body.rhs[1].value
+      body.rhs:is(ast.typed.expr.ID) and
+      call_stat.symbol == body.rhs.value
     then
-      call = call_stat.values[1]
-      reduce_lhs = body.lhs[1]
+      call = call_stat.value
+      reduce_lhs = body.lhs
       reduce_op = body.op
     else
       report_fail(call_stat, "loop optimization failed: preamble statement is not side-effect free")
@@ -389,12 +383,10 @@ local function optimize_loop_body(cx, node, report_pass, report_fail)
     then
       call = body.expr
     elseif body:is(ast.typed.stat.Reduce) and
-      #body.lhs == 1 and
-      #body.rhs == 1 and
-      body.rhs[1]:is(ast.typed.expr.Call)
+      body.rhs:is(ast.typed.expr.Call)
     then
-      call = body.rhs[1]
-      reduce_lhs = body.lhs[1]
+      call = body.rhs
+      reduce_lhs = body.lhs
       reduce_op = body.op
     else
       report_fail(body, "loop optimization failed: body is not a function call")

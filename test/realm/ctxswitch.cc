@@ -1,4 +1,4 @@
-#include "realm/realm.h"
+#include "realm.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -17,6 +17,8 @@ enum {
   TOP_LEVEL_TASK = Processor::TASK_ID_FIRST_AVAILABLE+0,
   SWITCH_TEST_TASK,
   SLEEP_TEST_TASK,
+  PRIORITY_MASTER_TASK,
+  PRIORITY_CHILD_TASK,
 };
 
 // we're going to use alarm() as a watchdog to detect deadlocks
@@ -85,6 +87,129 @@ void sleep_task(const void *args, size_t arglen,
   printf("ending sleep task on processor " IDFMT "\n", p.id);
 #endif
 }
+
+struct PriorityTestArgs {
+  int *counter;
+  int exp_val1, exp_val2;
+  int new_priority;
+  Event wait_on;
+  Barrier barrier;
+};
+
+void priority_child_task(const void *args, size_t arglen, 
+			 const void *userdata, size_t userlen, Processor p)
+{
+  const PriorityTestArgs& targs = *static_cast<const PriorityTestArgs *>(args);
+
+  int act_val1 = __sync_fetch_and_add(targs.counter, 1);
+  assert(act_val1 == targs.exp_val1);
+
+  if(targs.barrier.exists())
+    targs.barrier.arrive();
+
+  if(targs.new_priority >= 0)
+    Processor::set_current_task_priority(targs.new_priority);
+
+  targs.wait_on.wait();
+
+  int act_val2 = __sync_fetch_and_add(targs.counter, 1);
+  assert(act_val2 == targs.exp_val2);
+}
+
+void priority_master_task(const void *args, size_t arglen, 
+			  const void *userdata, size_t userlen, Processor p)
+{
+  int counter = 55;
+
+  // We will create 5 workers that each try to increment the count twice.
+  //  The first three are created before the master sleeps, and arrive at
+  //  the barrier before going to sleep.  The master then wakes up, creates
+  //  the last two, makes the first 3 ready, and sleeps until everybody's
+  //  done.  Here is the expected order of increments:
+  //
+  // M:                 58                      66
+  // W1: 1->0     56                         65
+  // W2: 0->2        57    59
+  // W3: 2->1  55                   62
+  // W4: 1                             63 64
+  // W5: 2                    60 61
+
+  UserEvent event1 = UserEvent::create_user_event();
+  UserEvent event2 = UserEvent::create_user_event();
+  UserEvent event3 = UserEvent::create_user_event();
+  Barrier barrier = Barrier::create_barrier(3);
+
+  std::vector<Event> finish_events;
+
+  PriorityTestArgs targs;
+  targs.counter = &counter;
+  targs.barrier = barrier;
+  {
+    targs.exp_val1 = 56;
+    targs.exp_val2 = 65;
+    targs.wait_on = event1;
+    targs.new_priority = 0;
+    Event e = p.spawn(PRIORITY_CHILD_TASK, &targs, sizeof(targs),
+		      Event::NO_EVENT, 1);
+    finish_events.push_back(e);
+  }
+
+  {
+    targs.exp_val1 = 57;
+    targs.exp_val2 = 59;
+    targs.wait_on = event2;
+    targs.new_priority = -1;
+    Event e = p.spawn(PRIORITY_CHILD_TASK, &targs, sizeof(targs),
+		      Event::NO_EVENT, 0);
+    finish_events.push_back(e);
+  }
+
+  {
+    targs.exp_val1 = 55;
+    targs.exp_val2 = 62;
+    targs.wait_on = event3;
+    targs.new_priority = 1;
+    Event e = p.spawn(PRIORITY_CHILD_TASK, &targs, sizeof(targs),
+		      Event::NO_EVENT, 2);
+    finish_events.push_back(e);
+  }
+
+  barrier.wait();
+
+  int act_val1 = __sync_fetch_and_add(&counter, 1);
+  assert(act_val1 == 58);
+
+  finish_events[1].set_operation_priority(2);
+
+  event1.trigger();
+  event2.trigger();
+  event3.trigger();
+
+  targs.barrier = Barrier::NO_BARRIER;
+  targs.wait_on = Event::NO_EVENT;
+  targs.new_priority = -1;
+
+  {
+    targs.exp_val1 = 63;
+    targs.exp_val2 = 64;
+    Event e = p.spawn(PRIORITY_CHILD_TASK, &targs, sizeof(targs),
+		      Event::NO_EVENT, 1);
+    finish_events.push_back(e);
+  }
+
+  {
+    targs.exp_val1 = 60;
+    targs.exp_val2 = 61;
+    Event e = p.spawn(PRIORITY_CHILD_TASK, &targs, sizeof(targs),
+		      Event::NO_EVENT, 2);
+    finish_events.push_back(e);
+  }
+
+  Event::merge_events(finish_events).wait();
+
+  int act_val2 = __sync_fetch_and_add(&counter, 1);
+  assert(act_val2 == 66);
+} 
 
 static int num_children = 4;
 static int num_iterations = 100000;
@@ -198,6 +323,12 @@ void top_level_task(const void *args, size_t arglen,
 	  errors++;
 	}
       }
+
+      // test task prioritization on this processor kind
+      {
+	Event e = pp.spawn(PRIORITY_MASTER_TASK, 0, 0);
+	e.wait();
+      }
     }
   }
 
@@ -246,6 +377,8 @@ int main(int argc, char **argv)
   rt.register_task(TOP_LEVEL_TASK, top_level_task);
   rt.register_task(SWITCH_TEST_TASK, switch_task);
   rt.register_task(SLEEP_TEST_TASK, sleep_task);
+  rt.register_task(PRIORITY_MASTER_TASK, priority_master_task);
+  rt.register_task(PRIORITY_CHILD_TASK, priority_child_task);
 
   signal(SIGALRM, sigalrm_handler);
 

@@ -1,4 +1,4 @@
--- Copyright 2017 Stanford University
+-- Copyright 2018 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -29,9 +29,9 @@ task f()
   var y3 = dynamic_cast(int2d(int3d(int, r), s), { 3, 0 })
 
   @y0 = x0
-  @y1 = x2
-  @y2 = x1
-  @y3 = x2
+  @y1 = x1
+  @y2 = x2
+  @y3 = x3
 
   var sc = c.legion_domain_coloring_create()
   c.legion_domain_coloring_color_domain(sc, 0, rect2d { y0, y1 })
@@ -62,6 +62,6 @@ task f()
 end
 
 task main()
-  regentlib.assert(f() == 17, "test failed")
+  regentlib.assert(f() == 11, "test failed")
 end
 regentlib.start(main)

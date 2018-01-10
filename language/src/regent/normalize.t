@@ -1,4 +1,4 @@
--- Copyright 2017 Stanford University, NVIDIA Corporation
+-- Copyright 2018 Stanford University, NVIDIA Corporation
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -534,7 +534,12 @@ local function update_alias(expr, updates)
 end
 
 function normalize.stat_assignment_or_reduce(cx, node)
-  if #node.lhs == 1 then return node
+  if #node.lhs == 1 then
+    assert(#node.rhs == 1)
+    return node {
+      lhs = node.lhs[1],
+      rhs = node.rhs[1],
+    }
   else
     local updates = terralib.newlist()
     local needs_temporary = terralib.newlist()
@@ -553,9 +558,9 @@ function normalize.stat_assignment_or_reduce(cx, node)
     for idx = 1, #needs_temporary do
       local symbol = temporaries[needs_temporary[idx]]
       flattened:insert(ast.typed.stat.Var {
-        symbols = terralib.newlist {symbol},
-        types = terralib.newlist {symbol:gettype()},
-        values = terralib.newlist {node.rhs[needs_temporary[idx]]},
+        symbol = symbol,
+        type = symbol:gettype(),
+        value = node.rhs[needs_temporary[idx]],
         annotations = node.annotations,
         span = node.span,
       })
@@ -564,20 +569,18 @@ function normalize.stat_assignment_or_reduce(cx, node)
     for idx = 1, #node.lhs do
       if temporaries[idx] then
         flattened:insert(node {
-          lhs = terralib.newlist {node.lhs[idx]},
-          rhs = terralib.newlist {
-            ast.typed.expr.ID {
-              value = temporaries[idx],
-              expr_type = std.rawref(&temporaries[idx]:gettype()),
-              span = node.span,
-              annotations = node.annotations,
-            }
+          lhs = node.lhs[idx],
+          rhs = ast.typed.expr.ID {
+            value = temporaries[idx],
+            expr_type = std.rawref(&temporaries[idx]:gettype()),
+            span = node.span,
+            annotations = node.annotations,
           },
         })
       else
         flattened:insert(node {
-          lhs = terralib.newlist {node.lhs[idx]},
-          rhs = terralib.newlist {node.rhs[idx]},
+          lhs = node.lhs[idx],
+          rhs = node.rhs[idx],
         })
       end
     end
@@ -601,11 +604,11 @@ end
 local capi = std.c
 
 local function desugar_image_by_task(cx, node)
-  local parent = node.values[1].parent.value
+  local parent = node.value.parent.value
   local parent_type = parent:gettype()
-  local partition = node.values[1].partition
+  local partition = node.value.partition
   local partition_type = std.as_read(partition.expr_type)
-  local image_partition_type = node.types[1]
+  local image_partition_type = node.type
 
   local stats = terralib.newlist()
 
@@ -629,7 +632,7 @@ local function desugar_image_by_task(cx, node)
                                   ast_util.mk_expr_id(color_symbol),
                                   subregion_type)
   local rect_expr =
-    ast_util.mk_expr_call(node.values[1].task.value,
+    ast_util.mk_expr_call(node.value.task.value,
                           ast_util.mk_expr_bounds_access(subregion_expr))
   local loop_body =
     ast_util.mk_stat_expr(
@@ -645,7 +648,7 @@ local function desugar_image_by_task(cx, node)
                               ast_util.mk_block(loop_body)))
 
   stats:insert(
-    ast_util.mk_stat_var(node.symbols[1], image_partition_type,
+    ast_util.mk_stat_var(node.symbol, image_partition_type,
                          ast_util.mk_expr_partition(image_partition_type,
                                                     ast_util.mk_expr_id(colors_symbol),
                                                     coloring_expr)))
@@ -670,15 +673,16 @@ function normalize.stat(cx)
       return normalize.stat_assignment_or_reduce(cx, node)
     elseif not std.config["parallelize"] and
            node:is(ast.typed.stat.ParallelizeWith) then
-      return ast.typed.stat.Block {
+      node = ast.typed.stat.Block {
         block = node.block,
         span = node.span,
         annotations = node.annotations,
       }
+      return continuation(node, true)
     elseif node:is(ast.specialized.stat.Var) then
       return normalize.stat_var(node)
-    elseif node:is(ast.typed.stat.Var) and #node.values > 0 and
-           node.values[1]:is(ast.typed.expr.ImageByTask) then
+    elseif node:is(ast.typed.stat.Var) and node.value and
+           node.value:is(ast.typed.expr.ImageByTask) then
       return desugar_image_by_task(cx, node)
     else
       return continuation(node, true)

@@ -1,4 +1,4 @@
-/* Copyright 2017 Stanford University, NVIDIA Corporation
+/* Copyright 2018 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,12 +15,12 @@
 
 // constructs for describing code blobs to Realm
 
-#include "codedesc.h"
+#include "realm/codedesc.h"
 
 #include <dlfcn.h>
 
-#include "logging.h"
-#include "utils.h"
+#include "realm/logging.h"
+#include "realm/utils.h"
 
 namespace Realm {
 
@@ -378,6 +378,19 @@ namespace Realm {
 #endif
 
     return 0;
+  }
+
+  // these pass through to CodeTranslator's definitions
+  bool DSOCodeTranslator::can_translate(const CodeDescriptor& source_codedesc,
+					const std::type_info& target_impl_type)
+  {
+    return CodeTranslator::can_translate(source_codedesc, target_impl_type);
+  }
+
+  CodeImplementation *DSOCodeTranslator::translate(const CodeDescriptor& source_codedesc,
+						   const std::type_info& target_impl_type)
+  {
+    return CodeTranslator::translate(source_codedesc, target_impl_type);
   }
 #endif
 

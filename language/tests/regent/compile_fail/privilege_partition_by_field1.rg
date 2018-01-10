@@ -1,4 +1,4 @@
--- Copyright 2017 Stanford University
+-- Copyright 2018 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -19,7 +19,7 @@
 
 import "regent"
 
-task f(r : region(int))
+task f(r : region(ptr))
   var c = ispace(ptr, 5)
   var p = partition(r, c)
 end

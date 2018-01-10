@@ -1,4 +1,4 @@
-/* Copyright 2017 Stanford University, NVIDIA Corporation
+/* Copyright 2018 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,7 +16,8 @@
 #ifndef __BISHOP_C_H__
 #define __BISHOP_C_H__
 
-#include "legion_c.h"
+#define LEGION_ENABLE_C_BINDINGS
+#include "legion.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -136,15 +137,18 @@ typedef struct bishop_instance_cache_t {
 bishop_instance_cache_t
 bishop_instance_cache_create();
 
-bool
-bishop_instance_cache_has_cached_instances(bishop_instance_cache_t,
-                                           size_t,
-                                           legion_logical_region_t);
-
 legion_physical_instance_t*
 bishop_instance_cache_get_cached_instances(bishop_instance_cache_t,
                                            size_t,
-                                           legion_logical_region_t);
+                                           legion_logical_region_t,
+                                           legion_memory_t);
+
+bool
+bishop_instance_cache_register_instances(bishop_instance_cache_t,
+                                         size_t,
+                                         legion_logical_region_t,
+                                         legion_memory_t,
+                                         legion_physical_instance_t*);
 
 typedef struct bishop_slice_cache_t {
   void *impl;

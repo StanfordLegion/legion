@@ -6,5 +6,7 @@ ctxswitch
 proc_group
 barrier_reduce
 taskreg
+deppart
 memspeed
 idcheck
+inst_reuse

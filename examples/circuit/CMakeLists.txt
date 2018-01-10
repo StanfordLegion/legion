@@ -1,5 +1,5 @@
 #------------------------------------------------------------------------------#
-# Copyright 2017 Kitware, Inc.
+# Copyright 2018 Kitware, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -25,9 +25,11 @@ endif()
 set(CPU_SOURCES
   circuit.h         circuit.cc
                     circuit_cpu.cc
+                    circuit_init.cc
   circuit_mapper.h  circuit_mapper.cc
 )
 if(Legion_USE_CUDA)
+  set(CUDA_NVCC_FLAGS ${CUDA_NVCC_FLAGS} -Wno-deprecated-gpu-targets)
   set(GPU_SOURCES circuit_gpu.cu)
   cuda_add_executable(circuit ${CPU_SOURCES} ${GPU_SOURCES})
 else()
@@ -35,5 +37,5 @@ else()
 endif()
 target_link_libraries(circuit Legion::Legion)
 if(Legion_ENABLE_TESTING)
-  add_test(NAME circuit COMMAND $<TARGET_FILE:circuit>) 
+  add_test(NAME circuit COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:circuit>)
 endif()

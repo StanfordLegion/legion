@@ -1,4 +1,4 @@
-/* Copyright 2017 Stanford University, NVIDIA Corporation
+/* Copyright 2018 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,12 +19,19 @@
 // NOTE: let's try to keep LLVM include files/etc. out of here, because they bring
 //  a bunch of C++11 baggage
 
+#include "realm/realm_config.h"
 #include "realm/codedesc.h"
 #include "realm/bytearray.h"
 
 #include <string>
 
 namespace Realm {
+
+#ifdef REALM_ALLOW_MISSING_LLVM_LIBS
+  namespace LLVMJit {
+    extern bool llvmjit_available;
+  };
+#endif
 
   // a code implementation that handles LLVM IR - text only right now, but the plan
   //  is to support binary here too
@@ -59,6 +66,6 @@ namespace Realm {
 
 }; // namespace Realm
 
-#include "llvmjit.inl"
+#include "realm/llvmjit/llvmjit.inl"
 
 #endif

@@ -1,4 +1,4 @@
-/* Copyright 2017 Stanford University, NVIDIA Corporation
+/* Copyright 2018 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,7 +21,7 @@
 #include <deque>
 #include <map>
 
-#include "sampling.h"
+#include "realm/sampling.h"
 
 namespace Realm {
 
@@ -106,7 +106,7 @@ namespace Realm {
 
 }; // namespace Realm
 
-#include "pri_queue.inl"
+#include "realm/pri_queue.inl"
 
 #endif // ifndef REALM_PRI_QUEUE_H
 

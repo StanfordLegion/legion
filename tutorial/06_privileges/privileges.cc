@@ -1,4 +1,4 @@
-/* Copyright 2017 Stanford University
+/* Copyright 2018 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,10 +19,6 @@
 #include <cstdlib>
 #include "legion.h"
 using namespace Legion;
-using namespace LegionRuntime::Accessor;
-
-// for Point<DIM> and Rect<DIM>
-using namespace LegionRuntime::Arrays;
 
 enum TaskIDs {
   TOP_LEVEL_TASK_ID,
@@ -55,9 +51,8 @@ void top_level_task(const Task *task,
 
   // Create our logical regions using the same schema that
   // we used in the previous example.
-  Rect<1> elem_rect(Point<1>(0),Point<1>(num_elements-1));
-  IndexSpace is = runtime->create_index_space(ctx, 
-                          Domain::from_rect<1>(elem_rect));
+  const Rect<1> elem_rect(0,num_elements-1);
+  IndexSpace is = runtime->create_index_space(ctx, elem_rect); 
   FieldSpace input_fs = runtime->create_field_space(ctx);
   {
     FieldAllocator allocator = 
@@ -210,16 +205,12 @@ void init_field_task(const Task *task,
   // however we chose to unmap this physical region and then
   // remap it then we would need to call 'wait_until_valid'
   // again to ensure that we were accessing valid data.
-  RegionAccessor<AccessorType::Generic, double> acc = 
-    regions[0].get_field_accessor(fid).typeify<double>();
+  const FieldAccessor<WRITE_DISCARD,double,1> acc(regions[0], fid);
 
-  Domain dom = runtime->get_index_space_domain(ctx, 
-      task->regions[0].region.get_index_space());
-  Rect<1> rect = dom.get_rect<1>();
-  for (GenericPointInRectIterator<1> pir(rect); pir; pir++)
-  {
-    acc.write(DomainPoint::from_point<1>(pir.p), drand48());
-  }
+  Rect<1> rect = runtime->get_index_space_domain(ctx, 
+                  task->regions[0].region.get_index_space());
+  for (PointInRectIterator<1> pir(rect); pir(); pir++)
+    acc[*pir] = drand48();
 }
 
 void daxpy_task(const Task *task,
@@ -231,22 +222,15 @@ void daxpy_task(const Task *task,
   assert(task->arglen == sizeof(double));
   const double alpha = *((const double*)task->args);
 
-  RegionAccessor<AccessorType::Generic, double> acc_x = 
-    regions[0].get_field_accessor(FID_X).typeify<double>();
-  RegionAccessor<AccessorType::Generic, double> acc_y = 
-    regions[0].get_field_accessor(FID_Y).typeify<double>();
-  RegionAccessor<AccessorType::Generic, double> acc_z = 
-    regions[1].get_field_accessor(FID_Z).typeify<double>();
+  const FieldAccessor<READ_ONLY,double,1> acc_x(regions[0], FID_X);
+  const FieldAccessor<READ_ONLY,double,1> acc_y(regions[0], FID_Y);
+  const FieldAccessor<WRITE_DISCARD,double,1> acc_z(regions[1], FID_Z);
+
   printf("Running daxpy computation with alpha %.8g...\n", alpha);
-  Domain dom = runtime->get_index_space_domain(ctx, 
-      task->regions[0].region.get_index_space());
-  Rect<1> rect = dom.get_rect<1>();
-  for (GenericPointInRectIterator<1> pir(rect); pir; pir++)
-  {
-    double value = alpha * acc_x.read(DomainPoint::from_point<1>(pir.p)) + 
-                           acc_y.read(DomainPoint::from_point<1>(pir.p));
-    acc_z.write(DomainPoint::from_point<1>(pir.p), value);
-  }
+  Rect<1> rect = runtime->get_index_space_domain(ctx,
+                  task->regions[0].region.get_index_space());
+  for (PointInRectIterator<1> pir(rect); pir(); pir++)
+    acc_z[*pir] = alpha * acc_x[*pir] + acc_y[*pir];
 }
 
 void check_task(const Task *task,
@@ -257,22 +241,18 @@ void check_task(const Task *task,
   assert(task->regions.size() == 2);
   assert(task->arglen == sizeof(double));
   const double alpha = *((const double*)task->args);
-  RegionAccessor<AccessorType::Generic, double> acc_x = 
-    regions[0].get_field_accessor(FID_X).typeify<double>();
-  RegionAccessor<AccessorType::Generic, double> acc_y = 
-    regions[0].get_field_accessor(FID_Y).typeify<double>();
-  RegionAccessor<AccessorType::Generic, double> acc_z = 
-    regions[1].get_field_accessor(FID_Z).typeify<double>();
+  const FieldAccessor<READ_ONLY,double,1> acc_x(regions[0], FID_X);
+  const FieldAccessor<READ_ONLY,double,1> acc_y(regions[0], FID_Y);
+  const FieldAccessor<READ_ONLY,double,1> acc_z(regions[1], FID_Z);
+
   printf("Checking results...");
-  Domain dom = runtime->get_index_space_domain(ctx, 
-      task->regions[0].region.get_index_space());
-  Rect<1> rect = dom.get_rect<1>();
+  Rect<1> rect = runtime->get_index_space_domain(ctx,
+                  task->regions[0].region.get_index_space());
   bool all_passed = true;
-  for (GenericPointInRectIterator<1> pir(rect); pir; pir++)
+  for (PointInRectIterator<1> pir(rect); pir(); pir++)
   {
-    double expected = alpha * acc_x.read(DomainPoint::from_point<1>(pir.p)) + 
-                           acc_y.read(DomainPoint::from_point<1>(pir.p));
-    double received = acc_z.read(DomainPoint::from_point<1>(pir.p));
+    double expected = alpha * acc_x[*pir] + acc_y[*pir];
+    double received = acc_z[*pir];
     // Probably shouldn't check for floating point equivalence but
     // the order of operations are the same should they should
     // be bitwise equal.
@@ -298,18 +278,21 @@ int main(int argc, char **argv)
   {
     TaskVariantRegistrar registrar(INIT_FIELD_TASK_ID, "init_field");
     registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+    registrar.set_leaf();
     Runtime::preregister_task_variant<init_field_task>(registrar, "init_field");
   }
 
   {
     TaskVariantRegistrar registrar(DAXPY_TASK_ID, "daxpy");
     registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+    registrar.set_leaf();
     Runtime::preregister_task_variant<daxpy_task>(registrar, "daxpy");
   }
 
   {
     TaskVariantRegistrar registrar(CHECK_TASK_ID, "check");
     registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+    registrar.set_leaf();
     Runtime::preregister_task_variant<check_task>(registrar, "check");
   }
 

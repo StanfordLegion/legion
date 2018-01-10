@@ -1,4 +1,4 @@
--- Copyright 2017 Stanford University
+-- Copyright 2018 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -655,22 +655,6 @@ do
 
   for z in rz do
     z.zdu = q1 * z.zss + 2.0 * q2 * z.z0tmp
-  end
-end
-
-local function accessor_generic_get_base_pointer(field_type)
-  return terra(accessor : c.legion_accessor_generic_t)
-
-    var base_pointer : &opaque = nil
-    var stride : c.size_t = terralib.sizeof(field_type)
-    var ok = c.legion_accessor_generic_get_soa_parameters(
-      accessor, &base_pointer, &stride)
-
-    regentlib.assert(ok, "failed to get base pointer")
-    regentlib.assert(stride == terralib.sizeof(field_type),
-                     "stride does not match expected value")
-
-    return [&field_type](base_pointer)
   end
 end
 
@@ -1494,5 +1478,4 @@ end
 task toplevel()
   test()
 end
-cpennant.register_mappers()
-regentlib.start(toplevel)
+regentlib.start(toplevel, cpennant.register_mappers)

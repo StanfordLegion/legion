@@ -1,4 +1,4 @@
-/* Copyright 2017 Stanford University
+/* Copyright 2018 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,9 +19,6 @@
 #include <cstdlib>
 #include "legion.h"
 using namespace Legion;
-
-// for Point<DIM> and Rect<DIM>
-using namespace LegionRuntime::Arrays;
 
 /*
  * This example shows how to create index
@@ -67,14 +64,14 @@ void top_level_task(const Task *task,
   // which requires an unbounded number of elements we would be
   // interested in learning more.  Here we create an unstructured
   // index space that will store at most 1024 elements.
-  IndexSpace unstructured_is = runtime->create_index_space(ctx, 1024); 
-  printf("Created unstructured index space %x\n", unstructured_is.get_id());
+  const Domain domain(DomainPoint(0), DomainPoint(1023));
+  IndexSpace untyped_is = runtime->create_index_space(ctx, domain); 
+  printf("Created untyped index space %x\n", untyped_is.get_id());
   // We create structured index spaces from Rects which we
   // convert to Domains (recall example 02).
-  Rect<1> rect(Point<1>(0),Point<1>(1023));
-  IndexSpace structured_is = runtime->create_index_space(ctx, 
-                                          Domain::from_rect<1>(rect));
-  printf("Created structured index space %x\n", structured_is.get_id());
+  const Rect<1> rect(0,1023);
+  IndexSpaceT<1> typed_is = runtime->create_index_space(ctx, rect); 
+  printf("Created typed index space %x\n", typed_is.get_id());
   // Structured index spaces by default already have all their
   // points allocated and they cannot be allocated or deallocated.
   // Unstructured index spaces must have their elements allocated
@@ -86,23 +83,14 @@ void top_level_task(const Task *task,
   // store actual data (covered in a later example).  Here we create
   // an allocator for our unstructured index space and allocate all of
   // its points.
-  {
-    IndexAllocator allocator = runtime->create_index_allocator(ctx, 
-                                                    unstructured_is);
-    ptr_t begin = allocator.alloc(1024);
-    // Make sure it isn't null
-    assert(!begin.is_null());
-    printf("Allocated elements in unstructured "
-           "space at ptr_t %lld\n", begin.value);
-    // When the allocator goes out of scope the runtime reclaims
-    // its resources.
-  }
+  
   // For structured index spaces we can always recover the original
   // domain for an index space from the runtime.
   {
-    Domain orig_domain = runtime->get_index_space_domain(ctx, structured_is);
-    Rect<1> orig = orig_domain.get_rect<1>();
-    assert(orig == rect);
+    Domain orig_domain = runtime->get_index_space_domain(ctx, untyped_is);
+    assert(orig_domain == domain);
+    Rect<1> orig_rect = runtime->get_index_space_domain(ctx, typed_is);
+    assert(orig_rect == rect);
   }
 
   // Fields spaces are the abstraction that Legion uses for describing
@@ -139,26 +127,27 @@ void top_level_task(const Task *task,
   // Note that we use the same field space for both logical regions
   // which means they both will have the same set of fields.  Any
   // modifications to the field space will effect both logical regions.
-  LogicalRegion unstructured_lr = 
-    runtime->create_logical_region(ctx, unstructured_is, fs);
-  printf("Created unstructured logical region (%x,%x,%x)\n",
-      unstructured_lr.get_index_space().get_id(), 
-      unstructured_lr.get_field_space().get_id(),
-      unstructured_lr.get_tree_id());
-  LogicalRegion structured_lr = 
-    runtime->create_logical_region(ctx, structured_is, fs);
-  printf("Created structured logical region (%x,%x,%x)\n",
-      structured_lr.get_index_space().get_id(), 
-      structured_lr.get_field_space().get_id(),
-      structured_lr.get_tree_id());
+  LogicalRegion untyped_lr = 
+    runtime->create_logical_region(ctx, untyped_is, fs);
+  printf("Created untyped logical region (%x,%x,%x)\n",
+      untyped_lr.get_index_space().get_id(), 
+      untyped_lr.get_field_space().get_id(),
+      untyped_lr.get_tree_id());
+  LogicalRegionT<1> typed_lr = 
+    runtime->create_logical_region(ctx, typed_is, fs);
+  printf("Created typed logical region (%x,%x,%x)\n",
+      typed_lr.get_index_space().get_id(), 
+      typed_lr.get_field_space().get_id(),
+      typed_lr.get_tree_id());
 
   // Note that logical regions are not uniquely defined by index spaces
   // and field spaces.  Every call to create_logical_region with the
   // same index space and field space will return a new logical region
   // with a different tree ID.
+  // implicit cast
   LogicalRegion no_clone_lr =
-    runtime->create_logical_region(ctx, structured_is, fs);
-  assert(structured_lr.get_tree_id() != no_clone_lr.get_tree_id());
+    runtime->create_logical_region(ctx, typed_is, fs);
+  assert(typed_lr.get_tree_id() != no_clone_lr.get_tree_id());
 
   // In the next example we'll show how to create physical instances
   // of logical regions and how to access data.
@@ -169,12 +158,12 @@ void top_level_task(const Task *task,
   // how to defer these deletions until they are safe to perform which
   // means the user does not need to worry about waiting for tasks that
   // use these resources before destroying them.
-  runtime->destroy_logical_region(ctx, unstructured_lr);
-  runtime->destroy_logical_region(ctx, structured_lr);
+  runtime->destroy_logical_region(ctx, untyped_lr);
+  runtime->destroy_logical_region(ctx, typed_lr);
   runtime->destroy_logical_region(ctx, no_clone_lr);
   runtime->destroy_field_space(ctx, fs);
-  runtime->destroy_index_space(ctx, unstructured_is);
-  runtime->destroy_index_space(ctx, structured_is);
+  runtime->destroy_index_space(ctx, untyped_is);
+  runtime->destroy_index_space(ctx, typed_is);
   printf("Successfully cleaned up all of our resources\n");
 }
 

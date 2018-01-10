@@ -1,4 +1,4 @@
-/* Copyright 2017 Stanford University, NVIDIA Corporation
+/* Copyright 2018 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,20 +18,20 @@
 #ifndef REALM_PROC_IMPL_H
 #define REALM_PROC_IMPL_H
 
-#include "processor.h"
-#include "id.h"
+#include "realm/processor.h"
+#include "realm/id.h"
 
-#include "activemsg.h"
-#include "operation.h"
-#include "profiling.h"
-#include "sampling.h"
+#include "realm/activemsg.h"
+#include "realm/operation.h"
+#include "realm/profiling.h"
+#include "realm/sampling.h"
 
-#include "event_impl.h"
-#include "rsrv_impl.h"
+#include "realm/event_impl.h"
+#include "realm/rsrv_impl.h"
 
-#include "tasks.h"
-#include "threads.h"
-#include "codedesc.h"
+#include "realm/tasks.h"
+#include "realm/threads.h"
+#include "realm/codedesc.h"
 
 namespace Realm {
 
@@ -275,7 +275,7 @@ namespace Realm {
  	                                 RequestArgs,
  	                                 handle_request> Message;
 
-      static void send_request(gasnet_node_t target, Processor proc,
+      static void send_request(NodeID target, Processor proc,
 			       Processor::TaskFuncID func_id,
 			       const void *args, size_t arglen,
 			       const ProfilingRequestSet *prs,
@@ -285,7 +285,7 @@ namespace Realm {
     
     struct RegisterTaskMessage {
       struct RequestArgs : public BaseMedium {
-	gasnet_node_t sender;
+	NodeID sender;
 	Processor::TaskFuncID func_id;
 	Processor::Kind kind;
 	RemoteTaskRegistration *reg_op;
@@ -297,7 +297,7 @@ namespace Realm {
  	                                 RequestArgs,
  	                                 handle_request> Message;
 
-      static void send_request(gasnet_node_t target,
+      static void send_request(NodeID target,
 			       Processor::TaskFuncID func_id,
 			       Processor::Kind kind,
 			       const std::vector<Processor>& procs,
@@ -308,7 +308,7 @@ namespace Realm {
     
     struct RegisterTaskCompleteMessage {
       struct RequestArgs {
-	gasnet_node_t sender;
+	NodeID sender;
 	RemoteTaskRegistration *reg_op;
 	bool successful;
       };
@@ -319,7 +319,7 @@ namespace Realm {
 					RequestArgs,
 					handle_request> Message;
 
-      static void send_request(gasnet_node_t target,
+      static void send_request(NodeID target,
 			       RemoteTaskRegistration *reg_op,
 			       bool successful);
     };

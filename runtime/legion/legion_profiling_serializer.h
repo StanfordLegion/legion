@@ -1,4 +1,4 @@
-/* Copyright 2017 Stanford University, NVIDIA Corporation
+/* Copyright 2018 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,10 +17,10 @@
 
 #include <string>
 #include <stdio.h>
-#include "legion_profiling.h"
+#include "legion/legion_profiling.h"
 
 #ifdef USE_ZLIB
-#include "zlib.h"
+#include <zlib.h>
 // lp_fopen expects filename to be a std::string
 #define lp_fopen(filename, mode)      gzopen(filename.c_str(),mode)
 #define lp_fwrite(f, data, num_bytes) gzwrite(f,data,num_bytes)
@@ -41,6 +41,7 @@ namespace Legion {
       LegionProfSerializer() {};
       virtual ~LegionProfSerializer() {};
 
+      virtual bool is_thread_safe(void) const = 0;
       // You must override the following functions in your implementation
       virtual void serialize(const LegionProfDesc::MessageDesc&) = 0;
       virtual void serialize(const LegionProfDesc::MapperCallDesc&) = 0;
@@ -65,6 +66,7 @@ namespace Legion {
       virtual void serialize(const LegionProfInstance::InstCreateInfo&) = 0;
       virtual void serialize(const LegionProfInstance::InstUsageInfo&) = 0;
       virtual void serialize(const LegionProfInstance::InstTimelineInfo&) = 0;
+      virtual void serialize(const LegionProfInstance::PartitionInfo&) = 0;
       virtual void serialize(const LegionProfInstance::MessageInfo&) = 0;
       virtual void serialize(const LegionProfInstance::MapperCallInfo&) = 0;
       virtual void serialize(const LegionProfInstance::RuntimeCallInfo&) = 0;
@@ -81,6 +83,7 @@ namespace Legion {
 
       void writePreamble();
 
+      bool is_thread_safe(void) const { return false; }
       // Serialize Methods
       void serialize(const LegionProfDesc::MessageDesc&);
       void serialize(const LegionProfDesc::MapperCallDesc&);
@@ -105,6 +108,7 @@ namespace Legion {
       void serialize(const LegionProfInstance::InstCreateInfo&);
       void serialize(const LegionProfInstance::InstUsageInfo&);
       void serialize(const LegionProfInstance::InstTimelineInfo&);
+      void serialize(const LegionProfInstance::PartitionInfo&);
       void serialize(const LegionProfInstance::MessageInfo&);
       void serialize(const LegionProfInstance::MapperCallInfo&);
       void serialize(const LegionProfInstance::RuntimeCallInfo&);
@@ -139,6 +143,7 @@ namespace Legion {
         INST_CREATE_INFO_ID,
         INST_USAGE_INFO_ID,
         INST_TIMELINE_INFO_ID,
+        PARTITION_INFO_ID,
         MESSAGE_INFO_ID,
         MAPPER_CALL_INFO_ID,
         RUNTIME_CALL_INFO_ID,
@@ -154,6 +159,7 @@ namespace Legion {
       LegionProfASCIISerializer();
       ~LegionProfASCIISerializer();
 
+      bool is_thread_safe(void) const { return true; }
       // Serialize Methods
       void serialize(const LegionProfDesc::MessageDesc&);
       void serialize(const LegionProfDesc::MapperCallDesc&);
@@ -178,6 +184,7 @@ namespace Legion {
       void serialize(const LegionProfInstance::InstCreateInfo&);
       void serialize(const LegionProfInstance::InstUsageInfo&);
       void serialize(const LegionProfInstance::InstTimelineInfo&);
+      void serialize(const LegionProfInstance::PartitionInfo&);
       void serialize(const LegionProfInstance::MessageInfo&);
       void serialize(const LegionProfInstance::MapperCallInfo&);
       void serialize(const LegionProfInstance::RuntimeCallInfo&);

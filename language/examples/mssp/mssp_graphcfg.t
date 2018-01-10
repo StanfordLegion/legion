@@ -1,4 +1,4 @@
--- Copyright 2017 Stanford University
+-- Copyright 2018 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -63,20 +63,6 @@ terra GraphCfg:show()
 	   self.nodes, self.edges, self.num_sources)
 end
 --GraphCfg.methods['show']:compile()
-
--- task GraphCfg:allocate_nodes(rn : region(Node))
--- do
---   var i = c.legion_index_allocator_create(__runtime(), __context(), __raw(rn).index_space)
---   c.legion_index_allocator_alloc(i, self.nodes)
---   c.legion_index_allocator_destroy(i)
--- end
-
--- task GraphCfg:allocate_edges(rn : region(Node), re : region(Edge(rn)))
--- do
---   var i = c.legion_index_allocator_create(__runtime(), __context(), __raw(re).index_space)
---   c.legion_index_allocator_alloc(i, self.edges)
---   c.legion_index_allocator_destroy(i)
--- end
 
 -- compile all methods eagerly to catch errors
 for k,v in pairs(GraphCfg.methods) do

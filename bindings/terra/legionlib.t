@@ -1,4 +1,4 @@
--- Copyright 2017 Stanford University
+-- Copyright 2018 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -24,7 +24,7 @@ require 'legionlib-terra'
 -- require 'legionlib-mapper'
 require 'legionlib-util'
 
-local legion_c = terralib.includec("legion_c.h")
+local legion_c = terralib.includec("legion.h")
 local legion_terra = terralib.includecstring([[
 #include "legion_terra.h"
 #include "legion_terra_tasks.h"

@@ -1,4 +1,4 @@
-/* Copyright 2017 Stanford University, NVIDIA Corporation
+/* Copyright 2018 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,12 +15,12 @@
 
 // Realm modules
 
-#include "realm_config.h"
+#include "realm/realm_config.h"
 
 #define REALM_MODULE_REGISTRATION_STATIC
-#include "module.h"
+#include "realm/module.h"
 
-#include "logging.h"
+#include "realm/logging.h"
 
 #include <assert.h>
 #include <string.h>
@@ -38,6 +38,9 @@
 #include "realm/openmp/openmp_module.h"
 #endif
 #include "realm/procset/procset_module.h"
+#ifdef REALM_USE_PYTHON
+#include "realm/python/python_module.h"
+#endif
 #ifdef USE_CUDA
 #include "realm/cuda/cuda_module.h"
 #endif

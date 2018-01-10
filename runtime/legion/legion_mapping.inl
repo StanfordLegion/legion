@@ -1,4 +1,4 @@
-/* Copyright 2017 Stanford University, NVIDIA Corporation
+/* Copyright 2018 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,11 +16,54 @@
 // Included from legion_mapping.h - do not include this directly
 
 // Useful for IDEs 
-#include "legion_mapping.h"
+#include "legion/legion_mapping.h"
 
 namespace Legion {
-
   namespace Mapping {
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    inline IndexSpaceT<DIM,T> MapperRuntime::create_index_space(
+                                    MapperContext ctx, Rect<DIM,T> bounds) const
+    //--------------------------------------------------------------------------
+    {
+      DomainT<DIM,T> realm_is((Realm::IndexSpace<DIM,T>(bounds)));
+      const Domain dom(realm_is);
+      return IndexSpaceT<DIM,T>(create_index_space_internal(ctx, dom, &realm_is,
+            Legion::Internal::NT_TemplateHelper::template encode_tag<DIM,T>()));
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    inline IndexSpaceT<DIM,T> MapperRuntime::create_index_space(
+              MapperContext ctx, const std::vector<Point<DIM,T> > &points) const
+    //--------------------------------------------------------------------------
+    {
+      // C++ type system is dumb
+      std::vector<Realm::Point<DIM,T> > realm_points(points.size());
+      for (unsigned idx = 0; idx < points.size(); idx++)
+        realm_points[idx] = points[idx];
+      DomainT<DIM,T> realm_is((Realm::IndexSpace<DIM,T>(realm_points)));
+      const Domain dom(realm_is);
+      return IndexSpaceT<DIM,T>(create_index_space_internal(ctx, dom, &realm_is,
+                Internal::NT_TemplateHelper::template encode_tag<DIM,T>()));
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    inline IndexSpaceT<DIM,T> MapperRuntime::create_index_space(
+                MapperContext ctx, const std::vector<Rect<DIM,T> > &rects) const
+    //--------------------------------------------------------------------------
+    {
+      // C++ type system is dumb
+      std::vector<Realm::Rect<DIM,T> > realm_rects(rects.size());
+      for (unsigned idx = 0; idx < rects.size(); idx++)
+        realm_rects[idx] = rects[idx];
+      DomainT<DIM,T> realm_is((Realm::IndexSpace<DIM,T>(realm_rects)));
+      const Domain dom(realm_is);
+      return IndexSpaceT<DIM,T>(create_index_space_internal(ctx, dom, &realm_is,
+                Internal::NT_TemplateHelper::template encode_tag<DIM,T>()));
+    }
 
     //--------------------------------------------------------------------------
     inline ProfilingRequest::ProfilingRequest(void)
@@ -97,6 +140,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    template <typename T>
+    inline bool ProfilingResponse::get_measurement(T& result) const
+    //--------------------------------------------------------------------------
+    {
+      if (realm_resp)
+        return realm_resp->template get_measurement<T>(result);
+      else
+        return false;
+    }
+
+    //--------------------------------------------------------------------------
     template<>
     inline ProfilingMeasurements::RuntimeOverhead* 
             ProfilingResponse::get_measurement<
@@ -104,6 +158,17 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return overhead;
+    }
+
+    //--------------------------------------------------------------------------
+    template<>
+    inline bool ProfilingResponse::get_measurement<
+                  ProfilingMeasurements::RuntimeOverhead>(
+                           ProfilingMeasurements::RuntimeOverhead& result) const
+    //--------------------------------------------------------------------------
+    {
+      result = *overhead;
+      return true;
     }
 
     namespace ProfilingMeasurements {

@@ -1,4 +1,4 @@
-/* Copyright 2017 Stanford University, NVIDIA Corporation
+/* Copyright 2018 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,16 +15,11 @@
 
 // Realm logging infrastructure
 
-#include "logging.h"
+#include "realm/logging.h"
 
-#ifdef SHARED_LOWLEVEL
-#define gasnet_mynode() 0
-#define gasnet_nodes() 1
-#else
-#include "activemsg.h"
-#endif
+#include "realm/activemsg.h"
 
-#include "cmdline.h"
+#include "realm/cmdline.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -307,7 +302,16 @@ namespace Realm {
     }
 
     // lots of choices for log output
-    if(logname.empty() || (logname == "stdout")) {
+    if(logname.empty()) {
+      // the gasnet UDP job spawner (amudprun) seems to buffer stdout, so make stderr the default
+#ifdef GASNET_CONDUIT_UDP
+      stream = new LoggerStreamSerialized<LoggerFileStream>(new LoggerFileStream(stderr, false),
+							    true);
+#else
+      stream = new LoggerStreamSerialized<LoggerFileStream>(new LoggerFileStream(stdout, false),
+							    true);
+#endif
+    } else if(logname == "stdout") {
       stream = new LoggerStreamSerialized<LoggerFileStream>(new LoggerFileStream(stdout, false),
 							    true);
     } else if(logname == "stderr") {
@@ -328,9 +332,9 @@ namespace Realm {
       size_t pct = logname.find_first_of('%', start);
       if(pct == std::string::npos) {
 	// no node number - everybody uses the same file
-	if(gasnet_nodes() > 1) {
+	if(max_node_id > 0) {
 	  if(!append) {
-	    if(gasnet_mynode() == 1)
+	    if(my_node_id == 0)
 	      fprintf(stderr, "WARNING: all ranks are logging to the same output file - appending is forced and output may be jumbled\n");
 	    append = true;
 	  }
@@ -345,7 +349,7 @@ namespace Realm {
 	// replace % with node number
 	char filename[256];
 	sprintf(filename, "%.*s%d%s",
-		(int)(pct - start), logname.c_str() + start, gasnet_mynode(), logname.c_str() + pct + 1);
+		(int)(pct - start), logname.c_str() + start, my_node_id, logname.c_str() + pct + 1);
 
 	f = fopen(filename, append ? "a" : "w");
 	if(!f) {
@@ -462,7 +466,7 @@ namespace Realm {
     static const int MAXLEN = 4096;
     char buffer[MAXLEN];
     int len = snprintf(buffer, MAXLEN - 2, "[%d - %lx] {%d}{%s}: ",
-		       gasnet_mynode(), (unsigned long)pthread_self(),
+		       my_node_id, (unsigned long)pthread_self(),
 		       level, name.c_str());
     int amt = msg.length();
     // Unusual case, but handle it

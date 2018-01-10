@@ -1,4 +1,4 @@
-/* Copyright 2017 Stanford University, NVIDIA Corporation
+/* Copyright 2018 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,17 +16,21 @@
 #include "legion_terra_partitions.h"
 #include "legion_terra_partitions_cxx.h"
 
-#include "arrays.h"
 #include "legion.h"
-#include "legion_c_util.h"
-#include "legion_utilities.h"
-#include "lowlevel.h"
-#include "utilities.h"
+#include "legion/legion_c_util.h"
+#include "legion/legion_utilities.h"
 
-using namespace LegionRuntime::Arrays;
-
-// Legion can't handle new partion API yet.
-#define USE_LEGION_CROSS_PRODUCT 0
+// Disable deprecated warnings in this file since we are also
+// trying to maintain backwards compatibility support for older
+// interfaces here in the C API
+#ifdef __GNUC__
+#pragma GCC diagnostic ignored "-Wdeprecated"
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
+#ifdef __clang__
+#pragma clang diagnostic ignored "-Wdeprecated"
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#endif
 
 #ifndef USE_TLS
 // Mac OS X and GCC <= 4.7 do not support C++11 thread_local.
@@ -38,9 +42,10 @@ using namespace LegionRuntime::Arrays;
 #endif
 
 #if !USE_TLS
+typedef GASNetHSL ImmovableLock;
 class AutoImmovableLock {
 public:
-  AutoImmovableLock(LegionRuntime::ImmovableLock& _lock)
+  AutoImmovableLock(ImmovableLock& _lock)
     : lock(_lock)
   {
     lock.lock();
@@ -52,7 +57,7 @@ public:
   }
 
 protected:
-  LegionRuntime::ImmovableLock& lock;
+  ImmovableLock& lock;
 };
 #endif
 
@@ -136,7 +141,7 @@ private:
   std::map<IndexSpace, std::vector<std::pair<ptr_t, size_t> > > global_cache;
 #else
   static std::map<IndexSpace, std::vector<std::pair<ptr_t, size_t> > > global_cache;
-  static LegionRuntime::ImmovableLock global_lock;
+  static ImmovableLock global_lock;
 #endif
 };
 
@@ -146,7 +151,7 @@ thread_local std::map<IndexSpace, std::vector<std::pair<ptr_t, size_t> > >
 #else
 std::map<IndexSpace, std::vector<std::pair<ptr_t, size_t> > >
   CachedIndexIterator::global_cache;
-LegionRuntime::ImmovableLock CachedIndexIterator::global_lock(true);
+ImmovableLock CachedIndexIterator::global_lock;
 #endif
 
 class TerraCObjectWrapper {
@@ -242,6 +247,7 @@ is_structured(Runtime *runtime, Context ctx, IndexPartition ip) {
   return is_structured(runtime, ctx, is);
 }
 
+#ifdef OLD_SHALLOW_CROSS_PRODUCT
 // Returns true if `lhs` and `rhs` should be switched when we take their
 // intersection to achieve better performance.  This is the case when the index
 // space is unstructured and `rhs` is "smaller" than `lhs`.
@@ -290,212 +296,6 @@ should_flip_cross_product(Runtime *runtime,
   }
   return rhs_span_count < lhs_span_count;
 }
-
-#if !USE_LEGION_CROSS_PRODUCT
-// Creates cross product between structured IndexPartition's.
-// See documentation of `create_cross_product()` for details.
-static Color
-create_cross_product_structured(Runtime *runtime,
-                                Context ctx,
-                                IndexPartition lhs,
-                                IndexPartition rhs,
-                                Color rhs_color,
-                                bool consistent_ids,
-                                std::map<IndexSpace, Color> *chosen_colors,
-                                const std::set<DomainPoint> *lhs_filter,
-                                const std::set<DomainPoint> *rhs_filter)
-{
-  // In the structured case, it makes no difference to "flip" `lhs` and `rhs`.
-
-  Domain lhs_colors = runtime->get_index_partition_color_space(ctx, lhs);
-  Domain rhs_colors = runtime->get_index_partition_color_space(ctx, rhs);
-
-  // Double for-loop: take rectangle intersection between each pair of
-  // subspaces.
-  for (Domain::DomainPointIterator lh_dp(lhs_colors); lh_dp; lh_dp++) {
-    const DomainPoint &lh_color = lh_dp.p;
-    if (lhs_filter && !lhs_filter->count(lh_color)) continue;
-
-    DomainPointColoring lh_coloring; // Coloring for current lhs region.
-
-    IndexSpace lh_space = runtime->get_index_subspace(ctx, lhs, lh_color);
-    // Doesn't currently handle structured index spaces consisting of multiple
-    // domains.
-    assert(!runtime->has_multiple_domains(lh_space));
-    Domain lh_domain = runtime->get_index_space_domain(lh_space);
-    // Verify that index space is indeed structured.
-    assert(lh_domain.get_dim() > 0);
-
-    for (Domain::DomainPointIterator rh_dp(rhs_colors); rh_dp; rh_dp++) {
-      const DomainPoint &rh_color = rh_dp.p;
-      if (rhs_filter && !rhs_filter->count(rh_color)) continue;
-
-      IndexSpace rh_space = runtime->get_index_subspace(ctx, rhs, rh_color);
-      assert(!runtime->has_multiple_domains(rh_space));
-      Domain rh_domain = runtime->get_index_space_domain(rh_space);
-      assert(rh_domain.get_dim() > 0);
-
-      // Take and store intersecton of the two rect domains.
-      lh_coloring[rh_color] = lh_domain.intersection(rh_domain);
-    }
-
-    // Create cross-product partition for current region in `lhs`.  We simply
-    // put `rhs_colors` as the color space, which may unfortunately include
-    // indices that are filtered out.
-    IndexPartition part = runtime->create_index_partition(
-      ctx, lh_space, rhs_colors, lh_coloring,
-      runtime->is_index_partition_disjoint(ctx, rhs) ? DISJOINT_KIND : ALIASED_KIND,
-      rhs_color);
-    if (chosen_colors) {
-      (*chosen_colors)[lh_space] = runtime->get_index_partition_color(ctx, part);
-    }
-    if (rhs_color == Color(-1) && consistent_ids) {
-      rhs_color = runtime->get_index_partition_color(ctx, part);
-    }
-  }
-
-  return rhs_color;
-}
-
-// Creates and stores coloring for cross product in the `coloring` parameter,
-// for unstructured IndexPartition's `lhs` and `rhs`.
-//
-// If `flip_coloring` is set, `coloring` will be created as a Map (rh_color =>
-// lh_color => intersection); otherwise, it will be a Map (lh_color => rh_color
-// => intersection).
-static void
-create_cross_product_coloring_unstructured(Runtime *runtime,
-                                           Context ctx,
-                                           IndexPartition lhs,
-                                           IndexPartition rhs,
-                                           std::map<DomainPoint, PointColoring> &coloring,
-                                           bool flip_coloring,
-                                           const std::set<DomainPoint> *lhs_filter,
-                                           const std::set<DomainPoint> *rhs_filter)
-{
-  Domain lhs_colors = runtime->get_index_partition_color_space(ctx, lhs);
-  Domain rhs_colors = runtime->get_index_partition_color_space(ctx, rhs);
-
-  // Double for-loop: take intersection between each pair of subspaces.
-  for (Domain::DomainPointIterator lh_dp(lhs_colors); lh_dp; lh_dp++) {
-    const DomainPoint &lh_color = lh_dp.p;
-    if (lhs_filter && !lhs_filter->count(lh_color)) continue;
-    IndexSpace lh_space = runtime->get_index_subspace(ctx, lhs, lh_color);
-
-    for (Domain::DomainPointIterator rh_dp(rhs_colors); rh_dp; rh_dp++) {
-      const DomainPoint &rh_color = rh_dp.p;
-      if (rhs_filter && !rhs_filter->count(rh_color)) continue;
-      IndexSpace rh_space = runtime->get_index_subspace(ctx, rhs, rh_color);
-
-      PointColoring::mapped_type &write_to = flip_coloring ?
-        coloring[rh_color][lh_color] : coloring[lh_color][rh_color];
-
-      // Take intersection between `lh_space` and `rh_space` by iterating
-      // through spans in each with a double for-loop and taking intersection
-      // between spans.
-      for (IndexIterator lh_it(runtime, ctx, lh_space); lh_it.has_next(); ) {
-        size_t lh_count = 0;
-        ptr_t lh_ptr = lh_it.next_span(lh_count);
-        ptr_t lh_end = lh_ptr.value + lh_count - 1;
-
-        for (IndexIterator rh_it(runtime, ctx, rh_space, /* start = */ lh_ptr);
-             rh_it.has_next(); ) {
-          size_t rh_count = 0;
-          ptr_t rh_ptr = rh_it.next_span(rh_count);
-          ptr_t rh_end = rh_ptr.value + rh_count - 1;
-
-          if (rh_ptr.value > lh_end.value) {
-            // lh_ptr           lh_end
-            //  |------------------|
-            //                       |----------------|-->     |---...
-            //                      rh_ptr         rh_end     rh_ptr'
-            // RHS span entirely exceeds LHS span; there isn't, and won't be,
-            // any overlap as the RHS span continues moving forward.
-            break;
-          }
-          if (rh_end.value > lh_end.value) {
-            // lh_ptr           lh_end
-            //  |------------------|
-            //            |----------------|-->      |---...
-            //           rh_ptr         rh_end      rh_ptr'
-            // This is the last time there's any overlap as RHS continues
-            // moving forward.
-            write_to.ranges.insert(std::pair<ptr_t, ptr_t>(rh_ptr, lh_end));
-            break;
-          }
-
-          // lh_ptr           lh_end
-          //  |------------------|
-          //    |---------|-->
-          //   rh_ptr  rh_end
-          // More overlap is possible as RHS moves forward.
-          write_to.ranges.insert(std::pair<ptr_t, ptr_t>(rh_ptr, rh_end));
-        }
-      }
-    }
-  }
-}
-
-// Creates cross product between unstructured IndexPartition's.
-// See documentation of `create_cross_product()` for details.
-static Color
-create_cross_product_unstructured(Runtime *runtime,
-                                  Context ctx,
-                                  IndexPartition lhs,
-                                  IndexPartition rhs,
-                                  Color rhs_color,
-                                  bool consistent_ids,
-                                  std::map<IndexSpace, Color> *chosen_colors,
-                                  const std::set<DomainPoint> *lhs_filter,
-                                  const std::set<DomainPoint> *rhs_filter)
-{
-  std::map<DomainPoint, PointColoring> coloring; // lh_color->rh_color->intersection
-
-  // The efficiency of this algorithm depends heavily on how many
-  // spans are in lhs and rhs. Since it is *MUCH* better to have a
-  // smaller number of spans on lhs, it is worth spending a little
-  // time here estimating which will have fewer spans.
-  bool flip = should_flip_cross_product(runtime, ctx, lhs, rhs, lhs_filter, rhs_filter);
-  if (flip) {
-    // We switch `lhs` and `rhs` (and their filters) in the params and also
-    // set `flip_coloring`, so that the output `map` be in the same format.
-    create_cross_product_coloring_unstructured(runtime, ctx, rhs, lhs,
-        coloring, /* flip_coloring = */ true,  rhs_filter, lhs_filter);
-  } else {
-    create_cross_product_coloring_unstructured(runtime, ctx, lhs, rhs,
-        coloring, /* flip_coloring = */ false, lhs_filter, rhs_filter);
-  }
-
-  // Create index partitions for each LHS partition.
-  Domain lhs_colors = runtime->get_index_partition_color_space(ctx, lhs);
-  Domain rhs_colors = runtime->get_index_partition_color_space(ctx, rhs);
-  bool allocable =
-#ifdef ASSUME_UNALLOCABLE
-    false
-#else
-    true
-#endif
-    ;
-
-  for (Domain::DomainPointIterator lh_dp(lhs_colors); lh_dp; lh_dp++) {
-    const DomainPoint &lh_color = lh_dp.p;
-    if (lhs_filter && !lhs_filter->count(lh_color)) continue;
-    IndexSpace lh_space = runtime->get_index_subspace(ctx, lhs, lh_color);
-
-    IndexPartition part = runtime->create_index_partition(
-        ctx, lh_space, rhs_colors, coloring[lh_color],
-        runtime->is_index_partition_disjoint(ctx, rhs) ? DISJOINT_KIND : ALIASED_KIND,
-        rhs_color, allocable);
-    if (chosen_colors) {
-      (*chosen_colors)[lh_space] = runtime->get_index_partition_color(ctx, part);
-    }
-    if (rhs_color == Color(-1) && consistent_ids) {
-      rhs_color = runtime->get_index_partition_color(ctx, part);
-    }
-  }
-
-  return rhs_color;
-}
 #endif
 
 Color
@@ -509,27 +309,15 @@ create_cross_product(Runtime *runtime,
                      const std::set<DomainPoint> *lhs_filter /* = NULL */,
                      const std::set<DomainPoint> *rhs_filter /* = NULL */)
 {
-#if USE_LEGION_CROSS_PRODUCT
-  std::map<DomainPoint, IndexPartition> handles;
-  runtime->create_cross_product_partitions(
+  std::map<IndexSpace, IndexPartition> handles;
+  rhs_color = runtime->create_cross_product_partitions(
     ctx, lhs, rhs, handles,
     (runtime->is_index_partition_disjoint(ctx, rhs) ? DISJOINT_KIND : ALIASED_KIND),
-    rhs_color, true);
+    rhs_color);
   return rhs_color;
-#else
-  // The two partitions should belong to the same index tree.
-  assert(lhs.get_tree_id() == rhs.get_tree_id());
-  
-  if (is_structured(runtime, ctx, lhs)) {
-    return create_cross_product_structured(runtime, ctx, lhs, rhs, rhs_color,
-        consistent_ids, chosen_colors, lhs_filter, rhs_filter);
-  } else {
-    return create_cross_product_unstructured(runtime, ctx, lhs, rhs, rhs_color,
-        consistent_ids, chosen_colors, lhs_filter, rhs_filter);
-  }
-#endif
 }
 
+#ifdef OLD_SHALLOW_CROSS_PRODUCT
 // For each unstructured IndexSpace in `index_spaces`, stores its bounds (first & last
 // element) as pairs in `bounds`.
 static inline void
@@ -558,6 +346,7 @@ get_bounding_boxes(Runtime *runtime,
     bounds.push_back(std::pair<ptr_t, ptr_t>(first, last));
   }
 }
+#endif
 
 struct BoundComp {
   bool operator()(const std::pair<ptr_t, ptr_t>& b1,
@@ -698,6 +487,7 @@ void print_tree(Node* tree, unsigned level)
   }
 }
 
+#ifdef OLD_SHALLOW_CROSS_PRODUCT
 static void
 find_first_bounding_box(Node* root, unsigned key, Leaf*& leaf, int& idx)
 {
@@ -822,212 +612,21 @@ create_cross_product_tree(Runtime *runtime,
   }
 }
 
-// For each index space in `ispaces`, adds its domain's rectangle to `rects`.
+// For each index space in `ispaces`, adds its domain to `doms`.
 // ASSUMES that each ispace is structured and only has one domain.
-// `DIM` should match the dimensionality of the index spaces.
-template <unsigned DIM>
 static void
-extract_ispace_domain_rects(Runtime *runtime,
-                            Context ctx,
-                            const std::vector<IndexSpace> &ispaces,
-                            std::vector<Rect<DIM> >& rects)
+extract_ispace_domain(Runtime *runtime,
+                      Context ctx,
+                      const std::vector<IndexSpace> &ispaces,
+                      std::vector<Domain>& doms)
 {
-  assert(DIM > 0);
-  assert(rects.empty());
-  rects.reserve(ispaces.size());
+  assert(doms.empty());
+  doms.reserve(ispaces.size());
   for (size_t i = 0; i < ispaces.size(); i++) {
     const IndexSpace &ispace = ispaces[i];
     // Doesn't currently handle structured index spaces with multiple domains.
     assert(!runtime->has_multiple_domains(ctx, ispace));
-    Domain domain = runtime->get_index_space_domain(ctx, ispace);
-    rects.push_back(domain.get_rect<DIM>());
-  }
-}
-
-// Version of `create_cross_product_shallow_structured` templetized on the
-// dimensionality of the structured index spaces.
-template <unsigned DIM>
-static void
-create_cross_product_shallow_structured_spec(
-    Runtime *runtime,
-    Context ctx,
-    const std::vector<IndexSpace> &lhs,
-    const std::vector<IndexSpace> &rhs,
-    legion_terra_logical_region_list_t *rhs_,
-    legion_terra_logical_region_list_list_t *result_)
-{
-  assert(DIM > 0); // Should be structured.
-
-  std::vector<Rect<DIM> > lh_rects, rh_rects;
-  extract_ispace_domain_rects<DIM>(runtime, ctx, lhs, lh_rects);
-  extract_ispace_domain_rects<DIM>(runtime, ctx, rhs, rh_rects);
-
-#define BLOCK_SIZE 512
-  size_t lhs_size = lhs.size();
-  size_t rhs_size = rhs.size();
-  for (size_t block_i = 0; block_i < lhs_size; block_i += BLOCK_SIZE) {
-    for (size_t block_j = 0; block_j < rhs_size; block_j += BLOCK_SIZE) {
-      size_t block_i_max = std::min(block_i + BLOCK_SIZE, lhs_size);
-      size_t block_j_max = std::min(block_j + BLOCK_SIZE, rhs_size);
-      for (size_t i = block_i; i < block_i_max; i++) {
-        Rect<DIM> lh_rect = lh_rects[i];
-        for (size_t j = block_j; j < block_j_max; j++) {
-          Rect<DIM> rh_rect = rh_rects[j];
-          if (lh_rect.overlaps(rh_rect)) {
-            legion_terra_logical_region_list_t& sublist = result_->sublists[i];
-            size_t idx = sublist.count++;
-            sublist.subregions[idx].index_space = CObjectWrapper::wrap(rhs[j]);
-            sublist.subregions[idx].field_space = rhs_->subregions[j].field_space;
-            sublist.subregions[idx].tree_id = rhs_->subregions[j].tree_id;
-          }
-        }
-      }
-    }
-  }
-}
-
-struct QuadLeaf;
-struct QuadNonLeaf;
-
-struct QuadNode {
-  QuadNode(const Rect<2>& _bounds) : bounds(_bounds) {}
-  virtual ~QuadNode() {}
-  virtual bool is_leaf() = 0;
-  virtual QuadLeaf* as_leaf() = 0;
-  virtual QuadNonLeaf* as_nonleaf() = 0;
-  virtual void insert(const Rect<2>& rect, unsigned idx) = 0;
-  virtual void query(const Rect<2>& rect, std::set<unsigned>& indices) = 0;
-  virtual bool overlaps(const Rect<2>& rect) {
-    return bounds.overlaps(rect);
-  }
-  virtual void print_tree(int level = 0) = 0;
-  Rect<2> bounds;
-};
-
-struct QuadLeaf : public QuadNode {
-  QuadLeaf(const Rect<2>& _bounds) : QuadNode(_bounds) {}
-  virtual ~QuadLeaf() {}
-  virtual bool is_leaf() { return true; }
-  virtual QuadLeaf* as_leaf() { return (QuadLeaf*)this; }
-  virtual QuadNonLeaf* as_nonleaf() { return 0; }
-  virtual void insert(const Rect<2>& rect, unsigned idx) {
-    children.insert(idx);
-  }
-  virtual void query(const Rect<2>& rect, std::set<unsigned>& indices) {
-    for (std::set<unsigned>::iterator it = children.begin();
-         it != children.end(); ++it)
-      indices.insert(*it);
-  }
-  virtual void print_tree(int level) {
-    std::string str = "";
-    for (int i = 0; i < level * 4; ++i)
-      str += " ";
-    printf("%s[Leaf Node] level: %d, bounds: (%lld, %lld) -- (%lld, %lld) children: ",
-        str.c_str(), level, bounds.lo[0], bounds.lo[1], bounds.hi[0], bounds.hi[1]);
-    for (std::set<unsigned>::iterator it = children.begin();
-         it != children.end(); ++it)
-      printf("%u ", *it);
-    printf("\n");
-  }
-
-  std::set<unsigned> children;
-};
-
-struct QuadNonLeaf : public QuadNode {
-  QuadNonLeaf(const Rect<2>& _bounds) : QuadNode(_bounds) {}
-  virtual ~QuadNonLeaf() {}
-  virtual bool is_leaf() { return false; }
-  virtual QuadLeaf* as_leaf() { return 0; }
-  virtual QuadNonLeaf* as_nonleaf() { return (QuadNonLeaf*)this; }
-  virtual void insert(const Rect<2>& rect, unsigned idx) {
-    for (unsigned i = 0; i < 4; ++i) {
-      if (children[i]->overlaps(rect))
-        children[i]->insert(rect, idx);
-    }
-  }
-  virtual void query(const Rect<2>& rect, std::set<unsigned>& indices) {
-    for (unsigned i = 0; i < 4; ++i)
-      if (children[i]->overlaps(rect))
-        children[i]->query(rect, indices);
-  }
-  virtual void print_tree(int level) {
-    std::string str = "";
-    for (int i = 0; i < level * 4; ++i)
-      str += " ";
-    printf("%s[NonLeaf Node] level: %d, bounds: (%lld, %lld) -- (%lld, %lld)\n",
-        str.c_str(), level, bounds.lo[0], bounds.lo[1], bounds.hi[0], bounds.hi[1]);
-    for (unsigned i = 0; i < 4; ++i)
-      children[i]->print_tree(level + 1);
-  }
-
-  QuadNode* children[4];
-};
-
-QuadNode* create_quad_tree(const Rect<2>& bounds,
-                           size_t num_nodes,
-                           size_t num_elements)
-{
-  if (num_nodes >= num_elements) {
-    QuadLeaf* leaf = new QuadLeaf(bounds);
-    return leaf;
-  }
-  else {
-    QuadNonLeaf* nonleaf = new QuadNonLeaf(bounds);
-    coord_t center_x = (bounds.lo[0] + bounds.hi[0]) / 2;
-    coord_t center_y = (bounds.lo[1] + bounds.hi[1]) / 2;
-
-    Rect<2> lower_left(bounds.lo, make_point(center_x, center_y));
-    Rect<2> lower_right(make_point(center_x + 1, bounds.lo[1]),
-                        make_point(bounds.hi[0], center_y));
-    Rect<2> upper_left(make_point(bounds.lo[0], center_y + 1),
-                       make_point(center_x, bounds.hi[1]));
-    Rect<2> upper_right(make_point(center_x + 1, center_y + 1),
-                        bounds.hi);
-    num_nodes *= 4;
-    num_elements /= 4;
-    nonleaf->children[0] = create_quad_tree(lower_left, num_nodes, num_elements);
-    nonleaf->children[1] = create_quad_tree(lower_right, num_nodes, num_elements);
-    nonleaf->children[2] = create_quad_tree(upper_left, num_nodes, num_elements);
-    nonleaf->children[3] = create_quad_tree(upper_right, num_nodes, num_elements);
-    return nonleaf;
-  }
-}
-
-static void
-create_cross_product_shallow_structured_tree(
-    Runtime *runtime,
-    Context ctx,
-    IndexPartition lhs_part,
-    const std::vector<IndexSpace> &lhs,
-    const std::vector<IndexSpace> &rhs,
-    legion_terra_logical_region_list_t *rhs_,
-    legion_terra_logical_region_list_list_t *result_)
-{
-  std::vector<Rect<2> > lh_rects, rh_rects;
-  extract_ispace_domain_rects<2>(runtime, ctx, lhs, lh_rects);
-  extract_ispace_domain_rects<2>(runtime, ctx, rhs, rh_rects);
-
-  IndexSpace parent = runtime->get_parent_index_space(lhs_part);
-  Rect<2> universe = runtime->get_index_space_domain(parent).get_rect<2>();
-
-  QuadNode* tree = create_quad_tree(universe, 1, lh_rects.size());
-  for (unsigned idx = 0; idx < lh_rects.size(); ++idx)
-    tree->insert(lh_rects[idx], idx);
-  for (unsigned j = 0; j < rh_rects.size(); ++j) {
-    Rect<2> rh_rect = rh_rects[j];
-    std::set<unsigned> indices;
-    tree->query(rh_rect, indices);
-    for (std::set<unsigned>::iterator it = indices.begin(); it != indices.end(); ++it) {
-      unsigned i = *it;
-      Rect<2> lh_rect = lh_rects[i];
-      if (lh_rect.overlaps(rh_rect)) {
-        legion_terra_logical_region_list_t& sublist = result_->sublists[i];
-        size_t idx = sublist.count++;
-        sublist.subregions[idx].index_space = CObjectWrapper::wrap(rhs[j]);
-        sublist.subregions[idx].field_space = rhs_->subregions[j].field_space;
-        sublist.subregions[idx].tree_id = rhs_->subregions[j].tree_id;
-      }
-    }
+    doms.push_back(runtime->get_index_space_domain(ctx, ispace));
   }
 }
 
@@ -1046,36 +645,32 @@ create_cross_product_shallow_structured(Runtime *runtime,
 {
   if (lhs.empty() || rhs.empty()) return;
 
-  int dim = runtime->get_index_space_domain(ctx, lhs[0]).get_dim();
-  switch (dim) {
-    case 0:
-      assert(false); // Index space should be structured.
-    case 1:
-      {
-        create_cross_product_shallow_structured_spec<1>(
-            runtime, ctx, lhs, rhs, rhs_, result_);
-        break;
-      }
-    case 2:
-      {
-        if (runtime->is_index_partition_disjoint(ctx, lhs_part)) {
-          create_cross_product_shallow_structured_tree(
-              runtime, ctx, lhs_part, lhs, rhs, rhs_, result_);
+  std::vector<Domain> lh_doms, rh_doms;
+  extract_ispace_domain(runtime, ctx, lhs, lh_doms);
+  extract_ispace_domain(runtime, ctx, rhs, rh_doms);
+
+#define BLOCK_SIZE 512
+  size_t lhs_size = lhs.size();
+  size_t rhs_size = rhs.size();
+  for (size_t block_i = 0; block_i < lhs_size; block_i += BLOCK_SIZE) {
+    for (size_t block_j = 0; block_j < rhs_size; block_j += BLOCK_SIZE) {
+      size_t block_i_max = std::min(block_i + BLOCK_SIZE, lhs_size);
+      size_t block_j_max = std::min(block_j + BLOCK_SIZE, rhs_size);
+      for (size_t i = block_i; i < block_i_max; i++) {
+        Domain& lh_dom = lh_doms[i];
+        for (size_t j = block_j; j < block_j_max; j++) {
+          Domain& rh_dom = rh_doms[j];
+          Domain intersection = lh_dom.intersection(rh_dom);
+          if (!intersection.empty()) {
+            legion_terra_logical_region_list_t& sublist = result_->sublists[i];
+            size_t idx = sublist.count++;
+            sublist.subregions[idx].index_space = CObjectWrapper::wrap(rhs[j]);
+            sublist.subregions[idx].field_space = rhs_->subregions[j].field_space;
+            sublist.subregions[idx].tree_id = rhs_->subregions[j].tree_id;
+          }
         }
-        else {
-          create_cross_product_shallow_structured_spec<2>(
-              runtime, ctx, lhs, rhs, rhs_, result_);
-        }
-        break;
       }
-    case 3:
-      {
-        create_cross_product_shallow_structured_spec<3>(
-            runtime, ctx, lhs, rhs, rhs_, result_);
-        break;
-      }
-    default:
-      assert(false);
+    }
   }
 }
 
@@ -1156,6 +751,7 @@ create_cross_product_shallow_unstructured(Runtime *runtime,
     }
   }
 }
+#endif
 
 static void
 create_cross_product_multi(Runtime *runtime,
@@ -1372,6 +968,7 @@ legion_terra_index_cross_product_create_list_shallow(
 
   IndexPartition lhs_part = partition_from_list(runtime, ctx, lhs);
   IndexPartition rhs_part = partition_from_list(runtime, ctx, rhs);
+#ifdef OLD_SHALLOW_CROSS_PRODUCT
   if ((lhs_part != IndexPartition::NO_PART && is_structured(runtime, ctx, lhs_part))
       || (rhs_part != IndexPartition::NO_PART && is_structured(runtime, ctx, rhs_part))) {
       // Structured index spaces.
@@ -1391,6 +988,43 @@ legion_terra_index_cross_product_create_list_shallow(
       create_cross_product_shallow_unstructured(runtime, ctx, flip, lhs, lhs_disjoint, rhs, rhs_disjoint, lhs_, rhs_, result_);
     }
   }
+#else
+  std::map<IndexSpace, IndexPartition> handles;
+  std::vector<IndexSpace> keys;
+  // Instantiate the map with all the sub-regions since we're going to
+  // want to look at all the partitions that get made
+  const Domain lhs_color_space = runtime->get_index_partition_color_space(lhs_part);
+  keys.resize(lhs_color_space.get_volume());
+  unsigned idx = 0;
+  for (Domain::DomainPointIterator itr(lhs_color_space); itr; itr++, idx++)
+  {
+    IndexSpace child = runtime->get_index_subspace(lhs_part, itr.p);
+    handles[child] = IndexPartition::NO_PART;
+    keys[idx] = child;
+  }
+  runtime->create_cross_product_partitions(ctx, lhs_part, rhs_part, handles);
+  // Need the colors for each of the rhs subspaces in the partition
+  std::vector<DomainPoint> rhs_colors(rhs.size());
+  for (idx = 0; idx < rhs.size(); idx++)
+    rhs_colors[idx] = runtime->get_index_space_color_point(rhs[idx]);
+  for (unsigned i = 0; i < keys.size(); i++)
+  {
+    legion_terra_logical_region_list_t& sublist = result_->sublists[i];
+    IndexPartition part = handles[keys[i]];
+    assert(part.exists());
+    for (idx = 0; idx < rhs.size(); idx++)
+    {
+      IndexSpace subspace = runtime->get_index_subspace(part, rhs_colors[idx]);
+      const Domain subdom = runtime->get_index_space_domain(subspace);
+      if (subdom.empty())
+        continue;
+      const unsigned index = sublist.count++;
+      sublist.subregions[index].index_space = CObjectWrapper::wrap(rhs[idx]);
+      sublist.subregions[index].field_space = rhs_->subregions[idx].field_space;
+      sublist.subregions[index].tree_id = rhs_->subregions[idx].tree_id;
+    }
+  }
+#endif
 }
 
 // "Completes" a shallow cross product between lists of structured index spaces.

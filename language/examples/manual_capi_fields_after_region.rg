@@ -1,4 +1,4 @@
--- Copyright 2017 Stanford University
+-- Copyright 2018 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -38,14 +38,13 @@ terra top_level_task(task : c.legion_task_t,
   var ptr1 : c.legion_ptr_t, ptr2 : c.legion_ptr_t
   var f1 : c.legion_field_id_t, f2 : c.legion_field_id_t
   do
-    var isa = c.legion_index_allocator_create(runtime, ctx, is)
     var fsa = c.legion_field_allocator_create(runtime, ctx, fs)
 
     c.printf("created region (%d,%d,%d)\n",
                   r.tree_id, r.index_space.id, r.field_space.id)
 
-    ptr1 = c.legion_index_allocator_alloc(isa, 1)
-    ptr2 = c.legion_index_allocator_alloc(isa, 1)
+    ptr1 = [c.legion_ptr_t] { value = 0 }
+    ptr2 = [c.legion_ptr_t] { value = 1 }
 
     c.printf("allocated pointers %d %d\n",
                   ptr1.value, ptr2.value)
@@ -57,7 +56,6 @@ terra top_level_task(task : c.legion_task_t,
                   f1, f2)
 
     c.legion_field_allocator_destroy(fsa)
-    c.legion_index_allocator_destroy(isa)
   end
 
   if broken then

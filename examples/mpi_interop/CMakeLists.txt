@@ -1,5 +1,5 @@
 #------------------------------------------------------------------------------#
-# Copyright 2017 Stanford University
+# Copyright 2018 Stanford University
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -28,5 +28,5 @@ add_executable(mpi_interop mpi_interop.cc)
 target_link_libraries(mpi_interop Legion::Legion ${MPI_CXX_LIBRARIES})
 target_include_directories(mpi_interop PRIVATE ${MPI_C_INCLUDE_PATH})
 if(Legion_ENABLE_TESTING)
-  add_test(NAME mpi_interop COMMAND $<TARGET_FILE:mpi_interop>)
+  add_test(NAME mpi_interop COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:mpi_interop>)
 endif()

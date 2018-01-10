@@ -1,4 +1,4 @@
--- Copyright 2017 Stanford University
+-- Copyright 2018 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -34,6 +34,6 @@ task main()
     t += @x
   end
 
-  regentlib.assert(t == 130805, "test failed")
+  regentlib.assert(t == 151005, "test failed")
 end
 regentlib.start(main)

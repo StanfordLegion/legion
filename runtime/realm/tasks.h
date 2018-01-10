@@ -1,4 +1,4 @@
-/* Copyright 2017 Stanford University, NVIDIA Corporation
+/* Copyright 2018 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,15 +18,15 @@
 #ifndef REALM_TASKS_H
 #define REALM_TASKS_H
 
-#include "processor.h"
-#include "id.h"
+#include "realm/processor.h"
+#include "realm/id.h"
 
-#include "operation.h"
-#include "profiling.h"
+#include "realm/operation.h"
+#include "realm/profiling.h"
 
-#include "threads.h"
-#include "pri_queue.h"
-#include "bytearray.h"
+#include "realm/threads.h"
+#include "realm/pri_queue.h"
+#include "realm/bytearray.h"
 
 namespace Realm {
 
@@ -51,6 +51,8 @@ namespace Realm {
       virtual void print(std::ostream& os) const;
 
       virtual bool attempt_cancellation(int error_code, const void *reason_data, size_t reason_size);
+
+      virtual void set_priority(int new_priority);
       
       void execute_on_processor(Processor p);
 
@@ -88,6 +90,8 @@ namespace Realm {
       // called when thread status changes
       virtual void thread_blocking(Thread *thread);
       virtual void thread_ready(Thread *thread);
+
+      virtual void set_thread_priority(Thread *thread, int new_priority);
 
     public:
       // the main scheduler loop - lock should be held before calling
@@ -183,6 +187,21 @@ namespace Realm {
       int cfg_min_active_workers;
       int cfg_max_active_workers;
     };
+
+    inline long long ThreadedTaskScheduler::WorkCounter::read_counter(void) const
+    {
+      // just return the counter value
+      return counter;
+    }
+
+    // returns true if there is new work since the old_counter value was read
+    // this is non-blocking, and may be called while holding another lock
+    inline bool ThreadedTaskScheduler::WorkCounter::check_for_work(long long old_counter)
+    {
+      // test the counter value without synchronization
+      return (counter > old_counter);
+    }
+
 
     // an implementation of ThreadedTaskScheduler that uses kernel threads
     //  for workers

@@ -1,4 +1,4 @@
--- Copyright 2017 Stanford University, NVIDIA Corporation
+-- Copyright 2018 Stanford University, NVIDIA Corporation
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -59,8 +59,8 @@ function context:new_task_scope(expected_return_type)
   local cx = {
     type_env = self.type_env:new_local_scope(),
     privileges = data.newmap(),
-    constraints = {},
-    region_universe = {},
+    constraints = data.new_recursive_map(2),
+    region_universe = data.newmap(),
     expected_return_type = {expected_return_type},
     fixup_nodes = terralib.newlist(),
     must_epoch = false,
@@ -980,6 +980,7 @@ function type_check.expr_call(cx, node)
     fn = fn,
     args = args,
     conditions = conditions,
+    replicable = false,
     expr_type = expr_type,
     annotations = node.annotations,
     span = node.span,
@@ -1415,7 +1416,7 @@ function type_check.expr_region(cx, node)
   std.add_privilege(cx, std.writes, region, data.newtuple())
   -- Freshly created regions are, by definition, disjoint from all
   -- other regions.
-  for other_region, _ in pairs(cx.region_universe) do
+  for other_region, _ in cx.region_universe:items() do
     assert(not std.type_eq(region, other_region))
     -- But still, don't bother litering the constraint space with
     -- trivial constraints.
@@ -1578,25 +1579,21 @@ function type_check.expr_partition_by_field(cx, node)
   local colors = type_check.expr(cx, node.colors)
   local colors_type = std.check_read(cx, colors)
 
-  if not region_type:is_opaque() then
-    report.error(node, "type mismatch in argument 1: expected region of ispace(ptr) but got " ..
-                tostring(region_type))
-  end
-
   if #region.fields ~= 1 then
     report.error(node, "type mismatch in argument 1: expected 1 field but got " ..
                 tostring(#region.fields))
   end
 
-  local field_type = std.get_field_path(region_type:fspace(), region.fields[1])
-  if not std.type_eq(field_type, int) then
-    report.error(node, "type mismatch in argument 1: expected field of type " .. tostring(int) ..
-                " but got " .. tostring(field_type))
-  end
-
   if not std.is_ispace(colors_type) then
     report.error(node, "type mismatch in argument 2: expected ispace but got " ..
                 tostring(colors_type))
+  end
+
+  -- Field type should be the same as the base type of the colors space is
+  local field_type = std.get_field_path(region_type:fspace(), region.fields[1])
+  if not std.type_eq(field_type, colors_type.index_type) then
+    report.error(node, "type mismatch in argument 1: expected field of type " .. tostring(colors_type.index_type) ..
+                " but got " .. tostring(field_type))
   end
 
   local region_symbol
@@ -1660,8 +1657,30 @@ function type_check.expr_image(cx, node)
   end
 
   local field_type = std.get_field_path(region_type:fspace(), region.fields[1])
-  if not (std.is_bounded_type(field_type) and field_type:is_ptr() or std.is_index_type(field_type)) then
-    report.error(node, "type mismatch in argument 3: expected field of ptr type but got " .. tostring(field_type))
+  if not ((std.is_bounded_type(field_type) and std.is_index_type(field_type.index_type)) or std.is_index_type(field_type)) then
+    report.error(node, "type mismatch in argument 3: expected field of index type but got " .. tostring(field_type))
+  else
+    -- TODO: indexspaces should be parametrized by index types.
+    --       currently they only support 64-bit points, which is why we do this check here.
+    local function is_base_type_64bit(ty)
+      if std.type_eq(ty, opaque) or std.type_eq(ty, int64) then
+        return true
+      elseif ty:isstruct() then
+        for _, entry in pairs(ty:getentries()) do
+          local entry_type = entry[2] or entry.type
+          if not is_base_type_64bit(entry_type) then return false end
+        end
+        return true
+      else return false end
+    end
+
+    local index_type = field_type
+    if std.is_bounded_type(index_type) then
+      index_type = index_type.index_type
+    end
+    if not is_base_type_64bit(index_type.base_type) then
+      report.error(node, "type mismatch in argument 3: expected field of 64-bit index type (for now) but got " .. tostring(field_type))
+    end
   end
 
   local region_symbol
@@ -1819,8 +1838,30 @@ function type_check.expr_preimage(cx, node)
   end
 
   local field_type = std.get_field_path(region_type:fspace(), region.fields[1])
-  if not (std.is_bounded_type(field_type) and field_type:is_ptr() or std.is_index_type(field_type)) then
-    report.error(node, "type mismatch in argument 3: expected field of ptr type but got " .. tostring(field_type))
+  if not ((std.is_bounded_type(field_type) and std.is_index_type(field_type.index_type)) or std.is_index_type(field_type)) then
+    report.error(node, "type mismatch in argument 3: expected field of index type but got " .. tostring(field_type))
+  else
+    -- TODO: indexspaces should be parametrized by index types.
+    --       currently they only support 64-bit points, which is why we do this check here.
+    local function is_base_type_64bit(ty)
+      if std.type_eq(ty, opaque) or std.type_eq(ty, int64) then
+        return true
+      elseif ty:isstruct() then
+        for _, entry in pairs(ty:getentries()) do
+          local entry_type = entry[2] or entry.type
+          if not is_base_type_64bit(entry_type) then return false end
+        end
+        return true
+      else return false end
+    end
+
+    local index_type = field_type
+    if std.is_bounded_type(index_type) then
+      index_type = index_type.index_type
+    end
+    if not is_base_type_64bit(index_type.base_type) then
+      report.error(node, "type mismatch in argument 3: expected field of 64-bit index type (for now) but got " .. tostring(field_type))
+    end
   end
 
   local region_symbol
@@ -1999,7 +2040,7 @@ function type_check.expr_list_duplicate_partition(cx, node)
   std.add_privilege(cx, std.writes, expr_type, data.newtuple())
   -- Freshly created regions are, by definition, disjoint from all
   -- other regions.
-  for other_region, _ in pairs(cx.region_universe) do
+  for other_region, _ in cx.region_universe:items() do
     assert(not std.type_eq(expr_type, other_region))
     -- But still, don't bother litering the constraint space with
     -- trivial constraints.
@@ -3341,10 +3382,13 @@ function type_check.stat_var(cx, node)
     return insert_implicit_cast(value, value_type, sym:gettype())
   end)
 
+  local value = false
+  if #values > 0 then value = values[1] end
+
   return ast.typed.stat.Var {
-    symbols = node.symbols,
-    types = types,
-    values = values,
+    symbol = node.symbols[1],
+    type = types[1],
+    value = value,
     annotations = node.annotations,
     span = node.span,
   }

@@ -1,4 +1,4 @@
-/* Copyright 2017 Stanford University, NVIDIA Corporation
+/* Copyright 2018 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,7 +18,7 @@
 #ifndef REALM_TIMERS_H
 #define REALM_TIMERS_H
 
-#include "activemsg.h"
+#include "realm/activemsg.h"
 
 #include <stdio.h>
 #include <map>
@@ -148,7 +148,7 @@ namespace Realm {
 				      RequestArgs,
 				      handle_request> Message;
 
-    static void send_request(gasnet_node_t target);
+    static void send_request(NodeID target);
   };
 
   struct TimerDataRequestMessage {
@@ -163,7 +163,7 @@ namespace Realm {
 				      RequestArgs,
 				      handle_request> Message;
 
-    static void send_request(gasnet_node_t target, void *rollup_ptr);
+    static void send_request(NodeID target, void *rollup_ptr);
   };
   
   struct TimerDataResponseMessage {
@@ -178,13 +178,13 @@ namespace Realm {
 			 	       RequestArgs,
 				       handle_request> Message;
 
-    static void send_request(gasnet_node_t target, void *rollup_ptr,
+    static void send_request(NodeID target, void *rollup_ptr,
 			     const void *data, size_t datalen, int payload_mode);
   };
   
 }; // namespace Realm
 
-#include "timers.inl"
+#include "realm/timers.inl"
 
 #endif // ifndef REALM_TIMERS_H
 

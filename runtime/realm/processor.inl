@@ -1,4 +1,4 @@
-/* Copyright 2017 Stanford University, NVIDIA Corporation
+/* Copyright 2018 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,10 +16,11 @@
 // processors for Realm
 
 // nop, but helps IDEs
-#include "processor.h"
+#include "realm/processor.h"
 
-#include "serialize.h"
+#include "realm/serialize.h"
 TYPE_IS_SERIALIZABLE(Realm::Processor);
+TYPE_IS_SERIALIZABLE(Realm::Processor::Kind);
 
 namespace Realm {
 
@@ -27,7 +28,6 @@ namespace Realm {
   //
   // class Processor
 
-#ifndef SHARED_LOWLEVEL
   // use compiler-provided TLS for quickly finding our thread - stick this in another
   //  namespace to make it obvious
   namespace ThreadLocal {
@@ -38,6 +38,6 @@ namespace Realm {
   { 
     return ThreadLocal::current_processor;
   }
-#endif
+
 
 }; // namespace Realm  

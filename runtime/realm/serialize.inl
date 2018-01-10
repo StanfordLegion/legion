@@ -1,4 +1,4 @@
-/* Copyright 2017 Stanford University, NVIDIA Corporation
+/* Copyright 2018 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,7 +16,7 @@
 // INCLDUED FROM serialize.h - DO NOT INCLUDE THIS DIRECTLY
 
 // this is a nop, but it's for the benefit of IDEs trying to parse this file
-#include "serialize.h"
+#include "realm/serialize.h"
 
 #include <string.h>
 #include <stdlib.h>
@@ -68,11 +68,13 @@ namespace Realm {
     //
 
     inline FixedBufferSerializer::FixedBufferSerializer(void *buffer, size_t size)
-      : pos((char *)buffer), limit(((char *)buffer) + size)
+      : pos(static_cast<char *>(buffer)),
+	limit(static_cast<char *>(buffer) + size)
     {}
 
     inline FixedBufferSerializer::FixedBufferSerializer(ByteArray& array)
-      : pos((char *)(array.base())), limit(((char *)(array.base())) + array.size())
+      : pos(static_cast<char *>(array.base())),
+	limit(static_cast<char *>(array.base()) + array.size())
     {}
 
     inline FixedBufferSerializer::~FixedBufferSerializer(void)
@@ -108,7 +110,7 @@ namespace Realm {
       // only copy if it fits in the buffer
       bool ok_to_write = (pos2 <= limit);
       if(ok_to_write)
-	*(T *)pos = data;
+	memcpy(pos, &data, sizeof(T));
       pos = pos2;
       return ok_to_write;
     }
@@ -136,7 +138,7 @@ namespace Realm {
       // always allocate at least a little space
       if(initial_size < 16)
 	initial_size = 16;
-      base = (char *)malloc(initial_size);
+      base = static_cast<char *>(malloc(initial_size));
       assert(base != 0);
       pos = base;
       limit = base + initial_size;
@@ -168,7 +170,7 @@ namespace Realm {
 
       // do we need to realloc to save space?
       if((max_wasted_bytes >= 0) &&
-	 ((size_t)(limit - pos) > (size_t)max_wasted_bytes)) {
+	 (size_t(limit - pos) > size_t(max_wasted_bytes))) {
 	void *shrunk = realloc(base, pos - base);
 	assert(shrunk != 0);
 	base = 0;
@@ -196,7 +198,7 @@ namespace Realm {
 	size_t needed = pos2 - base;
 	size_t size = limit - base;
 	do { size <<= 1; } while(needed > size);
-	char *newbase = (char *)realloc(base, size);
+	char *newbase = static_cast<char *>(realloc(base, size));
 	assert(newbase != 0);
 	base = newbase;
 	pos = newbase + used;
@@ -215,7 +217,7 @@ namespace Realm {
 	size_t used = pos - base;
 	size_t size = limit - base;
 	do { size <<= 1; } while((used + datalen) > size);
-	char *newbase = (char *)realloc(base, size);
+	char *newbase = static_cast<char *>(realloc(base, size));
 	assert(newbase != 0);
 	base = newbase;
 	pos = newbase + used;
@@ -237,7 +239,7 @@ namespace Realm {
 	size_t used = pos - base;
 	size_t size = limit - base;
 	do { size <<= 1; } while((used + sizeof(T)) > size);
-	char *newbase = (char *)realloc(base, size);
+	char *newbase = static_cast<char *>(realloc(base, size));
 	assert(newbase != 0);
 	base = newbase;
 	pos = newbase + used;
@@ -245,7 +247,7 @@ namespace Realm {
 	pos2 = pos + sizeof(T);
       }
       // copy always works now
-      *(T *)pos = data;
+      memcpy(pos, &data, sizeof(T));
       pos = pos2;
       return true;
     }
@@ -318,11 +320,13 @@ namespace Realm {
     //
 
     inline FixedBufferDeserializer::FixedBufferDeserializer(const void *buffer, size_t size)
-      : pos((const char *)buffer), limit(((const char *)buffer) + size)
+      : pos(static_cast<const char *>(buffer)),
+	limit(static_cast<const char *>(buffer) + size)
     {}
 
     inline FixedBufferDeserializer::FixedBufferDeserializer(const ByteArrayRef& array)
-      : pos((const char *)(array.base())), limit(((const char *)(array.base())) + array.size())
+      : pos(static_cast<const char *>(array.base())),
+	limit(static_cast<const char *>(array.base()) + array.size())
     {}
 
     inline FixedBufferDeserializer::~FixedBufferDeserializer(void)
@@ -369,7 +373,7 @@ namespace Realm {
       // only copy if we have enough data
       bool ok_to_read = (pos2 <= limit);
       if(ok_to_read)
-	data = *(const T *)pos;
+	memcpy(&data, pos, sizeof(T));
       pos = pos2;
       return ok_to_read;
     }
@@ -383,7 +387,7 @@ namespace Realm {
     template <typename T>
     bool FixedBufferDeserializer::operator&(const T& data)
     {
-      return SerializationHelper<T, is_copy_serializable::test<T>::value>::deserialize_scalar(*this, *(T*)&data);
+      return SerializationHelper<T, is_copy_serializable::test<T>::value>::deserialize_scalar(*this, const_cast<T&>(data));
     }
 
 
@@ -609,7 +613,7 @@ namespace Realm {
       if(!(s >> len)) return false;
       const void *p = s.peek_bytes(len);
       if(!p) return false;
-      str.assign((const char *)p, len);
+      str.assign(static_cast<const char *>(p), len);
       return s.extract_bytes(0, len);
     }      
 

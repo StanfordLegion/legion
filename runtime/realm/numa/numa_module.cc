@@ -1,4 +1,4 @@
-/* Copyright 2017 Stanford University, NVIDIA Corporation
+/* Copyright 2018 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13,15 +13,15 @@
  * limitations under the License.
  */
 
-#include "numa_module.h"
+#include "realm/numa/numa_module.h"
 
-#include "numasysif.h"
-#include "logging.h"
-#include "cmdline.h"
-#include "proc_impl.h"
-#include "threads.h"
-#include "runtime_impl.h"
-#include "utils.h"
+#include "realm/numa/numasysif.h"
+#include "realm/logging.h"
+#include "realm/cmdline.h"
+#include "realm/proc_impl.h"
+#include "realm/threads.h"
+#include "realm/runtime_impl.h"
+#include "realm/utils.h"
 
 namespace Realm {
 
@@ -121,7 +121,9 @@ namespace Realm {
       }
 
       // if neither NUMA memory nor cpus was requested, there's no point
-      if((m->cfg_numa_mem_size_in_mb == 0) && (m->cfg_numa_nocpu_mem_size_in_mb == 0) && (m->cfg_num_numa_cpus == 0)) {
+      if((m->cfg_numa_mem_size_in_mb == 0) &&
+	 (m->cfg_numa_nocpu_mem_size_in_mb <= 0) &&
+	 (m->cfg_num_numa_cpus == 0)) {
 	log_numa.debug() << "no NUMA memory or cpus requested";
 	delete m;
 	return 0;
@@ -255,7 +257,7 @@ namespace Realm {
 	  // create affinities between this processor and system/reg memories
 	  // if the memory is one we created, use the kernel-reported distance
 	  // to adjust the answer
-	  std::vector<MemoryImpl *>& local_mems = runtime->nodes[gasnet_mynode()].memories;
+	  std::vector<MemoryImpl *>& local_mems = runtime->nodes[my_node_id].memories;
 	  for(std::vector<MemoryImpl *>::iterator it2 = local_mems.begin();
 	      it2 != local_mems.end();
 	      ++it2) {
@@ -286,9 +288,6 @@ namespace Realm {
 		pma.bandwidth = 80;   // "large"
 		pma.latency = 10;     // "small"
 	      }
-	      // FIXME: once the stuff in runtime_impl.cc is removed, remove
-	      //  this 'continue' so that we create affinities here
-	      continue;
 	    } else {
 	      int d = numasysif_get_distance(cpu_node, mem_node);
 	      if(d >= 0) {

@@ -1,4 +1,4 @@
-/* Copyright 2017 Stanford University, NVIDIA Corporation
+/* Copyright 2018 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,18 +18,19 @@
 #ifndef REALM_EVENT_H
 #define REALM_EVENT_H
 
-#include "lowlevel_config.h"
+#include "realm/realm_c.h"
 
-#include "redop.h"
-
+#include <vector>
 #include <set>
 #include <iostream>
 
 namespace Realm {
 
+  typedef ::realm_reduction_op_id_t ReductionOpID;
+
     class Event {
     public:
-      typedef ::legion_lowlevel_id_t id_t;
+      typedef ::realm_id_t id_t;
 
       id_t id;
       bool operator<(const Event& rhs) const;
@@ -58,9 +59,14 @@ namespace Realm {
       // attempts to cancel the operation associated with this event
       // "reason_data" will be provided to any profilers of the operation
       void cancel_operation(const void *reason_data, size_t reason_size) const;
+
+      // attempts to change the priority of the operation associated with
+      //  this event
+      void set_operation_priority(int new_priority) const;
  
       // creates an event that won't trigger until all input events have
       static Event merge_events(const std::set<Event>& wait_for);
+      static Event merge_events(const std::vector<Event>& wait_for);
       static Event merge_events(Event ev1, Event ev2,
 				Event ev3 = NO_EVENT, Event ev4 = NO_EVENT,
 				Event ev5 = NO_EVENT, Event ev6 = NO_EVENT);
@@ -68,6 +74,7 @@ namespace Realm {
       // normal merged events propagate poison - this version ignores poison on
       //  inputs - use carefully!
       static Event merge_events_ignorefaults(const std::set<Event>& wait_for);
+      static Event merge_events_ignorefaults(const std::vector<Event>& wait_for);
       static Event ignorefaults(Event wait_for);
 
       // the following calls are used to give Realm bounds on when the UserEvent
@@ -100,7 +107,7 @@ namespace Realm {
     //  occurs
     class Barrier : public Event {
     public:
-      typedef ::legion_lowlevel_barrier_timestamp_t timestamp_t; // used to avoid race conditions with arrival adjustments
+      typedef ::realm_barrier_timestamp_t timestamp_t; // used to avoid race conditions with arrival adjustments
 
       timestamp_t timestamp;
 
@@ -123,7 +130,7 @@ namespace Realm {
 
 }; // namespace Realm
 
-#include "event.inl"
+#include "realm/event.inl"
 
 #endif // ifndef REALM_EVENT_H
 

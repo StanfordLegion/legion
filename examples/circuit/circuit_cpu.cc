@@ -1,4 +1,4 @@
-/* Copyright 2017 Stanford University
+/* Copyright 2018 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -121,20 +121,19 @@ bool CalcNewCurrentsTask::launch_check_fields(Context ctx, Runtime *runtime)
   return success;
 }
 
-template<typename AT>
-static inline float get_node_voltage(const RegionAccessor<AT,float> &priv,
-                                     const RegionAccessor<AT,float> &shr,
-                                     const RegionAccessor<AT,float> &ghost,
-                                     PointerLocation loc, ptr_t ptr)
+static inline float get_node_voltage(const AccessorROfloat &priv,
+                                     const AccessorROfloat &shr,
+                                     const AccessorROfloat &ghost,
+                                     PointerLocation loc, Point<1> ptr)
 {
   switch (loc)
   {
     case PRIVATE_PTR:
-      return priv.read(ptr);
+      return priv[ptr];
     case SHARED_PTR:
-      return shr.read(ptr);
+      return shr[ptr];
     case GHOST_PTR:
-      return ghost.read(ptr);
+      return ghost[ptr];
     default:
       assert(false);
   }
@@ -142,29 +141,28 @@ static inline float get_node_voltage(const RegionAccessor<AT,float> &priv,
 }
 
 #if defined(__AVX512F__)
-template<typename AT_VAL, typename AT_PTR>
-static inline __m512 get_vec_node_voltage(ptr_t current_wire,
-                                          const RegionAccessor<AT_VAL,float> &priv,
-                                          const RegionAccessor<AT_VAL,float> &shr,
-                                          const RegionAccessor<AT_VAL,float> &ghost,
-                                          const RegionAccessor<AT_PTR,ptr_t> &ptrs,
-                                          const RegionAccessor<AT_VAL,PointerLocation> &locs)
+static inline __m512 get_vec_node_voltage(Point<1> current_wire,
+                                          const AccessorROfloat &priv,
+                                          const AccessorROfloat &shr,
+                                          const AccessorROfloat &ghost,
+                                          const AccessorROpoint &ptrs,
+                                          const AccessorROloc &locs)
 {
   float voltages[16];
   for (int i = 0; i < 16; i++)
   {
-    ptr_t node_ptr = ptrs.read(current_wire+i);
-    PointerLocation loc = locs.read(current_wire+i);
+    const Point<1> node_ptr = ptrs[current_wire+i];
+    PointerLocation loc = locs[current_wire+i];
     switch (loc)
     {
       case PRIVATE_PTR:
-        voltages[i] = priv.read(node_ptr);
+        voltages[i] = priv[node_ptr];
         break;
       case SHARED_PTR:
-        voltages[i] = shr.read(node_ptr);
+        voltages[i] = shr[node_ptr];
         break;
       case GHOST_PTR:
-        voltages[i] = ghost.read(node_ptr);
+        voltages[i] = ghost[node_ptr];
         break;
       default:
         assert(false);
@@ -177,29 +175,28 @@ static inline __m512 get_vec_node_voltage(ptr_t current_wire,
 }
 
 #elif defined(__AVX__)
-template<typename AT_VAL, typename AT_PTR>
-static inline __m256 get_vec_node_voltage(ptr_t current_wire,
-                                          const RegionAccessor<AT_VAL,float> &priv,
-                                          const RegionAccessor<AT_VAL,float> &shr,
-                                          const RegionAccessor<AT_VAL,float> &ghost,
-                                          const RegionAccessor<AT_PTR,ptr_t> &ptrs,
-                                          const RegionAccessor<AT_VAL,PointerLocation> &locs)
+static inline __m256 get_vec_node_voltage(Point<1> current_wire,
+                                          const AccessorROfloat &priv,
+                                          const AccessorROfloat &shr,
+                                          const AccessorROfloat &ghost,
+                                          const AccessorROpoint &ptrs,
+                                          const AccessorROloc &locs)
 {
   float voltages[8];
   for (int i = 0; i < 8; i++)
   {
-    ptr_t node_ptr = ptrs.read(current_wire+i);
-    PointerLocation loc = locs.read(current_wire+i);
+    const Point<1> node_ptr = ptrs[current_wire+i];
+    PointerLocation loc = locs[current_wire+i];
     switch (loc)
     {
       case PRIVATE_PTR:
-        voltages[i] = priv.read(node_ptr);
+        voltages[i] = priv[node_ptr];
         break;
       case SHARED_PTR:
-        voltages[i] = shr.read(node_ptr);
+        voltages[i] = shr[node_ptr];
         break;
       case GHOST_PTR:
-        voltages[i] = ghost.read(node_ptr);
+        voltages[i] = ghost[node_ptr];
         break;
       default:
         assert(false);
@@ -210,29 +207,28 @@ static inline __m256 get_vec_node_voltage(ptr_t current_wire,
 }
 
 #elif defined(__SSE__)
-template<typename AT_VAL, typename AT_PTR>
-static inline __m128 get_vec_node_voltage(ptr_t current_wire,
-                                          const RegionAccessor<AT_VAL,float> &priv,
-                                          const RegionAccessor<AT_VAL,float> &shr,
-                                          const RegionAccessor<AT_VAL,float> &ghost,
-                                          const RegionAccessor<AT_PTR,ptr_t> &ptrs,
-                                          const RegionAccessor<AT_VAL,PointerLocation> &locs)
+static inline __m128 get_vec_node_voltage(Point<1> current_wire,
+                                          const AccessorROfloat &priv,
+                                          const AccessorROfloat &shr,
+                                          const AccessorROfloat &ghost,
+                                          const AccessorROpoint &ptrs,
+                                          const AccessorROloc &locs)
 {
   float voltages[4];
   for (int i = 0; i < 4; i++)
   {
-    ptr_t node_ptr = ptrs.read(current_wire+i);
-    PointerLocation loc = locs.read(current_wire+i);
+    const Point<1> node_ptr = ptrs[current_wire+i];
+    PointerLocation loc = locs[current_wire+i];
     switch (loc)
     {
       case PRIVATE_PTR:
-        voltages[i] = priv.read(node_ptr);
+        voltages[i] = priv[node_ptr];
         break;
       case SHARED_PTR:
-        voltages[i] = shr.read(node_ptr);
+        voltages[i] = shr[node_ptr];
         break;
       case GHOST_PTR:
-        voltages[i] = ghost.read(node_ptr);
+        voltages[i] = ghost[node_ptr];
         break;
       default:
         assert(false);
@@ -243,71 +239,32 @@ static inline __m128 get_vec_node_voltage(ptr_t current_wire,
 #endif
 
 /*static*/
-bool CalcNewCurrentsTask::dense_calc_new_currents(const CircuitPiece &piece,
-                              RegionAccessor<AccessorType::Generic, ptr_t> fa_in_ptr,
-                              RegionAccessor<AccessorType::Generic, ptr_t> fa_out_ptr,
-                              RegionAccessor<AccessorType::Generic, PointerLocation> fa_in_loc,
-                              RegionAccessor<AccessorType::Generic, PointerLocation> fa_out_loc,
-                              RegionAccessor<AccessorType::Generic, float> fa_inductance,
-                              RegionAccessor<AccessorType::Generic, float> fa_resistance,
-                              RegionAccessor<AccessorType::Generic, float> fa_wire_cap,
-                              RegionAccessor<AccessorType::Generic, float> fa_pvt_voltage,
-                              RegionAccessor<AccessorType::Generic, float> fa_shr_voltage,
-                              RegionAccessor<AccessorType::Generic, float> fa_ghost_voltage,
-                              RegionAccessor<AccessorType::Generic, float> *fa_current,
-                              RegionAccessor<AccessorType::Generic, float> *fa_voltage)
+void CalcNewCurrentsTask::cpu_base_impl(const CircuitPiece &piece,
+                                        const std::vector<PhysicalRegion> &regions,
+                                        Context ctx, Runtime* rt)
 {
-  // See if we can convert all of our accessors to Stuct-of-Array (SOA) accessors
-  if (!fa_in_ptr.can_convert<AccessorType::SOA<0> >()) return false;
-  if (!fa_out_ptr.can_convert<AccessorType::SOA<0> >()) return false;
-  if (!fa_in_loc.can_convert<AccessorType::SOA<0> >()) return false;
-  if (!fa_out_loc.can_convert<AccessorType::SOA<0> >()) return false;
-  if (!fa_inductance.can_convert<AccessorType::SOA<0> >()) return false;
-  if (!fa_resistance.can_convert<AccessorType::SOA<0> >()) return false;
-  if (!fa_wire_cap.can_convert<AccessorType::SOA<0> >()) return false;
-  if (!fa_pvt_voltage.can_convert<AccessorType::SOA<0> >()) return false;
-  if (!fa_shr_voltage.can_convert<AccessorType::SOA<0> >()) return false;
-  if (!fa_ghost_voltage.can_convert<AccessorType::SOA<0> >()) return false;
+#ifndef DISABLE_MATH
+  AccessorRWfloat fa_current[WIRE_SEGMENTS];
   for (int i = 0; i < WIRE_SEGMENTS; i++)
-    if (!fa_current[i].can_convert<AccessorType::SOA<0> >()) return false;
+    fa_current[i] = AccessorRWfloat(regions[0], FID_CURRENT+i);
+  AccessorRWfloat fa_voltage[WIRE_SEGMENTS-1];
   for (int i = 0; i < (WIRE_SEGMENTS-1); i++)
-    if (!fa_voltage[i].can_convert<AccessorType::SOA<0> >()) return false;
+    fa_voltage[i] = AccessorRWfloat(regions[0], FID_WIRE_VOLTAGE+i);
 
-  RegionAccessor<AccessorType::SOA<sizeof(ptr_t)>,ptr_t> soa_in_ptr = 
-    fa_in_ptr.convert<AccessorType::SOA<sizeof(ptr_t)> >();
-  RegionAccessor<AccessorType::SOA<sizeof(ptr_t)>,ptr_t> soa_out_ptr = 
-    fa_out_ptr.convert<AccessorType::SOA<sizeof(ptr_t)> >();
-  RegionAccessor<AccessorType::SOA<sizeof(PointerLocation)>,PointerLocation> soa_in_loc = 
-    fa_in_loc.convert<AccessorType::SOA<sizeof(PointerLocation)> >();
-  RegionAccessor<AccessorType::SOA<sizeof(PointerLocation)>,PointerLocation> soa_out_loc = 
-    fa_out_loc.convert<AccessorType::SOA<sizeof(PointerLocation)> >();
-  RegionAccessor<AccessorType::SOA<sizeof(float)>,float> soa_inductance = 
-    fa_inductance.convert<AccessorType::SOA<sizeof(float)> >();
-  RegionAccessor<AccessorType::SOA<sizeof(float)>,float> soa_resistance = 
-    fa_resistance.convert<AccessorType::SOA<sizeof(float)> >();
-  RegionAccessor<AccessorType::SOA<sizeof(float)>,float> soa_wire_cap = 
-    fa_wire_cap.convert<AccessorType::SOA<sizeof(float)> >();
-  RegionAccessor<AccessorType::SOA<sizeof(float)>,float> soa_pvt_voltage = 
-    fa_pvt_voltage.convert<AccessorType::SOA<sizeof(float)> >();
-  RegionAccessor<AccessorType::SOA<sizeof(float)>,float> soa_shr_voltage = 
-    fa_shr_voltage.convert<AccessorType::SOA<sizeof(float)> >();
-  RegionAccessor<AccessorType::SOA<sizeof(float)>,float> soa_ghost_voltage = 
-    fa_ghost_voltage.convert<AccessorType::SOA<sizeof(float)> >();
-  // Use malloc here to allocate memory without invoking default constructors
-  // which would prematurely test the templated field condition
-  RegionAccessor<AccessorType::SOA<sizeof(float)>,float> *soa_current = 
-    (RegionAccessor<AccessorType::SOA<sizeof(float)>,float>*)malloc(WIRE_SEGMENTS*
-        sizeof(RegionAccessor<AccessorType::SOA<sizeof(float)>,float>));
-  RegionAccessor<AccessorType::SOA<sizeof(float)>,float> *soa_voltage = 
-    (RegionAccessor<AccessorType::SOA<sizeof(float)>,float>*)malloc((WIRE_SEGMENTS-1)*
-        sizeof(RegionAccessor<AccessorType::SOA<sizeof(float)>,float>));
-  for (int i = 0; i < WIRE_SEGMENTS; i++)
-    soa_current[i] = fa_current[i].convert<AccessorType::SOA<sizeof(float)> >();
-  for (int i = 0; i < (WIRE_SEGMENTS-1); i++)
-    soa_voltage[i] = fa_voltage[i].convert<AccessorType::SOA<sizeof(float)> >();
+  const AccessorROpoint fa_in_ptr(regions[1], FID_IN_PTR);
+  const AccessorROpoint fa_out_ptr(regions[1], FID_OUT_PTR);
+  const AccessorROloc fa_in_loc(regions[1], FID_IN_LOC);
+  const AccessorROloc fa_out_loc(regions[1], FID_OUT_LOC);
+  const AccessorROfloat fa_inductance(regions[1], FID_INDUCTANCE);
+  const AccessorROfloat fa_resistance(regions[1], FID_RESISTANCE);
+  const AccessorROfloat fa_wire_cap(regions[1], FID_WIRE_CAP);
 
-  const int steps = piece.steps;
+  const AccessorROfloat fa_pvt_voltage(regions[2], FID_NODE_VOLTAGE);
+  const AccessorROfloat fa_shr_voltage(regions[3], FID_NODE_VOLTAGE);
+  const AccessorROfloat fa_ghost_voltage(regions[4], FID_NODE_VOLTAGE);
+
   unsigned index = 0;
+  const int steps = piece.steps;
 #if defined(__AVX512F__)
   // using AVX512F intrinsics, we can work on wires 16-at-a-time
   {
@@ -320,28 +277,28 @@ bool CalcNewCurrentsTask::dense_calc_new_currents(const CircuitPiece &piece,
     while ((index+15) < piece.num_wires)
     {
       // We can do pointer math!
-      ptr_t current_wire = piece.first_wire+index;
+      const Point<1> current_wire = piece.first_wire+index;
       for (int i = 0; i < WIRE_SEGMENTS; i++)
       {
-        temp_i[i] = _mm512_load_ps(soa_current[i].ptr(current_wire));
+        temp_i[i] = _mm512_load_ps(fa_current[i].ptr(current_wire));
         old_i[i] = temp_i[i];
       }
       for (int i = 0; i < (WIRE_SEGMENTS-1); i++)
       {
-        temp_v[i+1] = _mm512_load_ps(soa_voltage[i].ptr(current_wire));
+        temp_v[i+1] = _mm512_load_ps(fa_voltage[i].ptr(current_wire));
         old_v[i] = temp_v[i+1];
       }
 
       // Pin the outer voltages to the node voltages
-      temp_v[0] = get_vec_node_voltage(current_wire, soa_pvt_voltage,
-                                       soa_shr_voltage, soa_ghost_voltage,
-                                       soa_in_ptr, soa_in_loc);
-      temp_v[WIRE_SEGMENTS] = get_vec_node_voltage(current_wire, soa_pvt_voltage,
-                                       soa_shr_voltage, soa_ghost_voltage,
-                                       soa_out_ptr, soa_out_loc);
-      __m512 inductance = _mm512_load_ps(soa_inductance.ptr(current_wire));
-      __m512 recip_resistance = _mm512_rcp14_ps(_mm512_load_ps(soa_resistance.ptr(current_wire)));
-      __m512 recip_capacitance = _mm512_rcp14_ps(_mm512_load_ps(soa_wire_cap.ptr(current_wire)));
+      temp_v[0] = get_vec_node_voltage(current_wire, fa_pvt_voltage,
+                                       fa_shr_voltage, fa_ghost_voltage,
+                                       fa_in_ptr, fa_in_loc);
+      temp_v[WIRE_SEGMENTS] = get_vec_node_voltage(current_wire, fa_pvt_voltage,
+                                       fa_shr_voltage, fa_ghost_voltage,
+                                       fa_out_ptr, fa_out_loc);
+      __m512 inductance = _mm512_load_ps(fa_inductance.ptr(current_wire));
+      __m512 recip_resistance = _mm512_rcp14_ps(_mm512_load_ps(fa_resistance.ptr(current_wire)));
+      __m512 recip_capacitance = _mm512_rcp14_ps(_mm512_load_ps(fa_wire_cap.ptr(current_wire)));
       for (int j = 0; j < steps; j++)
       {
         for (int i = 0; i < WIRE_SEGMENTS; i++)
@@ -359,9 +316,9 @@ bool CalcNewCurrentsTask::dense_calc_new_currents(const CircuitPiece &piece,
       }
       // Write out the results
       for (int i = 0; i < WIRE_SEGMENTS; i++)
-        _mm512_stream_ps(soa_current[i].ptr(current_wire),temp_i[i]);
+        _mm512_stream_ps(fa_current[i].ptr(current_wire),temp_i[i]);
       for (int i = 0; i < (WIRE_SEGMENTS-1); i++)
-        _mm512_stream_ps(soa_voltage[i].ptr(current_wire),temp_v[i+1]);
+        _mm512_stream_ps(fa_voltage[i].ptr(current_wire),temp_v[i+1]);
       // Update the index
       index += 16;
     }
@@ -379,28 +336,28 @@ bool CalcNewCurrentsTask::dense_calc_new_currents(const CircuitPiece &piece,
     while ((index+7) < piece.num_wires)
     {
       // We can do pointer math!
-      ptr_t current_wire = piece.first_wire+index;
+      const Point<1> current_wire = piece.first_wire+index;
       for (int i = 0; i < WIRE_SEGMENTS; i++)
       {
-        temp_i[i] = _mm256_load_ps(soa_current[i].ptr(current_wire));
+        temp_i[i] = _mm256_load_ps(fa_current[i].ptr(current_wire));
         old_i[i] = temp_i[i];
       }
       for (int i = 0; i < (WIRE_SEGMENTS-1); i++)
       {
-        temp_v[i+1] = _mm256_load_ps(soa_voltage[i].ptr(current_wire));
+        temp_v[i+1] = _mm256_load_ps(fa_voltage[i].ptr(current_wire));
         old_v[i] = temp_v[i+1];
       }
 
       // Pin the outer voltages to the node voltages
-      temp_v[0] = get_vec_node_voltage(current_wire, soa_pvt_voltage,
-                                       soa_shr_voltage, soa_ghost_voltage,
-                                       soa_in_ptr, soa_in_loc);
-      temp_v[WIRE_SEGMENTS] = get_vec_node_voltage(current_wire, soa_pvt_voltage,
-                                       soa_shr_voltage, soa_ghost_voltage,
-                                       soa_out_ptr, soa_out_loc);
-      __m256 inductance = _mm256_load_ps(soa_inductance.ptr(current_wire));
-      __m256 recip_resistance = _mm256_rcp_ps(_mm256_load_ps(soa_resistance.ptr(current_wire)));
-      __m256 recip_capacitance = _mm256_rcp_ps(_mm256_load_ps(soa_wire_cap.ptr(current_wire)));
+      temp_v[0] = get_vec_node_voltage(current_wire, fa_pvt_voltage,
+                                       fa_shr_voltage, fa_ghost_voltage,
+                                       fa_in_ptr, fa_in_loc);
+      temp_v[WIRE_SEGMENTS] = get_vec_node_voltage(current_wire, fa_pvt_voltage,
+                                       fa_shr_voltage, fa_ghost_voltage,
+                                       fa_out_ptr, fa_out_loc);
+      __m256 inductance = _mm256_load_ps(fa_inductance.ptr(current_wire));
+      __m256 recip_resistance = _mm256_rcp_ps(_mm256_load_ps(fa_resistance.ptr(current_wire)));
+      __m256 recip_capacitance = _mm256_rcp_ps(_mm256_load_ps(fa_wire_cap.ptr(current_wire)));
       for (int j = 0; j < steps; j++)
       {
         for (int i = 0; i < WIRE_SEGMENTS; i++)
@@ -418,9 +375,9 @@ bool CalcNewCurrentsTask::dense_calc_new_currents(const CircuitPiece &piece,
       }
       // Write out the results
       for (int i = 0; i < WIRE_SEGMENTS; i++)
-        _mm256_stream_ps(soa_current[i].ptr(current_wire),temp_i[i]);
+        _mm256_stream_ps(fa_current[i].ptr(current_wire),temp_i[i]);
       for (int i = 0; i < (WIRE_SEGMENTS-1); i++)
-        _mm256_stream_ps(soa_voltage[i].ptr(current_wire),temp_v[i+1]);
+        _mm256_stream_ps(fa_voltage[i].ptr(current_wire),temp_v[i+1]);
       // Update the index
       index += 8;
     }
@@ -438,28 +395,28 @@ bool CalcNewCurrentsTask::dense_calc_new_currents(const CircuitPiece &piece,
     while ((index+3) < piece.num_wires)
     {
       // We can do pointer math!
-      ptr_t current_wire = piece.first_wire+index;
+      const Point<1> current_wire = piece.first_wire+index;
       for (int i = 0; i < WIRE_SEGMENTS; i++)
       {
-        temp_i[i] = _mm_load_ps(soa_current[i].ptr(current_wire));
+        temp_i[i] = _mm_load_ps(fa_current[i].ptr(current_wire));
         old_i[i] = temp_i[i];
       }
       for (int i = 0; i < (WIRE_SEGMENTS-1); i++)
       {
-        temp_v[i+1] = _mm_load_ps(soa_voltage[i].ptr(current_wire));
+        temp_v[i+1] = _mm_load_ps(fa_voltage[i].ptr(current_wire));
         old_v[i] = temp_v[i+1];
       }
 
       // Pin the outer voltages to the node voltages
-      temp_v[0] = get_vec_node_voltage(current_wire, soa_pvt_voltage,
-                                       soa_shr_voltage, soa_ghost_voltage,
-                                       soa_in_ptr, soa_in_loc);
-      temp_v[WIRE_SEGMENTS] = get_vec_node_voltage(current_wire, soa_pvt_voltage,
-                                       soa_shr_voltage, soa_ghost_voltage,
-                                       soa_out_ptr, soa_out_loc);
-      __m128 inductance = _mm_load_ps(soa_inductance.ptr(current_wire));
-      __m128 recip_resistance = _mm_rcp_ps(_mm_load_ps(soa_resistance.ptr(current_wire)));
-      __m128 recip_capacitance = _mm_rcp_ps(_mm_load_ps(soa_wire_cap.ptr(current_wire)));
+      temp_v[0] = get_vec_node_voltage(current_wire, fa_pvt_voltage,
+                                       fa_shr_voltage, fa_ghost_voltage,
+                                       fa_in_ptr, fa_in_loc);
+      temp_v[WIRE_SEGMENTS] = get_vec_node_voltage(current_wire, fa_pvt_voltage,
+                                       fa_shr_voltage, fa_ghost_voltage,
+                                       fa_out_ptr, fa_out_loc);
+      __m128 inductance = _mm_load_ps(fa_inductance.ptr(current_wire));
+      __m128 recip_resistance = _mm_rcp_ps(_mm_load_ps(fa_resistance.ptr(current_wire)));
+      __m128 recip_capacitance = _mm_rcp_ps(_mm_load_ps(fa_wire_cap.ptr(current_wire)));
       for (int j = 0; j < steps; j++)
       {
         for (int i = 0; i < WIRE_SEGMENTS; i++)
@@ -477,158 +434,49 @@ bool CalcNewCurrentsTask::dense_calc_new_currents(const CircuitPiece &piece,
       }
       // Write out the results
       for (int i = 0; i < WIRE_SEGMENTS; i++)
-        _mm_stream_ps(soa_current[i].ptr(current_wire),temp_i[i]);
+        _mm_stream_ps(fa_current[i].ptr(current_wire),temp_i[i]);
       for (int i = 0; i < (WIRE_SEGMENTS-1); i++)
-        _mm_stream_ps(soa_voltage[i].ptr(current_wire),temp_v[i+1]);
+        _mm_stream_ps(fa_voltage[i].ptr(current_wire),temp_v[i+1]);
       // Update the index
       index += 4;
     }
   }
 #endif
-  // Handle any leftover elements (or all of them, in the non-SSE case)
-  while (index < piece.num_wires)
-  {
-    float temp_v[WIRE_SEGMENTS+1];
-    float temp_i[WIRE_SEGMENTS];
-    float old_i[WIRE_SEGMENTS];
-    float old_v[WIRE_SEGMENTS-1];
-    ptr_t wire_ptr = piece.first_wire+index;
 
-    for (int i = 0; i < WIRE_SEGMENTS; i++)
-    {
-      temp_i[i] = soa_current[i].read(wire_ptr);
-      old_i[i] = temp_i[i];
-    }
-    for (int i = 0; i < (WIRE_SEGMENTS-1); i++)
-    {
-      temp_v[i+1] = soa_voltage[i].read(wire_ptr);
-      old_v[i] = temp_v[i+1];
-    }
-
-    // Pin the outer voltages to the node voltages
-    ptr_t in_ptr = soa_in_ptr.read(wire_ptr);
-    PointerLocation in_loc = soa_in_loc.read(wire_ptr);
-    temp_v[0] = 
-      get_node_voltage(soa_pvt_voltage, soa_shr_voltage, soa_ghost_voltage, in_loc, in_ptr);
-    ptr_t out_ptr = soa_out_ptr.read(wire_ptr);
-    PointerLocation out_loc = soa_out_loc.read(wire_ptr);
-    temp_v[WIRE_SEGMENTS] = 
-      get_node_voltage(soa_pvt_voltage, soa_shr_voltage, soa_ghost_voltage, out_loc, out_ptr);
-
-    // Solve the RLC model iteratively
-    float inductance = soa_inductance.read(wire_ptr);
-    float recip_resistance = 1.f/soa_resistance.read(wire_ptr);
-    float recip_capacitance = 1.f/soa_wire_cap.read(wire_ptr);
-    float dt = piece.dt;
-    float recip_dt = 1.0/dt;
-    for (int j = 0; j < steps; j++)
-    {
-      // first, figure out the new current from the voltage differential
-      // and our inductance:
-      // dV = R*I + L*I' ==> I = (dV - L*I')/R
-      for (int i = 0; i < WIRE_SEGMENTS; i++)
-      {
-        temp_i[i] = ((temp_v[i+1] - temp_v[i]) - 
-                     (inductance * (temp_i[i] - old_i[i]) * recip_dt)) * recip_resistance; 
-      }
-      // Now update the inter-node voltages
-      for (int i = 0; i < (WIRE_SEGMENTS-1); i++)
-      {
-        temp_v[i+1] = old_v[i] + dt * (temp_i[i] - temp_i[i+1]) * recip_capacitance;
-      }
-    }
-
-    // Write out the results
-    for (int i = 0; i < WIRE_SEGMENTS; i++)
-      soa_current[i].write(wire_ptr, temp_i[i]);
-    for (int i = 0; i < (WIRE_SEGMENTS-1); i++)
-      soa_voltage[i].write(wire_ptr, temp_v[i+1]);
-    // Update the index
-    index++;
-  }
-  // Clean up
-  free(soa_current);
-  free(soa_voltage);
-  return true;
-}
-
-/*static*/
-void CalcNewCurrentsTask::cpu_base_impl(const CircuitPiece &p,
-                                        const std::vector<PhysicalRegion> &regions,
-                                        Context ctx, Runtime* rt)
-{
-#ifndef DISABLE_MATH
-  RegionAccessor<AccessorType::Generic, float> fa_current[WIRE_SEGMENTS];
-  for (int i = 0; i < WIRE_SEGMENTS; i++)
-    fa_current[i] = regions[0].get_field_accessor(FID_CURRENT+i).typeify<float>();
-  RegionAccessor<AccessorType::Generic, float> fa_voltage[WIRE_SEGMENTS-1];
-  for (int i = 0; i < (WIRE_SEGMENTS-1); i++)
-    fa_voltage[i] = regions[0].get_field_accessor(FID_WIRE_VOLTAGE+i).typeify<float>();
-  RegionAccessor<AccessorType::Generic, ptr_t> fa_in_ptr = 
-    regions[1].get_field_accessor(FID_IN_PTR).typeify<ptr_t>();
-  RegionAccessor<AccessorType::Generic, ptr_t> fa_out_ptr = 
-    regions[1].get_field_accessor(FID_OUT_PTR).typeify<ptr_t>();
-  RegionAccessor<AccessorType::Generic, PointerLocation> fa_in_loc = 
-    regions[1].get_field_accessor(FID_IN_LOC).typeify<PointerLocation>();
-  RegionAccessor<AccessorType::Generic, PointerLocation> fa_out_loc = 
-    regions[1].get_field_accessor(FID_OUT_LOC).typeify<PointerLocation>();
-  RegionAccessor<AccessorType::Generic, float> fa_inductance = 
-    regions[1].get_field_accessor(FID_INDUCTANCE).typeify<float>();
-  RegionAccessor<AccessorType::Generic, float> fa_resistance = 
-    regions[1].get_field_accessor(FID_RESISTANCE).typeify<float>();
-  RegionAccessor<AccessorType::Generic, float> fa_wire_cap = 
-    regions[1].get_field_accessor(FID_WIRE_CAP).typeify<float>();
-  RegionAccessor<AccessorType::Generic, float> fa_pvt_voltage = 
-    regions[2].get_field_accessor(FID_NODE_VOLTAGE).typeify<float>();
-  RegionAccessor<AccessorType::Generic, float> fa_shr_voltage =
-    regions[3].get_field_accessor(FID_NODE_VOLTAGE).typeify<float>();
-  RegionAccessor<AccessorType::Generic, float> fa_ghost_voltage = 
-    regions[4].get_field_accessor(FID_NODE_VOLTAGE).typeify<float>();
-
-  // See if we can do the dense version with vector instructions
-  if (dense_calc_new_currents(p, fa_in_ptr, fa_out_ptr, fa_in_loc, fa_out_loc,
-                              fa_inductance, fa_resistance, fa_wire_cap,
-                              fa_pvt_voltage, fa_shr_voltage, fa_ghost_voltage,
-                              fa_current, fa_voltage))
-    return;
-
-  IndexIterator itr(rt, ctx, p.pvt_wires);
   float temp_v[WIRE_SEGMENTS+1];
   float temp_i[WIRE_SEGMENTS];
   float old_i[WIRE_SEGMENTS];
   float old_v[WIRE_SEGMENTS-1];
-  while (itr.has_next())
+  const float dt = piece.dt;
+  const float recip_dt = 1.0f / dt;
+  for (unsigned w = index; w < piece.num_wires; w++) 
   {
-    ptr_t wire_ptr = itr.next();
-    const float dt = p.dt;
-    const float recip_dt = 1.0f / dt;
-    const int steps = p.steps;
-
+    const Point<1> wire_ptr = piece.first_wire + w;
     for (int i = 0; i < WIRE_SEGMENTS; i++)
     {
-      temp_i[i] = fa_current[i].read(wire_ptr);
+      temp_i[i] = fa_current[i][wire_ptr];
       old_i[i] = temp_i[i];
     }
     for (int i = 0; i < (WIRE_SEGMENTS-1); i++)
     {
-      temp_v[i+1] = fa_voltage[i].read(wire_ptr);
+      temp_v[i+1] = fa_voltage[i][wire_ptr];
       old_v[i] = temp_v[i+1];
     }
 
     // Pin the outer voltages to the node voltages
-    ptr_t in_ptr = fa_in_ptr.read(wire_ptr);
-    PointerLocation in_loc = fa_in_loc.read(wire_ptr);
+    Point<1> in_ptr = fa_in_ptr[wire_ptr];
+    PointerLocation in_loc = fa_in_loc[wire_ptr];
     temp_v[0] = 
       get_node_voltage(fa_pvt_voltage, fa_shr_voltage, fa_ghost_voltage, in_loc, in_ptr);
-    ptr_t out_ptr = fa_out_ptr.read(wire_ptr);
-    PointerLocation out_loc = fa_out_loc.read(wire_ptr);
+    Point<1> out_ptr = fa_out_ptr[wire_ptr];
+    PointerLocation out_loc = fa_out_loc[wire_ptr];
     temp_v[WIRE_SEGMENTS] = 
       get_node_voltage(fa_pvt_voltage, fa_shr_voltage, fa_ghost_voltage, out_loc, out_ptr);
 
     // Solve the RLC model iteratively
-    float inductance = fa_inductance.read(wire_ptr);
-    float recip_resistance = 1.0f / fa_resistance.read(wire_ptr);
-    float recip_capacitance = 1.0f / fa_wire_cap.read(wire_ptr);
+    float inductance = fa_inductance[wire_ptr];
+    float recip_resistance = 1.0f / fa_resistance[wire_ptr];
+    float recip_capacitance = 1.0f / fa_wire_cap[wire_ptr];
     for (int j = 0; j < steps; j++)
     {
       // first, figure out the new current from the voltage differential
@@ -648,9 +496,9 @@ void CalcNewCurrentsTask::cpu_base_impl(const CircuitPiece &p,
 
     // Write out the results
     for (int i = 0; i < WIRE_SEGMENTS; i++)
-      fa_current[i].write(wire_ptr, temp_i[i]);
+      fa_current[i][wire_ptr] = temp_i[i];
     for (int i = 0; i < (WIRE_SEGMENTS-1); i++)
-      fa_voltage[i].write(wire_ptr, temp_v[i+1]);
+      fa_voltage[i][wire_ptr] = temp_v[i+1];
   }
 #endif
 }
@@ -706,22 +554,22 @@ bool DistributeChargeTask::launch_check_fields(Context ctx, Runtime *runtime)
   return success;
 }
 
-template<typename REDOP, typename AT1, typename AT2>
-static inline void reduce_node(const RegionAccessor<AT1,typename REDOP::LHS> &priv,
-                               const RegionAccessor<AT2,typename REDOP::LHS> &shr,
-                               const RegionAccessor<AT2,typename REDOP::LHS> &ghost,
-                               PointerLocation loc, ptr_t ptr, typename REDOP::RHS value)
+template<typename REDOP>
+static inline void reduce_node(const AccessorRWfloat &priv,
+                               const AccessorRDfloat &shr,
+                               const AccessorRDfloat &ghost,
+                               PointerLocation loc, Point<1> ptr, typename REDOP::RHS value)
 {
   switch (loc)
   {
     case PRIVATE_PTR:
-      priv.template reduce<REDOP>(ptr, value);
+      priv.template reduce<REDOP,true/*exclusive*/>(ptr, value);
       break;
     case SHARED_PTR:
-      shr.template reduce(ptr, value);
+      shr.template reduce<REDOP,false/*exclusive*/>(ptr, value);
       break;
     case GHOST_PTR:
-      ghost.template reduce(ptr, value);
+      ghost.template reduce<REDOP,false/*exclusive*/>(ptr, value);
       break;
     default:
       assert(false);
@@ -734,52 +582,34 @@ void DistributeChargeTask::cpu_base_impl(const CircuitPiece &p,
                                          Context ctx, Runtime* rt)
 {
 #ifndef DISABLE_MATH
-  RegionAccessor<AccessorType::Generic, ptr_t> fa_in_ptr = 
-    regions[0].get_field_accessor(FID_IN_PTR).typeify<ptr_t>();
-  RegionAccessor<AccessorType::Generic, ptr_t> fa_out_ptr = 
-    regions[0].get_field_accessor(FID_OUT_PTR).typeify<ptr_t>();
-  RegionAccessor<AccessorType::Generic, PointerLocation> fa_in_loc = 
-    regions[0].get_field_accessor(FID_IN_LOC).typeify<PointerLocation>();
-  RegionAccessor<AccessorType::Generic, PointerLocation> fa_out_loc = 
-    regions[0].get_field_accessor(FID_OUT_LOC).typeify<PointerLocation>();
-  RegionAccessor<AccessorType::Generic, float> fa_in_current = 
-    regions[0].get_field_accessor(FID_CURRENT).typeify<float>();
-  RegionAccessor<AccessorType::Generic, float> fa_out_current = 
-    regions[0].get_field_accessor(FID_CURRENT+WIRE_SEGMENTS-1).typeify<float>();
-  RegionAccessor<AccessorType::Generic, float> fa_pvt_charge = 
-    regions[1].get_field_accessor(FID_CHARGE).typeify<float>();
-  RegionAccessor<AccessorType::Generic, float> fa_shr_temp = 
-    regions[2].get_field_accessor(FID_CHARGE).typeify<float>();
-  RegionAccessor<AccessorType::Generic, float> fa_ghost_temp =
-    regions[3].get_field_accessor(FID_CHARGE).typeify<float>();
-  // Check that we can convert to reduction fold instances
-  assert(fa_shr_temp.can_convert<AccessorType::ReductionFold<AccumulateCharge> >());
-  assert(fa_ghost_temp.can_convert<AccessorType::ReductionFold<AccumulateCharge> >());
-  // Perform the conversion
-  RegionAccessor<AccessorType::ReductionFold<AccumulateCharge>, float> fa_shr_charge = 
-    fa_shr_temp.convert<AccessorType::ReductionFold<AccumulateCharge> >();
-  RegionAccessor<AccessorType::ReductionFold<AccumulateCharge>, float> fa_ghost_charge = 
-    fa_ghost_temp.convert<AccessorType::ReductionFold<AccumulateCharge> >();
+  const AccessorROpoint fa_in_ptr(regions[0], FID_IN_PTR);
+  const AccessorROpoint fa_out_ptr(regions[0], FID_OUT_PTR);
+  const AccessorROloc fa_in_loc(regions[0], FID_IN_LOC);
+  const AccessorROloc fa_out_loc(regions[0], FID_OUT_LOC);
+  const AccessorROfloat fa_in_current(regions[0], FID_CURRENT);
+  const AccessorROfloat fa_out_current(regions[0], FID_CURRENT+WIRE_SEGMENTS-1);
+  const AccessorRWfloat fa_pvt_charge(regions[1], FID_CHARGE);
+  const AccessorRDfloat fa_shr_charge(regions[2], FID_CHARGE, REDUCE_ID);
+  const AccessorRDfloat fa_ghost_charge(regions[3], FID_CHARGE, REDUCE_ID);
 
-  IndexIterator itr(rt, ctx, p.pvt_wires);
-  while (itr.has_next())
+  const float dt = p.dt;
+  for (unsigned i = 0; i < p.num_wires; i++)
   {
-    ptr_t wire_ptr = itr.next();
+    const Point<1> wire_ptr(p.first_wire + i);
 #ifdef DEBUG_MATH
     printf("DC: %d = %f->(%d,%d), %f->(%d,%d)\n",
-           wire_ptr.value,
-           fa_in_current.read(wire_ptr),
-           fa_in_ptr.read(wire_ptr).value, fa_in_loc.read(wire_ptr),
-           fa_out_current.read(wire_ptr),
-           fa_out_ptr.read(wire_ptr).value, fa_out_loc.read(wire_ptr));
+           wire_ptr,
+           fa_in_current[wire_ptr],
+           fa_in_ptr[wire_ptr], fa_in_loc[wire_ptr],
+           fa_out_current[wire_ptr],
+           fa_out_ptr[wire_ptr], fa_out_loc[wire_ptr]);
 #endif
-    const float dt = p.dt;
-    float in_current = -dt * fa_in_current.read(wire_ptr);
-    float out_current = dt * fa_out_current.read(wire_ptr);
-    ptr_t in_ptr = fa_in_ptr.read(wire_ptr);
-    ptr_t out_ptr = fa_out_ptr.read(wire_ptr);
-    PointerLocation in_loc = fa_in_loc.read(wire_ptr);
-    PointerLocation out_loc = fa_out_loc.read(wire_ptr);
+    float in_current = -dt * fa_in_current[wire_ptr];
+    float out_current = dt * fa_out_current[wire_ptr];
+    Point<1> in_ptr = fa_in_ptr[wire_ptr];
+    Point<1> out_ptr = fa_out_ptr[wire_ptr];
+    PointerLocation in_loc = fa_in_loc[wire_ptr];
+    PointerLocation out_loc = fa_out_loc[wire_ptr];
 
     reduce_node<AccumulateCharge>(fa_pvt_charge, fa_shr_charge, fa_ghost_charge,
                                   in_loc, in_ptr, in_current);
@@ -848,27 +678,25 @@ bool UpdateVoltagesTask::launch_check_fields(Context ctx, Runtime *runtime)
   return success;
 }
 
-template<typename AT>
 static inline void update_voltages(LogicalRegion lr,
-                                   const RegionAccessor<AT,float> &fa_voltage,
-                                   const RegionAccessor<AT,float> &fa_charge,
-                                   const RegionAccessor<AT,float> &fa_cap,
-                                   const RegionAccessor<AT,float> &fa_leakage,
+                                   const AccessorRWfloat &fa_voltage,
+                                   const AccessorRWfloat &fa_charge,
+                                   const AccessorROfloat &fa_cap,
+                                   const AccessorROfloat &fa_leakage,
                                    Context ctx, Runtime* rt)
 {
-  IndexIterator itr(rt, ctx, lr);
-  while (itr.has_next())
+  for (PointInDomainIterator<1> itr(
+        rt->get_index_space_domain(lr.get_index_space())); itr(); itr++)
   {
-    ptr_t node_ptr = itr.next();
-    float voltage = fa_voltage.read(node_ptr);
-    float charge = fa_charge.read(node_ptr);
-    float capacitance = fa_cap.read(node_ptr);
-    float leakage = fa_leakage.read(node_ptr);
+    float voltage = fa_voltage[*itr];
+    float charge = fa_charge[*itr];
+    float capacitance = fa_cap[*itr];
+    float leakage = fa_leakage[*itr];
     voltage += charge / capacitance;
     voltage *= (1.f - leakage);
-    fa_voltage.write(node_ptr, voltage);
+    fa_voltage[*itr] = voltage;
     // Reset the charge for the next iteration
-    fa_charge.write(node_ptr, 0.f);
+    fa_charge[*itr] = 0.f;
   }
 }
 
@@ -878,25 +706,19 @@ void UpdateVoltagesTask::cpu_base_impl(const CircuitPiece &p,
                                        Context ctx, Runtime* rt)
 {
 #ifndef DISABLE_MATH
-  RegionAccessor<AccessorType::Generic, float> fa_pvt_voltage = 
-    regions[0].get_field_accessor(FID_NODE_VOLTAGE).typeify<float>();
-  RegionAccessor<AccessorType::Generic, float> fa_pvt_charge = 
-    regions[0].get_field_accessor(FID_CHARGE).typeify<float>();
-  RegionAccessor<AccessorType::Generic, float> fa_shr_voltage = 
-    regions[1].get_field_accessor(FID_NODE_VOLTAGE).typeify<float>();
-  RegionAccessor<AccessorType::Generic, float> fa_shr_charge = 
-    regions[1].get_field_accessor(FID_CHARGE).typeify<float>();
-  RegionAccessor<AccessorType::Generic, float> fa_pvt_cap = 
-    regions[2].get_field_accessor(FID_NODE_CAP).typeify<float>();
-  RegionAccessor<AccessorType::Generic, float> fa_pvt_leakage = 
-    regions[2].get_field_accessor(FID_LEAKAGE).typeify<float>();
-  RegionAccessor<AccessorType::Generic, float> fa_shr_cap = 
-    regions[3].get_field_accessor(FID_NODE_CAP).typeify<float>();
-  RegionAccessor<AccessorType::Generic, float> fa_shr_leakage = 
-    regions[3].get_field_accessor(FID_LEAKAGE).typeify<float>();
+  const AccessorRWfloat fa_pvt_voltage(regions[0], FID_NODE_VOLTAGE);
+  const AccessorRWfloat fa_pvt_charge(regions[0], FID_CHARGE);
+
+  const AccessorRWfloat fa_shr_voltage(regions[1], FID_NODE_VOLTAGE);
+  const AccessorRWfloat fa_shr_charge(regions[1], FID_CHARGE);
+
+  const AccessorROfloat fa_pvt_cap(regions[2], FID_NODE_CAP);
+  const AccessorROfloat fa_pvt_leakage(regions[2], FID_LEAKAGE);
+
+  const AccessorROfloat fa_shr_cap(regions[3], FID_NODE_CAP);
+  const AccessorROfloat fa_shr_leakage(regions[3], FID_LEAKAGE);
   // Don't need this for the CPU version
-  //RegionAccessor<AccessorType::Generic, PointerLocation> fa_location = 
-  //  regions[4].get_field_accessor(FID_LOCATOR).typeify<PointerLocation>();
+  // const AccessorROloc fa_location(regions[4], FID_LOCATOR);
 
   update_voltages(p.pvt_nodes, fa_pvt_voltage, fa_pvt_charge, 
                   fa_pvt_cap, fa_pvt_leakage, ctx, rt);
@@ -925,9 +747,9 @@ bool CheckTask::dispatch(Context ctx, Runtime *runtime, bool success)
 {
   FutureMap fm = runtime->execute_index_space(ctx, *this);
   fm.wait_all_results();
-  Rect<1> launch_array = launch_domain.get_rect<1>();
-  for (GenericPointInRectIterator<1> pir(launch_array); pir; pir++)
-    success = fm.get_result<bool>(DomainPoint::from_point<1>(pir.p)) && success;
+  Rect<1> launch_array = launch_domain;
+  for (PointInRectIterator<1> pir(launch_array); pir(); pir++)
+    success = fm.get_result<bool>(*pir) && success;
   return success;
 }
 
@@ -936,15 +758,13 @@ bool CheckTask::cpu_impl(const Task *task,
                          const std::vector<PhysicalRegion> &regions,
                          Context ctx, Runtime *runtime)
 {
-  RegionAccessor<AccessorType::Generic, float> fa_check = 
-    regions[0].get_field_accessor(task->regions[0].instance_fields[0]).typeify<float>();
+  const AccessorROfloat fa_check(regions[0], task->regions[0].instance_fields[0]);
   LogicalRegion lr = task->regions[0].region;
-  IndexIterator itr(runtime, ctx, lr);
   bool success = true;
-  while (itr.has_next() && success)
+  for (PointInDomainIterator<1> itr(
+        runtime->get_index_space_domain(lr.get_index_space())); itr(); itr++)
   {
-    ptr_t ptr = itr.next();
-    float value = fa_check.read(ptr);
+    float value = fa_check[*itr];
     if (std::isnan(value))
       success = false;
   }

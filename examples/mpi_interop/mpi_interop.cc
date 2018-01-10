@@ -1,4 +1,4 @@
-/* Copyright 2017 Stanford University, NVIDIA Corporation
+/* Copyright 2018 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -36,7 +36,6 @@
 #include "legion.h"
 
 using namespace Legion;
-using namespace LegionRuntime::Arrays;
 
 enum TaskID
 {
@@ -134,10 +133,9 @@ void top_level_task(const Task *task,
   MPI_Comm_size(MPI_COMM_WORLD, &size);
   // Do a must epoch launch to align with the number of MPI ranks
   MustEpochLauncher must_epoch_launcher;
-  Rect<1> launch_bounds(Point<1>(0),Point<1>(size - 1));
-  Domain launch_domain = Domain::from_rect<1>(launch_bounds);
+  Rect<1> launch_bounds(0,size - 1);
   ArgumentMap args_map;
-  IndexLauncher index_launcher(MPI_INTEROP_TASK_ID, launch_domain, 
+  IndexLauncher index_launcher(MPI_INTEROP_TASK_ID, launch_bounds, 
                                TaskArgument(NULL, 0), args_map);
   must_epoch_launcher.add_index_task(index_launcher);
   runtime->execute_must_epoch(ctx, must_epoch_launcher);

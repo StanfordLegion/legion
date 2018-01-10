@@ -7,12 +7,11 @@
 #include <time.h>
 #include <unistd.h>
 
-#include "realm/realm.h"
+#include "realm.h"
 #include "realm/profiling.h"
 
 using namespace Realm;
 using namespace Realm::ProfilingMeasurements;
-using namespace LegionRuntime::LowLevel;
 
 Logger log_app("app");
 
@@ -160,6 +159,45 @@ void response_task(const void *args, size_t arglen,
     delete op_backtrace;
   }
 
+  {
+    InstanceStatus stat;
+    if(pr.get_measurement(stat)) {
+      std::cout << "inst status = " << stat.result << "\n";
+
+      assert(pr.user_data_size() == sizeof(InstanceStatus::Result));
+      InstanceStatus::Result exp_result = *(const InstanceStatus::Result *)(pr.user_data());
+      if(exp_result != stat.result) {
+	std::cout << "mismatch!  expected " << exp_result << "\n";
+	exit(1);
+      }
+    }
+  }
+
+  {
+    InstanceAllocResult result;
+    if(pr.get_measurement(result)) {
+      std::cout << "inst alloc success = " << result.success << "\n";
+    }
+  }
+
+  {
+    InstanceMemoryUsage usage;
+    if(pr.get_measurement(usage))
+      std::cout << "inst mem usage = " << usage.instance << " " << usage.memory << " " << usage.bytes << "\n";
+  }
+
+  if(pr.has_measurement<InstanceTimeline>()) {
+    InstanceTimeline *inst_timeline = pr.get_measurement<InstanceTimeline>();
+    printf("inst timeline = %llu %llu %llu (%lld %lld)\n",
+	   inst_timeline->create_time,
+	   inst_timeline->ready_time,
+	   inst_timeline->delete_time,
+	   inst_timeline->ready_time - inst_timeline->create_time,
+	   inst_timeline->delete_time - inst_timeline->ready_time);
+    delete inst_timeline;
+  } else
+    printf("no instance timeline\n");
+
   if(pr.user_data_size() > 0) {
     printf("user data = %zd (", pr.user_data_size());
     unsigned char *data = (unsigned char *)(pr.user_data());
@@ -225,8 +263,8 @@ void top_level_task(const void *args, size_t arglen,
     .add_measurement<OperationEventWaits>()
     .add_measurement<OperationBacktrace>();
 
-  // we expect (exactly) three responses
-  expected_responses_remaining = 7;
+  // we expect (exactly) 7 responses for tasks + 2 for instances
+  expected_responses_remaining = 9;
   response_counter = Barrier::create_barrier(expected_responses_remaining);
 
   // give ourselves 15 seconds for the tasks, and their profiling responses, to finish
@@ -274,7 +312,7 @@ void top_level_task(const void *args, size_t arglen,
     assert(poisoned);
   }
 
-  // now cancellatin of an event that is blocked on some event
+  // now cancellation of an event that is blocked on some event
   {
     cargs.hang = true;
     Event e5 = first_cpu.spawn(CHILD_TASK, &cargs, sizeof(cargs), prs);
@@ -284,6 +322,46 @@ void top_level_task(const void *args, size_t arglen,
     bool poisoned = false;
     e5.wait_faultaware(poisoned);
     assert(poisoned);
+  }
+
+  // instance profiling #1 - normal instance creation/deletion
+  {
+    Rect<1> is(0, 31);
+    ProfilingRequestSet prs;
+    Memory mem = Machine::MemoryQuery(machine).only_kind(Memory::SYSTEM_MEM).first();
+    assert(mem.exists());
+    InstanceStatus::Result exp_result = InstanceStatus::DESTROYED_SUCCESSFULLY;
+    prs.add_request(profile_cpu, RESPONSE_TASK, &exp_result, sizeof(exp_result))
+      .add_measurement<InstanceStatus>()
+      .add_measurement<InstanceAllocResult>()
+      .add_measurement<InstanceTimeline>()
+      .add_measurement<InstanceMemoryUsage>();
+    RegionInstance inst;
+    Event e = RegionInstance::create_instance(inst, mem, is,
+					      std::vector<size_t>(1, 8),
+					      0, // SOA
+					      prs);
+    inst.destroy(e);
+  }
+
+  // instance profiling #2 - allocation failure
+  {
+    Rect<1> is(0, 1 << 21); // make sure total size is less than 4GB for 32 bit builds
+    ProfilingRequestSet prs;
+    Memory mem = Machine::MemoryQuery(machine).only_kind(Memory::SYSTEM_MEM).first();
+    assert(mem.exists());
+    InstanceStatus::Result exp_result = InstanceStatus::FAILED_ALLOCATION;
+    prs.add_request(profile_cpu, RESPONSE_TASK, &exp_result, sizeof(exp_result))
+      .add_measurement<InstanceStatus>()
+      .add_measurement<InstanceAllocResult>()
+      .add_measurement<InstanceTimeline>()
+      .add_measurement<InstanceMemoryUsage>();
+    RegionInstance inst;
+    Event e = RegionInstance::create_instance(inst, mem, is,
+					      std::vector<size_t>(1, 1024),
+					      0, // SOA
+					      prs);
+    inst.destroy(e);
   }
 
   printf("waiting for profiling responses...\n");

@@ -1,4 +1,4 @@
-/* Copyright 2017 Stanford University, NVIDIA Corporation
+/* Copyright 2018 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -135,7 +135,7 @@ namespace Legion {
         static inline void end_task(Runtime *rt, 
                                     InternalContext ctx, T *result)
         {
-          // Otherwise this is a struct, so see if it has serialization methods 
+          // Otherwise this is a struct, so see if it has serialization methods
           NonPODSerializer<T,HasSerialize<T>::value>::end_task(rt, ctx, result);
         }
         static inline Future from_value(Runtime *rt, const T *value)
@@ -289,12 +289,2196 @@ namespace Legion {
 
     };
 
+    // Special namespace for providing multi-dimensional 
+    // array syntax on accessors 
+    namespace ArraySyntax {
+      // A small helper class that helps provide some syntactic sugar for
+      // indexing accessors like a multi-dimensional array for generic accessors
+      template<typename A, typename FT, int N, typename T, 
+                int M, bool READ_ONLY>
+      class GenericSyntaxHelper {
+      public:
+        GenericSyntaxHelper(const A &acc, const Point<M-1,T> &p)
+          : accessor(acc)
+        {
+          for (int i = 0; i < (M-1); i++)
+            point[i] = p[i];
+        }
+      public:
+        inline GenericSyntaxHelper<A,FT,N,T,M+1,READ_ONLY> operator[](T val)
+        {
+          point[M-1] = val;
+          return GenericSyntaxHelper<A,FT,N,T,M+1,READ_ONLY>(accessor, point);
+        }
+      public:
+        const A &accessor;
+        Point<M,T> point;
+      };
+      // Specialization for M = N
+      template<typename A, typename FT, int N, typename T, bool RO>
+      class GenericSyntaxHelper<A,FT,N,T,N,RO> {
+      public:
+        GenericSyntaxHelper(const A &acc, const Point<N-1,T> &p)
+          : accessor(acc)
+        {
+          for (int i = 0; i < (N-1); i++)
+            point[i] = p[i];
+        }
+      public:
+        inline Realm::AccessorRefHelper<FT> operator[](T val)
+        {
+          point[N-1] = val;
+          return accessor[point];
+        }
+      public:
+        const A &accessor;
+        Point<N,T> point;
+      };
+      // Further specialization for M = N and read-only
+      template<typename A, typename FT, int N, typename T>
+      class GenericSyntaxHelper<A,FT,N,T,N,true> {
+      public:
+        GenericSyntaxHelper(const A &acc, const Point<N-1,T> &p)
+          : accessor(acc)
+        {
+          for (int i = 0; i < (N-1); i++)
+            point[i] = p[i];
+        }
+      public:
+        inline const Realm::AccessorRefHelper<FT> operator[](T val)
+        {
+          point[N-1] = val;
+          return accessor[point];
+        }
+      public:
+        const A &accessor;
+        Point<N,T> point;
+      };
+
+      // A small helper class that helps provide some syntactic sugar for
+      // indexing accessors like a multi-dimensional array for affine accessors
+      template<typename A, typename FT, int N, typename T, 
+                int M, bool READ_ONLY>
+      class AffineSyntaxHelper {
+      public:
+        __CUDA_HD__
+        AffineSyntaxHelper(const A &acc, const Point<M-1,T> &p)
+          : accessor(acc)
+        {
+          for (int i = 0; i < (M-1); i++)
+            point[i] = p[i];
+        }
+      public:
+        __CUDA_HD__
+        inline AffineSyntaxHelper<A,FT,N,T,M+1,READ_ONLY> operator[](T val)
+        {
+          point[M-1] = val;
+          return AffineSyntaxHelper<A,FT,N,T,M+1,READ_ONLY>(accessor, point);
+        }
+      public:
+        const A &accessor;
+        Point<M,T> point;
+      };
+      // Specialization for M = N
+      template<typename A, typename FT, int N, typename T, bool RO>
+      class AffineSyntaxHelper<A,FT,N,T,N,RO> {
+      public:
+        __CUDA_HD__
+        AffineSyntaxHelper(const A &acc, const Point<N-1,T> &p)
+          : accessor(acc)
+        {
+          for (int i = 0; i < (N-1); i++)
+            point[i] = p[i];
+        }
+      public:
+        __CUDA_HD__
+        inline FT& operator[](T val)
+        {
+          point[N-1] = val;
+          return accessor[point];
+        }
+      public:
+        const A &accessor;
+        Point<N,T> point;
+      };
+      // Further specialization for M = N and read-only
+      template<typename A, typename FT, int N, typename T>
+      class AffineSyntaxHelper<A,FT,N,T,N,true> {
+      public:
+        __CUDA_HD__
+        AffineSyntaxHelper(const A &acc, const Point<N-1,T> &p)
+          : accessor(acc)
+        {
+          for (int i = 0; i < (N-1); i++)
+            point[i] = p[i];
+        }
+      public:
+        __CUDA_HD__
+        inline const FT& operator[](T val)
+        {
+          point[N-1] = val;
+          return accessor[point];
+        }
+      public:
+        const A &accessor;
+        Point<N,T> point;
+      };
+    };
+
+    ////////////////////////////////////////////////////////////
+    // Specializations for Generic Accessors
+    ////////////////////////////////////////////////////////////
+
+    // Read-only FieldAccessor specialization
+    template<typename FT, int N, typename T, bool CB>
+    class FieldAccessor<READ_ONLY,FT,N,T,
+                        Realm::GenericAccessor<FT,N,T>,CB> {
+    public:
+      FieldAccessor(void) { }
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,
+#ifdef DEBUG_LEGION
+                    size_t elems = 1, bool check_field_size = true,
+#else
+                    size_t elems = 1, bool check_field_size = false,
+#endif
+                    bool silence_warnings = false)
+      {
+        DomainT<N,T> is;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(READ_ONLY, fid, elems * sizeof(FT), &is,
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), 
+              silence_warnings, true/*generic accessor*/, check_field_size);
+        accessor = Realm::GenericAccessor<FT,N,T>(instance, fid, is.bounds);
+      }
+    public:
+      inline FT read(const Point<N,T>& p) const 
+        { 
+          return accessor.read(p); 
+        }
+      inline const Realm::AccessorRefHelper<FT> 
+          operator[](const Point<N,T>& p) const
+        { 
+          return accessor[p]; 
+        }
+      inline ArraySyntax::GenericSyntaxHelper<FieldAccessor<READ_ONLY,FT,N,T,
+            Realm::GenericAccessor<FT,N,T>,CB>,FT,N,T,2,true/*read only*/>
+          operator[](T index) const
+      {
+        return ArraySyntax::GenericSyntaxHelper<FieldAccessor<READ_ONLY,FT,N,T,
+               Realm::GenericAccessor<FT,N,T>,CB>,FT,N,T,2,true/*read only*/>(
+              *this, Point<1,T>(index));
+      }
+    public:
+      mutable Realm::GenericAccessor<FT,N,T> accessor;
+    };
+
+    // Read-only FieldAccessor specialization
+    // with bounds checks
+    template<typename FT, int N, typename T>
+    class FieldAccessor<READ_ONLY,FT,N,T,
+                        Realm::GenericAccessor<FT,N,T>,true> {
+    public:
+      FieldAccessor(void) { }
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,
+#ifdef DEBUG_LEGION
+                    size_t elems = 1, bool check_field_size = true,
+#else
+                    size_t elems = 1, bool check_field_size = false,
+#endif
+                    bool silence_warnings = false)
+        : field(fid), field_region(region), 
+          bounds(region.template get_bounds<N,T>())
+      {
+        DomainT<N,T> is;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(READ_ONLY, fid, elems * sizeof(FT), &is,
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), 
+              silence_warnings, true/*generic accessor*/, check_field_size);
+        accessor = Realm::GenericAccessor<FT,N,T>(instance, fid, is.bounds);
+      }
+    public:
+      inline FT read(const Point<N,T>& p) const 
+        { 
+          if (!bounds.contains(p)) 
+            field_region.fail_bounds_check(DomainPoint(p), field, READ_ONLY);
+          return accessor.read(p); 
+        }
+      inline const Realm::AccessorRefHelper<FT> 
+          operator[](const Point<N,T>& p) const
+        { 
+          if (!bounds.contains(p)) 
+            field_region.fail_bounds_check(DomainPoint(p), field, READ_ONLY);
+          return accessor[p]; 
+        }
+      inline ArraySyntax::GenericSyntaxHelper<FieldAccessor<READ_ONLY,FT,N,T,
+             Realm::GenericAccessor<FT,N,T>,true>,FT,N,T,2,true/*read only*/>
+          operator[](T index) const
+      {
+        return ArraySyntax::GenericSyntaxHelper<FieldAccessor<READ_ONLY,FT,N,T,
+              Realm::GenericAccessor<FT,N,T>,true>,FT,N,T,2,true/*read only*/>(
+              *this, Point<1,T>(index));
+      }
+    public:
+      mutable Realm::GenericAccessor<FT,N,T> accessor;
+      FieldID field;
+      PhysicalRegion field_region;
+      DomainT<N,T> bounds;
+    };
+
+    // Read-only FieldAccessor specialization 
+    // with N==1 to avoid array ambiguity
+    template<typename FT, typename T, bool CB>
+    class FieldAccessor<READ_ONLY,FT,1,T,
+                        Realm::GenericAccessor<FT,1,T>,CB> {
+    public:
+      FieldAccessor(void) { }
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,
+#ifdef DEBUG_LEGION
+                    size_t elems = 1, bool check_field_size = true,
+#else
+                    size_t elems = 1, bool check_field_size = false,
+#endif
+                    bool silence_warnings = false)
+      {
+        DomainT<1,T> is;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(READ_ONLY, fid, elems * sizeof(FT), &is,
+              Internal::NT_TemplateHelper::encode_tag<1,T>(), 
+              silence_warnings, true/*generic accessor*/, check_field_size);
+        accessor = Realm::GenericAccessor<FT,1,T>(instance, fid, is.bounds);
+      }
+    public:
+      inline FT read(const Point<1,T>& p) const 
+        { 
+          return accessor.read(p); 
+        }
+      inline const Realm::AccessorRefHelper<FT>
+          operator[](const Point<1,T>& p) const
+        { 
+          return accessor[p]; 
+        }
+    public:
+      mutable Realm::GenericAccessor<FT,1,T> accessor;
+    };
+
+    // Read-only FieldAccessor specialization 
+    // with N==1 to avoid array ambiguity and bounds checks
+    template<typename FT, typename T>
+    class FieldAccessor<READ_ONLY,FT,1,T,
+                        Realm::GenericAccessor<FT,1,T>,true> {
+    public:
+      // No CUDA support due to PhysicalRegion constructor
+      FieldAccessor(void) { }
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,
+#ifdef DEBUG_LEGION
+                    size_t elems = 1, bool check_field_size = true,
+#else
+                    size_t elems = 1, bool check_field_size = false,
+#endif
+                    bool silence_warnings = false)
+        : field(fid), field_region(region), 
+          bounds(region.template get_bounds<1,T>()) 
+      {
+        DomainT<1,T> is;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(READ_ONLY, fid, elems * sizeof(FT), &is,
+              Internal::NT_TemplateHelper::encode_tag<1,T>(), 
+              silence_warnings, true/*generic accessor*/, check_field_size);
+        accessor = Realm::GenericAccessor<FT,1,T>(instance, fid, is.bounds);
+      }
+    public:
+      inline FT read(const Point<1,T>& p) const 
+        { 
+          if (!bounds.contains(p)) 
+            field_region.fail_bounds_check(DomainPoint(p), field, READ_ONLY);
+          return accessor.read(p); 
+        }
+      inline const Realm::AccessorRefHelper<FT> 
+          operator[](const Point<1,T>& p) const
+        { 
+          if (!bounds.contains(p)) 
+            field_region.fail_bounds_check(DomainPoint(p), field, READ_ONLY);
+          return accessor[p]; 
+        }
+    public:
+      mutable Realm::GenericAccessor<FT,1,T> accessor;
+      FieldID field;
+      PhysicalRegion field_region;
+      DomainT<1,T> bounds;
+    };
+
+    // Read-write FieldAccessor specialization
+    template<typename FT, int N, typename T, bool CB>
+    class FieldAccessor<READ_WRITE,FT,N,T,
+                        Realm::GenericAccessor<FT,N,T>,CB> {
+    public:
+      FieldAccessor(void) { }
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,
+#ifdef DEBUG_LEGION
+                    size_t elems = 1, bool check_field_size = true,
+#else
+                    size_t elems = 1, bool check_field_size = false,
+#endif
+                    bool silence_warnings = false)
+      {
+        DomainT<N,T> is;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(READ_WRITE, fid, elems * sizeof(FT), &is,
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), 
+              silence_warnings, true/*generic accessor*/, check_field_size);
+        accessor = Realm::GenericAccessor<FT,N,T>(instance, fid, is.bounds);
+      }
+    public:
+      inline FT read(const Point<N,T>& p) const
+        { 
+          return accessor.read(p); 
+        }
+      inline void write(const Point<N,T>& p, FT val) const
+        { 
+          accessor.write(p, val); 
+        }
+      inline Realm::AccessorRefHelper<FT> 
+          operator[](const Point<N,T>& p) const
+        { 
+          return accessor[p]; 
+        }
+      inline ArraySyntax::GenericSyntaxHelper<FieldAccessor<READ_WRITE,FT,N,T,
+             Realm::GenericAccessor<FT,N,T>,CB>,FT,N,T,2,false/*read only*/>
+          operator[](T index) const
+      {
+        return ArraySyntax::GenericSyntaxHelper<FieldAccessor<READ_WRITE,FT,N,T,
+              Realm::GenericAccessor<FT,N,T>,CB>,FT,N,T,2,false/*read only*/>(
+              *this, Point<1,T>(index));
+      }
+      // No reductions since we can't handle atomicity correctly
+    public:
+      mutable Realm::GenericAccessor<FT,N,T> accessor;
+    };
+
+    // Read-write FieldAccessor specialization
+    // with bounds checks
+    template<typename FT, int N, typename T>
+    class FieldAccessor<READ_WRITE,FT,N,T,
+                        Realm::GenericAccessor<FT,N,T>,true> {
+    public:
+      FieldAccessor(void) { }
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,
+#ifdef DEBUG_LEGION
+                    size_t elems = 1, bool check_field_size = true,
+#else
+                    size_t elems = 1, bool check_field_size = false,
+#endif
+                    bool silence_warnings = false)
+        : field(fid), field_region(region), 
+          bounds(region.template get_bounds<N,T>())
+      {
+        DomainT<N,T> is;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(READ_WRITE, fid, elems * sizeof(FT), &is,
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), 
+              silence_warnings, true/*generic accessor*/, check_field_size);
+        accessor = Realm::GenericAccessor<FT,N,T>(instance, fid, is.bounds);
+      }
+    public:
+      inline FT read(const Point<N,T>& p) const
+        { 
+          if (!bounds.contains(p)) 
+            field_region.fail_bounds_check(DomainPoint(p), field, READ_ONLY);
+          return accessor.read(p); 
+        }
+      inline void write(const Point<N,T>& p, FT val) const
+        { 
+          if (!bounds.contains(p)) 
+            field_region.fail_bounds_check(DomainPoint(p), field,WRITE_DISCARD);
+          accessor.write(p, val); 
+        }
+      inline Realm::AccessorRefHelper<FT> 
+          operator[](const Point<N,T>& p) const
+        { 
+          if (!bounds.contains(p)) 
+            field_region.fail_bounds_check(DomainPoint(p), field, READ_WRITE);
+          return accessor[p]; 
+        }
+      inline ArraySyntax::GenericSyntaxHelper<FieldAccessor<READ_WRITE,FT,N,T,
+              Realm::GenericAccessor<FT,N,T>,true>,FT,N,T,2,false/*read only*/>
+          operator[](T index) const
+      {
+        return ArraySyntax::GenericSyntaxHelper<FieldAccessor<READ_WRITE,FT,N,T,
+              Realm::GenericAccessor<FT,N,T>,true>,FT,N,T,2,false/*read only*/>(
+              *this, Point<1,T>(index));
+      }
+      // No reductions since we can't handle atomicity correctly
+    public:
+      mutable Realm::GenericAccessor<FT,N,T> accessor;
+      FieldID field;
+      PhysicalRegion field_region;
+      DomainT<N,T> bounds;
+    };
+
+    // Read-write FieldAccessor specialization 
+    // with N==1 to avoid array ambiguity
+    template<typename FT, typename T, bool CB>
+    class FieldAccessor<READ_WRITE,FT,1,T,
+                        Realm::GenericAccessor<FT,1,T>,CB> {
+    public:
+      FieldAccessor(void) { }
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,
+#ifdef DEBUG_LEGION
+                    size_t elems = 1, bool check_field_size = true,
+#else
+                    size_t elems = 1, bool check_field_size = false,
+#endif
+                    bool silence_warnings = false)
+      {
+        DomainT<1,T> is;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(READ_WRITE, fid, elems * sizeof(FT), &is,
+              Internal::NT_TemplateHelper::encode_tag<1,T>(), 
+              silence_warnings, true/*generic accessor*/, check_field_size);
+        accessor = Realm::GenericAccessor<FT,1,T>(instance, fid, is.bounds);
+      }
+    public:
+      inline FT read(const Point<1,T>& p) const
+        { 
+          return accessor.read(p); 
+        }
+      inline void write(const Point<1,T>& p, FT val) const
+        { 
+          accessor.write(p, val); 
+        }
+      inline Realm::AccessorRefHelper<FT> 
+          operator[](const Point<1,T>& p) const
+        { 
+          return accessor[p]; 
+        }
+      // No reductions since we can't handle atomicity correctly
+    public:
+      mutable Realm::GenericAccessor<FT,1,T> accessor;
+    };
+
+    // Read-write FieldAccessor specialization 
+    // with N==1 to avoid array ambiguity and bounds checks
+    template<typename FT, typename T>
+    class FieldAccessor<READ_WRITE,FT,1,T,
+                        Realm::GenericAccessor<FT,1,T>,true> {
+    public:
+      FieldAccessor(void) { }
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,
+#ifdef DEBUG_LEGION
+                    size_t elems = 1, bool check_field_size = true,
+#else
+                    size_t elems = 1, bool check_field_size = false,
+#endif
+                    bool silence_warnings = false)
+        : field(fid), field_region(region), 
+          bounds(region.template get_bounds<1,T>())
+      {
+        DomainT<1,T> is;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(READ_WRITE, fid, elems * sizeof(FT), &is,
+              Internal::NT_TemplateHelper::encode_tag<1,T>(), 
+              silence_warnings, true/*generic accessor*/, check_field_size);
+        accessor = Realm::GenericAccessor<FT,1,T>(instance, fid, is.bounds);
+      }
+    public:
+      inline FT read(const Point<1,T>& p) const
+        { 
+          if (!bounds.contains(p)) 
+            field_region.fail_bounds_check(DomainPoint(p), field, READ_ONLY);
+          return accessor.read(p); 
+        }
+      inline void write(const Point<1,T>& p, FT val) const
+        { 
+          if (!bounds.contains(p)) 
+            field_region.fail_bounds_check(DomainPoint(p), field,WRITE_DISCARD);
+          accessor.write(p, val); 
+        }
+      inline Realm::AccessorRefHelper<FT> 
+          operator[](const Point<1,T>& p) const
+        { 
+          if (!bounds.contains(p)) 
+            field_region.fail_bounds_check(DomainPoint(p), field, READ_WRITE);
+          return accessor[p]; 
+        }
+      // No reduction since we can't handle atomicity correctly
+    public:
+      mutable Realm::GenericAccessor<FT,1,T> accessor;
+      FieldID field;
+      PhysicalRegion field_region;
+      DomainT<1,T> bounds;
+    };
+
+    // Write-discard FieldAccessor specialization
+    template<typename FT, int N, typename T, bool CB>
+    class FieldAccessor<WRITE_DISCARD,FT,N,T,
+                        Realm::GenericAccessor<FT,N,T>,CB> {
+    public:
+      FieldAccessor(void) { }
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,
+#ifdef DEBUG_LEGION
+                    size_t elems = 1, bool check_field_size = true,
+#else
+                    size_t elems = 1, bool check_field_size = false,
+#endif
+                    bool silence_warnings = false)
+      {
+        DomainT<N,T> is;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(WRITE_DISCARD, fid, elems * sizeof(FT), &is,
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), 
+              silence_warnings, true/*generic accessor*/, check_field_size);
+        accessor = Realm::GenericAccessor<FT,N,T>(instance, fid, is.bounds);
+      }
+    public:
+      inline FT read(const Point<N,T>& p) const
+        { 
+          return accessor.read(p); 
+        }
+      inline void write(const Point<N,T>& p, FT val) const
+        { 
+          accessor.write(p, val); 
+        }
+      inline Realm::AccessorRefHelper<FT> 
+          operator[](const Point<N,T>& p) const
+        { 
+          return accessor[p]; 
+        }
+      inline ArraySyntax::GenericSyntaxHelper<FieldAccessor<WRITE_DISCARD,FT,N,
+           T,Realm::GenericAccessor<FT,N,T>,CB>,FT,N,T,2,false/*read only*/>
+          operator[](T index) const
+      {
+        return ArraySyntax::GenericSyntaxHelper<FieldAccessor<WRITE_DISCARD,FT,
+          N,T,Realm::GenericAccessor<FT,N,T>,CB>,FT,N,T,2,false/*read only*/>(
+              *this, Point<1,T>(index));
+      }
+    public:
+      mutable Realm::GenericAccessor<FT,N,T> accessor;
+    };
+
+    // Write-discard FieldAccessor specialization
+    // with bounds checks
+    template<typename FT, int N, typename T>
+    class FieldAccessor<WRITE_DISCARD,FT,N,T,
+                        Realm::GenericAccessor<FT,N,T>,true> {
+    public:
+      // No CUDA support due to PhysicalRegion constructor
+      FieldAccessor(void) { }
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,
+#ifdef DEBUG_LEGION
+                    size_t elems = 1, bool check_field_size = true,
+#else
+                    size_t elems = 1, bool check_field_size = false,
+#endif
+                    bool silence_warnings = false)
+        : field(fid), field_region(region), 
+          bounds(region.template get_bounds<N,T>())
+      {
+        DomainT<N,T> is;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(WRITE_DISCARD, fid, elems * sizeof(FT), &is,
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), 
+              silence_warnings, true/*generic accessor*/, check_field_size);
+        accessor = Realm::GenericAccessor<FT,N,T>(instance, fid, is.bounds);
+      }
+    public:
+      inline FT read(const Point<N,T>& p) const
+        { 
+          if (!bounds.contains(p)) 
+            field_region.fail_bounds_check(DomainPoint(p), field, READ_ONLY);
+          return accessor.read(p); 
+        }
+      inline void write(const Point<N,T>& p, FT val) const
+        { 
+          if (!bounds.contains(p)) 
+            field_region.fail_bounds_check(DomainPoint(p), field,WRITE_DISCARD);
+          accessor.write(p, val); 
+        }
+      inline Realm::AccessorRefHelper<FT> 
+          operator[](const Point<N,T>& p) const
+        { 
+          if (!bounds.contains(p)) 
+            field_region.fail_bounds_check(DomainPoint(p), field, READ_WRITE);
+          return accessor[p]; 
+        }
+      inline ArraySyntax::GenericSyntaxHelper<FieldAccessor<WRITE_DISCARD,FT,N,
+           T,Realm::GenericAccessor<FT,N,T>,true>,FT,N,T,2,false/*read only*/>
+          operator[](T index) const
+      {
+        return ArraySyntax::GenericSyntaxHelper<FieldAccessor<WRITE_DISCARD,FT,
+         N,T,Realm::GenericAccessor<FT,N,T>,true>,FT,N,T,2,false/*read only*/>(
+              *this, Point<1,T>(index));
+      }
+    public:
+      mutable Realm::GenericAccessor<FT,N,T> accessor;
+      FieldID field;
+      PhysicalRegion field_region;
+      DomainT<N,T> bounds;
+    };
+
+    // Write-discard FieldAccessor specialization with
+    // N == 1 to avoid array ambiguity
+    template<typename FT, typename T, bool CB>
+    class FieldAccessor<WRITE_DISCARD,FT,1,T,
+                        Realm::GenericAccessor<FT,1,T>,CB> {
+    public:
+      FieldAccessor(void) { }
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,
+#ifdef DEBUG_LEGION
+                    size_t elems = 1, bool check_field_size = true,
+#else
+                    size_t elems = 1, bool check_field_size = false,
+#endif
+                    bool silence_warnings = false)
+      {
+        DomainT<1,T> is;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(WRITE_DISCARD, fid, elems * sizeof(FT), &is,
+              Internal::NT_TemplateHelper::encode_tag<1,T>(), 
+              silence_warnings, true/*generic accessor*/, check_field_size);
+        accessor = Realm::GenericAccessor<FT,1,T>(instance, fid, is.bounds);
+      }
+    public:
+      inline FT read(const Point<1,T>& p) const
+        { 
+          return accessor.read(p); 
+        }
+      inline void write(const Point<1,T>& p, FT val) const
+        { 
+          accessor.write(p, val); 
+        }
+      inline Realm::AccessorRefHelper<FT> 
+          operator[](const Point<1,T>& p) const
+        { 
+          return accessor[p]; 
+        }
+    public:
+      mutable Realm::GenericAccessor<FT,1,T> accessor;
+    };
+
+    // Write-discard FieldAccessor specialization with
+    // N == 1 to avoid array ambiguity and bounds checks
+    template<typename FT, typename T>
+    class FieldAccessor<WRITE_DISCARD,FT,1,T,
+                        Realm::GenericAccessor<FT,1,T>,true> {
+    public:
+      FieldAccessor(void) { }
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,
+#ifdef DEBUG_LEGION
+                    size_t elems = 1, bool check_field_size = true,
+#else
+                    size_t elems = 1, bool check_field_size = false,
+#endif
+                    bool silence_warnings = false)
+        : field(fid), field_region(region), 
+          bounds(region.template get_bounds<1,T>())
+      {
+        DomainT<1,T> is;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(WRITE_DISCARD, fid, elems * sizeof(FT), &is,
+              Internal::NT_TemplateHelper::encode_tag<1,T>(), 
+              silence_warnings, true/*generic accessor*/, check_field_size);
+        accessor = Realm::GenericAccessor<FT,1,T>(instance, fid, is.bounds);
+      }
+    public:
+      inline FT read(const Point<1,T>& p) const
+        { 
+          if (!bounds.contains(p)) 
+            field_region.fail_bounds_check(DomainPoint(p), field, READ_ONLY);
+          return accessor.read(p); 
+        }
+      inline void write(const Point<1,T>& p, FT val) const
+        { 
+          if (!bounds.contains(p)) 
+            field_region.fail_bounds_check(DomainPoint(p), field,WRITE_DISCARD);
+          accessor.write(p, val); 
+        }
+      inline Realm::AccessorRefHelper<FT> 
+          operator[](const Point<1,T>& p) const
+        { 
+          if (!bounds.contains(p)) 
+            field_region.fail_bounds_check(DomainPoint(p), field, READ_WRITE);
+          return accessor[p]; 
+        }
+    public:
+      mutable Realm::GenericAccessor<FT,1,T> accessor;
+      FieldID field;
+      PhysicalRegion field_region;
+      DomainT<1,T> bounds;
+    };
+
+    ////////////////////////////////////////////////////////////
+    // Specializations for Affine Accessors
+    ////////////////////////////////////////////////////////////
+
+    // Read-only FieldAccessor specialization
+    template<typename FT, int N, typename T, bool CB>
+    class FieldAccessor<READ_ONLY,FT,N,T,
+                        Realm::AffineAccessor<FT,N,T>,CB> {
+    public:
+      __CUDA_HD__
+      FieldAccessor(void) { }
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,
+#ifdef DEBUG_LEGION
+                    size_t elems = 1, bool check_field_size = true,
+#else
+                    size_t elems = 1, bool check_field_size = false,
+#endif
+                    bool silence_warnings = false)
+      {
+        DomainT<N,T> is;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(READ_ONLY, fid, elems * sizeof(FT), &is,
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), 
+              silence_warnings, false/*generic accessor*/, check_field_size);
+        accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, is.bounds);
+      }
+    public:
+      __CUDA_HD__
+      inline FT read(const Point<N,T>& p) const 
+        { 
+          return accessor.read(p); 
+        }
+      __CUDA_HD__
+      inline const FT* ptr(const Point<N,T>& p) const
+        { 
+          return accessor.ptr(p); 
+        }
+      __CUDA_HD__
+      inline const FT* ptr(const Rect<N,T>& r) const
+        {
+          if (!accessor.is_dense_arbitrary(r))
+          {
+            fprintf(stderr, 
+                "ERROR: Illegal request for pointer of non-dense rectangle\n");
+#ifdef DEBUG_LEGION
+            assert(false);
+#endif
+            exit(ERROR_NON_DENSE_RECTANGLE);
+          }
+          return accessor.ptr(r.lo);
+        }
+      __CUDA_HD__
+      inline const FT& operator[](const Point<N,T>& p) const
+        { 
+          return accessor[p]; 
+        }
+      __CUDA_HD__
+      inline ArraySyntax::AffineSyntaxHelper<FieldAccessor<READ_ONLY,FT,N,T,
+            Realm::AffineAccessor<FT,N,T>,CB>,FT,N,T,2,true/*read only*/>
+          operator[](T index) const
+      {
+        return ArraySyntax::AffineSyntaxHelper<FieldAccessor<READ_ONLY,FT,N,T,
+               Realm::AffineAccessor<FT,N,T>,CB>,FT,N,T,2,true/*read only*/>(
+              *this, Point<1,T>(index));
+      }
+    public:
+      Realm::AffineAccessor<FT,N,T> accessor;
+    };
+
+    // Read-only FieldAccessor specialization
+    // with bounds checks
+    template<typename FT, int N, typename T>
+    class FieldAccessor<READ_ONLY,FT,N,T,
+                        Realm::AffineAccessor<FT,N,T>,true> {
+    public:
+      // No CUDA support due to PhysicalRegion constructor
+      FieldAccessor(void) { }
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,
+#ifdef DEBUG_LEGION
+                    size_t elems = 1, bool check_field_size = true,
+#else
+                    size_t elems = 1, bool check_field_size = false,
+#endif
+                    bool silence_warnings = false)
+        : field(fid), field_region(region), 
+          bounds(region.template get_bounds<N,T>()),
+          gpu_warning(!silence_warnings)
+      {
+        DomainT<N,T> is;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(READ_ONLY, fid, elems * sizeof(FT), &is,
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), 
+              silence_warnings, false/*generic accessor*/, check_field_size);
+        accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, is.bounds);
+      }
+    public:
+      __CUDA_HD__
+      inline FT read(const Point<N,T>& p) const 
+        { 
+#ifdef __CUDA_ARCH__
+          if (gpu_warning)
+          {
+            if (!bounds.dense())
+              printf("WARNING: GPU bounds check is imprecise\n");
+            gpu_warning = false;
+          }
+          assert(bounds.bounds.contains(p));
+#else
+          if (!bounds.contains(p)) 
+            field_region.fail_bounds_check(DomainPoint(p), field, READ_ONLY);
+#endif
+          return accessor.read(p); 
+        }
+      __CUDA_HD__
+      inline const FT* ptr(const Point<N,T>& p) const
+        { 
+#ifdef __CUDA_ARCH__
+          if (gpu_warning)
+          {
+            if (!bounds.dense())
+              printf("WARNING: GPU bounds check is imprecise\n");
+            gpu_warning = false;
+          }
+          assert(bounds.bounds.contains(p));
+#else
+          if (!bounds.contains(p)) 
+            field_region.fail_bounds_check(DomainPoint(p), field, READ_ONLY);
+#endif
+          return accessor.ptr(p); 
+        }
+      __CUDA_HD__
+      inline const FT* ptr(const Rect<N,T>& r) const
+        {
+#ifdef __CUDA_ARCH__
+          if (gpu_warning)
+          {
+            if (!bounds.dense())
+              printf("WARNING: GPU bounds check is imprecise\n");
+            gpu_warning = false;
+          }
+          assert(bounds.bounds.contains(r));
+#else
+          if (!bounds.contains_all(r)) 
+            field_region.fail_bounds_check(DomainPoint(r), field, READ_ONLY);
+#endif
+          if (!accessor.is_dense_arbitrary(r))
+          {
+            fprintf(stderr, 
+                "ERROR: Illegal request for pointer of non-dense rectangle\n");
+#ifdef DEBUG_LEGION
+            assert(false);
+#endif
+            exit(ERROR_NON_DENSE_RECTANGLE);
+          }
+          return accessor.ptr(r.lo);
+        }
+      __CUDA_HD__
+      inline const FT& operator[](const Point<N,T>& p) const
+        { 
+#ifdef __CUDA_ARCH__
+          if (gpu_warning)
+          {
+            if (!bounds.dense())
+              printf("WARNING: GPU bounds check is imprecise\n");
+            gpu_warning = false;
+          }
+          assert(bounds.bounds.contains(p));
+#else
+          if (!bounds.contains(p)) 
+            field_region.fail_bounds_check(DomainPoint(p), field, READ_ONLY);
+#endif
+          return accessor[p]; 
+        }
+      __CUDA_HD__
+      inline ArraySyntax::AffineSyntaxHelper<FieldAccessor<READ_ONLY,FT,N,T,
+             Realm::AffineAccessor<FT,N,T>,true>,FT,N,T,2,true/*read only*/>
+          operator[](T index) const
+      {
+        return ArraySyntax::AffineSyntaxHelper<FieldAccessor<READ_ONLY,FT,N,T,
+              Realm::AffineAccessor<FT,N,T>,true>,FT,N,T,2,true/*read only*/>(
+              *this, Point<1,T>(index));
+      }
+    public:
+      Realm::AffineAccessor<FT,N,T> accessor;
+      FieldID field;
+      PhysicalRegion field_region;
+      DomainT<N,T> bounds;
+      mutable bool gpu_warning;
+    };
+
+    // Read-only FieldAccessor specialization 
+    // with N==1 to avoid array ambiguity
+    template<typename FT, typename T, bool CB>
+    class FieldAccessor<READ_ONLY,FT,1,T,
+                        Realm::AffineAccessor<FT,1,T>,CB> {
+    public:
+      __CUDA_HD__
+      FieldAccessor(void) { }
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,
+#ifdef DEBUG_LEGION
+                    size_t elems = 1, bool check_field_size = true,
+#else
+                    size_t elems = 1, bool check_field_size = false,
+#endif
+                    bool silence_warnings = false)
+      {
+        DomainT<1,T> is;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(READ_ONLY, fid, elems * sizeof(FT), &is,
+              Internal::NT_TemplateHelper::encode_tag<1,T>(), 
+              silence_warnings, false/*generic accessor*/, check_field_size);
+        accessor = Realm::AffineAccessor<FT,1,T>(instance, fid, is.bounds);
+      }
+    public:
+      __CUDA_HD__
+      inline FT read(const Point<1,T>& p) const 
+        { 
+          return accessor.read(p); 
+        }
+      __CUDA_HD__
+      inline const FT* ptr(const Point<1,T>& p) const
+        { 
+          return accessor.ptr(p); 
+        }
+      __CUDA_HD__
+      inline const FT* ptr(const Rect<1,T>& r) const
+        {
+          if (!accessor.is_dense_arbitrary(r))
+          {
+            fprintf(stderr, 
+                "ERROR: Illegal request for pointer of non-dense rectangle\n");
+#ifdef DEBUG_LEGION
+            assert(false);
+#endif
+            exit(ERROR_NON_DENSE_RECTANGLE);
+          }
+          return accessor.ptr(r.lo); 
+        }
+      __CUDA_HD__
+      inline const FT& operator[](const Point<1,T>& p) const
+        { 
+          return accessor[p]; 
+        }
+    public:
+      Realm::AffineAccessor<FT,1,T> accessor;
+    };
+
+    // Read-only FieldAccessor specialization 
+    // with N==1 to avoid array ambiguity and bounds checks
+    template<typename FT, typename T>
+    class FieldAccessor<READ_ONLY,FT,1,T,
+                        Realm::AffineAccessor<FT,1,T>,true> {
+    public:
+      // No CUDA support due to PhysicalRegion constructor
+      FieldAccessor(void) { }
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,
+#ifdef DEBUG_LEGION
+                    size_t elems = 1, bool check_field_size = true,
+#else
+                    size_t elems = 1, bool check_field_size = false,
+#endif
+                    bool silence_warnings = false)
+        : field(fid), field_region(region), 
+          bounds(region.template get_bounds<1,T>()), 
+          gpu_warning(!silence_warnings)
+      {
+        DomainT<1,T> is;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(READ_ONLY, fid, elems * sizeof(FT), &is,
+              Internal::NT_TemplateHelper::encode_tag<1,T>(), 
+              silence_warnings, false/*generic accessor*/, check_field_size);
+        accessor = Realm::AffineAccessor<FT,1,T>(instance, fid, is.bounds);
+      }
+    public:
+      __CUDA_HD__
+      inline FT read(const Point<1,T>& p) const 
+        { 
+#ifdef __CUDA_ARCH__
+          if (gpu_warning)
+          {
+            if (!bounds.dense())
+              printf("WARNING: GPU bounds check is imprecise\n");
+            gpu_warning = false;
+          }
+          assert(bounds.bounds.contains(p));
+#else
+          if (!bounds.contains(p)) 
+            field_region.fail_bounds_check(DomainPoint(p), field, READ_ONLY);
+#endif
+          return accessor.read(p); 
+        }
+      __CUDA_HD__
+      inline const FT* ptr(const Point<1,T>& p) const
+        { 
+#ifdef __CUDA_ARCH__
+          if (gpu_warning)
+          {
+            if (!bounds.dense())
+              printf("WARNING: GPU bounds check is imprecise\n");
+            gpu_warning = false;
+          }
+          assert(bounds.bounds.contains(p));
+#else
+          if (!bounds.contains(p)) 
+            field_region.fail_bounds_check(DomainPoint(p), field, READ_ONLY);
+#endif
+          return accessor.ptr(p); 
+        }
+      __CUDA_HD__
+      inline const FT* ptr(const Rect<1,T>& r) const
+        {
+#ifdef __CUDA_ARCH__
+          if (gpu_warning)
+          {
+            if (!bounds.dense())
+              printf("WARNING: GPU bounds check is imprecise\n");
+            gpu_warning = false;
+          }
+          assert(bounds.bounds.contains(r));
+#else
+          if (!bounds.contains_all(r)) 
+            field_region.fail_bounds_check(DomainPoint(r), field, READ_ONLY);
+#endif
+          if (!accessor.is_dense_arbitrary(r))
+          {
+            fprintf(stderr, 
+                "ERROR: Illegal request for pointer of non-dense rectangle\n");
+#ifdef DEBUG_LEGION
+            assert(false);
+#endif
+            exit(ERROR_NON_DENSE_RECTANGLE);
+          }
+          return accessor.ptr(r.lo);
+        }
+      __CUDA_HD__
+      inline const FT& operator[](const Point<1,T>& p) const
+        { 
+#ifdef __CUDA_ARCH__
+          if (gpu_warning)
+          {
+            if (!bounds.dense())
+              printf("WARNING: GPU bounds check is imprecise\n");
+            gpu_warning = false;
+          }
+          assert(bounds.bounds.contains(p));
+#else
+          if (!bounds.contains(p)) 
+            field_region.fail_bounds_check(DomainPoint(p), field, READ_ONLY);
+#endif
+          return accessor[p]; 
+        }
+    public:
+      Realm::AffineAccessor<FT,1,T> accessor;
+      FieldID field;
+      PhysicalRegion field_region;
+      DomainT<1,T> bounds;
+      mutable bool gpu_warning;
+    };
+
+    // Read-write FieldAccessor specialization
+    template<typename FT, int N, typename T, bool CB>
+    class FieldAccessor<READ_WRITE,FT,N,T,
+                        Realm::AffineAccessor<FT,N,T>,CB> {
+    public:
+      __CUDA_HD__
+      FieldAccessor(void) { }
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,
+#ifdef DEBUG_LEGION
+                    size_t elems = 1, bool check_field_size = true,
+#else
+                    size_t elems = 1, bool check_field_size = false,
+#endif
+                    bool silence_warnings = false)
+      {
+        DomainT<N,T> is;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(READ_WRITE, fid, elems * sizeof(FT), &is,
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), 
+              silence_warnings, false/*generic accessor*/, check_field_size);
+        accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, is.bounds);
+      }
+    public:
+      __CUDA_HD__
+      inline FT read(const Point<N,T>& p) const
+        { 
+          return accessor.read(p); 
+        }
+      __CUDA_HD__
+      inline void write(const Point<N,T>& p, FT val) const
+        { 
+          accessor.write(p, val); 
+        }
+      __CUDA_HD__
+      inline FT* ptr(const Point<N,T>& p) const
+        { 
+          return accessor.ptr(p); 
+        }
+      __CUDA_HD__
+      inline FT* ptr(const Rect<N,T>& r) const
+        {
+          if (!accessor.is_dense_arbitrary(r))
+          {
+            fprintf(stderr, 
+                "ERROR: Illegal request for pointer of non-dense rectangle\n");
+#ifdef DEBUG_LEGION
+            assert(false);
+#endif
+            exit(ERROR_NON_DENSE_RECTANGLE);
+          }
+          return accessor.ptr(r.lo);
+        }
+      __CUDA_HD__
+      inline FT& operator[](const Point<N,T>& p) const
+        { 
+          return accessor[p]; 
+        }
+      __CUDA_HD__
+      inline ArraySyntax::AffineSyntaxHelper<FieldAccessor<READ_WRITE,FT,N,T,
+             Realm::AffineAccessor<FT,N,T>,CB>,FT,N,T,2,false/*read only*/>
+          operator[](T index) const
+      {
+        return ArraySyntax::AffineSyntaxHelper<FieldAccessor<READ_WRITE,FT,N,T,
+              Realm::AffineAccessor<FT,N,T>,CB>,FT,N,T,2,false/*read only*/>(
+              *this, Point<1,T>(index));
+      }
+      template<typename REDOP, bool EXCLUSIVE> __CUDA_HD__
+      inline void reduce(const Point<N,T>& p, 
+                         typename REDOP::RHS val) const
+        { 
+          REDOP::template apply<EXCLUSIVE>(accessor[p], val);
+        }
+    public:
+      Realm::AffineAccessor<FT,N,T> accessor;
+    };
+
+    // Read-write FieldAccessor specialization
+    // with bounds checks
+    template<typename FT, int N, typename T>
+    class FieldAccessor<READ_WRITE,FT,N,T,
+                        Realm::AffineAccessor<FT,N,T>,true> {
+    public:
+      // No CUDA support due to PhysicalRegion constructor
+      FieldAccessor(void) { }
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,
+#ifdef DEBUG_LEGION
+                    size_t elems = 1, bool check_field_size = true,
+#else
+                    size_t elems = 1, bool check_field_size = false,
+#endif
+                    bool silence_warnings = false)
+        : field(fid), field_region(region), 
+          bounds(region.template get_bounds<N,T>()),
+          gpu_warning(!silence_warnings)
+      {
+        DomainT<N,T> is;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(READ_WRITE, fid, elems * sizeof(FT), &is,
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), 
+              silence_warnings, false/*generic accessor*/, check_field_size);
+        accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, is.bounds);
+      }
+    public:
+      __CUDA_HD__
+      inline FT read(const Point<N,T>& p) const
+        { 
+#ifdef __CUDA_ARCH__
+          if (gpu_warning)
+          {
+            if (!bounds.dense())
+              printf("WARNING: GPU bounds check is imprecise\n");
+            gpu_warning = false;
+          }
+          assert(bounds.bounds.contains(p));
+#else
+          if (!bounds.contains(p)) 
+            field_region.fail_bounds_check(DomainPoint(p), field, READ_ONLY);
+#endif
+          return accessor.read(p); 
+        }
+      __CUDA_HD__
+      inline void write(const Point<N,T>& p, FT val) const
+        { 
+#ifdef __CUDA_ARCH__
+          if (gpu_warning)
+          {
+            if (!bounds.dense())
+              printf("WARNING: GPU bounds check is imprecise\n");
+            gpu_warning = false;
+          }
+          assert(bounds.bounds.contains(p));
+#else
+          if (!bounds.contains(p)) 
+            field_region.fail_bounds_check(DomainPoint(p), field,WRITE_DISCARD);
+#endif
+          accessor.write(p, val); 
+        }
+      __CUDA_HD__
+      inline FT* ptr(const Point<N,T>& p) const
+        { 
+#ifdef __CUDA_ARCH__
+          if (gpu_warning)
+          {
+            if (!bounds.dense())
+              printf("WARNING: GPU bounds check is imprecise\n");
+            gpu_warning = false;
+          }
+          assert(bounds.bounds.contains(p));
+#else
+          if (!bounds.contains(p)) 
+            field_region.fail_bounds_check(DomainPoint(p), field, READ_WRITE);
+#endif
+          return accessor.ptr(p); 
+        }
+      __CUDA_HD__
+      inline FT* ptr(const Rect<N,T>& r) const
+        {
+#ifdef __CUDA_ARCH__
+          if (gpu_warning)
+          {
+            if (!bounds.dense())
+              printf("WARNING: GPU bounds check is imprecise\n");
+            gpu_warning = false;
+          }
+          assert(bounds.bounds.contains(r));
+#else
+          if (!bounds.contains_all(r)) 
+            field_region.fail_bounds_check(Domain(r), field, READ_WRITE);
+#endif
+          if (!accessor.is_dense_arbitrary(r))
+          {
+            fprintf(stderr, 
+                "ERROR: Illegal request for pointer of non-dense rectangle\n");
+#ifdef DEBUG_LEGION
+            assert(false);
+#endif
+            exit(ERROR_NON_DENSE_RECTANGLE);
+          }
+          return accessor.ptr(r.lo);
+        }
+      __CUDA_HD__
+      inline FT& operator[](const Point<N,T>& p) const
+        { 
+#ifdef __CUDA_ARCH__
+          if (gpu_warning)
+          {
+            if (!bounds.dense())
+              printf("WARNING: GPU bounds check is imprecise\n");
+            gpu_warning = false;
+          }
+          assert(bounds.bounds.contains(p));
+#else
+          if (!bounds.contains(p)) 
+            field_region.fail_bounds_check(DomainPoint(p), field, READ_WRITE);
+#endif
+          return accessor[p]; 
+        }
+      __CUDA_HD__
+      inline ArraySyntax::AffineSyntaxHelper<FieldAccessor<READ_WRITE,FT,N,T,
+              Realm::AffineAccessor<FT,N,T>,true>,FT,N,T,2,false/*read only*/>
+          operator[](T index) const
+      {
+        return ArraySyntax::AffineSyntaxHelper<FieldAccessor<READ_WRITE,FT,N,T,
+               Realm::AffineAccessor<FT,N,T>,true>,FT,N,T,2,false/*read only*/>(
+              *this, Point<1,T>(index));
+      }
+      template<typename REDOP, bool EXCLUSIVE> __CUDA_HD__ 
+      inline void reduce(const Point<N,T>& p, 
+                         typename REDOP::RHS val) const
+        { 
+#ifdef __CUDA_ARCH__
+          if (gpu_warning)
+          {
+            if (!bounds.dense())
+              printf("WARNING: GPU bounds check is imprecise\n");
+            gpu_warning = false;
+          }
+          assert(bounds.bounds.contains(p));
+#else
+          if (!bounds.contains(p)) 
+            field_region.fail_bounds_check(DomainPoint(p), field, REDUCE);
+#endif
+          REDOP::template apply<EXCLUSIVE>(accessor[p], val);
+        }
+    public:
+      Realm::AffineAccessor<FT,N,T> accessor;
+      FieldID field;
+      PhysicalRegion field_region;
+      DomainT<N,T> bounds;
+      mutable bool gpu_warning;
+    };
+
+    // Read-write FieldAccessor specialization 
+    // with N==1 to avoid array ambiguity
+    template<typename FT, typename T, bool CB>
+    class FieldAccessor<READ_WRITE,FT,1,T,
+                        Realm::AffineAccessor<FT,1,T>,CB> {
+    public:
+      __CUDA_HD__
+      FieldAccessor(void) { }
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,
+#ifdef DEBUG_LEGION
+                    size_t elems = 1, bool check_field_size = true,
+#else
+                    size_t elems = 1, bool check_field_size = false,
+#endif
+                    bool silence_warnings = false)
+      {
+        DomainT<1,T> is;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(READ_WRITE, fid, sizeof(FT), &is,
+              Internal::NT_TemplateHelper::encode_tag<1,T>(), 
+              silence_warnings, false/*generic accessor*/, check_field_size);
+        accessor = Realm::AffineAccessor<FT,1,T>(instance, fid, is.bounds);
+      }
+    public:
+      __CUDA_HD__
+      inline FT read(const Point<1,T>& p) const
+        { 
+          return accessor.read(p); 
+        }
+      __CUDA_HD__
+      inline void write(const Point<1,T>& p, FT val) const
+        { 
+          accessor.write(p, val); 
+        }
+      __CUDA_HD__
+      inline FT* ptr(const Point<1,T>& p) const
+        { 
+          return accessor.ptr(p); 
+        }
+      __CUDA_HD__
+      inline FT* ptr(const Rect<1,T>& r) const
+        {
+          if (!accessor.is_dense_arbitrary(r))
+          {
+            fprintf(stderr, 
+                "ERROR: Illegal request for pointer of non-dense rectangle\n");
+#ifdef DEBUG_LEGION
+            assert(false);
+#endif
+            exit(ERROR_NON_DENSE_RECTANGLE);
+          }
+          return accessor.ptr(r.lo);
+        }
+      __CUDA_HD__
+      inline FT& operator[](const Point<1,T>& p) const
+        { 
+          return accessor[p]; 
+        }
+      template<typename REDOP, bool EXCLUSIVE> __CUDA_HD__
+      inline void reduce(const Point<1,T>& p, 
+                         typename REDOP::RHS val) const
+        { 
+          REDOP::template apply<EXCLUSIVE>(accessor[p], val);
+        }
+    public:
+      Realm::AffineAccessor<FT,1,T> accessor;
+    };
+
+    // Read-write FieldAccessor specialization 
+    // with N==1 to avoid array ambiguity and bounds checks
+    template<typename FT, typename T>
+    class FieldAccessor<READ_WRITE,FT,1,T,
+                        Realm::AffineAccessor<FT,1,T>,true> {
+    public:
+      // No CUDA support due to PhysicalRegion constructor
+      FieldAccessor(void) { }
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,
+#ifdef DEBUG_LEGION
+                    size_t elems = 1, bool check_field_size = true,
+#else
+                    size_t elems = 1, bool check_field_size = false,
+#endif
+                    bool silence_warnings = false)
+        : field(fid), field_region(region), 
+          bounds(region.template get_bounds<1,T>()),
+          gpu_warning(!silence_warnings)
+      {
+        DomainT<1,T> is;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(READ_WRITE, fid, elems * sizeof(FT), &is,
+              Internal::NT_TemplateHelper::encode_tag<1,T>(), 
+              silence_warnings, false/*generic accessor*/, check_field_size);
+        accessor = Realm::AffineAccessor<FT,1,T>(instance, fid, is.bounds);
+      }
+    public:
+      __CUDA_HD__
+      inline FT read(const Point<1,T>& p) const
+        { 
+#ifdef __CUDA_ARCH__
+          if (gpu_warning)
+          {
+            if (!bounds.dense())
+              printf("WARNING: GPU bounds check is imprecise\n");
+            gpu_warning = false;
+          }
+          assert(bounds.bounds.contains(p));
+#else
+          if (!bounds.contains(p)) 
+            field_region.fail_bounds_check(DomainPoint(p), field, READ_ONLY);
+#endif
+          return accessor.read(p); 
+        }
+      __CUDA_HD__
+      inline void write(const Point<1,T>& p, FT val) const
+        { 
+#ifdef __CUDA_ARCH__
+          if (gpu_warning)
+          {
+            if (!bounds.dense())
+              printf("WARNING: GPU bounds check is imprecise\n");
+            gpu_warning = false;
+          }
+          assert(bounds.bounds.contains(p));
+#else
+          if (!bounds.contains(p)) 
+            field_region.fail_bounds_check(DomainPoint(p), field,WRITE_DISCARD);
+#endif
+          accessor.write(p, val); 
+        }
+      __CUDA_HD__
+      inline FT* ptr(const Point<1,T>& p) const
+        { 
+#ifdef __CUDA_ARCH__
+          if (gpu_warning)
+          {
+            if (!bounds.dense())
+              printf("WARNING: GPU bounds check is imprecise\n");
+            gpu_warning = false;
+          }
+          assert(bounds.bounds.contains(p));
+#else
+          if (!bounds.contains(p)) 
+            field_region.fail_bounds_check(DomainPoint(p), field, READ_WRITE);
+#endif
+          return accessor.ptr(p); 
+        }
+      __CUDA_HD__
+      inline FT* ptr(const Rect<1,T>& r) const
+        {
+#ifdef __CUDA_ARCH__
+          if (gpu_warning)
+          {
+            if (!bounds.dense())
+              printf("WARNING: GPU bounds check is imprecise\n");
+            gpu_warning = false;
+          }
+          assert(bounds.bounds.contains(r));
+#else
+          if (!bounds.contains_all(r)) 
+            field_region.fail_bounds_check(Domain(r), field, READ_WRITE);
+#endif
+          if (!accessor.is_dense_arbitrary(r))
+          {
+            fprintf(stderr, 
+                "ERROR: Illegal request for pointer of non-dense rectangle\n");
+#ifdef DEBUG_LEGION
+            assert(false);
+#endif
+            exit(ERROR_NON_DENSE_RECTANGLE);
+          }
+          return accessor.ptr(r.lo);
+        }
+      __CUDA_HD__
+      inline FT& operator[](const Point<1,T>& p) const
+        { 
+#ifdef __CUDA_ARCH__
+          if (gpu_warning)
+          {
+            if (!bounds.dense())
+              printf("WARNING: GPU bounds check is imprecise\n");
+            gpu_warning = false;
+          }
+          assert(bounds.bounds.contains(p));
+#else
+          if (!bounds.contains(p)) 
+            field_region.fail_bounds_check(DomainPoint(p), field, READ_WRITE);
+#endif
+          return accessor[p]; 
+        }
+      template<typename REDOP, bool EXCLUSIVE> __CUDA_HD__
+      inline void reduce(const Point<1,T>& p, 
+                         typename REDOP::RHS val) const
+        { 
+#ifdef __CUDA_ARCH__
+          if (gpu_warning)
+          {
+            if (!bounds.dense())
+              printf("WARNING: GPU bounds check is imprecise\n");
+            gpu_warning = false;
+          }
+          assert(bounds.bounds.contains(p));
+#else
+          if (!bounds.contains(p)) 
+            field_region.fail_bounds_check(DomainPoint(p), field, REDUCE);
+#endif
+          REDOP::template apply<EXCLUSIVE>(accessor[p], val);
+        }
+    public:
+      Realm::AffineAccessor<FT,1,T> accessor;
+      FieldID field;
+      PhysicalRegion field_region;
+      DomainT<1,T> bounds;
+      mutable bool gpu_warning;
+    };
+
+    // Write-discard FieldAccessor specialization
+    template<typename FT, int N, typename T, bool CB>
+    class FieldAccessor<WRITE_DISCARD,FT,N,T,
+                        Realm::AffineAccessor<FT,N,T>,CB> {
+    public:
+      __CUDA_HD__
+      FieldAccessor(void) { }
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,
+#ifdef DEBUG_LEGION
+                    size_t elems = 1, bool check_field_size = true,
+#else
+                    size_t elems = 1, bool check_field_size = false,
+#endif
+                    bool silence_warnings = false)
+      {
+        DomainT<N,T> is;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(WRITE_DISCARD, fid, elems * sizeof(FT), &is,
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), 
+              silence_warnings, false/*generic accessor*/, check_field_size);
+        accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, is.bounds);
+      }
+    public:
+      __CUDA_HD__
+      inline FT read(const Point<N,T>& p) const
+        { 
+          return accessor.read(p); 
+        }
+      __CUDA_HD__
+      inline void write(const Point<N,T>& p, FT val) const
+        { 
+          accessor.write(p, val); 
+        }
+      __CUDA_HD__
+      inline FT* ptr(const Point<N,T>& p) const
+        { 
+          return accessor.ptr(p); 
+        }
+      __CUDA_HD__
+      inline FT* ptr(const Rect<N,T>& r) const
+        {
+          if (!accessor.is_dense_arbitrary(r))
+          {
+            fprintf(stderr, 
+                "ERROR: Illegal request for pointer of non-dense rectangle\n");
+#ifdef DEBUG_LEGION
+            assert(false);
+#endif
+            exit(ERROR_NON_DENSE_RECTANGLE);
+          }
+          return accessor.ptr(r);
+        }
+      __CUDA_HD__
+      inline FT& operator[](const Point<N,T>& p) const
+        { 
+          return accessor[p]; 
+        }
+      __CUDA_HD__
+      inline ArraySyntax::AffineSyntaxHelper<FieldAccessor<WRITE_DISCARD,FT,N,T,
+             Realm::AffineAccessor<FT,N,T>,CB>,FT,N,T,2,false/*read only*/>
+          operator[](T index) const
+      {
+        return ArraySyntax::AffineSyntaxHelper<FieldAccessor<WRITE_DISCARD,FT,N,
+          T,Realm::AffineAccessor<FT,N,T>,CB>,FT,N,T,2,false/*read only*/>(
+              *this, Point<1,T>(index));
+      }
+    public:
+      Realm::AffineAccessor<FT,N,T> accessor;
+    };
+
+    // Write-discard FieldAccessor specialization
+    // with bounds checks
+    template<typename FT, int N, typename T>
+    class FieldAccessor<WRITE_DISCARD,FT,N,T,
+                        Realm::AffineAccessor<FT,N,T>,true> {
+    public:
+      // No CUDA support due to PhysicalRegion constructor
+      FieldAccessor(void) { }
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,
+#ifdef DEBUG_LEGION
+                    size_t elems = 1, bool check_field_size = true,
+#else
+                    size_t elems = 1, bool check_field_size = false,
+#endif
+                    bool silence_warnings = false)
+        : field(fid), field_region(region), 
+          bounds(region.template get_bounds<N,T>()),
+          gpu_warning(!silence_warnings)
+      {
+        DomainT<N,T> is;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(WRITE_DISCARD, fid, elems * sizeof(FT), &is,
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), 
+              silence_warnings, false/*generic accessor*/, check_field_size);
+        accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, is.bounds);
+      }
+    public:
+      __CUDA_HD__
+      inline FT read(const Point<N,T>& p) const
+        { 
+#ifdef __CUDA_ARCH__
+          if (gpu_warning)
+          {
+            if (!bounds.dense())
+              printf("WARNING: GPU bounds check is imprecise\n");
+            gpu_warning = false;
+          }
+          assert(bounds.bounds.contains(p));
+#else
+          if (!bounds.contains(p)) 
+            field_region.fail_bounds_check(DomainPoint(p), field, READ_ONLY);
+#endif
+          return accessor.read(p); 
+        }
+      __CUDA_HD__
+      inline void write(const Point<N,T>& p, FT val) const
+        { 
+#ifdef __CUDA_ARCH__
+          if (gpu_warning)
+          {
+            if (!bounds.dense())
+              printf("WARNING: GPU bounds check is imprecise\n");
+            gpu_warning = false;
+          }
+          assert(bounds.bounds.contains(p));
+#else
+          if (!bounds.contains(p)) 
+            field_region.fail_bounds_check(DomainPoint(p), field,WRITE_DISCARD);
+#endif
+          accessor.write(p, val); 
+        }
+      __CUDA_HD__
+      inline FT* ptr(const Point<N,T>& p) const
+        { 
+#ifdef __CUDA_ARCH__
+          if (gpu_warning)
+          {
+            if (!bounds.dense())
+              printf("WARNING: GPU bounds check is imprecise\n");
+            gpu_warning = false;
+          }
+          assert(bounds.bounds.contains(p));
+#else
+          if (!bounds.contains(p)) 
+            field_region.fail_bounds_check(DomainPoint(p), field, READ_WRITE);
+#endif
+          return accessor.ptr(p); 
+        }
+      __CUDA_HD__
+      inline FT* ptr(const Rect<N,T>& r) const 
+        {
+#ifdef __CUDA_ARCH__
+          if (gpu_warning)
+          {
+            if (!bounds.dense())
+              printf("WARNING: GPU bounds check is imprecise\n");
+            gpu_warning = false;
+          }
+          assert(bounds.bounds.contains(r));
+#else
+          if (!bounds.contains_all(r)) 
+            field_region.fail_bounds_check(Domain(r), field, READ_WRITE);
+#endif
+          if (!accessor.is_dense_arbitrary(r))
+          {
+            fprintf(stderr, 
+                "ERROR: Illegal request for pointer of non-dense rectangle\n");
+#ifdef DEBUG_LEGION
+            assert(false);
+#endif
+            exit(ERROR_NON_DENSE_RECTANGLE);
+          }
+          return accessor.ptr(r.lo);
+        }
+      __CUDA_HD__
+      inline FT& operator[](const Point<N,T>& p) const
+        { 
+#ifdef __CUDA_ARCH__
+          if (gpu_warning)
+          {
+            if (!bounds.dense())
+              printf("WARNING: GPU bounds check is imprecise\n");
+            gpu_warning = false;
+          }
+          assert(bounds.bounds.contains(p));
+#else
+          if (!bounds.contains(p)) 
+            field_region.fail_bounds_check(DomainPoint(p), field, READ_WRITE);
+#endif
+          return accessor[p]; 
+        }
+      __CUDA_HD__
+      inline ArraySyntax::AffineSyntaxHelper<FieldAccessor<WRITE_DISCARD,FT,N,T,
+             Realm::AffineAccessor<FT,N,T>,true>,FT,N,T,2,false/*read only*/>
+          operator[](T index) const
+      {
+        return ArraySyntax::AffineSyntaxHelper<FieldAccessor<WRITE_DISCARD,FT,N,
+          T,Realm::AffineAccessor<FT,N,T>,true>,FT,N,T,2,false/*read only*/>(
+              *this, Point<1,T>(index));
+      }
+    public:
+      Realm::AffineAccessor<FT,N,T> accessor;
+      FieldID field;
+      PhysicalRegion field_region;
+      DomainT<N,T> bounds;
+      mutable bool gpu_warning;
+    };
+
+    // Write-discard FieldAccessor specialization with
+    // N == 1 to avoid array ambiguity
+    template<typename FT, typename T, bool CB>
+    class FieldAccessor<WRITE_DISCARD,FT,1,T,
+                        Realm::AffineAccessor<FT,1,T>,CB> {
+    public:
+      __CUDA_HD__
+      FieldAccessor(void) { }
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,
+#ifdef DEBUG_LEGION
+                    size_t elems = 1, bool check_field_size = true,
+#else
+                    size_t elems = 1, bool check_field_size = false,
+#endif
+                    bool silence_warnings = false)
+      {
+        DomainT<1,T> is;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(WRITE_DISCARD, fid, elems * sizeof(FT), &is,
+              Internal::NT_TemplateHelper::encode_tag<1,T>(), 
+              silence_warnings, false/*generic accessor*/, check_field_size);
+        accessor = Realm::AffineAccessor<FT,1,T>(instance, fid, is.bounds);
+      }
+    public:
+      __CUDA_HD__
+      inline FT read(const Point<1,T>& p) const
+        { 
+          return accessor.read(p); 
+        }
+      __CUDA_HD__
+      inline void write(const Point<1,T>& p, FT val) const
+        { 
+          accessor.write(p, val); 
+        }
+      __CUDA_HD__
+      inline FT* ptr(const Point<1,T>& p) const
+        { 
+          return accessor.ptr(p); 
+        }
+      __CUDA_HD__
+      inline FT* ptr(const Rect<1,T>& r) const
+        {
+          if (!accessor.is_dense_arbitrary(r))
+          {
+            fprintf(stderr, 
+                "ERROR: Illegal request for pointer of non-dense rectangle\n");
+#ifdef DEBUG_LEGION
+            assert(false);
+#endif
+            exit(ERROR_NON_DENSE_RECTANGLE);
+          }
+          return accessor.ptr(r.lo);
+        }
+      __CUDA_HD__
+      inline FT& operator[](const Point<1,T>& p) const
+        { 
+          return accessor[p]; 
+        }
+    public:
+      Realm::AffineAccessor<FT,1,T> accessor;
+    };
+
+    // Write-discard FieldAccessor specialization with
+    // N == 1 to avoid array ambiguity and bounds checks
+    template<typename FT, typename T>
+    class FieldAccessor<WRITE_DISCARD,FT,1,T,
+                        Realm::AffineAccessor<FT,1,T>,true> {
+    public:
+      // No CUDA support due to PhysicalRegion constructor
+      FieldAccessor(void) { }
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,
+#ifdef DEBUG_LEGION
+                    size_t elems = 1, bool check_field_size = true,
+#else
+                    size_t elems = 1, bool check_field_size = false,
+#endif
+                    bool silence_warnings = false)
+        : field(fid), field_region(region), 
+          bounds(region.template get_bounds<1,T>()),
+          gpu_warning(!silence_warnings)
+      {
+        DomainT<1,T> is;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(WRITE_DISCARD, fid, elems * sizeof(FT), &is,
+              Internal::NT_TemplateHelper::encode_tag<1,T>(), 
+              silence_warnings, false/*generic accessor*/, check_field_size);
+        accessor = Realm::AffineAccessor<FT,1,T>(instance, fid, is.bounds);
+      }
+    public:
+      __CUDA_HD__
+      inline FT read(const Point<1,T>& p) const
+        { 
+#ifdef __CUDA_ARCH__
+          if (gpu_warning)
+          {
+            if (!bounds.dense())
+              printf("WARNING: GPU bounds check is imprecise\n");
+            gpu_warning = false;
+          }
+          assert(bounds.bounds.contains(p));
+#else
+          if (!bounds.contains(p)) 
+            field_region.fail_bounds_check(DomainPoint(p), field, READ_ONLY);
+#endif
+          return accessor.read(p); 
+        }
+      __CUDA_HD__
+      inline void write(const Point<1,T>& p, FT val) const
+        { 
+#ifdef __CUDA_ARCH__
+          if (gpu_warning)
+          {
+            if (!bounds.dense())
+              printf("WARNING: GPU bounds check is imprecise\n");
+            gpu_warning = false;
+          }
+          assert(bounds.bounds.contains(p));
+#else
+          if (!bounds.contains(p)) 
+            field_region.fail_bounds_check(DomainPoint(p), field,WRITE_DISCARD);
+#endif
+          accessor.write(p, val); 
+        }
+      __CUDA_HD__
+      inline FT* ptr(const Point<1,T>& p) const
+        { 
+#ifdef __CUDA_ARCH__
+          if (gpu_warning)
+          {
+            if (!bounds.dense())
+              printf("WARNING: GPU bounds check is imprecise\n");
+            gpu_warning = false;
+          }
+          assert(bounds.bounds.contains(p));
+#else
+          if (!bounds.contains(p)) 
+            field_region.fail_bounds_check(DomainPoint(p), field, READ_WRITE);
+#endif
+          return accessor.ptr(p); 
+        }
+      __CUDA_HD__
+      inline FT* ptr(const Rect<1,T>& r) const
+        {
+#ifdef __CUDA_ARCH__
+          if (gpu_warning)
+          {
+            if (!bounds.dense())
+              printf("WARNING: GPU bounds check is imprecise\n");
+            gpu_warning = false;
+          }
+          assert(bounds.bounds.contains(r));
+#else
+          if (!bounds.contains_all(r)) 
+            field_region.fail_bounds_check(Domain(r), field, READ_WRITE);
+#endif
+          if (!accessor.is_dense_arbitrary(r))
+          {
+            fprintf(stderr, 
+                "ERROR: Illegal request for pointer of non-dense rectangle\n");
+#ifdef DEBUG_LEGION
+            assert(false);
+#endif
+            exit(ERROR_NON_DENSE_RECTANGLE);
+          }
+          return accessor.ptr(r.lo);
+        }
+      __CUDA_HD__
+      inline FT& operator[](const Point<1,T>& p) const
+        { 
+#ifdef __CUDA_ARCH__
+          if (gpu_warning)
+          {
+            if (!bounds.dense())
+              printf("WARNING: GPU bounds check is imprecise\n");
+            gpu_warning = false;
+          }
+          assert(bounds.bounds.contains(p));
+#else
+          if (!bounds.contains(p)) 
+            field_region.fail_bounds_check(DomainPoint(p), field, READ_WRITE);
+#endif
+          return accessor[p]; 
+        }
+    public:
+      Realm::AffineAccessor<FT,1,T> accessor;
+      FieldID field;
+      PhysicalRegion field_region;
+      DomainT<1,T> bounds;
+      mutable bool gpu_warning;
+    };
+
+    // Reduce FieldAccessor specialization
+    template<typename FT, int N, typename T, bool CB>
+    class FieldAccessor<REDUCE,FT,N,T,
+                        Realm::AffineAccessor<FT,N,T>,CB> {
+    public:
+      __CUDA_HD__
+      FieldAccessor(void) { }
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,
+                    ReductionOpID redop, bool silence_warnings = false)
+      {
+        DomainT<N,T> is;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(REDUCE, fid, sizeof(FT), &is,
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), 
+              silence_warnings, false/*generic accessor*/, 
+              false/*check field size*/, redop);
+        accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, is.bounds);
+      }
+    public:
+      template<typename REDOP, bool EXCLUSIVE> __CUDA_HD__
+      inline void reduce(const Point<N,T>& p, 
+                         typename REDOP::RHS val) const
+        { 
+          REDOP::template fold<EXCLUSIVE>(accessor[p], val);
+        }
+    public:
+      Realm::AffineAccessor<FT,N,T> accessor;
+    };
+
+    // Reduce FieldAccessor specialization with bounds checks
+    template<typename FT, int N, typename T>
+    class FieldAccessor<REDUCE,FT,N,T,
+                        Realm::AffineAccessor<FT,N,T>,true> {
+    public:
+      // No CUDA support due to PhysicalRegion constructor
+      FieldAccessor(void) { }
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,
+                    ReductionOpID redop, bool silence_warnings = false)
+        : field(fid), field_region(region), 
+          bounds(region.template get_bounds<N,T>()),
+          gpu_warning(!silence_warnings)
+      {
+        DomainT<N,T> is;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(REDUCE, fid, sizeof(FT), &is,
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), 
+              silence_warnings, false/*generic accessor*/, 
+              false/*check field size*/, redop);
+        accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, is.bounds);
+      }
+    public:
+      template<typename REDOP, bool EXCLUSIVE> __CUDA_HD__ 
+      inline void reduce(const Point<N,T>& p, 
+                         typename REDOP::RHS val) const
+        { 
+#ifdef __CUDA_ARCH__
+          if (gpu_warning)
+          {
+            if (!bounds.dense())
+              printf("WARNING: GPU bounds check is imprecise\n");
+            gpu_warning = false;
+          }
+          assert(bounds.bounds.contains(p));
+#else
+          if (!bounds.contains(p)) 
+            field_region.fail_bounds_check(DomainPoint(p), field, REDUCE);
+#endif
+          REDOP::template fold<EXCLUSIVE>(accessor[p], val);
+        }
+    public:
+      Realm::AffineAccessor<FT,N,T> accessor;
+      FieldID field;
+      PhysicalRegion field_region;
+      DomainT<N,T> bounds;
+      mutable bool gpu_warning;
+    };
+
+    // A hidden class for users that really know what they are doing
+    /**
+     * \class UnsafeFieldAccessor
+     * This is a class for getting access to region data without
+     * privilege checks or bounds checks. Users should only use
+     * this accessor if they are confident that they actually do
+     * have their privileges and bounds correct
+     */
+    template<typename FT, int N, typename T = coord_t,
+             typename A = Realm::GenericAccessor<FT,N,T> >
+    class UnsafeFieldAccessor {
+    public:
+      UnsafeFieldAccessor(void) { }
+      UnsafeFieldAccessor(const PhysicalRegion &region, FieldID fid,
+                          bool silence_warnings = false)
+      {
+        DomainT<N,T> is;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(NO_ACCESS, fid, sizeof(FT), &is,
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), 
+              silence_warnings, true/*generic accessor*/,
+              false/*check field size*/);
+        accessor = Realm::GenericAccessor<FT,N,T>(instance, fid, is.bounds);
+      }
+    public:
+      inline FT read(const Point<N,T> &p) const
+        {
+          return accessor.read(p);
+        }
+      inline void write(const Point<N,T> &p, FT val) const
+        {
+          accessor.write(p, val);
+        }
+      inline Realm::AccessorRefHelper<FT> 
+              operator[](const Point<N,T> &p) const
+        {
+          return accessor[p];
+        }
+      inline ArraySyntax::GenericSyntaxHelper<UnsafeFieldAccessor<FT,N,T,
+              Realm::GenericAccessor<FT,N,T> >,FT,N,T,2,false/*read only*/>
+          operator[](T index) const
+        {
+          return ArraySyntax::GenericSyntaxHelper<UnsafeFieldAccessor<FT,N,T,
+              Realm::GenericAccessor<FT,N,T> >,FT,N,T,2,false/*read only*/>(
+                  *this, Point<1,T>(index));
+        }
+    public:
+      mutable Realm::GenericAccessor<FT,N,T> accessor;
+    };
+
+    template<typename FT, typename T>
+    class UnsafeFieldAccessor<FT,1,T,Realm::GenericAccessor<FT,1,T> > {
+    public:
+      UnsafeFieldAccessor(void) { }
+      UnsafeFieldAccessor(const PhysicalRegion &region, FieldID fid,
+                          bool silence_warnings = false)
+      {
+        DomainT<1,T> is;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(NO_ACCESS, fid, sizeof(FT), &is,
+              Internal::NT_TemplateHelper::encode_tag<1,T>(), 
+              silence_warnings, true/*generic accessor*/,
+              false/*check field size*/);
+        accessor = Realm::GenericAccessor<FT,1,T>(instance, fid, is.bounds);
+      }
+    public:
+      inline FT read(const Point<1,T> &p) const
+        {
+          return accessor.read(p);
+        }
+      inline void write(const Point<1,T> &p, FT val) const
+        {
+          accessor.write(p, val);
+        }
+      inline Realm::AccessorRefHelper<FT> 
+              operator[](const Point<1,T> &p) const
+        {
+          return accessor[p];
+        }
+    public:
+      mutable Realm::GenericAccessor<FT,1,T> accessor;
+    };
+
+    template<typename FT, int N, typename T>
+    class UnsafeFieldAccessor<FT, N, T, Realm::AffineAccessor<FT,N,T> > {
+    public:
+      UnsafeFieldAccessor(void) { }
+      UnsafeFieldAccessor(const PhysicalRegion &region, FieldID fid,
+                          bool silence_warnings = false)
+      {
+        DomainT<N,T> is;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(NO_ACCESS, fid, sizeof(FT), &is,
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), silence_warnings,
+              false/*generic accessor*/, false/*check field size*/);
+        accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, is.bounds);
+      }
+    public:
+      __CUDA_HD__
+      inline FT read(const Point<N,T> &p) const
+        {
+          return accessor.read(p);
+        }
+      __CUDA_HD__
+      inline void write(const Point<N,T> &p, FT val) const
+        {
+          accessor.write(p, val);
+        }
+      __CUDA_HD__
+      inline FT* ptr(const Point<N,T> &p) const
+        {
+          return accessor.ptr(p);
+        }
+      __CUDA_HD__
+      inline FT* ptr(const Rect<N,T>& r) const
+        {
+          if (!accessor.is_dense_arbitrary(r))
+          {
+            fprintf(stderr, 
+                "ERROR: Illegal request for pointer of non-dense rectangle\n");
+#ifdef DEBUG_LEGION
+            assert(false);
+#endif
+            exit(ERROR_NON_DENSE_RECTANGLE);
+          }
+          return accessor.ptr(r.lo);
+        }
+      __CUDA_HD__
+      inline FT& operator[](const Point<N,T> &p) const
+        {
+          return accessor[p];
+        }
+      __CUDA_HD__
+      inline FT& operator[](T index) const
+        {
+          return ArraySyntax::AffineSyntaxHelper<UnsafeFieldAccessor<FT,N,T,
+                 Realm::AffineAccessor<FT,N,T> >,FT,N,T,2,false/*read only*/>(
+                *this, Point<1,T>(index));
+        }
+    public:
+      Realm::AffineAccessor<FT,N,T> accessor;
+    };
+
+    // Specialization for UnsafeFieldAccessor for dimension 1 
+    // to avoid ambiguity for array access
+    template<typename FT, typename T>
+    class UnsafeFieldAccessor<FT,1,T,Realm::AffineAccessor<FT,1,T> > {
+    public:
+      UnsafeFieldAccessor(void) { }
+      UnsafeFieldAccessor(const PhysicalRegion &region, FieldID fid,
+                          bool silence_warnings = false)
+      {
+        DomainT<1,T> is;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(NO_ACCESS, fid, sizeof(FT), &is,
+              Internal::NT_TemplateHelper::encode_tag<1,T>(), silence_warnings,
+              false/*generic accessor*/, false/*check field size*/);
+        accessor = Realm::AffineAccessor<FT,1,T>(instance, fid, is.bounds);
+      }
+    public:
+      __CUDA_HD__
+      inline FT read(const Point<1,T> &p) const
+        {
+          return accessor.read(p); 
+        }
+      __CUDA_HD__
+      inline void write(const Point<1,T> &p, FT val) const
+        {
+          accessor.write(p, val);
+        }
+      __CUDA_HD__
+      inline FT* ptr(const Point<1,T> &p) const
+        {
+          return accessor.ptr(p);
+        }
+      __CUDA_HD__
+      inline FT& operator[](const Point<1,T> &p) const
+        {
+          return accessor[p];
+        }
+    public:
+      Realm::AffineAccessor<FT,1,T> accessor;
+    }; 
+
     //--------------------------------------------------------------------------
     inline IndexSpace& IndexSpace::operator=(const IndexSpace &rhs)
     //--------------------------------------------------------------------------
     {
       id = rhs.id;
       tid = rhs.tid;
+      type_tag = rhs.type_tag;
       return *this;
     }
 
@@ -306,6 +2490,9 @@ namespace Legion {
         return false;
       if (tid != rhs.tid)
         return false;
+#ifdef DEBUG_LEGION
+      assert(type_tag == rhs.type_tag);
+#endif
       return true;
     }
 
@@ -341,11 +2528,80 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    inline int IndexSpace::get_dim(void) const
+    //--------------------------------------------------------------------------
+    {
+      return Internal::NT_TemplateHelper::get_dim(type_tag);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    IndexSpaceT<DIM,T>::IndexSpaceT(IndexSpaceID id, IndexTreeID tid)
+      : IndexSpace(id, tid, 
+          Internal::NT_TemplateHelper::template encode_tag<DIM,T>()) 
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    IndexSpaceT<DIM,T>::IndexSpaceT(void)
+      : IndexSpace()
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    IndexSpaceT<DIM,T>::IndexSpaceT(const IndexSpaceT &rhs)
+      : IndexSpace(rhs.get_id(), rhs.get_tree_id(), rhs.get_type_tag())
+    //--------------------------------------------------------------------------
+    {
+      Internal::NT_TemplateHelper::template check_type<DIM,T>(type_tag);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    IndexSpaceT<DIM,T>::IndexSpaceT(const IndexSpace &rhs)
+      : IndexSpace(rhs.get_id(), rhs.get_tree_id(), rhs.get_type_tag())
+    //--------------------------------------------------------------------------
+    {
+      Internal::NT_TemplateHelper::template check_type<DIM,T>(type_tag);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    inline IndexSpaceT<DIM,T>& IndexSpaceT<DIM,T>::operator=(
+                                                          const IndexSpace &rhs)
+    //--------------------------------------------------------------------------
+    {
+      id = rhs.get_id();
+      tid = rhs.get_tree_id();
+      type_tag = rhs.get_type_tag();
+      Internal::NT_TemplateHelper::template check_type<DIM,T>(type_tag);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    inline IndexSpaceT<DIM,T>& IndexSpaceT<DIM,T>::operator=(
+                                                         const IndexSpaceT &rhs)
+    //--------------------------------------------------------------------------
+    {
+      id = rhs.get_id();
+      tid = rhs.get_tree_id();
+      type_tag = rhs.get_type_tag();
+      Internal::NT_TemplateHelper::template check_type<DIM,T>(type_tag);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
     inline IndexPartition& IndexPartition::operator=(const IndexPartition &rhs)
     //--------------------------------------------------------------------------
     {
       id = rhs.id;
       tid = rhs.tid;
+      type_tag = rhs.type_tag;
       return *this;
     }
     
@@ -357,6 +2613,9 @@ namespace Legion {
         return false;
       if (tid != rhs.tid)
         return false;
+#ifdef DEBUG_LEGION
+      assert(type_tag == rhs.type_tag);
+#endif
       return true;
     }
 
@@ -389,6 +2648,73 @@ namespace Legion {
       if (id < rhs.id)
         return false;
       return (tid > rhs.tid);
+    }
+
+    //--------------------------------------------------------------------------
+    inline int IndexPartition::get_dim(void) const
+    //--------------------------------------------------------------------------
+    {
+      return Internal::NT_TemplateHelper::get_dim(type_tag);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    IndexPartitionT<DIM,T>::IndexPartitionT(IndexPartitionID id,IndexTreeID tid)
+      : IndexPartition(id, tid,Internal::NT_TemplateHelper::encode_tag<DIM,T>())
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    IndexPartitionT<DIM,T>::IndexPartitionT(void)
+      : IndexPartition()
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    IndexPartitionT<DIM,T>::IndexPartitionT(const IndexPartitionT &rhs)
+      : IndexPartition(rhs.get_id(), rhs.get_tree_id(), rhs.get_type_tag())
+    //--------------------------------------------------------------------------
+    {
+      Internal::NT_TemplateHelper::template check_type<DIM,T>(type_tag);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    IndexPartitionT<DIM,T>::IndexPartitionT(const IndexPartition &rhs)
+      : IndexPartition(rhs.get_id(), rhs.get_tree_id(), rhs.get_type_tag())
+    //--------------------------------------------------------------------------
+    {
+      Internal::NT_TemplateHelper::template check_type<DIM,T>(type_tag);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    IndexPartitionT<DIM,T>& IndexPartitionT<DIM,T>::operator=(
+                                                      const IndexPartition &rhs)
+    //--------------------------------------------------------------------------
+    {
+      id = rhs.get_id();
+      tid = rhs.get_tree_id();
+      type_tag = rhs.get_type_tag();
+      Internal::NT_TemplateHelper::template check_type<DIM,T>(type_tag);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    IndexPartitionT<DIM,T>& IndexPartitionT<DIM,T>::operator=(
+                                                     const IndexPartitionT &rhs)
+    //--------------------------------------------------------------------------
+    {
+      id = rhs.get_id();
+      tid = rhs.get_tree_id();
+      type_tag = rhs.get_type_tag();
+      Internal::NT_TemplateHelper::template check_type<DIM,T>(type_tag);
+      return *this;
     }
     
     //--------------------------------------------------------------------------
@@ -472,6 +2798,75 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    LogicalRegionT<DIM,T>::LogicalRegionT(RegionTreeID tid, 
+                                          IndexSpace is, FieldSpace fs)
+      : LogicalRegion(tid, is, fs)
+    //--------------------------------------------------------------------------
+    {
+      Internal::NT_TemplateHelper::template check_type<DIM,T>(
+                                            is.get_type_tag());
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    LogicalRegionT<DIM,T>::LogicalRegionT(void)
+       : LogicalRegion()
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    LogicalRegionT<DIM,T>::LogicalRegionT(const LogicalRegionT &rhs)
+      : LogicalRegion(rhs.get_tree_id(), rhs.get_index_space(), 
+                      rhs.get_field_space())
+    //--------------------------------------------------------------------------
+    {
+      Internal::NT_TemplateHelper::template check_type<DIM,T>(
+                                rhs.get_type_tag());
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    LogicalRegionT<DIM,T>::LogicalRegionT(const LogicalRegion &rhs)
+      : LogicalRegion(rhs.get_tree_id(), rhs.get_index_space(), 
+                      rhs.get_field_space())
+    //--------------------------------------------------------------------------
+    {
+      Internal::NT_TemplateHelper::template check_type<DIM,T>(
+                                rhs.get_type_tag());
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    LogicalRegionT<DIM,T>& LogicalRegionT<DIM,T>::operator=(
+                                                       const LogicalRegion &rhs)
+    //--------------------------------------------------------------------------
+    {
+      tree_id = rhs.get_tree_id();
+      index_space = rhs.get_index_space();
+      field_space = rhs.get_field_space();
+      Internal::NT_TemplateHelper::template check_type<DIM,T>(
+                                rhs.get_type_tag());
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    LogicalRegionT<DIM,T>& LogicalRegionT<DIM,T>::operator=(
+                                                      const LogicalRegionT &rhs)
+    //--------------------------------------------------------------------------
+    {
+      tree_id = rhs.get_tree_id();
+      index_space = rhs.get_index_space();
+      field_space = rhs.get_field_space();
+      Internal::NT_TemplateHelper::template check_type<DIM,T>(
+                                rhs.get_type_tag());
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
     inline LogicalPartition& LogicalPartition::operator=(
                                                     const LogicalPartition &rhs)
     //--------------------------------------------------------------------------
@@ -518,37 +2913,72 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    inline bool IndexAllocator::operator==(const IndexAllocator &rhs) const
+    template<int DIM, typename T>
+    LogicalPartitionT<DIM,T>::LogicalPartitionT(RegionTreeID tid, 
+                                              IndexPartition pid, FieldSpace fs)
+      : LogicalPartition(tid, pid, fs)
     //--------------------------------------------------------------------------
     {
-      return ((index_space == rhs.index_space) && (allocator == rhs.allocator));
+      Internal::NT_TemplateHelper::template check_type<DIM,T>(
+                                            pid.get_type_tag());
     }
 
     //--------------------------------------------------------------------------
-    inline bool IndexAllocator::operator<(const IndexAllocator &rhs) const
+    template<int DIM, typename T>
+    LogicalPartitionT<DIM,T>::LogicalPartitionT(void)
+      : LogicalPartition()
     //--------------------------------------------------------------------------
     {
-      if (allocator < rhs.allocator)
-        return true;
-      else if (allocator > rhs.allocator)
-        return false;
-      else
-        return (index_space < rhs.index_space);
     }
 
     //--------------------------------------------------------------------------
-    inline ptr_t IndexAllocator::alloc(unsigned num_elements /*= 1*/)
+    template<int DIM, typename T>
+    LogicalPartitionT<DIM,T>::LogicalPartitionT(const LogicalPartitionT &rhs)
+      : LogicalPartition(rhs.get_tree_id(), rhs.get_index_partition(), 
+                         rhs.get_field_space())
     //--------------------------------------------------------------------------
     {
-      ptr_t result(allocator->alloc(num_elements));
-      return result;
+      Internal::NT_TemplateHelper::template check_type<DIM,T>(
+                                            rhs.get_type_tag());
     }
 
     //--------------------------------------------------------------------------
-    inline void IndexAllocator::free(ptr_t ptr, unsigned num_elements /*= 1*/)
+    template<int DIM, typename T>
+    LogicalPartitionT<DIM,T>::LogicalPartitionT(const LogicalPartition &rhs)
+      : LogicalPartition(rhs.get_tree_id(), rhs.get_index_partition(), 
+                         rhs.get_field_space())
     //--------------------------------------------------------------------------
     {
-      allocator->free(ptr.value,num_elements);
+      Internal::NT_TemplateHelper::template check_type<DIM,T>(
+                                            rhs.get_type_tag());
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    LogicalPartitionT<DIM,T>& LogicalPartitionT<DIM,T>::operator=(
+                                                    const LogicalPartition &rhs)
+    //--------------------------------------------------------------------------
+    {
+      tree_id = rhs.get_tree_id();
+      index_partition = rhs.get_index_partition();
+      field_space = rhs.get_field_space();
+      Internal::NT_TemplateHelper::template check_type<DIM,T>(
+                                            rhs.get_type_tag());
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    LogicalPartitionT<DIM,T>& LogicalPartitionT<DIM,T>::operator=(
+                                                   const LogicalPartitionT &rhs)
+    //--------------------------------------------------------------------------
+    {
+      tree_id = rhs.get_tree_id();
+      index_partition = rhs.get_index_partition();
+      field_space = rhs.get_field_space();
+      Internal::NT_TemplateHelper::template check_type<DIM,T>(
+                                            rhs.get_type_tag());
+      return *this;
     }
 
     //--------------------------------------------------------------------------
@@ -774,7 +3204,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    inline RegionRequirement& RegionRequirement::add_flags(RegionFlags new_flags)
+    inline RegionRequirement& RegionRequirement::add_flags(
+                                                          RegionFlags new_flags)
     //--------------------------------------------------------------------------
     {
       flags |= new_flags;
@@ -986,6 +3417,44 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    inline void InlineLauncher::add_grant(Grant g)
+    //--------------------------------------------------------------------------
+    {
+      grants.push_back(g);
+    }
+
+    //--------------------------------------------------------------------------
+    inline void InlineLauncher::add_wait_barrier(PhaseBarrier bar)
+    //--------------------------------------------------------------------------
+    {
+      assert(bar.exists());
+      wait_barriers.push_back(bar);
+    }
+
+    //--------------------------------------------------------------------------
+    inline void InlineLauncher::add_arrival_barrier(PhaseBarrier bar)
+    //--------------------------------------------------------------------------
+    {
+      assert(bar.exists());
+      arrive_barriers.push_back(bar);
+    }
+
+    //--------------------------------------------------------------------------
+    inline void InlineLauncher::add_wait_handshake(MPILegionHandshake handshake)
+    //--------------------------------------------------------------------------
+    {
+      wait_barriers.push_back(handshake.get_legion_wait_phase_barrier());
+    }
+
+    //--------------------------------------------------------------------------
+    inline void InlineLauncher::add_arrival_handshake(
+                                                   MPILegionHandshake handshake)
+    //--------------------------------------------------------------------------
+    {
+      arrive_barriers.push_back(handshake.get_legion_arrive_phase_barrier());
+    }
+
+    //--------------------------------------------------------------------------
     inline unsigned CopyLauncher::add_copy_requirements(
                      const RegionRequirement &src, const RegionRequirement &dst)
     //--------------------------------------------------------------------------
@@ -1017,6 +3486,26 @@ namespace Legion {
       assert(idx < dst_requirements.size());
 #endif
       dst_requirements[idx].add_field(fid, inst);
+    }
+
+    //--------------------------------------------------------------------------
+    inline void CopyLauncher::set_gather_field(RegionTreeID in_tid, 
+                                               FieldID in_fid) 
+    //--------------------------------------------------------------------------
+    {
+      copy_kind = GATHER_COPY;
+      indirect_tid = in_tid;
+      indirect_fid = in_fid;
+    }
+
+    //--------------------------------------------------------------------------
+    inline void CopyLauncher::set_scatter_field(RegionTreeID in_tid, 
+                                                FieldID in_fid) 
+    //--------------------------------------------------------------------------
+    {
+      copy_kind = SCATTER_COPY;
+      indirect_tid = in_tid;
+      indirect_fid = in_fid;
     }
 
     //--------------------------------------------------------------------------
@@ -1091,6 +3580,26 @@ namespace Legion {
       assert(idx < dst_requirements.size());
 #endif
       dst_requirements[idx].add_field(fid, inst);
+    }
+
+    //--------------------------------------------------------------------------
+    inline void IndexCopyLauncher::set_gather_field(RegionTreeID in_tid, 
+                                                    FieldID in_fid)
+    //--------------------------------------------------------------------------
+    {
+      copy_kind = GATHER_COPY;
+      indirect_tid = in_tid;
+      indirect_fid = in_fid;
+    }
+
+    //--------------------------------------------------------------------------
+    inline void IndexCopyLauncher::set_scatter_field(RegionTreeID in_tid, 
+                                                     FieldID in_fid)
+    //--------------------------------------------------------------------------
+    {
+      copy_kind = SCATTER_COPY;
+      indirect_tid = in_tid;
+      indirect_fid = in_fid;
     }
 
     //--------------------------------------------------------------------------
@@ -1349,6 +3858,9 @@ namespace Legion {
                                             LegionFileMode m)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(resource == EXTERNAL_POSIX_FILE);
+#endif
       file_name = name;
       mode = m;
       file_fields = fields;
@@ -1360,25 +3872,84 @@ namespace Legion {
                                 LegionFileMode m)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(resource == EXTERNAL_HDF5_FILE);
+#endif
       file_name = name;
       mode = m;
       field_files = field_map;
     }
 
     //--------------------------------------------------------------------------
-    inline void AttachLauncher::add_field_pointer(FieldID fid, void *ptr)
+    inline void AttachLauncher::attach_array_aos(void *base, bool column_major,
+                                            const std::vector<FieldID> &fields,
+                                            Memory mem, size_t alignment)
     //--------------------------------------------------------------------------
     {
-      field_pointers[fid] = ptr;
+#ifdef DEBUG_LEGION
+      assert(resource == EXTERNAL_INSTANCE);
+#endif
+      constraints.add_constraint(PointerConstraint(mem, uintptr_t(base)));
+      constraints.add_constraint(MemoryConstraint(mem.kind()));
+      constraints.add_constraint(
+          FieldConstraint(fields, true/*contiugous*/, true/*inorder*/));
+      std::vector<DimensionKind> dim_order(4);
+      // Field dimension first for AOS
+      dim_order[0] = DIM_F;
+      if (column_major)
+      {
+        dim_order[1] = DIM_X;
+        dim_order[2] = DIM_Y;
+        dim_order[3] = DIM_Z;
+      }
+      else
+      {
+        dim_order[1] = DIM_Z;
+        dim_order[2] = DIM_Y;
+        dim_order[3] = DIM_X;
+      }
+      constraints.add_constraint(
+          OrderingConstraint(dim_order, false/*contiguous*/));
+      for (std::vector<FieldID>::const_iterator it = fields.begin();
+            it != fields.end(); it++)
+        constraints.add_constraint(AlignmentConstraint(*it, GE_EK, alignment));
+      privilege_fields.insert(fields.begin(), fields.end());
     }
-
+    
     //--------------------------------------------------------------------------
-    inline void AttachLauncher::set_pitch(unsigned dim, size_t pitch)
+    inline void AttachLauncher::attach_array_soa(void *base, bool column_major,
+                                            const std::vector<FieldID> &fields,
+                                            Memory mem, size_t alignment)
     //--------------------------------------------------------------------------
     {
-      if (pitches.size() <= dim)
-        pitches.resize(dim+1, 0);
-      pitches[dim] = pitch;
+#ifdef DEBUG_LEGION
+      assert(resource == EXTERNAL_INSTANCE);
+#endif
+      constraints.add_constraint(PointerConstraint(mem, uintptr_t(base)));
+      constraints.add_constraint(MemoryConstraint(mem.kind()));
+      constraints.add_constraint(
+          FieldConstraint(fields, true/*contiugous*/, true/*inorder*/));
+      std::vector<DimensionKind> dim_order(4);
+      if (column_major)
+      {
+        dim_order[0] = DIM_X;
+        dim_order[1] = DIM_Y;
+        dim_order[2] = DIM_Z;
+      }
+      else
+      {
+        dim_order[0] = DIM_Z;
+        dim_order[1] = DIM_Y;
+        dim_order[2] = DIM_X;
+      }
+      // Field dimension last for SOA 
+      dim_order[3] = DIM_F;
+      constraints.add_constraint(
+          OrderingConstraint(dim_order, false/*contiguous*/));
+      for (std::vector<FieldID>::const_iterator it = fields.begin();
+            it != fields.end(); it++)
+        constraints.add_constraint(AlignmentConstraint(*it, GE_EK, alignment));
+      privilege_fields.insert(fields.begin(), fields.end());
     }
 
     //--------------------------------------------------------------------------
@@ -1569,6 +4140,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    inline void TaskVariantRegistrar::set_replicable(bool is_repl/*= true*/)
+    //--------------------------------------------------------------------------
+    {
+      replicable_variant = is_repl;
+    }
+
+    //--------------------------------------------------------------------------
     template<typename T>
     inline T Future::get_result(bool silence_warnings) const
     //--------------------------------------------------------------------------
@@ -1685,29 +4263,64 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    DomainT<DIM,T> PhysicalRegion::get_bounds(void) const
+    //--------------------------------------------------------------------------
+    {
+      DomainT<DIM,T> result;
+      get_bounds(&result, Internal::NT_TemplateHelper::encode_tag<DIM,T>());
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    PhysicalRegion::operator DomainT<DIM,T>(void) const
+    //--------------------------------------------------------------------------
+    {
+      DomainT<DIM,T> result;
+      get_bounds(&result, Internal::NT_TemplateHelper::encode_tag<DIM,T>());
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    PhysicalRegion::operator Rect<DIM,T>(void) const
+    //--------------------------------------------------------------------------
+    {
+      DomainT<DIM,T> result;
+      get_bounds(&result, Internal::NT_TemplateHelper::encode_tag<DIM,T>());
+#ifdef DEBUG_LEGION
+      assert(result.dense());
+#endif
+      return result.bounds;
+    }
+
+#ifdef __GNUC__
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
+#ifdef __clang__
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#endif
+    //--------------------------------------------------------------------------
     inline bool IndexIterator::has_next(void) const
     //--------------------------------------------------------------------------
     {
-      return (!finished);
+      return is_iterator.valid;
     }
     
     //--------------------------------------------------------------------------
     inline ptr_t IndexIterator::next(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(!finished);
-#endif
-      ptr_t result = current_pointer;
-      remaining_elmts--;
-      if (remaining_elmts > 0)
-      {
-        current_pointer++;
-      }
-      else
-      {
-        finished = !(enumerator->get_next(current_pointer, remaining_elmts));
-      }
+      if (!rect_iterator.valid)
+        rect_iterator = 
+          Realm::PointInRectIterator<1,coord_t>(is_iterator.rect);
+      const ptr_t result = rect_iterator.p[0];
+      rect_iterator.step();
+      if (!rect_iterator.valid)
+        is_iterator.step();
       return result;
     }
 
@@ -1715,31 +4328,132 @@ namespace Legion {
     inline ptr_t IndexIterator::next_span(size_t& act_count, size_t req_count)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(!finished);
-#endif
-      ptr_t result = current_pointer;
-      // did we consume the entire span from the enumerator?
-      if ((size_t)remaining_elmts <= req_count)
+      if (rect_iterator.valid)
       {
-	// yes, limit the actual count to what we had, and get the next span
-	act_count = remaining_elmts;
-	current_pointer += remaining_elmts;
-        finished = !(enumerator->get_next(current_pointer, remaining_elmts));
+        // If we have a rect iterator we just go to the end of the rectangle
+        const ptr_t result = rect_iterator.p[0];
+        const ptr_t last = is_iterator.rect.hi[0];
+        act_count = (last.value - result.value) + 1;
+        if (act_count <= req_count)
+        {
+          rect_iterator.valid = false;
+          is_iterator.step();
+        }
+        else
+	{
+          rect_iterator.p[0] = result.value + req_count;
+	  act_count = req_count;
+	}
+        return result;
       }
       else
       {
-	// no, just return what was requested
-	act_count = req_count;
-	current_pointer += req_count;
+        // Consume the whole rectangle
+        const ptr_t result = is_iterator.rect.lo[0];
+        const ptr_t last = is_iterator.rect.hi[0];
+        act_count = (last.value - result.value) + 1;
+        if (act_count > req_count)
+        {
+          rect_iterator = 
+            Realm::PointInRectIterator<1,coord_t>(is_iterator.rect);
+          rect_iterator.p[0] = result.value + req_count;
+	  act_count = req_count;
+        }
+        else
+        {
+          rect_iterator.valid = false;
+          is_iterator.step();
+        }
+        return result;
       }
-      return result;
+    }
+#ifdef __GNUC__
+#pragma GCC diagnostic pop
+#endif
+#ifdef __clang__
+#pragma clang diagnostic pop
+#endif
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    IndexSpaceT<DIM,T> Runtime::create_index_space(Context ctx, 
+                                                   Rect<DIM,T> bounds)
+    //--------------------------------------------------------------------------
+    {
+      // Make a Realm index space
+      DomainT<DIM,T> realm_is(bounds);
+      return IndexSpaceT<DIM,T>(create_index_space_internal(ctx, &realm_is,
+                Internal::NT_TemplateHelper::template encode_tag<DIM,T>()));
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    IndexSpaceT<DIM,T> Runtime::create_index_space(Context ctx,
+                                       const std::vector<Point<DIM,T> > &points)
+    //--------------------------------------------------------------------------
+    {
+      // C++ type system is dumb
+      std::vector<Realm::Point<DIM,T> > realm_points(points.size());
+      for (unsigned idx = 0; idx < points.size(); idx++)
+        realm_points[idx] = points[idx];
+      DomainT<DIM,T> realm_is((Realm::IndexSpace<DIM,T>(realm_points)));
+      return IndexSpaceT<DIM,T>(create_index_space_internal(ctx, &realm_is,
+                Internal::NT_TemplateHelper::template encode_tag<DIM,T>()));
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    IndexSpaceT<DIM,T> Runtime::create_index_space(Context ctx,
+                                         const std::vector<Rect<DIM,T> > &rects)
+    //--------------------------------------------------------------------------
+    {
+      // C++ type system is dumb
+      std::vector<Realm::Rect<DIM,T> > realm_rects(rects.size());
+      for (unsigned idx = 0; idx < rects.size(); idx++)
+        realm_rects[idx] = rects[idx];
+      DomainT<DIM,T> realm_is((Realm::IndexSpace<DIM,T>(realm_rects)));
+      return IndexSpaceT<DIM,T>(create_index_space_internal(ctx, &realm_is,
+                Internal::NT_TemplateHelper::template encode_tag<DIM,T>()));
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    IndexSpaceT<DIM,T> Runtime::union_index_spaces(Context ctx,
+                                 const std::vector<IndexSpaceT<DIM,T> > &spaces)
+    //--------------------------------------------------------------------------
+    {
+      std::vector<IndexSpace> handles(spaces.size());
+      for (unsigned idx = 0; idx < spaces.size(); idx++)
+        handles[idx] = spaces[idx];
+      return IndexSpaceT<DIM,T>(union_index_spaces(ctx, handles));
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    IndexSpaceT<DIM,T> Runtime::intersect_index_spaces(Context ctx,
+                                 const std::vector<IndexSpaceT<DIM,T> > &spaces)
+    //--------------------------------------------------------------------------
+    {
+      std::vector<IndexSpace> handles(spaces.size());
+      for (unsigned idx = 0; idx < spaces.size(); idx++)
+        handles[idx] = spaces[idx];
+      return IndexSpaceT<DIM,T>(intersect_index_spaces(ctx, handles));
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    IndexSpaceT<DIM,T> Runtime::subtract_index_spaces(Context ctx,
+                              IndexSpaceT<DIM,T> left, IndexSpaceT<DIM,T> right)
+    //--------------------------------------------------------------------------
+    {
+      return IndexSpaceT<DIM,T>(subtract_index_spaces(ctx, 
+                                        IndexSpace(left), IndexSpace(right)));
     }
 
     //--------------------------------------------------------------------------
     template<typename T>
     IndexPartition Runtime::create_index_partition(Context ctx,
-        IndexSpace parent, const T& mapping, int part_color /*= AUTO_GENERATE*/)
+      IndexSpace parent, const T& mapping, Color part_color /*= AUTO_GENERATE*/)
     //--------------------------------------------------------------------------
     {
       LegionRuntime::Arrays::Rect<T::IDIM> parent_rect = 
@@ -1819,6 +4533,463 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    template<int DIM, typename T, int COLOR_DIM, typename COLOR_T>
+    IndexPartitionT<DIM,T> Runtime::create_equal_partition(Context ctx,
+                              IndexSpaceT<DIM,T> parent,
+                              IndexSpaceT<COLOR_DIM,COLOR_T> color_space,
+                              size_t granularity, Color color)
+    //--------------------------------------------------------------------------
+    {
+      return IndexPartitionT<DIM,T>(create_equal_partition(ctx,
+                                    IndexSpace(parent), IndexSpace(color_space),
+                                    granularity, color));
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T, int COLOR_DIM, typename COLOR_T>
+    IndexPartitionT<DIM,T> Runtime::create_partition_by_union(Context ctx,
+                              IndexSpaceT<DIM,T> parent,
+                              IndexPartitionT<DIM,T> handle1,
+                              IndexPartitionT<DIM,T> handle2,
+                              IndexSpaceT<COLOR_DIM,COLOR_T> color_space,
+                              PartitionKind part_kind, Color color)
+    //--------------------------------------------------------------------------
+    {
+      return IndexPartitionT<DIM,T>(create_partition_by_union(ctx,
+           IndexSpace(parent), IndexPartition(handle1),
+           IndexPartition(handle2), IndexSpace(color_space), part_kind, color));
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T, int COLOR_DIM, typename COLOR_T>
+    IndexPartitionT<DIM,T> Runtime::create_partition_by_intersection(
+                              Context ctx,
+                              IndexSpaceT<DIM,T> parent,
+                              IndexPartitionT<DIM,T> handle1,
+                              IndexPartitionT<DIM,T> handle2,
+                              IndexSpaceT<COLOR_DIM,COLOR_T> color_space,
+                              PartitionKind part_kind, Color color)
+    //--------------------------------------------------------------------------
+    {
+      return IndexPartitionT<DIM,T>(create_partition_by_intersection(ctx,
+           IndexSpace(parent), IndexPartition(handle1),
+           IndexPartition(handle2), IndexSpace(color_space), part_kind, color));
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T, int COLOR_DIM, typename COLOR_T>
+    IndexPartitionT<DIM,T> Runtime::create_partition_by_difference(Context ctx,
+                              IndexSpaceT<DIM,T> parent,
+                              IndexPartitionT<DIM,T> handle1,
+                              IndexPartitionT<DIM,T> handle2,
+                              IndexSpaceT<COLOR_DIM,COLOR_T> color_space,
+                              PartitionKind part_kind, Color color)
+    //--------------------------------------------------------------------------
+    {
+      return IndexPartitionT<DIM,T>(create_partition_by_difference(ctx,
+           IndexSpace(parent), IndexPartition(handle1),
+           IndexPartition(handle2), IndexSpace(color_space), part_kind, color));
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T, int COLOR_DIM, typename COLOR_T>
+    Color Runtime::create_cross_product_partitions(Context ctx,
+                                      IndexPartitionT<DIM,T> handle1,
+                                      IndexPartitionT<DIM,T> handle2,
+                                      typename std::map<
+                                        IndexSpaceT<DIM,T>,
+                                        IndexPartitionT<DIM,T> > &handles,
+                                      PartitionKind part_kind, Color color)
+    //--------------------------------------------------------------------------
+    {
+      std::map<IndexSpace,IndexPartition> untyped_handles;
+      for (typename std::map<IndexSpaceT<DIM,T>,
+                             IndexPartitionT<DIM,T> >::const_iterator it =
+            handles.begin(); it != handles.end(); it++)
+        untyped_handles[it->first] = IndexPartition::NO_PART;
+      Color result = create_cross_product_partitions(ctx, handle1, handle2, 
+                                        untyped_handles, part_kind, color);
+      for (typename std::map<IndexSpaceT<DIM,T>,
+                             IndexPartitionT<DIM,T> >::iterator it =
+            handles.begin(); it != handles.end(); it++)
+      {
+        std::map<IndexSpace,IndexPartition>::const_iterator finder = 
+          untyped_handles.find(it->first);
+#ifdef DEBUG_LEGION
+        assert(finder != untyped_handles.end());
+#endif
+        it->second = IndexPartitionT<DIM,T>(finder->second);
+      }
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM1, typename T1, int DIM2, typename T2>
+    void Runtime::create_association(Context ctx,
+                                     LogicalRegionT<DIM1,T1> domain,
+                                     LogicalRegionT<DIM1,T1> domain_parent,
+                                     FieldID domain_fid,
+                                     IndexSpaceT<DIM2,T2> range,
+                                     MapperID id, MappingTagID tag)
+    //--------------------------------------------------------------------------
+    {
+      create_association(ctx, LogicalRegion(domain), 
+          LogicalRegion(domain_parent), domain_fid, IndexSpace(range), id, tag);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM1, typename T1, int DIM2, typename T2>
+    void Runtime::create_bidirectional_association(Context ctx,
+                                      LogicalRegionT<DIM1,T1> domain,
+                                      LogicalRegionT<DIM1,T1> domain_parent,
+                                      FieldID domain_fid,
+                                      LogicalRegionT<DIM2,T2> range,
+                                      LogicalRegionT<DIM2,T2> range_parent,
+                                      FieldID range_fid,
+                                      MapperID id, MappingTagID tag)
+    //--------------------------------------------------------------------------
+    {
+      create_bidirectional_association(ctx, LogicalRegion(domain),
+                                       LogicalRegion(domain_parent), domain_fid,
+                                       LogicalRegion(range),
+                                       LogicalRegion(range_parent), 
+                                       range_fid, id, tag);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, int COLOR_DIM, typename T>
+    IndexPartitionT<DIM,T> Runtime::create_partition_by_restriction(Context ctx,
+                                      IndexSpaceT<DIM,T> parent,
+                                      IndexSpaceT<COLOR_DIM,T> color_space,
+                                      Transform<DIM,COLOR_DIM,T> transform,
+                                      Rect<DIM,T> extent,
+                                      PartitionKind part_kind, Color color)
+    //--------------------------------------------------------------------------
+    {
+      return IndexPartitionT<DIM,T>(create_restricted_partition(ctx,
+        parent, color_space, &transform, sizeof(transform), 
+        &extent, sizeof(extent), part_kind, color));
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    IndexPartitionT<DIM,T> Runtime::create_partition_by_blockify(Context ctx,
+                                      IndexSpaceT<DIM,T> parent,
+                                      Point<DIM,T> blocking_factor,
+                                      Color color)
+    //--------------------------------------------------------------------------
+    {
+      Point<DIM,T> origin; 
+      for (int i = 0; i < DIM; i++)
+        origin[i] = 0;
+      return create_partition_by_blockify<DIM,T>(ctx, parent, blocking_factor,
+                                                 origin, color);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    IndexPartitionT<DIM,T> Runtime::create_partition_by_blockify(Context ctx,
+                                      IndexSpaceT<DIM,T> parent,
+                                      Point<DIM,T> blocking_factor,
+                                      Point<DIM,T> origin,
+                                      Color color)
+    //--------------------------------------------------------------------------
+    {
+      // Get the domain of the color space to partition
+      const DomainT<DIM,T> parent_is = get_index_space_domain(parent);
+      const Rect<DIM,T> &bounds = parent_is.bounds;
+      if (bounds.empty())
+        return IndexPartitionT<DIM,T>();
+      // Compute the intended color space bounds
+      Point<DIM,T> colors;
+      for (int i = 0; i < DIM; i++)
+        colors[i] = (((bounds.hi[i] - bounds.lo[i]) + // -1 and +1 cancel out
+            blocking_factor[i]) / blocking_factor[i]) - 1; 
+      Point<DIM,T> zeroes; 
+      for (int i = 0; i < DIM; i++)
+        zeroes[i] = 0;
+      // Make the color space
+      IndexSpaceT<DIM,T> color_space = create_index_space(ctx, 
+                                    Rect<DIM,T>(zeroes, colors));
+      // Now make the transform matrix
+      Transform<DIM,DIM,T> transform;
+      for (int i = 0; i < DIM; i++)
+        for (int j = 0; j < DIM; j++)
+          if (i == j)
+            transform[i][j] = blocking_factor[i];
+          else
+            transform[i][j] = 0;
+      // And the extent
+      Point<DIM,T> ones;
+      for (int i = 0; i < DIM; i++)
+        ones[i] = 1;
+      const Rect<DIM,T> extent(origin, origin + blocking_factor - ones);
+      // Then do the create partition by restriction call
+      return create_partition_by_restriction(ctx, parent, color_space,
+                                             transform, extent,
+                                             DISJOINT_KIND, color);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T, int COLOR_DIM, typename COLOR_T>
+    IndexPartitionT<DIM,T> Runtime::create_partition_by_field(Context ctx,
+                                    LogicalRegionT<DIM,T> handle,
+                                    LogicalRegionT<DIM,T> parent,
+                                    FieldID fid,
+                                    IndexSpaceT<COLOR_DIM,COLOR_T> color_space,
+                                    Color color, MapperID id, MappingTagID tag)
+    //--------------------------------------------------------------------------
+    {
+      return IndexPartitionT<DIM,T>(create_partition_by_field(ctx,
+            LogicalRegion(handle), LogicalRegion(parent), fid, 
+            IndexSpace(color_space), color, id, tag));
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM1, typename T1, int DIM2, typename T2,
+             int COLOR_DIM, typename COLOR_T>
+    IndexPartitionT<DIM2,T2> Runtime::create_partition_by_image(Context ctx,
+                              IndexSpaceT<DIM2,T2> handle,
+                              LogicalPartitionT<DIM1,T1> projection,
+                              LogicalRegionT<DIM1,T1> parent,
+                              FieldID fid, // type: Point<DIM2,COORD_T2>
+                              IndexSpaceT<COLOR_DIM,COLOR_T> color_space,
+                              PartitionKind part_kind, Color color,
+                              MapperID id, MappingTagID tag)
+    //--------------------------------------------------------------------------
+    {
+      return IndexPartitionT<DIM2,T2>(create_partition_by_image(ctx,
+        IndexSpace(handle), LogicalPartition(projection),
+        LogicalRegion(parent), fid, IndexSpace(color_space), part_kind, 
+        color, id, tag));
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM1, typename T1, int DIM2, typename T2,
+             int COLOR_DIM, typename COLOR_T>
+    IndexPartitionT<DIM2,T2> Runtime::create_partition_by_image_range(
+                              Context ctx,
+                              IndexSpaceT<DIM2,T2> handle,
+                              LogicalPartitionT<DIM1,T1> projection,
+                              LogicalRegionT<DIM1,T1> parent,
+                              FieldID fid, // type: Point<DIM2,COORD_T2>
+                              IndexSpaceT<COLOR_DIM,COLOR_T> color_space,
+                              PartitionKind part_kind, Color color,
+                              MapperID id, MappingTagID tag)
+    //--------------------------------------------------------------------------
+    {
+      return IndexPartitionT<DIM2,T2>(create_partition_by_image_range(ctx,
+        IndexSpace(handle), LogicalPartition(projection),
+        LogicalRegion(parent), fid, IndexSpace(color_space), part_kind, 
+        color, id, tag));
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM1, typename T1, int DIM2, typename T2,
+             int COLOR_DIM, typename COLOR_T>
+    IndexPartitionT<DIM1,T1> Runtime::create_partition_by_preimage(Context ctx,
+                              IndexPartitionT<DIM2,T2> projection,
+                              LogicalRegionT<DIM1,T1> handle,
+                              LogicalRegionT<DIM1,T1> parent,
+                              FieldID fid, // type: Point<DIM2,COORD_T2>
+                              IndexSpaceT<COLOR_DIM,COLOR_T> color_space,
+                              PartitionKind part_kind, Color color,
+                              MapperID id, MappingTagID tag)
+    //--------------------------------------------------------------------------
+    {
+      return IndexPartitionT<DIM1,T1>(create_partition_by_preimage(ctx, 
+        IndexPartition(projection), LogicalRegion(handle),
+        LogicalRegion(parent), fid, IndexSpace(color_space), part_kind, 
+        color, id, tag));
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM1, typename T1, int DIM2, typename T2,
+             int COLOR_DIM, typename COLOR_T>
+    IndexPartitionT<DIM1,T1> Runtime::create_partition_by_preimage_range(
+                              Context ctx,
+                              IndexPartitionT<DIM2,T2> projection,
+                              LogicalRegionT<DIM1,T1> handle,
+                              LogicalRegionT<DIM1,T1> parent,
+                              FieldID fid, // type: Rect<DIM2,COORD_T2>
+                              IndexSpaceT<COLOR_DIM,COLOR_T> color_space,
+                              PartitionKind part_kind, Color color,
+                              MapperID id, MappingTagID tag)
+    //--------------------------------------------------------------------------
+    {
+      return IndexPartitionT<DIM1,T1>(create_partition_by_preimage_range(ctx,
+        IndexPartition(projection), LogicalRegion(handle), 
+        LogicalRegion(parent), fid, IndexSpace(color_space), part_kind, 
+        color, id, tag));
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T, int COLOR_DIM, typename COLOR_T>
+    IndexPartitionT<DIM,T> Runtime::create_pending_partition(Context ctx,
+                              IndexSpaceT<DIM,T> parent,
+                              IndexSpaceT<COLOR_DIM,COLOR_T> color_space,
+                              PartitionKind part_kind, Color color)
+    //--------------------------------------------------------------------------
+    {
+      return IndexPartitionT<DIM,T>(create_pending_partition(ctx,
+            IndexSpace(parent), IndexSpace(color_space), part_kind, color));
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T, int COLOR_DIM, typename COLOR_T>
+    IndexSpaceT<DIM,T> Runtime::create_index_space_union(Context ctx,
+                                IndexPartitionT<DIM,T> parent,
+                                Point<COLOR_DIM,COLOR_T> color,
+                                const typename std::vector<
+                                  IndexSpaceT<DIM,T> > &handles)
+    //--------------------------------------------------------------------------
+    {
+      std::vector<IndexSpace> untyped_handles(handles.size());
+      for (unsigned idx = 0; idx < handles.size(); idx++)
+        untyped_handles[idx] = handles[idx];
+      return IndexSpaceT<DIM,T>(create_index_space_union_internal(ctx, 
+            IndexPartition(parent), &color, 
+            Internal::NT_TemplateHelper::encode_tag<COLOR_DIM,COLOR_T>(),
+            untyped_handles));
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T, int COLOR_DIM, typename COLOR_T>
+    IndexSpaceT<DIM,T> Runtime::create_index_space_union(Context ctx,
+                                IndexPartitionT<DIM,T> parent,
+                                Point<COLOR_DIM,COLOR_T> color,
+                                IndexPartitionT<DIM,T> handle)
+    //--------------------------------------------------------------------------
+    {
+      return IndexSpaceT<DIM,T>(create_index_space_union_internal(ctx,
+          IndexPartition(parent), &color, 
+          Internal::NT_TemplateHelper::encode_tag<COLOR_DIM,COLOR_T>(),
+          IndexPartition(handle)));
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T, int COLOR_DIM, typename COLOR_T>
+    IndexSpaceT<DIM,T> Runtime::create_index_space_intersection(Context ctx,
+                                IndexPartitionT<DIM,T> parent,
+                                Point<COLOR_DIM,COLOR_T> color,
+                                const typename std::vector<
+                                  IndexSpaceT<DIM,T> > &handles)
+    //--------------------------------------------------------------------------
+    {
+      std::vector<IndexSpace> untyped_handles(handles.size());
+      for (unsigned idx = 0; idx < handles.size(); idx++)
+        untyped_handles[idx] = handles[idx];
+      return IndexSpaceT<DIM,T>(create_index_space_intersection_internal(ctx,
+            IndexPartition(parent), &color,
+            Internal::NT_TemplateHelper::encode_tag<COLOR_DIM,COLOR_T>(), 
+            untyped_handles));
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T, int COLOR_DIM, typename COLOR_T>
+    IndexSpaceT<DIM,T> Runtime::create_index_space_intersection(Context ctx,
+                                IndexPartitionT<DIM,T> parent,
+                                Point<COLOR_DIM,COLOR_T> color,
+                                IndexPartitionT<DIM,T> handle)
+    //--------------------------------------------------------------------------
+    {
+      return IndexSpaceT<DIM,T>(create_index_space_intersection_internal(ctx,
+          IndexPartition(parent), &color, 
+          Internal::NT_TemplateHelper::encode_tag<COLOR_DIM,COLOR_T>(),
+          IndexPartition(handle)));
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T, int COLOR_DIM, typename COLOR_T>
+    IndexSpaceT<DIM,T> Runtime::create_index_space_difference(Context ctx,
+                                IndexPartitionT<DIM,T> parent,
+                                Point<COLOR_DIM,COLOR_T> color,
+                                IndexSpaceT<DIM,T> initial,
+                                const typename std::vector<
+                                  IndexSpaceT<DIM,T> > &handles)
+    //--------------------------------------------------------------------------
+    {
+      std::vector<IndexSpace> untyped_handles(handles.size());
+      for (unsigned idx = 0; idx < handles.size(); idx++)
+        untyped_handles[idx] = handles[idx];
+      return IndexSpaceT<DIM,T>(create_index_space_difference_internal(ctx,
+            IndexPartition(parent), &color,
+            Internal::NT_TemplateHelper::encode_tag<COLOR_DIM,COLOR_T>(), 
+            IndexSpace(initial), untyped_handles));
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    IndexPartitionT<DIM,T> Runtime::get_index_partition(
+                                         IndexSpaceT<DIM,T> parent, Color color)
+    //--------------------------------------------------------------------------
+    {
+      return IndexPartitionT<DIM,T>(
+                          get_index_partition(IndexSpace(parent), color));
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    bool Runtime::has_index_partition(IndexSpaceT<DIM,T> parent, Color color)
+    //--------------------------------------------------------------------------
+    {
+      return has_index_partition(IndexSpace(parent), color);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T, int COLOR_DIM, typename COLOR_T>
+    IndexSpaceT<DIM,T> Runtime::get_index_subspace(IndexPartitionT<DIM,T> p,
+                                         Point<COLOR_DIM,COLOR_T> color)
+    //--------------------------------------------------------------------------
+    {
+      return IndexSpaceT<DIM,T>(get_index_subspace_internal(IndexPartition(p), 
+        &color, Internal::NT_TemplateHelper::encode_tag<COLOR_DIM,COLOR_T>()));
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T, int COLOR_DIM, typename COLOR_T>
+    bool Runtime::has_index_subspace(IndexPartitionT<DIM,T> p, 
+                                     Point<COLOR_DIM,COLOR_T> color)
+    //--------------------------------------------------------------------------
+    {
+      return has_index_subspace_internal(IndexPartition(p), &color,
+          Internal::NT_TemplateHelper::encode_tag<COLOR_DIM,COLOR_T>());
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    DomainT<DIM,T> Runtime::get_index_space_domain(IndexSpaceT<DIM,T> handle)
+    //--------------------------------------------------------------------------
+    {
+      DomainT<DIM,T> realm_is;
+      get_index_space_domain_internal(handle, &realm_is, 
+          Internal::NT_TemplateHelper::encode_tag<DIM,T>());
+      return realm_is;
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T, int COLOR_DIM, typename COLOR_T>
+    DomainT<COLOR_DIM,COLOR_T> 
+              Runtime::get_index_partition_color_space(IndexPartitionT<DIM,T> p)
+    //--------------------------------------------------------------------------
+    {
+      DomainT<COLOR_DIM, COLOR_T> realm_is;
+      get_index_partition_color_space_internal(p, &realm_is, 
+          Internal::NT_TemplateHelper::encode_tag<COLOR_DIM,COLOR_T>());
+      return realm_is;
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T, int COLOR_DIM, typename COLOR_T>
+    IndexSpaceT<COLOR_DIM,COLOR_T> 
+         Runtime::get_index_partition_color_space_name(IndexPartitionT<DIM,T> p)
+    //--------------------------------------------------------------------------
+    {
+      return IndexSpaceT<COLOR_DIM,COLOR_T>(
+                              get_index_partition_color_space_name(p));
+    }
+
+    //--------------------------------------------------------------------------
     template<unsigned DIM>
     IndexSpace Runtime::get_index_subspace(Context ctx, 
                 IndexPartition p, LegionRuntime::Arrays::Point<DIM> color_point)
@@ -1826,6 +4997,157 @@ namespace Legion {
     {
       DomainPoint dom_point = DomainPoint::from_point<DIM>(color_point);
       return get_index_subspace(ctx, p, dom_point);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T, int COLOR_DIM, typename COLOR_T>
+    Point<COLOR_DIM,COLOR_T> Runtime::get_index_space_color(
+                                                      IndexSpaceT<DIM,T> handle)
+    //--------------------------------------------------------------------------
+    {
+      Point<COLOR_DIM,COLOR_T> point;
+      return get_index_space_color_internal(IndexSpace(handle), &point,
+          Internal::NT_TemplateHelper::encode_tag<COLOR_DIM,COLOR_T>());
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    IndexSpaceT<DIM,T> Runtime::get_parent_index_space(
+                                                  IndexPartitionT<DIM,T> handle)
+    //--------------------------------------------------------------------------
+    {
+      return IndexSpaceT<DIM,T>(get_parent_index_space(IndexPartiiton(handle)));
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    IndexPartitionT<DIM,T> Runtime::get_parent_index_partition(
+                                                      IndexSpaceT<DIM,T> handle)
+    //--------------------------------------------------------------------------
+    {
+      return IndexPartitionT<DIM,T>(get_parent_index_partition(
+                                              IndexSpace(handle)));
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    bool Runtime::safe_cast(Context ctx, Point<DIM,T> point, 
+                            LogicalRegionT<DIM,T> region)
+    //--------------------------------------------------------------------------
+    {
+      return safe_cast_internal(ctx, LogicalRegion(region), &point,
+          Internal::NT_TemplateHelper::encode_tag<DIM,T>());
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    LogicalRegionT<DIM,T> Runtime::create_logical_region(Context ctx,
+                                    IndexSpaceT<DIM,T> index, FieldSpace fields)
+    //--------------------------------------------------------------------------
+    {
+      return LogicalRegionT<DIM,T>(create_logical_region(ctx, 
+                                  IndexSpace(index), fields));
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    LogicalPartitionT<DIM,T> Runtime::get_logical_partition(
+                    LogicalRegionT<DIM,T> parent, IndexPartitionT<DIM,T> handle)
+    //--------------------------------------------------------------------------
+    {
+      return LogicalPartitionT<DIM,T>(get_logical_partition(
+                LogicalRegion(parent), IndexPartition(handle)));
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    LogicalPartitionT<DIM,T> Runtime::get_logical_partition_by_color(
+                                      LogicalRegionT<DIM,T> parent, Color color)
+    //--------------------------------------------------------------------------
+    {
+      return LogicalPartitionT<DIM,T>(get_logical_partition_by_color(
+                                        LogicalRegion(parent), color));
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    LogicalPartitionT<DIM,T> Runtime::get_logical_partition_by_tree(
+              IndexPartitionT<DIM,T> handle, FieldSpace space, RegionTreeID tid)
+    //--------------------------------------------------------------------------
+    {
+      return LogicalPartitionT<DIM,T>(get_logical_partition_by_tree(
+                                  IndexPartition(handle), space, tid));
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    LogicalRegionT<DIM,T> Runtime::get_logical_subregion(
+                     LogicalPartitionT<DIM,T> parent, IndexSpaceT<DIM,T> handle)
+    //--------------------------------------------------------------------------
+    {
+      return LogicalRegionT<DIM,T>(get_logical_subregion(
+                LogicalPartition(parent), IndexSpace(handle)));
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T, int COLOR_DIM, typename COLOR_T>
+    LogicalRegionT<DIM,T> Runtime::get_logical_subregion_by_color(
+        LogicalPartitionT<DIM,T> parent, Point<COLOR_DIM,COLOR_T> color)
+    //--------------------------------------------------------------------------
+    {
+      return LogicalRegionT<DIM,T>(get_logical_subregion_by_color_internal(
+            LogicalPartition(parent), &color,
+            Internal::NT_TemplateHelper::encode_tag<COLOR_DIM,COLOR_T>()));
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T, int COLOR_DIM, typename COLOR_T>
+    bool Runtime::has_logical_subregion_by_color(
+        LogicalPartitionT<DIM,T> parent, Point<COLOR_DIM,COLOR_T> color)
+    //--------------------------------------------------------------------------
+    {
+      return has_logical_subregion_by_color_internal(
+          LogicalPartition(parent), &color,
+          Internal::NT_TemplateHelper::encode_tag<COLOR_DIM,COLOR_T>());
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    LogicalRegionT<DIM,T> Runtime::get_logical_subregion_by_tree(
+                  IndexSpaceT<DIM,T> handle, FieldSpace space, RegionTreeID tid)
+    //--------------------------------------------------------------------------
+    {
+      return LogicalRegionT<DIM,T>(get_logical_subregion_by_tree(
+                                    IndexSpace(handle), space, tid));
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T, int COLOR_DIM, typename COLOR_T>
+    Point<COLOR_DIM,COLOR_T> Runtime::get_logical_region_color_point(
+                                                   LogicalRegionT<DIM,T> handle)
+    //--------------------------------------------------------------------------
+    {
+      return get_logical_region_color_point(LogicalRegion(handle));
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    LogicalRegionT<DIM,T> Runtime::get_parent_logical_region(
+                                                LogicalPartitionT<DIM,T> handle)
+    //--------------------------------------------------------------------------
+    {
+      return LogicalRegionT<DIM,T>(get_parent_logical_region(
+                                    LogicalPartition(handle)));
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    LogicalPartitionT<DIM,T> Runtime::get_parent_logical_partition(
+                                                   LogicalRegionT<DIM,T> handle)
+    //--------------------------------------------------------------------------
+    {
+      return LogicalPartitionT<DIM,T>(get_parent_logical_partition(
+                                            LogicalRegion(handle)));
     }
 
     //--------------------------------------------------------------------------
@@ -2552,7 +5874,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    inline std::ostream& operator<<(std::ostream& os, const LogicalPartition& lp)
+    inline std::ostream& operator<<(std::ostream& os,const LogicalPartition& lp)
     //--------------------------------------------------------------------------
     {
       os << "LogicalPartition(" << lp.tree_id << "," 
@@ -2649,8 +5971,6 @@ namespace LegionRuntime {
     LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Legion::LogicalPartition LogicalPartition;
     LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef Legion::IndexAllocator IndexAllocator;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Legion::FieldAllocator FieldAllocator;
     LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Legion::TaskArgument TaskArgument;
@@ -2688,8 +6008,24 @@ namespace LegionRuntime {
     typedef Legion::CopyLauncher CopyLauncher;
     LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Legion::PhysicalRegion PhysicalRegion;
+#ifdef __GNUC__
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
+#ifdef __clang__
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#endif
     LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Legion::IndexIterator IndexIterator;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
+    typedef Legion::IndexAllocator IndexAllocator;
+#ifdef __GNUC__
+#pragma GCC diagnostic pop
+#endif
+#ifdef __clang__
+#pragma clang diagnostic pop
+#endif
     LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Legion::AcquireLauncher AcquireLauncher;
     LEGION_DEPRECATED("Use the Legion namespace instance instead.")
@@ -2777,11 +6113,9 @@ namespace LegionRuntime {
     LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Realm::Machine Machine;
     LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef Realm::Domain Domain;
+    typedef Legion::Domain Domain;
     LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef Realm::DomainPoint DomainPoint;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef Realm::IndexSpaceAllocator IndexSpaceAllocator;
+    typedef Legion::DomainPoint DomainPoint;
     LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Realm::RegionInstance PhysicalInstance;
     LEGION_DEPRECATED("Use the Legion namespace instance instead.")
@@ -2812,10 +6146,6 @@ namespace LegionRuntime {
     typedef Realm::Machine::ProcessorMemoryAffinity ProcessorMemoryAffinity;
     LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Realm::Machine::MemoryMemoryAffinity MemoryMemoryAffinity;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef Realm::ElementMask::Enumerator Enumerator;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef Realm::IndexSpace::FieldDataDescriptor FieldDataDescriptor;
     LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef std::map<Legion::CustomSerdezID, 
                      const Realm::CustomSerdezUntyped *> SerdezOpTable;
@@ -2923,6 +6253,11 @@ namespace LegionRuntime {
                                const void*,size_t,Legion::Processor);
     LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Legion::Internal::TaskContext* Context; 
+  };
+
+  // map old Logger::Category to new Realm::Logger
+  namespace Logger {
+    typedef Realm::Logger Category;
   };
 };
 

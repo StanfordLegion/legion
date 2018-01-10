@@ -1,4 +1,4 @@
--- Copyright 2017 Stanford University
+-- Copyright 2018 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -27,7 +27,7 @@ task test_partition()
 end
 
 task test_partition_by_field()
-  var r = region(ispace(ptr, 4), int)
+  var r = region(ispace(ptr, 4), int1d)
   fill(r, 0)
   var p = partition(equal, r, ispace(int1d, 3))
 

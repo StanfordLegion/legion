@@ -1,4 +1,4 @@
-/* Copyright 2017 Stanford University, NVIDIA Corporation
+/* Copyright 2018 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,20 +18,23 @@
 
 #include "realm/mem_impl.h"
 
-#include <realm/transfer/lowlevel_dma.h>
+#include "realm/transfer/lowlevel_dma.h"
 
 #include <hdf5.h>
+
+#define CHECK_HDF5(cmd) \
+  do { \
+    herr_t res = (cmd); \
+    if(res < 0) { \
+      fprintf(stderr, "HDF5 error on %s:\n", #cmd); \
+      H5Eprint2(H5E_DEFAULT, stderr); \
+      assert(0); \
+    } \
+  } while(0)
 
 namespace Realm {
 
   namespace HDF5 {
-
-    // dma code is still in old namespace
-    typedef LegionRuntime::LowLevel::DmaRequest DmaRequest;
-    typedef LegionRuntime::LowLevel::OASVec OASVec;
-    typedef LegionRuntime::LowLevel::InstPairCopier InstPairCopier;
-    typedef LegionRuntime::LowLevel::MemPairCopier MemPairCopier;
-    typedef LegionRuntime::LowLevel::MemPairCopierFactory MemPairCopierFactory;
 
     class HDF5Memory : public MemoryImpl {
     public:
@@ -41,47 +44,13 @@ namespace Realm {
 
       virtual ~HDF5Memory(void);
 
-      virtual RegionInstance create_instance(IndexSpace is,
-                                             const int *linearization_bits,
-                                             size_t bytes_needed,
-                                             size_t block_size,
-                                             size_t element_size,
-                                             const std::vector<size_t>& field_sizes,
-                                             ReductionOpID redopid,
-                                             off_t list_size,
-                                             const ProfilingRequestSet &reqs,
-                                             RegionInstance parent_inst);
-
-      RegionInstance create_instance(IndexSpace is,
-                                     const int *linearization_bits,
-                                     size_t bytes_needed,
-                                     size_t block_size,
-                                     size_t element_size,
-                                     const std::vector<size_t>& field_sizes,
-                                     ReductionOpID redopid,
-                                     off_t list_size,
-                                     const ProfilingRequestSet &reqs,
-                                     RegionInstance parent_inst,
-                                     const char* file,
-                                     const std::vector<const char*>& path_names,
-                                     Domain domain,
-                                     bool read_only);
-
-      virtual void destroy_instance(RegionInstance i,
-                                    bool local_destroy);
-
       virtual off_t alloc_bytes(size_t size);
 
       virtual void free_bytes(off_t offset, size_t size);
 
       virtual void get_bytes(off_t offset, void *dst, size_t size);
-      void get_bytes(ID::IDType inst_id, const DomainPoint& dp, int fid, void *dst, size_t size);
 
       virtual void put_bytes(off_t offset, const void *src, size_t size);
-      void put_bytes(ID::IDType inst_id, const DomainPoint& dp, int fid, const void *src, size_t size);
-
-      virtual void apply_reduction_list(off_t offset, const ReductionOpUntyped *redop,
-                                       size_t count, const void *entry_buffer);
 
       virtual void *get_direct_ptr(off_t offset, size_t size);
       virtual int get_home_node(off_t offset, size_t size);
@@ -105,8 +74,10 @@ namespace Realm {
       virtual bool can_perform_copy(Memory src_mem, Memory dst_mem,
 				    ReductionOpID redop_id, bool fold);
 
+#ifdef OLD_COPIERS
       virtual MemPairCopier *create_copier(Memory src_mem, Memory dst_mem,
 					   ReductionOpID redop_id, bool fold);
+#endif
 
     protected:
       HDF5Memory *mem;
@@ -119,13 +90,16 @@ namespace Realm {
       virtual bool can_perform_copy(Memory src_mem, Memory dst_mem,
 				    ReductionOpID redop_id, bool fold);
 
+#ifdef OLD_COPIERS
       virtual MemPairCopier *create_copier(Memory src_mem, Memory dst_mem,
 					   ReductionOpID redop_id, bool fold);
+#endif
 
     protected:
       HDF5Memory *mem;
     };
 
+#ifdef OLD_COPIERS
     class HDF5WriteCopier : public MemPairCopier {
     public:
       HDF5WriteCopier(MemoryImpl *_src_impl, HDF5Memory *_mem);
@@ -184,6 +158,7 @@ namespace Realm {
       HDF5Memory::HDFMetadata *md;
       OASVec& oas_vec;
     };
+#endif
 
   }; // namespace HDF5
 

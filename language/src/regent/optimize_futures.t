@@ -1,4 +1,4 @@
--- Copyright 2017 Stanford University, NVIDIA Corporation
+-- Copyright 2018 Stanford University, NVIDIA Corporation
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -344,53 +344,40 @@ function analyze_var_flow.stat_index_launch_list(cx, node)
 end
 
 function analyze_var_flow.stat_var(cx, node)
-  local values = node.values:map(
-    function(value) return analyze_var_flow.expr(cx, value) end)
+  local value = node.value
+  if value then
+    value = analyze_var_flow.expr(cx, value)
+  end
 
-  for i, symbol in ipairs(node.symbols) do
-    local var_flow = cx:get_flow(symbol)
-    local value = values[i]
-    if value then
-      for v, _ in pairs(value) do
-        var_flow[v] = true
-      end
-    end
+  local var_flow = cx:get_flow(node.symbol)
+  if value then
+    var_flow[value] = true
   end
 end
 
 function analyze_var_flow.stat_assignment(cx, node)
-  local lhs = node.lhs:map(
-    function(lh) return analyze_var_flow.expr(cx, lh) end)
-  local rhs = node.rhs:map(
-    function(rh) return analyze_var_flow.expr(cx, rh) end)
+  local lhs = analyze_var_flow.expr(cx, node.lhs)
+  local rhs = analyze_var_flow.expr(cx, node.rhs)
 
-  for i, lh in ipairs(lhs) do
-    local rh = rhs[i]
-    if lh and rh then
-      for lhv, _ in pairs(lh) do
-        local lhv_flow = cx:get_flow(lhv)
-        for rhv, _ in pairs(rh) do
-          lhv_flow[rhv] = true
-        end
+  if lhs and rhs then
+    for lhv, _ in pairs(lhs) do
+      local lhv_flow = cx:get_flow(lhv)
+      for rhv, _ in pairs(rhs) do
+        lhv_flow[rhv] = true
       end
     end
   end
 end
 
 function analyze_var_flow.stat_reduce(cx, node)
-  local lhs = node.lhs:map(
-    function(lh) return analyze_var_flow.expr(cx, lh) end)
-  local rhs = node.rhs:map(
-    function(rh) return analyze_var_flow.expr(cx, rh) end)
+  local lhs = analyze_var_flow.expr(cx, node.lhs)
+  local rhs = analyze_var_flow.expr(cx, node.rhs)
 
-  for i, lh in ipairs(lhs) do
-    local rh = rhs[i]
-    if lh and rh then
-      for lhv, _ in pairs(lh) do
-        local lhv_flow = cx:get_flow(lhv)
-        for rhv, _ in pairs(rh) do
-          lhv_flow[rhv] = true
-        end
+  if lhs and rhs then
+    for lhv, _ in pairs(lhs) do
+      local lhv_flow = cx:get_flow(lhv)
+      for rhv, _ in pairs(rhs) do
+        lhv_flow[rhv] = true
       end
     end
   end
@@ -1344,61 +1331,56 @@ end
 function optimize_futures.stat_var(cx, node)
   local stats = terralib.newlist()
 
-  local symbols = terralib.newlist()
-  local types = terralib.newlist()
-  local values = terralib.newlist()
-  for i, symbol in ipairs(node.symbols) do
-    local value = node.values[i]
-    local value_type = node.types[i]
+  local value = node.value
+  local value_type = node.type
 
-    local new_symbol = symbol
-    if cx:is_var_future(symbol) then
-      new_symbol = cx:symbol(symbol)
-    end
-    symbols[i] = new_symbol
-
-    local new_type = value_type
-    if cx:is_var_future(symbol) then
-      new_type = std.future(value_type)
-    end
-    types[i] = new_type
-
-    local new_value = value
-    if value then
-      if cx:is_var_future(symbol) then
-        new_value = promote(optimize_futures.expr(cx, value), new_type)
-      else
-        new_value = concretize(optimize_futures.expr(cx, value))
-      end
-    else
-      if cx:is_var_future(symbol) then
-        -- This is an uninitialized future. Create an empty value and
-        -- use it to initialize the future, otherwise future will hold
-        -- an uninitialized pointer.
-        local empty_symbol = std.newsymbol(value_type)
-        local empty_var = node {
-          symbols = terralib.newlist({empty_symbol}),
-          types = terralib.newlist({value_type}),
-          values = terralib.newlist(),
-        }
-        local empty_ref = ast.typed.expr.ID {
-          value = empty_symbol,
-          expr_type = std.rawref(&value_type),
-          annotations = ast.default_annotations(),
-          span = node.span,
-        }
-
-        new_value = promote(empty_ref, new_type)
-        stats:insert(empty_var)
-      end
-    end
-    values[i] = new_value
+  local new_symbol = node.symbol
+  if cx:is_var_future(node.symbol) then
+    new_symbol = cx:symbol(node.symbol)
   end
+  local symbol = new_symbol
+
+  local new_type = value_type
+  if cx:is_var_future(node.symbol) then
+    new_type = std.future(value_type)
+  end
+  local type = new_type
+
+  local new_value = value
+  if value then
+    if cx:is_var_future(node.symbol) then
+      new_value = promote(optimize_futures.expr(cx, value), new_type)
+    else
+      new_value = concretize(optimize_futures.expr(cx, value))
+    end
+  else
+    if cx:is_var_future(node.symbol) then
+      -- This is an uninitialized future. Create an empty value and
+      -- use it to initialize the future, otherwise future will hold
+      -- an uninitialized pointer.
+      local empty_symbol = std.newsymbol(value_type)
+      local empty_var = node {
+        symbol = empty_symbol,
+        type = value_type,
+        value = false,
+      }
+      local empty_ref = ast.typed.expr.ID {
+        value = empty_symbol,
+        expr_type = std.rawref(&value_type),
+        annotations = ast.default_annotations(),
+        span = node.span,
+      }
+
+      new_value = promote(empty_ref, new_type)
+      stats:insert(empty_var)
+    end
+  end
+  value = new_value
 
   stats:insert(node {
-    symbols = symbols,
-    types = types,
-    values = values,
+    symbol = symbol,
+    type = type,
+    value = value,
   })
   return stats
 end
@@ -1421,19 +1403,15 @@ function optimize_futures.stat_break(cx, node)
 end
 
 function optimize_futures.stat_assignment(cx, node)
-  local lhs = node.lhs:map(function(lh) return optimize_futures.expr(cx, lh) end)
-  local rhs = node.rhs:map(function(rh) return optimize_futures.expr(cx, rh) end)
+  local lhs = optimize_futures.expr(cx, node.lhs)
+  local rhs = optimize_futures.expr(cx, node.rhs)
 
-  local normalized_rhs = terralib.newlist()
-  for i, lh in ipairs(lhs) do
-    local rh = rhs[i]
-
-    local lh_type = std.as_read(lh.expr_type)
-    if std.is_future(lh_type) then
-      normalized_rhs:insert(promote(rh, lh_type))
-    else
-      normalized_rhs:insert(concretize(rh))
-    end
+  local normalized_rhs
+  local lhs_type = std.as_read(lhs.expr_type)
+  if std.is_future(lhs_type) then
+    normalized_rhs = promote(rhs, lhs_type)
+  else
+    normalized_rhs = concretize(rhs)
   end
 
   return terralib.newlist({
@@ -1445,18 +1423,15 @@ function optimize_futures.stat_assignment(cx, node)
 end
 
 function optimize_futures.stat_reduce(cx, node)
-  local lhs = node.lhs:map(function(lh) return optimize_futures.expr(cx, lh) end)
-  local rhs = node.rhs:map(function(rh) return optimize_futures.expr(cx, rh) end)
+  local lhs = optimize_futures.expr(cx, node.lhs)
+  local rhs = optimize_futures.expr(cx, node.rhs)
 
-  local normalized_rhs = terralib.newlist()
-  for i, lh in ipairs(lhs) do
-    local rh = rhs[i]
-
-    if std.is_future(std.as_read(lh.expr_type)) then
-      normalized_rhs:insert(rh)
-    else
-      normalized_rhs:insert(concretize(rh))
-    end
+  local normalized_rhs
+  local lhs_type = std.as_read(lhs.expr_type)
+  if std.is_future(lhs_type) then
+    normalized_rhs = promote(rhs, lhs_type)
+  else
+    normalized_rhs = concretize(rhs)
   end
 
   return terralib.newlist({
@@ -1547,18 +1522,16 @@ function optimize_futures.top_task_param(cx, param)
     local new_symbol = cx:symbol(param.symbol)
 
     local new_var = ast.typed.stat.Var {
-      symbols = terralib.newlist({new_symbol}),
-      types = terralib.newlist({new_type}),
-      values = terralib.newlist({
-          promote(
-            ast.typed.expr.ID {
-              value = param.symbol,
-              expr_type = std.rawref(&param.param_type),
-              annotations = param.annotations,
-              span = param.span,
-            },
-            new_type),
-      }),
+      symbol = new_symbol,
+      type = new_type,
+      value = promote(
+        ast.typed.expr.ID {
+          value = param.symbol,
+          expr_type = std.rawref(&param.param_type),
+          annotations = param.annotations,
+          span = param.span,
+        },
+        new_type),
       annotations = param.annotations,
       span = param.span,
     }

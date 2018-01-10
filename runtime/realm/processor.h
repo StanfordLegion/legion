@@ -1,4 +1,4 @@
-/* Copyright 2017 Stanford University, NVIDIA Corporation
+/* Copyright 2018 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,23 +18,23 @@
 #ifndef REALM_PROCESSOR_H
 #define REALM_PROCESSOR_H
 
-#include "lowlevel_config.h"
+#include "realm/realm_c.h"
 
-#include "event.h"
+#include "realm/event.h"
 
 #include <vector>
 #include <map>
 
 namespace Realm {
 
-    typedef ::legion_lowlevel_address_space_t AddressSpace;
+    typedef ::realm_address_space_t AddressSpace;
 
     class ProfilingRequestSet;
     class CodeDescriptor;
 
     class Processor {
     public:
-      typedef ::legion_lowlevel_id_t id_t;
+      typedef ::realm_id_t id_t;
 
       id_t id;
       bool operator<(const Processor& rhs) const { return id < rhs.id; }
@@ -45,22 +45,17 @@ namespace Realm {
 
       bool exists(void) const { return id != 0; }
 
-      typedef ::legion_lowlevel_task_func_id_t TaskFuncID;
+      typedef ::realm_task_func_id_t TaskFuncID;
       typedef void (*TaskFuncPtr)(const void *args, size_t arglen,
 				  const void *user_data, size_t user_data_len,
 				  Processor proc);
 
-      // Different Processor types
-      // Keep this in sync with legion_processor_kind_t in lowlevel_config.h
+      // Different Processor types (defined in realm_c.h)
+      // can't just typedef the kind because of C/C++ enum scope rules
       enum Kind {
-	NO_KIND,
-        TOC_PROC = ::TOC_PROC, // Throughput core
-        LOC_PROC = ::LOC_PROC, // Latency core
-        UTIL_PROC = ::UTIL_PROC, // Utility core
-        IO_PROC = ::IO_PROC, // I/O core
-        PROC_GROUP = ::PROC_GROUP, // Processor group
-        PROC_SET = ::PROC_SET, // Set of Processors for OpenMP/Kokkos etc.
-	OMP_PROC = ::OMP_PROC, // OpenMP (or similar) thread pool
+#define C_ENUMS(name, desc) name,
+  REALM_PROCESSOR_KINDS(C_ENUMS)
+#undef C_ENUMS
       };
 
       // Return what kind of processor this is
@@ -91,6 +86,12 @@ namespace Realm {
                   Event wait_on = Event::NO_EVENT, int priority = 0) const;
 
       static Processor get_executing_processor(void);
+
+      // changes the priority of the currently running task
+      static void set_current_task_priority(int new_priority);
+
+      // returns the finish event for the currently running task
+      static Event get_current_finish_event(void);
 
       // dynamic task registration - this may be done for:
       //  1) a specific processor/group (anywhere in the system)
@@ -126,7 +127,7 @@ namespace Realm {
 	
 }; // namespace Realm
 
-#include "processor.inl"
+#include "realm/processor.inl"
 
 #endif // ifndef REALM_PROCESSOR_H
 

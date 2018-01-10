@@ -1,4 +1,4 @@
-/* Copyright 2017 Stanford University, NVIDIA Corporation
+/* Copyright 2018 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,11 +18,9 @@
 #ifndef REALM_RUNTIME_H
 #define REALM_RUNTIME_H
 
-#include "processor.h"
-#include "redop.h"
-#include "custom_serdez.h"
-
-#include "lowlevel_config.h"
+#include "realm/processor.h"
+#include "realm/redop.h"
+#include "realm/custom_serdez.h"
 
 namespace Realm {
 
@@ -49,14 +47,16 @@ namespace Realm {
       template <typename REDOP>
       bool register_reduction(ReductionOpID redop_id)
       {
-	return register_reduction(redop_id, ReductionOpUntyped::create_reduction_op<REDOP>());
+	const ReductionOp<REDOP> redop;
+	return register_reduction(redop_id, &redop);
       }
 
       bool register_custom_serdez(CustomSerdezID serdez_id, const CustomSerdezUntyped *serdez);
       template <typename SERDEZ>
       bool register_custom_serdez(CustomSerdezID serdez_id)
       {
-	return register_custom_serdez(serdez_id, CustomSerdezUntyped::create_custom_serdez<SERDEZ>());
+	const CustomSerdezWrapper<SERDEZ> serdez;
+	return register_custom_serdez(serdez_id, &serdez);
       }
 
       Event collective_spawn(Processor target_proc, Processor::TaskFuncID task_id, 
@@ -81,9 +81,10 @@ namespace Realm {
 	__attribute__((deprecated("use collect_spawn calls instead")));
 
       // requests a shutdown of the runtime
-      void shutdown(Event wait_on = Event::NO_EVENT);
+      void shutdown(Event wait_on = Event::NO_EVENT, int result_code = 0);
 
-      void wait_for_shutdown(void);
+      // returns the result_code passed to shutdown()
+      int wait_for_shutdown(void);
     };
 	
 }; // namespace Realm

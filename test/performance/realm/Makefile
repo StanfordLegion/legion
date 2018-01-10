@@ -3,7 +3,8 @@ TESTDIRS = \
 	event_throughput \
 	lock_chains \
 	lock_contention \
-	reducetest
+	reducetest \
+	task_throughput
 
 all : run_all
 

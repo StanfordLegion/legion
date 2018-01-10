@@ -1,4 +1,4 @@
-/* Copyright 2017 Stanford University
+/* Copyright 2018 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,14 +19,6 @@
 #include <cstdlib>
 #include "legion.h"
 using namespace Legion;
-using namespace LegionRuntime::Accessor;
-
-// Legion has a separate namespace which contains
-// some useful abstractions for operations on arrays.
-// Unsurprisingly it is called the Arrays namespace.
-// We'll see an example of one of these operations
-// in this example.
-using namespace LegionRuntime::Arrays;
 
 enum TaskIDs {
   TOP_LEVEL_TASK_ID,
@@ -64,9 +56,8 @@ void top_level_task(const Task *task,
   printf("Partitioning data into %d sub-regions...\n", num_subregions);
 
   // Create our logical regions using the same schemas as earlier examples
-  Rect<1> elem_rect(Point<1>(0),Point<1>(num_elements-1));
-  IndexSpace is = runtime->create_index_space(ctx, 
-                          Domain::from_rect<1>(elem_rect));
+  Rect<1> elem_rect(0,num_elements-1);
+  IndexSpace is = runtime->create_index_space(ctx, elem_rect); 
   runtime->attach_name(is, "is");
   FieldSpace input_fs = runtime->create_field_space(ctx);
   runtime->attach_name(input_fs, "input_fs");
@@ -98,8 +89,8 @@ void top_level_task(const Task *task,
   // want to create.  Each subregion is assigned a 'color' which is why
   // we name the variables 'color_bounds' and 'color_domain'.  We'll use
   // these below when we partition the region.
-  Rect<1> color_bounds(Point<1>(0),Point<1>(num_subregions-1));
-  Domain color_domain = Domain::from_rect<1>(color_bounds);
+  Rect<1> color_bounds(0,num_subregions-1);
+  IndexSpace color_is = runtime->create_index_space(ctx, color_bounds);
 
   // Parallelism in Legion is implicit.  This means that rather than
   // explicitly saying what should run in parallel, Legion applications
@@ -121,77 +112,7 @@ void top_level_task(const Task *task,
   // or not.  There are other methods to partitioning index spaces
   // which are not covered here.  We'll cover the case of coloring
   // individual points in an index space in our capstone circuit example.
-  IndexPartition ip;
-  if ((num_elements % num_subregions) != 0)
-  {
-    // Not evenly divisible
-    // Create domain coloring to store the coloring
-    // maps from colors to domains for each subregion
-    //
-    // In this block of code we handle the case where the index space
-    // of points is not evenly divisible by the desired number of
-    // subregions.  This gives us the opportunity to illustrate a
-    // general approach to coloring arrays.  The general idea is
-    // to create a map from colors to sub-domains.  Colors correspond
-    // to the sub index spaces that will be made and each sub-domain
-    // describes the set points to be kept in that domain.
-
-    // Computer upper and lower bounds on the number of elements per subregion
-    const int lower_bound = num_elements/num_subregions;
-    const int upper_bound = lower_bound+1;
-    const int number_small = num_subregions - (num_elements % num_subregions);
-    // Create a coloring object to store the domain coloring.  A
-    // DomainColoring type is a typedef of an STL map from Colors
-    // (unsigned integers) to Domain objects and can be found in
-    // legion_types.h along with type declarations for all user-visible
-    // Legion types.
-    DomainColoring coloring;
-    int index = 0;
-    // We fill in the coloring by computing the domain of points
-    // to assign to each color.  We assign 'elmts_per_subregion'
-    // to all colors except the last one when we clamp the
-    // value to the maximum number of elements.
-    for (int color = 0; color < num_subregions; color++)
-    {
-      int num_elmts = color < number_small ? lower_bound : upper_bound;
-      assert((index+num_elmts) <= num_elements);
-      Rect<1> subrect(Point<1>(index),Point<1>(index+num_elmts-1));
-      coloring[color] = Domain::from_rect<1>(subrect);
-      index += num_elmts;
-    }
-    // Once we have computed our domain coloring we are now ready
-    // to create the partition.  Creating a partition simply
-    // involves giving the Legion runtime an index space to
-    // partition 'is', a domain of colors, and then a domain
-    // coloring.  In addition the application must specify whether
-    // the given partition is disjoint or not.  This example is
-    // a disjoint partition because there are no overlapping
-    // points between any of the sub index spaces.  In debug mode
-    // the runtime will check whether disjointness assertions
-    // actually hold.  In the next example we'll see an
-    // application which makes use of a non-disjoint partition.
-    ip = runtime->create_index_partition(ctx, is, color_domain, 
-                                      coloring, true/*disjoint*/);
-  }
-  else
-  { 
-    // In the case where we know that the number of subregions
-    // evenly divides the number of elements, the Array namespace
-    // in Legion provide productivity constructs for partitioning
-    // an array.  Blockify is one example of these constructs.
-    // A Blockify will evenly divide a rectangle into subsets 
-    // containing the specified number of elements in each 
-    // dimension.  Since we are only dealing with a 1-D rectangle,
-    // we need only specify the number of elements to have
-    // in each subset.  A Blockify object is mapping from colors
-    // to subsets of an index space the same as a DomainColoring,
-    // but is implicitly disjoint.  The 'create_index_partition'
-    // method on the Legion runtime is overloaded a different
-    // instance of it takes mappings like Blockify and returns
-    // an IndexPartition.
-    Blockify<1> coloring(num_elements/num_subregions);
-    ip = runtime->create_index_partition(ctx, is, coloring);
-  }
+  IndexPartition ip = runtime->create_equal_partition(ctx, is, color_is);
   runtime->attach_name(ip, "ip");
 
   // The index space 'is' was used in creating two logical regions: 'input_lr'
@@ -209,7 +130,6 @@ void top_level_task(const Task *task,
 
   // Create our launch domain.  Note that is the same as color domain
   // as we are going to launch one task for each subregion we created.
-  Domain launch_domain = color_domain; 
   ArgumentMap arg_map;
 
   // As in previous examples, we now want to launch tasks for initializing 
@@ -218,7 +138,7 @@ void top_level_task(const Task *task,
   // the logical subregions created by our partitioning.  To express this
   // we create an IndexLauncher for launching an index space of tasks
   // the same as example 02.
-  IndexLauncher init_launcher(INIT_FIELD_TASK_ID, launch_domain, 
+  IndexLauncher init_launcher(INIT_FIELD_TASK_ID, color_is, 
                               TaskArgument(NULL, 0), arg_map);
   // For index space task launches we don't want to have to explicitly
   // enumerate separate region requirements for all points in our launch
@@ -268,7 +188,7 @@ void top_level_task(const Task *task,
   // in a similar way to the initialize field tasks.  Note we
   // again make use of two RegionRequirements which use a
   // partition as the upper bound for the privileges for the task.
-  IndexLauncher daxpy_launcher(DAXPY_TASK_ID, launch_domain,
+  IndexLauncher daxpy_launcher(DAXPY_TASK_ID, color_is,
                 TaskArgument(&alpha, sizeof(alpha)), arg_map);
   daxpy_launcher.add_region_requirement(
       RegionRequirement(input_lp, 0/*projection ID*/,
@@ -318,19 +238,14 @@ void init_field_task(const Task *task,
   const int point = task->index_point.point_data[0];
   printf("Initializing field %d for block %d...\n", fid, point);
 
-  RegionAccessor<AccessorType::Generic, double> acc = 
-    regions[0].get_field_accessor(fid).typeify<double>();
-
+  const FieldAccessor<WRITE_DISCARD,double,1> acc(regions[0], fid);
   // Note here that we get the domain for the subregion for
   // this task from the runtime which makes it safe for running
   // both as a single task and as part of an index space of tasks.
-  Domain dom = runtime->get_index_space_domain(ctx, 
-      task->regions[0].region.get_index_space());
-  Rect<1> rect = dom.get_rect<1>();
-  for (GenericPointInRectIterator<1> pir(rect); pir; pir++)
-  {
-    acc.write(DomainPoint::from_point<1>(pir.p), drand48());
-  }
+  Rect<1> rect = runtime->get_index_space_domain(ctx,
+                  task->regions[0].region.get_index_space());
+  for (PointInRectIterator<1> pir(rect); pir(); pir++)
+    acc[*pir] = drand48();
 }
 
 void daxpy_task(const Task *task,
@@ -343,24 +258,16 @@ void daxpy_task(const Task *task,
   const double alpha = *((const double*)task->args);
   const int point = task->index_point.point_data[0];
 
-  RegionAccessor<AccessorType::Generic, double> acc_x = 
-    regions[0].get_field_accessor(FID_X).typeify<double>();
-  RegionAccessor<AccessorType::Generic, double> acc_y = 
-    regions[0].get_field_accessor(FID_Y).typeify<double>();
-  RegionAccessor<AccessorType::Generic, double> acc_z = 
-    regions[1].get_field_accessor(FID_Z).typeify<double>();
+  const FieldAccessor<READ_ONLY,double,1> acc_x(regions[0], FID_X);
+  const FieldAccessor<READ_ONLY,double,1> acc_y(regions[0], FID_Y);
+  const FieldAccessor<WRITE_DISCARD,double,1> acc_z(regions[1], FID_Z);
   printf("Running daxpy computation with alpha %.8g for point %d...\n", 
           alpha, point);
 
-  Domain dom = runtime->get_index_space_domain(ctx, 
-      task->regions[0].region.get_index_space());
-  Rect<1> rect = dom.get_rect<1>();
-  for (GenericPointInRectIterator<1> pir(rect); pir; pir++)
-  {
-    double value = alpha * acc_x.read(DomainPoint::from_point<1>(pir.p)) + 
-                           acc_y.read(DomainPoint::from_point<1>(pir.p));
-    acc_z.write(DomainPoint::from_point<1>(pir.p), value);
-  }
+  Rect<1> rect = runtime->get_index_space_domain(ctx,
+                  task->regions[0].region.get_index_space());
+  for (PointInRectIterator<1> pir(rect); pir(); pir++)
+    acc_z[*pir] = alpha * acc_x[*pir] + acc_y[*pir];
 }
 
 void check_task(const Task *task,
@@ -371,22 +278,19 @@ void check_task(const Task *task,
   assert(task->regions.size() == 2);
   assert(task->arglen == sizeof(double));
   const double alpha = *((const double*)task->args);
-  RegionAccessor<AccessorType::Generic, double> acc_x = 
-    regions[0].get_field_accessor(FID_X).typeify<double>();
-  RegionAccessor<AccessorType::Generic, double> acc_y = 
-    regions[0].get_field_accessor(FID_Y).typeify<double>();
-  RegionAccessor<AccessorType::Generic, double> acc_z = 
-    regions[1].get_field_accessor(FID_Z).typeify<double>();
+
+  const FieldAccessor<READ_ONLY,double,1> acc_x(regions[0], FID_X);
+  const FieldAccessor<READ_ONLY,double,1> acc_y(regions[0], FID_Y);
+  const FieldAccessor<READ_ONLY,double,1> acc_z(regions[1], FID_Z);
+
   printf("Checking results...");
-  Domain dom = runtime->get_index_space_domain(ctx, 
-      task->regions[0].region.get_index_space());
-  Rect<1> rect = dom.get_rect<1>();
+  Rect<1> rect = runtime->get_index_space_domain(ctx,
+                  task->regions[0].region.get_index_space());
   bool all_passed = true;
-  for (GenericPointInRectIterator<1> pir(rect); pir; pir++)
+  for (PointInRectIterator<1> pir(rect); pir(); pir++)
   {
-    double expected = alpha * acc_x.read(DomainPoint::from_point<1>(pir.p)) + 
-                           acc_y.read(DomainPoint::from_point<1>(pir.p));
-    double received = acc_z.read(DomainPoint::from_point<1>(pir.p));
+    double expected = alpha * acc_x[*pir] + acc_y[*pir];
+    double received = acc_z[*pir];
     // Probably shouldn't check for floating point equivalence but
     // the order of operations are the same should they should
     // be bitwise equal.
@@ -412,18 +316,21 @@ int main(int argc, char **argv)
   {
     TaskVariantRegistrar registrar(INIT_FIELD_TASK_ID, "init_field");
     registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+    registrar.set_leaf();
     Runtime::preregister_task_variant<init_field_task>(registrar, "init_field");
   }
 
   {
     TaskVariantRegistrar registrar(DAXPY_TASK_ID, "daxpy");
     registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+    registrar.set_leaf();
     Runtime::preregister_task_variant<daxpy_task>(registrar, "daxpy");
   }
 
   {
     TaskVariantRegistrar registrar(CHECK_TASK_ID, "check");
     registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+    registrar.set_leaf();
     Runtime::preregister_task_variant<check_task>(registrar, "check");
   }
 

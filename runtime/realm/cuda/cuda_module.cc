@@ -1,4 +1,4 @@
-/* Copyright 2017 Stanford University, NVIDIA Corporation
+/* Copyright 2018 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13,32 +13,29 @@
  * limitations under the License.
  */
 
-#include "cuda_module.h"
+#include "realm/cuda/cuda_module.h"
 
 #include "realm/tasks.h"
 #include "realm/logging.h"
 #include "realm/cmdline.h"
 #include "realm/event_impl.h"
 
-#include <realm/transfer/lowlevel_dma.h>
-#include <realm/transfer/channel.h>
+#include "realm/transfer/lowlevel_dma.h"
+#include "realm/transfer/channel.h"
 
 #include "realm/cuda/cudart_hijack.h"
 
-#include "activemsg.h"
+#include "realm/activemsg.h"
 #include "realm/utils.h"
+
+#ifdef REALM_USE_VALGRIND_ANNOTATIONS
+#include <valgrind/memcheck.h>
+#endif
 
 #include <stdio.h>
 
 namespace Realm {
   namespace Cuda {
-
-    // dma code is still in old namespace
-    typedef LegionRuntime::LowLevel::DmaRequest DmaRequest;
-    typedef LegionRuntime::LowLevel::OASVec OASVec;
-    typedef LegionRuntime::LowLevel::InstPairCopier InstPairCopier;
-    typedef LegionRuntime::LowLevel::MemPairCopier MemPairCopier;
-    typedef LegionRuntime::LowLevel::MemPairCopierFactory MemPairCopierFactory;
 
     Logger log_gpu("gpu");
     Logger log_gpudma("gpudma");
@@ -159,6 +156,9 @@ namespace Realm {
 	  copy->execute(this);
 	}
 
+	// TODO: recycle these
+	delete copy;
+
 	// no backpressure on copies yet - keep going until list is empty
       }
     }
@@ -186,7 +186,14 @@ namespace Realm {
 	  return true; // oldest event hasn't triggered - check again later
 
 	// no other kind of error is expected
-	assert(res == CUDA_SUCCESS);
+	if(res != CUDA_SUCCESS) {
+	  const char *ename = 0;
+	  const char *estr = 0;
+	  cuGetErrorName(res, &ename);
+	  cuGetErrorString(res, &estr);
+	  log_gpu.fatal() << "CUDA error reported on GPU " << gpu->info->index << ": " << estr << " (" << ename << ")";
+	  assert(0);
+	}
 
 	log_stream.debug() << "CUDA event " << event << " triggered on stream " << stream << " (GPU " << gpu << ")";
 
@@ -242,16 +249,7 @@ namespace Realm {
 			     void *_dst, const void *_src, size_t _bytes, GPUMemcpyKind _kind,
 			     GPUCompletionNotification *_notification)
       : GPUMemcpy(_gpu, _kind), dst(_dst), src(_src), 
-	mask(0), elmt_size(_bytes), notification(_notification)
-    {}
-
-    GPUMemcpy1D::GPUMemcpy1D(GPU *_gpu,
-			     void *_dst, const void *_src, 
-			     const ElementMask *_mask, size_t _elmt_size,
-			     GPUMemcpyKind _kind,
-			     GPUCompletionNotification *_notification)
-      : GPUMemcpy(_gpu, _kind), dst(_dst), src(_src),
-	mask(_mask), elmt_size(_elmt_size), notification(_notification)
+	elmt_size(_bytes), notification(_notification)
     {}
 
     GPUMemcpy1D::~GPUMemcpy1D(void)
@@ -281,6 +279,9 @@ namespace Realm {
                                         (CUdeviceptr)(((char*)src)+span_start),
                                         span_bytes,
                                         raw_stream) );
+#ifdef REALM_USE_VALGRIND_ANNOTATIONS
+	    VALGRIND_MAKE_MEM_DEFINED((((char*)dst)+span_start), span_bytes);
+#endif
             break;
           }
         case GPU_MEMCPY_DEVICE_TO_DEVICE:
@@ -317,11 +318,7 @@ namespace Realm {
       // save stream into local variable for do_spam (which may be called indirectly
       //  by ElementMask::forall_ranges)
       local_stream = stream;
-      if(mask) {
-        ElementMask::forall_ranges(*this, *mask);
-      } else {
-        do_span(0, 1);
-      }
+      do_span(0, 1);
       
       if(notification)
 	stream->add_notification(notification);
@@ -467,6 +464,7 @@ namespace Realm {
     //
     // mem pair copiers for DMA channels
 
+#ifdef OLD_COPIERS
     class GPUtoFBMemPairCopier : public MemPairCopier {
     public:
       GPUtoFBMemPairCopier(Memory _src_mem, GPU *_gpu)
@@ -482,7 +480,7 @@ namespace Realm {
       virtual InstPairCopier *inst_pair(RegionInstance src_inst, RegionInstance dst_inst,
 					OASVec &oas_vec)
       {
-	return new LegionRuntime::LowLevel::SpanBasedInstPairCopier<GPUtoFBMemPairCopier>(this, src_inst, 
+	return new SpanBasedInstPairCopier<GPUtoFBMemPairCopier>(this, src_inst, 
 											  dst_inst, oas_vec);
       }
 
@@ -528,7 +526,7 @@ namespace Realm {
       virtual InstPairCopier *inst_pair(RegionInstance src_inst, RegionInstance dst_inst,
 					OASVec &oas_vec)
       {
-	return new LegionRuntime::LowLevel::SpanBasedInstPairCopier<GPUfromFBMemPairCopier>(this, src_inst, 
+	return new SpanBasedInstPairCopier<GPUfromFBMemPairCopier>(this, src_inst, 
 											    dst_inst, oas_vec);
       }
 
@@ -571,7 +569,7 @@ namespace Realm {
       virtual InstPairCopier *inst_pair(RegionInstance src_inst, RegionInstance dst_inst,
 					OASVec &oas_vec)
       {
-	return new LegionRuntime::LowLevel::SpanBasedInstPairCopier<GPUinFBMemPairCopier>(this, src_inst, 
+	return new SpanBasedInstPairCopier<GPUinFBMemPairCopier>(this, src_inst, 
 											  dst_inst, oas_vec);
       }
 
@@ -613,7 +611,7 @@ namespace Realm {
       virtual InstPairCopier *inst_pair(RegionInstance src_inst, RegionInstance dst_inst,
 					OASVec &oas_vec)
       {
-        return new LegionRuntime::LowLevel::SpanBasedInstPairCopier<GPUPeerMemPairCopier>(this, src_inst,
+        return new SpanBasedInstPairCopier<GPUPeerMemPairCopier>(this, src_inst,
 											  dst_inst, oas_vec);
       }
 
@@ -641,6 +639,7 @@ namespace Realm {
     protected:
       GPU *src, *dst;
     };
+#endif
 
     class GPUDMAChannel_H2D : public MemPairCopierFactory {
     public:
@@ -649,8 +648,10 @@ namespace Realm {
       virtual bool can_perform_copy(Memory src_mem, Memory dst_mem,
 				    ReductionOpID redop_id, bool fold);
 
+#ifdef OLD_COPIERS
       virtual MemPairCopier *create_copier(Memory src_mem, Memory dst_mem,
 					   ReductionOpID redop_id, bool fold);
+#endif
 
     protected:
       GPU *gpu;
@@ -663,8 +664,10 @@ namespace Realm {
       virtual bool can_perform_copy(Memory src_mem, Memory dst_mem,
 				    ReductionOpID redop_id, bool fold);
 
+#ifdef OLD_COPIERS
       virtual MemPairCopier *create_copier(Memory src_mem, Memory dst_mem,
 					   ReductionOpID redop_id, bool fold);
+#endif
 
     protected:
       GPU *gpu;
@@ -677,8 +680,10 @@ namespace Realm {
       virtual bool can_perform_copy(Memory src_mem, Memory dst_mem,
 				    ReductionOpID redop_id, bool fold);
 
+#ifdef OLD_COPIERS
       virtual MemPairCopier *create_copier(Memory src_mem, Memory dst_mem,
 					   ReductionOpID redop_id, bool fold);
+#endif
 
     protected:
       GPU *gpu;
@@ -691,8 +696,10 @@ namespace Realm {
       virtual bool can_perform_copy(Memory src_mem, Memory dst_mem,
 				    ReductionOpID redop_id, bool fold);
 
+#ifdef OLD_COPIERS
       virtual MemPairCopier *create_copier(Memory src_mem, Memory dst_mem,
 					   ReductionOpID redop_id, bool fold);
+#endif
 
     protected:
       GPU *gpu;
@@ -725,11 +732,13 @@ namespace Realm {
       return true;
     }
 
+#ifdef OLD_COPIERS
     MemPairCopier *GPUDMAChannel_H2D::create_copier(Memory src_mem, Memory dst_mem,
 						    ReductionOpID redop_id, bool fold)
     {
       return new GPUtoFBMemPairCopier(src_mem, gpu);
     }
+#endif
 
 
     ////////////////////////////////////////////////////////////////////////
@@ -758,11 +767,13 @@ namespace Realm {
       return true;
     }
 
-    LegionRuntime::LowLevel::MemPairCopier *GPUDMAChannel_D2H::create_copier(Memory src_mem, Memory dst_mem,
-									     ReductionOpID redop_id, bool fold)
+#ifdef OLD_COPIERS
+    MemPairCopier *GPUDMAChannel_D2H::create_copier(Memory src_mem, Memory dst_mem,
+						    ReductionOpID redop_id, bool fold)
     {
       return new GPUfromFBMemPairCopier(gpu, dst_mem);
     }
+#endif
 
 
     ////////////////////////////////////////////////////////////////////////
@@ -793,11 +804,13 @@ namespace Realm {
       return true;
     }
 
+#ifdef OLD_COPIERS
     MemPairCopier *GPUDMAChannel_D2D::create_copier(Memory src_mem, Memory dst_mem,
 						    ReductionOpID redop_id, bool fold)
     {
       return new GPUinFBMemPairCopier(gpu);
     }
+#endif
 
 
     ////////////////////////////////////////////////////////////////////////
@@ -826,6 +839,7 @@ namespace Realm {
       return true;
     }
 
+#ifdef OLD_COPIERS
     MemPairCopier *GPUDMAChannel_P2P::create_copier(Memory src_mem, Memory dst_mem,
 						    ReductionOpID redop_id, bool fold)
     {
@@ -835,6 +849,7 @@ namespace Realm {
 
       return new GPUPeerMemPairCopier(gpu, dst_gpu);
     }
+#endif
 
 
     void GPU::create_dma_channels(Realm::RuntimeImpl *r)
@@ -843,7 +858,7 @@ namespace Realm {
       // Not a good design choice
       // For now, channel_manager will creates all channels
       // for GPUs in dma_all_gpus
-      LegionRuntime::LowLevel::register_gpu_in_dma_systems(this);
+      register_gpu_in_dma_systems(this);
       // </NEW_DMA>
 
       // if we don't have any framebuffer memory, we can't do any DMAs
@@ -851,13 +866,16 @@ namespace Realm {
 	return;
 
       if(!pinned_sysmems.empty()) {
-	r->add_dma_channel(new GPUDMAChannel_H2D(this));
-	r->add_dma_channel(new GPUDMAChannel_D2H(this));
+	//r->add_dma_channel(new GPUDMAChannel_H2D(this));
+	//r->add_dma_channel(new GPUDMAChannel_D2H(this));
 
 	// TODO: move into the dma channels themselves
 	for(std::set<Memory>::const_iterator it = pinned_sysmems.begin();
 	    it != pinned_sysmems.end();
 	    ++it) {
+	  // don't create affinities for IB memories right now
+	  if(!ID(*it).is_memory()) continue;
+
 	  Machine::MemoryMemoryAffinity mma;
 	  mma.m1 = fbmem->me;
 	  mma.m2 = *it;
@@ -869,11 +887,11 @@ namespace Realm {
 	log_gpu.warning() << "GPU " << proc->me << " has no pinned system memories!?";
       }
 
-      r->add_dma_channel(new GPUDMAChannel_D2D(this));
+      //r->add_dma_channel(new GPUDMAChannel_D2D(this));
 
       // only create a p2p channel if we have peers (and an fb)
       if(!peer_fbs.empty()) {
-	r->add_dma_channel(new GPUDMAChannel_P2P(this));
+	//r->add_dma_channel(new GPUDMAChannel_P2P(this));
 
 	// TODO: move into the dma channels themselves
 	for(std::set<Memory>::const_iterator it = peer_fbs.begin();
@@ -1176,17 +1194,6 @@ namespace Realm {
       host_to_device_stream->add_copy(copy);
     }
 
-    void GPU::copy_to_fb(off_t dst_offset, const void *src,
-			 const ElementMask *mask, size_t elmt_size,
-			 GPUCompletionNotification *notification /*= 0*/)
-    {
-      GPUMemcpy *copy = new GPUMemcpy1D(this,
-					(void *)(fbmem->base + dst_offset),
-					src, mask, elmt_size,
-					GPU_MEMCPY_HOST_TO_DEVICE, notification);
-      host_to_device_stream->add_copy(copy);
-    }
-
     void GPU::copy_from_fb(void *dst, off_t src_offset, size_t bytes,
 			   GPUCompletionNotification *notification /*= 0*/)
     {
@@ -1196,17 +1203,6 @@ namespace Realm {
       device_to_host_stream->add_copy(copy);
     } 
 
-    void GPU::copy_from_fb(void *dst, off_t src_offset,
-			   const ElementMask *mask, size_t elmt_size,
-			   GPUCompletionNotification *notification /*= 0*/)
-    {
-      GPUMemcpy *copy = new GPUMemcpy1D(this,
-					dst, (const void *)(fbmem->base + src_offset),
-					mask, elmt_size,
-					GPU_MEMCPY_DEVICE_TO_HOST, notification);
-      device_to_host_stream->add_copy(copy);
-    }
-
     void GPU::copy_within_fb(off_t dst_offset, off_t src_offset,
 			     size_t bytes,
 			     GPUCompletionNotification *notification /*= 0*/)
@@ -1215,18 +1211,6 @@ namespace Realm {
 					(void *)(fbmem->base + dst_offset),
 					(const void *)(fbmem->base + src_offset),
 					bytes, GPU_MEMCPY_DEVICE_TO_DEVICE, notification);
-      device_to_device_stream->add_copy(copy);
-    }
-
-    void GPU::copy_within_fb(off_t dst_offset, off_t src_offset,
-			     const ElementMask *mask, size_t elmt_size,
-			     GPUCompletionNotification *notification /*= 0*/)
-    {
-      GPUMemcpy *copy = new GPUMemcpy1D(this,
-					(void *)(fbmem->base + dst_offset),
-					(const void *)(fbmem->base + src_offset),
-					mask, elmt_size, GPU_MEMCPY_DEVICE_TO_DEVICE,
-					notification);
       device_to_device_stream->add_copy(copy);
     }
 
@@ -1598,28 +1582,6 @@ namespace Realm {
 
     GPUFBMemory::~GPUFBMemory(void) {}
 
-    RegionInstance GPUFBMemory::create_instance(IndexSpace is,
-						const int *linearization_bits,
-						size_t bytes_needed,
-						size_t block_size,
-						size_t element_size,
-						const std::vector<size_t>& field_sizes,
-						ReductionOpID redopid,
-						off_t list_size,
-						const Realm::ProfilingRequestSet &reqs,
-						RegionInstance parent_inst)
-    {
-      return create_instance_local(is, linearization_bits, bytes_needed,
-				   block_size, element_size, field_sizes, redopid,
-				   list_size, reqs, parent_inst);
-    }
-
-    void GPUFBMemory::destroy_instance(RegionInstance i, 
-				       bool local_destroy)
-    {
-      destroy_instance_local(i, local_destroy);
-    }
-
     off_t GPUFBMemory::alloc_bytes(size_t size)
     {
       return alloc_bytes_local(size);
@@ -1672,28 +1634,6 @@ namespace Realm {
 
     GPUZCMemory::~GPUZCMemory(void) {}
 
-    RegionInstance GPUZCMemory::create_instance(IndexSpace is,
-						const int *linearization_bits,
-						size_t bytes_needed,
-						size_t block_size,
-						size_t element_size,
-						const std::vector<size_t>& field_sizes,
-						ReductionOpID redopid,
-						off_t list_size,
-						const Realm::ProfilingRequestSet &reqs,
-						RegionInstance parent_inst)
-    {
-      return create_instance_local(is, linearization_bits, bytes_needed,
-				   block_size, element_size, field_sizes, redopid,
-				   list_size, reqs, parent_inst);
-    }
-
-    void GPUZCMemory::destroy_instance(RegionInstance i, 
-				       bool local_destroy)
-    {
-      destroy_instance_local(i, local_destroy);
-    }
-
     off_t GPUZCMemory::alloc_bytes(size_t size)
     {
       return alloc_bytes_local(size);
@@ -1723,24 +1663,6 @@ namespace Realm {
     {
       return ID(me).memory.owner_node;
     }
-
-#ifdef POINTER_CHECKS
-    static unsigned *get_gpu_valid_mask(RegionMetaDataUntyped region)
-    {
-	const ElementMask &mask = region.get_valid_mask();
-	void *valid_mask_base;
-	for(size_t p = 0; p < mask.raw_size(); p += 4)
-	  log_gpudma.info("  raw mask data[%zd] = %08x\n", p,
-		       ((unsigned *)(mask.get_raw()))[p>>2]);
-        CHECK_CU( cuMemAlloc((cuDevicePtr*)(&valid_mask_base), mask.raw_size()) );
-	log_gpudma.info("copy of valid mask (%zd bytes) created at %p",
-		     mask.raw_size(), valid_mask_base);
-        CHECK_CU( cuMemcpyHtoD(vald_mask_base, 
-                               mask.get_raw(),
-                               mask.raw_size()) );
-	return (unsigned *)&(((ElementMaskImpl *)valid_mask_base)->bits);
-    }
-#endif
 
     // Helper methods for emulating the cuda runtime
     /*static*/ GPUProcessor* GPUProcessor::get_current_gpu_proc(void)
@@ -2287,11 +2209,14 @@ namespace Realm {
       , cfg_pin_sysmem(true)
       , cfg_fences_use_callbacks(false)
       , cfg_suppress_hijack_warning(false)
-      , shared_worker(0), zcmem_cpu_base(0), zcib_cpu_base(0), zcmem(0)
+      , shared_worker(0), zcmem_cpu_base(0)
+      , zcib_cpu_base(0), zcmem(0)
     {}
       
     CudaModule::~CudaModule(void)
-    {}
+    {
+      delete_container_contents(gpu_info);
+    }
 
     /*static*/ Module *CudaModule::create_module(RuntimeImpl *runtime,
 						 std::vector<std::string>& cmdline)
@@ -2538,9 +2463,9 @@ namespace Realm {
       // before we create dma channels, see how many of the system memory ranges
       //  we can register with CUDA
       if(cfg_pin_sysmem && !gpus.empty()) {
-	std::vector<MemoryImpl *>& local_mems = runtime->nodes[gasnet_mynode()].memories;
+	std::vector<MemoryImpl *>& local_mems = runtime->nodes[my_node_id].memories;
 	// <NEW_DMA> also add intermediate buffers into local_mems
-	std::vector<MemoryImpl *>& local_ib_mems = runtime->nodes[gasnet_mynode()].ib_memories;
+	std::vector<MemoryImpl *>& local_ib_mems = runtime->nodes[my_node_id].ib_memories;
 	std::vector<MemoryImpl *> all_local_mems;
 	all_local_mems.insert(all_local_mems.end(), local_mems.begin(), local_mems.end());
 	all_local_mems.insert(all_local_mems.end(), local_ib_mems.begin(), local_ib_mems.end());
@@ -2570,6 +2495,7 @@ namespace Realm {
 			   << ret;
 	    continue;
 	  }
+	  registered_host_ptrs.push_back(base);
 
 	  // now go through each GPU and verify that it got a GPU pointer (it may not match the CPU
 	  //  pointer, but that's ok because we'll never refer to it directly)
@@ -2637,6 +2563,22 @@ namespace Realm {
 	CHECK_CU( cuMemFreeHost(zcmem_cpu_base) );
       }
 
+      if(zcib_cpu_base) {
+	assert(!gpus.empty());
+	AutoGPUContext agc(gpus[0]);
+	CHECK_CU( cuMemFreeHost(zcib_cpu_base) );
+      }
+
+      // also unregister any host memory at this time
+      if(!registered_host_ptrs.empty()) {
+	AutoGPUContext agc(gpus[0]);
+	for(std::vector<void *>::const_iterator it = registered_host_ptrs.begin();
+	    it != registered_host_ptrs.end();
+	    ++it)
+	  CHECK_CU( cuMemHostUnregister(*it) );
+	registered_host_ptrs.clear();
+      }
+
       for(std::vector<GPU *>::iterator it = gpus.begin();
 	  it != gpus.end();
 	  it++)
@@ -2676,7 +2618,12 @@ namespace Realm {
     {}
 
     GlobalRegistrations::~GlobalRegistrations(void)
-    {}
+    {
+      delete_container_contents(variables);
+      delete_container_contents(functions);
+      // we don't own fat binary pointers, but we can forget them
+      fat_binaries.clear();
+    }
 
     /*static*/ GlobalRegistrations& GlobalRegistrations::get_global_registrations(void)
     {

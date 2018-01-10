@@ -1,4 +1,4 @@
-/* Copyright 2017 Stanford University
+/* Copyright 2018 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,16 +20,20 @@
 #include <limits>
 #include <vector>
 
+#define LEGION_ENABLE_C_BINDINGS
 #include "legion.h"
-#include "legion_c.h"
-#include "legion_c_util.h"
+#include "legion/legion_c_util.h"
 
 #include "legion_terra.h"
 
 using namespace Legion;
-using namespace LegionRuntime::Accessor::AccessorType;
 
-typedef CObjectWrapper::AccessorGeneric AccessorGeneric;
+typedef Realm::Point<1,coord_t> Point1D;
+typedef Realm::Point<2,coord_t> Point2D;
+typedef Realm::Point<3,coord_t> Point3D;
+typedef CObjectWrapper::ArrayAccessor1D ArrayAccessor1D;
+typedef CObjectWrapper::ArrayAccessor2D ArrayAccessor2D;
+typedef CObjectWrapper::ArrayAccessor3D ArrayAccessor3D;
 
 #define ADD(x, y) ((x) + (y))
 #define SUB(x, y) ((x) - (y))
@@ -86,137 +90,165 @@ typedef CObjectWrapper::AccessorGeneric AccessorGeneric;
   {                                                                     \
   void REG(legion_reduction_op_id_t redop)                              \
   {                                                                     \
-    Runtime::register_reduction_op<CLASS>(redop);              \
+    Runtime::register_reduction_op<CLASS>(redop);                       \
   }                                                                     \
-  void SRED(legion_accessor_generic_t accessor_,                        \
+  void SRED(legion_accessor_array_1d_t accessor_,                       \
            legion_ptr_t ptr_, T value)                                  \
   {                                                                     \
-    AccessorGeneric* accessor = CObjectWrapper::unwrap(accessor_);      \
+    ArrayAccessor1D* accessor = CObjectWrapper::unwrap(accessor_);      \
     ptr_t ptr = CObjectWrapper::unwrap(ptr_);                           \
-    accessor->typeify<T>().convert<ReductionFold<CLASS> >().reduce(ptr, value); \
+    CLASS::fold<false>(*(T*)(accessor->ptr(ptr.value)), value);         \
   }                                                                     \
-  void SRED_DP(legion_accessor_generic_t accessor_,                     \
-               legion_domain_point_t dp_, T value)                      \
+  void SRED_DP##_1d(legion_accessor_array_1d_t accessor_,               \
+                  legion_point_1d_t p_, T value)                        \
   {                                                                     \
-    AccessorGeneric* accessor = CObjectWrapper::unwrap(accessor_);      \
-    DomainPoint dp = CObjectWrapper::unwrap(dp_);                       \
-    accessor->typeify<T>()/*.convert<ReductionFold<CLASS> >()*/.reduce<CLASS>(dp, value); \
+    ArrayAccessor1D* accessor = CObjectWrapper::unwrap(accessor_);      \
+    Point1D p = CObjectWrapper::unwrap(p_);                             \
+    CLASS::fold<false>(*(T*)(accessor->ptr(p)), value);                 \
   }                                                                     \
-  void RED(legion_accessor_generic_t accessor_,                         \
+  void SRED_DP##_2d(legion_accessor_array_2d_t accessor_,               \
+                  legion_point_2d_t p_, T value)                        \
+  {                                                                     \
+    ArrayAccessor2D* accessor = CObjectWrapper::unwrap(accessor_);      \
+    Point2D p = CObjectWrapper::unwrap(p_);                             \
+    CLASS::fold<false>(*(T*)(accessor->ptr(p)), value);                 \
+  }                                                                     \
+  void SRED_DP##_3d(legion_accessor_array_3d_t accessor_,               \
+                  legion_point_3d_t p_, T value)                        \
+  {                                                                     \
+    ArrayAccessor3D* accessor = CObjectWrapper::unwrap(accessor_);      \
+    Point3D p = CObjectWrapper::unwrap(p_);                             \
+    CLASS::fold<false>(*(T*)(accessor->ptr(p)), value);                 \
+  }                                                                     \
+  void RED(legion_accessor_array_1d_t accessor_,                        \
            legion_ptr_t ptr_, T value)                                  \
   {                                                                     \
-    AccessorGeneric* accessor = CObjectWrapper::unwrap(accessor_);      \
+    ArrayAccessor1D* accessor = CObjectWrapper::unwrap(accessor_);      \
     ptr_t ptr = CObjectWrapper::unwrap(ptr_);                           \
-    accessor->typeify<T>().reduce<CLASS>(ptr, value);                   \
+    CLASS::fold<true>(*(T*)(accessor->ptr(ptr.value)), value);          \
   }                                                                     \
-  void RED_DP(legion_accessor_generic_t accessor_,                      \
-              legion_domain_point_t dp_, T value)                       \
+  void RED_DP##_1d(legion_accessor_array_1d_t accessor_,                \
+                 legion_point_1d_t p_, T value)                         \
   {                                                                     \
-    AccessorGeneric* accessor = CObjectWrapper::unwrap(accessor_);      \
-    DomainPoint dp = CObjectWrapper::unwrap(dp_);                       \
-    accessor->typeify<T>().reduce<CLASS>(dp, value);                    \
+    ArrayAccessor1D* accessor = CObjectWrapper::unwrap(accessor_);      \
+    Point1D p = CObjectWrapper::unwrap(p_);                             \
+    CLASS::fold<true>(*(T*)(accessor->ptr(p)), value);                  \
+  }                                                                     \
+  void RED_DP##_2d(legion_accessor_array_2d_t accessor_,                \
+                 legion_point_2d_t p_, T value)                         \
+  {                                                                     \
+    ArrayAccessor2D* accessor = CObjectWrapper::unwrap(accessor_);      \
+    Point2D p = CObjectWrapper::unwrap(p_);                             \
+    CLASS::fold<true>(*(T*)(accessor->ptr(p)), value);                  \
+  }                                                                     \
+  void RED_DP##_3d(legion_accessor_array_3d_t accessor_,                \
+                 legion_point_3d_t p_, T value)                         \
+  {                                                                     \
+    ArrayAccessor3D* accessor = CObjectWrapper::unwrap(accessor_);      \
+    Point3D p = CObjectWrapper::unwrap(p_);                             \
+    CLASS::fold<true>(*(T*)(accessor->ptr(p)), value);                  \
   }                                                                     \
   }                                                                     \
 
 DECLARE_REDUCTION(register_reduction_plus_float,
-                  safe_reduce_plus_float, safe_reduce_plus_float_domain_point,
-                  reduce_plus_float, reduce_plus_float_domain_point,
+                  safe_reduce_plus_float, safe_reduce_plus_float_point,
+                  reduce_plus_float, reduce_plus_float_point,
                   PlusOpFloat, float, int, ADD, ADD, 0.0f)
 DECLARE_REDUCTION(register_reduction_plus_double,
-                  safe_reduce_plus_double, safe_reduce_plus_double_domain_point,
-                  reduce_plus_double, reduce_plus_double_domain_point,
+                  safe_reduce_plus_double, safe_reduce_plus_double_point,
+                  reduce_plus_double, reduce_plus_double_point,
                   PlusOpDouble, double, size_t, ADD, ADD, 0.0)
 DECLARE_REDUCTION(register_reduction_plus_int32,
-                  safe_reduce_plus_int32, safe_reduce_plus_int32_domain_point,
-                  reduce_plus_int32, reduce_plus_int32_domain_point,
+                  safe_reduce_plus_int32, safe_reduce_plus_int32_point,
+                  reduce_plus_int32, reduce_plus_int32_point,
                   PlusOpInt, int, int, ADD, ADD, 0)
 DECLARE_REDUCTION(register_reduction_plus_int64,
-                  safe_reduce_plus_int64, safe_reduce_plus_int64_domain_point,
-                  reduce_plus_int64, reduce_plus_int64_domain_point,
+                  safe_reduce_plus_int64, safe_reduce_plus_int64_point,
+                  reduce_plus_int64, reduce_plus_int64_point,
                   PlusOpLongLong, long long int, long long int, ADD, ADD, 0)
 
 DECLARE_REDUCTION(register_reduction_minus_float,
-                  safe_reduce_minus_float, safe_reduce_minus_float_domain_point,
-                  reduce_minus_float, reduce_minus_float_domain_point,
+                  safe_reduce_minus_float, safe_reduce_minus_float_point,
+                  reduce_minus_float, reduce_minus_float_point,
                   MinusOpFloat, float, int, ADD, SUB, 0.0f)
 DECLARE_REDUCTION(register_reduction_minus_double,
-                  safe_reduce_minus_double, safe_reduce_minus_double_domain_point,
-                  reduce_minus_double, reduce_minus_double_domain_point,
+                  safe_reduce_minus_double, safe_reduce_minus_double_point,
+                  reduce_minus_double, reduce_minus_double_point,
                   MinusOpDouble, double, size_t, ADD, SUB, 0.0)
 DECLARE_REDUCTION(register_reduction_minus_int32,
-                  safe_reduce_minus_int32, safe_reduce_minus_int32_domain_point,
-                  reduce_minus_int32, reduce_minus_int32_domain_point,
+                  safe_reduce_minus_int32, safe_reduce_minus_int32_point,
+                  reduce_minus_int32, reduce_minus_int32_point,
                   MinusOpInt, int, int, ADD, SUB, 0)
 DECLARE_REDUCTION(register_reduction_minus_int64,
-                  safe_reduce_minus_int64, safe_reduce_minus_int64_domain_point,
-                  reduce_minus_int64, reduce_minus_int64_domain_point,
+                  safe_reduce_minus_int64, safe_reduce_minus_int64_point,
+                  reduce_minus_int64, reduce_minus_int64_point,
                   MinusOpLongLong, long long int, long long int, ADD, SUB, 0)
 
 DECLARE_REDUCTION(register_reduction_times_float,
-                  safe_reduce_times_float, safe_reduce_times_float_domain_point,
-                  reduce_times_float, reduce_times_float_domain_point,
+                  safe_reduce_times_float, safe_reduce_times_float_point,
+                  reduce_times_float, reduce_times_float_point,
                   TImesOPFloat, float, int, MUL, MUL, 1.0f)
 DECLARE_REDUCTION(register_reduction_times_double,
-                  safe_reduce_times_double, safe_reduce_times_double_domain_point,
-                  reduce_times_double, reduce_times_double_domain_point,
+                  safe_reduce_times_double, safe_reduce_times_double_point,
+                  reduce_times_double, reduce_times_double_point,
                   TimesOpDouble, double, size_t, MUL, MUL, 1.0)
 DECLARE_REDUCTION(register_reduction_times_int32,
-                  safe_reduce_times_int32, safe_reduce_times_int32_domain_point,
-                  reduce_times_int32, reduce_times_int32_domain_point,
+                  safe_reduce_times_int32, safe_reduce_times_int32_point,
+                  reduce_times_int32, reduce_times_int32_point,
                   TimesOpInt, int, int, MUL, MUL, 1)
 DECLARE_REDUCTION(register_reduction_times_int64,
-                  safe_reduce_times_int64, safe_reduce_times_int64_domain_point,
-                  reduce_times_int64, reduce_times_int64_domain_point,
+                  safe_reduce_times_int64, safe_reduce_times_int64_point,
+                  reduce_times_int64, reduce_times_int64_point,
                   TimesOpLongLong, long long int, long long int, MUL, MUL, 1)
 
 DECLARE_REDUCTION(register_reduction_divide_float,
-                  safe_reduce_divide_float, safe_reduce_divide_float_domain_point,
-                  reduce_divide_float, reduce_divide_float_domain_point,
+                  safe_reduce_divide_float, safe_reduce_divide_float_point,
+                  reduce_divide_float, reduce_divide_float_point,
                   DivideOPFloat, float, int, DIV, MUL, 1.0f)
 DECLARE_REDUCTION(register_reduction_divide_double,
-                  safe_reduce_divide_double, safe_reduce_divide_double_domain_point,
-                  reduce_divide_double, reduce_divide_double_domain_point,
+                  safe_reduce_divide_double, safe_reduce_divide_double_point,
+                  reduce_divide_double, reduce_divide_double_point,
                   DivideOpDouble, double, size_t, DIV, MUL, 1.0)
 DECLARE_REDUCTION(register_reduction_divide_int32,
-                  safe_reduce_divide_int32, safe_reduce_divide_int32_domain_point,
-                  reduce_divide_int32, reduce_divide_int32_domain_point,
+                  safe_reduce_divide_int32, safe_reduce_divide_int32_point,
+                  reduce_divide_int32, reduce_divide_int32_point,
                   DivideOpInt, int, int, DIV, MUL, 1)
 DECLARE_REDUCTION(register_reduction_divide_int64,
-                  safe_reduce_divide_int64, safe_reduce_divide_int64_domain_point,
-                  reduce_divide_int64, reduce_divide_int64_domain_point,
+                  safe_reduce_divide_int64, safe_reduce_divide_int64_point,
+                  reduce_divide_int64, reduce_divide_int64_point,
                   DivideOpLongLong, long long int, long long int, DIV, MUL, 1)
 
 DECLARE_REDUCTION(register_reduction_max_float,
-                  safe_reduce_max_float, safe_reduce_max_float_domain_point,
-                  reduce_max_float, reduce_max_float_domain_point,
+                  safe_reduce_max_float, safe_reduce_max_float_point,
+                  reduce_max_float, reduce_max_float_point,
                   MaxOPFloat, float, int, std::max, std::max, -std::numeric_limits<float>::infinity())
 DECLARE_REDUCTION(register_reduction_max_double,
-                  safe_reduce_max_double, safe_reduce_max_double_domain_point,
-                  reduce_max_double, reduce_max_double_domain_point,
+                  safe_reduce_max_double, safe_reduce_max_double_point,
+                  reduce_max_double, reduce_max_double_point,
                   MaxOpDouble, double, size_t, std::max, std::max, -std::numeric_limits<double>::infinity())
 DECLARE_REDUCTION(register_reduction_max_int32,
-                  safe_reduce_max_int32, safe_reduce_max_int32_domain_point,
-                  reduce_max_int32, reduce_max_int32_domain_point,
+                  safe_reduce_max_int32, safe_reduce_max_int32_point,
+                  reduce_max_int32, reduce_max_int32_point,
                   MaxOpInt, int, int, std::max, std::max, INT_MIN)
 DECLARE_REDUCTION(register_reduction_max_int64,
-                  safe_reduce_max_int64, safe_reduce_max_int64_domain_point,
-                  reduce_max_int64, reduce_max_int64_domain_point,
+                  safe_reduce_max_int64, safe_reduce_max_int64_point,
+                  reduce_max_int64, reduce_max_int64_point,
                   MaxOpLongLong, long long int, long long int, std::max, std::max, LLONG_MIN)
 
 DECLARE_REDUCTION(register_reduction_min_float,
-                  safe_reduce_min_float, safe_reduce_min_float_domain_point,
-                  reduce_min_float, reduce_min_float_domain_point,
+                  safe_reduce_min_float, safe_reduce_min_float_point,
+                  reduce_min_float, reduce_min_float_point,
                   MinOPFloat, float, int, std::min, std::min, std::numeric_limits<float>::infinity())
 DECLARE_REDUCTION(register_reduction_min_double,
-                  safe_reduce_min_double, safe_reduce_min_double_domain_point,
-                  reduce_min_double, reduce_min_double_domain_point,
+                  safe_reduce_min_double, safe_reduce_min_double_point,
+                  reduce_min_double, reduce_min_double_point,
                   MinOpDouble, double, size_t, std::min, std::min, std::numeric_limits<double>::infinity())
 DECLARE_REDUCTION(register_reduction_min_int32,
-                  safe_reduce_min_int32, safe_reduce_min_int32_domain_point,
-                  reduce_min_int32, reduce_min_int32_domain_point,
+                  safe_reduce_min_int32, safe_reduce_min_int32_point,
+                  reduce_min_int32, reduce_min_int32_point,
                   MinOpInt, int, int, std::min, std::min, INT_MAX)
 DECLARE_REDUCTION(register_reduction_min_int64,
-                  safe_reduce_min_int64, safe_reduce_min_int64_domain_point,
-                  reduce_min_int64, reduce_min_int64_domain_point,
+                  safe_reduce_min_int64, safe_reduce_min_int64_point,
+                  reduce_min_int64, reduce_min_int64_point,
                   MinOpLongLong, long long int, long long int, std::min, std::min, LLONG_MAX)
 

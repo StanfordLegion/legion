@@ -1,4 +1,4 @@
--- Copyright 2017 Stanford University
+-- Copyright 2018 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -76,7 +76,7 @@ end
 
 terra get_raw_ptr(pr : c.legion_physical_region_t[1],
                   fld : c.legion_field_id_t[1])
-  var fa = c.legion_physical_region_get_field_accessor_generic(pr[0], fld[0])
+  var fa = c.legion_physical_region_get_field_accessor_array_2d(pr[0], fld[0])
   var rect : c.legion_rect_2d_t
   var subrect : c.legion_rect_2d_t
   var offsets : c.legion_byte_offset_t[2]
@@ -84,7 +84,7 @@ terra get_raw_ptr(pr : c.legion_physical_region_t[1],
   rect.lo.x[1] = 0
   rect.hi.x[0] = 2
   rect.hi.x[1] = 2
-  var p = c.legion_accessor_generic_raw_rect_ptr_2d(fa, rect, &subrect, offsets)
+  var p = c.legion_accessor_array_2d_raw_rect_ptr(fa, rect, &subrect, offsets)
   return [&float](p)
 end
 

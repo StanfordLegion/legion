@@ -1,4 +1,4 @@
--- Copyright 2017 Stanford University, NVIDIA Corporation
+-- Copyright 2018 Stanford University, NVIDIA Corporation
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -73,7 +73,7 @@ local function uses(cx, region_type, polarity)
 
   assert(std.type_supports_privileges(region_type))
   local usage = { [region_type] = polarity }
-  for other_region_type, _ in pairs(cx.region_universe) do
+  for other_region_type, _ in cx.region_universe:items() do
     if std.is_region(other_region_type) then -- Skip lists of regions
       local constraint = std.constraint(
         region_type,

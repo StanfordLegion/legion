@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-# Copyright 2017 Stanford University, NVIDIA Corporation
+# Copyright 2018 Stanford University, NVIDIA Corporation
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -49,6 +49,12 @@ future_pat = re.compile(prefix + r'GC Future (?P<did>[0-9]+) (?P<node>[0-9]+)')
 future_map_pat = re.compile(prefix + r'GC Future Map (?P<did>[0-9]+) (?P<node>[0-9]+)')
 # Constraints
 constraints_pat = re.compile(prefix + r'GC Constraints (?P<did>[0-9]+) (?P<node>[0-9]+)')
+# Region Tree
+index_space_pat = re.compile(prefix + r'GC Index Space (?P<did>[0-9]+) (?P<node>[0-9]+) (?P<handle>[0-9]+)')
+index_part_pat  = re.compile(prefix + r'GC Index Partition (?P<did>[0-9]+) (?P<node>[0-9]+) (?P<handle>[0-9]+)')
+field_space_pat = re.compile(prefix + r'GC Field Space (?P<did>[0-9]+) (?P<node>[0-9]+) (?P<handle>[0-9]+)')
+region_pat      = re.compile(prefix + r'GC Region (?P<did>[0-9]+) (?P<node>[0-9]+) (?P<is>[0-9]+) (?P<fs>[0-9]+) (?P<tid>[0-9]+)')
+partition_pat   = re.compile(prefix + r'GC Partition (?P<did>[0-9]+) (?P<node>[0-9]+) (?P<ip>[0-9]+) (?P<fs>[0-9]+) (?P<tid>[0-9]+)')
 # Source Kinds
 source_kind_pat = re.compile(prefix + r'GC Source Kind (?P<kind>[0-9]+) (?P<name>[0-9a-zA-Z_ ]+)')
 # Deletion Pattern
@@ -587,6 +593,51 @@ class Constraints(Base):
     def __repr__(self):
         return 'Layout Constraints '+str(self.did)+' (Node='+str(self.node)+')'
 
+class IndexSpace(Base):
+    def __init__(self, did, node, handle):
+        super(IndexSpace,self).__init__(did, node)
+        self.handle = handle
+
+    def __repr__(self):
+        return 'Index Space '+str(self.did)+' (Node='+str(self.node)+') Handle '+str(self.handle)
+        
+
+class IndexPartition(Base):
+    def __init__(self, did, node, handle):
+        super(IndexPartition,self).__init__(did, node)
+        self.handle = handle
+
+    def __repr__(self):
+        return 'Index Partition '+str(self.did)+' (Node='+str(self.node)+') Handle '+str(self.handle)
+
+class FieldSpace(Base):
+    def __init__(self, did, node, handle):
+        super(FieldSpace,self).__init__(did, node)
+        self.handle = handle
+
+    def __repr__(self):
+        return 'Field Space '+str(self.did)+' (Node='+str(self.node)+') Handle '+str(self.handle)
+
+class Region(Base):
+    def __init__(self, did, node, index_space, field_space, tid):
+        super(Region,self).__init__(did, node)
+        self.index_space = index_space
+        self.field_space = field_space
+        self.tree_id = tid
+
+    def __repr__(self):
+        return 'Region '+str(self.did)+' (Node='+str(self.node)+') ('+str(self.index_space)+','+str(self.field_space)+','+str(self.tree_id)+')'
+
+class Partition(Base):
+    def __init__(self, did, node, index_partition, field_space, tid):
+        super(Partition,self).__init__(did, node)
+        self.index_partition = index_partition
+        self.field_space = field_space
+        self.tree_id = tid
+
+    def __repr__(self):
+        return 'Partition '+str(self.did)+' (Node='+str(self.node)+') ('+str(self.index_partition)+','+str(self.field_space)+','+str(self.tree_id)+')'
+
 class Instance(object):
     def __init__(self, iid, mem, kind):
         self.iid = iid
@@ -607,6 +658,11 @@ class State(object):
         self.src_names = {}
         self.constraints = {}
         self.version_states = {}
+        self.index_spaces = {}
+        self.index_partitions = {}
+        self.field_spaces = {}
+        self.regions = {}
+        self.partitions = {}
 
     def parse_log_file(self, file_name):
         with open(file_name, 'rb') as log:
@@ -712,6 +768,40 @@ class State(object):
                     self.log_constraints(long(m.group('did')),
                                          long(m.group('node')))
                     continue
+                m = index_space_pat.match(line)
+                if m is not None:
+                    self.log_index_space(long(m.group('did')),
+                                         long(m.group('node')),
+                                         long(m.group('handle')))
+                    continue
+                m = index_part_pat.match(line)
+                if m is not None:
+                    self.log_index_partition(long(m.group('did')),
+                                             long(m.group('node')),
+                                             long(m.group('handle')))
+                    continue
+                m = field_space_pat.match(line)
+                if m is not None:
+                    self.log_field_space(long(m.group('did')),
+                                         long(m.group('node')),
+                                         long(m.group('handle')))
+                    continue
+                m = region_pat.match(line)
+                if m is not None:
+                    self.log_region(long(m.group('did')),
+                                    long(m.group('node')),
+                                    long(m.group('is')),
+                                    long(m.group('fs')),
+                                    long(m.group('tid')))
+                    continue
+                m = partition_pat.match(line)
+                if m is not None:
+                    self.log_partition(long(m.group('did')),
+                                       long(m.group('node')),
+                                       long(m.group('ip')),
+                                       long(m.group('fs')),
+                                       long(m.group('tid')))
+                    continue
                 m = source_kind_pat.match(line)
                 if m is not None:
                     self.log_source_kind(int(m.group('kind')),
@@ -751,6 +841,16 @@ class State(object):
             constraint.update_nested_references(self)
         for state in self.version_states.itervalues():
             state.update_nested_references(self)
+        for index_space in self.index_spaces.itervalues():
+            index_space.update_nested_references(self)
+        for index_part in self.index_partitions.itervalues():
+            index_part.update_nested_references(self)
+        for field_space in self.field_spaces.itervalues():
+            field_space.update_nested_references(self)
+        for region in self.regions.itervalues():
+            region.update_nested_references(self)
+        for partition in self.partitions.itervalues():
+            partition.update_nested_references(self)
         # Run the garbage collector
         gc.collect()
 
@@ -817,6 +917,21 @@ class State(object):
 
     def log_constraints(self, did, node):
         self.get_constraints(did, node)
+
+    def log_index_space(self, did, node, handle):
+        self.get_index_space(did, node, handle)
+
+    def log_index_partition(self, did, node, handle):
+        self.get_index_partition(did, node, handle)
+
+    def log_field_space(self, did, node, handle):
+        self.get_field_space(did, node, handle)
+
+    def log_region(self, did, node, index_space, field_space, tid):
+        self.get_region(did, node, index_space, field_space, tid)
+
+    def log_partition(self, did, node, index_partition, field_space, tid):
+        self.get_partition(did, node, index_partition, field_space, tid)
 
     def log_source_kind(self, kind, name):
         if kind not in self.src_names:
@@ -885,6 +1000,51 @@ class State(object):
                 del self.unknowns[key]
         return self.constraints[key]
 
+    def get_index_space(self, did, node, handle):
+        key = (did,node)
+        if key not in self.index_spaces:
+            self.index_spaces[key] = IndexSpace(did, node, handle)
+            if key in self.unknowns:
+                self.index_spaces[key].clone(self.unknowns[key])
+                del self.unknowns[key]
+        return self.index_spaces[key]
+
+    def get_index_partition(self, did, node, handle):
+        key = (did,node)
+        if key not in self.index_partitions:
+            self.index_partitions[key] = IndexPartition(did, node, handle)
+            if key in self.unknowns:
+                self.index_partitions[key].clone(self.unknowns[key])
+                del self.unknowns[key]
+        return self.index_partitions[key]
+
+    def get_field_space(self, did, node, handle):
+        key = (did,node)
+        if key not in self.field_spaces:
+            self.field_spaces[key] = FieldSpace(did, node, handle)
+            if key in self.unknowns:
+                self.field_spaces[key].clone(self.unknowns[key])
+                del self.unknowns[key]
+        return self.field_spaces[key]
+
+    def get_region(self, did, node, index_space, field_space, tid):
+        key = (did,node)
+        if key not in self.regions:
+            self.regions[key] = Region(did, node, index_space, field_space, tid)
+            if key in self.unknowns:
+                self.regions[key].clone(self.unknowns[key])
+                del self.unknowns[key]
+        return self.regions[key]
+
+    def get_partition(self, did, node, index_partition, field_space, tid):
+        key = (did,node)
+        if key not in self.partitions:
+            self.partitions[key] = Partition(did, node, index_partition, field_space, tid)
+            if key in self.unknowns:
+                self.partitions[key].clone(self.unknowns[key])
+                del self.unknowns[key]
+        return self.partitions[key]
+
     def get_obj(self, did, node):
         key = (did,node)
         if key in self.views:
@@ -899,6 +1059,16 @@ class State(object):
             return self.version_states[key]
         if key in self.constraints:
             return self.constraints[key]
+        if key in self.index_spaces:
+            return self.index_spaces[key]
+        if key in self.index_partitions:
+            return self.index_partitions[key]
+        if key in self.field_spaces:
+            return self.field_spaces[key]
+        if key in self.regions:
+            return self.regions[key]
+        if key in self.partitions:
+            return self.partitions[key]
         if key in self.unknowns:
             return self.unknowns[key]
         self.unknowns[key] = Base(did, node)
@@ -923,6 +1093,20 @@ class State(object):
         for did,constraint in self.constraints.iteritems():
             print "Checking for cycles in "+repr(constraint)
             constraint.check_for_cycles()
+        for did,index_space in self.index_spaces.iteritems():
+            print "Checking for cycles in "+repr(index_space)
+            index_space.check_for_cycles()
+        for did,index_part in self.index_partitions.iteritems():
+            print "Checking for cycles in "+repr(index_part)
+            index_part.check_for_cycles()
+        for did,field_space in self.field_spaces.iteritems():
+            print "Checking for cycles in "+repr(field_space)
+            field_space.check_for_cycles();
+        for did,region in self.regions.iteritems():
+            print "Checking for cycles in "+repr(region)
+            region.check_for_cycles()
+        for did,partition in self.partitions.iteritems():
+            print "Checking for cycles in "+repr(partition)
         print "NO CYCLES"
 
     def check_for_leaks(self, verbose): 
@@ -933,6 +1117,11 @@ class State(object):
         pinned_managers = 0
         leaked_views = 0
         leaked_states = 0
+        leaked_index_spaces = 0
+        leaked_index_partitions = 0
+        leaked_field_spaces = 0
+        leaked_regions = 0
+        leaked_partitions = 0
         for future in self.futures.itervalues():
             if not future.check_for_leaks(verbose):
                 leaked_futures += 1
@@ -955,6 +1144,21 @@ class State(object):
         for state in self.version_states.itervalues():
             if not state.check_for_leaks(verbose):
                 leaked_states += 1
+        for index_space in self.index_spaces.itervalues():
+            if not index_space.check_for_leaks(verbose):
+                leaked_index_spaces += 1
+        for index_part in self.index_partitions.itervalues():
+            if not index_part.check_for_leaks(verbose):
+                leaked_index_partitions += 1
+        for field_space in self.field_spaces.itervalues():
+            if not field_space.check_for_leaks(verbose):
+                leaked_field_spaces += 1
+        for region in self.regions.itervalues():
+            if not region.check_for_leaks(verbose):
+                leaked_regions += 1
+        for partition in self.partitions.itervalues():
+            if not partition.check_for_leaks(verbose):
+                leaked_partitions += 1
         print "LEAK SUMMARY"
         if leaked_futures > 0:
             print "  LEAKED FUTURES: "+str(leaked_futures)
@@ -984,6 +1188,26 @@ class State(object):
             print "  LEAKED VERSION STATES: "+str(leaked_states)
         else:
             print "  Leaked Version States: "+str(leaked_states)
+        if leaked_index_spaces > 0:
+            print "  LEAKED INDEX SPACES: "+str(leaked_index_spaces)
+        else:
+            print "  Leaked Index Spaces: "+str(leaked_index_spaces)
+        if leaked_index_partitions > 0:
+            print "  LEAKED INDEX PARTITIONS: "+str(leaked_index_partitions)
+        else:
+            print "  Leaked Index Partitions: "+str(leaked_index_partitions)
+        if leaked_field_spaces > 0:
+            print "  LEAKED FIELD SPACES: "+str(leaked_field_spaces)
+        else:
+            print "  Leaked Field Spaces: "+str(leaked_field_spaces)
+        if leaked_regions > 0:
+            print "  LEAKED REGIONS: "+str(leaked_regions)
+        else:
+            print "  Leaked Regions: "+str(leaked_regions)
+        if leaked_partitions > 0:
+            print "  LEAKED PARTITIONS: "+str(leaked_partitions)
+        else:
+            print "  Leaked Partitions: "+str(leaked_partitions)
 
 def usage():
     print 'Usage: '+sys.argv[0]+' [-c -l -v] <file_names>+'

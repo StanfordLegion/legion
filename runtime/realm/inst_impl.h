@@ -1,4 +1,4 @@
-/* Copyright 2017 Stanford University, NVIDIA Corporation
+/* Copyright 2018 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,30 +18,30 @@
 #ifndef REALM_INST_IMPL_H
 #define REALM_INST_IMPL_H
 
-#include "instance.h"
-#include "id.h"
+#include "realm/instance.h"
+#include "realm/id.h"
+#include "realm/inst_layout.h"
 
-#include "activemsg.h"
+#include "realm/activemsg.h"
 
-#include "rsrv_impl.h"
-#include "metadata.h"
+#include "realm/rsrv_impl.h"
+#include "realm/metadata.h"
 
 namespace Realm {
 
     class RegionInstanceImpl {
-    public:
-      RegionInstanceImpl(RegionInstance _me, IndexSpace _is, Memory _memory, off_t _offset, size_t _size, 
-			 ReductionOpID _redopid,
-			 const DomainLinearization& _linear, size_t _block_size, size_t _elmt_size, 
-			 const std::vector<size_t>& _field_sizes,
-			 const ProfilingRequestSet &reqs,
-			 off_t _count_offset = -1, off_t _red_list_size = -1, 
-			 RegionInstance _parent_inst = RegionInstance::NO_INST);
-
-      // when we auto-create a remote instance, we don't know region/offset/linearization
+    protected:
+      // RegionInstanceImpl creation/deletion is handled by MemoryImpl
+      friend class MemoryImpl;
       RegionInstanceImpl(RegionInstance _me, Memory _memory);
-
       ~RegionInstanceImpl(void);
+
+    public:
+      // the life cycle of an instance is defined in part by when the
+      //  allocation and deallocation of storage occurs, but that is managed
+      //  by the memory, which uses these callbacks to notify us
+      void notify_allocation(bool success, size_t offset);
+      void notify_deallocation(void);
 
 #ifdef POINTER_CHECKS
       void verify_access(unsigned ptr);
@@ -62,10 +62,10 @@ namespace Realm {
       bool get_strided_parameters(void *&base, size_t &stride,
 				  off_t field_offset);
 
-      Event request_metadata(void) { return metadata.request_data(ID(me).instance.owner_node, me.id); }
+      Event request_metadata(void) { return metadata.request_data(ID(me).instance.creator_node, me.id); }
 
-      void record_instance_usage(void);
-      void finalize_instance(void);
+      // called once storage has been released and all remote metadata is invalidated
+      void recycle_instance(void);
 
     public: //protected:
       friend class RegionInstance;
@@ -82,7 +82,6 @@ namespace Realm {
 	void *serialize(size_t& out_size) const;
 	void deserialize(const void *in_data, size_t in_size);
 
-	IndexSpace is;
 	off_t alloc_offset;
 	size_t size;
 	ReductionOpID redopid;
@@ -91,13 +90,18 @@ namespace Realm {
 	size_t block_size, elmt_size;
 	std::vector<size_t> field_sizes;
 	RegionInstance parent_inst;
-	DomainLinearization linearization;
+
+	size_t inst_offset;
+	Event ready_event;
+	InstanceLayoutGeneric *layout;
+	std::string filename; // temp hack for attached files
       };
 
+      // used for atomic access to metadata
+      GASNetHSL mutex;
       Metadata metadata;
 
-      static const unsigned MAX_LINEARIZATION_LEN = 32;
-
+      // used for serialized application access to contents of instance
       ReservationImpl lock;
     };
 

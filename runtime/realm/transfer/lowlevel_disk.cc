@@ -1,5 +1,5 @@
-/* Copyright 2017 Stanford University, NVIDIA Corporation
- * Copyright 2017 Los Alamos National Laboratory
+/* Copyright 2018 Stanford University, NVIDIA Corporation
+ * Copyright 2018 Los Alamos National Laboratory
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,12 +15,16 @@
  */
 
 #include "realm/realm_config.h"
-#include "lowlevel_impl.h"
-#include "lowlevel.h"
+#include "realm/runtime_impl.h"
+#include "realm/deppart/inst_helper.h"
+#include "realm/mem_impl.h"
+#include "realm/inst_impl.h"
+
 #include <sys/types.h>
 #include <time.h>
 #include <unistd.h>
 #include <errno.h>
+#include <fcntl.h>
 
 namespace Realm {
   
@@ -46,29 +50,6 @@ namespace Realm {
       close(fd);
       // attempt to delete the file
       unlink(file.c_str());
-    }
-
-    RegionInstance DiskMemory::create_instance(
-                     IndexSpace is,
-                     const int *linearization_bits,
-                     size_t bytes_needed,
-                     size_t block_size,
-                     size_t element_size,
-                     const std::vector<size_t>& field_sizes,
-                     ReductionOpID redopid,
-                     off_t list_size,
-                     const Realm::ProfilingRequestSet &reqs,
-                     RegionInstance parent_inst)
-    {
-      return create_instance_local(is, linearization_bits, bytes_needed,
-                     block_size, element_size, field_sizes, redopid,
-                     list_size, reqs, parent_inst);
-    }
-
-    void DiskMemory::destroy_instance(RegionInstance i,
-                                      bool local_destroy)
-    {
-      destroy_instance_local(i, local_destroy);
     }
 
     off_t DiskMemory::alloc_bytes(size_t size)
@@ -115,7 +96,7 @@ namespace Realm {
 
     int DiskMemory::get_home_node(off_t offset, size_t size)
     {
-      return gasnet_mynode();
+      return my_node_id;
     }
 
     FileMemory::FileMemory(Memory _me)
@@ -128,114 +109,6 @@ namespace Realm {
     FileMemory::~FileMemory(void)
     {
       pthread_mutex_destroy(&vector_lock);
-    }
-
-    RegionInstance FileMemory::create_instance(
-                     IndexSpace is,
-                     const int *linearization_bits,
-                     size_t bytes_needed,
-                     size_t block_size,
-                     size_t element_size,
-                     const std::vector<size_t>& field_sizes,
-                     ReductionOpID redopid,
-                     off_t list_size,
-                     const ProfilingRequestSet &reqs,
-                     RegionInstance parent_inst)
-    {
-      // we use a new create_instance API
-      assert(0);
-      return RegionInstance::NO_INST;
-    }
-
-    RegionInstance FileMemory::create_instance(
-                     IndexSpace is,
-                     const int *linearization_bits,
-                     size_t bytes_needed,
-                     size_t block_size,
-                     size_t element_size,
-                     const std::vector<size_t>& field_sizes,
-                     ReductionOpID redopid,
-                     off_t list_size,
-                     const ProfilingRequestSet &reqs,
-                     RegionInstance parent_inst,
-                     const char *file_name,
-                     Domain domain,
-                     legion_lowlevel_file_mode_t file_mode)
-    {
-      RegionInstance inst =  create_instance_local(is,
-                   linearization_bits, bytes_needed,
-                   block_size, element_size, field_sizes, redopid,
-                   list_size, reqs, parent_inst);
-      // figure out what offset we assigned it (indirect because we went
-      //  through MemoryImpl::create_instance_local)
-      RegionInstanceImpl *impl = get_runtime()->get_instance_impl(inst);
-      off_t inst_offset = impl->metadata.alloc_offset;
-
-      int fd;
-#ifdef REALM_USE_KERNEL_AIO
-      int direct_flag = O_DIRECT;
-#else
-      int direct_flag = 0;
-#endif
-      switch (file_mode) {
-        case LEGION_FILE_READ_ONLY:
-        {
-          fd = open(file_name, O_RDONLY | direct_flag, 00777);
-          assert(fd != -1);
-          break;
-        }
-        case LEGION_FILE_READ_WRITE:
-        {
-          fd = open(file_name, O_RDWR | direct_flag, 00777);
-          assert(fd != -1);
-          break;
-        }
-        case LEGION_FILE_CREATE:
-        {
-          fd = open(file_name, O_CREAT | O_RDWR | direct_flag, 00777);
-          assert(fd != -1);
-          // resize the file to what we want
-          size_t field_size = 0;
-          for(std::vector<size_t>::const_iterator it = field_sizes.begin(); it != field_sizes.end(); it++) {
-            field_size += *it;
-          }
-          int ret = ftruncate(fd, field_size * domain.get_volume());
-#ifdef NDEBUG
-	  (void)ret;
-#else
-          assert(ret == 0);
-#endif
-          break;
-        }
-        default:
-          assert(0);
-      }
-
-      pthread_mutex_lock(&vector_lock);
-      ID id(inst);
-      unsigned index = id.instance.inst_idx;
-      if (index < file_vec.size())
-        file_vec[index] = fd;
-      else {
-        assert(index == file_vec.size());
-        file_vec.push_back(fd);
-      }
-      offset_map[inst_offset] = index;
-      pthread_mutex_unlock(&vector_lock);
-      return inst;
-    }
-
-    void FileMemory::destroy_instance(RegionInstance i,
-                      bool local_destroy)
-    {
-      pthread_mutex_lock(&vector_lock);
-      ID id(i);
-      unsigned index = id.instance.inst_idx;
-      assert(index < file_vec.size());
-      int fd = file_vec[index];
-      pthread_mutex_unlock(&vector_lock);
-      close(fd);
-      destroy_instance_local(i, local_destroy);
     }
 
     off_t FileMemory::alloc_bytes(size_t size)
@@ -320,7 +193,7 @@ namespace Realm {
 
     int FileMemory::get_home_node(off_t offset, size_t size)
     {
-      return gasnet_mynode();
+      return my_node_id;
     }
 
     int FileMemory::get_file_des(ID::IDType inst_id)
@@ -330,5 +203,90 @@ namespace Realm {
       pthread_mutex_unlock(&vector_lock);
       return fd;
     }
+
+  template <int N, typename T>
+  /*static*/ Event RegionInstance::create_file_instance(RegionInstance& inst,
+							const char *file_name,
+							const IndexSpace<N,T>& space,
+							const std::vector<FieldID> &field_ids,
+							const std::vector<size_t> &field_sizes,
+							realm_file_mode_t file_mode,
+							const ProfilingRequestSet& prs,
+							Event wait_on /*= Event::NO_EVENT*/)
+  {
+    // look up the local file memory
+    Memory memory = Machine::MemoryQuery(Machine::get_machine())
+      .local_address_space()
+      .only_kind(Memory::FILE_MEM)
+      .first();
+    assert(memory.exists());
+    
+    // construct an instance layout for the new instance
+    // for now, we put the fields in order and use a fortran
+    //  linearization
+    InstanceLayout<N,T> *layout = new InstanceLayout<N,T>;
+    layout->bytes_used = 0;
+    layout->alignment_reqd = 0;  // no allocation being made
+    layout->space = space;
+    layout->piece_lists.resize(field_sizes.size());
+
+    size_t file_ofs = 0;
+    for(size_t i = 0; i < field_sizes.size(); i++) {
+      FieldID id = field_ids[i];
+      InstanceLayoutGeneric::FieldLayout& fl = layout->fields[id];
+      fl.list_idx = i;
+      fl.rel_offset = 0;
+      fl.size_in_bytes = field_sizes[i];
+
+      // create a single piece (for non-empty index spaces)
+      if(!space.empty()) {
+	AffineLayoutPiece<N,T> *alp = new AffineLayoutPiece<N,T>;
+	alp->bounds = space.bounds;
+	alp->offset = file_ofs;
+	size_t stride = field_sizes[i];
+	for(int j = 0; j < N; j++) {
+	  alp->strides[j] = stride;
+	  alp->offset -= space.bounds.lo[j] * stride;
+	  stride *= (space.bounds.hi[j] - space.bounds.lo[j] + 1);
+	}
+	layout->piece_lists[i].pieces.push_back(alp);
+	file_ofs += stride;
+      }
+    }
+
+    // continue to support creating the file for now
+    if(file_mode == LEGION_FILE_CREATE) {
+      int fd = open(file_name, O_CREAT | O_RDWR, 0777);
+      assert(fd != -1);
+      // resize the file to what we want
+      int ret = ftruncate(fd, file_ofs);
+      assert(ret == 0);
+      ret = close(fd);
+      assert(ret == 0);
+    }
+    
+    // and now create the instance using this layout
+    Event e = create_instance(inst, memory, layout, prs, wait_on);
+
+    // stuff the filename into the impl's metadata for now
+    RegionInstanceImpl *impl = get_runtime()->get_instance_impl(inst);
+    impl->metadata.filename = file_name;
+
+    return e;
+  }
+
+  #define DOIT(N,T) \
+  template Event RegionInstance::create_file_instance<N,T>(RegionInstance&, \
+							   const char *, \
+							   const IndexSpace<N,T>&, \
+							   const std::vector<FieldID>&, \
+							   const std::vector<size_t>&, \
+                                                           realm_file_mode_t, \
+							   const ProfilingRequestSet&, \
+							   Event);
+  FOREACH_NT(DOIT)
+
+
+
 }
 

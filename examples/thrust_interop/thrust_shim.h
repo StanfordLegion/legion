@@ -1,4 +1,4 @@
-/* Copyright 2017 Stanford University, NVIDIA Corporation
+/* Copyright 2018 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,5 +15,6 @@
 
 void initialize_gpu_array(double *ptr, size_t size);
 
-void gpu_saxpy(double alpha, double *x_ptr, double *y_ptr, double *z_ptr, size_t size);
+void gpu_saxpy(double alpha, const double *x_ptr, 
+               const double *y_ptr, double *z_ptr, size_t size);
 

@@ -1,4 +1,4 @@
--- Copyright 2017 Stanford University
+-- Copyright 2018 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -122,6 +122,11 @@ task main()
     --   release((p2[c]))
     -- end
     detach(hdf5, r2.{a, b, c})
+
+    -- FIXME: The runtime can't track dependencies across different
+    -- attach/detach pairs so we have to issue an execution fence here
+    -- to avoid interference.
+    regentlib.c.legion_runtime_issue_execution_fence(__runtime(), __context())
 
     var errors = 0
     attach(hdf5, r2.{a, b, c}, filename, regentlib.file_read_write)

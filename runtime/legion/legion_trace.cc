@@ -1,4 +1,4 @@
-/* Copyright 2017 Stanford University, NVIDIA Corporation
+/* Copyright 2018 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,13 +15,11 @@
 
 
 #include "legion.h"
-#include "legion_ops.h"
-#include "legion_spy.h"
-#include "legion_trace.h"
-#include "legion_tasks.h"
-#include "legion_context.h"
-#include "legion_views.h"
-#include "logger_message_descriptor.h"
+#include "legion/legion_ops.h"
+#include "legion/legion_spy.h"
+#include "legion/legion_trace.h"
+#include "legion/legion_tasks.h"
+#include "legion/legion_context.h"
 
 namespace Legion {
   namespace Internal {
@@ -599,52 +597,31 @@ namespace Legion {
           frontiers.insert(key);
           // Check for exceeding the trace size
           if (index >= dependences.size())
-          {
-            MessageDescriptor TRACE_VIOLATION_RECORDED(1600, "undefined");
-            log_run.error(TRACE_VIOLATION_RECORDED.id(),
+            REPORT_LEGION_ERROR(ERROR_TRACE_VIOLATION_RECORDED,
                           "Trace violation! Recorded %zd operations in trace "
                           "%d in task %s (UID %lld) but %d operations have "
                           "now been issued!", dependences.size(), tid,
-                          ctx->get_task_name(), ctx->get_unique_id(), index+1);
-#ifdef DEBUG_LEGION
-            assert(false);
-#endif
-            exit(ERROR_TRACE_VIOLATION);
-          }
+                          ctx->get_task_name(), ctx->get_unique_id(), index+1)
           // Check to see if the meta-data alignes
           const OperationInfo &info = op_info[index];
           // Check that they are the same kind of operation
           if (info.kind != op->get_operation_kind())
-          {
-            MessageDescriptor TRACE_VIOLATION_OPERATION(1601, "undefined");
-            log_run.error(TRACE_VIOLATION_OPERATION.id(),
+            REPORT_LEGION_ERROR(ERROR_TRACE_VIOLATION_OPERATION,
                           "Trace violation! Operation at index %d of trace %d "
                           "in task %s (UID %lld) was recorded as having type "
                           "%s but instead has type %s in replay.",
                           index, tid, ctx->get_task_name(),ctx->get_unique_id(),
                           Operation::get_string_rep(info.kind),
-                          Operation::get_string_rep(op->get_operation_kind()));
-#ifdef DEBUG_LEGION
-            assert(false);
-#endif
-            exit(ERROR_TRACE_VIOLATION);
-          }
+                          Operation::get_string_rep(op->get_operation_kind()))
           // Check that they have the same number of region requirements
           if (info.count != op->get_region_count())
-          {
-            MessageDescriptor TRACE_VIOLATION_OPERATION2(1602, "undefined");
-            log_run.error(TRACE_VIOLATION_OPERATION2.id(),
+            REPORT_LEGION_ERROR(ERROR_TRACE_VIOLATION_OPERATION,
                           "Trace violation! Operation at index %d of trace %d "
                           "in task %s (UID %lld) was recorded as having %d "
                           "regions, but instead has %zd regions in replay.",
                           index, tid, ctx->get_task_name(),
                           ctx->get_unique_id(), info.count,
-                          op->get_region_count());
-#ifdef DEBUG_LEGION
-            assert(false);
-#endif
-            exit(ERROR_TRACE_VIOLATION);
-          }
+                          op->get_region_count())
           // If we make it here, everything is good
           const LegionVector<DependenceRecord>::aligned &deps = 
                                                           dependences[index];

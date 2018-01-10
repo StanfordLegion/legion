@@ -1,4 +1,4 @@
--- Copyright 2017 Stanford University
+-- Copyright 2018 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -13,7 +13,7 @@
 -- limitations under the License.
 
 -- fails-with:
--- type_mismatch_partition_by_field3.rg:25: type mismatch in argument 1: expected field of type int32 but got bool
+-- type_mismatch_partition_by_field3.rg:25: type mismatch in argument 1: expected field of type ptr but got bool
 --   var p = partition(r, c)
 --                   ^
 

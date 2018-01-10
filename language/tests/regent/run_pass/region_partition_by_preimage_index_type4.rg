@@ -1,4 +1,4 @@
--- Copyright 2017 Stanford University
+-- Copyright 2018 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -20,11 +20,11 @@ task f()
   var r = region(ispace(int1d, 5), int)
   -- pointers in s will be initialized to the first point in r
   var s = region(ispace(int2d, { 5, 1 }), int1d)
-  s[{ 0, 0 }] = 1
-  s[{ 1, 0 }] = 0
-  s[{ 2, 0 }] = 1
-  s[{ 3, 0 }] = 2
-  s[{ 4, 0 }] = 3
+  s[{ 0, 0 }] = 0
+  s[{ 1, 0 }] = 1
+  s[{ 2, 0 }] = 2
+  s[{ 3, 0 }] = 3
+  s[{ 4, 0 }] = 4
 
   var rc = c.legion_domain_point_coloring_create()
   c.legion_domain_point_coloring_color_domain(rc, [int3d] { 0, 0, 0 }, [rect1d] { 0, 0 })
@@ -46,10 +46,6 @@ task f()
     for y in si do
       if @y <= ri.bounds then
         r[@y] *= color.x + 2
-      -- technically this branch shouldn't be taken by the definition of preimage,
-      -- but is inevitable due to the fact that structured regions are only dense
-      else
-        r[@y] += color.x + 2
       end
     end
   end
@@ -63,6 +59,6 @@ task f()
 end
 
 task main()
-  regentlib.assert(f() == 20, "test failed")
+  regentlib.assert(f() == 11, "test failed")
 end
 regentlib.start(main)

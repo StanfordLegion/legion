@@ -1,4 +1,4 @@
-/* Copyright 2017 Stanford University, NVIDIA Corporation
+/* Copyright 2018 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,7 +19,7 @@
 #include "realm/profiling.h"
 #include "realm/event_impl.h"
 
-#include "activemsg.h"
+#include "realm/activemsg.h"
 
 #include <set>
 #include <iostream>
@@ -53,6 +53,8 @@ namespace Realm {
     // returns true if its able to perform the cancellation (or if nothing can be done)
     // returns false if a subclass wants to try some other means to cancel an operation
     virtual bool attempt_cancellation(int error_code, const void *reason_data, size_t reason_size);
+
+    virtual void set_priority(int new_priority);
 
     // a common reason for cancellation is a poisoned precondition - this helper takes care
     //  of recording the error code and marking the operation as (unsuccessfully) finished
@@ -131,8 +133,12 @@ namespace Realm {
     void add_remote_operation(Event finish_event, int remote_note);
 
     void request_cancellation(Event finish_event, const void *reason_data, size_t reason_size);
+
+    void set_priority(Event finish_event, int new_priority);
+
+    void print_operations(std::ostream& os);
     
-    static int register_handlers(gasnet_handlerentry_t *handlers);
+    static void register_handlers(void);
 
   protected:
     void event_triggered(Event e);
@@ -171,6 +177,6 @@ namespace Realm {
 
 };
 
-#include "operation.inl"
+#include "realm/operation.inl"
 
 #endif // REALM_OPERATION_H

@@ -1,4 +1,4 @@
-/* Copyright 2017 Stanford University
+/* Copyright 2018 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,12 +23,12 @@
  */
 
 #include "legion.h"
-#include "legion_c.h"
-#include "legion_mapping.h"
-#include "mapping_utilities.h"
+#include "legion/legion_c.h"
+#include "legion/legion_mapping.h"
+#include "mappers/mapping_utilities.h"
 
-#include <cstdlib>
-#include <cstring>
+#include <stdlib.h>
+#include <string.h>
 #include <algorithm>
 
 namespace Legion {
@@ -37,12 +37,19 @@ namespace Legion {
 
     class CObjectWrapper {
     public:
+      typedef Legion::UnsafeFieldAccessor<char,1,coord_t,
+                Realm::AffineAccessor<char,1,coord_t> >   ArrayAccessor1D;
+      typedef Legion::UnsafeFieldAccessor<char,2,coord_t,
+                Realm::AffineAccessor<char,2,coord_t> >   ArrayAccessor2D;
+      typedef Legion::UnsafeFieldAccessor<char,3,coord_t,
+                Realm::AffineAccessor<char,3,coord_t> >   ArrayAccessor3D;
 
-      typedef LegionRuntime::Accessor::AccessorType::Generic Generic;
-      typedef LegionRuntime::Accessor::AccessorType::SOA<0> SOA;
-      typedef LegionRuntime::Accessor::RegionAccessor<Generic> AccessorGeneric;
-      typedef LegionRuntime::Accessor::RegionAccessor<SOA, char> AccessorArray;
-
+#ifdef __ICC
+// icpc complains about "error #858: type qualifier on return type is meaningless"
+// but it's pretty annoying to get this macro to handle all the cases right
+#pragma warning (push)
+#pragma warning (disable: 858)
+#endif
 #define NEW_OPAQUE_WRAPPER(T_, T)                                       \
       static T_ wrap(T t) {                                             \
         T_ t_;                                                          \
@@ -81,11 +88,27 @@ namespace Legion {
       NEW_OPAQUE_WRAPPER(legion_copy_launcher_t, CopyLauncher *);
       NEW_OPAQUE_WRAPPER(legion_acquire_launcher_t, AcquireLauncher *);
       NEW_OPAQUE_WRAPPER(legion_release_launcher_t, ReleaseLauncher *);
+      NEW_OPAQUE_WRAPPER(legion_attach_launcher_t, AttachLauncher *);
       NEW_OPAQUE_WRAPPER(legion_must_epoch_launcher_t, MustEpochLauncher *);
       NEW_OPAQUE_WRAPPER(legion_physical_region_t, PhysicalRegion *);
-      NEW_OPAQUE_WRAPPER(legion_accessor_generic_t, AccessorGeneric *);
-      NEW_OPAQUE_WRAPPER(legion_accessor_array_t, AccessorArray *);
+      NEW_OPAQUE_WRAPPER(legion_accessor_array_1d_t, ArrayAccessor1D *);
+      NEW_OPAQUE_WRAPPER(legion_accessor_array_2d_t, ArrayAccessor2D *);
+      NEW_OPAQUE_WRAPPER(legion_accessor_array_3d_t, ArrayAccessor3D *);
+#ifdef __GNUC__
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
+#ifdef __clang__
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#endif
       NEW_OPAQUE_WRAPPER(legion_index_iterator_t, IndexIterator *);
+#ifdef __GNUC__
+#pragma GCC diagnostic pop
+#endif
+#ifdef __clang__
+#pragma clang diagnostic pop
+#endif
       NEW_OPAQUE_WRAPPER(legion_task_t, Task *);
       NEW_OPAQUE_WRAPPER(legion_inline_t, InlineMapping *);
       NEW_OPAQUE_WRAPPER(legion_mappable_t, Mappable *);
@@ -109,6 +132,11 @@ namespace Legion {
       typedef std::map<FieldID, const char *> FieldMap;
       NEW_OPAQUE_WRAPPER(legion_field_map_t, FieldMap *);
 #undef NEW_OPAQUE_WRAPPER
+#ifdef __ICC
+// icpc complains about "error #858: type qualifier on return type is meaningless"
+// but it's pretty annoying to get this macro to handle all the cases right
+#pragma warning (pop)
+#endif
 
       static legion_ptr_t
       wrap(ptr_t ptr)
@@ -129,24 +157,30 @@ namespace Legion {
 #define NEW_POINT_WRAPPER(T_, T, DIM)                \
       static T_ wrap(T t) {                          \
         T_ t_;                                       \
-        std::copy(t.x, t.x + DIM, t_.x);             \
+        for (int i = 0; i < DIM; i++)                \
+          t_.x[i] = t[i];                            \
         return t_;                                   \
       }                                              \
       static T unwrap(T_ t_) {                       \
-        T t(t_.x);                                   \
+        T t;                                         \
+        for (int i = 0; i < DIM; i++)                \
+          t[i] = t_.x[i];                            \
         return t;                                    \
       }
 
-      NEW_POINT_WRAPPER(legion_point_1d_t, LegionRuntime::Arrays::Point<1>, 1);
-      NEW_POINT_WRAPPER(legion_point_2d_t, LegionRuntime::Arrays::Point<2>, 2);
-      NEW_POINT_WRAPPER(legion_point_3d_t, LegionRuntime::Arrays::Point<3>, 3);
+      typedef Point<1,coord_t> Point1D;
+      typedef Point<2,coord_t> Point2D;
+      typedef Point<3,coord_t> Point3D;
+      NEW_POINT_WRAPPER(legion_point_1d_t, Point1D, 1);
+      NEW_POINT_WRAPPER(legion_point_2d_t, Point2D, 2);
+      NEW_POINT_WRAPPER(legion_point_3d_t, Point3D, 3);
 #undef NEW_POINT_WRAPPER
 
-#define NEW_RECT_WRAPPER(T_, T)                         \
+#define NEW_RECT_WRAPPER(T_, T, PT)                     \
       static T_ wrap(T t) {                             \
         T_ t_;                                          \
-        t_.lo = wrap(t.lo);                             \
-        t_.hi = wrap(t.hi);                             \
+        t_.lo = wrap(PT(t.lo));                         \
+        t_.hi = wrap(PT(t.hi));                         \
         return t_;                                      \
       }                                                 \
       static T unwrap(T_ t_) {                          \
@@ -154,20 +188,32 @@ namespace Legion {
         return t;                                       \
       }
 
-      NEW_RECT_WRAPPER(legion_rect_1d_t, LegionRuntime::Arrays::Rect<1>);
-      NEW_RECT_WRAPPER(legion_rect_2d_t, LegionRuntime::Arrays::Rect<2>);
-      NEW_RECT_WRAPPER(legion_rect_3d_t, LegionRuntime::Arrays::Rect<3>);
-#undef NEW_RECT_WRAPPER
+      typedef Rect<1,coord_t> Rect1D;
+      typedef Rect<2,coord_t> Rect2D;
+      typedef Rect<3,coord_t> Rect3D;
+      NEW_RECT_WRAPPER(legion_rect_1d_t, Rect1D, Point1D);
+      NEW_RECT_WRAPPER(legion_rect_2d_t, Rect2D, Point2D);
+      NEW_RECT_WRAPPER(legion_rect_3d_t, Rect3D, Point3D);
+#undef NEW_RECT_WRAPPER 
 
 #define NEW_BLOCKIFY_WRAPPER(T_, T)                     \
       static T unwrap(T_ t_) {                          \
         T t(unwrap(t_.block_size), unwrap(t_.offset));  \
         return t;                                       \
       }
+      template<int DIM>
+      struct Blockify {
+      public:
+        Blockify(Point<DIM,coord_t> b, 
+                 Point<DIM,coord_t> o)
+          : block_size(b), offset(o) { }
+      public:
+        Point<DIM,coord_t> block_size, offset;
+      };
 
-      NEW_BLOCKIFY_WRAPPER(legion_blockify_1d_t, LegionRuntime::Arrays::Blockify<1>);
-      NEW_BLOCKIFY_WRAPPER(legion_blockify_2d_t, LegionRuntime::Arrays::Blockify<2>);
-      NEW_BLOCKIFY_WRAPPER(legion_blockify_3d_t, LegionRuntime::Arrays::Blockify<3>);
+      NEW_BLOCKIFY_WRAPPER(legion_blockify_1d_t, Blockify<1>);
+      NEW_BLOCKIFY_WRAPPER(legion_blockify_2d_t, Blockify<2>);
+      NEW_BLOCKIFY_WRAPPER(legion_blockify_3d_t, Blockify<3>);
 #undef NEW_RECT_WRAPPER
       static legion_domain_t
       wrap(Domain domain) {
@@ -209,6 +255,7 @@ namespace Legion {
         legion_index_space_t is_;
         is_.id = is.id;
         is_.tid = is.tid;
+        is_.type_tag = is.type_tag;
         return is_;
       }
 
@@ -218,6 +265,7 @@ namespace Legion {
         IndexSpace is;
         is.id = is_.id;
         is.tid = is_.tid;
+        is.type_tag = is_.type_tag;
         return is;
       }
 
@@ -227,6 +275,7 @@ namespace Legion {
         legion_index_partition_t ip_;
         ip_.id = ip.id;
         ip_.tid = ip.tid;
+        ip_.type_tag = ip.type_tag;
         return ip_;
       }
 
@@ -236,25 +285,9 @@ namespace Legion {
         IndexPartition ip;
         ip.id = ip_.id;
         ip.tid = ip_.tid;
+        ip.type_tag = ip_.type_tag;
         return ip;
       }
-
-      static legion_index_allocator_t
-      wrap(IndexAllocator allocator)
-      {
-        legion_index_allocator_t allocator_;
-        allocator_.index_space = wrap(allocator.index_space);
-        allocator_.allocator = wrap(allocator.allocator);
-        return allocator_;
-      }
-
-      static IndexAllocator
-      unwrap(legion_index_allocator_t allocator_)
-      {
-        IndexAllocator allocator(unwrap(allocator_.index_space),
-                                 unwrap(allocator_.allocator));
-        return allocator;
-      } 
 
       static legion_field_space_t
       wrap(FieldSpace fs)
@@ -325,18 +358,17 @@ namespace Legion {
       }
 
       static const legion_byte_offset_t
-      wrap(const LegionRuntime::Accessor::ByteOffset offset)
+      wrap(const ptrdiff_t offset)
       {
         legion_byte_offset_t offset_;
-        offset_.offset = offset.offset;
+        offset_.offset = offset;
         return offset_;
       }
 
-      static const LegionRuntime::Accessor::ByteOffset
+      static ptrdiff_t
       unwrap(const legion_byte_offset_t offset_)
       {
-        const LegionRuntime::Accessor::ByteOffset offset(offset_.offset);
-        return offset;
+        return offset_.offset;
       }
 
       static const legion_input_args_t
@@ -494,6 +526,7 @@ namespace Legion {
         options_.stealable = options.stealable;
         options_.map_locally = options.map_locally;
         options_.memoize = options.memoize;
+        options_.parent_priority = options.parent_priority;
         return options_;
       }
 
@@ -505,6 +538,7 @@ namespace Legion {
         options.stealable = options_.stealable;
         options.map_locally = options_.map_locally;
         options.memoize = options_.memoize;
+        options.parent_priority = options_.parent_priority;
         return options;
       }
 

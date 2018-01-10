@@ -1,5 +1,5 @@
 #------------------------------------------------------------------------------#
-# Copyright 2017 Stanford University
+# Copyright 2018 Stanford University
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -21,7 +21,12 @@ if(NOT Legion_SOURCE_DIR)
 endif()
 
 add_subdirectory(attach_file_mini)
+add_subdirectory(rendering)
 
 if(Legion_USE_HDF5)
   add_subdirectory(hdf_attach_subregion_parallel)
+endif()
+
+if(Legion_USE_Python)
+  add_subdirectory(python_bindings)
 endif()

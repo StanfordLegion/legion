@@ -1,4 +1,4 @@
-/* Copyright 2017 Stanford University, NVIDIA Corporation
+/* Copyright 2018 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,11 +14,10 @@
  */
 
 #include "legion.h"
-#include "shim_mapper.h"
-#include "logger_message_descriptor.h"
+#include "mappers/shim_mapper.h"
 
-#include <cstdlib>
-#include <cassert>
+#include <stdlib.h>
+#include <assert.h>
 #include <algorithm>
 
 #define STATIC_MAX_PERMITTED_STEALS   4
@@ -571,6 +570,8 @@ namespace Legion {
       current_ctx = ctx;
       // Call select variant first to get it over with
       select_task_variant(&local_task);
+      const std::set<unsigned> premapped_set(input.premapped_regions.begin(),
+                                             input.premapped_regions.end());
       // Do this in a while-true loop until we succeed in mapping
       while (true)
       {
@@ -580,6 +581,10 @@ namespace Legion {
         // Now find or make the physical instances asked for each region
         for (unsigned idx = 0; idx < local_task.regions.size(); idx++)
         {
+          // Check to see if this is a premapped region in which case 
+          // we can skip the conversion cause it doesn't matter
+          if (premapped_set.find(idx) != premapped_set.end())
+            continue;
           if (!convert_requirement_mapping(ctx, local_task.regions[idx],
                                            output.chosen_instances[idx]))
           {
@@ -983,15 +988,14 @@ namespace Legion {
                                    std::vector<ShimMapper::DomainSplit> &slices)
     //--------------------------------------------------------------------------
     {
-      LegionRuntime::Arrays::Rect<DIM> r = domain.get_rect<DIM>();
+      Rect<DIM,coord_t> r = domain;
 
       std::vector<Processor>::const_iterator target_it = targets.begin();
-      for(LegionRuntime::Arrays::GenericPointInRectIterator<DIM> pir(r); 
-           pir; pir++) 
+      for(PointInRectIterator<DIM> pir(r); pir(); pir++) 
       {
         // rect containing a single point
-        LegionRuntime::Arrays::Rect<DIM> subrect(pir.p, pir.p); 
-	ShimMapper::DomainSplit ds(Domain::from_rect<DIM>(subrect), 
+        Rect<DIM> subrect(*pir, *pir);
+	ShimMapper::DomainSplit ds(subrect, 
             *target_it++, false /* recurse */, false /* stealable */);
 	slices.push_back(ds);
 	if(target_it == targets.end())
@@ -1026,7 +1030,7 @@ namespace Legion {
       {
         // Only works for one dimensional rectangles right now
         assert(domain.get_dim() == 1);
-        LegionRuntime::Arrays::Rect<1> rect = domain.get_rect<1>();
+        Rect<1,coord_t> rect = domain;
         unsigned num_elmts = rect.volume();
         unsigned num_chunks = targets.size()*splitting_factor;
         if (num_chunks > num_elmts)
@@ -1040,13 +1044,12 @@ namespace Legion {
         for (unsigned idx = 0; idx < num_chunks; idx++)
         {
           unsigned elmts = (idx < number_small) ? lower_bound : upper_bound;
-          LegionRuntime::Arrays::Point<1> lo(index);  
-          LegionRuntime::Arrays::Point<1> hi(index+elmts-1);
+          Point<1,coord_t> lo(index);  
+          Point<1,coord_t> hi(index+elmts-1);
           index += elmts;
-          LegionRuntime::Arrays::Rect<1> chunk(rect.lo+lo,rect.lo+hi);
+          Rect<1,coord_t> chunk(rect.lo+lo,rect.lo+hi);
           unsigned proc_idx = idx % targets.size();
-          slices.push_back(DomainSplit(
-                Domain::from_rect<1>(chunk), targets[proc_idx], false, false));
+          slices.push_back(DomainSplit(chunk, targets[proc_idx], false, false));
         }
       }
     }
@@ -1079,9 +1082,7 @@ namespace Legion {
 				      TunableID tid, MappingTagID tag)
     //--------------------------------------------------------------------------
     {
-      Legion::Internal::MessageDescriptor SHIM_MAPPER_SUPPORT(3900, "undefined");
-      log_shim.fatal(SHIM_MAPPER_SUPPORT.id(),
-                     "Shim mapper doesn't support any tunables directly!");
+      log_shim.error("Shim mapper doesn't support any tunables directly!");
       assert(0);
       //should never happen, but function needs return statement
       return(STATIC_MAX_FAILED_MAPPINGS);

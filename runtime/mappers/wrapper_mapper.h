@@ -1,4 +1,4 @@
-/* Copyright 2017 Stanford University, NVIDIA Corporation
+/* Copyright 2018 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -51,12 +51,9 @@
 #define __WRAPPER_MAPPER_h__
 
 #include "legion.h"
-#include "legion_mapping.h"
 
-
-
-#include <cstdlib>
-#include <cassert>
+#include <stdlib.h>
+#include <assert.h>
 #include <algorithm>
 
 namespace Legion {

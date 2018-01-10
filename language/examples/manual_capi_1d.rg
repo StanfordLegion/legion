@@ -1,4 +1,4 @@
--- Copyright 2017 Stanford University
+-- Copyright 2018 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -30,7 +30,7 @@ terra sub_task(task : c.legion_task_t,
   var d = c.legion_index_space_get_domain(runtime, is)
   var rect = c.legion_domain_get_rect_1d(d)
 
-  var a1 = c.legion_physical_region_get_field_accessor_generic(
+  var a1 = c.legion_physical_region_get_field_accessor_array_1d(
     regions[0], FID_1)
 
   -- This code uses the raw rect ptr API.
@@ -38,7 +38,7 @@ terra sub_task(task : c.legion_task_t,
     var subrect : c.legion_rect_1d_t
     var offsets : c.legion_byte_offset_t[1]
 
-    var base = [&int8](c.legion_accessor_generic_raw_rect_ptr_1d(
+    var base = [&int8](c.legion_accessor_array_1d_raw_rect_ptr(
                          a1, rect, &subrect, &(offsets[0])))
     if base == nil then
       c.printf("Error: failed to get base ptr\n")
@@ -66,16 +66,17 @@ terra sub_task(task : c.legion_task_t,
 
   -- Sanity check with generic API.
   for global_i0 = rect.lo.x[0], rect.hi.x[0]+1 do
-    var p = c.legion_domain_point_t { dim = 1, point_data = arrayof(int64, global_i0, 0, 0) }
+    var p = c.legion_point_1d_t { x = arrayof(int64, global_i0) }
+    -- var p = c.legion_domain_point_t { dim = 1, point_data = arrayof(int64, global_i0, 0, 0) }
     var value : int
-    c.legion_accessor_generic_read_domain_point(a1, p, &value, sizeof(int))
+    c.legion_accessor_array_1d_read_point(a1, p, &value, sizeof(int))
     c.printf("read value %2d at global %2d\n", value, global_i0)
     if value ~= global_i0 then
       c.abort()
     end
   end
 
-  c.legion_accessor_generic_destroy(a1)
+  c.legion_accessor_array_1d_destroy(a1)
 end
 
 terra top_level_task(task : c.legion_task_t,

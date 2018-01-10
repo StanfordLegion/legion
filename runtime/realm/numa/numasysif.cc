@@ -1,4 +1,4 @@
-/* Copyright 2017 Stanford University, NVIDIA Corporation
+/* Copyright 2018 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,7 +18,7 @@
 // NOTE: this is nowhere near a full libnuma-style interface - it's just the
 //  calls that Realm's NUMA module needs
 
-#include "numasysif.h"
+#include "realm/numa/numasysif.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -28,6 +28,7 @@
 #include <vector>
 
 #ifdef __linux__
+#include <alloca.h>
 #include <unistd.h>
 #include <sys/syscall.h>
 #include <linux/mempolicy.h>
@@ -37,7 +38,7 @@
 #include <sys/mman.h>
 
 namespace {
-  long get_mempolicy(int *policy, const unsigned long *nmask,
+  long get_mempolicy(int *policy, unsigned long *nmask,
 		     unsigned long maxnode, void *addr, int flags)
   {
     return syscall(__NR_get_mempolicy, policy, nmask,
@@ -66,20 +67,55 @@ namespace Realm {
   // as soon as we get more than one real version of these, split them out into
   //  separate files
 
+#ifdef __linux__
+  namespace {
+    // Linux wants you to guess how many nodes there are, and if you're wrong,
+    //  it just tells you to try again - save the answer here so we only have
+    //  to do it once
+    int detected_node_count = 8 * sizeof(unsigned long);
+    const int max_supported_node_count = 1024 * sizeof(unsigned long);
+  };
+
+  static bool mask_nonempty(const unsigned char *nmask, int max_count)
+  {
+    for(int i = 0; i < (max_count >> 3); i++)
+      if(nmask[i] != 0)
+	return true;
+    return false;
+  }
+#endif
+
   // is NUMA support available in the system?
   bool numasysif_numa_available(void)
   {
 #ifdef __linux__
     int policy;
-    unsigned long nmask = 0;
-    int ret = get_mempolicy(&policy, &nmask, 8*sizeof(nmask), 0, MPOL_F_MEMS_ALLOWED);
-    if((ret != 0) || (nmask == 0)) {
-      fprintf(stderr, "get_mempolicy() returned: ret=%d nmask=%08lx\n", ret, nmask);
+    unsigned char *nmask = (unsigned char *)alloca(max_supported_node_count >> 3);
+    while(1) {
+      errno = 0;
+      int ret = get_mempolicy(&policy,
+			      (unsigned long *)nmask, detected_node_count,
+			      0, MPOL_F_MEMS_ALLOWED);
+      if(ret == 0) break;
+
+      // EINVAL maybe means our mask isn't big enough
+      if((errno == EINVAL) &&
+	 (detected_node_count < max_supported_node_count)) {
+	detected_node_count <<= 1;
+      } else {
+	// otherwise we're out of luck
+        //fprintf(stderr, "get_mempolicy() returned: ret=%d errno=%d\n", ret, errno);
+	return false;
+      }
+    }
+
+    // also check that we have at least one node set in the mask - if not, 
+    //  assume numa support is disabled
+    if(!mask_nonempty(nmask, detected_node_count)) {
+      //fprintf(stderr, "get_mempolicy() returned empty node mask!\n");
       return false;
     }
-    //printf("policy=%d nmask=%08lx\n", policy, nmask);
-    //ret = get_mempolicy(&policy, &nmask, 8*sizeof(nmask), 0, 0);
-    //printf("ret=%d policy=%d nmask=%08lx\n", ret, policy, nmask);
+
     return true;
 #else
     return false;
@@ -93,25 +129,36 @@ namespace Realm {
   {
 #ifdef __linux__
     int policy = -1;
-    unsigned long nmask = 0;
+    unsigned char *nmask = (unsigned char *)alloca(detected_node_count >> 3);
+    for(int i = 0; i < detected_node_count >> 3; i++)
+      nmask[i] = 0;
     int ret = -1;
     if(only_available) {
       // first, ask for the default policy for the thread to detect binding via 
       //  numactl, mpirun, etc.
-      ret = get_mempolicy(&policy, &nmask, 8*sizeof(nmask), 0, 0);
+      errno = 0;
+      ret = get_mempolicy(&policy,
+			  (unsigned long *)nmask, detected_node_count, 0, 0);
     }
-    if((ret != 0) || (policy != MPOL_BIND) || (nmask == 0)) {
+    if((ret != 0) || (policy != MPOL_BIND) ||
+       !mask_nonempty(nmask, detected_node_count)) {
       // not a reasonable-looking bound state, so ask for all nodes
-      ret = get_mempolicy(&policy, &nmask, 8*sizeof(nmask), 0, MPOL_F_MEMS_ALLOWED);
-      if((ret != 0) || (nmask == 0)) {
-	// still no good
+      errno = 0;
+      ret = get_mempolicy(&policy,
+			  (unsigned long *)nmask, detected_node_count,
+			  0, MPOL_F_MEMS_ALLOWED);
+      if((ret != 0) || !mask_nonempty(nmask, detected_node_count)) {
+	// this really shouldn't fail, since we made the same call above in
+	//  numasysif_numa_available()
+	fprintf(stderr, "mems_allowed: ret=%d errno=%d mask=%08lx count=%d\n",
+		ret, errno, *(unsigned long *)nmask, detected_node_count);
 	return false;
       }
     }
 
     // for each bit set in the mask, try to query the free memory
-    for(int i = 0; i < 8*(int)sizeof(nmask); i++)
-      if(((nmask >> i) & 1) != 0) {
+    for(int i = 0; i < detected_node_count; i++)
+      if(((nmask[i >> 3] >> (i & 7)) & 1) != 0) {
 	// free information comes from /sys...
 	char fname[80];
 	sprintf(fname, "/sys/devices/system/node/node%d/meminfo", i);
@@ -308,9 +355,17 @@ namespace Realm {
   {
 #ifdef __linux__
     int policy = MPOL_BIND;
-    unsigned long nmask = (1UL << node);
+    if((node < 0) || (node >= detected_node_count)) {
+      fprintf(stderr, "bind request for node out of range: %d\n", node);
+      return false;
+    }
+    unsigned char *nmask = (unsigned char *)alloca(detected_node_count >> 3);
+    for(int i = 0; i < detected_node_count >> 3; i++)
+      nmask[i] = 0;
+    nmask[(node >> 3)] = (1 << (node & 7));
     int ret = mbind(base, bytes,
-		    policy, &nmask, 8*sizeof(nmask),
+		    policy,
+		    (const unsigned long *)nmask, detected_node_count,
 		    MPOL_MF_STRICT | MPOL_MF_MOVE);
     if(ret != 0) {
       fprintf(stderr, "failed to bind memory for node %d: %s\n", node, strerror(errno));

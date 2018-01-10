@@ -1,4 +1,4 @@
-/* Copyright 2017 Stanford University, NVIDIA Corporation
+/* Copyright 2018 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,11 +18,7 @@
 #ifndef REALM_REDOP_H
 #define REALM_REDOP_H
 
-#include "lowlevel_config.h"
-#include "accessor.h"
-
 #include <sys/types.h>
-#include <map>
 
 namespace Realm {
 
@@ -41,7 +37,6 @@ namespace Realm {
     };
 #endif
 
-    typedef int ReductionOpID;
     class ReductionOpUntyped {
     public:
       size_t sizeof_lhs;
@@ -65,13 +60,17 @@ namespace Realm {
 				bool exclusive = false) const = 0;
       virtual void init(void *rhs_ptr, size_t count) const = 0;
 
+#ifdef NEED_TO_FIX_REDUCTION_LISTS_FOR_DEPPART
       virtual void apply_list_entry(void *lhs_ptr, const void *entry_ptr, size_t count,
 				    off_t ptr_offset, bool exclusive = false) const = 0;
       virtual void fold_list_entry(void *rhs_ptr, const void *entry_ptr, size_t count,
                                     off_t ptr_offset, bool exclusive = false) const = 0;
       virtual void get_list_pointers(unsigned *ptrs, const void *entry_ptr, size_t count) const = 0;
+#endif
 
       virtual ~ReductionOpUntyped() {}
+
+      virtual ReductionOpUntyped *clone(void) const = 0;
 
     protected:
       ReductionOpUntyped(size_t _sizeof_lhs, size_t _sizeof_rhs,
@@ -82,11 +81,13 @@ namespace Realm {
   	  has_identity(_has_identity), is_foldable(_is_foldable) {}
     };
 
+#ifdef NEED_TO_FIX_REDUCTION_LISTS_FOR_DEPPART
     template <class LHS, class RHS>
     struct ReductionListEntry {
       ptr_t ptr;
       RHS rhs;
     };
+#endif
 
     template <class REDOP>
     class ReductionOp : public ReductionOpUntyped {
@@ -95,14 +96,23 @@ namespace Realm {
       //  template-fu to figure it out
       ReductionOp(void)
 	: ReductionOpUntyped(sizeof(typename REDOP::LHS), sizeof(typename REDOP::RHS),
+#ifdef NEED_TO_FIX_REDUCTION_LISTS_FOR_DEPPART
 			     sizeof(ReductionListEntry<typename REDOP::LHS,typename REDOP::RHS>),
+#else
+			     0,
+#endif
 			     true, true) {}
+
+      virtual ReductionOpUntyped *clone(void) const
+      {
+	return new ReductionOp<REDOP>;
+      }
 
       virtual void apply(void *lhs_ptr, const void *rhs_ptr, size_t count,
 			 bool exclusive = false) const
       {
-	typename REDOP::LHS *lhs = (typename REDOP::LHS *)lhs_ptr;
-	const typename REDOP::RHS *rhs = (const typename REDOP::RHS *)rhs_ptr;
+	typename REDOP::LHS *lhs = static_cast<typename REDOP::LHS *>(lhs_ptr);
+	const typename REDOP::RHS *rhs = static_cast<const typename REDOP::RHS *>(rhs_ptr);
 	if(exclusive) {
 	  for(size_t i = 0; i < count; i++)
 	    REDOP::template apply<true>(lhs[i], rhs[i]);
@@ -116,21 +126,19 @@ namespace Realm {
 				 off_t lhs_stride, off_t rhs_stride, size_t count,
 				 bool exclusive = false) const
       {
-	char *lhs = (char *)lhs_ptr;
-	const char *rhs = (const char *)rhs_ptr;
 	if(exclusive) {
 	  for(size_t i = 0; i < count; i++) {
-	    REDOP::template apply<true>(*(typename REDOP::LHS *)lhs,
-					*(const typename REDOP::RHS *)rhs);
-	    lhs += lhs_stride;
-	    rhs += rhs_stride;
+	    REDOP::template apply<true>(*static_cast<typename REDOP::LHS *>(lhs_ptr),
+					*static_cast<const typename REDOP::RHS *>(rhs_ptr));
+	    lhs_ptr = static_cast<char *>(lhs_ptr) + lhs_stride;
+	    rhs_ptr = static_cast<const char *>(rhs_ptr) + rhs_stride;
 	  }
 	} else {
 	  for(size_t i = 0; i < count; i++) {
-	    REDOP::template apply<false>(*(typename REDOP::LHS *)lhs,
-					 *(const typename REDOP::RHS *)rhs);
-	    lhs += lhs_stride;
-	    rhs += rhs_stride;
+	    REDOP::template apply<false>(*static_cast<typename REDOP::LHS *>(lhs_ptr),
+					 *static_cast<const typename REDOP::RHS *>(rhs_ptr));
+	    lhs_ptr = static_cast<char *>(lhs_ptr) + lhs_stride;
+	    rhs_ptr = static_cast<const char *>(rhs_ptr) + rhs_stride;
 	  }
 	}
       }
@@ -138,8 +146,8 @@ namespace Realm {
       virtual void fold(void *rhs1_ptr, const void *rhs2_ptr, size_t count,
 			bool exclusive = false) const
       {
-	typename REDOP::RHS *rhs1 = (typename REDOP::RHS *)rhs1_ptr;
-	const typename REDOP::RHS *rhs2 = (const typename REDOP::RHS *)rhs2_ptr;
+	typename REDOP::RHS *rhs1 = static_cast<typename REDOP::RHS *>(rhs1_ptr);
+	const typename REDOP::RHS *rhs2 = static_cast<const typename REDOP::RHS *>(rhs2_ptr);
 	if(exclusive) {
 	  for(size_t i = 0; i < count; i++)
 	    REDOP::template fold<true>(rhs1[i], rhs2[i]);
@@ -153,32 +161,31 @@ namespace Realm {
 				off_t lhs_stride, off_t rhs_stride, size_t count,
 				bool exclusive = false) const
       {
-	char *lhs = (char *)lhs_ptr;
-	const char *rhs = (const char *)rhs_ptr;
 	if(exclusive) {
 	  for(size_t i = 0; i < count; i++) {
-	    REDOP::template fold<true>(*(typename REDOP::RHS *)lhs,
-				       *(const typename REDOP::RHS *)rhs);
-	    lhs += lhs_stride;
-	    rhs += rhs_stride;
+	    REDOP::template fold<true>(*static_cast<typename REDOP::RHS *>(lhs_ptr),
+				       *static_cast<const typename REDOP::RHS *>(rhs_ptr));
+	    lhs_ptr = static_cast<char *>(lhs_ptr) + lhs_stride;
+	    rhs_ptr = static_cast<const char *>(rhs_ptr) + rhs_stride;
 	  }
 	} else {
 	  for(size_t i = 0; i < count; i++) {
-	    REDOP::template fold<false>(*(typename REDOP::RHS *)lhs,
-					*(const typename REDOP::RHS *)rhs);
-	    lhs += lhs_stride;
-	    rhs += rhs_stride;
+	    REDOP::template fold<false>(*static_cast<typename REDOP::RHS *>(lhs_ptr),
+					*static_cast<const typename REDOP::RHS *>(rhs_ptr));
+	    lhs_ptr = static_cast<char *>(lhs_ptr) + lhs_stride;
+	    rhs_ptr = static_cast<const char *>(rhs_ptr) + rhs_stride;
 	  }
 	}
       }
 
       virtual void init(void *ptr, size_t count) const
       {
-        typename REDOP::RHS *rhs_ptr = (typename REDOP::RHS *)ptr;
+        typename REDOP::RHS *rhs_ptr = static_cast<typename REDOP::RHS *>(ptr);
         for (size_t i = 0; i < count; i++)
           *rhs_ptr++ = REDOP::identity;
       }
 
+#ifdef NEED_TO_FIX_REDUCTION_LISTS_FOR_DEPPART
       virtual void apply_list_entry(void *lhs_ptr, const void *entry_ptr, size_t count,
 				    off_t ptr_offset, bool exclusive = false) const
       {
@@ -218,6 +225,7 @@ namespace Realm {
 	  //printf("%d=%d\n", i, ptrs[i]);
 	}
       }
+#endif
     };
 
     template <class REDOP>

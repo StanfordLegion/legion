@@ -1,4 +1,4 @@
-/* Copyright 2017 Stanford University, NVIDIA Corporation
+/* Copyright 2018 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,10 +18,8 @@
 #ifndef REALM_MACHINE_H
 #define REALM_MACHINE_H
 
-#include "lowlevel_config.h"
-
-#include "processor.h"
-#include "memory.h"
+#include "realm/processor.h"
+#include "realm/memory.h"
 
 #include <iterator>
 
@@ -251,7 +249,8 @@ namespace Realm {
     class MachineQueryIterator : public std::iterator<std::input_iterator_tag, RT> {
       // would like this constructor to be protected and have QT be a friend, but that requires
       //  C++11 (or a compiler like g++ that supports it even without -std=c++11)
-#if __cplusplus >= 201103L
+      //  The CUDA compiler also seems to be a little dense here as well
+#if __cplusplus >= 201103L && !defined(__CUDACC__)
     protected:
       friend QT;
 #else
@@ -286,7 +285,7 @@ namespace Realm {
 	
 }; // namespace Realm
 
-#include "machine.inl"
+#include "realm/machine.inl"
 
 #endif // ifndef REALM_MACHINE_H
 

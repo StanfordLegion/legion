@@ -1,5 +1,5 @@
 #------------------------------------------------------------------------------#
-# Copyright 2017 Stanford University
+# Copyright 2018 Stanford University
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -25,5 +25,5 @@ endif()
 add_executable(hdf_attach_subregion_parallel tester_io.cc legion_io.cc)
 target_link_libraries(hdf_attach_subregion_parallel Legion::Legion)
 if(Legion_ENABLE_TESTING)
-  add_test(NAME hdf_attach_subregion_parallel COMMAND $<TARGET_FILE:hdf_attach_subregion_parallel> -ll:cpu 4) 
+  add_test(NAME hdf_attach_subregion_parallel COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:hdf_attach_subregion_parallel> -ll:cpu 4) 
 endif()

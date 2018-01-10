@@ -1,4 +1,4 @@
-/* Copyright 2017 Stanford University
+/* Copyright 2018 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,7 +16,7 @@
 #ifndef __LEGION_TERRA_H__
 #define __LEGION_TERRA_H__
 
-#include "legion_c.h"
+#include "legion.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -52,209 +52,54 @@ void register_reduction_min_double(legion_reduction_op_id_t redop);
 void register_reduction_min_int32(legion_reduction_op_id_t redop);
 void register_reduction_min_int64(legion_reduction_op_id_t redop);
 
-void reduce_plus_float(legion_accessor_generic_t accessor,
-                       legion_ptr_t ptr, float value);
-void reduce_plus_float_domain_point(legion_accessor_generic_t accessor,
-                                    legion_domain_point_t, float value);
-void reduce_plus_double(legion_accessor_generic_t accessor,
-                        legion_ptr_t ptr, double value);
-void reduce_plus_double_domain_point(legion_accessor_generic_t accessor,
-                                     legion_domain_point_t, double value);
-void reduce_plus_int32(legion_accessor_generic_t accessor,
-                       legion_ptr_t ptr, int value);
-void reduce_plus_int32_domain_point(legion_accessor_generic_t accessor,
-                                    legion_domain_point_t, int value);
-void reduce_plus_int64(legion_accessor_generic_t accessor,
-                       legion_ptr_t ptr, long long int value);
-void reduce_plus_int64_domain_point(legion_accessor_generic_t accessor,
-                                    legion_domain_point_t, long long int value);
+#define DECLARE_C_REDUCTION(NAME)                                     \
+  void NAME_float(legion_accessor_array_1d_t accessor,                \
+                  legion_ptr_t ptr, float value);                     \
+  void NAME_float_point_1d(legion_accessor_array_1d_t accessor,       \
+                           legion_point_1d_t, float value);           \
+  void NAME_float_point_2d(legion_accessor_array_2d_t accessor,       \
+                           legion_point_2d_t, float value);           \
+  void NAME_float_point_3d(legion_accessor_array_3d_t accessor,       \
+                           legion_point_3d_t, float value);           \
+  void NAME_double(legion_accessor_array_1d_t accessor,               \
+                   legion_ptr_t ptr, double value);                   \
+  void NAME_double_point_1d(legion_accessor_array_1d_t accessor,      \
+                            legion_point_1d_t, double value);         \
+  void NAME_double_point_2d(legion_accessor_array_2d_t accessor,      \
+                           legion_point_2d_t, double value);          \
+  void NAME_double_point_3d(legion_accessor_array_3d_t accessor,      \
+                           legion_point_3d_t, double value);          \
+  void NAME_int32(legion_accessor_array_1d_t accessor,                \
+                  legion_ptr_t ptr, int value);                       \
+  void NAME_int32_point_1d(legion_accessor_array_1d_t accessor,       \
+                            legion_point_1d_t, int value);            \
+  void NAME_int32_point_2d(legion_accessor_array_2d_t accessor,       \
+                           legion_point_2d_t, int value);             \
+  void NAME_int32_point_3d(legion_accessor_array_3d_t accessor,       \
+                           legion_point_3d_t, int value);             \
+  void NAME_int64(legion_accessor_array_1d_t accessor,                \
+                  legion_ptr_t ptr, long long int value);             \
+  void NAME_int64_point_1d(legion_accessor_array_1d_t accessor,       \
+                            legion_point_1d_t, long long int value);  \
+  void NAME_int64_point_2d(legion_accessor_array_2d_t accessor,       \
+                           legion_point_2d_t, long long int value);   \
+  void NAME_int64_point_3d(legion_accessor_array_3d_t accessor,       \
+                           legion_point_3d_t, long long int value);
 
-void reduce_minus_float(legion_accessor_generic_t accessor,
-                        legion_ptr_t ptr, float value);
-void reduce_minus_float_domain_point(legion_accessor_generic_t accessor,
-                                     legion_domain_point_t, float value);
-void reduce_minus_double(legion_accessor_generic_t accessor,
-                         legion_ptr_t ptr, double value);
-void reduce_minus_double_domain_point(legion_accessor_generic_t accessor,
-                                      legion_domain_point_t, double value);
-void reduce_minus_int32(legion_accessor_generic_t accessor,
-                        legion_ptr_t ptr, int value);
-void reduce_minus_int32_domain_point(legion_accessor_generic_t accessor,
-                                     legion_domain_point_t, int value);
-void reduce_minus_int64(legion_accessor_generic_t accessor,
-                        legion_ptr_t ptr, long long int value);
-void reduce_minus_int64_domain_point(legion_accessor_generic_t accessor,
-                                     legion_domain_point_t, long long int value);
+DECLARE_C_REDUCTION(reduce_plus)
+DECLARE_C_REDUCTION(reduce_minus)  
+DECLARE_C_REDUCTION(reduce_times)
+DECLARE_C_REDUCTION(reduce_divide)
+DECLARE_C_REDUCTION(reduce_max)
+DECLARE_C_REDUCTION(reduce_min)
+DECLARE_C_REDUCTION(safe_reduce_plus)
+DECLARE_C_REDUCTION(safe_reduce_minus)
+DECLARE_C_REDUCTION(safe_reduce_times)
+DECLARE_C_REDUCTION(safe_reduce_divide)
+DECLARE_C_REDUCTION(safe_reduce_max)
+DECLARE_C_REDUCTION(safe_reduce_min)
 
-void reduce_times_float(legion_accessor_generic_t accessor,
-                        legion_ptr_t ptr, float value);
-void reduce_times_float_domain_point(legion_accessor_generic_t accessor,
-                                     legion_domain_point_t, float value);
-void reduce_times_double(legion_accessor_generic_t accessor,
-                         legion_ptr_t ptr, double value);
-void reduce_times_double_domain_point(legion_accessor_generic_t accessor,
-                                      legion_domain_point_t, double value);
-void reduce_times_int32(legion_accessor_generic_t accessor,
-                        legion_ptr_t ptr, int value);
-void reduce_times_int32_domain_point(legion_accessor_generic_t accessor,
-                                     legion_domain_point_t, int value);
-void reduce_times_int64(legion_accessor_generic_t accessor,
-                        legion_ptr_t ptr, long long int value);
-void reduce_times_int64_domain_point(legion_accessor_generic_t accessor,
-                                     legion_domain_point_t, long long int value);
-
-void reduce_divide_float(legion_accessor_generic_t accessor,
-                         legion_ptr_t ptr, float value);
-void reduce_divide_float_domain_point(legion_accessor_generic_t accessor,
-                                      legion_domain_point_t, float value);
-void reduce_divide_double(legion_accessor_generic_t accessor,
-                          legion_ptr_t ptr, double value);
-void reduce_divide_double_domain_point(legion_accessor_generic_t accessor,
-                                       legion_domain_point_t, double value);
-void reduce_divide_int32(legion_accessor_generic_t accessor,
-                         legion_ptr_t ptr, int value);
-void reduce_divide_int32_domain_point(legion_accessor_generic_t accessor,
-                                      legion_domain_point_t, int value);
-void reduce_divide_int64(legion_accessor_generic_t accessor,
-                         legion_ptr_t ptr, long long int value);
-void reduce_divide_int64_domain_point(legion_accessor_generic_t accessor,
-                                      legion_domain_point_t, long long int value);
-
-void reduce_max_float(legion_accessor_generic_t accessor,
-                      legion_ptr_t ptr, float value);
-void reduce_max_float_domain_point(legion_accessor_generic_t accessor,
-                                   legion_domain_point_t, float value);
-void reduce_max_double(legion_accessor_generic_t accessor,
-                       legion_ptr_t ptr, double value);
-void reduce_max_double_domain_point(legion_accessor_generic_t accessor,
-                                    legion_domain_point_t, double value);
-void reduce_max_int32(legion_accessor_generic_t accessor,
-                      legion_ptr_t ptr, int value);
-void reduce_max_int32_domain_point(legion_accessor_generic_t accessor,
-                                   legion_domain_point_t, int value);
-void reduce_max_int64(legion_accessor_generic_t accessor,
-                      legion_ptr_t ptr, long long int value);
-void reduce_max_int64_domain_point(legion_accessor_generic_t accessor,
-                                   legion_domain_point_t, long long int value);
-
-void reduce_min_float(legion_accessor_generic_t accessor,
-                      legion_ptr_t ptr, float value);
-void reduce_min_float_domain_point(legion_accessor_generic_t accessor,
-                                   legion_domain_point_t, float value);
-void reduce_min_double(legion_accessor_generic_t accessor,
-                       legion_ptr_t ptr, double value);
-void reduce_min_double_domain_point(legion_accessor_generic_t accessor,
-                                    legion_domain_point_t, double value);
-void reduce_min_int32(legion_accessor_generic_t accessor,
-                      legion_ptr_t ptr, int value);
-void reduce_min_int32_domain_point(legion_accessor_generic_t accessor,
-                                   legion_domain_point_t, int value);
-void reduce_min_int64(legion_accessor_generic_t accessor,
-                      legion_ptr_t ptr, long long int value);
-void reduce_min_int64_domain_point(legion_accessor_generic_t accessor,
-                                   legion_domain_point_t, long long int value);
-
-void safe_reduce_plus_float(legion_accessor_generic_t accessor,
-                            legion_ptr_t ptr, float value);
-void safe_reduce_plus_float_domain_point(legion_accessor_generic_t accessor,
-                                         legion_domain_point_t, float value);
-void safe_reduce_plus_double(legion_accessor_generic_t accessor,
-                             legion_ptr_t ptr, double value);
-void safe_reduce_plus_double_domain_point(legion_accessor_generic_t accessor,
-                                          legion_domain_point_t, double value);
-void safe_reduce_plus_int32(legion_accessor_generic_t accessor,
-                            legion_ptr_t ptr, int value);
-void safe_reduce_plus_int32_domain_point(legion_accessor_generic_t accessor,
-                                         legion_domain_point_t, int value);
-void safe_reduce_plus_int64(legion_accessor_generic_t accessor,
-                            legion_ptr_t ptr, long long int value);
-void safe_reduce_plus_int64_domain_point(legion_accessor_generic_t accessor,
-                                         legion_domain_point_t, long long int value);
-
-void safe_reduce_minus_float(legion_accessor_generic_t accessor,
-                             legion_ptr_t ptr, float value);
-void safe_reduce_minus_float_domain_point(legion_accessor_generic_t accessor,
-                                          legion_domain_point_t, float value);
-void safe_reduce_minus_double(legion_accessor_generic_t accessor,
-                              legion_ptr_t ptr, double value);
-void safe_reduce_minus_double_domain_point(legion_accessor_generic_t accessor,
-                                           legion_domain_point_t, double value);
-void safe_reduce_minus_int32(legion_accessor_generic_t accessor,
-                             legion_ptr_t ptr, int value);
-void safe_reduce_minus_int32_domain_point(legion_accessor_generic_t accessor,
-                                          legion_domain_point_t, int value);
-void safe_reduce_minus_int64(legion_accessor_generic_t accessor,
-                             legion_ptr_t ptr, long long int value);
-void safe_reduce_minus_int64_domain_point(legion_accessor_generic_t accessor,
-                                          legion_domain_point_t, long long int value);
-
-void safe_reduce_times_float(legion_accessor_generic_t accessor,
-                             legion_ptr_t ptr, float value);
-void safe_reduce_times_float_domain_point(legion_accessor_generic_t accessor,
-                                          legion_domain_point_t, float value);
-void safe_reduce_times_double(legion_accessor_generic_t accessor,
-                              legion_ptr_t ptr, double value);
-void safe_reduce_times_double_domain_point(legion_accessor_generic_t accessor,
-                                           legion_domain_point_t, double value);
-void safe_reduce_times_int32(legion_accessor_generic_t accessor,
-                             legion_ptr_t ptr, int value);
-void safe_reduce_times_int32_domain_point(legion_accessor_generic_t accessor,
-                                          legion_domain_point_t, int value);
-void safe_reduce_times_int64(legion_accessor_generic_t accessor,
-                             legion_ptr_t ptr, long long int value);
-void safe_reduce_times_int64_domain_point(legion_accessor_generic_t accessor,
-                                          legion_domain_point_t, long long int value);
-
-void safe_reduce_divide_float(legion_accessor_generic_t accessor,
-                              legion_ptr_t ptr, float value);
-void safe_reduce_divide_float_domain_point(legion_accessor_generic_t accessor,
-                                           legion_domain_point_t, float value);
-void safe_reduce_divide_double(legion_accessor_generic_t accessor,
-                               legion_ptr_t ptr, double value);
-void safe_reduce_divide_double_domain_point(legion_accessor_generic_t accessor,
-                                            legion_domain_point_t, double value);
-void safe_reduce_divide_int32(legion_accessor_generic_t accessor,
-                              legion_ptr_t ptr, int value);
-void safe_reduce_divide_int32_domain_point(legion_accessor_generic_t accessor,
-                                           legion_domain_point_t, int value);
-void safe_reduce_divide_int64(legion_accessor_generic_t accessor,
-                              legion_ptr_t ptr, long long int value);
-void safe_reduce_divide_int64_domain_point(legion_accessor_generic_t accessor,
-                                           legion_domain_point_t, long long int value);
-
-void safe_reduce_max_float(legion_accessor_generic_t accessor,
-                           legion_ptr_t ptr, float value);
-void safe_reduce_max_float_domain_point(legion_accessor_generic_t accessor,
-                                        legion_domain_point_t, float value);
-void safe_reduce_max_double(legion_accessor_generic_t accessor,
-                            legion_ptr_t ptr, double value);
-void safe_reduce_max_double_domain_point(legion_accessor_generic_t accessor,
-                                         legion_domain_point_t, double value);
-void safe_reduce_max_int32(legion_accessor_generic_t accessor,
-                           legion_ptr_t ptr, int value);
-void safe_reduce_max_int32_domain_point(legion_accessor_generic_t accessor,
-                                        legion_domain_point_t, int value);
-void safe_reduce_max_int64(legion_accessor_generic_t accessor,
-                           legion_ptr_t ptr, long long int value);
-void safe_reduce_max_int64_domain_point(legion_accessor_generic_t accessor,
-                                        legion_domain_point_t, long long int value);
-
-void safe_reduce_min_float(legion_accessor_generic_t accessor,
-                           legion_ptr_t ptr, float value);
-void safe_reduce_min_float_domain_point(legion_accessor_generic_t accessor,
-                                        legion_domain_point_t, float value);
-void safe_reduce_min_double(legion_accessor_generic_t accessor,
-                            legion_ptr_t ptr, double value);
-void safe_reduce_min_double_domain_point(legion_accessor_generic_t accessor,
-                                         legion_domain_point_t, double value);
-void safe_reduce_min_int32(legion_accessor_generic_t accessor,
-                           legion_ptr_t ptr, int value);
-void safe_reduce_min_int32_domain_point(legion_accessor_generic_t accessor,
-                                        legion_domain_point_t, int value);
-void safe_reduce_min_int64(legion_accessor_generic_t accessor,
-                           legion_ptr_t ptr, long long int value);
-void safe_reduce_min_int64_domain_point(legion_accessor_generic_t accessor,
-                                        legion_domain_point_t, long long int value);
+#undef DECLARE_C_REDUCTION
 
 #ifdef __cplusplus
 }

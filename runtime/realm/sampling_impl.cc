@@ -1,4 +1,4 @@
-/* Copyright 2017 Stanford University, NVIDIA Corporation
+/* Copyright 2018 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,9 +15,9 @@
 
 // sampling profiler implementation for Realm
 
-#include "sampling_impl.h"
-#include "cmdline.h"
-#include "timers.h"
+#include "realm/sampling_impl.h"
+#include "realm/cmdline.h"
+#include "realm/timers.h"
 
 #include <unistd.h>
 #include <errno.h>
@@ -374,6 +374,9 @@ namespace Realm {
   {
     if(is_default)
       DefaultSamplerHandler::get_handler().remove_default_sampler(this);
+
+    delete sampling_start;
+    delete sampling_time;
   }
 
   void SamplingProfilerImpl::flush_data(void)
@@ -481,7 +484,7 @@ namespace Realm {
 
     assert(ok);
 
-    cfg_enabled = ((int)gasnet_mynode() < nodes_profiled);
+    cfg_enabled = (my_node_id < nodes_profiled);
 
     // mark that we're configured and processed deferred additions
     DelayedGaugeAddition *dga = 0;
@@ -544,7 +547,7 @@ namespace Realm {
 	// replace % with node number
 	char filename[256];
 	sprintf(filename, "%.*s%d%s",
-		(int)pct, logfile.c_str(), gasnet_mynode(), logfile.c_str() + pct + 1);
+		(int)pct, logfile.c_str(), my_node_id, logfile.c_str() + pct + 1);
 	logfile = filename;
       }
 

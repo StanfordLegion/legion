@@ -1,4 +1,4 @@
-/* Copyright 2017 Stanford University
+/* Copyright 2018 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -1011,7 +1011,7 @@ public:
                                     const RegionRequirement &req, unsigned index,
                                     std::vector<PhysicalInstance> &instances);
 private:
-  // std::vector<Processor>& procs_list;
+  std::vector<Processor>& procs_list;
   std::vector<Memory>& sysmems_list;
   std::map<Memory, std::vector<Processor> >& sysmem_local_procs;
 #if SPMD_SHARD_USE_IO_PROC
@@ -1032,7 +1032,7 @@ PennantMapper::PennantMapper(MapperRuntime *rt, Machine machine, Processor local
                              std::map<Processor, Memory>* _proc_sysmems,
                              std::map<Processor, Memory>* _proc_regmems)
   : DefaultMapper(rt, machine, local, mapper_name),
-    // procs_list(*_procs_list),
+    procs_list(*_procs_list),
     sysmems_list(*_sysmems_list),
     sysmem_local_procs(*_sysmem_local_procs),
 #if SPMD_SHARD_USE_IO_PROC
@@ -1143,15 +1143,16 @@ void PennantMapper::pennant_create_copy_instance(MapperContext ctx,
 
   // ELLIOTT: Get the remote node here.
   Color index = runtime->get_logical_region_color(ctx, copy.src_requirements[idx].region);
-#if SPMD_RESERVE_SHARD_PROC
-  size_t sysmem_index = index / (std::max(sysmem_local_procs.begin()->second.size() - 1, (size_t)1));
-#else
-  size_t sysmem_index = index / sysmem_local_procs.begin()->second.size();
-#endif
-  assert(sysmem_index < sysmems_list.size());
-  Memory target_memory = sysmems_list[sysmem_index];
-  // Memory target_memory = default_policy_select_target_memory(ctx,
-  //                          procs_list[index % procs_list.size()]);
+// #if SPMD_RESERVE_SHARD_PROC
+//   size_t sysmem_index = index / (std::max(sysmem_local_procs.begin()->second.size() - 1, (size_t)1));
+// #else
+//   size_t sysmem_index = index / sysmem_local_procs.begin()->second.size();
+// #endif
+//   assert(sysmem_index < sysmems_list.size());
+//   Memory target_memory = sysmems_list[sysmem_index];
+  Memory target_memory = default_policy_select_target_memory(ctx,
+                           procs_list[index % procs_list.size()],
+                           req);
   log_pennant.spew("Building instance for copy of a region with index %u to be in memory %llx",
                       index, target_memory.id);
   bool force_new_instances = false;

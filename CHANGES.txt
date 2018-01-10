@@ -1,10 +1,26 @@
 This file lists the major changes as they appear in the stable branch.  No
 attempt is made to keep this list accurate for the master branch.
 
-Version 17.??.?
+Version 17.10.0 (October 27, 2017)
+  * Legion
+    - Introduction of new partitioning API based on dependent partitioning
+    - Deprecation of old partitioning API, LegionRuntime::{Arrays,Accessors}
+        namespaces
+  * Realm
+    - Dependent partitioning API, including dimension-aware IndexSpace
+    - Point/Rect types moved to Realm namespace
+    - Instance creation allows caller to choose precise memory layout
+    - Accessors moved to Realm namespace, changed to match new instance layouts
+  * C API
+    - The C API is now accessed via the `legion.h` header file. Note that this
+        is still a redirect back to the current `legion/legion_c.h` header
   * Legion Prof
     - Added support for minimally invasive dumping of intermediate
-      profiling data while the application is still running for long runs
+        profiling data while the application is still running for long runs
+  * Python
+    - New Python API bindings and native support for Python processors
+        Compile with USE_PYTHON=1 and run with -ll:py 1 to enable Python
+        Also see examples/python_interop for an example
 
 Version 17.08.0 (August 24, 2017)
   * Build system

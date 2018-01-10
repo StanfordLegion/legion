@@ -1,4 +1,4 @@
--- Copyright 2017 Stanford University, NVIDIA Corporation
+-- Copyright 2018 Stanford University, NVIDIA Corporation
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -297,6 +297,18 @@ function optimize_config_options.top_task(cx, node)
   -- is disabled. This is to ensure that the analysis always works.
   local leaf = analyze_leaf(cx, node.body) and std.config["leaf"]
   local inner = analyze_inner(cx, node.body) and std.config["inner"] and not leaf
+
+  if std.config["leaf"] and not leaf and
+    node.annotations.leaf:is(ast.annotation.Demand)
+  then
+    report.error(node, "task is not a valid leaf task")
+  end
+
+  if std.config["inner"] and not inner and
+    node.annotations.inner:is(ast.annotation.Demand)
+  then
+    report.error(node, "task is not a valid inner task")
+  end
 
   return node {
     config_options = ast.TaskConfigOptions {

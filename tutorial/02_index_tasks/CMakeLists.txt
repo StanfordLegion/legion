@@ -1,5 +1,5 @@
 #------------------------------------------------------------------------------#
-# Copyright 2017 Kitware, Inc.
+# Copyright 2018 Kitware, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -25,5 +25,5 @@ endif()
 add_executable(index_tasks index_tasks.cc)
 target_link_libraries(index_tasks Legion::Legion)
 if(Legion_ENABLE_TESTING)
-  add_test(NAME index_tasks COMMAND $<TARGET_FILE:index_tasks>) 
+  add_test(NAME index_tasks COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:index_tasks>)
 endif()

@@ -1,4 +1,4 @@
-# Copyright 2017 Stanford University
+# Copyright 2018 Stanford University
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -29,7 +29,7 @@ ALT_MAPPERS     ?= 0		# Include alternative mappers (not recommended)
 # Put the binary file name here
 OUTFILE		?= circuit
 # List all the application source files here
-GEN_SRC		?= circuit.cc circuit_cpu.cc circuit_mapper.cc	# .cc files
+GEN_SRC		?= circuit.cc circuit_cpu.cc circuit_init.cc circuit_mapper.cc	# .cc files
 ifeq ($(strip $(USE_CUDA)),1)
 GEN_GPU_SRC	?= circuit_gpu.cu				# .cu files
 endif

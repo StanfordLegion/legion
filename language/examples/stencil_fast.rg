@@ -1,4 +1,4 @@
--- Copyright 2017 Stanford University
+-- Copyright 2018 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -32,7 +32,10 @@ local c = regentlib.c
 if USE_FOREIGN then
   local root_dir = arg[0]:match(".*/") or "./"
   local stencil_cc = root_dir .. "stencil.cc"
-  if os.getenv('SAVEOBJ') == '1' then
+  if os.getenv('OBJNAME') then
+    local out_dir = os.getenv('OBJNAME'):match('.*/') or './'
+    stencil_so = out_dir .. "libstencil.so"
+  elseif os.getenv('SAVEOBJ') == '1' then
     stencil_so = root_dir .. "libstencil.so"
   else
     stencil_so = os.tmpname() .. ".so" -- root_dir .. "stencil.so"
@@ -79,7 +82,10 @@ do
   local mapper_dir = runtime_dir .. "mappers/"
   local realm_dir = runtime_dir .. "realm/"
   local mapper_cc = root_dir .. "stencil_mapper.cc"
-  if os.getenv('SAVEOBJ') == '1' then
+  if os.getenv('OBJNAME') then
+    local out_dir = os.getenv('OBJNAME'):match('.*/') or './'
+    mapper_so = out_dir .. "libstencil_mapper.so"
+  elseif os.getenv('SAVEOBJ') == '1' then
     mapper_so = root_dir .. "libstencil_mapper.so"
   else
     mapper_so = os.tmpname() .. ".so" -- root_dir .. "stencil_mapper.so"
@@ -296,8 +302,8 @@ terra get_base_and_stride(rect : c.legion_rect_2d_t,
                           field : c.legion_field_id_t)
   var subrect : c.legion_rect_2d_t
   var offsets : c.legion_byte_offset_t[2]
-  var accessor = c.legion_physical_region_get_field_accessor_generic(physical, field)
-  var base_pointer = [&DTYPE](c.legion_accessor_generic_raw_rect_ptr_2d(
+  var accessor = c.legion_physical_region_get_field_accessor_array_2d(physical, field)
+  var base_pointer = [&DTYPE](c.legion_accessor_array_2d_raw_rect_ptr(
                                       accessor, rect, &subrect, &(offsets[0])))
   regentlib.assert(base_pointer ~= nil, "base pointer is nil")
   regentlib.assert(subrect.lo.x[0] == rect.lo.x[0] and subrect.lo.x[1] == rect.lo.x[1], "subrect not equal to rect")
@@ -554,7 +560,8 @@ task main()
 end
 if os.getenv('SAVEOBJ') == '1' then
   local root_dir = arg[0]:match(".*/") or "./"
-  local link_flags = {"-L" .. root_dir, "-lstencil", "-lstencil_mapper"}
+  local out_dir = (os.getenv('OBJNAME') and os.getenv('OBJNAME'):match('.*/')) or root_dir
+  local link_flags = {"-L" .. out_dir, "-lstencil", "-lstencil_mapper"}
   if os.getenv('CRAYPE_VERSION') then
     local new_flags = terralib.newlist({"-Wl,-Bdynamic"})
     new_flags:insertall(link_flags)
@@ -568,7 +575,13 @@ if os.getenv('SAVEOBJ') == '1' then
     new_flags:insert("-ludreg")
     link_flags = new_flags
   end
-  regentlib.saveobj(main, "stencil", "executable", cmapper.register_mappers, link_flags)
+
+  if os.getenv('STANDALONE') == '1' then
+    os.execute('cp ' .. os.getenv('LG_RT_DIR') .. '/../bindings/terra/liblegion_terra.so ' .. out_dir)
+  end
+
+  local exe = os.getenv('OBJNAME') or "stencil"
+  regentlib.saveobj(main, exe, "executable", cmapper.register_mappers, link_flags)
 else
   regentlib.start(main, cmapper.register_mappers)
 end

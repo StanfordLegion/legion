@@ -1,4 +1,4 @@
-/* Copyright 2017 Stanford University, NVIDIA Corporation
+/* Copyright 2018 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13,14 +13,14 @@
  * limitations under the License.
  */
 
-#include "procset_module.h"
+#include "realm/procset/procset_module.h"
 
-#include "logging.h"
-#include "cmdline.h"
-#include "proc_impl.h"
-#include "threads.h"
-#include "runtime_impl.h"
-#include "utils.h"
+#include "realm/logging.h"
+#include "realm/cmdline.h"
+#include "realm/proc_impl.h"
+#include "realm/threads.h"
+#include "realm/runtime_impl.h"
+#include "realm/utils.h"
 
 namespace Realm {
 
@@ -89,7 +89,6 @@ namespace Realm {
       , cfg_num_mp_threads(0)
       , cfg_num_mp_procs(0)
       , cfg_num_mp_cpus(0)
-      , cfg_force_kernel_threads(false)
       , cfg_stack_size_in_mb(2)
     {
     }
@@ -108,8 +107,7 @@ namespace Realm {
 
       cp.add_option_int("-ll:mp_threads", m->cfg_num_mp_threads)
         .add_option_int("-ll:mp_nodes", m->cfg_num_mp_procs)
-        .add_option_int("-ll:mp_cpu", m->cfg_num_mp_cpus)
-	.add_option_bool("-ll:force_kthreads", m->cfg_force_kernel_threads, true /*keep*/);
+        .add_option_int("-ll:mp_cpu", m->cfg_num_mp_cpus);
 
       bool ok = cp.parse_command_line(cmdline);
       if(!ok) {
@@ -140,17 +138,17 @@ namespace Realm {
     {
       Module::create_processors(runtime);
       // for simplicity don't allow more that one procset per node for now
-      if (cfg_num_mp_procs > static_cast<int>(gasnet_nodes())) {
+      if (cfg_num_mp_procs > (max_node_id + 1)) {
 	    log_procset.fatal() << "error num_mp_procs > number of nodes";
 	    assert(false);
       }
       if (cfg_num_mp_threads) {
         // if num_mp_procs is not set then assume one procset on every node
-        if (cfg_num_mp_procs == 0 || static_cast<int>(gasnet_mynode()) < cfg_num_mp_procs ) { 
+        if (cfg_num_mp_procs == 0 || my_node_id < cfg_num_mp_procs) { 
           Processor p = runtime->next_local_processor_id();
           ProcessorImpl *pi = new LocalProcessorSet(p, runtime->core_reservation_set(),
 						    cfg_stack_size_in_mb << 20, cfg_num_mp_threads,
-						    cfg_force_kernel_threads);
+						    Config::force_kernel_threads);
           runtime->add_processor(pi);
         // if there are not procSets on all nodes and cfg_num_mp_cpus is set
         // then add additional LocalCPUProcessors on these nodes
@@ -159,7 +157,7 @@ namespace Realm {
             Processor p = runtime->next_local_processor_id();
             ProcessorImpl *pi = new LocalCPUProcessor(p, runtime->core_reservation_set(),
 						      cfg_stack_size_in_mb << 20,
-						      cfg_force_kernel_threads);
+						      Config::force_kernel_threads);
             runtime->add_processor(pi);
           }
         }      

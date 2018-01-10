@@ -1,4 +1,4 @@
--- Copyright 2017 Stanford University
+-- Copyright 2018 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -42,6 +42,8 @@ else
   if os.execute("grep avx /proc/cpuinfo > /dev/null") == 0 then
     SIMD_REG_SIZE = 32
   elseif os.execute("grep sse /proc/cpuinfo > /dev/null") == 0 then
+    SIMD_REG_SIZE = 16
+  elseif os.execute("grep POWER8 /proc/cpuinfo > /dev/null") == 0 then
     SIMD_REG_SIZE = 16
   else
     error("Unable to determine CPU architecture")
@@ -161,47 +163,29 @@ function flip_types.stat(cx, simd_width, symbol, node)
     return node { block = flip_types.block(cx, simd_width, symbol, node.block) }
 
   elseif node:is(ast.typed.stat.Var) then
-    local symbols = terralib.newlist()
-    local types = terralib.newlist()
-    local values = terralib.newlist()
+    local symbol = node.symbol
+    local type = node.type
+    local value = false
 
-    for i = 1, #node.symbols do
-      local symbol = node.symbols[i]
-      if node.values[i] == nil or
-         cx:lookup_expr_type(node.values[i]) == V then
-        types:insert(flip_types.type(simd_width, node.types[i]))
-        symbols:insert(std.newsymbol(types[i],
-          symbol:hasname() and symbol:getname() .. "_vectorized"))
-        cx:add_substitution(symbol, symbols[i])
-        if i <= #node.values then
-          values:insert(flip_types.expr(cx, simd_width, symbol, node.values[i]))
-        end
-      else
-        types:insert(node.types[i])
-        symbols:insert(symbol)
-        if i <= #node.values then values:insert(node.values[i]) end
+    if not node.value or cx:lookup_expr_type(node.value) == V then
+      type = flip_types.type(simd_width, node.type)
+      symbol = std.newsymbol(type,
+        symbol:hasname() and symbol:getname() .. "_vectorized")
+      cx:add_substitution(node.symbol, symbol)
+      if node.value then
+        value = flip_types.expr(cx, simd_width, symbol, node.value)
       end
+    elseif node.value then
+      value = node.value
     end
 
-    return node { symbols = symbols, types = types, values = values }
+    return node { symbol = symbol, type = type, value = value }
 
   elseif node:is(ast.typed.stat.Assignment) or
          node:is(ast.typed.stat.Reduce) then
-    local lhs = terralib.newlist()
-    local rhs = terralib.newlist()
-
-    node.lhs:map(function(exp)
-      lhs:insert(flip_types.expr(cx, simd_width, symbol, exp))
-    end)
-    node.rhs:map(function(exp)
-      rhs:insert(flip_types.expr(cx, simd_width, symbol, exp))
-    end)
-
-    if node:is(ast.typed.stat.Assignment) then
-      return node { lhs = lhs, rhs = rhs }
-    else -- node:is(ast.typed.stat.Reduce)
-      return node { lhs = lhs, rhs = rhs }
-    end
+    local lhs = flip_types.expr(cx, simd_width, symbol, node.lhs)
+    local rhs = flip_types.expr(cx, simd_width, symbol, node.rhs)
+    return node { lhs = lhs, rhs = rhs }
 
   elseif node:is(ast.typed.stat.ForNum) then
     return node { block = flip_types.block(cx, simd_width, symbol, node.block) }
@@ -266,6 +250,7 @@ function flip_types.expr(cx, simd_width, symbol, node)
         fn = fn_node,
         args = args,
         conditions = terralib.newlist(),
+        replicable = false,
         expr_type = rval_type,
         annotations = node.annotations,
         span = node.span,
@@ -389,23 +374,17 @@ function min_simd_width.stat(cx, reg_size, node)
 
   elseif node:is(ast.typed.stat.Var) then
     local simd_width = reg_size
-    node.types:map(function(type)
-      simd_width = min(simd_width, min_simd_width.type(reg_size, type))
-    end)
-    node.values:map(function(value)
-      simd_width = min(simd_width, min_simd_width.expr(cx, reg_size, value))
-    end)
+    simd_width = min(simd_width, min_simd_width.type(reg_size, node.type))
+    if node.value then
+      simd_width = min(simd_width, min_simd_width.expr(cx, reg_size, node.value))
+    end
     return simd_width
 
   elseif node:is(ast.typed.stat.Assignment) or
          node:is(ast.typed.stat.Reduce) then
     local simd_width = reg_size
-    node.lhs:map(function(lh)
-      simd_width = min(simd_width, min_simd_width.expr(cx, reg_size, lh))
-    end)
-    node.rhs:map(function(rh)
-      simd_width = min(simd_width, min_simd_width.expr(cx, reg_size, rh))
-    end)
+    simd_width = min(simd_width, min_simd_width.expr(cx, reg_size, node.lhs))
+    simd_width = min(simd_width, min_simd_width.expr(cx, reg_size, node.rhs))
     return simd_width
 
   elseif node:is(ast.typed.stat.ForNum) then
@@ -636,91 +615,24 @@ function check_vectorizability.stat(cx, node)
     return check_vectorizability.block(cx, node.block)
 
   elseif node:is(ast.typed.stat.Var) then
-    for i, symbol in pairs(node.symbols) do
-      local fact = V
-      if #node.values > 0 then
-        local value = node.values[i]
-        if not check_vectorizability.expr(cx, value) then return false end
-        fact = cx:lookup_expr_type(value)
-      end
-
-      local ty = node.types[i]
-      local type_vectorizable =
-        (ty:isarray() and ty.type:isprimitive()) or
-        check_vectorizability.type(ty)
-      if not type_vectorizable then
-        cx:report_error_when_demanded(node,
-          error_prefix .. "a variable declaration of an inadmissible type")
-        return type_vectorizable
-      end
-      cx:assign(symbol, fact)
-      node.values:map(function(value)
-        collect_bounds(value):map(function(pair)
-          local ty, field = unpack(pair)
-          local field_hash = field:hash()
-          if not cx.read_set[ty] then cx.read_set[ty] = {} end
-          if not cx.read_set[ty][field_hash] then
-            cx.read_set[ty][field_hash] = data.newtuple(field, node)
-          end
-        end)
-      end)
+    local fact = V
+    if node.value then
+      if not check_vectorizability.expr(cx, node.value) then return false end
+      fact = cx:lookup_expr_type(node.value)
     end
-    return true
 
-  elseif node:is(ast.typed.stat.Assignment) or
-         node:is(ast.typed.stat.Reduce) then
-    for i, rh in pairs(node.rhs) do
-      local lh = node.lhs[i]
-
-      if not check_vectorizability.expr(cx, lh) or
-         not check_vectorizability.expr(cx, rh) then return false end
-
-      if cx:lookup_expr_type(lh) == S and cx:lookup_expr_type(rh) == V then
-        cx:report_error_when_demanded(node, error_prefix ..
-          "an assignment of a non-scalar expression to a scalar expression")
-        return false
-      end
-
-      -- TODO: we could accept statements with no loop carrying dependence
-      if cx:lookup_expr_type(lh) == S then
-        cx:report_error_when_demanded(node, error_prefix ..
-          "an assignment to a scalar expression")
-        return false
-      end
-
-      -- TODO: for the moment we reject an assignment such as
-      -- 'r[i] = i' where 'i' is of an index type
-      local function contains_loop_var(node)
-        if node:is(ast.typed.expr.Cast) then
-          return contains_loop_var(node.arg)
-        elseif node:is(ast.typed.expr.Binary) then
-          return contains_loop_var(node.lhs) or
-                 contains_loop_var(node.rhs)
-        elseif node:is(ast.typed.expr.Unary) then
-          return contains_loop_var(node.rhs)
-        elseif node:is(ast.typed.expr.ID) then
-          return cx.loop_symbol == node.value or
-                 (std.is_bounded_type(node.expr_type) and
-                  std.type_eq(cx.loop_symbol:gettype(), node.expr_type))
-        else
-          return false
-        end
-      end
-      if contains_loop_var(rh) then
-        cx:report_error_when_demanded(node, error_prefix ..
-          "a corner case statement not supported for the moment")
-        return false
-      end
-
-      if not (check_vectorizability.type(std.as_read(lh.expr_type)) and
-              check_vectorizability.type(std.as_read(rh.expr_type))) then
-        cx:report_error_when_demanded(node, error_prefix ..
-          "an assignment between expressions that have inadmissible types")
-        return false
-      end
-
-      -- bookkeeping for alias analysis
-      collect_bounds(rh):map(function(pair)
+    local ty = node.type
+    local type_vectorizable =
+      (ty:isarray() and ty.type:isprimitive()) or
+      check_vectorizability.type(ty)
+    if not type_vectorizable then
+      cx:report_error_when_demanded(node,
+        error_prefix .. "a variable declaration of an inadmissible type")
+      return type_vectorizable
+    end
+    cx:assign(node.symbol, fact)
+    if node.value then
+      collect_bounds(node.value):map(function(pair)
         local ty, field = unpack(pair)
         local field_hash = field:hash()
         if not cx.read_set[ty] then cx.read_set[ty] = {} end
@@ -728,18 +640,81 @@ function check_vectorizability.stat(cx, node)
           cx.read_set[ty][field_hash] = data.newtuple(field, node)
         end
       end)
-      local write_set = {}
-      get_bounds(lh.expr_type):map(function(pair)
-        local ty, field = unpack(pair)
-        local field_hash = field:hash()
-        if not write_set[ty] then write_set[ty] = {} end
-        if not write_set[ty][field_hash] then
-          write_set[ty][field_hash] = data.newtuple(field, node)
-        end
-      end)
-      if check_vectorizability.has_aliasing(cx, write_set) then
+    end
+    return true
+
+  elseif node:is(ast.typed.stat.Assignment) or
+         node:is(ast.typed.stat.Reduce) then
+    local lh = node.lhs
+    local rh = node.rhs
+
+    if not check_vectorizability.expr(cx, lh) or
+       not check_vectorizability.expr(cx, rh) then return false end
+
+    if cx:lookup_expr_type(lh) == S and cx:lookup_expr_type(rh) == V then
+      cx:report_error_when_demanded(node, error_prefix ..
+        "an assignment of a non-scalar expression to a scalar expression")
+      return false
+    end
+
+    -- TODO: we could accept statements with no loop carrying dependence
+    if cx:lookup_expr_type(lh) == S then
+      cx:report_error_when_demanded(node, error_prefix ..
+        "an assignment to a scalar expression")
+      return false
+    end
+
+    -- TODO: for the moment we reject an assignment such as
+    -- 'r[i] = i' where 'i' is of an index type
+    local function contains_loop_var(node)
+      if node:is(ast.typed.expr.Cast) then
+        return contains_loop_var(node.arg)
+      elseif node:is(ast.typed.expr.Binary) then
+        return contains_loop_var(node.lhs) or
+               contains_loop_var(node.rhs)
+      elseif node:is(ast.typed.expr.Unary) then
+        return contains_loop_var(node.rhs)
+      elseif node:is(ast.typed.expr.ID) then
+        return cx.loop_symbol == node.value or
+               (std.is_bounded_type(node.expr_type) and
+                std.type_eq(cx.loop_symbol:gettype(), node.expr_type))
+      else
         return false
       end
+    end
+    if contains_loop_var(rh) then
+      cx:report_error_when_demanded(node, error_prefix ..
+        "a corner case statement not supported for the moment")
+      return false
+    end
+
+    if not (check_vectorizability.type(std.as_read(lh.expr_type)) and
+            check_vectorizability.type(std.as_read(rh.expr_type))) then
+      cx:report_error_when_demanded(node, error_prefix ..
+        "an assignment between expressions that have inadmissible types")
+      return false
+    end
+
+    -- bookkeeping for alias analysis
+    collect_bounds(rh):map(function(pair)
+      local ty, field = unpack(pair)
+      local field_hash = field:hash()
+      if not cx.read_set[ty] then cx.read_set[ty] = {} end
+      if not cx.read_set[ty][field_hash] then
+        cx.read_set[ty][field_hash] = data.newtuple(field, node)
+      end
+    end)
+    local write_set = {}
+    get_bounds(lh.expr_type):map(function(pair)
+      local ty, field = unpack(pair)
+      local field_hash = field:hash()
+      if not write_set[ty] then write_set[ty] = {} end
+      if not write_set[ty][field_hash] then
+        write_set[ty][field_hash] = data.newtuple(field, node)
+      end
+    end)
+    if check_vectorizability.has_aliasing(cx, write_set) then
+      return false
     end
 
     return true
@@ -864,7 +839,9 @@ function check_vectorizability.expr(cx, node)
     if cx:lookup_expr_type(node.index) == V then
       local value_type = std.as_read(node.value.expr_type)
       -- TODO: We currently don't support scattered reads from structured regions
-      if std.is_region(value_type) and not value_type:is_opaque() then
+      --       Update on 06/20/17: index types are no longer sliced. will reject
+      --                           all scattered reads for now. (wclee)
+      if std.is_region(value_type) then
         cx:report_error_when_demanded(node, error_prefix ..
           "a scattered read from a structured region")
         return false
@@ -964,7 +941,9 @@ function check_vectorizability.expr(cx, node)
     local fact = cx:lookup_expr_type(node.value)
     if fact == C then fact = V
     -- TODO: We currently don't support scattered reads from structured regions
-    elseif fact == V and not std.as_read(node.value.expr_type).index_type:is_opaque() then
+    --       Update on 06/20/17: index types are no longer sliced. will reject
+    --                           all scattered reads for now. (wclee)
+    elseif fact == V then
       cx:report_error_when_demanded(node, error_prefix ..
         "a scattered read from a structured region")
       return false
@@ -1068,7 +1047,10 @@ end
 
 -- check if the type is admissible to vectorizer
 function check_vectorizability.type(ty)
-  if ty:isprimitive() or std.is_bounded_type(ty) then
+  if (std.is_bounded_type(ty) and std.is_index_type(ty.index_type)) or
+     std.is_index_type(ty) or std.is_rect_type(ty) then
+    return false
+  elseif ty:isprimitive() then
     return true
   elseif ty:isstruct() then
     for _, entry in pairs(ty.entries) do

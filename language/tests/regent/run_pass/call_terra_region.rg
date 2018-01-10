@@ -1,4 +1,4 @@
--- Copyright 2017 Stanford University
+-- Copyright 2018 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -37,13 +37,13 @@ terra edit(runtime : c.legion_runtime_t,
   cstdio.printf("  physical regions: %p, %p, %p\n", s_physical[0].impl, s_physical[1].impl, s_physical[2].impl)
   cstdio.printf("  field ids: %d, %d, %d\n", s_fields[0], s_fields[1], s_fields[2])
 
-  var r = c.legion_physical_region_get_field_accessor_generic(
+  var r = c.legion_physical_region_get_field_accessor_array_1d(
     r_physical[0], r_fields[0])
-  var s_a = c.legion_physical_region_get_field_accessor_generic(
+  var s_a = c.legion_physical_region_get_field_accessor_array_1d(
     s_physical[0], s_fields[0])
-  var s_b = c.legion_physical_region_get_field_accessor_generic(
+  var s_b = c.legion_physical_region_get_field_accessor_array_1d(
     s_physical[1], s_fields[1])
-  var s_c = c.legion_physical_region_get_field_accessor_generic(
+  var s_c = c.legion_physical_region_get_field_accessor_array_1d(
     s_physical[2], s_fields[2])
 
   var r_logical = c.legion_physical_region_get_logical_region(
@@ -55,16 +55,16 @@ terra edit(runtime : c.legion_runtime_t,
     var p = c.legion_index_iterator_next(r_iterator)
     cstdio.printf("attempting to read r at pointer %d\n", p.value)
     var x : int64 = 9999999
-    c.legion_accessor_generic_read(r, p, &x, sizeof(int64))
+    c.legion_accessor_array_1d_read(r, p, &x, sizeof(int64))
     cstdio.printf("  value is %lld\n", x)
     sum = sum + x
   end
   c.legion_index_iterator_destroy(r_iterator)
 
-  c.legion_accessor_generic_destroy(r)
-  c.legion_accessor_generic_destroy(s_a)
-  c.legion_accessor_generic_destroy(s_b)
-  c.legion_accessor_generic_destroy(s_c)
+  c.legion_accessor_array_1d_destroy(r)
+  c.legion_accessor_array_1d_destroy(s_a)
+  c.legion_accessor_array_1d_destroy(s_b)
+  c.legion_accessor_array_1d_destroy(s_c)
   return sum
 end
 

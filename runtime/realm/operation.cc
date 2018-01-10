@@ -1,4 +1,4 @@
-/* Copyright 2017 Stanford University, NVIDIA Corporation
+/* Copyright 2018 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13,10 +13,10 @@
  * limitations under the License.
  */
 
-#include "operation.h"
+#include "realm/operation.h"
 
-#include "faults.h"
-#include "runtime_impl.h"
+#include "realm/faults.h"
+#include "realm/runtime_impl.h"
 
 namespace Realm {
 
@@ -204,6 +204,11 @@ namespace Realm {
     return false;
   }
 
+  void Operation::set_priority(int new_priority)
+  {
+    // ignored
+  }
+
   // a common reason for cancellation is a poisoned precondition - this helper takes care
   //  of recording the error code and marking the operation as (unsuccessfully) finished
   void Operation::handle_poisoned_precondition(Event pre)
@@ -260,6 +265,10 @@ namespace Realm {
   std::ostream& operator<<(std::ostream& os, const Operation *op)
   {
     op->print(os);
+    os << " status=" << op->status.result
+       << "(" << op->timeline.ready_time
+       << "," << op->timeline.start_time
+       << ") work=" << op->pending_work_items;
     if(!op->all_work_items.empty()) {
       os << " { ";
       std::set<Operation::AsyncWorkItem *>::const_iterator it = op->all_work_items.begin();
@@ -268,7 +277,7 @@ namespace Realm {
 	os << ", ";
 	(*it)->print(os);
       }
-      os << " }";
+      os << " }\n";
     }
     return os;
   }
@@ -486,7 +495,7 @@ namespace Realm {
       // not found - who owns this event?
       int owner = ID(finish_event).event.creator_node;
 
-      if(owner == (int)gasnet_mynode()) {
+      if(owner == my_node_id) {
 	// if we're the owner, it's probably for an event that already completed successfully,
 	//  so ignore the request
 	log_optable.info() << "event " << finish_event << " cancellation ignored - not in table";
@@ -511,10 +520,95 @@ namespace Realm {
     assert(0);
 #endif
   }
-    
-  /*static*/ int OperationTable::register_handlers(gasnet_handlerentry_t *handlers)
+
+  void OperationTable::set_priority(Event finish_event, int new_priority)
   {
-    return 0;
+#ifdef REALM_USE_OPERATION_TABLE
+    // "hash" the id to figure out which subtable to use
+    int subtable = finish_event.id % NUM_TABLES;
+    GASNetHSL& mutex = mutexes[subtable];
+    Table& table = tables[subtable];
+
+    bool found = false;
+    Operation *local_op = 0;
+    int remote_node = -1;
+    {
+      AutoHSLLock al(mutex);
+
+      Table::iterator it = table.find(finish_event);
+
+      if(it != table.end()) {
+	found = true;
+
+	// if there's a local op, we need to take a reference in case it completes successfully
+	//  before we get to it below
+	if(it->second.local_op) {
+	  local_op = it->second.local_op;
+	  local_op->add_reference();
+	}
+	remote_node = it->second.remote_node;
+      }
+    }
+
+    if(!found) {
+      // not found - who owns this event?
+      int owner = ID(finish_event).event.creator_node;
+
+      if(owner == my_node_id) {
+	// if we're the owner, it's probably for an event that already completed successfully,
+	//  so ignore the request
+	log_optable.info() << "event " << finish_event << " priority change ignored - not in table";
+      } else {
+	// let the owner of the event deal with it
+	remote_node = owner;
+      }
+    }
+
+    if(remote_node != -1) {
+      // TODO: active message
+      assert(false);
+    }
+
+    if(local_op) {
+      local_op->set_priority(new_priority);
+      log_optable.info() << "event " << finish_event << " - operation " << (void *)local_op << " priority=" << new_priority;
+      local_op->remove_reference();
+    }
+#else
+    assert(0);
+#endif
+  }
+    
+  /*static*/ void OperationTable::register_handlers(void)
+  {
+  }
+
+  void OperationTable::print_operations(std::ostream& os)
+  {
+#ifdef REALM_USE_OPERATION_TABLE
+    os << "OperationTable(node=" << my_node_id << ") {\n";
+
+    for(int subtable = 0; subtable < NUM_TABLES; subtable++) {
+      GASNetHSL& mutex = mutexes[subtable];
+      Table& table = tables[subtable];
+
+      // taking the lock on the subtable also guarantees that none of the
+      //  operations in the subtable will be deleted during our iteration
+      AutoHSLLock al(mutex);
+
+      for(Table::const_iterator it = table.begin();
+	  it != table.end();
+	  ++it) {
+	if(it->second.local_op) {
+	  os << "  " << it->first << ": " << it->second.local_op << "\n";
+	} else {
+	  os << "  " << it->first << ": remote - node=" << it->second.remote_node << "\n";
+	}
+      }
+    }
+
+    os << "}";
+#endif
   }
 
 

@@ -1,4 +1,4 @@
-/* Copyright 2017 Stanford University, NVIDIA Corporation
+/* Copyright 2018 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13,7 +13,7 @@
  * limitations under the License.
  */
 
-#include "test_mapper.h"
+#include "mappers/test_mapper.h"
 #include <sys/time.h>
 
 #define INLINE_RATIO    100 // 1 in 100
@@ -25,8 +25,6 @@
 
 namespace Legion {
   namespace Mapping {
-
-    using namespace LegionRuntime::Arrays;
 
     Logger log_test_mapper("test_mapper");
 
@@ -215,12 +213,11 @@ namespace Legion {
       {
         case 1:
           {
-            LegionRuntime::Arrays::Rect<1> rect = input.domain.get_rect<1>();
-            for (LegionRuntime::Arrays::GenericPointInRectIterator<1> pir(rect);
-                  pir; pir++, idx++)
+            Rect<1,coord_t> rect = input.domain;
+            for (PointInRectIterator<1> pir(rect); pir(); pir++, idx++)
             {
-              Rect<1> slice(pir.p, pir.p);
-              output.slices[idx] = TaskSlice(Domain::from_rect<1>(slice),
+              Rect<1,coord_t> slice(*pir, *pir);
+              output.slices[idx] = TaskSlice(slice,
                   select_random_processor(task.target_proc.kind()),
                   false/*recurse*/, true/*stealable*/);
             }
@@ -228,12 +225,11 @@ namespace Legion {
           }
         case 2:
           {
-            LegionRuntime::Arrays::Rect<2> rect = input.domain.get_rect<2>();
-            for (LegionRuntime::Arrays::GenericPointInRectIterator<2> pir(rect);
-                  pir; pir++, idx++)
+            Rect<2,coord_t> rect = input.domain;
+            for (PointInRectIterator<2> pir(rect); pir(); pir++, idx++)
             {
-              Rect<2> slice(pir.p, pir.p);
-              output.slices[idx] = TaskSlice(Domain::from_rect<2>(slice),
+              Rect<2,coord_t> slice(*pir, *pir);
+              output.slices[idx] = TaskSlice(slice,
                   select_random_processor(task.target_proc.kind()),
                   false/*recurse*/, true/*stealable*/);
             }
@@ -241,12 +237,11 @@ namespace Legion {
           }
         case 3:
           {
-            LegionRuntime::Arrays::Rect<3> rect = input.domain.get_rect<3>();
-            for (LegionRuntime::Arrays::GenericPointInRectIterator<3> pir(rect);
-                  pir; pir++, idx++)
+            Rect<3,coord_t> rect = input.domain;
+            for (PointInRectIterator<3> pir(rect); pir(); pir++, idx++)
             {
-              Rect<3> slice(pir.p, pir.p);
-              output.slices[idx] = TaskSlice(Domain::from_rect<3>(slice),
+              Rect<3,coord_t> slice(*pir, *pir);
+              output.slices[idx] = TaskSlice(slice,
                   select_random_processor(task.target_proc.kind()),
                   false/*recurse*/, true/*stealable*/);
             }

@@ -1,4 +1,4 @@
--- Copyright 2017 Stanford University, NVIDIA Corporation
+-- Copyright 2018 Stanford University, NVIDIA Corporation
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -79,8 +79,8 @@ ast.annotation:leaf("Forbid", {"value"}, true)
 ast.annotation:leaf("Unroll", {"value"}, true)
 
 -- Annotation: Sets
-ast.annotation:leaf("Set", {"cuda", "external", "inline", "openmp",
-                            "parallel", "spmd", "trace", "vectorize"},
+ast.annotation:leaf("Set", {"cuda", "external", "inline", "inner", "leaf",
+                            "openmp", "parallel", "spmd", "trace", "vectorize"},
                     false, true)
 
 function ast.default_annotations()
@@ -89,6 +89,8 @@ function ast.default_annotations()
     cuda = allow,
     external = allow,
     inline = allow,
+    inner = allow,
+    leaf = allow,
     openmp = allow,
     parallel = allow,
     spmd = allow,
@@ -399,7 +401,7 @@ ast.typed.expr:leaf("ID", {"value"})
 ast.typed.expr:leaf("FieldAccess", {"value", "field_name"})
 ast.typed.expr:leaf("IndexAccess", {"value", "index"})
 ast.typed.expr:leaf("MethodCall", {"value", "method_name", "args"})
-ast.typed.expr:leaf("Call", {"fn", "args", "conditions"})
+ast.typed.expr:leaf("Call", {"fn", "args", "conditions", "replicable"})
 ast.typed.expr:leaf("Cast", {"fn", "arg"})
 ast.typed.expr:leaf("Ctor", {"fields", "named"})
 ast.typed.expr:leaf("CtorListField", {"value"})
@@ -484,7 +486,7 @@ ast.typed.stat:leaf("IndexLaunchList", {"symbol", "value", "preamble", "call",
                                         "reduce_lhs", "reduce_op",
                                         "args_provably"})
 ast:leaf("IndexLaunchArgsProvably", {"invariant", "variant"})
-ast.typed.stat:leaf("Var", {"symbols", "types", "values"})
+ast.typed.stat:leaf("Var", {"symbol", "type", "value"})
 ast.typed.stat:leaf("VarUnpack", {"symbols", "fields", "field_types", "value"})
 ast.typed.stat:leaf("Return", {"value"})
 ast.typed.stat:leaf("Break")

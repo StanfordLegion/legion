@@ -1,4 +1,4 @@
-/* Copyright 2017 Stanford University, NVIDIA Corporation
+/* Copyright 2018 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13,14 +13,21 @@
  * limitations under the License.
  */
 
-#include "machine_impl.h"
+#include "realm/machine_impl.h"
 
-#include "logging.h"
-#include "proc_impl.h"
-#include "mem_impl.h"
-#include "runtime_impl.h"
+#include "realm/logging.h"
+#include "realm/proc_impl.h"
+#include "realm/mem_impl.h"
+#include "realm/runtime_impl.h"
 
-#include "activemsg.h"
+#include "realm/activemsg.h"
+#include "realm/transfer/channel.h"
+
+TYPE_IS_SERIALIZABLE(Realm::NodeAnnounceTag);
+TYPE_IS_SERIALIZABLE(Realm::Memory);
+TYPE_IS_SERIALIZABLE(Realm::Memory::Kind);
+TYPE_IS_SERIALIZABLE(Realm::Channel::SupportedPath);
+TYPE_IS_SERIALIZABLE(Realm::XferDes::XferKind);
 
 namespace Realm {
 
@@ -264,7 +271,7 @@ namespace Realm {
 
     size_t Machine::get_address_space_count(void) const
     {
-      return gasnet_nodes();
+      return max_node_id + 1;
     }
 
     void Machine::get_all_memories(std::set<Memory>& mset) const
@@ -417,150 +424,204 @@ namespace Realm {
     {
       AutoHSLLock al(mutex);
 
-      const size_t *cur = (const size_t *)args;
-#ifndef NDEBUG
-      const size_t *limit = (const size_t *)(((const char *)args)+arglen);
-#endif
-      while(1) {
-	assert(cur < limit);
-	if(*cur == NODE_ANNOUNCE_DONE) break;
-	switch(*cur++) {
+      assert(node_id <= max_node_id);
+      Node& n = get_runtime()->nodes[node_id];
+
+      Serialization::FixedBufferDeserializer fbd(args, arglen);
+      bool ok = true;
+      while(ok) {
+	NodeAnnounceTag tag;
+	if(!(fbd >> tag)) {
+	  log_annc.fatal() << "unexpected end of input";
+	  assert(0);
+	}
+
+	if(tag == NODE_ANNOUNCE_DONE)
+	  break;
+
+	switch(tag) {
 	case NODE_ANNOUNCE_PROC:
 	  {
-	    ID id((ID::IDType)*cur++);
-	    Processor p = id.convert<Processor>();
-	    assert(id.proc.proc_idx < num_procs);
-	    Processor::Kind kind = (Processor::Kind)(*cur++);
-            int num_cores = (int)(*cur++);
-            log_annc.debug() << "adding proc " << p << " (kind = " << kind << 
-                                " num_cores = " << num_cores << ")";
-	    if(remote) {
-	      RemoteProcessor *proc = new RemoteProcessor(p, kind, num_cores);
-	      get_runtime()->nodes[id.proc.owner_node].processors[id.proc.proc_idx] = proc;
+	    Processor p;
+	    Processor::Kind kind;
+	    int num_cores;
+	    ok = (ok &&
+		  (fbd >> p) &&
+		  (fbd >> kind) &&
+		  (fbd >> num_cores));
+	    if(ok) {
+	      assert(ID(p).proc.owner_node == node_id);
+	      assert(ID(p).proc.proc_idx < num_procs);
+	      log_annc.debug() << "adding proc " << p << " (kind = " << kind
+			       << " num_cores = " << num_cores << ")";
+	      if(remote) {
+		RemoteProcessor *proc = new RemoteProcessor(p, kind, num_cores);
+		n.processors[ID(p).proc.proc_idx] = proc;
+	      }
 	    }
 	  }
 	  break;
 
 	case NODE_ANNOUNCE_MEM:
 	  {
-	    ID id((ID::IDType)*cur++);
-	    Memory m = id.convert<Memory>();
-	    assert(id.memory.mem_idx < num_memories);
-            Memory::Kind kind = (Memory::Kind)(*cur++);
-	    size_t size = *cur++;
-	    void *regbase = (void *)(*cur++);
-	    log_annc.debug() << "adding memory " << m << " (kind = " << kind
-			     << ", size = " << size << ", regbase = " << regbase << ")";
-	    if(remote) {
-	      RemoteMemory *mem = new RemoteMemory(m, size, kind, regbase);
-	      get_runtime()->nodes[id.memory.owner_node].memories[id.memory.mem_idx] = mem;
+	    Memory m;
+	    Memory::Kind kind;
+	    size_t size;
+	    intptr_t regbase;
+	    ok = (ok &&
+		  (fbd >> m) &&
+		  (fbd >> kind) &&
+		  (fbd >> size) &&
+		  (fbd >> regbase));
+	    if(ok) {
+	      assert(ID(m).memory.owner_node == node_id);
+	      assert(ID(m).memory.mem_idx < num_memories);
+	      log_annc.debug() << "adding memory " << m << " (kind = " << kind
+			       << ", size = " << size << ", regbase = " << std::hex << regbase << std::dec << ")";
+	      if(remote) {
+		RemoteMemory *mem = new RemoteMemory(m, size, kind,
+						     reinterpret_cast<void *>(regbase));
+		n.memories[ID(m).memory.mem_idx] = mem;
 
 #ifndef REALM_SKIP_INTERNODE_AFFINITIES
-	      {
-		// manufacture affinities for remote writes
-		// acceptable local sources: SYSTEM, Z_COPY, REGDMA (bonus)
-		// acceptable remote targets: SYSTEM, Z_COPY, GPU_FB, DISK, HDF, FILE, REGDMA (bonus)
-		int bw = 6;
-		int latency = 1000;
-		bool rem_send, rem_recv, rem_reg;
-		if(!allows_internode_copies(kind,
-					    rem_send, rem_recv, rem_reg))
-		  continue;
-
-		// iterate over local memories and check their kinds
-		Node *n = &(get_runtime()->nodes[gasnet_mynode()]);
-		for(std::vector<MemoryImpl *>::const_iterator it = n->memories.begin();
-		    it != n->memories.end();
-		    ++it) {		    
-		  Machine::MemoryMemoryAffinity mma;
-		  mma.bandwidth = bw + (rem_reg ? 1 : 0);
-		  mma.latency = latency - (rem_reg ? 100 : 0);
-
-		  bool lcl_send, lcl_recv, lcl_reg;
-		  if(!allows_internode_copies((*it)->get_kind(),
-					      lcl_send, lcl_recv, lcl_reg))
+		{
+		  // manufacture affinities for remote writes
+		  // acceptable local sources: SYSTEM, Z_COPY, REGDMA (bonus)
+		  // acceptable remote targets: SYSTEM, Z_COPY, GPU_FB, DISK, HDF, FILE, REGDMA (bonus)
+		  int bw = 6;
+		  int latency = 1000;
+		  bool rem_send, rem_recv, rem_reg;
+		  if(!allows_internode_copies(kind,
+					      rem_send, rem_recv, rem_reg))
 		    continue;
 
-		  if(lcl_reg) {
-		    mma.bandwidth += 1;
-		    mma.latency -= 100;
-		  }
+		  // iterate over local memories and check their kinds
+		  Node *mynode = &(get_runtime()->nodes[my_node_id]);
+		  for(std::vector<MemoryImpl *>::const_iterator it = mynode->memories.begin();
+		      it != mynode->memories.end();
+		      ++it) {
+		    Machine::MemoryMemoryAffinity mma;
+		    mma.bandwidth = bw + (rem_reg ? 1 : 0);
+		    mma.latency = latency - (rem_reg ? 100 : 0);
 
-		  if(lcl_send && rem_recv) {
-		    mma.m1 = (*it)->me;
-		    mma.m2 = m;
-		    log_annc.debug() << "adding inter-node affinity "
-				     << mma.m1 << " -> " << mma.m2
-				     << " (bw = " << mma.bandwidth << ", latency = " << mma.latency << ")";
-		    add_mem_mem_affinity(mma, true /*lock held*/);
-		    //mem_mem_affinities.push_back(mma);
-		  }
-		  if(rem_send && lcl_recv) {
-		    mma.m1 = m;
-		    mma.m2 = (*it)->me;
-		    log_annc.debug() << "adding inter-node affinity "
-				     << mma.m1 << " -> " << mma.m2
-				     << " (bw = " << mma.bandwidth << ", latency = " << mma.latency << ")";
-		    add_mem_mem_affinity(mma, true /*lock held*/);
-		    //mem_mem_affinities.push_back(mma);
+		    bool lcl_send, lcl_recv, lcl_reg;
+		    if(!allows_internode_copies((*it)->get_kind(),
+						lcl_send, lcl_recv, lcl_reg))
+		      continue;
+
+		    if(lcl_reg) {
+		      mma.bandwidth += 1;
+		      mma.latency -= 100;
+		    }
+
+		    if(lcl_send && rem_recv) {
+		      mma.m1 = (*it)->me;
+		      mma.m2 = m;
+		      log_annc.debug() << "adding inter-node affinity "
+				       << mma.m1 << " -> " << mma.m2
+				       << " (bw = " << mma.bandwidth << ", latency = " << mma.latency << ")";
+		      add_mem_mem_affinity(mma, true /*lock held*/);
+		      //mem_mem_affinities.push_back(mma);
+		    }
+		    if(rem_send && lcl_recv) {
+		      mma.m1 = m;
+		      mma.m2 = (*it)->me;
+		      log_annc.debug() << "adding inter-node affinity "
+				       << mma.m1 << " -> " << mma.m2
+				       << " (bw = " << mma.bandwidth << ", latency = " << mma.latency << ")";
+		      add_mem_mem_affinity(mma, true /*lock held*/);
+		      //mem_mem_affinities.push_back(mma);
+		    }
 		  }
 		}
-	      }
 #endif
+	      }
 	    }
 	  }
 	  break;
 
 	case NODE_ANNOUNCE_IB_MEM:
 	  {
-	    ID id((ID::IDType)*cur++);
-	    Memory m = id.convert<Memory>();
-	    assert(id.memory.mem_idx < num_ib_memories);
-	    Memory::Kind kind = (Memory::Kind)(*cur++);
-	    size_t size = *cur++;
-	    void *regbase = (void *)(*cur++);
-	    log_annc.debug() << "adding ib memory " << m << " (kind = " << kind
-			     << ", size = " << size << ", regbase = " << regbase << ")";
-	    if(remote) {
-	      RemoteMemory *mem = new RemoteMemory(m, size, kind, regbase);
-              get_runtime()->nodes[id.memory.owner_node].ib_memories[id.memory.mem_idx] = mem;
+	    Memory m;
+	    Memory::Kind kind;
+	    size_t size;
+	    intptr_t regbase;
+	    ok = (ok &&
+		  (fbd >> m) &&
+		  (fbd >> kind) &&
+		  (fbd >> size) &&
+		  (fbd >> regbase));
+	    if(ok) {
+	      assert(ID(m).memory.owner_node == node_id);
+	      assert(ID(m).memory.mem_idx < num_ib_memories);
+	      log_annc.debug() << "adding ib memory " << m << " (kind = " << kind
+			       << ", size = " << size << ", regbase = " << std::hex << regbase << std::dec << ")";
+	      if(remote) {
+		RemoteMemory *mem = new RemoteMemory(m, size, kind,
+						     reinterpret_cast<void *>(regbase));
+		n.ib_memories[ID(m).memory.mem_idx] = mem;
+	      }
 	    }
 	  }
 	  break;
+
 	case NODE_ANNOUNCE_PMA:
 	  {
 	    Machine::ProcessorMemoryAffinity pma;
-	    pma.p = ID((ID::IDType)*cur++).convert<Processor>();
-	    pma.m = ID((ID::IDType)*cur++).convert<Memory>();
-	    pma.bandwidth = *cur++;
-	    pma.latency = *cur++;
-	    log_annc.debug() << "adding affinity " << pma.p << " -> " << pma.m
-			     << " (bw = " << pma.bandwidth << ", latency = " << pma.latency << ")";
+	    ok = (ok &&
+		  (fbd >> pma.p) &&
+		  (fbd >> pma.m) &&
+		  (fbd >> pma.bandwidth) &&
+		  (fbd >> pma.latency));
+	    if(ok) {
+	      log_annc.debug() << "adding affinity " << pma.p << " -> " << pma.m
+			       << " (bw = " << pma.bandwidth << ", latency = " << pma.latency << ")";
 
-	    add_proc_mem_affinity(pma, true /*lock held*/);
-	    //proc_mem_affinities.push_back(pma);
+	      add_proc_mem_affinity(pma, true /*lock held*/);
+	      //proc_mem_affinities.push_back(pma);
+	    }
 	  }
 	  break;
 
 	case NODE_ANNOUNCE_MMA:
 	  {
 	    Machine::MemoryMemoryAffinity mma;
-	    mma.m1 = ID((ID::IDType)*cur++).convert<Memory>();
-	    mma.m2 = ID((ID::IDType)*cur++).convert<Memory>();
-	    mma.bandwidth = *cur++;
-	    mma.latency = *cur++;
-	    log_annc.debug() << "adding affinity " << mma.m1 << " <-> " << mma.m2
-			     << " (bw = " << mma.bandwidth << ", latency = " << mma.latency << ")";
+	    ok = (ok &&
+		  (fbd >> mma.m1) &&
+		  (fbd >> mma.m2) &&
+		  (fbd >> mma.bandwidth) &&
+		  (fbd >> mma.latency));
+	    if(ok) {
+	      log_annc.debug() << "adding affinity " << mma.m1 << " <-> " << mma.m2
+			       << " (bw = " << mma.bandwidth << ", latency = " << mma.latency << ")";
 
-	    add_mem_mem_affinity(mma, true /*lock held*/);
-	    //mem_mem_affinities.push_back(mma);
+	      add_mem_mem_affinity(mma, true /*lock held*/);
+	      //mem_mem_affinities.push_back(mma);
+	    }
+	  }
+	  break;
+
+	case NODE_ANNOUNCE_DMA_CHANNEL:
+	  {
+	    RemoteChannel *rc = RemoteChannel::deserialize_new(fbd);
+	    if(rc) {
+	      log_annc.debug() << "adding channel: " << *rc;
+	      assert(rc->node == node_id);
+	      if(remote)
+		get_runtime()->add_dma_channel(rc);
+	      else
+		delete rc; // don't actually need it
+	    }
 	  }
 	  break;
 
 	default:
+	  log_annc.fatal() << "unknown tag: " << tag;
 	  assert(0);
 	}
       }
+
+      assert(ok && (fbd.bytes_left() == 0));
     }
 
     void MachineImpl::get_all_memories(std::set<Memory>& mset) const
@@ -633,11 +694,11 @@ namespace Realm {
 	  it != proc_mem_affinities.end();
 	  it++) {
 	Processor p = (*it).p;
-	if(ID(p).proc.owner_node == gasnet_mynode())
+	if(ID(p).proc.owner_node == my_node_id)
 	  pset.insert(p);
       }
 #else
-      const MachineNodeInfo *mynode = get_nodeinfo(gasnet_mynode());
+      const MachineNodeInfo *mynode = get_nodeinfo(my_node_id);
       assert(mynode != 0);
       for(std::map<Processor, MachineProcInfo *>::const_iterator it = mynode->procs.begin();
 	  it != mynode->procs.end();
@@ -656,11 +717,11 @@ namespace Realm {
 	  it != proc_mem_affinities.end();
 	  it++) {
 	Processor p = (*it).p;
-	if((ID(p).proc.owner_node == gasnet_mynode()) && (p.kind() == kind))
+	if((ID(p).proc.owner_node == my_node_id) && (p.kind() == kind))
 	  pset.insert(p);
       }
 #else
-      const MachineNodeInfo *mynode = get_nodeinfo(gasnet_mynode());
+      const MachineNodeInfo *mynode = get_nodeinfo(my_node_id);
       assert(mynode != 0);
       std::map<Processor::Kind, std::map<Processor, MachineProcInfo *> >::const_iterator it = mynode->proc_by_kind.find(kind);
       if(it != mynode->proc_by_kind.end())
@@ -1098,7 +1159,7 @@ namespace Realm {
   Machine::ProcessorQuery& Machine::ProcessorQuery::local_address_space(void)
   {
     impl = ((ProcessorQueryImpl *)impl)->writeable_reference();
-    ((ProcessorQueryImpl *)impl)->restrict_to_node(gasnet_mynode());
+    ((ProcessorQueryImpl *)impl)->restrict_to_node(my_node_id);
     return *this;
   }
 
@@ -1196,7 +1257,7 @@ namespace Realm {
   Machine::MemoryQuery& Machine::MemoryQuery::local_address_space(void)
   {
     impl = ((MemoryQueryImpl *)impl)->writeable_reference();
-    ((MemoryQueryImpl *)impl)->restrict_to_node(gasnet_mynode());
+    ((MemoryQueryImpl *)impl)->restrict_to_node(my_node_id);
     return *this;
   }
 
@@ -2301,7 +2362,7 @@ namespace Realm {
   {
     DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
     log_annc.info("%d: received announce from %d (%d procs, %d memories)\n",
-		  gasnet_mynode(),
+		  my_node_id,
 		  args.node_id,
 		  args.num_procs,
 		  args.num_memories);
@@ -2322,7 +2383,7 @@ namespace Realm {
     }
   }
 
-  /*static*/ void NodeAnnounceMessage::send_request(gasnet_node_t target,
+  /*static*/ void NodeAnnounceMessage::send_request(NodeID target,
 						    unsigned num_procs,
 						    unsigned num_memories,
 						    unsigned num_ib_memories,
@@ -2332,7 +2393,7 @@ namespace Realm {
   {
     RequestArgs args;
 
-    args.node_id = gasnet_mynode();
+    args.node_id = my_node_id;
     args.num_procs = num_procs;
     args.num_memories = num_memories;
     args.num_ib_memories = num_ib_memories;
@@ -2342,10 +2403,10 @@ namespace Realm {
   /*static*/ void NodeAnnounceMessage::await_all_announcements(void)
   {
     // wait until we hear from everyone else?
-    while((int)announcements_received < (int)(gasnet_nodes() - 1))
+    while((int)announcements_received < max_node_id)
       do_some_polling();
 
-    log_annc.info("node %d has received all of its announcements\n", gasnet_mynode());
+    log_annc.info("node %d has received all of its announcements", my_node_id);
   }
 
 }; // namespace Realm

@@ -1,4 +1,4 @@
-/* Copyright 2017 Stanford University, NVIDIA Corporation
+/* Copyright 2018 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13,10 +13,9 @@
  * limitations under the License.
  */
 
-#include "hdf5_internal.h"
+#include "realm/hdf5/hdf5_internal.h"
 
-#include "arrays.h"
-#include "logging.h"
+#include "realm/logging.h"
 
 namespace Realm {
 
@@ -38,104 +37,6 @@ namespace Realm {
       // close all HDF metadata
     }
 
-    RegionInstance HDF5Memory::create_instance(
-                     IndexSpace is,
-                     const int *linearization_bits,
-                     size_t bytes_needed,
-                     size_t block_size,
-                     size_t element_size,
-                     const std::vector<size_t>& field_sizes,
-                     ReductionOpID redopid,
-                     off_t list_size,
-                     const Realm::ProfilingRequestSet &reqs,
-                     RegionInstance parent_inst)
-    {
-      // we use a new create_instance, which could provide
-      // more information for creating HDF metadata
-      assert(0);
-      return RegionInstance::NO_INST;
-    }
-
-    RegionInstance HDF5Memory::create_instance(
-                     IndexSpace is,
-                     const int *linearization_bits,
-                     size_t bytes_needed,
-                     size_t block_size,
-                     size_t element_size,
-                     const std::vector<size_t>& field_sizes,
-                     ReductionOpID redopid,
-                     off_t list_size,
-                     const Realm::ProfilingRequestSet &reqs,
-                     RegionInstance parent_inst,
-                     const char* file,
-                     const std::vector<const char*>& path_names,
-                     Domain domain,
-                     bool read_only)
-
-    {
-      RegionInstance inst = create_instance_local(is,
-                 linearization_bits, bytes_needed,
-                 block_size, element_size, field_sizes, redopid,
-                 list_size, reqs, parent_inst);
-
-      HDFMetadata* new_hdf = new HDFMetadata;
-      new_hdf->ndims = domain.get_dim();
-      for (int i = 0; i < domain.get_dim(); i++) {
-        new_hdf->lo[i] = domain.rect_data[i];
-        new_hdf->dims[i] = domain.rect_data[i + domain.get_dim()] - domain.rect_data[i] + 1;
-      }
-      unsigned flags;
-      if (read_only)
-        flags = H5F_ACC_RDONLY;
-      else
-        flags = H5F_ACC_RDWR;
-      new_hdf->file_id = H5Fopen(file, flags, H5P_DEFAULT);
-      assert(new_hdf->file_id > 0);
-
-      assert(field_sizes.size() == path_names.size());
-      size_t total_ofs = 0;
-      for(size_t i = 0; i < field_sizes.size(); i++) {
-	hid_t dset_id = H5Dopen2(new_hdf->file_id, path_names[i], H5P_DEFAULT);
-	assert(dset_id > 0);
-
-	hid_t dtype_id = H5Dget_type(dset_id);
-	assert(field_sizes[i] == H5Tget_size(dtype_id));
-
-	new_hdf->dataset_ids[total_ofs] = dset_id;
-	new_hdf->datatype_ids[total_ofs] = dtype_id;
-	total_ofs += field_sizes[i];
-      }
-
-      hdf_metadata[inst] = new_hdf;
-
-      return inst;
-    }
-
-    void HDF5Memory::destroy_instance(RegionInstance i,
-                                     bool local_destroy)
-    {
-      std::map<RegionInstance, HDFMetadata *>::iterator it = hdf_metadata.find(i);
-      assert(it != hdf_metadata.end());
-
-      HDFMetadata* new_hdf = it->second;
-
-      for(std::map<size_t, hid_t>::iterator it = new_hdf->dataset_ids.begin();
-	  it != new_hdf->dataset_ids.end();
-	  ++it)
-	H5Dclose(it->second);
-
-      for(std::map<size_t, hid_t>::iterator it = new_hdf->datatype_ids.begin();
-	  it != new_hdf->datatype_ids.end();
-	  ++it)
-	H5Tclose(it->second);
-
-      H5Fclose(new_hdf->file_id);
-      delete new_hdf;
-
-      hdf_metadata.erase(it);
-      destroy_instance_local(i, local_destroy);
-    }
-
     off_t HDF5Memory::alloc_bytes(size_t size)
     {
       // We don't have to actually allocate bytes
@@ -154,10 +55,10 @@ namespace Realm {
       assert(0);
     }
 
+#if 0
     void HDF5Memory::get_bytes(ID::IDType inst_id, const DomainPoint& dp, int fid, void *dst, size_t size)
     {
       assert(0);
-#if 0
       HDFMetadata *metadata = hdf_metadata[inst_id];
       // use index to compute position in space
       assert(size == H5Tget_size(metadata->datatype_ids[fid]));
@@ -172,18 +73,18 @@ namespace Realm {
       H5Dread(metadata->dataset_ids[fid], metadata->datatype_ids[fid], memspace_id, dataspace_id, H5P_DEFAULT, dst);
       H5Sclose(dataspace_id);
       H5Sclose(memspace_id);
-#endif
     }
+#endif
 
     void HDF5Memory::put_bytes(off_t offset, const void *src, size_t size)
     {
       assert(0);
     }
 
+#if 0
     void HDF5Memory::put_bytes(ID::IDType inst_id, const DomainPoint& dp, int fid, const void *src, size_t size)
     {
       assert(0);
-#if 0
       HDFMetadata *metadata = hdf_metadata[inst_id];
       // use index to compute position in space
       assert(size == H5Tget_size(hdf_metadata[inst_id]->datatype_ids[fid]));
@@ -198,13 +99,8 @@ namespace Realm {
       H5Dwrite(metadata->dataset_ids[fid], metadata->datatype_ids[fid], memspace_id, dataspace_id, H5P_DEFAULT, src);
       H5Sclose(dataspace_id);
       H5Sclose(memspace_id);
+    }
 #endif
-    }
-
-    void HDF5Memory::apply_reduction_list(off_t offset, const ReductionOpUntyped *redop,
-                        size_t count, const void *entry_buffer)
-    {
-    }
 
     void *HDF5Memory::get_direct_ptr(off_t offset, size_t size)
     {
@@ -213,7 +109,7 @@ namespace Realm {
 
     int HDF5Memory::get_home_node(off_t offset, size_t size)
     {
-      return gasnet_mynode();
+      return my_node_id;
     }
 
 
@@ -239,12 +135,14 @@ namespace Realm {
       return true;
     }
 
+#ifdef OLD_COPIERS
     MemPairCopier *HDF5WriteChannel::create_copier(Memory src_mem, Memory dst_mem,
 						   ReductionOpID redop_id, bool fold)
     {
       MemoryImpl *src_impl = get_runtime()->get_memory_impl(src_mem);
       return new HDF5WriteCopier(src_impl, mem);
     }
+#endif
 
 
     ////////////////////////////////////////////////////////////////////////
@@ -269,18 +167,21 @@ namespace Realm {
       return true;
     }
 
+#ifdef OLD_COPIERS
     MemPairCopier *HDF5ReadChannel::create_copier(Memory src_mem, Memory dst_mem,
 						   ReductionOpID redop_id, bool fold)
     {
       MemoryImpl *dst_impl = get_runtime()->get_memory_impl(dst_mem);
       return new HDF5ReadCopier(mem, dst_impl);
     }
+#endif
 
 
     ////////////////////////////////////////////////////////////////////////
     //
     // class HDF5WriteCopier
 
+#ifdef OLD_COPIERS
     HDF5WriteCopier::HDF5WriteCopier(MemoryImpl *_src_impl, HDF5Memory *_mem)
       : src_impl(_src_impl)
       , mem(_mem)
@@ -376,7 +277,9 @@ namespace Realm {
       hdf_ofs = oas.src_offset;
       local_ofs = oas.dst_offset;
     }
+#endif
 
+#if 0
     template <typename T, unsigned DIM>
     static void copy_rect(LegionRuntime::Arrays::Rect<DIM> r,
 			  T *mpc,
@@ -418,7 +321,7 @@ namespace Realm {
 	LegionRuntime::Arrays::Mapping<DIM, 1> *linearization = local_impl->metadata.linearization.get_mapping<DIM>();
 	for(typename LegionRuntime::Arrays::Mapping<DIM, 1>::LinearSubrectIterator lsi(r, *linearization); lsi; lsi++) {
 	  log_hdf5.debug() << " sr: " << lsi.subrect << " " << lsi.strides[0];
-	  off_t l_offset = LegionRuntime::LowLevel::calc_mem_loc(local_impl->metadata.alloc_offset + (local_ofs - local_start),
+	  off_t l_offset = calc_mem_loc(local_impl->metadata.alloc_offset + (local_ofs - local_start),
 					local_start, local_size,
 					local_impl->metadata.elmt_size,
 					local_impl->metadata.block_size,
@@ -493,10 +396,14 @@ namespace Realm {
 	H5Sclose(dspace_id);
       }
     }
+#endif
 
+#ifdef OLD_COPIERS
     template <typename T>
     bool HDF5InstPairCopier<T>::copy_all_fields(Domain d)
     {
+      assert(0);
+#ifdef DEAD_CODE
       //log_hdf5.print() << "copy all fields";
       switch(d.get_dim()) {
       case 0:
@@ -524,6 +431,7 @@ namespace Realm {
 	assert(false);
 	return false;
       }
+#endif
     }
 
     template <typename T>
@@ -544,6 +452,7 @@ namespace Realm {
     {
       //log_hdf5.print() << "flush";
     }
+#endif
 
 
   }; // namespace HDF5

@@ -1,4 +1,4 @@
-/* Copyright 2017 Stanford University
+/* Copyright 2018 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -42,7 +42,10 @@ public:
                           const InlineMapping&   inline_op,
                           const MapInlineInput&  input,
                                 MapInlineOutput& output);
-
+protected:
+  void map_circuit_region(const MapperContext ctx,
+                          LogicalRegion region, Memory target,
+                          std::vector<PhysicalInstance> &instanes);
 protected:
   std::vector<Processor>& procs_list;
   std::vector<Memory>& sysmems_list;
@@ -50,6 +53,9 @@ protected:
   std::map<Processor, Memory>& proc_sysmems;
   std::map<Processor, Memory>& proc_fbmems;
   std::map<Processor, Memory>& proc_zcmems;
+protected:
+  // For memoizing mapping instances
+  std::map<std::pair<LogicalRegion,Memory>,PhysicalInstance> local_instances;
 };
 
 void update_mappers(Machine machine, Runtime *rt,

@@ -1,4 +1,4 @@
-/* Copyright 2017 Stanford University, NVIDIA Corporation
+/* Copyright 2018 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -61,7 +61,6 @@ namespace Realm {
      int cfg_num_mp_threads; // threads per ProcSet
      int cfg_num_mp_procs; // number of ProcSets
      int cfg_num_mp_cpus; // additional cpus on any non ProcSet nodes
-     bool cfg_force_kernel_threads;
      size_t cfg_stack_size_in_mb;
     };
 

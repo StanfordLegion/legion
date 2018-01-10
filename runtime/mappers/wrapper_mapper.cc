@@ -1,4 +1,4 @@
-/* Copyright 2017 Stanford University, NVIDIA Corporation
+/* Copyright 2018 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13,12 +13,12 @@
  * limitations under the License.
  */
 
-#include <cstdlib>
-#include <cassert>
+#include <stdlib.h>
+#include <assert.h>
 #include <limits.h>
 #include <algorithm>
 #include <typeinfo>
-#include "wrapper_mapper.h"
+#include "mappers/wrapper_mapper.h"
 #include <vector>
 
 #define STATIC_MAX_PERMITTED_STEALS   4
@@ -671,7 +671,7 @@ namespace Legion {
 
 	      int send_size = send_message.size()+1;
 	      char send_mess_chars[send_size];
-	      std::strcpy(send_mess_chars, send_message.c_str());
+	      strcpy(send_mess_chars, send_message.c_str());
 	      void *message_point = &send_mess_chars;
 	      mrt->broadcast(ctx, message_point, send_size*sizeof(char));  
 	      //Broadcast the information to all processors on exit            	
@@ -1259,7 +1259,7 @@ namespace Legion {
 	  Serialize(print_tasks, stop_tasks, procs_map_int);
 	int send_size = send_message.size()+1;
 	char send_mess_chars[send_size];
-	std::strcpy(send_mess_chars, send_message.c_str());
+	strcpy(send_mess_chars, send_message.c_str());
 	void *message_point = &send_mess_chars;
 	mrt->broadcast(ctx, message_point, send_size*sizeof(char));                                        
 	databroadcasted=1;

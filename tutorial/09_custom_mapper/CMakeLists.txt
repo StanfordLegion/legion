@@ -1,5 +1,5 @@
 #------------------------------------------------------------------------------#
-# Copyright 2017 Kitware, Inc.
+# Copyright 2018 Kitware, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -25,5 +25,5 @@ endif()
 add_executable(custom_mapper custom_mapper.cc)
 target_link_libraries(custom_mapper Legion::Legion)
 if(Legion_ENABLE_TESTING)
-  add_test(NAME custom_mapper COMMAND $<TARGET_FILE:custom_mapper>) 
+  add_test(NAME custom_mapper COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:custom_mapper>)
 endif()

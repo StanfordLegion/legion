@@ -1,4 +1,4 @@
-/* Copyright 2017 Stanford University, NVIDIA Corporation
+/* Copyright 2018 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,8 +16,8 @@
 #ifndef __MAPPER_MANAGER_H__
 #define __MAPPER_MANAGER_H__
 
-#include "legion_types.h"
-#include "legion_mapping.h"
+#include "legion/legion_types.h"
+#include "legion/legion_mapping.h"
 
 namespace Legion {
   namespace Internal {
@@ -219,6 +219,31 @@ namespace Legion {
                                            Mapper::ReleaseProfilingInfo *input,
                                            bool first_invocation = true,
                                            MappingCallInfo *info = NULL);
+    public: // Partition mapper calls
+      void invoke_select_partition_projection(DependentPartitionOp *op,
+                          Mapper::SelectPartitionProjectionInput *input,
+                          Mapper::SelectPartitionProjectionOutput *output,
+                          bool first_invocation = true,
+                          MappingCallInfo *info = NULL);
+      void invoke_map_partition(DependentPartitionOp *op,
+                          Mapper::MapPartitionInput *input,
+                          Mapper::MapPartitionOutput *output,
+                          bool first_invocation = true,
+                          MappingCallInfo *info = NULL);
+      void invoke_select_partition_sources(DependentPartitionOp *op,
+                          Mapper::SelectPartitionSrcInput *input,
+                          Mapper::SelectPartitionSrcOutput *output,
+                          bool first_invocation = true,
+                          MappingCallInfo *info = NULL);
+      void invoke_partition_create_temporary(DependentPartitionOp *op,
+                          Mapper::CreatePartitionTemporaryInput *input,
+                          Mapper::CreatePartitionTemporaryOutput *output,
+                          bool first_invocation = true,
+                          MappingCallInfo *info = NULL);
+      void invoke_partition_report_profiling(DependentPartitionOp *op,
+                          Mapper::PartitionProfilingInfo *input,
+                          bool first_invocation = true,
+                          MappingCallInfo *info = NULL);
     public: // Task execution mapper calls
       void invoke_configure_context(TaskOp *task,
                                     Mapper::ContextConfigOutput *output,
@@ -406,6 +431,8 @@ namespace Legion {
       bool perform_remote_acquires(MappingCallInfo *info,
                       std::map<MemoryManager*,AcquireStatus> &acquire_requests);
     public:
+      IndexSpace create_index_space(MappingCallInfo *info, const Domain &domain,
+                                    const void *realm_is, TypeTag type_tag);
       IndexPartition get_index_partition(MappingCallInfo *info,
                                          IndexSpace parent, Color color);
       IndexSpace get_index_subspace(MappingCallInfo *info,
@@ -424,10 +451,6 @@ namespace Legion {
                                             std::set<Color> &colors);
       bool is_index_partition_disjoint(MappingCallInfo *info,
                                        IndexPartition p);
-      template<unsigned DIM>
-      IndexSpace get_index_subspace(MappingCallInfo *info,
-                                    IndexPartition p, 
-                                    ColorPoint &color_point);
       Color get_index_space_color(MappingCallInfo *info, IndexSpace handle);
       Color get_index_partition_color(MappingCallInfo *info, 
                                       IndexPartition handle);
@@ -530,6 +553,14 @@ namespace Legion {
       void defer_message(Mapper::MapperMessage *message);
       static void handle_deferred_message(const void *args);
     public:
+      // For stealing
+      void process_advertisement(Processor advertiser); 
+      void perform_stealing(std::multimap<Processor,MapperID> &targets);
+    public:
+      // For advertising
+      void process_failed_steal(Processor thief);
+      void perform_advertisements(std::set<Processor> &failed_waiters);
+    public:
       Runtime *const runtime;
       Mapping::Mapper *const mapper;
       const MapperID mapper_id;
@@ -538,9 +569,12 @@ namespace Legion {
       Reservation mapper_lock;
     protected:
       std::vector<MappingCallInfo*> available_infos;
-    protected:
-      unsigned next_mapper_event;
-      std::map<unsigned,RtUserEvent> mapper_events;
+    protected: // Steal request information
+      // Mappers on other processors that we've tried to steal from and failed
+      std::set<Processor> steal_blacklist;
+      // Mappers that have tried to steal from us and which we
+      // should advertise work when we have it
+      std::set<Processor> failed_thiefs;
     };
 
     /**

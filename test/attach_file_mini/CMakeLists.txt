@@ -1,5 +1,5 @@
 #------------------------------------------------------------------------------#
-# Copyright 2017 Stanford University
+# Copyright 2018 Stanford University
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -17,6 +17,16 @@
 cmake_minimum_required(VERSION 3.1)
 project(LegionTest_attach_file_mini)
 
+include(CheckCXXCompilerFlag)
+
+check_cxx_compiler_flag( "-std=c++11" CXX11_COMPILER)
+
+if(CXX11_COMPILER)
+  set(CMAKE_CXX_STANDARD 11)
+else()
+  message(FATAL_ERROR "C++11 compatible compiler not found")
+endif()
+
 # Only search if were building stand-alone and not as part of Legion
 if(NOT Legion_SOURCE_DIR)
   find_package(Legion REQUIRED)
@@ -25,5 +35,5 @@ endif()
 add_executable(attach_file_mini attach_file_mini.cc)
 target_link_libraries(attach_file_mini Legion::Legion)
 if(Legion_ENABLE_TESTING)
-  add_test(NAME attach_file_mini COMMAND $<TARGET_FILE:attach_file_mini>) 
+  add_test(NAME attach_file_mini COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:attach_file_mini>)
 endif()

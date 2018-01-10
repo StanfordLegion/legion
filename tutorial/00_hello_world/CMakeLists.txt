@@ -1,5 +1,5 @@
 #------------------------------------------------------------------------------#
-# Copyright 2017 Kitware, Inc.
+# Copyright 2018 Kitware, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -25,5 +25,5 @@ endif()
 add_executable(hello_world hello_world.cc)
 target_link_libraries(hello_world Legion::Legion)
 if(Legion_ENABLE_TESTING)
-  add_test(NAME hello_world COMMAND $<TARGET_FILE:hello_world>) 
+  add_test(NAME hello_world COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:hello_world>)
 endif()

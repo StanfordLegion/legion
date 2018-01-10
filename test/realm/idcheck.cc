@@ -1,4 +1,4 @@
-// Copyright 2017 Stanford University
+// Copyright 2018 Stanford University
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -122,6 +122,17 @@ int main(int argc, const char *argv[])
     names[lo.id] = "idxspace";
     assert(lo.is_idxspace());
     assert(hi.is_idxspace());
+  }
+
+  // sparsity
+  {
+    ID lo = ID::make_sparsity(0, 0, 0);
+    ID hi = ID::make_sparsity(-1U, -1U, -1U);
+    assert(ranges.count(lo.id) == 0);
+    ranges[lo.id] = hi.id;
+    names[lo.id] = "sparsity";
+    assert(lo.is_sparsity());
+    assert(hi.is_sparsity());
   }
 
   // allocator

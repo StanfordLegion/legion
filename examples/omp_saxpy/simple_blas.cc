@@ -1,4 +1,4 @@
-/* Copyright 2017 Stanford University
+/* Copyright 2018 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,9 +15,6 @@
 
 #include "simple_blas.h"
 
-using namespace LegionRuntime::Arrays;
-using namespace LegionRuntime::Accessor;
-
 // global configuration variables
 int blas_thread_count = 0;
 bool blas_do_parallel = true;
@@ -32,13 +29,15 @@ void BlasTaskImplementations<float>::axpy_task_cpu(const Task *task,
 						   Context ctx, Runtime *runtime)
 {
   IndexSpace is = regions[1].get_logical_region().get_index_space();
-  Rect<1> bounds = runtime->get_index_space_domain(ctx, is).get_rect<1>();
+  Rect<1> bounds = runtime->get_index_space_domain(ctx, is);
   //printf("hi [%d, %d]\n", bounds.lo[0], bounds.hi[0]);
 
   float alpha = *(const float *)(task->args);
 
-  RegionAccessor<AccessorType::Affine<1>, float> fa_x = regions[0].get_field_accessor(task->regions[0].instance_fields[0]).typeify<float>().convert<AccessorType::Affine<1> >();
-  RegionAccessor<AccessorType::Affine<1>, float> fa_y = regions[1].get_field_accessor(task->regions[1].instance_fields[0]).typeify<float>().convert<AccessorType::Affine<1> >();
+  const FieldAccessor<READ_ONLY,float,1,coord_t,
+          Realm::AffineAccessor<float,1,coord_t> > fa_x(regions[0], task->regions[0].instance_fields[0]);
+  const FieldAccessor<READ_WRITE,float,1,coord_t,
+          Realm::AffineAccessor<float,1,coord_t> > fa_y(regions[1], task->regions[1].instance_fields[0]);
 
 #pragma omp parallel for if(blas_do_parallel)
   for(int i = bounds.lo[0]; i <= bounds.hi[0]; i++)
@@ -51,11 +50,13 @@ float BlasTaskImplementations<float>::dot_task_cpu(const Task *task,
 						   Context ctx, Runtime *runtime)
 {
   IndexSpace is = regions[1].get_logical_region().get_index_space();
-  Rect<1> bounds = runtime->get_index_space_domain(ctx, is).get_rect<1>();
+  Rect<1> bounds = runtime->get_index_space_domain(ctx, is);
   //printf("hi [%d, %d]\n", bounds.lo[0], bounds.hi[0]);
 
-  RegionAccessor<AccessorType::Affine<1>, float> fa_x = regions[0].get_field_accessor(task->regions[0].instance_fields[0]).typeify<float>().convert<AccessorType::Affine<1> >();
-  RegionAccessor<AccessorType::Affine<1>, float> fa_y = regions[1].get_field_accessor(task->regions[1].instance_fields[0]).typeify<float>().convert<AccessorType::Affine<1> >();
+  const FieldAccessor<READ_ONLY,float,1,coord_t,
+          Realm::AffineAccessor<float,1,coord_t> > fa_x(regions[0], task->regions[0].instance_fields[0]);
+  const FieldAccessor<READ_ONLY,float,1,coord_t,
+          Realm::AffineAccessor<float,1,coord_t> > fa_y(regions[1], task->regions[0].instance_fields[0]);
 
   float acc = 0;
 #pragma omp parallel for reduction(+:acc) if(blas_do_parallel)

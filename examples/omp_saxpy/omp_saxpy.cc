@@ -1,4 +1,4 @@
-/* Copyright 2017 Stanford University
+/* Copyright 2018 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,8 +24,6 @@
 #include "simple_blas.h"
 
 using namespace Legion;
-using namespace LegionRuntime::Accessor;
-using namespace LegionRuntime::Arrays;
 
 Logger log_app("app");
 
@@ -53,14 +51,13 @@ void top_level_task(const Task *task,
   }
 
   Rect<1> r_top = Rect<1>(0, num_elements - 1);
-  IndexSpace is_top = runtime->create_index_space(ctx, Domain::from_rect<1>(r_top));
+  IndexSpace is_top = runtime->create_index_space(ctx, r_top);
 
   IndexPartition ip_dist = IndexPartition::NO_PART;
   if(num_pieces > 1) {
     Rect<1> cspace = Rect<1>(1, num_pieces);
-    ip_dist = runtime->create_equal_partition(ctx,
-					      is_top,
-					      Domain::from_rect<1>(cspace));
+    IndexSpace cs = runtime->create_index_space(ctx, cspace);
+    ip_dist = runtime->create_equal_partition(ctx, is_top, cs);
   }
 
   BlasArrayRef<float> x = BlasArrayRef<float>::create(runtime, ctx, is_top);

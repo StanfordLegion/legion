@@ -1,5 +1,5 @@
 #------------------------------------------------------------------------------#
-# Copyright 2017 Kitware, Inc.
+# Copyright 2018 Kitware, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -25,5 +25,5 @@ endif()
 add_executable(ghost ghost.cc)
 target_link_libraries(ghost Legion::Legion)
 if(Legion_ENABLE_TESTING)
-  add_test(NAME ghost COMMAND $<TARGET_FILE:ghost> -ll:cpu 4) 
+  add_test(NAME ghost COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:ghost> -ll:cpu 4)
 endif()

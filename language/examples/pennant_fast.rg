@@ -1,4 +1,4 @@
--- Copyright 2017 Stanford University
+-- Copyright 2018 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -134,7 +134,7 @@ where
   reads(rz_spans)
 do
   for z_span in rz_spans do
-    __demand(__vectorize)
+    --__demand(__vectorize)
     for z_raw = z_span.start, z_span.stop do
       var z = unsafe_cast(ptr(zone, rz), z_raw)
 
@@ -338,19 +338,19 @@ do
   for p_span in rp_spans do
     -- Save off point variable values from previous cycle.
     -- Initialize fields used in reductions.
-    __demand(__vectorize)
+    --__demand(__vectorize)
     for p_raw = p_span.start, p_span.stop do
       var p = unsafe_cast(ptr(point, rp), p_raw)
 
       p.pmaswt = 0.0
     end
-    __demand(__vectorize)
+    --__demand(__vectorize)
     for p_raw = p_span.start, p_span.stop do
       var p = unsafe_cast(ptr(point, rp), p_raw)
 
       p.pf.x = 0.0
     end
-    __demand(__vectorize)
+    --__demand(__vectorize)
     for p_raw = p_span.start, p_span.stop do
       var p = unsafe_cast(ptr(point, rp), p_raw)
 
@@ -362,7 +362,7 @@ do
     --
 
     -- Copy state variables from previous time step and update position.
-    __demand(__vectorize)
+    --__demand(__vectorize)
     for p_raw = p_span.start, p_span.stop do
       var p = unsafe_cast(ptr(point, rp), p_raw)
 
@@ -372,7 +372,7 @@ do
       p.pu0.x = pu0_x
       p.pxp.x = px0_x + dth*pu0_x
     end
-    __demand(__vectorize)
+    --__demand(__vectorize)
     for p_raw = p_span.start, p_span.stop do
       var p = unsafe_cast(ptr(point, rp), p_raw)
 
@@ -449,7 +449,7 @@ do
 
     -- Save off zone variable value from previous cycle.
     -- Copy state variables from previous time step.
-    __demand(__vectorize)
+    --__demand(__vectorize)
     for z_raw = z_span.start, z_span.stop do
       var z = unsafe_cast(ptr(zone, rz), z_raw)
 
@@ -613,7 +613,7 @@ do
     --
 
     -- Compute zone densities.
-    __demand(__vectorize)
+    --__demand(__vectorize)
     for z_raw = z_span.start, z_span.stop do
       var z = unsafe_cast(ptr(zone, rz), z_raw)
 
@@ -622,7 +622,7 @@ do
 
     -- Reduce masses into points.
     if s_span.internal then
-      __demand(__vectorize)
+      --__demand(__vectorize)
       for s_raw = s_span.start, s_span.stop do
         var s = unsafe_cast(ptr(side(rz, rpp, rpg, rs), rs), s_raw)
 
@@ -634,7 +634,7 @@ do
         p1.pmaswt += m
       end
     else
-      __demand(__vectorize)
+      --__demand(__vectorize)
       for s_raw = s_span.start, s_span.stop do
         var s = unsafe_cast(ptr(side(rz, rpp, rpg, rs), rs), s_raw)
 
@@ -656,7 +656,7 @@ do
       var ss2 = max(ssmin * ssmin, 1e-99)
       var dth = 0.5 * dt
 
-      __demand(__vectorize)
+      --__demand(__vectorize)
       for z_raw = z_span.start, z_span.stop do
         var z = unsafe_cast(ptr(zone, rz), z_raw)
 
@@ -683,7 +683,7 @@ do
     --
 
     -- Compute PolyGas and TTS forces.
-    __demand(__vectorize)
+    --__demand(__vectorize)
     for s_raw = s_span.start, s_span.stop do
       var s = unsafe_cast(ptr(side(rz, rpp, rpg, rs), rs), s_raw)
 
@@ -757,7 +757,7 @@ do
 
     -- QCS corner divergence.
     if s_span.internal then
-      __demand(__vectorize)
+      --__demand(__vectorize)
       for s_raw = s_span.start, s_span.stop do
         var s2 = unsafe_cast(ptr(side(rz, rpp, rpg, rs), rs), s_raw)
 
@@ -835,7 +835,7 @@ do
         c.cdu = cond3 * du
       end
     else
-      __demand(__vectorize)
+      --__demand(__vectorize)
       for s_raw = s_span.start, s_span.stop do
         var s2 = unsafe_cast(ptr(side(rz, rpp, rpg, rs), rs), s_raw)
 
@@ -918,7 +918,7 @@ do
     if s_span.internal then
       var gammap1 = gamma + 1.0
 
-      __demand(__vectorize)
+      --__demand(__vectorize)
       for s_raw = s_span.start, s_span.stop do
         var s4 = unsafe_cast(ptr(side(rz, rpp, rpg, rs), rs), s_raw)
 
@@ -945,7 +945,7 @@ do
     else
       var gammap1 = gamma + 1.0
 
-      __demand(__vectorize)
+      --__demand(__vectorize)
       for s_raw = s_span.start, s_span.stop do
         var s4 = unsafe_cast(ptr(side(rz, rpp, rpg, rs), rs), s_raw)
 
@@ -972,7 +972,7 @@ do
     end
 
     -- QCS force.
-    __demand(__vectorize)
+    --__demand(__vectorize)
     for s_raw = s_span.start, s_span.stop do
       var s = unsafe_cast(ptr(side(rz, rpp, rpg, rs), rs), s_raw)
 
@@ -999,14 +999,14 @@ do
 
     -- QCS vel diff.
     if s_span.internal then
-      __demand(__vectorize)
+      --__demand(__vectorize)
       for z_raw = z_span.start, z_span.stop do
         var z = unsafe_cast(ptr(zone, rz), z_raw)
 
         z.z0tmp = 0.0
       end
 
-      __demand(__vectorize)
+      --__demand(__vectorize)
       for s_raw = s_span.start, s_span.stop do
         var s = unsafe_cast(ptr(side(rz, rpp, rpg, rs), rs), s_raw)
 
@@ -1023,21 +1023,21 @@ do
         z.z0tmp max= dux
       end
 
-      __demand(__vectorize)
+      --__demand(__vectorize)
       for z_raw = z_span.start, z_span.stop do
         var z = unsafe_cast(ptr(zone, rz), z_raw)
 
         z.zdu = q1 * z.zss + 2.0 * q2 * z.z0tmp
       end
     else
-      __demand(__vectorize)
+      --__demand(__vectorize)
       for z_raw = z_span.start, z_span.stop do
         var z = unsafe_cast(ptr(zone, rz), z_raw)
 
         z.z0tmp = 0.0
       end
 
-      __demand(__vectorize)
+      --__demand(__vectorize)
       for s_raw = s_span.start, s_span.stop do
         var s = unsafe_cast(ptr(side(rz, rpp, rpg, rs), rs), s_raw)
 
@@ -1054,7 +1054,7 @@ do
         z.z0tmp max= dux
       end
 
-      __demand(__vectorize)
+      --__demand(__vectorize)
       for z_raw = z_span.start, z_span.stop do
         var z = unsafe_cast(ptr(zone, rz), z_raw)
 
@@ -1064,7 +1064,7 @@ do
 
     -- Reduce forces into points.
     if s_span.internal then
-      __demand(__vectorize)
+      --__demand(__vectorize)
       for s_raw = s_span.start, s_span.stop do
         var s = unsafe_cast(ptr(side(rz, rpp, rpg, rs), rs), s_raw)
 
@@ -1076,7 +1076,7 @@ do
         p1.pf.y += f.y
       end
     else
-      __demand(__vectorize)
+      --__demand(__vectorize)
       for s_raw = s_span.start, s_span.stop do
         var s = unsafe_cast(ptr(side(rz, rpp, rpg, rs), rs), s_raw)
 
@@ -1111,7 +1111,7 @@ do
     -- 4a. Apply boundary conditions.
     --
 
-    __demand(__vectorize)
+    --__demand(__vectorize)
     for p_raw = p_span.start, p_span.stop do
       var p = unsafe_cast(ptr(point, rp), p_raw)
 
@@ -1131,7 +1131,7 @@ do
     do
       var fuzz = 1e-99
       var dth = 0.5 * dt
-      __demand(__vectorize)
+      --__demand(__vectorize)
       for p_raw = p_span.start, p_span.stop do
         var p = unsafe_cast(ptr(point, rp), p_raw)
 
@@ -1364,7 +1364,7 @@ do
 
     do
       var dtiny = 1.0 / dt
-      __demand(__vectorize)
+      --__demand(__vectorize)
       for z_raw = z_span.start, z_span.stop do
         var z = unsafe_cast(ptr(zone, rz), z_raw)
 
@@ -1379,7 +1379,7 @@ do
 
     do
       var fuzz = 1e-99
-      __demand(__vectorize)
+      --__demand(__vectorize)
       for z_raw = z_span.start, z_span.stop do
         var z = unsafe_cast(ptr(zone, rz), z_raw)
 
@@ -1387,7 +1387,7 @@ do
       end
     end
 
-    __demand(__vectorize)
+    --__demand(__vectorize)
     for z_raw = z_span.start, z_span.stop do
       var z = unsafe_cast(ptr(zone, rz), z_raw)
 
@@ -1913,7 +1913,8 @@ task toplevel()
 end
 if os.getenv('SAVEOBJ') == '1' then
   local root_dir = arg[0]:match(".*/") or "./"
-  local link_flags = terralib.newlist({"-L" .. root_dir, "-lpennant", "-lm"})
+  local out_dir = (os.getenv('OBJNAME') and os.getenv('OBJNAME'):match('.*/')) or root_dir
+  local link_flags = terralib.newlist({"-L" .. out_dir, "-lpennant", "-lm"})
   if os.getenv('CRAYPE_VERSION') then
     local new_flags = terralib.newlist({"-Wl,-Bdynamic"})
     new_flags:insertall(link_flags)
@@ -1928,7 +1929,12 @@ if os.getenv('SAVEOBJ') == '1' then
     link_flags = new_flags
   end
 
-  regentlib.saveobj(toplevel, "pennant", "executable", cpennant.register_mappers, link_flags)
+  if os.getenv('STANDALONE') == '1' then
+    os.execute('cp ' .. os.getenv('LG_RT_DIR') .. '/../bindings/terra/liblegion_terra.so ' .. out_dir)
+  end
+
+  local exe = os.getenv('OBJNAME') or "pennant"
+  regentlib.saveobj(toplevel, exe, "executable", cpennant.register_mappers, link_flags)
 else
   regentlib.start(toplevel, cpennant.register_mappers)
 end

@@ -1,4 +1,4 @@
--- Copyright 2017 Stanford University
+-- Copyright 2018 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -192,6 +192,14 @@ function data.zip(...)
   return result
 end
 
+function data.flatten(list)
+  local result = terralib.newlist()
+  for _, sublist in ipairs(list) do
+    result:insertall(sublist)
+  end
+  return result
+end
+
 function data.dict(list)
   local result = {}
   for _, pair in ipairs(list) do
@@ -311,6 +319,10 @@ function data.map:__newindex(k, v)
   self:put(k, v)
 end
 
+function data.map:has(k)
+  return self.__values_by_hash[data.hash(k)]
+end
+
 function data.map:get(k)
   return self.__values_by_hash[data.hash(k)]
 end
@@ -417,6 +429,10 @@ function data.default_map:__index(k)
     if lookup ~= nil then self:put(k, lookup) end
   end
   return lookup
+end
+
+function data.default_map:has(k)
+  return data.map.get(self, k)
 end
 
 function data.default_map:get(k)

@@ -1,5 +1,5 @@
-/* Copyright 2017 Stanford University
- * Copyright 2017 Los Alamos National Laboratory 
+/* Copyright 2018 Stanford University
+ * Copyright 2018 Los Alamos National Laboratory 
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,11 +22,10 @@
 
 #include <time.h>
 
-#include <realm/realm.h>
+#include <realm.h>
 #include <realm/cmdline.h>
 
 using namespace Realm;
-using namespace LegionRuntime::Accessor;
 
 namespace TestConfig {
   int tasks_per_processor = 256;
@@ -66,6 +65,12 @@ struct TestTaskData {
   double start_time;
 };
 
+namespace FieldIDs {
+  enum {
+    TASKDATA,
+  };
+};
+
 void dummy_task(const void *args, size_t arglen, 
 		const void *userdata, size_t userlen, Processor p)
 {
@@ -74,7 +79,7 @@ void dummy_task(const void *args, size_t arglen,
   // quick out for most tasks
   if(task_type == MIDDLE_TASK) return;
 
-  RegionAccessor<AccessorType::Affine<1>, TestTaskData> ra = ta.instance.get_accessor().typeify<TestTaskData>().convert<AccessorType::Affine<1> >();
+  AffineAccessor<TestTaskData, 1> ra(ta.instance, FieldIDs::TASKDATA);
   TestTaskData& mydata = ra[0];
 
   if(task_type == FIRST_TASK) {
@@ -194,19 +199,28 @@ void top_level_task(const void *args, size_t arglen,
 	.has_affinity_to(p)
 	.first();
       assert(m.exists());
-      Domain d = Domain::from_rect<1>(Rect<1>(0, 0));
-      RegionInstance i = d.create_instance(m, sizeof(TestTaskData));
+      Rect<1> r(0, 0);
+      RegionInstance i;
+      std::map<FieldID, size_t> field_sizes;
+      field_sizes[FieldIDs::TASKDATA] = sizeof(TestTaskData);
+      RegionInstance::create_instance(i, m, r,
+				      field_sizes,
+				      0, // SOA
+				      ProfilingRequestSet()).wait();
+      assert(i.exists());
+
       launch_args.instances[p] = i;
       {
-	std::vector<Domain::CopySrcDstField> dsts(1);
+	std::vector<CopySrcDstField> dsts(1);
 	dsts[0].inst = i;
-	dsts[0].offset = 0;
+	dsts[0].field_id = FieldIDs::TASKDATA;
 	dsts[0].size = sizeof(TestTaskData);
 	TestTaskData ival;
 	ival.first_count = 0;
 	ival.last_count = 0;
 	ival.start_time = 0;
-	d.fill(dsts, &ival, sizeof(ival)).wait();
+	r.fill(dsts, ProfilingRequestSet(),
+	       &ival, sizeof(ival)).wait();
       }
     }
   }

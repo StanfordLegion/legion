@@ -1,4 +1,4 @@
-// Copyright 2017 Stanford University
+// Copyright 2018 Stanford University
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -335,15 +335,21 @@ int main(int argc, const char *argv[])
 
   std::vector<PODStruct> a2(1);
   a2[0] = PODStruct(3, 4);
-  do_test("vector<PODStruct>", a2, sizeof(size_t) + a2.size() * sizeof(PODStruct));
+  do_test("vector<PODStruct>", a2, (std::max(sizeof(size_t),
+					     __alignof__(PODStruct)) +
+				    a2.size() * sizeof(PODStruct)));
 
   std::vector<PODPacked> a3(1);
   a3[0] = PODPacked(3, 4);
-  do_test("vector<PODPacked>", a3, sizeof(size_t) + 12 /* not sizeof(PODPacked)*/);
+  do_test("vector<PODPacked>", a3, (std::max(sizeof(size_t),
+					     __alignof__(double)) +
+				    12 /* not sizeof(PODPacked)*/));
 
   std::vector<PODPacked2> a4(1);
   a4[0] = PODPacked2(3, 4);
-  do_test("vector<PODPacked2>", a4, sizeof(size_t) + 9 /* not sizeof(PODPacked2)*/);
+  do_test("vector<PODPacked2>", a4, (std::max(sizeof(size_t),
+					      __alignof__(double)) +
+				     9 /* not sizeof(PODPacked2)*/));
 
   std::list<int> b;
   b.push_back(4);
@@ -356,7 +362,12 @@ int main(int argc, const char *argv[])
   c[8] = 1.1;
   c[9] = 2.2;
   c[10] = 3.3;
-  do_test("map<int,double>", c, sizeof(size_t) + c.size() * 16 /*alignment*/);
+  // in a 32-bit build, the size is "free" because it packs with the first
+  //  int key
+  do_test("map<int,double>", c, (sizeof(size_t) +
+				 ((!c.empty() && (sizeof(size_t) ==
+						  sizeof(int))) ? -4 : 0) +
+				 c.size() * 16 /*alignment*/));
 
   std::vector<std::string> ss;
   ss.push_back("Hello");

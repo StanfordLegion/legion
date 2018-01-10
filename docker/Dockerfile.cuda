@@ -20,7 +20,8 @@ RUN apt-get update -qq && \
       mpich libmpich-dev \
       mesa-common-dev \
       libblas-dev liblapack-dev libhdf5-dev \
-      module-init-tools && \
+      module-init-tools \
+      gdb vim && \
     apt-get clean
 
 # Build LLVM and Clang

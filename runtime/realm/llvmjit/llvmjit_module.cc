@@ -1,4 +1,4 @@
-/* Copyright 2017 Stanford University, NVIDIA Corporation
+/* Copyright 2018 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13,9 +13,9 @@
  * limitations under the License.
  */
 
-#include "llvmjit.h"
-#include "llvmjit_module.h"
-#include "llvmjit_internal.h"
+#include "realm/llvmjit/llvmjit.h"
+#include "realm/llvmjit/llvmjit_module.h"
+#include "realm/llvmjit/llvmjit_internal.h"
 
 #include "realm/runtime_impl.h"
 #include "realm/logging.h"
@@ -25,6 +25,10 @@ namespace Realm {
   Logger log_llvmjit("llvmjit");
 
   namespace LLVMJit {
+
+#ifdef REALM_ALLOW_MISSING_LLVM_LIBS
+    /*extern*/ bool llvmjit_available = false;
+#endif
 
     ////////////////////////////////////////////////////////////////////////
     //
@@ -40,6 +44,13 @@ namespace Realm {
 				 const std::type_info& target_impl_type);
 
       virtual CodeImplementation *translate(const CodeImplementation *source,
+					    const std::type_info& target_impl_type);
+
+      // C++ considers the above a "partial override" and wants these defined too
+      virtual bool can_translate(const CodeDescriptor& source_codedesc,
+				 const std::type_info& target_impl_type);
+
+      virtual CodeImplementation *translate(const CodeDescriptor& source_codedesc,
 					    const std::type_info& target_impl_type);
 
     protected:
@@ -80,6 +91,19 @@ namespace Realm {
       assert(0);
     }
 
+    // these pass through to CodeTranslator's definitions
+    bool LLVMCodeTranslator::can_translate(const CodeDescriptor& source_codedesc,
+					   const std::type_info& target_impl_type)
+    {
+      return CodeTranslator::can_translate(source_codedesc, target_impl_type);
+    }
+
+    CodeImplementation *LLVMCodeTranslator::translate(const CodeDescriptor& source_codedesc,
+						      const std::type_info& target_impl_type)
+    {
+      return CodeTranslator::translate(source_codedesc, target_impl_type);
+    }
+
 
     ////////////////////////////////////////////////////////////////////////
     //
@@ -96,6 +120,14 @@ namespace Realm {
     /*static*/ Module *LLVMJitModule::create_module(RuntimeImpl *runtime,
 						    std::vector<std::string>& cmdline)
     {
+#ifdef REALM_ALLOW_MISSING_LLVM_LIBS
+      if(LLVMJitInternal::detect_llvm_libraries()) {
+	llvmjit_available = true;
+      } else {
+	log_llvmjit.info() << "LLVM libs not found - disabling JIT functionality";
+	return 0;
+      }
+#endif
       LLVMJitModule *m = new LLVMJitModule;
       return m;
     }

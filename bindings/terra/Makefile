@@ -1,4 +1,4 @@
-# Copyright 2017 Stanford University
+# Copyright 2018 Stanford University
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -57,7 +57,7 @@ INC_FLAGS += -I$(TERRA_DIR)/release/include/terra -I$(TERRA_DIR)/include/terra
 endif
 LD_FLAGS ?=
 
-CC_FLAGS += -fPIC -DASSUME_UNALLOCABLE
+CC_FLAGS += -fPIC
 ifeq ($(shell uname), Darwin)
 	LD_FLAGS += -dynamiclib -single_module -undefined dynamic_lookup -fPIC
 else
@@ -73,6 +73,10 @@ endif
 ifeq ($(strip $(USE_SPY)),1)
 	CC_FLAGS += -DLEGION_SPY
 endif
+
+# terra already includes LLVM libs, so we don't want them in our .so
+CC_FLAGS += -DREALM_ALLOW_MISSING_LLVM_LIBS
+$(OUTFILE) : LLVM_LIBS=
 
 ###########################################################################
 #

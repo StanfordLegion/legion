@@ -1,4 +1,4 @@
--- Copyright 2017 Stanford University
+-- Copyright 2018 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -13,7 +13,7 @@
 -- limitations under the License.
 
 -- fails-with:
--- type_mismatch_partition_by_preimage4.rg:26: type mismatch in argument 3: expected field of ptr type but got int32
+-- type_mismatch_partition_by_preimage4.rg:26: type mismatch in argument 3: expected field of index type but got int32
 --   var q = preimage(s, p, s)
 --                  ^
 

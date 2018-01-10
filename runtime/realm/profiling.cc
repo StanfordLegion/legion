@@ -1,4 +1,4 @@
-/* Copyright 2017 Stanford University, NVIDIA Corporation
+/* Copyright 2018 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,7 +15,7 @@
 
 // implementation of profiling stuff for Realm
 
-#include "profiling.h"
+#include "realm/profiling.h"
 
 namespace Realm {
 
@@ -159,7 +159,8 @@ namespace Realm {
 	it != prs.requests.end();
 	it++) {
       if((*it)->requested_measurements.empty()) {
-	// TODO: respond to empty requests immediately?
+	// send responses to empty requests immediately (no point in waiting)
+	send_response(**it);
       } else {
 	for(std::set<ProfilingMeasurementID>::const_iterator it2 = (*it)->requested_measurements.begin();
 	    it2 != (*it)->requested_measurements.end();
@@ -263,7 +264,8 @@ namespace Realm {
     }
   }
 
-  void ProfilingMeasurementCollection::clear(void) {
+  void ProfilingMeasurementCollection::clear_measurements(void)
+  {
     measurements.clear();
 
     // also have to restore the counts
@@ -276,6 +278,14 @@ namespace Realm {
 	  it2++)
 	measurements_left[*it2]++;
     }
+  }
+
+  void ProfilingMeasurementCollection::clear(void)
+  {
+    measurements.clear();
+    measurements_left.clear();
+    requested_measurements.clear();
+    completed_requests_present = false;
   }
 
   

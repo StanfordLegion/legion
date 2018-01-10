@@ -1,4 +1,4 @@
-/* Copyright 2017 Stanford University, NVIDIA Corporation
+/* Copyright 2018 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -50,19 +50,22 @@ namespace Realm {
       // PROCESSOR:   tag:8 = 0x1d, owner_node:16,   (unused):28, proc_idx: 12
       // PROCGROUP:   tag:8 = 0x1c, owner_node:16,   creator_node:16, pgroup_idx: 24
       // IDXSPACE:    tag:4 = 0x5,  owner_node:16,   creator_node:16, idxspace_idx: 28
+      // SPARSITY:    tag:4 = 0x4,  owner_node:16,   creator_node:16, sparsity_idx: 28
       // ALLOCATOR:   tag:8 = 0x1b, owner_node:16,   creator_node:16, allocator_idx: 24
 
       static const int NODE_FIELD_WIDTH = 16;
       static const unsigned MAX_NODE_ID = (1U << NODE_FIELD_WIDTH) - 2; // reserve all 1's for special cases
+      static const int EVENT_GENERATION_WIDTH = 20;
+      static const int INSTANCE_INDEX_WIDTH = 16;
 
       struct FMT_Event {
 #ifdef REALM_REVERSE_ID_FIELDS
 	IDType type_tag : 1;
 	IDType creator_node : NODE_FIELD_WIDTH;
 	IDType gen_event_idx : 27;
-	IDType generation : 20;
+	IDType generation : EVENT_GENERATION_WIDTH;
 #else
-	IDType generation : 20;
+	IDType generation : EVENT_GENERATION_WIDTH;
 	IDType gen_event_idx : 27;
 	IDType creator_node : NODE_FIELD_WIDTH;
 	IDType type_tag : 1;
@@ -75,9 +78,9 @@ namespace Realm {
 	IDType type_tag : 4;
 	IDType creator_node : 16;
 	IDType barrier_idx : 24;
-	IDType generation : 20;  // MUST MATCH FMT_Event::generation size
+	IDType generation : EVENT_GENERATION_WIDTH;  // MUST MATCH FMT_Event::generation size
 #else
-	IDType generation : 20;  // MUST MATCH FMT_Event::generation size
+	IDType generation : EVENT_GENERATION_WIDTH;  // MUST MATCH FMT_Event::generation size
 	IDType barrier_idx : 24;
 	IDType creator_node : 16;
 	IDType type_tag : 4;
@@ -136,9 +139,9 @@ namespace Realm {
 	IDType owner_node : 16;
 	IDType creator_node : 16;
 	IDType mem_idx : 12;
-	IDType inst_idx : 16;
+	IDType inst_idx : INSTANCE_INDEX_WIDTH;
 #else
-	IDType inst_idx : 16;
+	IDType inst_idx : INSTANCE_INDEX_WIDTH;
 	IDType mem_idx : 12;
 	IDType creator_node : 16;
 	IDType owner_node : 16;
@@ -192,6 +195,14 @@ namespace Realm {
 	static const IDType TAG_VALUE = 0x5;
       };
 
+      struct FMT_Sparsity {
+	IDType sparsity_idx : 28;
+	IDType creator_node : 16;
+	IDType owner_node : 16;
+	IDType type_tag : 4;
+	static const IDType TAG_VALUE = 0x4;
+      };
+
       struct FMT_Allocator {
 #ifdef REALM_REVERSE_ID_FIELDS
 	IDType type_tag : 8;
@@ -216,6 +227,7 @@ namespace Realm {
       static ID make_processor(unsigned owner_node, unsigned proc_idx);
       static ID make_procgroup(unsigned owner_node, unsigned creator_node, unsigned pgroup_idx);
       static ID make_idxspace(unsigned owner_node, unsigned creator_node, unsigned idxspace_idx);
+      static ID make_sparsity(unsigned owner_node, unsigned creator_node, unsigned sparsity_idx);
       static ID make_allocator(unsigned owner_node, unsigned creator_node, unsigned allocator_idx);
 
       bool is_null(void) const;
@@ -228,6 +240,7 @@ namespace Realm {
       bool is_processor(void) const;
       bool is_procgroup(void) const;
       bool is_idxspace(void) const;
+      bool is_sparsity(void) const;
       bool is_allocator(void) const;
 
       enum ID_Types {
@@ -242,7 +255,7 @@ namespace Realm {
 	ID_PROCESSOR,
 	ID_PROCGROUP,
 	ID_INDEXSPACE,
-	ID_UNUSED_11,
+	ID_SPARSITY,
 	ID_ALLOCATOR,
 	ID_UNUSED_13,
 	ID_INSTANCE,
@@ -261,6 +274,7 @@ namespace Realm {
       ID(T thing_to_get_id_from);
 
       bool operator==(const ID& rhs) const;
+      bool operator!=(const ID& rhs) const;
 
       template <class T>
       T convert(void) const;
@@ -276,6 +290,7 @@ namespace Realm {
 	FMT_Processor proc;
 	FMT_ProcGroup pgroup;
 	FMT_IdxSpace idxspace;
+	FMT_Sparsity sparsity;
 	FMT_Allocator allocator;
       };
 
@@ -284,7 +299,7 @@ namespace Realm {
 
 }; // namespace Realm
 
-#include "id.inl"
+#include "realm/id.inl"
 
 #endif // ifndef REALM_ID_H
 

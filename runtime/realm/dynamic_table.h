@@ -1,4 +1,4 @@
-/* Copyright 2017 Stanford University, NVIDIA Corporation
+/* Copyright 2018 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -30,6 +30,8 @@ namespace Realm {
       int level;
       IT first_index, last_index;
       LT lock;
+      // all nodes in a table are linked in a list for destruction
+      DynamicTableNodeBase<LT,IT> *next_alloced_node;
     };
 
     template <typename ET, size_t _SIZE, typename LT, typename IT>
@@ -67,6 +69,8 @@ namespace Realm {
       // lock protects _changes_ to 'root', but not access to it
       LT lock;
       NodeBase * volatile root;
+      // all nodes in a table are linked in a list for destruction
+      NodeBase *first_alloced_node;
     };
 
     template <typename ALLOCATOR>
@@ -81,6 +85,10 @@ namespace Realm {
       ET *alloc_entry(void);
       void free_entry(ET *entry);
 
+      // allocates a range of IDs that can be given to a remote node for remote allocation
+      // these entries do not go on the local free list unless they are deleted after being used
+      void alloc_range(int requested, IT& first_id, IT& last_id);
+
       DynamicTable<ALLOCATOR>& table;
       int owner;
       LT lock;
@@ -90,7 +98,7 @@ namespace Realm {
 	
 }; // namespace Realm
 
-#include "dynamic_table.inl"
+#include "realm/dynamic_table.inl"
 
 #endif // ifndef REALM_DYNAMIC_TABLE_H
 

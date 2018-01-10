@@ -1,4 +1,4 @@
-/* Copyright 2017 Stanford University, NVIDIA Corporation
+/* Copyright 2018 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,8 +19,8 @@
 #define REALM_NODESET_H
 
 // currently just using the HLR's version
-#include "legion_types.h"
-#include "legion_utilities.h"
+#include "legion/legion_types.h"
+#include "legion/legion_utilities.h"
 
 namespace Realm {
   typedef Legion::Internal::NodeSet NodeSet;

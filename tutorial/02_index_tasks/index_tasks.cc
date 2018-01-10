@@ -1,4 +1,4 @@
-/* Copyright 2017 Stanford University
+/* Copyright 2018 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,10 +18,8 @@
 #include <cassert>
 #include <cstdlib>
 #include "legion.h"
-using namespace Legion;
 
-// for Point<DIM> and Rect<DIM>
-using namespace LegionRuntime::Arrays;
+using namespace Legion;
 
 /*
  * This example is a redux version of hello world 
@@ -65,15 +63,7 @@ void top_level_task(const Task *task,
   // dimensions accessed.  Here we create a 1-D Rect which
   // we'll use to launch an array of tasks.  Note that the
   // bounds on Rects are inclusive.
-  Rect<1> launch_bounds(Point<1>(0),Point<1>(num_points-1));
-  // Rects can be converted to Domains.  Domains are useful
-  // type which is equivalent to Rects but are not templated
-  // on the number of dimensions.  Users can easily convert
-  // between Domains and Rects using the 'from_rect' and
-  // 'get_rect' methods.  Most Legion runtime calls will 
-  // take Domains, but it often helps in application code
-  // to have type checking support on the number of dimensions.
-  Domain launch_domain = Domain::from_rect<1>(launch_bounds);
+  Rect<1> launch_bounds(0,num_points-1);
 
   // When we go to launch a large group of tasks in a single
   // call, we may want to pass different arguments to each
@@ -88,8 +78,7 @@ void top_level_task(const Task *task,
   for (int i = 0; i < num_points; i++)
   {
     int input = i + 10;
-    arg_map.set_point(DomainPoint::from_point<1>(Point<1>(i)),
-        TaskArgument(&input,sizeof(input)));
+    arg_map.set_point(i,TaskArgument(&input,sizeof(input)));
   }
   // Legion supports launching an array of tasks with a 
   // single call.  We call these index tasks as we are launching
@@ -101,7 +90,7 @@ void top_level_task(const Task *task,
   // be passed to all tasks launched, and a domain describing
   // the points to be launched.
   IndexLauncher index_launcher(INDEX_SPACE_TASK_ID,
-                               launch_domain,
+                               launch_bounds,
                                TaskArgument(NULL, 0),
                                arg_map);
   // Index tasks are launched the same as single tasks, but
@@ -120,7 +109,7 @@ void top_level_task(const Task *task,
   for (int i = 0; i < num_points; i++)
   {
     int expected = 2*(i+10);
-    int received = fm.get_result<int>(DomainPoint::from_point<1>(Point<1>(i)));
+    int received = fm.get_result<int>(i);
     if (expected != received)
     {
       printf("Check failed for point %d: %d != %d\n", i, expected, received);
@@ -159,6 +148,7 @@ int main(int argc, char **argv)
   {
     TaskVariantRegistrar registrar(INDEX_SPACE_TASK_ID, "index_space_task");
     registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+    registrar.set_leaf();
     Runtime::preregister_task_variant<int, index_space_task>(registrar, "index_space_task");
   }
 

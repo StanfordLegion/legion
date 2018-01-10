@@ -1,4 +1,4 @@
-/* Copyright 2017 Stanford University, NVIDIA Corporation
+/* Copyright 2018 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,11 +14,10 @@
  */
 
 #include "legion.h"
-#include "default_mapper.h"
-#include "logger_message_descriptor.h"
+#include "mappers/default_mapper.h"
 
-#include <cstdlib>
-#include <cassert>
+#include <stdlib.h>
+#include <assert.h>
 #include <limits.h>
 #include <algorithm>
 
@@ -34,9 +33,6 @@
 
 namespace Legion {
   namespace Mapping {
-
-    using namespace Utilities;
-    using namespace LegionRuntime::Arrays;
 
     Logger log_mapper("default_mapper");
 
@@ -58,13 +54,14 @@ namespace Legion {
         node_id(local.address_space()), machine(m),
         mapper_name((name == NULL) ? create_default_name(local) : strdup(name)),
         next_local_gpu(0), next_local_cpu(0), next_local_io(0),
-        next_local_procset(0), next_local_omp(0),
+        next_local_procset(0), next_local_omp(0), next_local_py(0),
         next_global_gpu(Processor::NO_PROC),
         next_global_cpu(Processor::NO_PROC), next_global_io(Processor::NO_PROC),
         next_global_procset(Processor::NO_PROC),
-        next_global_omp(Processor::NO_PROC),
+        next_global_omp(Processor::NO_PROC), next_global_py(Processor::NO_PROC),
         global_gpu_query(NULL), global_cpu_query(NULL), global_io_query(NULL),
         global_procset_query(NULL), global_omp_query(NULL),
+        global_py_query(NULL),
         max_steals_per_theft(STATIC_MAX_PERMITTED_STEALS),
         max_steal_count(STATIC_MAX_STEAL_COUNT),
         breadth_first_traversal(STATIC_BREADTH_FIRST),
@@ -135,6 +132,11 @@ namespace Legion {
                 local_ios.push_back(*it);
                 break;
               }
+            case Processor::PY_PROC:
+              {
+                local_pys.push_back(*it);
+                break;
+              }
             case Processor::PROC_SET:
               {
                 local_procsets.push_back(*it);
@@ -176,6 +178,15 @@ namespace Legion {
                 remote_ios.resize(node+1, Processor::NO_PROC);
               if (!remote_ios[node].exists())
                 remote_ios[node] = *it;
+              break;
+            }
+          case Processor::PY_PROC:
+            {
+              // See if we already have a target I/O processor for this node
+              if (node >= remote_pys.size())
+                remote_pys.resize(node+1, Processor::NO_PROC);
+              if (!remote_pys[node].exists())
+                remote_pys[node] = *it;
               break;
             }
           case Processor::PROC_SET:
@@ -243,6 +254,18 @@ namespace Legion {
           if (!remote_omps[idx].exists()) {
             log_mapper.error("Default mapper has OMP procs on node %d, but "
                              "could not detect OMP procs on node %d. The "
+                             "current default mapper implementation assumes "
+                             "symmetric heterogeneity.", node_id, idx);
+            assert(false);
+          }
+        }
+      } 
+      if (!local_pys.empty()) {
+        for (unsigned idx = 0; idx < remote_pys.size(); idx++) {
+	  if (idx == node_id) continue;  // ignore our own node
+          if (!remote_pys[idx].exists()) {
+            log_mapper.error("Default mapper has Python procs on node %d, but "
+                             "could not detect Python procs on node %d. The "
                              "current default mapper implementation assumes "
                              "symmetric heterogeneity.", node_id, idx);
             assert(false);
@@ -360,6 +383,8 @@ namespace Legion {
             return default_get_next_local_io();
           case Processor::OMP_PROC:
             return default_get_next_local_omp();
+          case Processor::PY_PROC:
+            return default_get_next_local_py();
           default: // make warnings go away
             break;
         }
@@ -387,6 +412,8 @@ namespace Legion {
                 return default_get_next_local_io();
               case Processor::OMP_PROC:
                 return default_get_next_local_omp();
+              case Processor::PY_PROC:
+                return default_get_next_local_py();
               default: // make warnings go away
                 break;
             }
@@ -394,22 +421,29 @@ namespace Legion {
         case 1:
           {
             // First-level tasks: assume we should distribute these
-            // evenly around the machine
+            // evenly around the machine unless we've been explicitly 
+	    // told not to
             // TODO: Fix this when we implement a good stealing algorithm
             // to instead encourage locality
-            switch (info.proc_kind)
+	    if ((task.tag & SAME_ADDRESS_SPACE) == 0)
             {
-              case Processor::LOC_PROC:
-                return default_get_next_global_cpu();
-              case Processor::TOC_PROC:
-                return default_get_next_global_gpu();
-              case Processor::IO_PROC: // Don't distribute I/O
-                return default_get_next_local_io();
-              case Processor::OMP_PROC:
-                return default_get_next_global_omp();
-              default: // make warnings go away
-                break;
+	      switch (info.proc_kind)
+              {
+                case Processor::LOC_PROC:
+                  return default_get_next_global_cpu();
+                case Processor::TOC_PROC:
+                  return default_get_next_global_gpu();
+                case Processor::IO_PROC: // Don't distribute I/O
+                  return default_get_next_local_io();
+                case Processor::OMP_PROC:
+                  return default_get_next_global_omp();
+                case Processor::PY_PROC:
+                  return default_get_next_global_py();
+                default: // make warnings go away
+                  break;
+              }
             }
+            // fall through to local assignment code below
           }
         default:
           {
@@ -425,6 +459,8 @@ namespace Legion {
                 return default_get_next_local_io();
               case Processor::OMP_PROC:
                 return default_get_next_local_omp();
+              case Processor::PY_PROC:
+                return default_get_next_local_py();
               default: // make warnings go away
                 break;
             }
@@ -537,6 +573,38 @@ namespace Legion {
       {
         delete global_io_query;
         global_io_query = NULL;
+      }
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    Processor DefaultMapper::default_get_next_local_py(void)
+    //--------------------------------------------------------------------------
+    {
+      Processor result = local_pys[next_local_py++];
+      if (next_local_py == local_pys.size())
+        next_local_py = 0;
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    Processor DefaultMapper::default_get_next_global_py(void)
+    //--------------------------------------------------------------------------
+    {
+      if (total_nodes == 1)
+        return default_get_next_local_py();
+      if (!next_global_py.exists())
+      {
+        global_py_query = new Machine::ProcessorQuery(machine);
+        global_py_query->only_kind(Processor::PY_PROC);
+        next_global_py = global_py_query->first();
+      }
+      Processor result = next_global_py;
+      next_global_py = global_py_query->next(result);
+      if (!next_global_py.exists())
+      {
+        delete global_py_query;
+        global_py_query = NULL;
       }
       return result;
     }
@@ -679,6 +747,12 @@ namespace Legion {
               case Processor::IO_PROC:
                 {
                   if (local_ios.empty())
+                    continue;
+                  break;
+                }
+              case Processor::PY_PROC:
+                {
+                  if (local_pys.empty())
                     continue;
                   break;
                 }
@@ -826,7 +900,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Default mapper is ignorant about task IDs so just do whatever
-      // GPU > OMP > procset > cpu > IO
+      // GPU > OMP > procset > cpu > IO > Python
       // It is up to the caller to filter out processor kinds that aren't
       // suitable for a given task
       if (local_gpus.size() > 0) ranking.push_back(Processor::TOC_PROC);
@@ -834,6 +908,7 @@ namespace Legion {
       if (local_procsets.size() > 0) ranking.push_back(Processor::PROC_SET);
       ranking.push_back(Processor::LOC_PROC);
       if (local_ios.size() > 0) ranking.push_back(Processor::IO_PROC);
+      if (local_pys.size() > 0) ranking.push_back(Processor::PY_PROC);
     }
 
     //--------------------------------------------------------------------------
@@ -904,6 +979,23 @@ namespace Legion {
                   {
                     log_mapper.error("Default mapper failure. No memory found "
                         "for I/O task %s (ID %lld) which is visible "
+                        "for all points in the index space.",
+                        task.get_task_name(), task.get_unique_id());
+                    assert(false);
+                  }
+                  else
+                    target_memory = global_memory;
+                }
+                break;
+              }
+            case Processor::PY_PROC:
+              {
+                if (task.index_domain.get_volume() > local_pys.size())
+                {
+                  if (!global_memory.exists())
+                  {
+                    log_mapper.error("Default mapper failure. No memory found "
+                        "for Python task %s (ID %lld) which is visible "
                         "for all points in the index space.",
                         task.get_task_name(), task.get_unique_id());
                     assert(false);
@@ -1016,6 +1108,7 @@ namespace Legion {
           case Processor::IO_PROC:
           case Processor::PROC_SET:
           case Processor::OMP_PROC:
+          case Processor::PY_PROC:
             {
               visible_memories.only_kind(Memory::SYSTEM_MEM);
               if (visible_memories.count() == 0)
@@ -1104,12 +1197,11 @@ namespace Legion {
 
           output.slices.resize(input.domain.get_volume());
           unsigned idx = 0;
-          LegionRuntime::Arrays::Rect<1> rect = input.domain.get_rect<1>();
-          for (LegionRuntime::Arrays::GenericPointInRectIterator<1> pir(rect);
-              pir; pir++, idx++)
+          Rect<1> rect = input.domain;
+          for (PointInRectIterator<1> pir(rect); pir(); pir++, idx++)
           {
-            Rect<1> slice(pir.p, pir.p);
-            output.slices[idx] = TaskSlice(Domain::from_rect<1>(slice),
+            Rect<1> slice(*pir, *pir);
+            output.slices[idx] = TaskSlice(slice,
               remote_procsets[idx % remote_cpus.size()],
               false/*recurse*/, false/*stealable*/);
           }
@@ -1143,6 +1235,12 @@ namespace Legion {
           {
             default_slice_task(task, local_ios, remote_ios, 
                                input, output, io_slices_cache);
+            break;
+          }
+        case Processor::PY_PROC:
+          {
+            default_slice_task(task, local_pys, remote_pys, 
+                               input, output, py_slices_cache);
             break;
           }
         case Processor::PROC_SET:
@@ -1184,35 +1282,37 @@ namespace Legion {
       // simple one-level decomposition across all the processors.
       Machine::ProcessorQuery all_procs(machine);
       all_procs.only_kind(local[0].kind());
+      if ((task.tag & SAME_ADDRESS_SPACE) != 0)
+	all_procs.local_address_space();
       std::vector<Processor> procs(all_procs.begin(), all_procs.end());
 
       switch (input.domain.get_dim())
       {
         case 1:
           {
-            Rect<1> point_rect = input.domain.get_rect<1>();
-            Point<1> num_blocks(procs.size());
-            default_decompose_points<1>(point_rect, procs,
+            DomainT<1,coord_t> point_space = input.domain; 
+            Point<1,coord_t> num_blocks(procs.size());
+            default_decompose_points<1>(point_space, procs,
                   num_blocks, false/*recurse*/,
                   stealing_enabled, output.slices);
             break;
           }
         case 2:
           {
-            Rect<2> point_rect = input.domain.get_rect<2>();
-            Point<2> num_blocks =
-              default_select_num_blocks<2>(procs.size(), point_rect);
-            default_decompose_points<2>(point_rect, procs,
+            DomainT<2,coord_t> point_space = input.domain;
+            Point<2,coord_t> num_blocks =
+              default_select_num_blocks<2>(procs.size(), point_space.bounds);
+            default_decompose_points<2>(point_space, procs,
                 num_blocks, false/*recurse*/,
                 stealing_enabled, output.slices);
             break;
           }
         case 3:
           {
-            Rect<3> point_rect = input.domain.get_rect<3>();
-            Point<3> num_blocks =
-              default_select_num_blocks<3>(procs.size(), point_rect);
-            default_decompose_points<3>(point_rect, procs,
+            DomainT<3,coord_t> point_space = input.domain;
+            Point<3,coord_t> num_blocks =
+              default_select_num_blocks<3>(procs.size(), point_space.bounds);
+            default_decompose_points<3>(point_space, procs,
                 num_blocks, false/*recurse*/,
                 stealing_enabled, output.slices);
             break;
@@ -1232,22 +1332,22 @@ namespace Legion {
       {
         case 1:
           {
-            Rect<1> point_rect = input.domain.get_rect<1>();
+            DomainT<1,coord_t> point_space = input.domain;
             if (remote.size() > 1) {
               if (total_points <= local.size()) {
-                Point<1> num_blocks(local.size());
-                default_decompose_points<1>(point_rect, local,
+                Point<1,coord_t> num_blocks(local.size());
+                default_decompose_points<1>(point_space, local,
                     num_blocks, false/*recurse*/,
                     stealing_enabled, output.slices);
               } else {
-                Point<1> num_blocks(remote.size());
-                default_decompose_points<1>(point_rect, remote,
+                Point<1,coord_t> num_blocks(remote.size());
+                default_decompose_points<1>(point_space, remote,
                     num_blocks, true/*recurse*/,
                     stealing_enabled, output.slices);
               }
             } else {
-              Point<1> num_blocks(local.size());
-              default_decompose_points<1>(point_rect, local,
+              Point<1,coord_t> num_blocks(local.size());
+              default_decompose_points<1>(point_space, local,
                   num_blocks, false/*recurse*/,
                   stealing_enabled, output.slices);
             }
@@ -1255,25 +1355,25 @@ namespace Legion {
           }
         case 2:
           {
-            Rect<2> point_rect = input.domain.get_rect<2>();
+            DomainT<2,coord_t> point_space = input.domain;
             if (remote.size() > 1) {
               if (total_points <= local.size()) {
-                Point<2> num_blocks =
-                  default_select_num_blocks<2>(local.size(), point_rect);
-                default_decompose_points<2>(point_rect, local,
+                Point<2,coord_t> num_blocks =
+                  default_select_num_blocks<2>(local.size(),point_space.bounds);
+                default_decompose_points<2>(point_space, local,
                     num_blocks, false/*recurse*/,
                     stealing_enabled, output.slices);
               } else {
-                Point<2> num_blocks =
-                  default_select_num_blocks<2>(remote.size(), point_rect);
-                default_decompose_points<2>(point_rect, remote,
+                Point<2,coord_t> num_blocks =
+                 default_select_num_blocks<2>(remote.size(),point_space.bounds);
+                default_decompose_points<2>(point_space, remote,
                     num_blocks, true/*recurse*/,
                     stealing_enabled, output.slices);
               }
             } else {
-              Point<2> num_blocks =
-                default_select_num_blocks<2>(local.size(), point_rect);
-              default_decompose_points<2>(point_rect, local,
+              Point<2,coord_t> num_blocks =
+                default_select_num_blocks<2>(local.size(), point_space.bounds);
+              default_decompose_points<2>(point_space, local,
                   num_blocks, false/*recurse*/,
                   stealing_enabled, output.slices);
             }
@@ -1281,25 +1381,25 @@ namespace Legion {
           }
         case 3:
           {
-            Rect<3> point_rect = input.domain.get_rect<3>();
+            DomainT<3,coord_t> point_space = input.domain;
             if (remote.size() > 1) {
               if (total_points <= local.size()) {
-                Point<3> num_blocks =
-                  default_select_num_blocks<3>(local.size(), point_rect);
-                default_decompose_points<3>(point_rect, local,
+                Point<3,coord_t> num_blocks =
+                  default_select_num_blocks<3>(local.size(),point_space.bounds);
+                default_decompose_points<3>(point_space, local,
                     num_blocks, false/*recurse*/,
                     stealing_enabled, output.slices);
               } else {
-                Point<3> num_blocks =
-                  default_select_num_blocks<3>(remote.size(), point_rect);
-                default_decompose_points<3>(point_rect, remote,
+                Point<3,coord_t> num_blocks =
+                 default_select_num_blocks<3>(remote.size(),point_space.bounds);
+                default_decompose_points<3>(point_space, remote,
                     num_blocks, true/*recurse*/,
                     stealing_enabled, output.slices);
               }
             } else {
-              Point<3> num_blocks =
-                default_select_num_blocks<3>(local.size(), point_rect);
-              default_decompose_points<3>(point_rect, local,
+              Point<3,coord_t> num_blocks =
+                default_select_num_blocks<3>(local.size(), point_space.bounds);
+              default_decompose_points<3>(point_space, local,
                   num_blocks, false/*recurse*/,
                   stealing_enabled, output.slices);
             }
@@ -1327,8 +1427,7 @@ namespace Legion {
       VariantInfo chosen = default_find_preferred_variant(task, ctx,
                         true/*needs tight bound*/, true/*cache*/, target_kind);
       output.chosen_variant = chosen.variant;
-      // TODO: some criticality analysis to assign priorities
-      output.task_priority = 0;
+      output.task_priority = default_policy_select_task_priority(ctx, task);
       output.postmap_task = false;
       // Figure out our target processors
       default_policy_select_target_processors(ctx, task, output.target_procs);
@@ -1368,12 +1467,13 @@ namespace Legion {
             const TaskLayoutConstraintSet &layout_constraints =
                 runtime->find_task_layout_constraints(ctx,
                                       task.task_id, output.chosen_variant);
-            Memory target_memory = default_policy_select_target_memory(ctx, 
-                                                         task.target_proc);
             for (std::vector<unsigned>::const_iterator it = 
                   reduction_indexes.begin(); it != 
                   reduction_indexes.end(); it++)
             {
+              Memory target_memory = default_policy_select_target_memory(ctx,
+                                                         task.target_proc,
+                                                         task.regions[*it]);
               std::set<FieldID> copy = task.regions[*it].privilege_fields;
               if (!default_create_custom_instances(ctx, task.target_proc,
                   target_memory, task.regions[*it], *it, copy, 
@@ -1388,6 +1488,10 @@ namespace Legion {
           return;
         }
       }
+      // Should we cache this task?
+      CachedMappingPolicy cache_policy =
+        default_policy_select_task_cache_policy(ctx, task);
+
       // First, let's see if we've cached a result of this task mapping
       const unsigned long long task_hash = compute_task_hash(task);
       std::pair<TaskID,Processor> cache_key(task.task_id, task.target_proc);
@@ -1398,9 +1502,7 @@ namespace Legion {
       // possibly because a new field was allocated in a region, so our old
       // cached physical instance(s) is(are) no longer valid
       bool needs_field_constraint_check = false;
-      Memory target_memory = default_policy_select_target_memory(ctx, 
-                                                         task.target_proc);
-      if (finder != cached_task_mappings.end())
+      if (cache_policy == DEFAULT_CACHE_POLICY_ENABLE && finder != cached_task_mappings.end())
       {
         bool found = false;
         bool has_reductions = false;
@@ -1432,6 +1534,9 @@ namespace Legion {
             {
               if (task.regions[idx].privilege == REDUCE)
               {
+                Memory target_memory = default_policy_select_target_memory(ctx,
+                                                         task.target_proc,
+                                                         task.regions[idx]);
                 std::set<FieldID> copy = task.regions[idx].privilege_fields;
                 if (!default_create_custom_instances(ctx, task.target_proc,
                     target_memory, task.regions[idx], idx, copy, 
@@ -1489,6 +1594,9 @@ namespace Legion {
             missing_fields[idx].empty())
           continue;
         // See if this is a reduction      
+        Memory target_memory = default_policy_select_target_memory(ctx,
+                                                         task.target_proc,
+                                                         task.regions[idx]);
         if (task.regions[idx].privilege == REDUCE)
         {
           has_reductions = true;
@@ -1547,20 +1655,22 @@ namespace Legion {
                                       task.target_proc, target_memory);
         }
       }
-      // Now that we are done, let's cache the result so we can use it later
-      std::list<CachedTaskMapping> &map_list = cached_task_mappings[cache_key];
-      map_list.push_back(CachedTaskMapping());
-      CachedTaskMapping &cached_result = map_list.back();
-      cached_result.task_hash = task_hash; 
-      cached_result.variant = output.chosen_variant;
-      cached_result.mapping = output.chosen_instances;
-      cached_result.has_reductions = has_reductions;
-      // We don't ever save reduction instances in our cache 
-      if (has_reductions) {
-        for (unsigned idx = 0; idx < task.regions.size(); idx++) {
-          if (task.regions[idx].privilege != REDUCE)
-            continue;
-          cached_result.mapping[idx].clear();
+      if (cache_policy == DEFAULT_CACHE_POLICY_ENABLE) {
+        // Now that we are done, let's cache the result so we can use it later
+        std::list<CachedTaskMapping> &map_list = cached_task_mappings[cache_key];
+        map_list.push_back(CachedTaskMapping());
+        CachedTaskMapping &cached_result = map_list.back();
+        cached_result.task_hash = task_hash;
+        cached_result.variant = output.chosen_variant;
+        cached_result.mapping = output.chosen_instances;
+        cached_result.has_reductions = has_reductions;
+        // We don't ever save reduction instances in our cache
+        if (has_reductions) {
+          for (unsigned idx = 0; idx < task.regions.size(); idx++) {
+            if (task.regions[idx].privilege != REDUCE)
+              continue;
+            cached_result.mapping[idx].clear();
+          }
         }
       }
     }
@@ -1607,6 +1717,18 @@ namespace Legion {
                 target_procs.push_back(task.target_proc);
               break;
             }
+          case Processor::PY_PROC:
+            {
+              // Put any of our Python procs here
+              // If we're part of a must epoch launch, our
+              // target proc will be sufficient
+              if (!task.must_epoch_task)
+                target_procs.insert(target_procs.end(),
+                    local_pys.begin(), local_pys.end());
+              else
+                target_procs.push_back(task.target_proc);
+              break;
+            }
           case Processor::PROC_SET:
             {
               target_procs.push_back(task.target_proc);
@@ -1631,6 +1753,25 @@ namespace Legion {
       }
       else
         target_procs.push_back(task.target_proc);
+    }
+
+    //--------------------------------------------------------------------------
+    TaskPriority DefaultMapper::default_policy_select_task_priority(
+                                    MapperContext ctx, const Task &task)
+    //--------------------------------------------------------------------------
+    {
+      // TODO: some criticality analysis to assign priorities
+      return 0;
+    }
+
+    //--------------------------------------------------------------------------
+    DefaultMapper::CachedMappingPolicy
+    DefaultMapper::default_policy_select_task_cache_policy(
+                                    MapperContext ctx, const Task &task)
+    //--------------------------------------------------------------------------
+    {
+      // Always cache task result.
+      return DEFAULT_CACHE_POLICY_ENABLE;
     }
 
     //--------------------------------------------------------------------------
@@ -1870,14 +2011,23 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     Memory DefaultMapper::default_policy_select_target_memory(MapperContext ctx,
-                                                          Processor target_proc)
+                                                   Processor target_proc,
+                                                   const RegionRequirement &req)
     //--------------------------------------------------------------------------
     {
+      bool prefer_rdma = ((req.tag & DefaultMapper::PREFER_RDMA_MEMORY) != 0);
+
       // TODO: deal with the updates in machine model which will
       //       invalidate this cache
-      std::map<Processor,Memory>::iterator it =
-        cached_target_memory.find(target_proc);
-      if (it != cached_target_memory.end()) return it->second;
+      std::map<Processor,Memory>::iterator it;
+      if (prefer_rdma)
+      {
+	it = cached_rdma_target_memory.find(target_proc);
+	if (it != cached_rdma_target_memory.end()) return it->second;
+      } else {
+        it = cached_target_memory.find(target_proc);
+	if (it != cached_target_memory.end()) return it->second;
+      }
 
       // Find the visible memories from the processor for the given kind
       Machine::MemoryQuery visible_memories(machine);
@@ -1889,8 +2039,10 @@ namespace Legion {
         assert(false);
       }
       // Figure out the memory with the highest-bandwidth
-      Memory chosen = Memory::NO_MEMORY;
+      Memory best_memory = Memory::NO_MEMORY;
       unsigned best_bandwidth = 0;
+      Memory best_rdma_memory = Memory::NO_MEMORY;
+      unsigned best_rdma_bandwidth = 0;
       std::vector<Machine::ProcessorMemoryAffinity> affinity(1);
       for (Machine::MemoryQuery::iterator it = visible_memories.begin();
             it != visible_memories.end(); it++)
@@ -1899,14 +2051,27 @@ namespace Legion {
         machine.get_proc_mem_affinity(affinity, target_proc, *it,
 				      false /*not just local affinities*/);
         assert(affinity.size() == 1);
-        if (!chosen.exists() || (affinity[0].bandwidth > best_bandwidth)) {
-          chosen = *it;
+        if (!best_memory.exists() || (affinity[0].bandwidth > best_bandwidth)) {
+          best_memory = *it;
           best_bandwidth = affinity[0].bandwidth;
         }
+        if ((it->kind() == Memory::REGDMA_MEM) &&
+	    (!best_rdma_memory.exists() ||
+	     (affinity[0].bandwidth > best_rdma_bandwidth))) {
+          best_rdma_memory = *it;
+          best_rdma_bandwidth = affinity[0].bandwidth;
+        }
       }
-      assert(chosen.exists());
-      cached_target_memory[target_proc] = chosen;
-      return chosen;
+      assert(best_memory.exists());
+      if (prefer_rdma)
+      {
+	if (!best_rdma_memory.exists()) best_rdma_memory = best_memory;
+	cached_rdma_target_memory[target_proc] = best_rdma_memory;
+	return best_rdma_memory;
+      } else {
+	cached_target_memory[target_proc] = best_memory;
+	return best_memory;
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -2402,7 +2567,8 @@ namespace Legion {
         }
         else
           target_memory = default_policy_select_target_memory(ctx,
-                                  inline_op.parent_task->current_proc);
+                                  inline_op.parent_task->current_proc,
+                                  inline_op.requirement);
         if (creation_constraints.field_constraint.field_set.empty())
           creation_constraints.add_constraint(FieldConstraint(
                 inline_op.requirement.privilege_fields, false/*contig*/));
@@ -2432,7 +2598,8 @@ namespace Legion {
           return;
         // Otherwise, let's make an instance for our missing fields
         target_memory = default_policy_select_target_memory(ctx,
-                                        inline_op.parent_task->current_proc);
+                                        inline_op.parent_task->current_proc,
+                                        inline_op.requirement);
         LayoutConstraintID our_layout_id = 
          default_policy_select_layout_constraints(ctx, target_memory, 
                                                inline_op.requirement, 
@@ -2633,7 +2800,8 @@ namespace Legion {
         // is running.
         Memory target_memory =
           default_policy_select_target_memory(ctx, 
-                                              close.parent_task->current_proc);
+                                              close.parent_task->current_proc,
+                                              close.requirement);
         LayoutConstraintSet constraints;
         default_policy_select_constraints(ctx, constraints, target_memory,
                                           close.requirement);
@@ -2804,6 +2972,128 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void DefaultMapper::select_partition_projection(const MapperContext  ctx,
+                        const Partition&                           partition,
+                        const SelectPartitionProjectionInput&      input,
+                              SelectPartitionProjectionOutput&     output)
+    //--------------------------------------------------------------------------
+    {
+      log_mapper.spew("Default select_partition_projection in %s", 
+                      get_mapper_name());
+      // If we have a complete partition then use it
+      if (!input.open_complete_partitions.empty())
+        output.chosen_partition = input.open_complete_partitions[0];
+      else
+        output.chosen_partition = LogicalPartition::NO_PART;
+    }
+
+    //--------------------------------------------------------------------------
+    void DefaultMapper::map_partition(const MapperContext        ctx,
+                                      const Partition&           partition,
+                                      const MapPartitionInput&   input,
+                                            MapPartitionOutput&  output)
+    //--------------------------------------------------------------------------
+    {
+      // No constraints on mapping partitions
+      // Copy over all the valid instances, then try to do an acquire on them
+      // and see which instances are no longer valid
+      output.chosen_instances = input.valid_instances;
+      if (!output.chosen_instances.empty())
+        runtime->acquire_and_filter_instances(ctx, 
+                                          output.chosen_instances);
+      // Now see if we have any fields which we still make space for
+      std::set<FieldID> missing_fields = 
+        partition.requirement.privilege_fields;
+      for (std::vector<PhysicalInstance>::const_iterator it = 
+            output.chosen_instances.begin(); it != 
+            output.chosen_instances.end(); it++)
+      {
+        it->remove_space_fields(missing_fields);
+        if (missing_fields.empty())
+          break;
+      }
+      // If we've satisfied all our fields, then we are done
+      if (missing_fields.empty())
+        return;
+      // Otherwise, let's make an instance for our missing fields
+      Memory target_memory = default_policy_select_target_memory(ctx,
+                                      partition.parent_task->current_proc,
+                                      partition.requirement);
+      bool force_new_instances = false;
+      LayoutConstraintID our_layout_id = 
+       default_policy_select_layout_constraints(ctx, target_memory, 
+                                             partition.requirement, 
+                                             PARTITION_MAPPING,
+                                             true/*needs check*/, 
+                                             force_new_instances);
+      LayoutConstraintSet creation_constraints = 
+              runtime->find_layout_constraints(ctx, our_layout_id);
+      creation_constraints.add_constraint(
+          FieldConstraint(missing_fields, false/*contig*/, false/*inorder*/));
+      output.chosen_instances.resize(output.chosen_instances.size()+1);
+      if (!default_make_instance(ctx, target_memory, creation_constraints,
+            output.chosen_instances.back(), PARTITION_MAPPING, 
+            force_new_instances, true/*meets*/, partition.requirement))
+      {
+        // If we failed to make it that is bad
+        log_mapper.error("Default mapper failed allocation for region "
+                         "requirement of partition in task %s (UID %lld) "
+                         "in memory " IDFMT "for processor " IDFMT ". This "
+                         "means the working set of your application is too big "
+                         "for the allotted capacity of the given memory under "
+                         "the default mapper's mapping scheme. You have three "
+                         "choices: ask Realm to allocate more memory, write a "
+                         "custom mapper to better manage working sets, or find "
+                         "a bigger machine. Good luck!", 
+                         partition.parent_task->get_task_name(),
+                         partition.parent_task->get_unique_id(),
+                         target_memory.id,
+                         partition.parent_task->current_proc.id);
+        assert(false);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void DefaultMapper::select_partition_sources(
+                                     const MapperContext             ctx,
+                                     const Partition&                partition,
+                                     const SelectPartitionSrcInput&  input,
+                                           SelectPartitionSrcOutput& output)
+    //--------------------------------------------------------------------------
+    {
+      log_mapper.spew("Default select_partition_sources in %s", 
+                      get_mapper_name());
+      default_policy_select_sources(ctx, input.target, input.source_instances,
+                                    output.chosen_ranking);
+    }
+
+    //--------------------------------------------------------------------------
+    void DefaultMapper::create_partition_temporary_instance(
+                            const MapperContext                   ctx,
+                            const Partition&                      partition,
+                            const CreatePartitionTemporaryInput&  input,
+                                  CreatePartitionTemporaryOutput& output)
+    //--------------------------------------------------------------------------
+    {
+      log_mapper.spew("Default create_partition_temporary_instance in %s",
+                      get_mapper_name());
+      output.temporary_instance = default_policy_create_temporary(ctx,
+            partition.requirement.region, input.destination_instance);
+    }
+
+    //--------------------------------------------------------------------------
+    void DefaultMapper::report_profiling(const MapperContext              ctx,
+                                         const Partition&             partition,
+                                         const PartitionProfilingInfo&    input)
+    //--------------------------------------------------------------------------
+    {
+      log_mapper.spew("Default report_profiling for Partition in %s", 
+                      get_mapper_name());
+      // We don't ask for any task profiling right now so assert if we see this
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
     void DefaultMapper::configure_context(const MapperContext         ctx,
                                           const Task&                 task,
                                                 ContextConfigOutput&  output)
@@ -2851,6 +3141,11 @@ namespace Legion {
             *result = local_omps.size();
             break;
           }
+        case DEFAULT_TUNABLE_LOCAL_PYS:
+          {
+            *result = local_pys.size();
+            break;
+          }
         case DEFAULT_TUNABLE_GLOBAL_GPUS:
           {
             // TODO: deal with machine asymmetry here
@@ -2873,6 +3168,12 @@ namespace Legion {
           {
             // TODO: deal with machine asymmetry here
             *result = (local_omps.size() * total_nodes);
+            break;
+          }
+        case DEFAULT_TUNABLE_GLOBAL_PYS:
+          {
+            // TODO: deal with machine asymmetry here
+            *result = (local_pys.size() * total_nodes);
             break;
           }
         default:
@@ -2984,9 +3285,10 @@ namespace Legion {
 	      // if we wrap around, nothing is large enough and we're toast
 	      if(next_as == curr_as) {
 	      }
-        Legion::Internal::MessageDescriptor MUST_EPOCH_NOADDRESS(3800, "undefined");
-	      log_mapper.fatal(MUST_EPOCH_NOADDRESS.id()) << "must_epoch: no address space has enough "
-                  << "processors to fit a group of " << group_size << " tasks!";
+        
+              log_mapper.error("must_epoch: no address space has enough "
+                               "processors to fit a group of %d tasks!",
+                                int(group_size));
 	      assert(false);
 	    } while(next_as->second.size() < group_size);
 	    curr_as = next_as;
@@ -3013,7 +3315,7 @@ namespace Legion {
     Memory DefaultMapper::
       default_policy_select_constrained_instance_constraints(
                                   MapperContext ctx,
-                                  const std::vector</*const*/ Task *> &tasks,
+                                  const std::vector<const Task *> &tasks,
                                   const std::vector<unsigned> &req_indexes,
                                   const std::vector<Processor> &target_procs,
                                   const std::set<LogicalRegion> &needed_regions,
@@ -3033,30 +3335,28 @@ namespace Legion {
 
       // check for case of no tasks that want access
       if(accessing_task_idxs.empty()) {
-        Legion::Internal::MessageDescriptor MUST_EPOCH_NOTASKS(3801, "undefined");
-        log_mapper.fatal(MUST_EPOCH_NOTASKS.id()) << "Must epoch has no tasks that require direct "
-                           << "access to an instance - DefaultMapper doesn't "
-                           << "know how to pick one.";
-	assert(false);
+        log_mapper.error("Must epoch has no tasks that require direct "
+         "access to an instance - DefaultMapper doesn't know how to pick one.");
+        assert(false);
       }
 
       // pick the first (or only) task as the "home task" - it'll be the one we
       //  ask for layout choices
       unsigned home_task_idx = accessing_task_idxs[0];
       Processor target_proc = target_procs[home_task_idx];
-      Memory target_memory = default_policy_select_target_memory(ctx, 
-								 target_proc);
+      Memory target_memory = default_policy_select_target_memory(ctx,
+                      target_proc,
+                      tasks[home_task_idx]->regions[req_indexes[home_task_idx]]);
       // if we have more than one task, double-check that this memory is kosher 
       // with the other ones too
       if(accessing_task_idxs.size() > 1) {
 	for(size_t i = 1; i < accessing_task_idxs.size(); i++) {
 	  Processor p2 = target_procs[accessing_task_idxs[i]];
 	  if(!machine.has_affinity(p2, target_memory)) {
-      Legion::Internal::MessageDescriptor DEFAULT_MAPPER_ERROR(3802, "undefined");
-	    log_mapper.fatal(DEFAULT_MAPPER_ERROR.id()) << "Default Mapper Error.  Memory chosen for "
-                               << "constrained instance was " << target_memory
-			       << ", but is not visible to task on processor " 
-                               << p2;
+            log_mapper.error("Default Mapper Error.  Memory chosen for "
+                             "constrained instance was %llu, but is not "
+                             "visible to task on processor %llu",
+                              target_memory.id, p2.id);
 	    assert(false);
 	  }
 	}
@@ -3077,9 +3377,8 @@ namespace Legion {
 	  const LayoutConstraintSet &req_cons = 
             runtime->find_layout_constraints(ctx, it2->second);
 	  if(constraints.conflicts(req_cons)) {
-      Legion::Internal::MessageDescriptor DEFAULT_MAPPER_ERROR(3803, "undefined");
-	    log_mapper.fatal(DEFAULT_MAPPER_ERROR.id()) << "Default mapper error.  Layout constraint "
-                               << "violation in must_epoch instance creation.";
+            log_mapper.error("Default mapper error.  Layout constraint "
+                             "violation in must_epoch instance creation.");
 	    assert(false);
 	  }
 	  ++it2;
@@ -3102,12 +3401,68 @@ namespace Legion {
       std::map<Processor::Kind, std::vector<const Task *> > tasks_by_kind;
       for(unsigned i = 0; i < input.tasks.size(); i++) {
 	// see which processor kinds are preferred, but filter by which ones 
-        // have available variants
+        // have available variants and available processors
 	std::vector<Processor::Kind> ranking;
 	default_policy_rank_processor_kinds(ctx, *(input.tasks[i]), ranking);
 	std::vector<Processor::Kind>::iterator it = ranking.begin();
 	while(true) {
 	  assert(it != ranking.end());
+          // Check to see if we actually have processors of this kind
+          switch (*it)
+          {
+            case Processor::TOC_PROC:
+              {
+                if (local_gpus.empty())
+                {
+                  ++it;
+                  continue;
+                }
+                break;
+              }
+            case Processor::OMP_PROC:
+              {
+                if (local_omps.empty())
+                {
+                  ++it;
+                  continue;
+                }
+                break;
+              }
+            case Processor::PROC_SET:
+              {
+                if (local_procsets.empty())
+                {
+                  ++it;
+                  continue;
+                }
+                break;
+              }
+            case Processor::LOC_PROC:
+              {
+                assert(!local_cpus.empty());
+                break;
+              }
+            case Processor::IO_PROC:
+              {
+                if (local_ios.empty())
+                {
+                  ++it;
+                  continue;
+                }
+                break;
+              }
+            case Processor::PY_PROC:
+              {
+                if (local_pys.empty())
+                {
+                  ++it;
+                  continue;
+                }
+                break;
+              }
+            default:
+              assert(false); // unknown processor kind
+          }
 	  if(have_proc_kind_variant(ctx, input.tasks[i]->task_id, *it)) {
 	    tasks_by_kind[*it].push_back(input.tasks[i]);
 	    break;
@@ -3213,7 +3568,7 @@ namespace Legion {
         std::set<FieldID> needed_fields;
         for (unsigned idx = 0; idx < constraint.constrained_tasks.size(); idx++)
         {
-          Task *task = constraint.constrained_tasks[idx];
+          const Task *task = constraint.constrained_tasks[idx];
           unsigned req_idx = constraint.requirement_indexes[idx];
           needed_regions.insert(task->regions[req_idx].region);
           needed_fields.insert(task->regions[req_idx].privilege_fields.begin(),
@@ -3223,7 +3578,7 @@ namespace Legion {
 	// Now delegate to a policy routine to decide on a memory and layout
 	// constraints for this constrained instance
 	std::vector<Processor> target_procs;
-	for(std::vector<Task *>::const_iterator it = 
+	for(std::vector<const Task *>::const_iterator it = 
             constraint.constrained_tasks.begin();
 	    it != constraint.constrained_tasks.end();
 	    ++it)
@@ -3252,9 +3607,7 @@ namespace Legion {
 	assert(ok);
 	if(!ok)
         {
-          Legion::Internal::MessageDescriptor DEFAULT_MAPPER_ERROR(3804, "undefined");
-          log_mapper.fatal(DEFAULT_MAPPER_ERROR.id(),
-                       "Default mapper error. Unable to make instance(s) "
+          log_mapper.error("Default mapper error. Unable to make instance(s) "
 			   "in memory " IDFMT " for index %d of constrained "
 			   "task %s (ID %lld) in must epoch launch.",
 			   mem.id, constraint.requirement_indexes[0],

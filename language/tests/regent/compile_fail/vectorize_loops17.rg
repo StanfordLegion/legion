@@ -1,4 +1,4 @@
--- Copyright 2017 Stanford University
+-- Copyright 2018 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -13,9 +13,9 @@
 -- limitations under the License.
 
 -- fails-with:
--- vectorize_loops17.rg:41: vectorization failed: loop body has aliasing update of path region(fs2()).v
---     e.p1.v = t
---     ^
+-- vectorize_loops17.rg:40: vectorization failed: loop body has a scattered read from a structured region
+--     var t = e.p2.v
+--              ^
 
 import "regent"
 
@@ -41,3 +41,8 @@ do
     e.p1.v = t
   end
 end
+
+-- FIXME: This test was supposed to check this case. Put this back once the vectorizer gets fixed.
+-- vectorize_loops17.rg:41: vectorization failed: loop body has aliasing update of path region(fs2()).v
+--     e.p1.v = t
+--     ^

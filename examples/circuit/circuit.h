@@ -1,4 +1,4 @@
-/* Copyright 2017 Stanford University
+/* Copyright 2018 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -31,10 +31,6 @@
 #define INDEX_DIM     1
 
 using namespace Legion;
-using namespace LegionRuntime::Accessor;
-
-// for Point<DIM> and Rect<DIM>
-using namespace LegionRuntime::Arrays;
 
 // Data type definitions
 
@@ -50,6 +46,11 @@ enum {
   DISTRIBUTE_CHARGE_TASK_ID,
   UPDATE_VOLTAGES_TASK_ID,
   CHECK_FIELD_TASK_ID,
+#ifndef SEQUENTIAL_LOAD_CIRCUIT
+  INIT_NODES_TASK_ID,
+  INIT_WIRES_TASK_ID,
+  INIT_LOCATION_TASK_ID,
+#endif
 };
 
 enum {
@@ -61,6 +62,7 @@ enum NodeFields {
   FID_LEAKAGE,
   FID_CHARGE,
   FID_NODE_VOLTAGE,
+  FID_PIECE_COLOR,
 };
 
 enum WireFields {
@@ -80,6 +82,21 @@ enum LocatorFields {
   FID_LOCATOR,
 };
 
+typedef FieldAccessor<READ_ONLY,float,1,coord_t,Realm::AffineAccessor<float,1,coord_t> > AccessorROfloat;
+typedef FieldAccessor<READ_WRITE,float,1,coord_t,Realm::AffineAccessor<float,1,coord_t> > AccessorRWfloat;
+typedef FieldAccessor<WRITE_ONLY,float,1,coord_t,Realm::AffineAccessor<float,1,coord_t> > AccessorWOfloat;
+typedef FieldAccessor<REDUCE,float,1,coord_t,Realm::AffineAccessor<float,1,coord_t> > AccessorRDfloat;
+
+typedef FieldAccessor<READ_ONLY,Point<1>,1,coord_t,Realm::AffineAccessor<Point<1>,1,coord_t> > AccessorROpoint;
+typedef FieldAccessor<READ_WRITE,Point<1>,1,coord_t,Realm::AffineAccessor<Point<1>,1,coord_t> > AccessorRWpoint;
+typedef FieldAccessor<WRITE_ONLY,Point<1>,1,coord_t,Realm::AffineAccessor<Point<1>,1,coord_t> > AccessorWOpoint;
+typedef FieldAccessor<REDUCE,Point<1>,1,coord_t,Realm::AffineAccessor<Point<1>,1,coord_t> > AccessorRDpoint;
+
+typedef FieldAccessor<READ_ONLY,PointerLocation,1,coord_t,Realm::AffineAccessor<PointerLocation,1,coord_t> > AccessorROloc;
+typedef FieldAccessor<READ_WRITE,PointerLocation,1,coord_t,Realm::AffineAccessor<PointerLocation,1,coord_t> > AccessorRWloc;
+typedef FieldAccessor<WRITE_ONLY,PointerLocation,1,coord_t,Realm::AffineAccessor<PointerLocation,1,coord_t> > AccessorWOloc;
+typedef FieldAccessor<REDUCE,PointerLocation,1,coord_t,Realm::AffineAccessor<PointerLocation,1,coord_t> > AccessorRDloc;
+
 struct Circuit {
   LogicalRegion all_nodes;
   LogicalRegion all_wires;
@@ -90,9 +107,9 @@ struct CircuitPiece {
   LogicalRegion pvt_nodes, shr_nodes, ghost_nodes;
   LogicalRegion pvt_wires;
   unsigned      num_wires;
-  ptr_t         first_wire;
+  Point<1>      first_wire;
   unsigned      num_nodes;
-  ptr_t         first_node;
+  Point<1>      first_node;
 
   float         dt;
   int           steps;
@@ -134,20 +151,6 @@ public:
   static const bool CPU_BASE_LEAF = true;
   static const bool GPU_BASE_LEAF = true;
   static const int MAPPER_ID = 0;
-protected:
-  static bool dense_calc_new_currents(const CircuitPiece &piece,
-                              RegionAccessor<AccessorType::Generic, ptr_t> fa_in_ptr,
-                              RegionAccessor<AccessorType::Generic, ptr_t> fa_out_ptr,
-                              RegionAccessor<AccessorType::Generic, PointerLocation> fa_in_loc,
-                              RegionAccessor<AccessorType::Generic, PointerLocation> fa_out_loc,
-                              RegionAccessor<AccessorType::Generic, float> fa_inductance,
-                              RegionAccessor<AccessorType::Generic, float> fa_resistance,
-                              RegionAccessor<AccessorType::Generic, float> fa_wire_cap,
-                              RegionAccessor<AccessorType::Generic, float> fa_pvt_voltage,
-                              RegionAccessor<AccessorType::Generic, float> fa_shr_voltage,
-                              RegionAccessor<AccessorType::Generic, float> fa_ghost_voltage,
-                              RegionAccessor<AccessorType::Generic, float> *fa_current,
-                              RegionAccessor<AccessorType::Generic, float> *fa_voltage);
 public:
   static void cpu_base_impl(const CircuitPiece &piece,
                             const std::vector<PhysicalRegion> &regions,
@@ -233,6 +236,88 @@ public:
                        Context ctx, Runtime *runtime);
   static void register_task(void);
 };
+
+#ifndef SEQUENTIAL_LOAD_CIRCUIT
+class InitNodesTask : public IndexLauncher {
+public:
+  InitNodesTask(LogicalRegion lr_all_nodes,
+                LogicalPartition lp_equal_nodes,
+                IndexSpace launch_space);
+public:
+  static const char * const TASK_NAME;
+  static const int TASK_ID = INIT_NODES_TASK_ID;
+  static const bool LEAF = true;
+  static const int MAPPER_ID = 0;
+public:
+  static void cpu_base_impl(const Task *task,
+                            const std::vector<PhysicalRegion> &regions,
+                            Context ctx, Runtime *runtime);
+  static void register_task(void);
+};
+
+class InitWiresTask : public IndexLauncher {
+public:
+  struct Args {
+  public:
+    Args(int p, int n, int pct)
+      : num_pieces(p), nodes_per_piece(n), pct_wire_in_piece(pct) { }
+  public:
+    int num_pieces;
+    int nodes_per_piece;
+    int pct_wire_in_piece;
+  };
+public:
+  InitWiresTask(LogicalRegion lr_all_wires,
+                LogicalPartition lp_equal_wires,
+                IndexSpace launch_space,
+                int num_pieces, int nodes_per_piece,
+                int pct_wire_in_piece);
+protected:
+  Args args;
+public:
+  static const char * const TASK_NAME;
+  static const int TASK_ID = INIT_WIRES_TASK_ID;
+  static const bool LEAF = true;
+  static const int MAPPER_ID = 0;
+public:
+  static void cpu_base_impl(const Task *task,
+                            const std::vector<PhysicalRegion> &regions,
+                            Context ctx, Runtime *runtime);
+  static void register_task(void);
+};
+
+class InitLocationTask : public IndexLauncher {
+public:
+  struct Args {
+  public:
+    Args(LogicalPartition p, LogicalPartition s)
+      : lp_private(p), lp_shared(s) { }
+  public:
+    LogicalPartition lp_private;
+    LogicalPartition lp_shared;
+  };
+public:
+  InitLocationTask(LogicalRegion lr_location,
+                   LogicalPartition lp_equal_location,
+                   LogicalRegion lr_all_wires,
+                   LogicalPartition lp_equal_wires,
+                   IndexSpace launch_space,
+                   LogicalPartition lp_private,
+                   LogicalPartition lp_shared);
+protected:
+  Args args;
+public:
+  static const char * const TASK_NAME;
+  static const int TASK_ID = INIT_LOCATION_TASK_ID;
+  static const bool LEAF = true;
+  static const int MAPPER_ID = 0;
+public:
+  static void cpu_base_impl(const Task *task,
+                            const std::vector<PhysicalRegion> &regions,
+                            Context ctx, Runtime *runtime);
+  static void register_task(void);
+};
+#endif
 
 namespace TaskHelper {
   template<typename T>

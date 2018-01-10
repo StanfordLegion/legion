@@ -1,4 +1,4 @@
-/* Copyright 2017 Stanford University
+/* Copyright 2018 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -37,6 +37,19 @@ int global_var = 0;
 // across all processes on all machines in the system.
 const int global_constant = 4;
 
+// Thread local variables are still global variables
+// and are therfore also illegal. It's important to
+// realize that tasks are not threads and the same
+// Legion task may execute on multiple different 
+// hardware threads throughout the course of its
+// lifetime, so the same task may not even end up
+// accessing the same instance of a thread local 
+// variable during the course of its execution. 
+// We provide explicit Legion runtime calls if users 
+// would like to create task-local global variables 
+// that have the lifetime of a single task.
+__thread int thread_local_global_var = 0;
+
 // Another thing to be careful of is that function
 // pointers are another kind of global variable that
 // may differ between multiple processes in the machine.
@@ -54,6 +67,8 @@ void top_level_task(const Task *task,
   printf("The value of global_var %d is undefined\n", global_var);
 
   printf("The value of global_constant %d will always be the same\n", global_constant);
+
+  printf("The value of thread_local_global_var %d is also undefined\n", thread_local_global_var);
 
   printf("The function pointer to foo %p may be different on different processors\n", foo);
 

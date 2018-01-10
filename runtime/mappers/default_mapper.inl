@@ -1,4 +1,4 @@
-/* Copyright 2017 Stanford University, NVIDIA Corporation
+/* Copyright 2018 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,31 +19,42 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<int DIM>
     /*static*/ void DefaultMapper::default_decompose_points(
-                                         const Rect<DIM> &point_rect,
-                                         const std::vector<Processor> &targets,
-                                         const Point<DIM> &num_blocks,
-                                         bool recurse, bool stealable,
-                                         std::vector<TaskSlice> &slices)
+                           const DomainT<DIM,coord_t> &point_space,
+                           const std::vector<Processor> &targets,
+                           const Point<DIM,coord_t> &num_blocks,
+                           bool recurse, bool stealable,
+                           std::vector<TaskSlice> &slices)
     //--------------------------------------------------------------------------
     {
-      Point<DIM> num_points = 
-        point_rect.hi - point_rect.lo + Point<DIM>::ONES();
-      Rect<DIM> blocks(Point<DIM>::ZEROES(), num_blocks - Point<DIM>::ONES());
+      Point<DIM,coord_t> zeroes;
+      for (int i = 0; i < DIM; i++)
+        zeroes[i] = 0;
+      Point<DIM,coord_t> ones;
+      for (int i = 0; i < DIM; i++)
+        ones[i] = 1;
+      Point<DIM,coord_t> num_points = 
+        point_space.bounds.hi - point_space.bounds.lo + ones;
+      Rect<DIM,coord_t> blocks(zeroes, num_blocks - ones);
       size_t next_index = 0;
       slices.reserve(blocks.volume());
-      for (GenericPointInRectIterator<DIM> pir(blocks);
-           pir; pir++) {
-        Point<DIM> block_lo = pir.p, block_hi = pir.p + Point<DIM>::ONES();
-
-        Point<DIM> slice_lo =
-          num_points * block_lo / num_blocks + point_rect.lo;
-        Point<DIM> slice_hi = num_points * block_hi / num_blocks +
-          point_rect.lo - Point<DIM>::ONES();
-        Rect<DIM> slice_rect(slice_lo, slice_hi);
-
-        if (slice_rect.volume() > 0) {
+      for (PointInRectIterator<DIM> pir(blocks); pir(); pir++) {
+        Point<DIM,coord_t> block_lo = *pir;
+        Point<DIM,coord_t> block_hi = *pir + ones;
+        Point<DIM,coord_t> slice_lo =
+          num_points * block_lo / num_blocks + point_space.bounds.lo;
+        Point<DIM,coord_t> slice_hi = 
+          num_points * block_hi / num_blocks + point_space.bounds.lo - ones;
+        // Construct a new slice space based on the new bounds 
+        // and any existing sparsity map, tighten if necessary
+        DomainT<DIM,coord_t> slice_space;
+        slice_space.bounds.lo = slice_lo;
+        slice_space.bounds.hi = slice_hi;
+        slice_space.sparsity = point_space.sparsity;
+        if (!slice_space.dense())
+          slice_space = slice_space.tighten();
+        if (slice_space.volume() > 0) {
           TaskSlice slice;
-          slice.domain = Domain::from_rect<DIM>(slice_rect);
+          slice.domain = slice_space;
           slice.proc = targets[next_index++ % targets.size()];
           slice.recurse = recurse;
           slice.stealable = stealable;
@@ -54,12 +65,38 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM>
-    /*static*/ Point<DIM> DefaultMapper::default_select_num_blocks( 
-                               long long int factor, const Rect<DIM> &to_factor)
+    /*static*/ void DefaultMapper::default_decompose_points(
+                               const LegionRuntime::Arrays::Rect<DIM> &rect,
+                               const std::vector<Processor> &targets,
+                               const LegionRuntime::Arrays::Point<DIM> &blocks,
+                               bool recurse, bool stealable,
+                               std::vector<TaskSlice> &slices)
+    //--------------------------------------------------------------------------
+    {
+      const Domain dom_rect = Domain::from_rect<DIM>(rect);
+      const DomainT<DIM,coord_t> point_space = dom_rect;
+
+      const DomainPoint dom_point = DomainPoint::from_point<DIM>(blocks);
+      const Point<DIM,coord_t> num_blocks = dom_point;
+
+      default_decompose_points(point_space, targets, num_blocks, 
+                               recurse, stealable, slices);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM>
+    /*static*/ Point<DIM,coord_t> DefaultMapper::default_select_num_blocks( 
+                                             long long int factor, 
+                                             const Rect<DIM,coord_t> &to_factor)
     //--------------------------------------------------------------------------
     {
       if (factor == 1)
-        return Point<DIM>::ONES();
+      {
+        Point<DIM,coord_t> ones;
+        for (int i = 0; i < DIM; i++)
+          ones[i] = 1;
+        return ones;
+      }
 
       // Fundamental theorem of arithmetic time!
       const unsigned num_primes = 32;
@@ -95,7 +132,7 @@ namespace Legion {
         result[i] = 1;
       double dim_chunks[DIM];
       for (int i = 0; i < DIM; i++)
-        dim_chunks[i] = to_factor.dim_size(i);
+        dim_chunks[i] = ((to_factor.hi[i] - to_factor.lo[i]) + 1);
       for (int idx = prime_factors.size()-1; idx >= 0; idx--)
       {
         // Find the dimension with the biggest dim_chunk 
@@ -114,7 +151,7 @@ namespace Legion {
         result[next_dim] *= next_prime;
         dim_chunks[next_dim] /= next_prime;
       }
-      return Point<DIM>(result);
+      return Point<DIM,coord_t>(result);
     }
 
     //--------------------------------------------------------------------------
@@ -139,7 +176,8 @@ namespace Legion {
       // We clearly need to take a guess, let's see if we can find
       // one of our instances to use.
       Memory target_memory = default_policy_select_target_memory(ctx,
-                                        copy.parent_task->current_proc);
+                                        copy.parent_task->current_proc,
+                                        req);
       bool force_new_instances = false;
       LayoutConstraintID our_layout_id = 
        default_policy_select_layout_constraints(ctx, target_memory, 

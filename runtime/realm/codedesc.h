@@ -1,4 +1,4 @@
-/* Copyright 2017 Stanford University, NVIDIA Corporation
+/* Copyright 2018 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,11 +18,11 @@
 #ifndef REALM_CODEDESC_H
 #define REALM_CODEDESC_H
 
-#include "realm_config.h"
+#include "realm/realm_config.h"
 
-#include "serialize.h"
+#include "realm/serialize.h"
 
-#include <cstddef>
+#include <stddef.h>
 #include <vector>
 #include <iostream>
 
@@ -479,6 +479,13 @@ namespace Realm {
     virtual CodeImplementation *translate(const CodeImplementation *source,
 					  const std::type_info& target_impl_type);
 
+    // C++ considers the above a "partial override" and wants these defined too
+    virtual bool can_translate(const CodeDescriptor& source_codedesc,
+			       const std::type_info& target_impl_type);
+
+    virtual CodeImplementation *translate(const CodeDescriptor& source_codedesc,
+					  const std::type_info& target_impl_type);
+
   protected:
     std::map<std::string, void *> modules_loaded;
   };
@@ -486,7 +493,7 @@ namespace Realm {
 
 }; // namespace Realm
 
-#include "codedesc.inl"
+#include "realm/codedesc.inl"
 
 #undef REALM_TYPE_KINDS
 

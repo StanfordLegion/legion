@@ -1,4 +1,4 @@
-/* Copyright 2017 Stanford University, NVIDIA Corporation
+/* Copyright 2018 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,7 +22,6 @@
 
 using namespace Legion;
 using namespace Legion::Mapping;
-using namespace LegionRuntime::Accessor;
 
 enum TaskID
 {
@@ -79,7 +78,7 @@ void top_level_task(const Task *task,
   // data - we need not worry about a tight bound, because we will never create
   // any instances of this size
   Rect<1> bounds(0, total_region_size - 1);
-  IndexSpace is = runtime->create_index_space(ctx, Domain::from_rect<1>(bounds));
+  IndexSpaceT<1> is = runtime->create_index_space(ctx, bounds);
   runtime->attach_name(is, "is");
 
   // our field space will just have a single field
@@ -99,8 +98,8 @@ void top_level_task(const Task *task,
   Rect<1> subregion_idxs(0, num_subregions - 1);
   size_t elements_per_subregion = total_region_size / num_subregions;
   assert(elements_per_subregion >= (2 * average_output_size));
-  Blockify<1> blockify(elements_per_subregion);
-  IndexPartition ip = runtime->create_index_partition(ctx, is, blockify);
+  IndexPartition ip = runtime->create_partition_by_blockify(ctx, is, 
+                                    Point<1>(elements_per_subregion));
   LogicalPartition lp = runtime->get_logical_partition(ctx, lr, ip);
 
   // perform an index launch to have each subregion filled in with a variable
@@ -109,7 +108,7 @@ void top_level_task(const Task *task,
     MakeDataTaskArgs args;
     args.random_seed = random_seed;
     args.average_output_size = average_output_size;
-    IndexLauncher launcher(MAKE_DATA_TASK_ID, Domain::from_rect<1>(subregion_idxs),
+    IndexLauncher launcher(MAKE_DATA_TASK_ID, subregion_idxs,
 			   TaskArgument(&args, sizeof(args)),
 			   ArgumentMap());
     launcher.add_region_requirement(RegionRequirement(lp,
@@ -126,7 +125,7 @@ void top_level_task(const Task *task,
   // now perform a second index launch to use the variable-sized chunks of
   // data
   {
-    IndexLauncher launcher(USE_DATA_TASK_ID, Domain::from_rect<1>(subregion_idxs),
+    IndexLauncher launcher(USE_DATA_TASK_ID, subregion_idxs,
 			   TaskArgument(0, 0),
 			   ArgumentMap());
     if(use_projection_functor) {
@@ -178,8 +177,8 @@ void make_data_task(const Task *task,
   // now we can define a (sub-)subregion of our subregion that is the right size
   // to hold the output
   LogicalRegion my_lr = regions[0].get_logical_region();
-  IndexSpace my_is = my_lr.get_index_space();
-  Rect<1> my_bounds = runtime->get_index_space_domain(my_is).get_rect<1>();
+  IndexSpaceT<1> my_is(my_lr.get_index_space());
+  Rect<1> my_bounds = Domain(runtime->get_index_space_domain(my_is));
   coord_t bounds_lo = my_bounds.lo[0];
 
   // remember rectangle bounds are inclusive on both sides
@@ -187,16 +186,15 @@ void make_data_task(const Task *task,
 
   // create a new partition with a known part_color so that other tasks can find
   // the color space will consist of the single color '0'
-  DomainColoring dc;
-  Domain color_space = Domain::from_rect<1>(Rect<1>(0, 0));
-  dc[0] = Domain::from_rect<1>(alloc_bounds);
-
-  IndexPartition alloc_ip = runtime->create_index_partition(ctx,
-							    my_is,
-							    color_space,
-							    dc,
-							    DISJOINT_KIND, // trivial
-							    PID_ALLOCED_DATA);
+  IndexSpaceT<1> color_space = runtime->create_index_space(ctx, Rect<1>(0, 0));
+  Transform<1,1> transform;
+  transform[0][0] = 0;
+  IndexPartition alloc_ip = runtime->create_partition_by_restriction(ctx, my_is,
+                                                                     color_space,
+                                                                     transform,
+                                                                     alloc_bounds,
+                                                                     DISJOINT_KIND, // trivial
+                                                                     PID_ALLOCED_DATA);
 
   // now we get the name of the logical subregion we just created and inline map
   // it to generate our output
@@ -222,11 +220,11 @@ void make_data_task(const Task *task,
   pr.wait_until_valid();
 
   {
-    RegionAccessor<AccessorType::Generic, int> ra = pr.get_field_accessor(FID_DATA).typeify<int>();
+    const FieldAccessor<READ_WRITE,int,1,coord_t,
+            Realm::AffineAccessor<int,1,coord_t> > ra(pr, FID_DATA);
 
     for(coord_t i = 0; i < output_size; i++)
-      ra.write(DomainPoint::from_point<1>(bounds_lo + i),
-	       (subregion_index * 10000) + i);
+      ra[bounds_lo + i] = (subregion_index * 10000) + i;
   }
 
   // release our inline mapping
@@ -262,7 +260,7 @@ void use_data_task(const Task *task,
     log_app.debug() << "looked up subregion " << alloc_lr;
 
     // learn the input size from the bounds of the allocated subspace
-    my_bounds = runtime->get_index_space_domain(alloc_is).get_rect<1>();
+    my_bounds = runtime->get_index_space_domain(alloc_is);
 
     // again, tell the default mapper that we want exactly this region to be mapped
     // this is important if the mapper sends us to a different place than where the
@@ -278,7 +276,7 @@ void use_data_task(const Task *task,
     // we've got the exact region mapped for us, so ask for its size
     LogicalRegion my_lr = regions[0].get_logical_region();
     IndexSpace my_is = my_lr.get_index_space();
-    my_bounds = runtime->get_index_space_domain(my_is).get_rect<1>();
+    my_bounds = runtime->get_index_space_domain(my_is);
   }
 
   coord_t bounds_lo = my_bounds.lo[0];
@@ -291,11 +289,12 @@ void use_data_task(const Task *task,
   // check that the data is what we expect
   int errors = 0;
   {
-    RegionAccessor<AccessorType::Generic, int> ra = pr.get_field_accessor(FID_DATA).typeify<int>();
+    const FieldAccessor<READ_ONLY,int,1,coord_t,
+            Realm::AffineAccessor<int,1,coord_t> > ra(pr, FID_DATA);
 
     for(coord_t i = 0; i < input_size; i++) {
       int exp = (subregion_index * 10000) + i;
-      int act = ra.read(DomainPoint::from_point<1>(bounds_lo + i));
+      int act = ra[bounds_lo + i];
       if(exp != act) {
 	// don't print more than 10 errors
 	if(errors < 10)

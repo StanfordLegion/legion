@@ -1,4 +1,4 @@
-/* Copyright 2017 Stanford University, NVIDIA Corporation
+/* Copyright 2018 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,10 +18,7 @@
 #ifndef REALM_CUSTOM_SERDEZ_H
 #define REALM_CUSTOM_SERDEZ_H
 
-#include "lowlevel_config.h"
-#include "accessor.h"
-
-#include "serialize.h"
+#include "realm/serialize.h"
 
 #include <sys/types.h>
 
@@ -71,6 +68,7 @@ namespace Realm {
   class SerdezObject {
   public:
     typedef T* FIELD_TYPE;
+    static const size_t MAX_SERIALIZED_SIZE = sizeof(T);
 
     static size_t serialized_size(const FIELD_TYPE& val) {
       return sizeof(T);
@@ -95,31 +93,39 @@ namespace Realm {
 
   // as a useful example, here's a templated serdez that works for anything that supports Realm's serialization
   //  framework
-  template <typename T>
+  template <typename T, size_t MAX_SER_SIZE = 4096>
   class SimpleSerdez {
   public:
     typedef T *FIELD_TYPE;  // field holds a pointer to the object
+    static const size_t MAX_SERIALIZED_SIZE = MAX_SER_SIZE;
 
     static size_t serialized_size(const FIELD_TYPE& val)
     {
       Serialization::ByteCountSerializer bcs;
-      bcs << (*val);
+      bool ok = (bcs << (*val));
+      assert(ok);
       return bcs.bytes_used();
     }
 
     static size_t serialize(const FIELD_TYPE& val, void *buffer)
     {
-      Serialization::FixedBufferSerializer fbs(buffer, ((size_t)-1));
-      fbs << *val;
-      return ((size_t)-1) - fbs.bytes_left();  // because we didn't really tell it how many bytes we had
+      // fake a max size, but it can't wrap the pointer
+      size_t max_size = size_t(-1) - reinterpret_cast<size_t>(buffer);
+      Serialization::FixedBufferSerializer fbs(buffer, max_size);
+      bool ok = (fbs << *val);
+      assert(ok);
+      return max_size - fbs.bytes_left();  // because we didn't really tell it how many bytes we had
     }
 
     static size_t deserialize(FIELD_TYPE& val, const void *buffer)
     {
       val = new T;  // assumes existence of default constructor
-      Serialization::FixedBufferDeserializer fbd(buffer, ((size_t)-1));
-      fbd >> (*val);
-      return ((size_t)-1) - fbd.bytes_left();
+      // fake a max size, but it can't wrap the pointer
+      size_t max_size = size_t(-1) - reinterpret_cast<size_t>(buffer);
+      Serialization::FixedBufferDeserializer fbd(buffer, max_size);
+      bool ok = (fbd >> (*val));
+      assert(ok);
+      return max_size - fbd.bytes_left();
     }
 
     static void destroy(FIELD_TYPE& val)
@@ -134,23 +140,26 @@ namespace Realm {
   class CustomSerdezUntyped {
   public:
     size_t sizeof_field_type;
+    size_t max_serialized_size;
   
     template <class SERDEZ>
     static CustomSerdezUntyped *create_custom_serdez(void);
 
     virtual ~CustomSerdezUntyped(void);
 
+    virtual CustomSerdezUntyped *clone(void) const = 0;
+
     // each operator exists in two forms: single-element and strided-array-of-elements
 
     // computes the number of bytes needed for the serialization of 'val'
     virtual size_t serialized_size(const void *field_ptr) const = 0;
-    virtual size_t serialized_size(const void *field_ptr, ptrdiff_t stride, size_t count) = 0;
+    virtual size_t serialized_size(const void *field_ptr, ptrdiff_t stride, size_t count) const = 0;
 
     // serializes 'val' into the provided buffer - no size is provided (serialized_size will be called first),
     //  but the function should return the bytes used
     virtual size_t serialize(const void *field_ptr, void *buffer) const = 0;
     virtual size_t serialize(const void *field_ptr, ptrdiff_t stride, size_t count,
-			     void *buffer) = 0;
+			     void *buffer) const = 0;
 
     // deserializes the provided buffer into 'val' - the existing contents of 'val' are overwritten, but
     //  will have already been "destroyed" if this copy is overwriting previously valid data - this call
@@ -158,11 +167,11 @@ namespace Realm {
     //  means the serialization format must have some internal way of knowing how much to read)
     virtual size_t deserialize(void *field_ptr, const void *buffer) const = 0;
     virtual size_t deserialize(void *field_ptr, ptrdiff_t stride, size_t count,
-			       const void *buffer) = 0;
+			       const void *buffer) const = 0;
 
     // destroys the contents of a field
     virtual void destroy(void *field_ptr) const = 0;
-    virtual void destroy(void *field_ptr, ptrdiff_t stride, size_t count) = 0;
+    virtual void destroy(void *field_ptr, ptrdiff_t stride, size_t count) const = 0;
   };
 
   template <typename T> class CustomSerdezWrapper;
@@ -170,7 +179,7 @@ namespace Realm {
 
 }; // namespace Realm
 
-#include "custom_serdez.inl"
+#include "realm/custom_serdez.inl"
 
 #endif // ifndef REALM_REDOP_H
 

@@ -1,4 +1,4 @@
-/* Copyright 2017 Stanford University, NVIDIA Corporation
+/* Copyright 2018 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,15 +18,91 @@
 #define __RUNTIME_H__
 
 #include "legion.h"
-#include "legion_spy.h"
-#include "region_tree.h"
-#include "mapper_manager.h"
-#include "legion_utilities.h"
-#include "legion_profiling.h"
-#include "legion_allocation.h"
-#include "garbage_collection.h"
+#include "legion/legion_spy.h"
+#include "legion/region_tree.h"
+#include "legion/mapper_manager.h"
+#include "legion/legion_utilities.h"
+#include "legion/legion_profiling.h"
+#include "legion/legion_allocation.h"
+#include "legion/garbage_collection.h"
+
+#define REPORT_LEGION_FATAL(code, fmt, ...)               \
+{                                                         \
+char message[4096];                                       \
+snprintf(message, 4096, fmt, ##__VA_ARGS__);              \
+Legion::Internal::Runtime::report_fatal_message(          \
+code, __FILE__, __LINE__, message);                       \
+}
+
+#define REPORT_LEGION_ERROR(code, fmt, ...)               \
+{                                                         \
+char message[4096];                                       \
+snprintf(message, 4096, fmt, ##__VA_ARGS__);              \
+Legion::Internal::Runtime::report_error_message(          \
+code, __FILE__, __LINE__, message);                       \
+}
+
+#define REPORT_LEGION_WARNING(code, fmt, ...)             \
+{                                                         \
+char message[4096];                                       \
+snprintf(message, 4096, fmt, ##__VA_ARGS__);              \
+Legion::Internal::Runtime::report_warning_message(        \
+code, __FILE__, __LINE__, message);                       \
+}
 
 namespace Legion {
+#ifndef DISABLE_PARTITION_SHIM
+#define PARTITION_SHIM_MAPPER_ID                      (1729)
+  // An internal namespace with some classes for providing help
+  // with backwards compatibility for partitioning operations
+  namespace PartitionShim {
+
+    template<int COLOR_DIM>
+    class ColorPoints : public TaskLauncher {
+    public:
+      ColorPoints(const Coloring &coloring, LogicalRegion region,
+                  FieldID color_field, FieldID pointer_field);
+      ColorPoints(const PointColoring &coloring, LogicalRegion region,
+                  FieldID color_field, FieldID pointer_field);
+    protected:
+      Serializer rez;
+    public:
+      static TaskID TASK_ID;
+      static void register_task(void);
+      static void cpu_variant(const Task *task,
+          const std::vector<PhysicalRegion> &regions, 
+          Context ctx, Runtime *runtime);
+    };
+
+    template<int COLOR_DIM, int RANGE_DIM>
+    class ColorRects : public TaskLauncher {
+    public:
+      ColorRects(const DomainColoring &coloring, LogicalRegion region,
+                 FieldID color_field, FieldID range_field);
+      ColorRects(const MultiDomainColoring &coloring, LogicalRegion region, 
+                 FieldID color_field, FieldID range_field);
+    public:
+      ColorRects(const DomainPointColoring &coloring,
+          LogicalRegion region, FieldID color_field, FieldID range_field);
+      ColorRects(const MultiDomainPointColoring &coloring,
+          LogicalRegion region, FieldID color_field, FieldID range_field);
+    public:
+      ColorRects(const Coloring &coloring, LogicalRegion region,
+                 FieldID color_field, FieldID range_field);
+      ColorRects(const PointColoring &coloring, LogicalRegion region,
+                 FieldID color_field, FieldID range_field);
+    protected:
+      Serializer rez;
+    public:
+      static TaskID TASK_ID;
+      static void register_task(void);
+      static void cpu_variant(const Task *task,
+          const std::vector<PhysicalRegion> &regions, 
+          Context ctx, Runtime *runtime);
+    };
+  };
+#endif
+
   namespace Internal { 
 
     // Special helper for when we need a dummy context
@@ -218,7 +294,8 @@ namespace Legion {
       virtual void notify_inactive(ReferenceMutator *mutator);
     public:
       Future get_future(const DomainPoint &point, bool allow_empty = false);
-      void set_future(const DomainPoint &point, FutureImpl *impl);
+      void set_future(const DomainPoint &point, FutureImpl *impl,
+                      ReferenceMutator *mutator);
       void get_void_result(const DomainPoint &point, 
                             bool silence_warnings = true);
       void wait_all_results(bool silence_warnings = true);
@@ -286,6 +363,7 @@ namespace Legion {
                             bool warn = false, const char *src = NULL);
       bool is_valid(void) const;
       bool is_mapped(void) const;
+      bool is_external_region(void) const;
       LogicalRegion get_logical_region(void) const;
       LegionRuntime::Accessor::RegionAccessor<
         LegionRuntime::Accessor::AccessorType::Generic>
@@ -311,9 +389,20 @@ namespace Legion {
 #endif
 #ifdef BOUNDS_CHECKS
     public:
-      bool contains_ptr(ptr_t ptr) const;
-      bool contains_point(const DomainPoint &dp) const;
+      bool contains_ptr(ptr_t ptr);
+      bool contains_point(const DomainPoint &dp);
 #endif
+    public:
+      void get_bounds(void *realm_is, TypeTag type_tag);
+      PhysicalInstance get_instance_info(PrivilegeMode mode, 
+                                         FieldID fid, size_t field_size, 
+                                         void *realm_is, TypeTag type_tag,
+                                         bool silence_warnings, 
+                                         bool generic_accessor,
+                                         bool check_field_size,
+                                         ReductionOpID redop);
+      void fail_bounds_check(DomainPoint p, FieldID fid, PrivilegeMode mode);
+      void fail_bounds_check(Domain d, FieldID fid, PrivilegeMode mode);
     public:
       Runtime *const runtime;
       TaskContext *const context;
@@ -451,7 +540,7 @@ namespace Legion {
       RtUserEvent done_event;
       std::vector<int> stage_notifications;
       std::vector<bool> sent_stages;
-    };
+    }; 
 
     /**
      * \class ProcessorManager
@@ -481,6 +570,15 @@ namespace Legion {
       public:
         TaskOp *op;
       };
+      struct DeferMapperSchedulerArgs : 
+        public LgTaskArgs<DeferMapperSchedulerArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_DEFER_MAPPER_SCHEDULER_TASK_ID;
+      public:
+        ProcessorManager *proxy_this;
+        MapperID map_id;
+        RtEvent deferral_event;
+      };
       struct MapperMessage {
       public:
         MapperMessage(void)
@@ -497,9 +595,8 @@ namespace Legion {
       };
     public:
       ProcessorManager(Processor proc, Processor::Kind proc_kind,
-                       Runtime *rt,
-                       unsigned width, unsigned default_mappers,  
-                       unsigned max_steals, bool no_steal, bool replay);
+                       Runtime *rt, unsigned default_mappers,  
+                       bool no_steal, bool replay);
       ProcessorManager(const ProcessorManager &rhs);
       ~ProcessorManager(void);
     public:
@@ -507,6 +604,7 @@ namespace Legion {
     public:
       void prepare_for_shutdown(void);
     public:
+      void startup_mappers(void);
       void add_mapper(MapperID mid, MapperManager *m, 
                       bool check, bool own, bool skip_replay = false);
       void replace_default_mapper(MapperManager *m, bool own);
@@ -514,6 +612,8 @@ namespace Legion {
     public:
       void perform_scheduling(void);
       void launch_task_scheduler(void);
+      void notify_deferred_mapper(MapperID map_id, RtEvent deferred_event);
+      static void handle_defer_mapper(const void *args);
     public:
       void activate_context(InnerContext *context);
       void deactivate_context(InnerContext *context);
@@ -524,7 +624,7 @@ namespace Legion {
       void process_advertisement(Processor advertiser, MapperID mid);
     public:
       void add_to_ready_queue(TaskOp *op);
-      void add_to_local_ready_queue(Operation *op);
+      void add_to_local_ready_queue(Operation *op, LgPriority priority);
     public:
       inline void find_visible_memories(std::set<Memory> &visible) const
         { visible = visible_memories; }
@@ -534,15 +634,14 @@ namespace Legion {
     protected:
       void increment_active_contexts(void);
       void decrement_active_contexts(void);
+    protected:
+      void increment_active_mappers(void);
+      void decrement_active_mappers(void);
     public:
       // Immutable state
       Runtime *const runtime;
       const Processor local_proc;
       const Processor::Kind proc_kind;
-      // Effective super-scalar width of the runtime
-      const unsigned superscalar_width;
-      // Maximum number of outstanding steals permitted by any mapper
-      const unsigned max_outstanding_steals;
       // Is stealing disabled 
       const bool stealing_disabled;
       // are we doing replay execution
@@ -551,36 +650,35 @@ namespace Legion {
       // Local queue state
       Reservation local_queue_lock;
       unsigned next_local_index;
-      std::vector<RtEvent> local_scheduler_preconditions;
     protected:
       // Scheduling state
       Reservation queue_lock;
       bool task_scheduler_enabled;
       unsigned total_active_contexts;
+      unsigned total_active_mappers;
       struct ContextState {
       public:
         ContextState(void)
-          : active(false), owned_tasks(0) { }
+          : owned_tasks(0), active(false) { }
       public:
-        bool active;
         unsigned owned_tasks;
+        bool active;
       };
       std::vector<ContextState> context_states;
     protected:
-      // For each mapper, a list of tasks that are ready to map
-      std::map<MapperID,std::list<TaskOp*> > ready_queues;
       // Mapper objects
       std::map<MapperID,std::pair<MapperManager*,bool/*own*/> > mappers;
-      // For each mapper, the set of processors to which it
-      // has outstanding steal requests
-      std::map<MapperID,std::set<Processor> > outstanding_steal_requests;
-      // Failed thiefs to notify when tasks become available
-      std::multimap<MapperID,Processor> failed_thiefs;
+      // For each mapper something to track its state
+      struct MapperState {
+      public:
+        std::list<TaskOp*> ready_queue;
+        RtEvent deferral_event;
+        bool added_tasks;
+      };
+      // State for each mapper for scheduling purposes
+      std::map<MapperID,MapperState> mapper_states;
       // Reservations for accessing mappers
       Reservation mapper_lock;
-      // Reservations for stealing and thieving
-      Reservation stealing_lock;
-      Reservation thieving_lock;
       // The set of visible memories from this processor
       std::set<Memory> visible_memories;
     };
@@ -750,14 +848,14 @@ namespace Legion {
       PhysicalManager* find_and_record(PhysicalManager *manager, 
                                     const LayoutConstraintSet &constraints,
                                     const std::vector<LogicalRegion> &regions,
-                                    const std::set<PhysicalManager*> &cands,
+                                    std::set<PhysicalManager*> &candidates,
                                     bool acquire, MapperID mapper_id, 
                                     Processor proc, GCPriority priority,
                                     bool tight_region_bounds, bool remote);
       PhysicalManager* find_and_record(PhysicalManager *manager, 
                                     LayoutConstraints *constraints,
                                     const std::vector<LogicalRegion> &regions,
-                                    const std::set<PhysicalManager*> &cands,
+                                    std::set<PhysicalManager*> &candidates,
                                     bool acquire, MapperID mapper_id, 
                                     Processor proc, GCPriority priority,
                                     bool tight_region_bounds, bool remote);
@@ -1248,12 +1346,15 @@ namespace Legion {
       void update_constraints(Deserializer &derez);
       void release_remote_instances(void);
     public:
-      bool entails(LayoutConstraints *other_constraints);
-      bool entails(const LayoutConstraintSet &other) const;
-      bool conflicts(LayoutConstraints *other_constraints);
-      bool conflicts(const LayoutConstraintSet &other) const;
-      bool entails_without_pointer(LayoutConstraints *other);
-      bool entails_without_pointer(const LayoutConstraintSet &other) const;
+      bool entails(LayoutConstraints *other_constraints, unsigned total_dims);
+      bool entails(const LayoutConstraintSet &other, unsigned total_dims) const;
+      bool conflicts(LayoutConstraints *other_constraints, unsigned total_dims);
+      bool conflicts(const LayoutConstraintSet &other, 
+                     unsigned total_dims) const;
+      bool entails_without_pointer(LayoutConstraints *other,
+                                   unsigned total_dims);
+      bool entails_without_pointer(const LayoutConstraintSet &other,
+                                   unsigned total_dims) const;
     public:
       static AddressSpaceID get_owner_space(LayoutConstraintID layout_id,
                                             Runtime *runtime);
@@ -1294,6 +1395,7 @@ namespace Legion {
       virtual LogicalRegion project(const Mappable *mappable, unsigned index,
                                     LogicalPartition upper_bound,
                                     const DomainPoint &point);
+      virtual bool is_exclusive(void) const;
       virtual unsigned get_depth(void) const;
     };
 
@@ -1449,195 +1551,182 @@ namespace Legion {
       void register_static_projections(void);
       void initialize_legion_prof(void);
       void initialize_mappers(void);
+      void startup_mappers(void);
       void finalize_runtime(void);
       void launch_top_level_task(Processor target);
       ApEvent launch_mapper_task(Mapper *mapper, Processor proc, 
                                  Processor::TaskFuncID tid,
                                  const TaskArgument &arg, MapperID map_id);
-      void process_mapper_task_result(const MapperTaskArgs *args);
+      void process_mapper_task_result(const MapperTaskArgs *args); 
     public:
-      IndexSpace create_index_space(Context ctx, size_t max_num_elmts);
-      IndexSpace create_index_space(Context ctx, Domain domain);
-      IndexSpace create_index_space(Context ctx, 
-                                    const std::set<Domain> &domains);
+      IndexSpace create_index_space(Context ctx, const void *realm_is,
+                                    TypeTag type_tag);
+      IndexSpace union_index_spaces(Context ctx, 
+                                    const std::vector<IndexSpace> &spaces);
+      IndexSpace intersect_index_spaces(Context ctx,
+                                    const std::vector<IndexSpace> &spaces);
+      IndexSpace subtract_index_spaces(Context ctx,
+                                    IndexSpace left, IndexSpace right);
       void destroy_index_space(Context ctx, IndexSpace handle);
       // Called from deletion op
       void finalize_index_space_destroy(IndexSpace handle);
     public:
-      IndexPartition create_index_partition(Context ctx, IndexSpace parent,
-                                            const Domain &color_space,
-                                            const PointColoring &coloring,
-                                            PartitionKind part_kind,
-                                            int color, bool allocable);
-      IndexPartition create_index_partition(Context ctx, IndexSpace parent,
-                                            const Coloring &coloring,
-                                            bool disjoint,
-                                            int part_color);
-      IndexPartition create_index_partition(Context ctx, IndexSpace parent,
-                                            const Domain &color_space,
-                                            const DomainPointColoring &coloring,
-                                            PartitionKind part_kind, int color);
-      IndexPartition create_index_partition(Context ctx, IndexSpace parent,
-                                            Domain color_space,
-                                            const DomainColoring &coloring,
-                                            bool disjoint,
-                                            int part_color);
-      IndexPartition create_index_partition(Context ctx, IndexSpace parent,
-                                            const Domain &color_space,
-                                       const MultiDomainPointColoring &coloring,
-                                            PartitionKind part_kind, int color);
-      IndexPartition create_index_partition(Context ctx, IndexSpace parent,
-                                            Domain color_space,
-                                            const MultiDomainColoring &coloring,
-                                            bool disjoint, 
-                                            int part_color);
-      IndexPartition create_index_partition(Context ctx, IndexSpace parent,
-      LegionRuntime::Accessor::RegionAccessor<
-        LegionRuntime::Accessor::AccessorType::Generic> field_accessor,
-                                                        int part_color);
       void destroy_index_partition(Context ctx, IndexPartition handle);
       // Called from deletion op
       void finalize_index_partition_destroy(IndexPartition handle);
     public:
-      // Helper methods for partition construction
-      void validate_unstructured_disjointness(IndexPartition pid,
-                                  const std::map<DomainPoint,Domain> &domains);
-      void validate_structured_disjointness(IndexPartition pid,
-                                  const std::map<DomainPoint,Domain> &domains);
-      void validate_multi_structured_disjointness(IndexPartition pid,
-                       const std::map<DomainPoint,std::set<Domain> > &domains);
-      Domain construct_convex_hull(const std::set<Domain> &domains);
-    public:
       IndexPartition create_equal_partition(Context ctx, IndexSpace parent,
-                                            const Domain &color_space, 
-                                            size_t granuarlity,
-                                            int color, bool allocable);
-      IndexPartition create_weighted_partition(Context ctx, IndexSpace parent,
-                                            const Domain &color_space,
-                                      const std::map<DomainPoint,int> &weights,
-                                            size_t granularity, int color,
-                                            bool allocable);
+                                            IndexSpace color_space, 
+                                            size_t granuarlity, Color color);
       IndexPartition create_partition_by_union(Context ctx, IndexSpace parent,
                                                IndexPartition handle1,
                                                IndexPartition handle2,
-                                               PartitionKind kind,
-                                               int color, bool allocable);
+                                               IndexSpace color_space,
+                                               PartitionKind kind, Color color);
       IndexPartition create_partition_by_intersection(Context ctx, 
                                                IndexSpace parent,
                                                IndexPartition handle1,
                                                IndexPartition handle2,
-                                               PartitionKind kind,
-                                               int color, bool allocable);
+                                               IndexSpace color_space,
+                                               PartitionKind kind, Color color);
       IndexPartition create_partition_by_difference(Context ctx, 
                                                IndexSpace parent,
                                                IndexPartition handle1,
                                                IndexPartition handle2,
-                                               PartitionKind kind,
-                                               int color, bool allocable);
-      void create_cross_product_partition(Context ctx, 
-                                          IndexPartition handle1,
-                                          IndexPartition handle2,
-                              std::map<DomainPoint,IndexPartition> &handles,
-                                          PartitionKind kind,
-                                          int color, bool allocable);
+                                               IndexSpace color_space,
+                                               PartitionKind kind, Color color);
+      Color create_cross_product_partitions(Context ctx, 
+                                            IndexPartition handle1,
+                                            IndexPartition handle2,
+                                std::map<IndexSpace,IndexPartition> &handles,
+                                            PartitionKind kind, Color color);
+      void create_association(Context ctx,
+                              LogicalRegion domain,
+                              LogicalRegion domain_parent,
+                              FieldID domain_fid,
+                              IndexSpace range,
+                              MapperID id, MappingTagID tag);
+      IndexPartition create_restricted_partition(Context ctx,
+                                                 IndexSpace parent,
+                                                 IndexSpace color_space,
+                                                 const void *transform,
+                                                 size_t transform_size,
+                                                 const void *extent,
+                                                 size_t extent_size,
+                                                 PartitionKind part_kind,
+                                                 Color color);
       IndexPartition create_partition_by_field(Context ctx, 
                                                LogicalRegion handle,
                                                LogicalRegion parent,
                                                FieldID fid,
-                                               const Domain &color_space,
-                                               int color, bool allocable);
+                                               IndexSpace color_space,
+                                               Color color,
+                                               MapperID id, MappingTagID tag);
       IndexPartition create_partition_by_image(Context ctx,
                                                IndexSpace handle,
                                                LogicalPartition projection,
                                                LogicalRegion parent,
                                                FieldID fid, 
-                                               const Domain &color_space,
+                                               IndexSpace color_space,
                                                PartitionKind part_kind,
-                                               int color, bool allocable);
+                                               Color color,
+                                               MapperID id, MappingTagID tag);
+      IndexPartition create_partition_by_image_range(Context ctx,
+                                               IndexSpace handle,
+                                               LogicalPartition projection,
+                                               LogicalRegion parent,
+                                               FieldID fid, 
+                                               IndexSpace color_space,
+                                               PartitionKind part_kind,
+                                               Color color,
+                                               MapperID id, MappingTagID tag);
       IndexPartition create_partition_by_preimage(Context ctx,
                                                IndexPartition projection,
                                                LogicalRegion handle,
                                                LogicalRegion parent,
                                                FieldID fid,
-                                               const Domain &color_space,
+                                               IndexSpace color_space,
                                                PartitionKind part_kind,
-                                               int color, bool allocable);
+                                               Color color,
+                                               MapperID id, MappingTagID tag);
+      IndexPartition create_partition_by_preimage_range(Context ctx,
+                                               IndexPartition projection,
+                                               LogicalRegion handle,
+                                               LogicalRegion parent,
+                                               FieldID fid,
+                                               IndexSpace color_space,
+                                               PartitionKind part_kind,
+                                               Color color,
+                                               MapperID id, MappingTagID tag);
       IndexPartition create_pending_partition(Context ctx, IndexSpace parent,
-                                              const Domain &color_space,
+                                              IndexSpace color_space,
                                               PartitionKind part_kind,
-                                              int color, bool allocable);
+                                              Color color);
       IndexSpace create_index_space_union(Context ctx, IndexPartition parent,
-                                          const DomainPoint &color, 
+                                          const void *realm_color, 
+                                          TypeTag type_tag,
                                         const std::vector<IndexSpace> &handles);
       IndexSpace create_index_space_union(Context ctx, IndexPartition parent,
-                                          const DomainPoint &color,
+                                          const void *realm_color,
+                                          TypeTag type_tag,
                                           IndexPartition handle);
       IndexSpace create_index_space_intersection(Context ctx, 
                                                  IndexPartition parent,
-                                                 const DomainPoint &color,
+                                                 const void *realm_color,
+                                                 TypeTag type_tag,
                                        const std::vector<IndexSpace> &handles);
       IndexSpace create_index_space_intersection(Context ctx,
                                                  IndexPartition parent,
-                                                 const DomainPoint &color,
+                                                 const void *realm_color,
+                                                 TypeTag type_tag,
                                                  IndexPartition handle); 
       IndexSpace create_index_space_difference(Context ctx, 
                                                IndexPartition parent,
-                                               const DomainPoint &color,
+                                               const void *realm_color,
+                                               TypeTag type_tag,
                                                IndexSpace initial,
                                        const std::vector<IndexSpace> &handles);
     public:
       IndexPartition get_index_partition(Context ctx, IndexSpace parent, 
                                          Color color);
       IndexPartition get_index_partition(IndexSpace parent, Color color);
-      IndexPartition get_index_partition(Context ctx, IndexSpace parent,
-                                         const DomainPoint &color);
-      IndexPartition get_index_partition(IndexSpace parent,
-                                         const DomainPoint &color);
-      bool has_index_partition(Context ctx, IndexSpace parent,
-                               const DomainPoint &color);
-      bool has_index_partition(IndexSpace parent, 
-                               const DomainPoint &color);
-      IndexSpace get_index_subspace(Context ctx, IndexPartition p, 
-                                    Color color); 
-      IndexSpace get_index_subspace(IndexPartition p, Color c);
+      bool has_index_partition(Context ctx, IndexSpace parent, Color color);
+      bool has_index_partition(IndexSpace parent, Color color); 
       IndexSpace get_index_subspace(Context ctx, IndexPartition p,
-                                    const DomainPoint &color);
-      IndexSpace get_index_subspace(IndexPartition p, const DomainPoint &c);
+                                    const void *realm_color, TypeTag type_tag);
+      IndexSpace get_index_subspace(IndexPartition p, 
+                                    const void *realm_color, TypeTag type_tag);
       bool has_index_subspace(Context ctx, IndexPartition p,
-                              const DomainPoint &color);
+                              const void *realm_color, TypeTag type_tag);
       bool has_index_subspace(IndexPartition p, 
-                              const DomainPoint &color);
-      bool has_multiple_domains(Context ctx, IndexSpace handle);
-      bool has_multiple_domains(IndexSpace handle);
-      Domain get_index_space_domain(Context ctx, IndexSpace handle);
-      Domain get_index_space_domain(IndexSpace handle);
-      void get_index_space_domains(Context ctx, IndexSpace handle,
-                                   std::vector<Domain> &domains);
-      void get_index_space_domains(IndexSpace handle,
-                                   std::vector<Domain> &domains);
+                              const void *realm_color, TypeTag type_tag);
+      void get_index_space_domain(Context ctx, IndexSpace handle,
+                                  void *realm_is, TypeTag type_tag);
+      void get_index_space_domain(IndexSpace handle, 
+                                  void *realm_is, TypeTag type_tag);
       Domain get_index_partition_color_space(Context ctx, IndexPartition p);
       Domain get_index_partition_color_space(IndexPartition p);
+      void get_index_partition_color_space(IndexPartition p, 
+                                           void *realm_is, TypeTag type_tag);
+      IndexSpace get_index_partition_color_space_name(Context ctx,
+                                                      IndexPartition p);
+      IndexSpace get_index_partition_color_space_name(IndexPartition p);
       void get_index_space_partition_colors(Context ctx, IndexSpace handle,
                                             std::set<Color> &colors);
       void get_index_space_partition_colors(IndexSpace handle,
                                             std::set<Color> &colors);
-      void get_index_space_partition_colors(Context ctx, IndexSpace handle,
-                                            std::set<DomainPoint> &colors);
-      void get_index_space_partition_colors(IndexSpace handle,
-                                            std::set<DomainPoint> &colors);
       bool is_index_partition_disjoint(Context ctx, IndexPartition p);
       bool is_index_partition_disjoint(IndexPartition p);
       bool is_index_partition_complete(Context ctx, IndexPartition p);
       bool is_index_partition_complete(IndexPartition p);
-      Color get_index_space_color(Context ctx, IndexSpace handle);
-      Color get_index_space_color(IndexSpace handle);
+      void get_index_space_color_point(Context ctx, IndexSpace handle,
+                                       void *realm_color, TypeTag type_tag);
+      void get_index_space_color_point(IndexSpace handle,
+                                       void *realm_color, TypeTag type_tag);
       DomainPoint get_index_space_color_point(Context ctx, IndexSpace handle);
       DomainPoint get_index_space_color_point(IndexSpace handle);
       Color get_index_partition_color(Context ctx, IndexPartition handle);
       Color get_index_partition_color(IndexPartition handle);
-      DomainPoint get_index_partition_color_point(Context ctx, 
-                                                  IndexPartition handle);
-      DomainPoint get_index_partition_color_point(IndexPartition handle);
       IndexSpace get_parent_index_space(Context ctx, IndexPartition handle);
       IndexSpace get_parent_index_space(IndexPartition handle);
       bool has_parent_index_partition(Context ctx, IndexSpace handle);
@@ -1649,9 +1738,8 @@ namespace Legion {
       unsigned get_index_partition_depth(Context ctx, IndexPartition handle);
       unsigned get_index_partition_depth(IndexPartition handle);
     public:
-      ptr_t safe_cast(Context ctx, ptr_t pointer, LogicalRegion region);
-      DomainPoint safe_cast(Context ctx, DomainPoint point, 
-                            LogicalRegion region);
+      bool safe_cast(Context ctx, LogicalRegion region,
+                     const void *realm_point, TypeTag type_tag);
     public:
       FieldSpace create_field_space(Context ctx);
       void destroy_field_space(Context ctx, FieldSpace handle);
@@ -1682,17 +1770,11 @@ namespace Legion {
       LogicalPartition get_logical_partition_by_color(Context ctx, 
                                                       LogicalRegion parent, 
                                                       Color c);
-      LogicalPartition get_logical_partition_by_color(Context ctx,
-                                                      LogicalRegion parent,
-                                                      const DomainPoint &c);
       LogicalPartition get_logical_partition_by_color(LogicalRegion parent,
                                                       Color c);
-      LogicalPartition get_logical_partition_by_color(LogicalRegion parent,
-                                                      const DomainPoint &c);
       bool has_logical_partition_by_color(Context ctx, LogicalRegion parent,
-                                          const DomainPoint &color);
-      bool has_logical_partition_by_color(LogicalRegion parent,
-                                          const DomainPoint &color);
+                                          Color c);
+      bool has_logical_partition_by_color(LogicalRegion parent, Color c);
       LogicalPartition get_logical_partition_by_tree(Context ctx, 
                                                      IndexPartition handle, 
                                                      FieldSpace fspace, 
@@ -1704,20 +1786,19 @@ namespace Legion {
                                           IndexSpace handle);
       LogicalRegion get_logical_subregion(LogicalPartition parent,
                                           IndexSpace handle);
-      LogicalRegion get_logical_subregion_by_color(Context ctx, 
-                                                   LogicalPartition parent, 
-                                                   Color c);
       LogicalRegion get_logical_subregion_by_color(Context ctx,
                                                    LogicalPartition parent,
-                                                   const DomainPoint &c);
+                                                   const void *realm_color,
+                                                   TypeTag type_tag);
       LogicalRegion get_logical_subregion_by_color(LogicalPartition parent,
-                                                   Color c);
-      LogicalRegion get_logical_subregion_by_color(LogicalPartition parent,
-                                                   const DomainPoint &c);
+                                                   const void *realm_color,
+                                                   TypeTag type_tag);
       bool has_logical_subregion_by_color(Context ctx, LogicalPartition parent,
-                                          const DomainPoint &color);
+                                          const void *realm_color, 
+                                          TypeTag type_tag);
       bool has_logical_subregion_by_color(LogicalPartition parent,
-                                          const DomainPoint &color);
+                                          const void *realm_color,
+                                          TypeTag type_tag);
       LogicalRegion get_logical_subregion_by_tree(Context ctx, 
                                                   IndexSpace handle, 
                                                   FieldSpace fspace, 
@@ -1725,16 +1806,15 @@ namespace Legion {
       LogicalRegion get_logical_subregion_by_tree(IndexSpace handle,
                                                   FieldSpace fspace,
                                                   RegionTreeID tid);
-      Color get_logical_region_color(Context ctx, LogicalRegion handle);
-      Color get_logical_region_color(LogicalRegion handle);
+      void get_logical_region_color(Context ctx, LogicalRegion handle,
+                                    void *realm_color, TypeTag type_tag);
+      void get_logical_region_color(LogicalRegion handle, 
+                                    void *realm_color, TypeTag type_tag);
       DomainPoint get_logical_region_color_point(Context ctx, 
                                                  LogicalRegion handle);
       DomainPoint get_logical_region_color_point(LogicalRegion handle);
       Color get_logical_partition_color(Context ctx, LogicalPartition handle);
       Color get_logical_partition_color(LogicalPartition handle);
-      DomainPoint get_logical_partition_color_point(Context ctx, 
-                                                    LogicalPartition handle);
-      DomainPoint get_logical_partition_color_point(LogicalPartition handle);
       LogicalRegion get_parent_logical_region(Context ctx, 
                                               LogicalPartition handle);
       LogicalRegion get_parent_logical_region(LogicalPartition handle);
@@ -1744,7 +1824,6 @@ namespace Legion {
                                                     LogicalRegion handle);
       LogicalPartition get_parent_logical_partition(LogicalRegion handle);
     public:
-      IndexAllocator create_index_allocator(Context ctx, IndexSpace handle);
       FieldAllocator create_field_allocator(Context ctx, FieldSpace handle);
       ArgumentMap create_argument_map(void);
     public:
@@ -1943,6 +2022,7 @@ namespace Legion {
       void send_index_space_node(AddressSpaceID target, Serializer &rez);
       void send_index_space_request(AddressSpaceID target, Serializer &rez);
       void send_index_space_return(AddressSpaceID target, Serializer &rez);
+      void send_index_space_set(AddressSpaceID target, Serializer &rez);
       void send_index_space_child_request(AddressSpaceID target, 
                                           Serializer &rez);
       void send_index_space_child_response(AddressSpaceID target,
@@ -1960,10 +2040,6 @@ namespace Legion {
                                               Serializer &rez);
       void send_index_partition_child_response(AddressSpaceID target,
                                                Serializer &rez);
-      void send_index_partition_children_request(AddressSpaceID target,
-                                                 Serializer &rez);
-      void send_index_partition_children_response(AddressSpaceID target,
-                                                  Serializer &rez);
       void send_field_space_node(AddressSpaceID target, Serializer &rez);
       void send_field_space_request(AddressSpaceID target, Serializer &rez);
       void send_field_space_return(AddressSpaceID target, Serializer &rez);
@@ -1978,7 +2054,7 @@ namespace Legion {
       void send_local_field_free(AddressSpaceID target, Serializer &rez);
       void send_local_field_update(AddressSpaceID target, Serializer &rez);
       void send_top_level_region_request(AddressSpaceID target,Serializer &rez);
-      void send_top_level_region_return(AddressSpaceID target, Serializer &rez); 
+      void send_top_level_region_return(AddressSpaceID target, Serializer &rez);
       void send_logical_region_node(AddressSpaceID target, Serializer &rez);
       void send_index_space_destruction(IndexSpace handle, 
                                         AddressSpaceID target);
@@ -2002,6 +2078,8 @@ namespace Legion {
       void send_did_remote_gc_update(AddressSpaceID target, Serializer &rez);
       void send_did_remote_resource_update(AddressSpaceID target,
                                            Serializer &rez);
+      void send_did_remote_invalidate(AddressSpaceID target, Serializer &rez);
+      void send_did_remote_deactivate(AddressSpaceID target, Serializer &rez);
       void send_did_add_create_reference(AddressSpaceID target,Serializer &rez);
       void send_did_remove_create_reference(AddressSpaceID target,
                                             Serializer &rez, bool flush = true);
@@ -2113,6 +2191,7 @@ namespace Legion {
       void handle_index_space_request(Deserializer &derez, 
                                       AddressSpaceID source);
       void handle_index_space_return(Deserializer &derez); 
+      void handle_index_space_set(Deserializer &derez, AddressSpaceID source);
       void handle_index_space_child_request(Deserializer &derez, 
                                             AddressSpaceID source); 
       void handle_index_space_child_response(Deserializer &derez);
@@ -2128,9 +2207,6 @@ namespace Legion {
       void handle_index_partition_child_request(Deserializer &derez,
                                                 AddressSpaceID source);
       void handle_index_partition_child_response(Deserializer &derez);
-      void handle_index_partition_children_request(Deserializer &derez,
-                                                   AddressSpaceID source);
-      void handle_index_partition_children_response(Deserializer &derez);
       void handle_field_space_node(Deserializer &derez, AddressSpaceID source);
       void handle_field_space_request(Deserializer &derez,
                                       AddressSpaceID source);
@@ -2172,6 +2248,8 @@ namespace Legion {
       void handle_did_remote_valid_update(Deserializer &derez);
       void handle_did_remote_gc_update(Deserializer &derez);
       void handle_did_remote_resource_update(Deserializer &derez);
+      void handle_did_remote_invalidate(Deserializer &derez);
+      void handle_did_remote_deactivate(Deserializer &derez);
       void handle_did_create_add(Deserializer &derez);
       void handle_did_create_remove(Deserializer &derez);
       void handle_did_remote_unregister(Deserializer &derez);
@@ -2259,8 +2337,7 @@ namespace Legion {
       void handle_version_state_update_response(Deserializer &derez);
       void handle_version_state_valid_notification(Deserializer &derez,
                                                    AddressSpaceID source);
-      void handle_version_manager_advance(Deserializer &derez,
-                                          AddressSpaceID source);
+      void handle_version_manager_advance(Deserializer &derez);
       void handle_version_manager_invalidate(Deserializer &derez);
       void handle_version_manager_request(Deserializer &derez, 
                                           AddressSpaceID source);
@@ -2338,7 +2415,7 @@ namespace Legion {
       void add_to_dependence_queue(TaskContext *ctx, Processor p,Operation *op);
       void add_to_ready_queue(Processor p, TaskOp *task_op, 
                               RtEvent wait_on = RtEvent::NO_RT_EVENT);
-      void add_to_local_queue(Processor p, Operation *op);
+      void add_to_local_queue(Processor p, Operation *op, LgPriority priority);
     public:
       inline Processor find_utility_group(void) { return utility_group; }
       Processor find_processor_group(const std::vector<Processor> &procs);
@@ -2361,6 +2438,8 @@ namespace Legion {
       void unregister_distributed_collectable(DistributedID did);
       bool has_distributed_collectable(DistributedID did);
       DistributedCollectable* find_distributed_collectable(DistributedID did);
+      DistributedCollectable* find_distributed_collectable(DistributedID did,
+                                                           RtEvent &ready);
       DistributedCollectable* weak_find_distributed_collectable(
                                                            DistributedID did);
       bool find_pending_collectable_location(DistributedID did,void *&location);
@@ -2380,6 +2459,10 @@ namespace Legion {
                                         ReferenceMutator *mutator);
       FutureMapImpl* find_or_create_future_map(DistributedID did, 
                       TaskContext *ctx, ReferenceMutator *mutator);
+      IndexSpace find_or_create_index_launch_space(const Domain &launch_domain);
+      IndexSpace find_or_create_index_launch_space(const Domain &launch_domain,
+                                                   const void *realm_is,
+                                                   TypeTag type_tag);
     public:
       void defer_collect_user(LogicalView *view, ApEvent term_event, 
                               ReferenceMutator *mutator);
@@ -2475,6 +2558,8 @@ namespace Legion {
                                                   bool has_lock = false);
       DependentPartitionOp* get_available_dependent_partition_op(bool need_cont,
                                                   bool has_lock = false);
+      PointDepPartOp*       get_available_point_dep_part_op(bool need_cont,
+                                                  bool has_lock = false);
       FillOp*               get_available_fill_op(bool need_cont,
                                                   bool has_lock = false);
       IndexFillOp*          get_available_index_fill_op(bool need_cont,
@@ -2518,6 +2603,7 @@ namespace Legion {
       void free_epoch_op(MustEpochOp *op);
       void free_pending_partition_op(PendingPartitionOp *op);
       void free_dependent_partition_op(DependentPartitionOp* op);
+      void free_point_dep_part_op(PointDepPartOp *op);
       void free_fill_op(FillOp *op);
       void free_index_fill_op(IndexFillOp *op);
       void free_point_fill_op(PointFillOp *op);
@@ -2586,10 +2672,6 @@ namespace Legion {
                           const void *args, size_t arglen, 
 			  const void *userdata, size_t userlen,
 			  Processor p);
-      static void profiling_mapper_task(
-                          const void *args, size_t arglen, 
-			  const void *userdata, size_t userlen,
-			  Processor p);
       static void launch_top_level(
                           const void *args, size_t arglen, 
 			  const void *userdata, size_t userlen,
@@ -2597,7 +2679,7 @@ namespace Legion {
       static void init_mpi_interop(const void *args, size_t arglen, 
 			  const void *userdata, size_t userlen,
 			  Processor p);
-      static void init_mpi_sync(const void *args, size_t arglen, 
+      static void startup_sync(const void *args, size_t arglen, 
 			  const void *userdata, size_t userlen,
 			  Processor p);
       static void dummy_barrier(const void *args, size_t arglen,
@@ -2609,7 +2691,6 @@ namespace Legion {
       // Internal runtime methods invoked by the above static methods
       // after the find the right runtime instance to call
       void process_schedule_request(Processor p);
-      void process_profiling_task(Processor p, const void *args, size_t arglen);
       void process_message_task(const void *args, size_t arglen);
     public:
       // The Runtime wrapper for this class
@@ -2719,6 +2800,9 @@ namespace Legion {
       std::map<DistributedID,
         std::pair<DistributedCollectable*,RtUserEvent> > pending_collectables;
     protected:
+      Reservation is_launch_lock;
+      std::map<std::pair<Domain,TypeTag>,IndexSpace> index_launch_spaces;
+    protected:
       Reservation gc_epoch_lock;
       GarbageCollectionEpoch *current_gc_epoch;
       LegionSet<GarbageCollectionEpoch*,
@@ -2820,6 +2904,7 @@ namespace Legion {
       std::deque<MustEpochOp*>          available_epoch_ops;
       std::deque<PendingPartitionOp*>   available_pending_partition_ops;
       std::deque<DependentPartitionOp*> available_dependent_partition_ops;
+      std::deque<PointDepPartOp*>       available_point_dep_part_ops;
       std::deque<FillOp*>               available_fill_ops;
       std::deque<IndexFillOp*>          available_index_fill_ops;
       std::deque<PointFillOp*>          available_point_fill_ops;
@@ -2892,6 +2977,19 @@ namespace Legion {
                       const void *user_data, size_t user_data_size,
                       CodeDescriptor *realm_desc, bool has_ret, 
                       const char *task_name,VariantID vid,bool check_id = true);
+    public:
+      static void report_fatal_message(int code,
+                                       const char *file_name,
+                                       const int line_number,
+                                       const char *message);
+      static void report_error_message(int code,
+                                       const char *file_name,
+                                       const int line_number,
+                                       const char *message);
+      static void report_warning_message(int code,
+                                         const char *file_name, 
+                                         const int line_number,
+                                         const char *message);
 #if defined(PRIVILEGE_CHECKS) || defined(BOUNDS_CHECKS)
     public:
       static const char* find_privilege_task_name(void *impl);
@@ -2915,7 +3013,6 @@ namespace Legion {
       static int initial_task_window_size;
       static unsigned initial_task_window_hysteresis;
       static unsigned initial_tasks_to_schedule;
-      static unsigned superscalar_width;
       static unsigned max_message_size;
       static unsigned gc_epoch_size;
       static unsigned max_local_fields;
@@ -2950,19 +3047,20 @@ namespace Legion {
       static bool logical_logging_only;
       static bool physical_logging_only;
       static bool check_privileges;
-      static bool verify_disjointness;
       static bool bit_mask_logging;
 #endif
       static bool program_order_execution;
       static bool dump_physical_traces;
       static bool no_tracing;
       static bool no_physical_tracing;
+      static bool verify_disjointness;
     public:
       static unsigned num_profiling_nodes;
       static const char* serializer_type;
       static const char* prof_logfile;
       static size_t prof_footprint_threshold;
       static size_t prof_target_latency;
+      static bool slow_debug_ok;
     public:
       static inline ApEvent merge_events(ApEvent e1, ApEvent e2);
       static inline ApEvent merge_events(ApEvent e1, ApEvent e2, ApEvent e3);

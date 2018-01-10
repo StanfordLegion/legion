@@ -1,4 +1,4 @@
-/* Copyright 2017 Stanford University, NVIDIA Corporation
+/* Copyright 2018 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -34,6 +34,18 @@ namespace Realm {
 
     if(clear_cont)
       v.clear();
+  }
+
+  template <typename K, typename V>
+  void delete_container_contents(std::map<K, V *>& m, bool clear_cont = true)
+  {
+    for(typename std::map<K, V *>::iterator it = m.begin();
+	it != m.end();
+	it++)
+      delete it->second;
+
+    if(clear_cont)
+      m.clear();
   }
 
 

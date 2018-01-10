@@ -1,4 +1,4 @@
-/* Copyright 2017 Stanford University, NVIDIA Corporation
+/* Copyright 2018 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,7 +17,7 @@
 #ifndef __LEGION_GARBAGE_COLLECTION__
 #define __LEGION_GARBAGE_COLLECTION__
 
-#include "legion_types.h"
+#include "legion/legion_types.h"
 
 // This is a macro for enabling the use of remote references
 // on distributed collectable objects. Remote references 
@@ -34,6 +34,24 @@
 
 namespace Legion {
   namespace Internal {
+
+    enum DistCollectableType {
+      INSTANCE_MANAGER_DC = 0x1,
+      REDUCTION_FOLD_DC = 0x2,
+      REDUCTION_LIST_DC = 0x3,
+      MATERIALIZED_VIEW_DC = 0x4,
+      REDUCTION_VIEW_DC = 0x5,
+      COMPOSITE_VIEW_DC = 0x6,
+      FILL_VIEW_DC = 0x7,
+      PHI_VIEW_DC = 0x8,
+      VERSION_STATE_DC = 0x9,
+      FUTURE_DC = 0xA,
+      FUTURE_MAP_DC = 0xB,
+      INDEX_TREE_NODE_DC = 0xC,
+      FIELD_SPACE_DC = 0xD,
+      REGION_TREE_NODE_DC = 0xE,
+      DIST_TYPE_LAST_DC,
+    };
 
     enum ReferenceSource {
       FUTURE_HANDLE_REF = 0,
@@ -56,8 +74,11 @@ namespace Legion {
       CONTEXT_REF = 17,
       RESTRICTED_REF = 18,
       VERSION_STATE_TREE_REF = 19,
-      PHYSICAL_TRACE_REF = 20,
-      LAST_SOURCE_REF = 21,
+      PHYSICAL_MANAGER_REF = 20,
+      LOGICAL_VIEW_REF = 21,
+      REGION_TREE_REF = 22,
+      PHYSICAL_TRACE_REF = 23,
+      LAST_SOURCE_REF = 24,
     };
 
     enum ReferenceKind {
@@ -88,6 +109,9 @@ namespace Legion {
       "Context Reference",                          \
       "Restricted Reference",                       \
       "Version State Tree Reference",               \
+      "Physical Manager Reference",                 \
+      "Logical View Reference",                     \
+      "Region Tree Reference",                      \
       "Physical Trace Reference",                   \
     }
 
@@ -236,6 +260,28 @@ namespace Legion {
         ReferenceMutator *const mutator;
         unsigned count;
       };
+      class RemoteInvalidateFunctor {
+      public:
+        RemoteInvalidateFunctor(DistributedCollectable *dc,
+                                ReferenceMutator *m)
+          : source(dc), mutator(m) { }
+      public:
+        inline void apply(AddressSpaceID target);
+      protected:
+        DistributedCollectable *const source;
+        ReferenceMutator *const mutator;
+      };
+      class RemoteDeactivateFunctor {
+      public:
+        RemoteDeactivateFunctor(DistributedCollectable *dc,
+                                ReferenceMutator *m)
+          : source(dc), mutator(m) { }
+      public:
+        inline void apply(AddressSpaceID target);
+      protected:
+        DistributedCollectable *const source;
+        ReferenceMutator *const mutator;
+      };
       class UnregisterFunctor {
       public:
         UnregisterFunctor(Runtime *rt, const DistributedID d,
@@ -335,6 +381,9 @@ namespace Legion {
       virtual void notify_inactive(ReferenceMutator *mutator) = 0;
       virtual void notify_valid(ReferenceMutator *mutator) = 0;
       virtual void notify_invalid(ReferenceMutator *mutator) = 0;
+      // For explicit remote messages
+      virtual void notify_remote_inactive(ReferenceMutator *mutator);
+      virtual void notify_remote_invalid(ReferenceMutator *mutator);
     public:
       inline bool is_owner(void) const { return (owner_space == local_space); }
       inline bool is_registered(void) const { return registered_with_runtime; }
@@ -347,7 +396,8 @@ namespace Legion {
     public:
       // This is for the owner node only
       void register_with_runtime(ReferenceMutator *mutator);
-      RtEvent unregister_with_runtime(VirtualChannelKind vc) const;
+    protected:
+      void unregister_with_runtime(void) const;
       RtEvent send_unregister_messages(VirtualChannelKind vc) const;
     public:
       // This for remote nodes only
@@ -364,6 +414,10 @@ namespace Legion {
                                  unsigned count, bool add);
       void send_remote_resource_update(AddressSpaceID target,
                                        unsigned count, bool add);
+      void send_remote_invalidate(AddressSpaceID target,
+                                  ReferenceMutator *mutator);
+      void send_remote_deactivate(AddressSpaceID target,
+                                  ReferenceMutator *mutator);
 #ifdef USE_REMOTE_REFERENCES
     public:
       ReferenceKind send_create_reference(AddressSpaceID target);
@@ -380,6 +434,10 @@ namespace Legion {
                                               Deserializer &derez);
       static void handle_did_remote_resource_update(Runtime *runtime,
                                                     Deserializer &derez);
+      static void handle_did_remote_invalidate(Runtime *runtime,
+                                               Deserializer &derez);
+      static void handle_did_remote_deactivate(Runtime *runtime,
+                                               Deserializer &derez);
     public:
       static void handle_did_add_create(Runtime *runtime, 
                                         Deserializer &derez);
@@ -500,6 +558,22 @@ namespace Legion {
     {
       AutoLock gc(gc_lock,1,false/*exclusive*/); 
       remote_instances.map(functor); 
+    }
+
+    //--------------------------------------------------------------------------
+    inline void DistributedCollectable::RemoteInvalidateFunctor::apply(
+                                                          AddressSpaceID target)
+    //--------------------------------------------------------------------------
+    {
+      source->send_remote_invalidate(target, mutator);
+    }
+
+    //--------------------------------------------------------------------------
+    inline void DistributedCollectable::RemoteDeactivateFunctor::apply(
+                                                          AddressSpaceID target)
+    //--------------------------------------------------------------------------
+    {
+      source->send_remote_deactivate(target, mutator);
     }
 
     //--------------------------------------------------------------------------

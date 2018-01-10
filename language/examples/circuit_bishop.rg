@@ -1,4 +1,4 @@
--- Copyright 2017 Stanford University
+-- Copyright 2018 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -373,7 +373,7 @@ where
 do
   var dt : float = DELTAT
   var recip_dt : float = 1.0 / dt
-  __demand(__vectorize)
+  --__demand(__vectorize)
   for w in rw do
     var temp_v : float[WIRE_SEGMENTS + 1]
     var temp_i : float[WIRE_SEGMENTS]

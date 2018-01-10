@@ -1,4 +1,4 @@
-/* Copyright 2017 Stanford University, NVIDIA Corporation
+/* Copyright 2018 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,7 +16,7 @@
 // command-line processing helpers
 
 // nop, but helps IDEs
-#include "cmdline.h"
+#include "realm/cmdline.h"
 
 namespace Realm {
 
@@ -39,6 +39,15 @@ namespace Realm {
 							  bool keep /*= false*/)
   {
     options.push_back(new StringCommandLineOption(optname, keep, target));
+    return *this;
+  }
+
+  inline CommandLineParser& CommandLineParser::add_option_string(const std::string& optname,
+							  char *target,
+							  size_t maxlen,
+							  bool keep /*= false*/)
+  {
+    options.push_back(new StringCommandLineOption(optname, keep, target, maxlen));
     return *this;
   }
 

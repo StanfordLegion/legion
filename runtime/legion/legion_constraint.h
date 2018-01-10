@@ -1,4 +1,4 @@
-/* Copyright 2017 Stanford University, NVIDIA Corporation
+/* Copyright 2018 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,7 +20,7 @@
  * \file legion_constraint.h
  */
 
-#include "legion_types.h"
+#include "legion/legion_types.h"
 
 namespace Legion {
 
@@ -329,11 +329,13 @@ namespace Legion {
       OrderingConstraint(const std::vector<DimensionKind> &ordering,
                          bool contiguous);
     public:
-      bool entails(const OrderingConstraint &other) const;
-      bool conflicts(const OrderingConstraint &other) const;
+      bool entails(const OrderingConstraint &other, unsigned total_dims) const;
+      bool conflicts(const OrderingConstraint &other,unsigned total_dims) const;
     public:
       void serialize(Serializer &rez) const;
       void deserialize(Deserializer &derez);
+    public:
+      static bool is_skip_dimension(DimensionKind dim, unsigned total_dims);
     public:
       std::vector<DimensionKind> ordering;
       bool contiguous;
@@ -493,8 +495,10 @@ namespace Legion {
       LayoutConstraintSet&
         add_constraint(const PointerConstraint &constraint);
     public:
-      bool entails(const LayoutConstraintSet &other) const;
-      bool conflicts(const LayoutConstraintSet &other) const;
+      bool entails(const LayoutConstraintSet &other, 
+                   unsigned total_dims = 0) const;
+      bool conflicts(const LayoutConstraintSet &other,
+                     unsigned total_dims = 0) const;
     public:
       void serialize(Serializer &rez) const;
       void deserialize(Deserializer &derez);

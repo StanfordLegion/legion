@@ -1,4 +1,4 @@
-/* Copyright 2017 Stanford University
+/* Copyright 2018 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -48,7 +48,7 @@ int main(int argc, char **argv)
   // runtime can potentially run must be registered with the runtime.
   // A task may have multiple variants (versions of the same code for
   // different processors, data layouts, etc.) Each variant is
-  // registered described by a TaskVariantRegistrar object.  The
+  // registered by a TaskVariantRegistrar object.  The
   // registrar takes a number of constraints which determine where it
   // is valid to run the task variant.  The ProcessorConstraint
   // specifies the kind of processor on which the task can be run:
@@ -63,7 +63,7 @@ int main(int argc, char **argv)
   }
 
   // Now we're ready to start the runtime, so tell it to begin the
-  // execution.  We'll never return from this call, but its return 
-  // signature will return an int to satisfy the type checker.
+  // execution.  We'll only return from this call once the Legion
+  // program is done executing.
   return Runtime::start(argc, argv);
 }

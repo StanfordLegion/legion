@@ -1,4 +1,4 @@
-/* Copyright 2017 Stanford University, NVIDIA Corporation
+/* Copyright 2018 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,15 +18,15 @@
 #ifndef REALM_FAULTS_H
 #define REALM_FAULTS_H
 
-#include "bytearray.h"
-#include "event.h"
+#include "realm/bytearray.h"
+#include "realm/event.h"
 
 #include <vector>
 #include <iostream>
 
 // we need intptr_t - make it if needed
 #if __cplusplus >= 201103L
-#include <cstdint>
+#include <stdint.h>
 #else
 #include <stddef.h>
 typedef ptrdiff_t intptr_t;
@@ -142,6 +142,6 @@ namespace Realm {
 
 }; // namespace Realm
 
-#include "faults.inl"
+#include "realm/faults.inl"
 
 #endif // REALM_FAULTS_H

@@ -1,4 +1,4 @@
--- Copyright 2017 Stanford University
+-- Copyright 2018 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -40,13 +40,13 @@ terra sub_task(task : c.legion_task_t,
   var p1 = @[&c.legion_ptr_t](c.legion_task_get_args(task))
   c.printf("got arg %d\n", p1)
 
-  var a1 = c.legion_physical_region_get_field_accessor_generic(
+  var a1 = c.legion_physical_region_get_field_accessor_array_1d(
     regions[0], FID_1)
 
   -- FIMXE: This has privilege problems.
   -- c.reduce_plus_int32(a1, p1, 123)
 
-  c.legion_accessor_generic_destroy(a1)
+  c.legion_accessor_array_1d_destroy(a1)
 end
 
 terra top_level_task(task : c.legion_task_t,
@@ -63,14 +63,13 @@ terra top_level_task(task : c.legion_task_t,
   var ptr1 : c.legion_ptr_t, ptr2 : c.legion_ptr_t
   var f1 : c.legion_field_id_t, f2 : c.legion_field_id_t
   do
-    var isa = c.legion_index_allocator_create(runtime, ctx, is)
     var fsa = c.legion_field_allocator_create(runtime, ctx, fs)
 
     c.printf("created region (%d,%d,%d)\n",
                   r.tree_id, r.index_space.id, r.field_space.id)
 
-    ptr1 = c.legion_index_allocator_alloc(isa, 1)
-    ptr2 = c.legion_index_allocator_alloc(isa, 1)
+    ptr1 = [c.legion_ptr_t] { value = 0 }
+    ptr2 = [c.legion_ptr_t] { value = 1 }
 
     c.printf("allocated pointers %d %d\n",
                   ptr1.value, ptr2.value)
@@ -82,7 +81,6 @@ terra top_level_task(task : c.legion_task_t,
                   f1, f2)
 
     c.legion_field_allocator_destroy(fsa)
-    c.legion_index_allocator_destroy(isa)
   end
 
   var coloring = c.legion_coloring_create()

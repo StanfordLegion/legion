@@ -1,4 +1,4 @@
-/* Copyright 2017 Stanford University, NVIDIA Corporation
+/* Copyright 2018 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13,16 +13,16 @@
  * limitations under the License.
  */
 
-#include "hdf5_module.h"
+#include "realm/hdf5/hdf5_module.h"
 
-#include "hdf5_internal.h"
+#include "realm/hdf5/hdf5_internal.h"
 
-#include "logging.h"
-#include "cmdline.h"
-#include "threads.h"
-#include "runtime_impl.h"
-#include "utils.h"
-#include "inst_impl.h"
+#include "realm/logging.h"
+#include "realm/cmdline.h"
+#include "realm/threads.h"
+#include "realm/runtime_impl.h"
+#include "realm/utils.h"
+#include "realm/inst_impl.h"
 
 namespace Realm {
 
@@ -153,8 +153,8 @@ namespace Realm {
     {
       Module::create_dma_channels(runtime);
 
-      runtime->add_dma_channel(new HDF5WriteChannel(hdf5mem));
-      runtime->add_dma_channel(new HDF5ReadChannel(hdf5mem));
+      //runtime->add_dma_channel(new HDF5WriteChannel(hdf5mem));
+      //runtime->add_dma_channel(new HDF5ReadChannel(hdf5mem));
     }
 
     // create any code translators provided by the module (default == do nothing)
@@ -183,73 +183,6 @@ namespace Realm {
 	  log_hdf5.error() << "failed to free memory in HDF5 node " << it->first << ": ptr=" << it->second;
       }
 #endif
-    }
-
-    ////////////////////////////////////////////////////////////////////////
-    //
-    // hack
-
-    RegionInstance create_hdf5_instance(Domain dom,
-					const ProfilingRequestSet& prs,
-					const char *file_name,
-					const std::vector<size_t> &field_sizes,
-					const std::vector<const char*> &field_files,
-					bool read_only)
-    {
-      HDF5Memory *hdf_mem = (HDF5Memory *)(hdf5mod->hdf5mem);
-      size_t elem_size = 0;
-      for(std::vector<size_t>::const_iterator it = field_sizes.begin();
-	  it != field_sizes.end();
-	  it++)
-	elem_size += *it;
-      
-      size_t num_elements;
-      int linearization_bits[RegionInstanceImpl::MAX_LINEARIZATION_LEN];
-      assert(dom.get_dim() > 0);
-      {
-        LegionRuntime::Arrays::Rect<1> inst_extent;
-        switch(dom.get_dim()) {
-	case 1:
-	  {
-	    LegionRuntime::Arrays::FortranArrayLinearization<1> cl(dom.get_rect<1>(), 0);
-	    DomainLinearization dl = DomainLinearization::from_mapping<1>(LegionRuntime::Arrays::Mapping<1, 1>::new_dynamic_mapping(cl));
-	    inst_extent = cl.image_convex(dom.get_rect<1>());
-	    dl.serialize(linearization_bits);
-	    break;
-	  }
-
-	case 2:
-	  {
-	    LegionRuntime::Arrays::FortranArrayLinearization<2> cl(dom.get_rect<2>(), 0);
-	    DomainLinearization dl = DomainLinearization::from_mapping<2>(LegionRuntime::Arrays::Mapping<2, 1>::new_dynamic_mapping(cl));
-	    inst_extent = cl.image_convex(dom.get_rect<2>());
-	    dl.serialize(linearization_bits);
-	    break;
-	  }
-
-	case 3:
-	  {
-	    LegionRuntime::Arrays::FortranArrayLinearization<3> cl(dom.get_rect<3>(), 0);
-	    DomainLinearization dl = DomainLinearization::from_mapping<3>(LegionRuntime::Arrays::Mapping<3, 1>::new_dynamic_mapping(cl));
-	    inst_extent = cl.image_convex(dom.get_rect<3>());
-	    dl.serialize(linearization_bits);
-	    break;
-	  }
-
-	default: assert(0);
-	}
-
-	num_elements = inst_extent.volume();
-      }
-
-      size_t inst_bytes = elem_size * num_elements;
-      RegionInstance i = hdf_mem->create_instance(dom.get_index_space(), linearization_bits, inst_bytes, 
-                                                  1/*block_size*/, elem_size, field_sizes,
-                                                  0 /*redop_id*/, -1/*list_size*/, prs, RegionInstance::NO_INST,
-                                                  file_name, field_files, dom, read_only);
-      log_hdf5.info("instance created: region=" IDFMT " memory=" IDFMT " id=" IDFMT " bytes=%zd",
-	       dom.is_id, hdf_mem->me.id, i.id, inst_bytes);
-      return i;
     }
 
 

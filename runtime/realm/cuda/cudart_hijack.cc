@@ -11,7 +11,7 @@
 //  by any other parts of Realm, or it will mess up the ability to let an app link
 //  against the real libcudart.so
 
-#include "cudart_hijack.h"
+#include "realm/cuda/cudart_hijack.h"
 
 #include "realm/cuda/cuda_module.h"
 #include "realm/logging.h"
@@ -54,7 +54,8 @@ namespace Realm {
 	std::cout << "unregistering fat binary " << fat_bin << ", handle = " << handle << std::endl;
 #endif
 	GlobalRegistrations::unregister_fat_binary(fat_bin);
-	// TODO: free storage for handle?
+
+	delete handle;
       }
 
       void __cudaRegisterVar(void **handle,

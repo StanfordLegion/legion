@@ -1,4 +1,4 @@
-/* Copyright 2017 Stanford University
+/* Copyright 2018 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -26,8 +26,6 @@
 #include "cgmapper.h"
 
 using namespace Legion;
-using namespace LegionRuntime::Accessor;
-using namespace LegionRuntime::Arrays;
 
 Logger log_app("app");
 
@@ -63,60 +61,60 @@ enum {
   SIDE_PLUS = 1,
 };
 
-template <unsigned DIM>
+template <int DIM>
 static int volume(const Point<DIM>& p)
 {
   int v = 1;
   for(unsigned i = 0; i < DIM; i++)
-    v *= p.x[i];
+    v *= p[i];
   return v;
 }
 
-template <unsigned DIM>
+template <int DIM>
 inline Point<DIM> LEFT(const Point<DIM>& p)
 {
   Point<DIM> p2(p);
-  p2.x[0]--;
+  p2[0]--;
   return p2;
 }
 
-template <unsigned DIM>
+template <int DIM>
 inline Point<DIM> RIGHT(const Point<DIM>& p)
 {
   Point<DIM> p2(p);
-  p2.x[0]++;
+  p2[0]++;
   return p2;
 }
 
-template <unsigned DIM>
+template <int DIM>
 inline Point<DIM> UP(const Point<DIM>& p)
 {
   Point<DIM> p2(p);
-  p2.x[1]--;
+  p2[1]--;
   return p2;
 }
 
-template <unsigned DIM>
+template <int DIM>
 inline Point<DIM> DOWN(const Point<DIM>& p)
 {
   Point<DIM> p2(p);
-  p2.x[1]++;
+  p2[1]++;
   return p2;
 }
 
-template <unsigned DIM>
+template <int DIM>
 inline Point<DIM> FRONT(const Point<DIM>& p)
 {
   Point<DIM> p2(p);
-  p2.x[2]--;
+  p2[2]--;
   return p2;
 }
 
-template <unsigned DIM>
+template <int DIM>
 inline Point<DIM> BACK(const Point<DIM>& p)
 {
   Point<DIM> p2(p);
-  p2.x[2]++;
+  p2[2]++;
   return p2;
 }
 
@@ -127,8 +125,6 @@ struct BarrierCombineReductionOp {
   typedef PhaseBarrier LHS;
   typedef PhaseBarrier RHS;
   static const PhaseBarrier identity;
-
-  typedef RegionAccessor<AccessorType::ReductionFold<BarrierCombineReductionOp>, RHS> AccType;
 
   static void combine(LHS& lhs, RHS rhs)
   {
@@ -305,21 +301,17 @@ public:
     runtime->attach_name(fs, fid, name);
   }
 
-  template <typename AT>
-  RegionAccessor<AT, T> accessor(const PhysicalRegion& pr)
+  template <PrivilegeMode PRIV>
+  FieldAccessor<PRIV,T,3,coord_t,Realm::AffineAccessor<T,3,coord_t> > accessor(const PhysicalRegion& pr)
   {
     assert(fid != AUTO_GENERATE_ID);
-    return pr.get_field_accessor(fid).template typeify<T>().template convert<AT>();
+    return FieldAccessor<PRIV,T,3,coord_t,Realm::AffineAccessor<T,3,coord_t> >(pr, fid);
   }
 
-  template <typename AT>
-  RegionAccessor<AT, T> fold_accessor(const PhysicalRegion& pr)
+  FieldAccessor<REDUCE,T,3,coord_t,Realm::AffineAccessor<T,3,coord_t> > fold_accessor(const PhysicalRegion& pr, int redop)
   {
     assert(fid != AUTO_GENERATE_ID);
-    std::vector<FieldID> fields;
-    pr.get_fields(fields);
-    assert((fields.size() == 1) && (fields[0] == fid));
-    return pr.get_field_accessor(fid).template typeify<T>().template convert<AT>();
+    return FieldAccessor<REDUCE,T,3,coord_t,Realm::AffineAccessor<T,3,coord_t> >(pr, fid, redop);
   }
 
 protected:
@@ -364,50 +356,50 @@ void top_level_task(const Task *task,
   bool verbose = false;
 
   // default is an 8^3 grid with 8 4^3 blocks
-  grid_dim.x[0] = grid_dim.x[1] = grid_dim.x[2] = 8;
-  block_dim.x[0] = block_dim.x[1] = block_dim.x[2] = 4;
+  grid_dim[0] = grid_dim[1] = grid_dim[2] = 8;
+  block_dim[0] = block_dim[1] = block_dim[2] = 4;
 
   {
     const InputArgs &command_args = Runtime::get_input_args();
     for(int i = 1; i < command_args.argc; i++) {
       if(!strcmp(command_args.argv[i], "-g")) {
 	int g = atoi(command_args.argv[++i]);
-	grid_dim.x[0] = grid_dim.x[1] = grid_dim.x[2] = g;
+	grid_dim[0] = grid_dim[1] = grid_dim[2] = g;
 	continue;
       }
       if(!strcmp(command_args.argv[i], "-gx")) {
 	int g = atoi(command_args.argv[++i]);
-	grid_dim.x[0] = g;
+	grid_dim[0] = g;
 	continue;
       }
       if(!strcmp(command_args.argv[i], "-gy")) {
 	int g = atoi(command_args.argv[++i]);
-	grid_dim.x[1] = g;
+	grid_dim[1] = g;
 	continue;
       }
       if(!strcmp(command_args.argv[i], "-gz")) {
 	int g = atoi(command_args.argv[++i]);
-	grid_dim.x[2] = g;
+	grid_dim[2] = g;
 	continue;
       }
       if(!strcmp(command_args.argv[i], "-b")) {
 	int b = atoi(command_args.argv[++i]);
-	block_dim.x[0] = block_dim.x[1] = block_dim.x[2] = b;
+	block_dim[0] = block_dim[1] = block_dim[2] = b;
 	continue;
       }
       if(!strcmp(command_args.argv[i], "-bx")) {
 	int b = atoi(command_args.argv[++i]);
-	block_dim.x[0] = b;
+	block_dim[0] = b;
 	continue;
       }
       if(!strcmp(command_args.argv[i], "-by")) {
 	int b = atoi(command_args.argv[++i]);
-	block_dim.x[1] = b;
+	block_dim[1] = b;
 	continue;
       }
       if(!strcmp(command_args.argv[i], "-bz")) {
 	int b = atoi(command_args.argv[++i]);
-	block_dim.x[2] = b;
+	block_dim[2] = b;
 	continue;
       }
       if(!strcmp(command_args.argv[i], "-m")) {
@@ -436,33 +428,28 @@ void top_level_task(const Task *task,
   // if the user hasn't set a max, a reasonable upper bound is based on the
   //  manhattan distance across the grid
   if(max_iters == 0)
-    max_iters = 2 * (grid_dim.x[0] + grid_dim.x[1] + grid_dim.x[2]);
+    max_iters = 2 * (grid_dim[0] + grid_dim[1] + grid_dim[2]);
 
   // compute the number of blocks in each direction
   Point<3> blocks;
   for(int i = 0; i < 3; i++) {
-    int g = grid_dim.x[i];
-    int b = block_dim.x[i];
+    int g = grid_dim[i];
+    int b = block_dim[i];
     LOG_ASSERT((b != 0), log_app, "block size cannot be zero (dim=%d)", i);
     LOG_ASSERT(((g % b) == 0), log_app, "block size must evenly divide grid size (dim=%d, grid=%d, block=%d)", i, g, b);
-    blocks.x[i] = g / b;
+    blocks[i] = g / b;
   }
   log_app.print() << "grid pts = " << volume(grid_dim) << ", block pts = " << volume(block_dim) << ", block count = " << volume(blocks);
 
   // define the main grid index space and its partition into blocks
-  IndexSpace is_grid = runtime->create_index_space(ctx,
-						   Domain::from_rect<3>(Rect<3>(Point<3>::ZEROES(),
-										grid_dim - Point<3>::ONES())));
-  Blockify<3> grid2blk_map(block_dim);
-  IndexPartition ip_grid = runtime->create_index_partition(ctx,
-							   is_grid,
-							   grid2blk_map,
-							   0 /*color*/);
+  IndexSpaceT<3> is_grid = runtime->create_index_space(ctx,
+      Rect<3>(Point<3>(0,0,0), grid_dim - Point<3>(1,1,1)));
+  IndexPartition ip_grid = runtime->create_partition_by_blockify(ctx, is_grid, 
+                                                        block_dim, 0/*color*/);
 
   // we also use an index space with an element per block to record things like which shard owns each block
   IndexSpace is_blks = runtime->create_index_space(ctx,
-						   Domain::from_rect<3>(Rect<3>(Point<3>::ZEROES(),
-										blocks - Point<3>::ONES())));
+      Rect<3>(Point<3>(0,0,0), blocks - Point<3>(1,1,1)));
   FieldSpace fs_blks = runtime->create_field_space(ctx);
   fid_owner_shard.allocate(runtime, ctx, fs_blks);
   fid_neighbor_count.allocate(runtime, ctx, fs_blks);
@@ -487,31 +474,31 @@ void top_level_task(const Task *task,
     pr_blks.wait_until_valid();
 
     
-    RegionAccessor<AccessorType::Affine<3>, int> fa_owner = fid_owner_shard.accessor<AccessorType::Affine<3> >(pr_blks);
-    RegionAccessor<AccessorType::Affine<3>, int> fa_neighbors = fid_neighbor_count.accessor<AccessorType::Affine<3> >(pr_blks);
+    const AccessorWDint fa_owner = 
+      fid_owner_shard.accessor<WRITE_DISCARD>(pr_blks);
+    const AccessorWDint fa_neighbors =
+      fid_neighbor_count.accessor<WRITE_DISCARD>(pr_blks);
 
     int num_blks = volume(blocks);
 
     {
       int i = 0;
-      for(GenericPointInRectIterator<3> pir(Rect<3>(Point<3>::ZEROES(),
-						    blocks - Point<3>::ONES()));
-	  pir; ++pir)
-      fa_owner[pir.p] = (i++ * num_shards) / num_blks;
+      for(PointInRectIterator<3> pir(Rect<3>(
+              Point<3>(0,0,0), blocks - Point<3>(1,1,1))); pir(); ++pir)
+      fa_owner[*pir] = (i++ * num_shards) / num_blks;
     }
 
-    for(GenericPointInRectIterator<3> pir(Rect<3>(Point<3>::ZEROES(),
-						  blocks - Point<3>::ONES()));
-	pir; ++pir) {
-      int owner = fa_owner[pir.p];
+    for(PointInRectIterator<3> pir(Rect<3>(
+            Point<3>(0,0,0), blocks - Point<3>(1,1,1))); pir(); ++pir) {
+      int owner = fa_owner[*pir];
       int neighbors = 0;
-      if((pir.p.x[0] > 0) && (owner != fa_owner[LEFT(pir.p)])) neighbors++;
-      if((pir.p.x[0] < blocks.x[0] - 1) && (owner != fa_owner[RIGHT(pir.p)])) neighbors++;
-      if((pir.p.x[1] > 0) && (owner != fa_owner[UP(pir.p)])) neighbors++;
-      if((pir.p.x[1] < blocks.x[1] - 1) && (owner != fa_owner[DOWN(pir.p)])) neighbors++;
-      if((pir.p.x[2] > 0) && (owner != fa_owner[FRONT(pir.p)])) neighbors++;
-      if((pir.p.x[2] < blocks.x[2] - 1) && (owner != fa_owner[BACK(pir.p)])) neighbors++;
-      fa_neighbors[pir.p] = neighbors;
+      if((pir[0] > 0) && (owner != fa_owner[LEFT(*pir)])) neighbors++;
+      if((pir[0] < blocks[0] - 1) && (owner != fa_owner[RIGHT(*pir)])) neighbors++;
+      if((pir[1] > 0) && (owner != fa_owner[UP(*pir)])) neighbors++;
+      if((pir[1] < blocks[1] - 1) && (owner != fa_owner[DOWN(*pir)])) neighbors++;
+      if((pir[2] > 0) && (owner != fa_owner[FRONT(*pir)])) neighbors++;
+      if((pir[2] < blocks[2] - 1) && (owner != fa_owner[BACK(*pir)])) neighbors++;
+      fa_neighbors[*pir] = neighbors;
     }
 
     runtime->unmap_region(ctx, pr_blks);
@@ -530,7 +517,7 @@ void top_level_task(const Task *task,
   PhysicalRegion pr_blks = runtime->map_region(ctx, launcher);
   pr_blks.wait_until_valid();
 
-  RegionAccessor<AccessorType::Affine<3>, int> fa_owner = fid_owner_shard.accessor<AccessorType::Affine<3> >(pr_blks);
+  const AccessorROint fa_owner = fid_owner_shard.accessor<READ_ONLY>(pr_blks);
 
   runtime->fill_field(ctx, lr_blks, lr_blks, fid_ready_barrier, PhaseBarrier());
   runtime->fill_field(ctx, lr_blks, lr_blks, fid_done_barrier, PhaseBarrier());
@@ -566,15 +553,12 @@ void top_level_task(const Task *task,
 							EXCLUSIVE, lr_blks)
 				      .add_field(fid_done_barrier));
 
-      for(GenericPointInRectIterator<3> pir(Rect<3>(Point<3>::ZEROES(),
-						    blocks - Point<3>::ONES()));
-	  pir; ++pir) {
-	if(fa_owner[pir.p] != shard)
+      for(PointInRectIterator<3> pir(Rect<3>(
+              Point<3>(0,0,0), blocks - Point<3>(1,1,1))); pir(); ++pir) {
+	if(fa_owner[*pir] != shard)
 	  continue;
 
-	LogicalRegion lr_solblk = runtime->get_logical_subregion_by_color(ctx,
-									  lp_sol,
-									  DomainPoint::from_point<3>(pir.p));
+	LogicalRegion lr_solblk = runtime->get_logical_subregion_by_color(ctx, lp_sol, *pir);
 	launcher.add_region_requirement(RegionRequirement(lr_solblk, WRITE_DISCARD, EXCLUSIVE, lr_sol)
 					.add_field(fid_sol_p));
       }
@@ -615,7 +599,7 @@ void top_level_task(const Task *task,
 							     sizeof(zero));
     }
 
-    Rect<3> blk_space(Point<3>::ZEROES(), blocks - Point<3>::ONES());
+    Rect<3> blk_space(Point<3>(0,0,0), blocks - Point<3>(1,1,1));
 
     MustEpochLauncher must;
 
@@ -643,12 +627,12 @@ void top_level_task(const Task *task,
 				      .add_field(fid_ready_barrier)
 				      .add_field(fid_done_barrier));
 
-      for(GenericPointInRectIterator<3> pir(blk_space); pir; ++pir) {
+      for(PointInRectIterator<3> pir(blk_space); pir(); ++pir) {
 	LogicalRegion lr_solblk = runtime->get_logical_subregion_by_color(ctx,
 									  lp_sol,
-									  DomainPoint::from_point<3>(pir.p));
+                                                                          *pir);
 	launcher.add_region_requirement(RegionRequirement(lr_solblk, READ_WRITE, SIMULTANEOUS, lr_sol,
-							  CGMapper::SHARD_TAG(fa_owner[pir.p]))
+							  CGMapper::SHARD_TAG(fa_owner[*pir]))
 					.add_field(fid_sol_p)
 					.add_flags(NO_ACCESS_FLAG));
       }
@@ -692,28 +676,27 @@ void spmd_init_task(const Task *task,
 
   log_app.print() << "in spmd_init_task, shard=" << args.shard << ", proc=" << runtime->get_executing_processor(ctx) << ", regions=" << regions.size();
 
-  RegionAccessor<AccessorType::Affine<3>, int> fa_owner = fid_owner_shard.accessor<AccessorType::Affine<3> >(regions[0]);
-  RegionAccessor<AccessorType::Affine<3>, int> fa_neighbors = fid_neighbor_count.accessor<AccessorType::Affine<3> >(regions[0]);
+  const AccessorROint fa_owner = fid_owner_shard.accessor<READ_ONLY>(regions[0]);
+  const AccessorROint fa_neighbors = fid_neighbor_count.accessor<READ_ONLY>(regions[0]);
 
-  RegionAccessor<AccessorType::Affine<3>, PhaseBarrier> fa_ready = fid_ready_barrier.fold_accessor<AccessorType::Affine<3> >(regions[1]);
-  RegionAccessor<AccessorType::Affine<3>, PhaseBarrier> fa_done = fid_done_barrier.fold_accessor<AccessorType::Affine<3> >(regions[2]);
+  const AccessorRDpb fa_ready = fid_ready_barrier.fold_accessor(regions[1], BarrierCombineReductionOp::redop_id);
+  const AccessorRDpb fa_done = fid_done_barrier.fold_accessor(regions[2], BarrierCombineReductionOp::redop_id);
 
-  for(GenericPointInRectIterator<3> pir(Rect<3>(Point<3>::ZEROES(),
-						args.blocks - Point<3>::ONES()));
-      pir; ++pir) {
-    int owner = fa_owner[pir.p];
+  for(PointInRectIterator<3> pir(Rect<3>(
+          Point<3>(0,0,0), args.blocks - Point<3>(1,1,1))); pir(); ++pir) {
+    int owner = fa_owner[*pir];
     if(owner != args.shard)
       continue;
 
-    int neighbors = fa_neighbors[pir.p];
+    int neighbors = fa_neighbors[*pir];
     if(neighbors > 0) {
       PhaseBarrier pb_ready = runtime->create_phase_barrier(ctx, 1);
       PhaseBarrier pb_done = runtime->create_phase_barrier(ctx, neighbors);
 
-      log_app.info() << "pbs: shard=" << args.shard << " blk=" << pir.p << " neighbors=" << neighbors << " ready=" << pb_ready << " done=" << pb_done;
+      log_app.info() << "pbs: shard=" << args.shard << " blk=" << *pir << " neighbors=" << neighbors << " ready=" << pb_ready << " done=" << pb_done;
 
-      fa_ready[pir.p] = pb_ready;
-      fa_done[pir.p] = pb_done;
+      fa_ready.reduce<BarrierCombineReductionOp, true/*exclusive*/>(*pir, pb_ready);
+      fa_done.reduce<BarrierCombineReductionOp, true/*exclusive*/>(*pir, pb_done);
     }
   }
 }
@@ -758,7 +741,7 @@ bool spmd_main_task(const Task *task,
   log_app.print() << "in spmd_main_task, shard=" << shard << ", proc=" << runtime->get_executing_processor(ctx) << ", regions=" << regions.size();
 
   // iterate over the distribution info, capturing the info for the subblocks we own
-  std::map<Point<3>, BlockMetadata, Point<3>::STLComparator> myblocks;
+  std::map<Point<3>, BlockMetadata> myblocks;
 
   FieldSpace fs_private = runtime->create_field_space(ctx);
   fid_sol_b.allocate(runtime, ctx, fs_private);
@@ -766,80 +749,86 @@ bool spmd_main_task(const Task *task,
   fid_sol_r.allocate(runtime, ctx, fs_private);
   fid_sol_Ap.allocate(runtime, ctx, fs_private);
 
-  RegionAccessor<AccessorType::Affine<3>, int> fa_owner = fid_owner_shard.accessor<AccessorType::Affine<3> >(regions[0]);
-  RegionAccessor<AccessorType::Affine<3>, int> fa_neighbors = fid_neighbor_count.accessor<AccessorType::Affine<3> >(regions[0]);
-  RegionAccessor<AccessorType::Affine<3>, PhaseBarrier> fa_ready = fid_ready_barrier.accessor<AccessorType::Affine<3> >(regions[0]);
-  RegionAccessor<AccessorType::Affine<3>, PhaseBarrier> fa_done = fid_done_barrier.accessor<AccessorType::Affine<3> >(regions[0]);
+  const AccessorROint fa_owner = fid_owner_shard.accessor<READ_ONLY>(regions[0]);
+  const AccessorROint fa_neighbors = fid_neighbor_count.accessor<READ_ONLY>(regions[0]);
+  const AccessorROpb fa_ready = fid_ready_barrier.accessor<READ_ONLY>(regions[0]);
+  const AccessorROpb fa_done = fid_done_barrier.accessor<READ_ONLY>(regions[0]);
 
-  Rect<3> blk_space(Point<3>::ZEROES(), args.blocks - Point<3>::ONES());
+  Rect<3> blk_space(Point<3>(0,0,0), args.blocks - Point<3>(1,1,1));
 
   int pr_idx = 1;
-  FortranArrayLinearization<3> fal(blk_space, pr_idx);
+  const Point<3> blk_strides(1, (blk_space.hi[0] - blk_space.lo[0]) + 1,
+      ((blk_space.hi[0] - blk_space.lo[0]) + 1) * ((blk_space.hi[1] - blk_space.lo[1]) + 1));
 
-  for(GenericPointInRectIterator<3> pir(blk_space); pir; ++pir, ++pr_idx) {
-    int owner = fa_owner[pir.p];
+  for(PointInRectIterator<3> pir(blk_space); pir(); ++pir, ++pr_idx) {
+    int owner = fa_owner[*pir];
     if(owner != shard)
       continue;
 
-    assert((int)fal.image(pir.p) == pr_idx);
+    assert((int)((blk_strides.dot(*pir))+1) == pr_idx);
 
-    BlockMetadata& mdata = myblocks[pir.p];
+    BlockMetadata& mdata = myblocks[*pir];
 
     mdata.lr_shared = regions[pr_idx].get_logical_region();
     mdata.ispace = mdata.lr_shared.get_index_space();
-    mdata.bounds = runtime->get_index_space_domain(ctx, mdata.ispace).get_rect<3>();
+    mdata.bounds = runtime->get_index_space_domain(ctx, mdata.ispace);
 
     mdata.lr_private = runtime->create_logical_region(ctx, mdata.ispace, fs_private);
 
-    mdata.neighbors = fa_neighbors[pir.p];
+    mdata.neighbors = fa_neighbors[*pir];
     if(mdata.neighbors > 0) {
-      mdata.pb_shared_ready = fa_ready[pir.p];
-      mdata.pb_shared_done = fa_done[pir.p];
+      mdata.pb_shared_ready = fa_ready[*pir];
+      mdata.pb_shared_done = fa_done[*pir];
     } else {
       mdata.pb_shared_ready = PhaseBarrier();
       mdata.pb_shared_done = PhaseBarrier();
     }
 
+    IndexSpaceT<1> color_space = runtime->create_index_space(ctx, Rect<1>(0, 0));
     for(int dir = DIR_X; dir <= DIR_Z; dir++) {
       for(int side = SIDE_MINUS; side <= SIDE_PLUS; side++) {
 	GhostInfo& g = mdata.ghosts[dir][side];
-	if(pir.p.x[dir] == ((side == SIDE_MINUS) ? 0 : args.blocks.x[dir] - 1)) {
+	if(pir[dir] == ((side == SIDE_MINUS) ? 0 : args.blocks[dir] - 1)) {
 	  // boundary
 	  g.gtype = GhostInfo::GHOST_BOUNDARY;
 	} else {
-	  Point<3> p2(pir.p);
+	  Point<3> p2(*pir);
 	  if(side == SIDE_MINUS)
-	    p2.x[dir]--;
+	    p2[dir]--;
 	  else
-	    p2.x[dir]++;
+	    p2[dir]++;
 
 	  if(fa_owner[p2] == owner) {
 	    g.gtype = GhostInfo::GHOST_LOCAL;
-	    g.lr_parent = regions[fal.image(p2)].get_logical_region();
+            g.lr_parent = regions[blk_strides.dot(p2)+1].get_logical_region();
 	  } else {
 	    g.gtype = GhostInfo::GHOST_REMOTE;
-	    g.lr_parent = regions[fal.image(p2)].get_logical_region();
+            g.lr_parent = regions[blk_strides.dot(p2)+1].get_logical_region();
 	    g.pb_shared_ready = fa_ready[p2];
 	    g.pb_shared_done = fa_done[p2];
 	  }
 
-	  IndexSpace is_parent = g.lr_parent.get_index_space();
-	  Rect<3> r_parent = runtime->get_index_space_domain(ctx, is_parent).get_rect<3>();
+	  IndexSpaceT<3> is_parent(g.lr_parent.get_index_space());
+	  Rect<3> r_parent = runtime->get_index_space_domain(ctx, is_parent);
 	  Rect<3> r_subset(r_parent);
 	  if(side == SIDE_MINUS)
-	    r_subset.lo.x[dir] = r_subset.hi.x[dir];  // just 1 plane
+	    r_subset.lo[dir] = r_subset.hi[dir];  // just 1 plane
 	  else
-	    r_subset.hi.x[dir] = r_subset.lo.x[dir];  // just 1 plane
+	    r_subset.hi[dir] = r_subset.lo[dir];  // just 1 plane
 	  //std::cout << "dir=" << dir << " side=" << side << " -> " << r_parent << " -> " << r_subset << "\n";
-	  DomainColoring dc;
-	  dc[0] = Domain::from_rect<3>(r_subset);
-	  IndexPartition ip = runtime->create_index_partition(ctx,
-							      is_parent,
-							      Domain::from_rect<1>(Rect<1>(0, 0)),
-							      dc,
-							      dir*2+side);
+          Transform<3,1> transform;
+          transform[0][0] = 0;
+          transform[1][0] = 0;
+          transform[2][0] = 0;
+          IndexPartition ip = runtime->create_partition_by_restriction(ctx, 
+                                                              is_parent, 
+                                                              color_space,
+                                                              transform,
+                                                              r_subset,
+                                                              COMPUTE_KIND,
+                                                              dir*2+side);
 	  IndexSpace is_subset = runtime->get_index_subspace(ctx, ip, 0);
-	  assert(runtime->get_index_space_domain(ctx, is_subset).get_rect<3>() == r_subset);
+	  assert(runtime->get_index_space_domain(ctx, is_subset) == r_subset);
 	  g.ispace = is_subset;
 	  g.lr_shared = runtime->get_logical_subregion_by_tree(ctx,
 							       is_subset,
@@ -1241,11 +1230,11 @@ void init_field_task(const Task *task,
 {
   const InitFieldArgs& args = *(const InitFieldArgs *)(task->args);
 
-  log_app.info() << "init_field task - bounds=" << args.bounds << ", fid=" << task->regions[0].instance_fields[0] << ", proc=" << runtime->get_executing_processor(ctx);
+  log_app.debug() << "init_field task - bounds=" << args.bounds << ", fid=" << task->regions[0].instance_fields[0] << ", proc=" << runtime->get_executing_processor(ctx);
 
-  RegionAccessor<AccessorType::Affine<3>, double> fa = regions[0].get_field_accessor(task->regions[0].instance_fields[0]).typeify<double>().convert<AccessorType::Affine<3> >();
+  const AccessorWDdouble fa(regions[0], task->regions[0].instance_fields[0]);
   
-  for(GenericPointInRectIterator<3> pir(args.bounds); pir; ++pir) {
+  for(PointInRectIterator<3> pir(args.bounds); pir(); ++pir) {
 #if 0
     double v = 0.0;
     if((pir.p.x[0] == (args.grid_dim.x[0] / 2)) &&
@@ -1253,12 +1242,12 @@ void init_field_task(const Task *task,
        (pir.p.x[2] == (args.grid_dim.x[2] / 2)))
       v = 1.0;
 #else
-    srand48(pir.p.x[0] * 100000 + pir.p.x[1] * 1000 + pir.p.x[2]);
+    srand48(pir[0] * 100000 + pir[1] * 1000 + pir[2]);
     double v = drand48();
 #endif
     //double v = pir.p.x[0] * 10000 + pir.p.x[1] * 100 + pir.p.x[2];
     //printf("%p <- %g\n", &fa[pir.p], v);
-    fa[pir.p] = v;
+    fa[*pir] = v;
   }
 }
 
@@ -1268,32 +1257,33 @@ void spmv_field_task(const Task *task,
 {
   const SpmvFieldArgs& args = *(const SpmvFieldArgs *)(task->args);
 
-  log_app.info() << "init_field task - bounds=" << args.bounds << ", fid=" << task->regions[0].instance_fields[0] << ", proc=" << runtime->get_executing_processor(ctx);
+  log_app.debug() << "init_field task - bounds=" << args.bounds << ", fid=" << task->regions[0].instance_fields[0] << ", proc=" << runtime->get_executing_processor(ctx);
 
-  RegionAccessor<AccessorType::Affine<3>, double> fa_out = regions[0].get_field_accessor(task->regions[0].instance_fields[0]).typeify<double>().convert<AccessorType::Affine<3> >();
-  RegionAccessor<AccessorType::Affine<3>, double> fa_in = regions[1].get_field_accessor(task->regions[1].instance_fields[0]).typeify<double>().convert<AccessorType::Affine<3> >();
+  const AccessorRWdouble fa_out(regions[0], task->regions[0].instance_fields[0]);
+  const AccessorROdouble fa_in(regions[1], task->regions[1].instance_fields[0]);
   size_t pr_idx = 2;
-  RegionAccessor<AccessorType::Affine<3>, double> fa_ghost[3][2];
+  AccessorROdouble fa_ghost[3][2];
   for(int dir = DIR_X; dir <= DIR_Z; dir++)
     for(int side = SIDE_MINUS; side <= SIDE_PLUS; side++)
       if(args.gtypes[dir][side] != GhostInfo::GHOST_BOUNDARY) {
-	fa_ghost[dir][side] = regions[pr_idx].get_field_accessor(task->regions[pr_idx].instance_fields[0]).typeify<double>().convert<AccessorType::Affine<3> >();
+        fa_ghost[dir][side] = AccessorROdouble(regions[pr_idx],
+            task->regions[pr_idx].instance_fields[0]);
 	pr_idx++;
       }
   assert(pr_idx == regions.size());
   
-  for(GenericPointInRectIterator<3> pir(args.bounds); pir; ++pir) {
+  for(PointInRectIterator<3> pir(args.bounds); pir(); ++pir) {
     double v_neighbors[3][2];
     for(int dir = DIR_X; dir <= DIR_Z; dir++)
       for(int side = SIDE_MINUS; side <= SIDE_PLUS; side++) {
-	Point<3> p2(pir.p);
+	Point<3> p2(*pir);
 	bool interior;
 	if(side == SIDE_MINUS) {
-	  p2.x[dir]--;
-	  interior = (p2.x[dir] >= args.bounds.lo[dir]);
+	  p2[dir]--;
+	  interior = (p2[dir] >= args.bounds.lo[dir]);
 	} else {
-	  p2.x[dir]++;
-	  interior = (p2.x[dir] <= args.bounds.hi[dir]);
+	  p2[dir]++;
+	  interior = (p2[dir] <= args.bounds.hi[dir]);
 	}
 	if(interior) {
 	  v_neighbors[dir][side] = fa_in[p2];
@@ -1305,7 +1295,7 @@ void spmv_field_task(const Task *task,
 	}
       }
 	
-    double v_in = fa_in[pir.p];
+    double v_in = fa_in[*pir];
     double dx = 1.0;
     double dy = 1.0;
     double dz = 1.0;
@@ -1318,7 +1308,7 @@ void spmv_field_task(const Task *task,
 	      << " y:(" << v_neighbors[DIR_Y][SIDE_MINUS] << "," << v_neighbors[DIR_Y][SIDE_PLUS] << ")"
 	      << " z:(" << v_neighbors[DIR_Z][SIDE_MINUS] << "," << v_neighbors[DIR_Z][SIDE_PLUS] << ")\n";
 #endif
-    fa_out[pir.p] = v_out;
+    fa_out[*pir] = v_out;
   }
 }
 

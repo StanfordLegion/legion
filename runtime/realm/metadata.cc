@@ -1,4 +1,4 @@
-/* Copyright 2017 Stanford University, NVIDIA Corporation
+/* Copyright 2018 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,11 +15,11 @@
 
 // Realm object metadata base implementation
 
-#include "metadata.h"
+#include "realm/metadata.h"
 
-#include "event_impl.h"
-#include "inst_impl.h"
-#include "runtime_impl.h"
+#include "realm/event_impl.h"
+#include "realm/inst_impl.h"
+#include "realm/runtime_impl.h"
 
 namespace Realm {
 
@@ -37,21 +37,26 @@ namespace Realm {
     MetadataBase::~MetadataBase(void)
     {}
 
-    void MetadataBase::mark_valid(void)
+    void MetadataBase::mark_valid(NodeSet& early_reqs)
     {
-      // don't actually need lock for this
-      assert(remote_copies.empty()); // should not have any valid remote copies if we weren't valid
-      state = STATE_VALID;
+      // take lock so we can make sure we get a precise list of early requestors
+      {
+	AutoHSLLock a(mutex);
+	early_reqs = remote_copies;
+	state = STATE_VALID;
+      }
     }
 
-    void MetadataBase::handle_request(int requestor)
+    bool MetadataBase::handle_request(int requestor)
     {
-      // just add the requestor to the list of remote nodes with copies
+      // just add the requestor to the list of remote nodes with copies, can send
+      //   response if the data is already valid
       AutoHSLLock a(mutex);
 
-      assert(is_valid());
       assert(!remote_copies.contains(requestor));
       remote_copies.add(requestor);
+
+      return is_valid();
     }
 
     void MetadataBase::handle_response(void)
@@ -87,7 +92,7 @@ namespace Realm {
 	return Event::NO_EVENT;
 
       // sanity-check - should never be requesting data from ourselves
-      assert(((unsigned)owner) != gasnet_mynode());
+      assert(owner != my_node_id);
 
       Event e = Event::NO_EVENT;
       bool issue_request = false;
@@ -232,22 +237,25 @@ namespace Realm {
     ID id(args.id);
     if(id.is_instance()) {
       RegionInstanceImpl *impl = get_runtime()->get_instance_impl(args.id);
-      impl->metadata.handle_request(args.node);
-      data = impl->metadata.serialize(datalen);
+      bool valid = impl->metadata.handle_request(args.node);
+      if(valid)
+	data = impl->metadata.serialize(datalen);
     } else {
       assert(0);
     }
 
-    log_metadata.info("metadata for " IDFMT " requested by %d - %zd bytes",
-		      args.id, args.node, datalen);
-    MetadataResponseMessage::send_request(args.node, args.id, data, datalen, PAYLOAD_FREE);
+    if(data) {
+      log_metadata.info("metadata for " IDFMT " requested by %d - %zd bytes",
+			args.id, args.node, datalen);
+      MetadataResponseMessage::send_request(args.node, args.id, data, datalen, PAYLOAD_FREE);
+    }
   }
 
-  /*static*/ void MetadataRequestMessage::send_request(gasnet_node_t target, ID::IDType id)
+  /*static*/ void MetadataRequestMessage::send_request(NodeID target, ID::IDType id)
   {
     RequestArgs args;
 
-    args.node = gasnet_mynode();
+    args.node = my_node_id;
     args.id = id;
     Message::request(target, args);
   }
@@ -276,7 +284,7 @@ namespace Realm {
     }
   }
 
-  /*static*/ void MetadataResponseMessage::send_request(gasnet_node_t target,
+  /*static*/ void MetadataResponseMessage::send_request(NodeID target,
 							ID::IDType id, 
 							const void *data,
 							size_t datalen,
@@ -287,7 +295,39 @@ namespace Realm {
     args.id = id;
     Message::request(target, args, data, datalen, payload_mode);
   }
+
+  template <typename T>
+  struct BroadcastWDataHelper : public T::RequestArgs {
+    BroadcastWDataHelper(const void *_data, size_t _datalen, int _payload_mode)
+      : data(_data), datalen(_datalen), payload_mode(_payload_mode)
+    {}
+
+    inline void apply(NodeID target)
+    {
+      T::Message::request(target, *this, data, datalen, payload_mode);
+    }
+
+    void broadcast(const NodeSet& targets)
+    {
+      targets.map(*this);
+    }
+
+    const void *data;
+    size_t datalen;
+    int payload_mode;
+  };
   
+  /*static*/ void MetadataResponseMessage::broadcast_request(const NodeSet& targets,
+							     ID::IDType id, 
+							     const void *data,
+							     size_t datalen)
+  {
+    BroadcastWDataHelper<MetadataResponseMessage> args(data, datalen, PAYLOAD_COPY);
+
+    args.id = id;
+    args.broadcast(targets);
+  }
+
   
   ////////////////////////////////////////////////////////////////////////
   //
@@ -312,19 +352,19 @@ namespace Realm {
     MetadataInvalidateAckMessage::send_request(args.owner, args.id);
   }
 
-  /*static*/ void MetadataInvalidateMessage::send_request(gasnet_node_t target,
+  /*static*/ void MetadataInvalidateMessage::send_request(NodeID target,
 							  ID::IDType id)
   {
     RequestArgs args;
 
-    args.owner = gasnet_mynode();
+    args.owner = my_node_id;
     args.id = id;
     Message::request(target, args);
   }
 
   template <typename T>
   struct BroadcastHelper : public T::RequestArgs {
-    inline void apply(gasnet_node_t target)
+    inline void apply(NodeID target)
     {
       T::Message::request(target, *this);
     }
@@ -340,7 +380,7 @@ namespace Realm {
   {
     BroadcastHelper<MetadataInvalidateMessage> args;
 
-    args.owner = gasnet_mynode();
+    args.owner = my_node_id;
     args.id = id;
     args.broadcast(targets);
   }
@@ -361,6 +401,8 @@ namespace Realm {
     if(id.is_instance()) {
       RegionInstanceImpl *impl = get_runtime()->get_instance_impl(args.id);
       last_ack = impl->metadata.handle_inval_ack(args.node);
+      if(last_ack)
+	impl->recycle_instance();
     } else {
       assert(0);
     }
@@ -370,11 +412,11 @@ namespace Realm {
     }
   }
    
-  /*static*/ void MetadataInvalidateAckMessage::send_request(gasnet_node_t target, ID::IDType id)
+  /*static*/ void MetadataInvalidateAckMessage::send_request(NodeID target, ID::IDType id)
   {
     RequestArgs args;
 
-    args.node = gasnet_mynode();
+    args.node = my_node_id;
     args.id = id;
     Message::request(target, args);
   }

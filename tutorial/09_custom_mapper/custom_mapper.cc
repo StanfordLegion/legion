@@ -1,4 +1,4 @@
-/* Copyright 2017 Stanford University
+/* Copyright 2018 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,8 +24,6 @@
 
 using namespace Legion;
 using namespace Legion::Mapping;
-using namespace LegionRuntime::Accessor;
-using namespace LegionRuntime::Arrays;
 
 /*
  * In this example, we perform the same
@@ -475,12 +473,11 @@ void AdversarialMapper::slice_task(const MapperContext      ctx,
   {
     case 1:
       {
-        Rect<1> rect = input.domain.get_rect<1>();
-        for (GenericPointInRectIterator<1> pir(rect);
-              pir; pir++, idx++)
+        Rect<1> rect = input.domain;
+        for (PointInRectIterator<1> pir(rect); pir(); pir++, idx++)
         {
-          Rect<1> slice(pir.p, pir.p);
-          output.slices[idx] = TaskSlice(Domain::from_rect<1>(slice),
+          Rect<1> slice(*pir, *pir);
+          output.slices[idx] = TaskSlice(slice,
               select_random_processor(task.target_proc.kind()),
               false/*recurse*/, true/*stealable*/);
         }
@@ -488,12 +485,11 @@ void AdversarialMapper::slice_task(const MapperContext      ctx,
       }
     case 2:
       {
-        Rect<2> rect = input.domain.get_rect<2>();
-        for (GenericPointInRectIterator<2> pir(rect);
-              pir; pir++, idx++)
+        Rect<2> rect = input.domain;
+        for (PointInRectIterator<2> pir(rect); pir(); pir++, idx++)
         {
-          Rect<2> slice(pir.p, pir.p);
-          output.slices[idx] = TaskSlice(Domain::from_rect<2>(slice),
+          Rect<2> slice(*pir, *pir);
+          output.slices[idx] = TaskSlice(slice,
               select_random_processor(task.target_proc.kind()),
               false/*recurse*/, true/*stealable*/);
         }
@@ -501,12 +497,11 @@ void AdversarialMapper::slice_task(const MapperContext      ctx,
       }
     case 3:
       {
-        Rect<3> rect = input.domain.get_rect<3>();
-        for (GenericPointInRectIterator<3> pir(rect);
-              pir; pir++, idx++)
+        Rect<3> rect = input.domain;
+        for (PointInRectIterator<3> pir(rect); pir(); pir++, idx++)
         {
-          Rect<3> slice(pir.p, pir.p);
-          output.slices[idx] = TaskSlice(Domain::from_rect<3>(slice),
+          Rect<3> slice(*pir, *pir);
+          output.slices[idx] = TaskSlice(slice,
               select_random_processor(task.target_proc.kind()),
               false/*recurse*/, true/*stealable*/);
         }
@@ -615,6 +610,7 @@ void AdversarialMapper::map_task(const MapperContext         ctx,
   // Finally, let's ask for some profiling data to see the impact of our choices
   {
     using namespace ProfilingMeasurements;
+    output.task_prof_requests.add_measurement<OperationStatus>();
     output.task_prof_requests.add_measurement<OperationTimeline>();
     output.task_prof_requests.add_measurement<RuntimeOverhead>();
   }
@@ -632,6 +628,45 @@ void AdversarialMapper::report_profiling(const MapperContext      ctx,
   // check the result of calls to get_measurement (or just call has_measurement
   // first).  Also, the call returns a copy of the result that you must delete
   // yourself.
+  OperationStatus *status = 
+    input.profiling_responses.get_measurement<OperationStatus>();
+  if (status)
+  {
+    switch (status->result)
+    {
+      case OperationStatus::COMPLETED_SUCCESSFULLY:
+        {
+          printf("Task %s COMPLETED SUCCESSFULLY\n", task.get_task_name());
+          break;
+        }
+      case OperationStatus::COMPLETED_WITH_ERRORS:
+        {
+          printf("Task %s COMPLETED WITH ERRORS\n", task.get_task_name());
+          break;
+        }
+      case OperationStatus::INTERRUPT_REQUESTED:
+        {
+          printf("Task %s was INTERRUPTED\n", task.get_task_name());
+          break;
+        }
+      case OperationStatus::TERMINATED_EARLY:
+        {
+          printf("Task %s TERMINATED EARLY\n", task.get_task_name());
+          break;
+        }
+      case OperationStatus::CANCELLED:
+        {
+          printf("Task %s was CANCELLED\n", task.get_task_name());
+          break;
+        }
+      default:
+        assert(false); // shouldn't get any of the rest currently
+    }
+    delete status;
+  }
+  else
+    printf("No operation status for task %s\n", task.get_task_name());
+
   OperationTimeline *timeline =
     input.profiling_responses.get_measurement<OperationTimeline>();
   if (timeline)
@@ -661,7 +696,7 @@ void AdversarialMapper::report_profiling(const MapperContext      ctx,
     delete overhead;
   }
   else
-    printf("No runtime overhead data for task %s\n", task.get_task_name());
+    printf("No runtime overhead data for task %s\n", task.get_task_name()); 
 }
 
 PartitioningMapper::PartitioningMapper(Machine m,
@@ -714,9 +749,8 @@ void top_level_task(const Task *task,
   printf("Running daxpy for %d elements...\n", num_elements);
   printf("Partitioning data into %d sub-regions...\n", num_subregions);
 
-  Rect<1> elem_rect(Point<1>(0),Point<1>(num_elements-1));
-  IndexSpace is = runtime->create_index_space(ctx, 
-                          Domain::from_rect<1>(elem_rect));
+  Rect<1> elem_rect(0,num_elements-1);
+  IndexSpace is = runtime->create_index_space(ctx, elem_rect);
   FieldSpace input_fs = runtime->create_field_space(ctx);
   {
     FieldAllocator allocator = 
@@ -733,41 +767,17 @@ void top_level_task(const Task *task,
   LogicalRegion input_lr = runtime->create_logical_region(ctx, is, input_fs);
   LogicalRegion output_lr = runtime->create_logical_region(ctx, is, output_fs);
 
-  Rect<1> color_bounds(Point<1>(0),Point<1>(num_subregions-1));
-  Domain color_domain = Domain::from_rect<1>(color_bounds);
+  Rect<1> color_bounds(0,num_subregions-1);
+  IndexSpace color_is = runtime->create_index_space(ctx, color_bounds);
 
-  IndexPartition ip;
-  if ((num_elements % num_subregions) != 0)
-  {
-    const int lower_bound = num_elements/num_subregions;
-    const int upper_bound = lower_bound+1;
-    const int number_small = num_subregions - (num_elements % num_subregions);
-    DomainColoring coloring;
-    int index = 0;
-    for (int color = 0; color < num_subregions; color++)
-    {
-      int num_elmts = color < number_small ? lower_bound : upper_bound;
-      assert((index+num_elmts) <= num_elements);
-      Rect<1> subrect(Point<1>(index),Point<1>(index+num_elmts-1));
-      coloring[color] = Domain::from_rect<1>(subrect);
-      index += num_elmts;
-    }
-    ip = runtime->create_index_partition(ctx, is, color_domain, 
-                                      coloring, true/*disjoint*/);
-  }
-  else
-  { 
-    Blockify<1> coloring(num_elements/num_subregions);
-    ip = runtime->create_index_partition(ctx, is, coloring);
-  }
+  IndexPartition ip = runtime->create_equal_partition(ctx, is, color_is);
 
   LogicalPartition input_lp = runtime->get_logical_partition(ctx, input_lr, ip);
   LogicalPartition output_lp = runtime->get_logical_partition(ctx, output_lr, ip);
 
-  Domain launch_domain = color_domain; 
   ArgumentMap arg_map;
 
-  IndexLauncher init_launcher(INIT_FIELD_TASK_ID, launch_domain, 
+  IndexLauncher init_launcher(INIT_FIELD_TASK_ID, color_is, 
                               TaskArgument(NULL, 0), arg_map);
   init_launcher.add_region_requirement(
       RegionRequirement(input_lp, 0/*projection ID*/, 
@@ -781,7 +791,7 @@ void top_level_task(const Task *task,
   runtime->execute_index_space(ctx, init_launcher);
 
   const double alpha = drand48();
-  IndexLauncher daxpy_launcher(DAXPY_TASK_ID, launch_domain,
+  IndexLauncher daxpy_launcher(DAXPY_TASK_ID, color_is,
                 TaskArgument(&alpha, sizeof(alpha)), arg_map);
   daxpy_launcher.add_region_requirement(
       RegionRequirement(input_lp, 0/*projection ID*/,
@@ -823,16 +833,14 @@ void init_field_task(const Task *task,
   const int point = task->index_point.point_data[0];
   printf("Initializing field %d for block %d...\n", fid, point);
 
-  RegionAccessor<AccessorType::Generic, double> acc = 
-    regions[0].get_field_accessor(fid).typeify<double>();
-
-  Domain dom = runtime->get_index_space_domain(ctx, 
-      task->regions[0].region.get_index_space());
-  Rect<1> rect = dom.get_rect<1>();
-  for (GenericPointInRectIterator<1> pir(rect); pir; pir++)
-  {
-    acc.write(DomainPoint::from_point<1>(pir.p), drand48());
-  }
+  const FieldAccessor<WRITE_DISCARD,double,1> acc(regions[0], fid);
+  // Note here that we get the domain for the subregion for
+  // this task from the runtime which makes it safe for running
+  // both as a single task and as part of an index space of tasks.
+  Rect<1> rect = runtime->get_index_space_domain(ctx,
+                  task->regions[0].region.get_index_space());
+  for (PointInRectIterator<1> pir(rect); pir(); pir++)
+    acc[*pir] = drand48();
 }
 
 void daxpy_task(const Task *task,
@@ -845,24 +853,16 @@ void daxpy_task(const Task *task,
   const double alpha = *((const double*)task->args);
   const int point = task->index_point.point_data[0];
 
-  RegionAccessor<AccessorType::Generic, double> acc_x = 
-    regions[0].get_field_accessor(FID_X).typeify<double>();
-  RegionAccessor<AccessorType::Generic, double> acc_y = 
-    regions[0].get_field_accessor(FID_Y).typeify<double>();
-  RegionAccessor<AccessorType::Generic, double> acc_z = 
-    regions[1].get_field_accessor(FID_Z).typeify<double>();
+  const FieldAccessor<READ_ONLY,double,1> acc_x(regions[0], FID_X);
+  const FieldAccessor<READ_ONLY,double,1> acc_y(regions[0], FID_Y);
+  const FieldAccessor<WRITE_DISCARD,double,1> acc_z(regions[1], FID_Z);
   printf("Running daxpy computation with alpha %.8g for point %d...\n", 
           alpha, point);
 
-  Domain dom = runtime->get_index_space_domain(ctx, 
-      task->regions[0].region.get_index_space());
-  Rect<1> rect = dom.get_rect<1>();
-  for (GenericPointInRectIterator<1> pir(rect); pir; pir++)
-  {
-    double value = alpha * acc_x.read(DomainPoint::from_point<1>(pir.p)) + 
-                           acc_y.read(DomainPoint::from_point<1>(pir.p));
-    acc_z.write(DomainPoint::from_point<1>(pir.p), value);
-  }
+  Rect<1> rect = runtime->get_index_space_domain(ctx,
+                  task->regions[0].region.get_index_space());
+  for (PointInRectIterator<1> pir(rect); pir(); pir++)
+    acc_z[*pir] = alpha * acc_x[*pir] + acc_y[*pir];
 }
 
 void check_task(const Task *task,
@@ -873,22 +873,19 @@ void check_task(const Task *task,
   assert(task->regions.size() == 2);
   assert(task->arglen == sizeof(double));
   const double alpha = *((const double*)task->args);
-  RegionAccessor<AccessorType::Generic, double> acc_x = 
-    regions[0].get_field_accessor(FID_X).typeify<double>();
-  RegionAccessor<AccessorType::Generic, double> acc_y = 
-    regions[0].get_field_accessor(FID_Y).typeify<double>();
-  RegionAccessor<AccessorType::Generic, double> acc_z = 
-    regions[1].get_field_accessor(FID_Z).typeify<double>();
+
+  const FieldAccessor<READ_ONLY,double,1> acc_x(regions[0], FID_X);
+  const FieldAccessor<READ_ONLY,double,1> acc_y(regions[0], FID_Y);
+  const FieldAccessor<READ_ONLY,double,1> acc_z(regions[1], FID_Z);
+
   printf("Checking results...");
-  Domain dom = runtime->get_index_space_domain(ctx, 
-      task->regions[0].region.get_index_space());
-  Rect<1> rect = dom.get_rect<1>();
+  Rect<1> rect = runtime->get_index_space_domain(ctx,
+                  task->regions[0].region.get_index_space());
   bool all_passed = true;
-  for (GenericPointInRectIterator<1> pir(rect); pir; pir++)
+  for (PointInRectIterator<1> pir(rect); pir(); pir++)
   {
-    double expected = alpha * acc_x.read(DomainPoint::from_point<1>(pir.p)) + 
-                           acc_y.read(DomainPoint::from_point<1>(pir.p));
-    double received = acc_z.read(DomainPoint::from_point<1>(pir.p));
+    double expected = alpha * acc_x[*pir] + acc_y[*pir];
+    double received = acc_z[*pir];
     // Probably shouldn't check for floating point equivalence but
     // the order of operations are the same should they should
     // be bitwise equal.
@@ -914,18 +911,21 @@ int main(int argc, char **argv)
   {
     TaskVariantRegistrar registrar(INIT_FIELD_TASK_ID, "init_field");
     registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+    registrar.set_leaf();
     Runtime::preregister_task_variant<init_field_task>(registrar, "init_field");
   }
 
   {
     TaskVariantRegistrar registrar(DAXPY_TASK_ID, "daxpy");
     registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+    registrar.set_leaf();
     Runtime::preregister_task_variant<daxpy_task>(registrar, "daxpy");
   }
 
   {
     TaskVariantRegistrar registrar(CHECK_TASK_ID, "check");
     registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+    registrar.set_leaf();
     Runtime::preregister_task_variant<check_task>(registrar, "check");
   }
 

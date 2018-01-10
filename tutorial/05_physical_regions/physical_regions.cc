@@ -1,4 +1,4 @@
-/* Copyright 2017 Stanford University
+/* Copyright 2018 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,9 +20,6 @@
 #include "legion.h"
 using namespace Legion;
 
-// for Point<DIM> and Rect<DIM>
-using namespace LegionRuntime::Arrays;
-
 /*
  * In this section we use a sequential
  * implementation of daxpy to show how
@@ -32,10 +29,6 @@ using namespace LegionRuntime::Arrays;
  * so that it will run with sub-tasks
  * and also run in parallel.
  */
-
-// Note since we are now accessing data inside
-// of logical regions we need the accessor namespace.
-using namespace LegionRuntime::Accessor;
 
 enum TaskIDs {
   TOP_LEVEL_TASK_ID,
@@ -68,9 +61,8 @@ void top_level_task(const Task *task,
   // have two fields for storing the 'x' and 'y' fields of the
   // daxpy computation, and the output region will have a single
   // field 'z' for storing the result.
-  Rect<1> elem_rect(Point<1>(0),Point<1>(num_elements-1));
-  IndexSpace is = runtime->create_index_space(ctx, 
-                          Domain::from_rect<1>(elem_rect));
+  Rect<1> elem_rect(0,num_elements-1);
+  IndexSpace is = runtime->create_index_space(ctx, elem_rect); 
   FieldSpace input_fs = runtime->create_field_space(ctx);
   {
     FieldAllocator allocator = 
@@ -174,10 +166,8 @@ void top_level_task(const Task *task,
   // field that is being accessed.  This provides a combination
   // of dynamic and static checking which ensures that the 
   // correct data is being accessed.
-  RegionAccessor<AccessorType::Generic, double> acc_x = 
-    input_region.get_field_accessor(FID_X).typeify<double>();
-  RegionAccessor<AccessorType::Generic, double> acc_y = 
-    input_region.get_field_accessor(FID_Y).typeify<double>();
+  const FieldAccessor<READ_WRITE,double,1> acc_x(input_region, FID_X);
+  const FieldAccessor<READ_WRITE,double,1> acc_y(input_region, FID_Y);
 
   // We initialize our regions with some random data.  To iterate
   // over all the points in each of the regions we use an iterator
@@ -185,10 +175,10 @@ void top_level_task(const Task *task,
   // The points in the array (the 'p' field in the iterator) are
   // used to access different locations in each of the physical
   // instances.
-  for (GenericPointInRectIterator<1> pir(elem_rect); pir; pir++)
+  for (PointInRectIterator<1> pir(elem_rect); pir(); pir++)
   {
-    acc_x.write(DomainPoint::from_point<1>(pir.p), drand48());
-    acc_y.write(DomainPoint::from_point<1>(pir.p), drand48());
+    acc_x[*pir] = drand48();
+    acc_y[*pir] = drand48();
   }
 
   // Now we map our output region so we can do the actual computation.
@@ -205,19 +195,16 @@ void top_level_task(const Task *task,
 
   // Note that this accessor invokes the implicit 'wait_until_valid'
   // call described earlier.
-  RegionAccessor<AccessorType::Generic, double> acc_z = 
-    output_region.get_field_accessor(FID_Z).typeify<double>();
-
   const double alpha = drand48();
-  printf("Running daxpy computation with alpha %.8g...", alpha);
-  // Iterate over our points and perform the daxpy computation.  Note
-  // we can use the same iterator because both the input and output
-  // regions were created using the same index space.
-  for (GenericPointInRectIterator<1> pir(elem_rect); pir; pir++)
   {
-    double value = alpha * acc_x.read(DomainPoint::from_point<1>(pir.p)) + 
-                           acc_y.read(DomainPoint::from_point<1>(pir.p));
-    acc_z.write(DomainPoint::from_point<1>(pir.p), value);
+    const FieldAccessor<WRITE_DISCARD,double,1> acc_z(output_region, FID_Z);
+
+    printf("Running daxpy computation with alpha %.8g...", alpha);
+    // Iterate over our points and perform the daxpy computation.  Note
+    // we can use the same iterator because both the input and output
+    // regions were created using the same index space.
+    for (PointInRectIterator<1> pir(elem_rect); pir(); pir++)
+      acc_z[*pir] = alpha * acc_x[*pir] + acc_y[*pir];
   }
   printf("Done!\n");
 
@@ -248,16 +235,15 @@ void top_level_task(const Task *task,
   // Since we may have received a new physical instance we need
   // to update our accessor as well.  Again this implicitly calls
   // 'wait_until_valid' to ensure we have valid data.
-  acc_z = output_region.get_field_accessor(FID_Z).typeify<double>();
+  const FieldAccessor<READ_ONLY,double,1> acc_z(output_region, FID_Z);
 
   printf("Checking results...");
   bool all_passed = true;
   // Check our results are the same
-  for (GenericPointInRectIterator<1> pir(elem_rect); pir; pir++)
+  for (PointInRectIterator<1> pir(elem_rect); pir(); pir++)
   {
-    double expected = alpha * acc_x.read(DomainPoint::from_point<1>(pir.p)) + 
-                           acc_y.read(DomainPoint::from_point<1>(pir.p));
-    double received = acc_z.read(DomainPoint::from_point<1>(pir.p));
+    double expected = alpha * acc_x[*pir] + acc_y[*pir];
+    double received = acc_z[*pir];
     // Probably shouldn't check for floating point equivalence but
     // the order of operations are the same should they should
     // be bitwise equal.

@@ -1,4 +1,4 @@
-/* Copyright 2017 Stanford University, NVIDIA Corporation
+/* Copyright 2018 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,14 +22,6 @@
 namespace Realm {
 
   namespace HDF5 {
-
-    // temporary hack
-    RegionInstance create_hdf5_instance(Domain dom,
-					const ProfilingRequestSet& prs,
-					const char *file_name,
-					const std::vector<size_t> &field_sizes,
-					const std::vector<const char*> &field_files,
-					bool read_only);
 
     class HDF5Memory;
 

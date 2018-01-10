@@ -1,4 +1,4 @@
--- Copyright 2017 Stanford University
+-- Copyright 2018 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -1376,7 +1376,8 @@ end
 if os.getenv('SAVEOBJ') == '1' then
   local root_dir = arg[0]:match(".*/") or "./"
   local link_flags = {"-L" .. root_dir, "-lpennant"}
-  regentlib.saveobj(toplevel, "pennant", "executable", cpennant.register_mappers, link_flags)
+  local exe = os.getenv('OBJNAME') or "pennant"
+  regentlib.saveobj(toplevel, exe, "executable", cpennant.register_mappers, link_flags)
 else
   regentlib.start(toplevel, cpennant.register_mappers)
 end

@@ -1,4 +1,4 @@
-/* Copyright 2017 Stanford University
+/* Copyright 2018 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,12 +14,10 @@
  */
 
 #include "bishop_mapper.h"
-#include "legion_c_util.h"
-#include "utilities.h"
+#include "legion/legion_c_util.h"
 
-extern "C" {
-#include "legion_c.h"
-}
+#define LEGION_ENABLE_C_BINDINGS
+#include "legion.h"
 
 using namespace std;
 

@@ -1,5 +1,5 @@
 #
-# Copyright 2017 Stanford University, NVIDIA Corporation
+# Copyright 2018 Stanford University, NVIDIA Corporation
 # 
 #  Licensed under the Apache License, Version 2.0 (the "License");
 #  you may not use this file except in compliance with the License.
@@ -17,8 +17,8 @@
 README.txt
 
 You probably just want to do "./makeAllTheThings.bash".
-This will produce a new set of glossary and design_patterns pages in publish/.
-It will also produce a set of collated and cross-referenced error messages in publish/.
+This will produce a new set of glossary and design_patterns pages in publish/glossary and publish/design_patterns.
+It will also produce a set of collated and cross-referenced error messages in publish/messages.
 
 
 glossary/markdown
@@ -27,8 +27,11 @@ contains a set of files, each file defines a glossary term, file names are exact
 design_patterns/markdown
 contains a set of files, each file contains a design pattern page, file names are full sentences
 
+remedies/markdown
+contains a set of files, each file contains one error remedy, file names correspond to legion_error_t anum names in legion_config.h
+
 makeAllTheThings.bash
-runs all of the scripts, no parameters required, results in publish/.
+runs all of the scripts, no parameters required, results in publish/.  Invokes toos/collate_messages.py
 
 crossIndex.bash
 script to automatically cross index the glossary and design patterns, results go into

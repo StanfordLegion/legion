@@ -1,4 +1,4 @@
-/* Copyright 2017 Stanford University
+/* Copyright 2018 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -45,6 +45,7 @@ void top_level_task(const Task *task,
   // use this to get the number of Fibonacci numbers to compute.
   const InputArgs &command_args = Runtime::get_input_args();
   for (int i = 1; i < command_args.argc; i++) {
+    // Skip any legion runtime configuration parameters
     if (command_args.argv[i][0] == '-') {
       i++;
       continue;

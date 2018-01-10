@@ -1,4 +1,4 @@
-/* Copyright 2017 Stanford University, NVIDIA Corporation
+/* Copyright 2018 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,6 +16,8 @@
 #ifndef RUNTIME_LOWLEVEL_H
 #define RUNTIME_LOWLEVEL_H
 
+#warning This file is deprecated - include "realm/realm.h" instead (and use namespace Realm instead of LegionRuntime::LowLevel).
+
 ///////////////////////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////////
 //
@@ -25,11 +27,8 @@
 ///////////////////////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////////
 
-#include "utilities.h"
-#include "accessor.h"
-#include "arrays.h"
-//#include "layouts.h"
-#include "lowlevel_config.h"
+#include "legion/arrays.h"
+#include "realm/realm_c.h"
 #ifdef USE_HDF
 #include <hdf5.h>
 #endif
@@ -53,16 +52,10 @@ namespace LegionRuntime {
     typedef Realm::Processor Processor;
     typedef Realm::Memory Memory;
     typedef Realm::RegionInstance RegionInstance;
-    typedef Realm::IndexSpace IndexSpace;
-    typedef Realm::IndexSpaceAllocator IndexSpaceAllocator;
-    typedef Realm::ElementMask ElementMask;
-    typedef Realm::Domain Domain;
-    typedef Realm::DomainPoint DomainPoint;
-    typedef Realm::DomainLinearization DomainLinearization;
     typedef Realm::Machine Machine;
     typedef Realm::Runtime Runtime;
 
-    typedef ::legion_lowlevel_id_t IDType;
+    typedef ::realm_id_t IDType;
 
   }; // namespace LowLevel
 }; // namespace LegionRuntime

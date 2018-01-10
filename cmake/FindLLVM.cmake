@@ -1,5 +1,5 @@
 #=============================================================================
-# Copyright 2017 Kitware, Inc.
+# Copyright 2018 Kitware, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -23,9 +23,23 @@
 # Once llvm-config is found, it will be used to query available components
 #
 if(NOT LLVM_FOUND AND NOT TARGET_LLVM)
-  find_program(LLVM_CONFIG_EXECUTABLE llvm-config)
+  if(NOT LLVM_CONFIG_EXECUTABLE)
+    # if an explicitly-versioned llvm-config (that we've tested with) is
+    #  available, use that
+    find_program(LLVM_CONFIG_EXECUTABLE NAMES llvm-config-3.9
+                                              llvm-config-3.8
+                                              llvm-config-3.6
+                                              llvm-config-3.5
+                                              llvm-config-4.0
+                                              llvm-config-5.0
+                                              llvm-config)
+  endif(NOT LLVM_CONFIG_EXECUTABLE)
   if(LLVM_CONFIG_EXECUTABLE)
     # Check components
+    execute_process(COMMAND ${LLVM_CONFIG_EXECUTABLE} --version
+      OUTPUT_VARIABLE LLVM_VERSION
+      OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET
+    )
     execute_process(COMMAND ${LLVM_CONFIG_EXECUTABLE} --components
       OUTPUT_VARIABLE LLVM_AVAILABLE_COMPONENTS
       OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET
@@ -36,6 +50,10 @@ if(NOT LLVM_FOUND AND NOT TARGET_LLVM)
     string(REPLACE " " ";"
       LLVM_AVAILABLE_COMPONENTS "${LLVM_AVAILABLE_COMPONENTS}"
     )
+    # for LLVM 3.6 and above, ignore jit in requested components
+    if(${LLVM_VERSION} VERSION_GREATER 3.5.99)
+      list(REMOVE_ITEM LLVM_FIND_COMPONENTS jit)
+    endif()
     foreach(C IN LISTS LLVM_FIND_COMPONENTS)
       list(FIND LLVM_AVAILABLE_COMPONENTS ${C} C_IDX)
       if(C_IDX EQUAL -1)
@@ -49,6 +67,10 @@ if(NOT LLVM_FOUND AND NOT TARGET_LLVM)
       OUTPUT_VARIABLE _LLVM_LIBS
       OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET
     )
+    # some versions of LLVM have a bug with libfiles where they produce 
+    #  /path/to/liblibfoo.so.so - do some string replaces to fix this
+    string(REPLACE "liblib" "lib" _LLVM_LIBS ${_LLVM_LIBS})
+    string(REPLACE ".so.so" ".so" _LLVM_LIBS ${_LLVM_LIBS})
     string(REPLACE " " ";" _LLVM_LIBS "${_LLVM_LIBS}")
 
     # LLVM system libs
@@ -57,6 +79,11 @@ if(NOT LLVM_FOUND AND NOT TARGET_LLVM)
       OUTPUT_VARIABLE _LLVM_SYSTEM_LIBS
       OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET
     )
+    # llvm-config --system-libs gives you all the libraries you might need for anything,
+    #  which includes things we don't need, and might not be installed
+    # for example, filter out libedit
+    string(REPLACE "-ledit" "" _LLVM_SYSTEM_LIBS "${_LLVM_SYSTEM_LIBS}")
+
     string(REPLACE "-l" "" _LLVM_SYSTEM_LIBS "${_LLVM_SYSTEM_LIBS}")
     string(REPLACE " " ";" _LLVM_SYSTEM_LIBS "${_LLVM_SYSTEM_LIBS}")
     list(APPEND _LLVM_LIBS ${_LLVM_SYSTEM_LIBS})
@@ -78,7 +105,7 @@ endif()
 
 if(LLVM_FOUND AND NOT TARGET LLVM::LLVM)
   add_library(LLVM::LLVM INTERFACE IMPORTED)
-  set_target_properties(LLVM PROPERTIES
+  set_target_properties(LLVM::LLVM PROPERTIES
     INTERFACE_COMPILE_OPTIONS "--std=c++11"
     INTERFACE_INCLUDE_DIRECTORIES "${_LLVM_INCLUDE}"
     INTERFACE_LINK_LIBRARIES "${_LLVM_LIBS}"

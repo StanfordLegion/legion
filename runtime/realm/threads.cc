@@ -1,4 +1,4 @@
-/* Copyright 2017 Stanford University, NVIDIA Corporation
+/* Copyright 2018 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,17 +15,18 @@
 
 // generic Realm interface to threading libraries (e.g. pthreads)
 
-#include "threads.h"
+#include "realm/threads.h"
 
-#include "logging.h"
-#include "faults.h"
-#include "operation.h"
+#include "realm/logging.h"
+#include "realm/faults.h"
+#include "realm/operation.h"
 
 #ifdef DEBUG_USWITCH
 #include <stdio.h>
 #endif
 
 #include <pthread.h>
+#include <errno.h>
 // for PTHREAD_STACK_MIN
 #include <limits.h>
 #ifdef __MACH__
@@ -69,6 +70,17 @@ inline void makecontext_wrap(ucontext_t *u, void (*fn)(), int args, ...) { makec
 #ifdef REALM_USE_HWLOC
 #include <hwloc/linux.h>
 #endif
+#endif
+
+#ifndef CHECK_LIBC
+#define CHECK_LIBC(cmd) do { \
+  errno = 0; \
+  int ret = (cmd); \
+  if(ret != 0) { \
+    std::cerr << "ERROR: " __FILE__ ":" << __LINE__ << ": " #cmd " = " << ret << " (" << strerror(errno) << ")" << std::endl;	\
+    assert(0); \
+  } \
+} while(0)
 #endif
 
 #ifndef CHECK_PTHREAD
@@ -551,11 +563,7 @@ namespace Realm {
     act.sa_sigaction = &signal_handler;
     act.sa_flags = SA_SIGINFO;
 
-#ifndef NDEBUG
-    int ret =
-#endif
-              sigaction(handler_signal, &act, 0);
-    assert(ret == 0);
+    CHECK_LIBC( sigaction(handler_signal, &act, 0) );
   }
 
   void Thread::signal(Signal sig, bool asynchronous)
@@ -623,6 +631,14 @@ namespace Realm {
 	}
       }
     }
+  }
+
+  // changes the priority of the thread (and, by extension, the operation it
+  //   is working on)
+  void Thread::set_priority(int new_priority)
+  {
+    assert(scheduler != 0);
+    scheduler->set_thread_priority(this, new_priority);
   }
 
 
@@ -821,6 +837,68 @@ namespace Realm {
   // class UserThread
 
 #ifdef REALM_USE_USER_THREADS
+  namespace {
+    int uswitch_test_check_flag = 1;
+    ucontext_t uswitch_test_ctx1, uswitch_test_ctx2;
+
+    void uswitch_test_entry(int arg)
+    {
+      log_thread.debug() << "uswitch test: adding: " << uswitch_test_check_flag << " " << arg;
+      __sync_fetch_and_add(&uswitch_test_check_flag, arg);
+      errno = 0;
+      int ret = swapcontext(&uswitch_test_ctx2, &uswitch_test_ctx1);
+      if(ret != 0) {
+	log_thread.fatal() << "uswitch test: swap out failed: " << ret << " " << errno;
+	assert(0);
+      }
+    }
+  }
+
+  // some systems do not appear to support user thread switching for
+  //  reasons unknown, so allow code to test to see if it's working first
+  /*static*/ bool Thread::test_user_switch_support(size_t stack_size /*= 1 << 20*/)
+  {
+    errno = 0;
+    int ret;
+    ret = getcontext(&uswitch_test_ctx2);
+    if(ret != 0) {
+      log_thread.info() << "uswitch test: getcontext failed: " << ret << " " << errno;
+      return false;
+    }
+    void *stack_base = malloc(stack_size);
+    if(!stack_base) {
+      log_thread.info() << "uswitch test: stack malloc failed";
+      return false;
+    }
+    uswitch_test_ctx2.uc_link = 0; // we don't expect it to ever fall through
+    uswitch_test_ctx2.uc_stack.ss_sp = stack_base;
+    uswitch_test_ctx2.uc_stack.ss_size = stack_size;
+    uswitch_test_ctx2.uc_stack.ss_flags = 0;
+    makecontext(&uswitch_test_ctx2,
+		reinterpret_cast<void(*)()>(uswitch_test_entry),
+		1, 66);
+
+    // now try to swap and back
+    errno = 0;
+    ret = swapcontext(&uswitch_test_ctx1, &uswitch_test_ctx2);
+    if(ret != 0) {
+      log_thread.info() << "uswitch test: swap in failed: " << ret << " " << errno;
+      free(stack_base);
+      return false;
+    }
+
+    int val = __sync_fetch_and_add(&uswitch_test_check_flag, 0);
+    if(val != 67) {
+      log_thread.info() << "uswitch test: val mismatch: " << val << " != 67";
+      free(stack_base);
+      return false;
+    }
+
+    log_thread.debug() << "uswitch test: check succeeded";
+    free(stack_base);
+    return true;
+  }
+
   class UserThread : public Thread {
   public:
     UserThread(void *_target, void (*_entry_wrapper)(void *),
@@ -932,7 +1010,7 @@ namespace Realm {
     stack_base = malloc(stack_size);
     assert(stack_base != 0);
 
-    getcontext(&ctx);
+    CHECK_LIBC( getcontext(&ctx) );
 
     ctx.uc_link = 0; // we don't expect it to ever fall through
     ctx.uc_stack.ss_sp = stack_base;
@@ -980,14 +1058,7 @@ namespace Realm {
       ThreadLocal::current_host_thread = ThreadLocal::current_thread;
       ThreadLocal::current_thread = switch_to;
 
-#ifndef NDEBUG
-      int ret =
-#endif
-	swapcontext(&host_ctx, &switch_to->ctx);
-
-      // if we return with a value of 0, that means we were (eventually) given control
-      //  back, as we hoped
-      assert(ret == 0);
+      CHECK_LIBC( swapcontext(&host_ctx, &switch_to->ctx) );
 
       assert(ThreadLocal::current_user_thread == 0);
       assert(ThreadLocal::host_context == &host_ctx);
@@ -1006,11 +1077,7 @@ namespace Realm {
 	ThreadLocal::current_thread = switch_to;
 
 	// a switch between two user contexts - nice and simple
-#ifndef NDEBUG
-	int ret =
-#endif
-	  swapcontext(&switch_from->ctx, &switch_to->ctx);
-	assert(ret == 0);
+	CHECK_LIBC( swapcontext(&switch_from->ctx, &switch_to->ctx) );
 
 	assert(switch_from->running == false);
 	switch_from->host_pthread = pthread_self();
@@ -1022,11 +1089,7 @@ namespace Realm {
 	ThreadLocal::current_thread = ThreadLocal::current_host_thread;
 	ThreadLocal::current_host_thread = 0;
 
-#ifndef NDEBUG
-	int ret =
-#endif
-	  swapcontext(&switch_from->ctx, ThreadLocal::host_context);
-	assert(ret == 0);
+	CHECK_LIBC( swapcontext(&switch_from->ctx, ThreadLocal::host_context) );
 
 	// if we get control back
 	assert(switch_from->running == false);
@@ -1191,23 +1254,29 @@ namespace Realm {
     return cm;
   }
 
-  // proc with the same physical core share everything (ALU,FPU,LDST)
-  void update_ht_sharing(std::map<std::pair<int, int>, std::set<CoreMap::Proc *> > ht_sets)
+  // this function is templated on the map key, since we don't really care 
+  //  what was used to make the equivalence classes
+  template <typename K>
+  void update_core_sharing(const std::map<K, std::set<CoreMap::Proc *> >& core_sets,
+			   bool share_alu, bool share_fpu, bool share_ldst)
   {
-    for(std::map<std::pair<int, int>, std::set<CoreMap::Proc *> >::const_iterator it = ht_sets.begin();
-        it != ht_sets.end();
+    for(typename std::map<K, std::set<CoreMap::Proc *> >::const_iterator it = core_sets.begin();
+        it != core_sets.end();
         it++) {
-      const std::set<CoreMap::Proc *>& ht = it->second;
-      if(ht.size() == 1) continue;  // singleton set - no sharing
+      const std::set<CoreMap::Proc *>& cset = it->second;
+      if(cset.size() == 1) continue;  // singleton set - no sharing
 
       // all pairs dependencies
-      for(std::set<CoreMap::Proc *>::const_iterator it1 = ht.begin(); it1 != ht.end(); it1++) {
-        for(std::set<CoreMap::Proc *>::const_iterator it2 = ht.begin(); it2 != ht.end(); it2++) {
+      for(std::set<CoreMap::Proc *>::const_iterator it1 = cset.begin(); it1 != cset.end(); it1++) {
+        for(std::set<CoreMap::Proc *>::const_iterator it2 = cset.begin(); it2 != cset.end(); it2++) {
           if(it1 != it2) {
             CoreMap::Proc *p = *it1;
-            p->shares_alu.insert(*it2);
-            p->shares_fpu.insert(*it2);
-            p->shares_ldst.insert(*it2);
+            if(share_alu)
+	      p->shares_alu.insert(*it2);
+	    if(share_fpu)
+	      p->shares_fpu.insert(*it2);
+	    if(share_ldst)
+	      p->shares_ldst.insert(*it2);
           }
         }
       }
@@ -1232,7 +1301,12 @@ namespace Realm {
 
     CoreMap *cm = new CoreMap;
     // hyperthreading sets are cores with the same node ID and physical core ID
+    //  they share ALU, FPU, and LDST units
     std::map<std::pair<int, int>, std::set<CoreMap::Proc *> > ht_sets;
+
+    // "thread_siblings" can be used to detect Bulldozer's core pairs that 
+    //  share the same FPU (this will also catch hyperthreads, but that's ok)
+    std::map<std::string, std::set<CoreMap::Proc *> > sibling_sets;
 
     // look for entries named /sys/devices/system/node/node<N>
     for(struct dirent *ne = readdir(nd); ne; ne = readdir(nd)) {
@@ -1289,13 +1363,34 @@ namespace Realm {
 
 	// add to HT sets to deal with in a bit
 	ht_sets[std::make_pair(node_id, core_id)].insert(p);
+
+	// read the sibling set, if we can - no need to parse it because we
+	//  expect symmetry across all cores in the same set
+	{
+	  char sibling_path[1024];
+	  sprintf(sibling_path, "/sys/devices/system/node/%s/%s/topology/thread_siblings_list", ne->d_name, ce->d_name);
+	  FILE *f = fopen(sibling_path, "r");
+	  if(f) {
+	    char line[256];
+	    if(fgets(line, 255, f)) {
+	      if(*line)
+		sibling_sets[line].insert(p);
+	    } else
+	      log_thread.warning() << "error reading '" << sibling_path << "' - no contents?";
+	    fclose(f);
+	  } else
+	    log_thread.warning() << "can't read '" << sibling_path << "' - skipping";
+	}
       }
       closedir(cd);
     }
     closedir(nd);
 
-    if(hyperthread_sharing)
-      update_ht_sharing(ht_sets);
+    if(hyperthread_sharing) {
+      update_core_sharing(ht_sets, true /*alu*/, true /*fpu*/, true /*ldst*/);
+      update_core_sharing(sibling_sets,
+			  false /*!alu*/, true /*fpu*/, false /*!ldst*/);
+    }
 
     // all done!
     return cm;
@@ -1303,25 +1398,6 @@ namespace Realm {
 #endif
 
 #ifdef REALM_USE_HWLOC
-  // bulldozer siblings share fpu
-  static void update_bd_sharing(std::map<int, std::set<CoreMap::Proc *> > bd_sets)
-  {
-    for(std::map<int, std::set<CoreMap::Proc *> >::const_iterator it = bd_sets.begin();
-        it != bd_sets.end();
-        it++) {
-      const std::set<CoreMap::Proc *>& bd = it->second;
-
-      for(std::set<CoreMap::Proc *>::const_iterator it1 = bd.begin(); it1 != bd.end(); it1++) {
-        for(std::set<CoreMap::Proc *>::const_iterator it2 = bd.begin(); it2 != bd.end(); it2++) {
-          if(it1 != it2) {
-            CoreMap::Proc *p = *it1;
-            p->shares_fpu.insert(*it2);
-          }
-        }
-      }
-    }
-  }
-
 #ifdef __linux__
   // find bulldozer cpus that share fpu
   static bool get_bd_sibling_id(int cpu_id, int core_id,
@@ -1344,6 +1420,9 @@ namespace Realm {
 	siblingid = hwloc_bitmap_next(set, siblingid)) {
       if(siblingid == cpu_id) continue;
 
+      // don't filter siblings with the same core ID - this catches
+      //  hyperthreads too
+#if 0
       sprintf(str, "/sys/devices/system/cpu/cpu%d/topology/core_id", siblingid);
       f = fopen(str, "r");
       if(!f) {
@@ -1356,9 +1435,10 @@ namespace Realm {
       if(count != 1) {
 	log_thread.warning() << "can't find core id in '" << str << "' - skipping";
 	continue;
-      }      
-      if(sib_core_id != core_id)
-	sibling_ids.insert(sib_core_id);
+      }
+      if(sib_core_id == core_id) continue;
+#endif
+      sibling_ids.insert(siblingid);
     }
 
     hwloc_bitmap_free(set);
@@ -1421,9 +1501,11 @@ namespace Realm {
     }
     hwloc_topology_destroy(topology);
 
-    if(hyperthread_sharing)
-      update_ht_sharing(ht_sets);
-    update_bd_sharing(bd_sets);
+    if(hyperthread_sharing) {
+      update_core_sharing(ht_sets, true /*alu*/, true /*fpu*/, true /*ldst*/);
+      update_core_sharing(bd_sets,
+			  false /*!alu*/, true /*fpu*/, false /*!ldst*/);
+    }
 
     // all done!
     return cm;

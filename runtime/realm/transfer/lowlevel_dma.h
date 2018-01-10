@@ -1,4 +1,4 @@
-/* Copyright 2017 Stanford University, NVIDIA Corporation
+/* Copyright 2018 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,15 +16,18 @@
 #ifndef LOWLEVEL_DMA_H
 #define LOWLEVEL_DMA_H
 
-#include "lowlevel_impl.h"
-#include "activemsg.h"
+#include "realm/activemsg.h"
+#include "realm/id.h"
+#include "realm/memory.h"
+#include "realm/redop.h"
+#include "realm/instance.h"
+#include "realm/event.h"
+#include "realm/runtime_impl.h"
+#include "realm/inst_impl.h"
 
 namespace Realm {
   class CoreReservationSet;
-};
 
-namespace LegionRuntime {
-  namespace LowLevel {
     struct RemoteIBAllocRequestAsync {
       struct RequestArgs {
         int node;
@@ -41,7 +44,7 @@ namespace LegionRuntime {
                                         RequestArgs,
                                         handle_request> Message;
 
-      static void send_request(gasnet_node_t target, Memory tgt_mem, void* req,
+      static void send_request(NodeID target, Memory tgt_mem, void* req,
                                int idx, ID::IDType src_id, ID::IDType dst_id, size_t size);
     };
 
@@ -60,7 +63,7 @@ namespace LegionRuntime {
                                         RequestArgs,
                                         handle_request> Message;
 
-      static void send_request(gasnet_node_t target, void* req, int idx, ID::IDType src_id,
+      static void send_request(NodeID target, void* req, int idx, ID::IDType src_id,
                                ID::IDType dst_id, size_t ib_size, off_t ib_offset);
     };
 
@@ -77,11 +80,12 @@ namespace LegionRuntime {
                                         RequestArgs,
                                         handle_request> Message;
 
-      static void send_request(gasnet_node_t target, Memory tgt_mem,
+      static void send_request(NodeID target, Memory tgt_mem,
                                off_t ib_offset, size_t ib_size);
     };
 
-    void find_shortest_path(Memory src_mem, Memory dst_mem, std::vector<Memory>& path);
+    void find_shortest_path(Memory src_mem, Memory dst_mem,
+			    CustomSerdezID serdez_id, std::vector<Memory>& path);
 
     struct RemoteCopyArgs : public BaseMedium {
       ReductionOpID redop_id;
@@ -92,7 +96,8 @@ namespace LegionRuntime {
 
     struct RemoteFillArgs : public BaseMedium {
       RegionInstance inst;
-      unsigned offset, size;
+      FieldID field_id;
+      unsigned size;
       Event before_fill, after_fill;
       //int priority;
     };
@@ -100,11 +105,6 @@ namespace LegionRuntime {
     extern void handle_remote_copy(RemoteCopyArgs args, const void *data, size_t msglen);
 
     extern void handle_remote_fill(RemoteFillArgs args, const void *data, size_t msglen);
-
-    enum DMAActiveMessageIDs {
-      REMOTE_COPY_MSGID = 200,
-      REMOTE_FILL_MSGID = 201,
-    };
 
     typedef ActiveMessageMediumNoReply<REMOTE_COPY_MSGID,
 				       RemoteCopyArgs,
@@ -122,7 +122,6 @@ namespace LegionRuntime {
     extern void start_dma_system(int count, bool pinned, int max_nr, Realm::CoreReservationSet& crs);
 
     extern void stop_dma_system(void);
-    extern void create_builtin_dma_channels(Realm::RuntimeImpl *r);
 
     /*
     extern Event enqueue_dma(IndexSpace idx,
@@ -148,6 +147,9 @@ namespace LegionRuntime {
 			  size_t size, off_t& field_start, int& field_size);
     
     class DmaRequestQueue;
+    // for now we use a single queue for all (local) dmas
+    extern DmaRequestQueue *dma_queue;
+    
     typedef unsigned long long XferDesID;
     class DmaRequest : public Realm::Operation {
     public:
@@ -223,98 +225,211 @@ namespace LegionRuntime {
     void free_intermediate_buffer(DmaRequest* req, Memory mem, off_t offset, size_t size);
 
     struct OffsetsAndSize {
-      off_t src_offset, dst_offset;
+      FieldID src_field_id, dst_field_id;
+      off_t src_subfield_offset, dst_subfield_offset;
       int size;
       CustomSerdezID serdez_id;
     };
     typedef std::vector<OffsetsAndSize> OASVec;
+    typedef std::pair<Memory, Memory> MemPair;
+    typedef std::pair<RegionInstance, RegionInstance> InstPair;
+    typedef std::map<InstPair, OASVec> OASByInst;
+    typedef std::map<MemPair, OASByInst *> OASByMem;
 
-    // an interface for objects that are responsible for copying data from one instance to another
-    //  these are generally created by MemPairCopier's
-    // an InstPairCopier remembers all the addressing details of the source and destination instance,
-    //  allowing a generic "iterate over all elements in the index space to be copied" loop to work
-    //  for all copy paths
-    class InstPairCopier {
-    public:
-      InstPairCopier(void);
-      virtual ~InstPairCopier(void);
-    public:
-      virtual bool copy_all_fields(Domain d) { return false; }
+    class MemPairCopier;
 
-      virtual void copy_field(off_t src_index, off_t dst_index, off_t elem_count,
-                              unsigned offset_index) = 0;
-
-      virtual void copy_all_fields(off_t src_index, off_t dst_index, off_t elem_count) = 0;
-
-      virtual void copy_all_fields(off_t src_index, off_t dst_index, off_t count_per_line,
-				   off_t src_stride, off_t dst_stride, off_t lines);
-
-      virtual void flush(void) = 0;
+    struct PendingIBInfo {
+      Memory memory;
+      int idx;
+      InstPair ip;
     };
 
-    // many instance pair copiers are "span-based" and the various copies can be implemented using a single
-    //  "copy_span" building block - this is provided via templating rather than inheritance to allow for
-    //  inlining the calls to copy_span that will occur in for loops
-    template <typename T>
-    class SpanBasedInstPairCopier : public InstPairCopier {
+    class ComparePendingIBInfo {
     public:
-      SpanBasedInstPairCopier(T *_span_copier, 
-                              RegionInstance _src_inst, 
-                              RegionInstance _dst_inst,
-                              OASVec &_oas_vec);
-
-      virtual ~SpanBasedInstPairCopier(void);
-
-      virtual void copy_field(off_t src_index, off_t dst_index, off_t elem_count,
-                              unsigned offset_index);
-
-      virtual void copy_all_fields(off_t src_index, off_t dst_index, off_t elem_count);
-
-      virtual void copy_all_fields(off_t src_index, off_t dst_index, off_t count_per_line,
-				   off_t src_stride, off_t dst_stride, off_t lines);
-
-      virtual void flush(void);
-
-    protected:
-      T *span_copier;
-      RegionInstanceImpl *src_inst;
-      RegionInstanceImpl *dst_inst;
-      OASVec &oas_vec;
-      std::vector<off_t> src_start;
-      std::vector<off_t> dst_start;
-      std::vector<int> src_size;
-      std::vector<int> dst_size;
-      std::vector<bool> partial_field;
+      bool operator() (const PendingIBInfo& a, const PendingIBInfo& b) {
+        if (a.memory.id == b.memory.id) {
+          assert(a.idx != b.idx);
+          return a.idx < b.idx;
+        }
+        else
+          return a.memory.id < b.memory.id;
+      }
     };
 
-    class MemPairCopier {
+    struct IBInfo {
+      enum Status {
+        INIT,
+        SENT,
+        COMPLETED
+      };
+      Memory memory;
+      off_t offset;
+      size_t size;
+      Status status;
+      //IBFence* fence;
+      Event event;
+    };
+
+    typedef std::set<PendingIBInfo, ComparePendingIBInfo> PriorityIBQueue;
+    typedef std::vector<IBInfo> IBVec;
+    typedef std::map<InstPair, IBVec> IBByInst;
+
+    class TransferDomain;
+    class TransferIterator;
+
+    // dma requests come in two flavors:
+    // 1) CopyRequests, which are per memory pair, and
+    // 2) ReduceRequests, which have to be handled monolithically
+
+    class CopyRequest : public DmaRequest {
     public:
-      static MemPairCopier* create_copier(Memory src_mem, Memory dst_mem,
-					  ReductionOpID redop_id = 0,
-					  CustomSerdezID serdez_id = 0,
-					  bool fold = false);
+      CopyRequest(const void *data, size_t datalen,
+		  Event _before_copy,
+		  Event _after_copy,
+		  int _priority);
 
-      MemPairCopier(void);
-
-      virtual ~MemPairCopier(void);
-
-      virtual InstPairCopier *inst_pair(RegionInstance src_inst, RegionInstance dst_inst,
-                                        OASVec &oas_vec) = 0;
-
-      // default behavior of flush is just to report bytes (maybe)
-      virtual void flush(DmaRequest *req);
-
-      void record_bytes(size_t bytes);
-
-      size_t get_total_bytes() { return total_bytes; }
+      CopyRequest(const TransferDomain *_domain, //const Domain& _domain,
+		  OASByInst *_oas_by_inst,
+		  Event _before_copy,
+		  Event _after_copy,
+		  int _priority,
+                  const Realm::ProfilingRequestSet &reqs);
 
     protected:
-      size_t total_reqs, total_bytes;
+      // deletion performed when reference count goes to zero
+      virtual ~CopyRequest(void);
+
+    public:
+      void forward_request(NodeID target_node);
+
+      virtual bool check_readiness(bool just_check, DmaRequestQueue *rq);
+
+      void perform_new_dma(Memory src_mem, Memory dst_mem);
+
+      virtual void perform_dma(void);
+
+      virtual bool handler_safe(void) { return(false); }
+
+      TransferDomain *domain;
+      //Domain domain;
+      OASByInst *oas_by_inst;
+
+      // <NEW_DMA>
+      void alloc_intermediate_buffer(InstPair inst_pair, Memory tgt_mem, int idx);
+
+      void handle_ib_response(int idx, InstPair inst_pair, size_t ib_size, off_t ib_offset);
+
+      PriorityIBQueue priority_ib_queue;
+      // operations on ib_by_inst are protected by ib_mutex
+      IBByInst ib_by_inst;
+      GASNetHSL ib_mutex;
+      class IBAllocOp : public Realm::Operation {
+      public:
+        IBAllocOp(Event _completion) : Operation(_completion, Realm::ProfilingRequestSet()) {};
+        ~IBAllocOp() {};
+        void print(std::ostream& os) const {os << "IBAllocOp"; };
+      };
+
+      std::vector<Memory> mem_path;
+      // </NEW_DMA>
+
+      Event before_copy;
+      Waiter waiter; // if we need to wait on events
+    };
+
+    class ReduceRequest : public DmaRequest {
+    public:
+      ReduceRequest(const void *data, size_t datalen,
+		    ReductionOpID _redop_id,
+		    bool _red_fold,
+		    Event _before_copy,
+		    Event _after_copy,
+		    int _priority);
+
+      ReduceRequest(const TransferDomain *_domain, //const Domain& _domain,
+		    const std::vector<CopySrcDstField>& _srcs,
+		    const CopySrcDstField& _dst,
+		    bool _inst_lock_needed,
+		    ReductionOpID _redop_id,
+		    bool _red_fold,
+		    Event _before_copy,
+		    Event _after_copy,
+		    int _priority,
+                    const Realm::ProfilingRequestSet &reqs);
+
+    protected:
+      // deletion performed when reference count goes to zero
+      virtual ~ReduceRequest(void);
+
+    public:
+      void forward_request(NodeID target_node);
+
+      virtual bool check_readiness(bool just_check, DmaRequestQueue *rq);
+
+      virtual void perform_dma(void);
+
+      virtual bool handler_safe(void) { return(false); }
+
+      TransferDomain *domain;
+      //Domain domain;
+      std::vector<CopySrcDstField> srcs;
+      CopySrcDstField dst;
+      bool inst_lock_needed;
+      Event inst_lock_event;
+      ReductionOpID redop_id;
+      bool red_fold;
+      Event before_copy;
+      Waiter waiter; // if we need to wait on events
+    };
+
+    class FillRequest : public DmaRequest {
+    public:
+      FillRequest(const void *data, size_t msglen,
+                  RegionInstance inst,
+                  FieldID field_id, unsigned size,
+                  Event _before_fill, 
+                  Event _after_fill,
+                  int priority);
+      FillRequest(const TransferDomain *_domain, //const Domain &_domain,
+                  const CopySrcDstField &_dst,
+                  const void *fill_value, size_t fill_size,
+                  Event _before_fill,
+                  Event _after_fill,
+                  int priority,
+                  const Realm::ProfilingRequestSet &reqs);
+
+    protected:
+      // deletion performed when reference count goes to zero
+      virtual ~FillRequest(void);
+
+    public:
+      void forward_request(NodeID target_node);
+
+      virtual bool check_readiness(bool just_check, DmaRequestQueue *rq);
+
+      virtual void perform_dma(void);
+
+      virtual bool handler_safe(void) { return(false); }
+
+      template<int DIM>
+      void perform_dma_rect(MemoryImpl *mem_impl);
+
+      size_t optimize_fill_buffer(RegionInstanceImpl *impl, int &fill_elmts);
+
+      TransferDomain *domain;
+      //Domain domain;
+      CopySrcDstField dst;
+      void *fill_buffer;
+      size_t fill_size;
+      Event before_fill;
+      Waiter waiter;
     };
 
     // each DMA "channel" implements one of these to describe (implicitly) which copies it
     //  is capable of performing and then to actually construct a MemPairCopier for copies 
     //  between a given pair of memories
+    // NOTE: we no longer use MemPairCopier's, but these are left in as
+    //  placeholders for having channels be created more modularly
     class MemPairCopierFactory {
     public:
       MemPairCopierFactory(const std::string& _name);
@@ -327,14 +442,17 @@ namespace LegionRuntime {
       virtual bool can_perform_copy(Memory src_mem, Memory dst_mem,
 				    ReductionOpID redop_id, bool fold) = 0;
 
+#ifdef OLD_COPIERS
       virtual MemPairCopier *create_copier(Memory src_mem, Memory dst_mem,
 					   ReductionOpID redop_id, bool fold) = 0;
+#endif
 
     protected:
       std::string name;
     };
 
     class Request;
+
     class AsyncFileIOContext {
     public:
       AsyncFileIOContext(int _max_depth);
@@ -366,10 +484,6 @@ namespace LegionRuntime {
       aio_context_t aio_ctx;
 #endif
     };
-  };
 };
-
-// implementation of templated and inline methods
-#include "lowlevel_dma.inl"
 
 #endif
