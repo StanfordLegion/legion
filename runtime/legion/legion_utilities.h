@@ -6641,9 +6641,9 @@ namespace Legion {
     //-------------------------------------------------------------------------
     {
       PPCBitMask<MAX> result;
-      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+      for (unsigned idx = 0; idx < PPC_ELMTS; idx++)
       {
-        result[idx] = ~(bits.bit_vector[idx]);
+        result(idx) = ~(bits.ppc_vector[idx]);
       }
       return result;
     }
@@ -7276,11 +7276,13 @@ namespace Legion {
     //-------------------------------------------------------------------------
     {
       PPCTLBitMask<MAX> result;
-      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+      __vector unsigned long long result_mask = { 0, 0 };
+      for (unsigned idx = 0; idx < PPC_ELMTS; idx++)
       {
-        result[idx] = ~(bits.bit_vector[idx]);
-        result.sum_mask |= result[idx];
+        result(idx) = ~(bits.ppc_vector[idx]);
+        result_mask = vec_or(result_mask, result(idx));
       }
+      result.sum_mask = extract_mask(result_mask);
       return result;
     }
 
