@@ -422,13 +422,15 @@ local function analyze_replicable_node(cx)
     if node:is(ast.typed.expr.Call) then
       return std.is_task(node.fn.value) or node.replicable
     
-    elseif node:is(ast.typed.expr.MethodCall) then
-      return false
-
-    elseif node:is(ast.typed.expr.ID) or
+    elseif node:is(ast.typed.expr.MethodCall) or
       node:is(ast.typed.expr.Adjust) or
       node:is(ast.typed.expr.Arrive) or
       node:is(ast.typed.expr.Await) or
+      node:is(ast.typed.expr.Advance)
+    then
+      return false
+
+    elseif node:is(ast.typed.expr.ID) or
       node:is(ast.typed.expr.Constant) or
       node:is(ast.typed.expr.Deref) or
       node:is(ast.typed.expr.IndexAccess) or
@@ -471,7 +473,6 @@ local function analyze_replicable_node(cx)
       node:is(ast.typed.expr.PhaseBarrier) or
       node:is(ast.typed.expr.DynamicCollective) or
       node:is(ast.typed.expr.DynamicCollectiveGetResult) or
-      node:is(ast.typed.expr.Advance) or
       node:is(ast.typed.expr.Copy) or
       node:is(ast.typed.expr.Fill) or
       node:is(ast.typed.expr.Acquire) or
