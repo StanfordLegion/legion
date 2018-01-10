@@ -428,6 +428,8 @@ namespace Legion {
     public:
       IndexSpace create_index_space(MappingCallInfo *info, const Domain &domain,
                                     const void *realm_is, TypeTag type_tag);
+      bool has_index_partition(MappingCallInfo *info,
+                               IndexSpace parent, Color color);
       IndexPartition get_index_partition(MappingCallInfo *info,
                                          IndexSpace parent, Color color);
       IndexSpace get_index_subspace(MappingCallInfo *info,
@@ -445,6 +447,8 @@ namespace Legion {
                                             IndexSpace sp, 
                                             std::set<Color> &colors);
       bool is_index_partition_disjoint(MappingCallInfo *info,
+                                       IndexPartition p);
+      bool is_index_partition_complete(MappingCallInfo *info,
                                        IndexPartition p);
       Color get_index_space_color(MappingCallInfo *info, IndexSpace handle);
       Color get_index_partition_color(MappingCallInfo *info, 
