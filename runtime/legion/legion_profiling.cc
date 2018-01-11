@@ -1581,8 +1581,11 @@ namespace Legion {
         // so there are no discontinuities in performance. If the threshold
         // is zero we'll just choose an arbitrarily large scale factor to 
         // ensure that things work properly.
-        const double over_scale = output_footprint_threshold == 0 ? 1 << 20 : 
+        double over_scale = output_footprint_threshold == 0 ? double(1 << 20) :
                         double(footprint) / double(output_footprint_threshold);
+        // Let's actually make this quadratic so it's not just linear
+        if (output_footprint_threshold > 0)
+          over_scale *= over_scale;
         if (!serializer->is_thread_safe())
         {
           // Need a lock to protect the serializer
