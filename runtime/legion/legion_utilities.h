@@ -31,7 +31,10 @@
 #if defined(__i386__) || defined(__x86_64__)
 #include <x86intrin.h>
 #endif
-#else
+#ifdef __ALTIVEC__
+#include <altivec.h>
+#endif
+#else // !__MACH__
 #ifdef __SSE2__
 #include <emmintrin.h>
 #endif
@@ -370,6 +373,12 @@ namespace Legion {
       template<unsigned int MAX>
       inline void serialize(const AVXTLBitMask<MAX> &mask);
 #endif
+#ifdef __ALTIVEC__
+      template<unsigned int MAX>
+      inline void serialize(const PPCBitMask<MAX> &mask);
+      template<unsigned int MAX>
+      inline void serialize(const PPCTLBitMask<MAX> &mask);
+#endif
       template<typename IT, typename DT, bool BIDIR>
       inline void serialize(const IntegerSet<IT,DT,BIDIR> &index_set);
       inline void serialize(const Domain &domain);
@@ -441,6 +450,12 @@ namespace Legion {
       inline void deserialize(AVXBitMask<MAX> &mask);
       template<unsigned int MAX>
       inline void deserialize(AVXTLBitMask<MAX> &mask);
+#endif
+#ifdef __ALTIVEC__
+      template<unsigned int MAX>
+      inline void deserialize(PPCBitMask<MAX> &mask);
+      template<unsigned int MAX>
+      inline void deserialize(PPCTLBitMask<MAX> &mask);
 #endif
       template<typename IT, typename DT, bool BIDIR>
       inline void deserialize(IntegerSet<IT,DT,BIDIR> &index_set);
@@ -1020,6 +1035,162 @@ namespace Legion {
 #endif
 #endif // __AVX__
 
+#ifdef __ALTIVEC__
+    /////////////////////////////////////////////////////////////
+    // PPC Bit Mask  
+    /////////////////////////////////////////////////////////////
+    template<unsigned int MAX>
+    class PPCBitMask // alignment handled below
+      : public Internal::LegionHeapify<PPCBitMask<MAX> > {
+    public:
+      explicit PPCBitMask(uint64_t init = 0);
+      PPCBitMask(const PPCBitMask &rhs);
+      ~PPCBitMask(void);
+    public:
+      inline void set_bit(unsigned bit);
+      inline void unset_bit(unsigned bit);
+      inline void assign_bit(unsigned bit, bool val);
+      inline bool is_set(unsigned bit) const;
+      inline int find_first_set(void) const;
+      inline int find_index_set(int index) const;
+      inline int find_next_set(int start) const;
+      inline void clear(void);
+    public:
+      inline bool operator==(const PPCBitMask &rhs) const;
+      inline bool operator<(const PPCBitMask &rhs) const;
+      inline bool operator!=(const PPCBitMask &rhs) const;
+    public:
+      inline const __vector unsigned long long& 
+        operator()(const unsigned &idx) const;
+      inline __vector unsigned long long& operator()(const unsigned &idx);
+      inline const uint64_t& operator[](const unsigned &idx) const;
+      inline uint64_t& operator[](const unsigned &idx);
+      inline PPCBitMask& operator=(const PPCBitMask &rhs);
+      inline const __vector double& elem(const unsigned &idx) const;
+      inline __vector double& elem(const unsigned &idx);
+    public:
+      inline PPCBitMask operator~(void) const;
+      inline PPCBitMask operator|(const PPCBitMask &rhs) const;
+      inline PPCBitMask operator&(const PPCBitMask &rhs) const;
+      inline PPCBitMask operator^(const PPCBitMask &rhs) const;
+    public:
+      inline PPCBitMask& operator|=(const PPCBitMask &rhs);
+      inline PPCBitMask& operator&=(const PPCBitMask &rhs);
+      inline PPCBitMask& operator^=(const PPCBitMask &rhs);
+    public:
+      // Use * for disjointness testing
+      inline bool operator*(const PPCBitMask &rhs) const;
+      // Set difference
+      inline PPCBitMask operator-(const PPCBitMask &rhs) const;
+      inline PPCBitMask& operator-=(const PPCBitMask &rhs);
+      // Test to see if everything is zeros
+      inline bool operator!(void) const;
+    public:
+      inline PPCBitMask operator<<(unsigned shift) const;
+      inline PPCBitMask operator>>(unsigned shift) const;
+    public:
+      inline PPCBitMask& operator<<=(unsigned shift);
+      inline PPCBitMask& operator>>=(unsigned shift);
+    public:
+      inline uint64_t get_hash_key(void) const;
+      inline const uint64_t* base(void) const;
+      inline void serialize(Serializer &rez) const;
+      inline void deserialize(Deserializer &derez);
+    public:
+      // Allocates memory that becomes owned by the caller
+      inline char* to_string(void) const;
+    public:
+      static inline int pop_count(const PPCBitMask<MAX> &mask);
+    protected:
+      union {
+        __vector unsigned long long ppc_vector[MAX/128];
+        __vector double ppc_double[MAX/128];
+        uint64_t bit_vector[MAX/64];
+      } bits;
+    public:
+      static const unsigned ELEMENT_SIZE = 64;
+      static const unsigned ELEMENTS = MAX/ELEMENT_SIZE;
+    } __attribute__((aligned(16)));
+    
+    /////////////////////////////////////////////////////////////
+    // PPC Two-Level Bit Mask  
+    /////////////////////////////////////////////////////////////
+    template<unsigned int MAX>
+    class PPCTLBitMask // alignment handled below
+      : public Internal::LegionHeapify<PPCTLBitMask<MAX> > {
+    public:
+      explicit PPCTLBitMask(uint64_t init = 0);
+      PPCTLBitMask(const PPCTLBitMask &rhs);
+      ~PPCTLBitMask(void);
+    public:
+      inline void set_bit(unsigned bit);
+      inline void unset_bit(unsigned bit);
+      inline void assign_bit(unsigned bit, bool val);
+      inline bool is_set(unsigned bit) const;
+      inline int find_first_set(void) const;
+      inline int find_index_set(int index) const;
+      inline int find_next_set(int start) const;
+      inline void clear(void);
+    public:
+      inline bool operator==(const PPCTLBitMask &rhs) const;
+      inline bool operator<(const PPCTLBitMask &rhs) const;
+      inline bool operator!=(const PPCTLBitMask &rhs) const;
+    public:
+      inline const __vector unsigned long long& 
+        operator()(const unsigned &idx) const;
+      inline __vector unsigned long long& operator()(const unsigned &idx);
+      inline const uint64_t& operator[](const unsigned &idx) const;
+      inline uint64_t& operator[](const unsigned &idx);
+      inline PPCTLBitMask& operator=(const PPCTLBitMask &rhs);
+      inline const __vector double& elem(const unsigned &idx) const;
+      inline __vector double& elem(const unsigned &idx);
+    public:
+      inline PPCTLBitMask operator~(void) const;
+      inline PPCTLBitMask operator|(const PPCTLBitMask &rhs) const;
+      inline PPCTLBitMask operator&(const PPCTLBitMask &rhs) const;
+      inline PPCTLBitMask operator^(const PPCTLBitMask &rhs) const;
+    public:
+      inline PPCTLBitMask& operator|=(const PPCTLBitMask &rhs);
+      inline PPCTLBitMask& operator&=(const PPCTLBitMask &rhs);
+      inline PPCTLBitMask& operator^=(const PPCTLBitMask &rhs);
+    public:
+      // Use * for disjointness testing
+      inline bool operator*(const PPCTLBitMask &rhs) const;
+      // Set difference
+      inline PPCTLBitMask operator-(const PPCTLBitMask &rhs) const;
+      inline PPCTLBitMask& operator-=(const PPCTLBitMask &rhs);
+      // Test to see if everything is zeros
+      inline bool operator!(void) const;
+    public:
+      inline PPCTLBitMask operator<<(unsigned shift) const;
+      inline PPCTLBitMask operator>>(unsigned shift) const;
+    public:
+      inline PPCTLBitMask& operator<<=(unsigned shift);
+      inline PPCTLBitMask& operator>>=(unsigned shift);
+    public:
+      inline uint64_t get_hash_key(void) const;
+      inline const uint64_t* base(void) const;
+      inline void serialize(Serializer &rez) const;
+      inline void deserialize(Deserializer &derez);
+    public:
+      // Allocates memory that becomes owned by the caller
+      inline char* to_string(void) const;
+    public:
+      static inline int pop_count(const PPCTLBitMask<MAX> &mask);
+      static inline uint64_t extract_mask(__vector unsigned long long value);
+    protected:
+      union {
+        __vector unsigned long long ppc_vector[MAX/128];
+        __vector double ppc_double[MAX/128];
+        uint64_t bit_vector[MAX/64];
+      } bits;
+      uint64_t sum_mask;
+    public:
+      static const unsigned ELEMENT_SIZE = 64;
+      static const unsigned ELEMENTS = MAX/ELEMENT_SIZE;
+    } __attribute__((aligned(16)));
+#endif // __ALTIVEC__
+
     template<typename BITMASK, unsigned int MAX, unsigned int WORDS>
     class CompoundBitMask {
     public:
@@ -1463,6 +1634,24 @@ namespace Legion {
     }
 #endif
 
+#ifdef __ALTIVEC__
+    //--------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline void Serializer::serialize(const PPCBitMask<MAX> &mask)
+    //--------------------------------------------------------------------------
+    {
+      mask.serialize(*this);
+    }
+
+    //--------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline void Serializer::serialize(const PPCTLBitMask<MAX> &mask)
+    //--------------------------------------------------------------------------
+    {
+      mask.serialize(*this);
+    }
+#endif
+
     //--------------------------------------------------------------------------
     template<typename IT, typename DT, bool BIDIR>
     inline void Serializer::serialize(const IntegerSet<IT,DT,BIDIR> &int_set)
@@ -1656,6 +1845,24 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<unsigned int MAX>
     inline void Deserializer::deserialize(AVXTLBitMask<MAX> &mask)
+    //--------------------------------------------------------------------------
+    {
+      mask.deserialize(*this);
+    }
+#endif
+
+#ifdef __ALTIVEC__
+    //--------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline void Deserializer::deserialize(PPCBitMask<MAX> &mask)
+    //--------------------------------------------------------------------------
+    {
+      mask.deserialize(*this);
+    }
+
+    //--------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline void Deserializer::deserialize(PPCTLBitMask<MAX> &mask)
     //--------------------------------------------------------------------------
     {
       mask.deserialize(*this);
@@ -6232,6 +6439,1332 @@ namespace Legion {
 #undef BIT_ELMTS
 #undef AVX_ELMTS
 #endif // __AVX__
+
+#ifdef __ALTIVEC__
+#define PPC_ELMTS (MAX/128)
+#define BIT_ELMTS (MAX/64)
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    PPCBitMask<MAX>::PPCBitMask(uint64_t init /*= 0*/)
+    //-------------------------------------------------------------------------
+    {
+      LEGION_STATIC_ASSERT((MAX % 128) == 0);
+      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+      {
+        bits.bit_vector[idx] = init;
+      }
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    PPCBitMask<MAX>::PPCBitMask(const PPCBitMask &rhs)
+    //-------------------------------------------------------------------------
+    {
+      LEGION_STATIC_ASSERT((MAX % 128) == 0);
+      for (unsigned idx = 0; idx < PPC_ELMTS; idx++)
+      {
+        bits.ppc_vector[idx] = rhs(idx);
+      }
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    PPCBitMask<MAX>::~PPCBitMask(void)
+    //-------------------------------------------------------------------------
+    {
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline void PPCBitMask<MAX>::set_bit(unsigned bit)
+    //-------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(bit < MAX);
+#endif
+      unsigned idx = bit >> 6;
+      bits.bit_vector[idx] |= (1UL << (bit & 0x3F));
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline void PPCBitMask<MAX>::unset_bit(unsigned bit)
+    //-------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(bit < MAX);
+#endif
+      unsigned idx = bit >> 6;
+      bits.bit_vector[idx] &= ~(1UL << (bit & 0x3F));
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline void PPCBitMask<MAX>::assign_bit(unsigned bit, bool val)
+    //-------------------------------------------------------------------------
+    {
+      if (val)
+        set_bit(bit);
+      else
+        unset_bit(bit);
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline bool PPCBitMask<MAX>::is_set(unsigned bit) const
+    //-------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(bit < MAX);
+#endif
+      unsigned idx = bit >> 6;
+      return (bits.bit_vector[idx] & (1UL << (bit & 0x3F)));
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline int PPCBitMask<MAX>::find_first_set(void) const
+    //-------------------------------------------------------------------------
+    {
+      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+      {
+        if (bits.bit_vector[idx])
+        {
+          for (unsigned j = 0; j < ELEMENT_SIZE; j++)
+          {
+            if (bits.bit_vector[idx] & (1UL << j))
+            {
+              return (idx*ELEMENT_SIZE + j);
+            }
+          }
+        }
+      }
+      return -1;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline int PPCBitMask<MAX>::find_index_set(int index) const
+    //-------------------------------------------------------------------------
+    {
+      int offset = 0;
+      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+      {
+        int local = __builtin_popcount(bits.bit_vector[idx]);
+        if (index <= local)
+        {
+          for (unsigned j = 0; j < ELEMENT_SIZE; j++)
+          {
+            if (bits.bit_vector[idx] & (1ULL << j))
+            {
+              if (index == 0)
+                return (offset + j);
+              index--;
+            }
+          }
+        }
+        index -= local;
+        offset += ELEMENT_SIZE;
+      }
+      return -1;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline int PPCBitMask<MAX>::find_next_set(int start) const
+    //-------------------------------------------------------------------------
+    {
+      if (start < 0)
+        start = 0;
+      int idx = start / ELEMENT_SIZE; // truncate
+      int offset = idx * ELEMENT_SIZE; 
+      int j = start % ELEMENT_SIZE;
+      if (j > 0) // if we are already in the middle of element search it
+      {
+        for ( ; j < int(ELEMENT_SIZE); j++)
+        {
+          if (bits.bit_vector[idx] & (1ULL << j))
+            return (offset + j);
+        }
+        idx++;
+        offset += ELEMENT_SIZE;
+      }
+      for ( ; idx < int(BIT_ELMTS); idx++)
+      {
+        if (bits.bit_vector[idx] > 0) // if it has any valid entries, find next
+        {
+          for (j = 0; j < int(ELEMENT_SIZE); j++)
+          {
+            if (bits.bit_vector[idx] & (1ULL << j))
+              return (offset + j);
+          }
+        }
+        offset += ELEMENT_SIZE;
+      }
+      return -1;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline void PPCBitMask<MAX>::clear(void)
+    //-------------------------------------------------------------------------
+    {
+      const __vector unsigned long long zero_vec = { 0, 0 };
+      for (unsigned idx = 0; idx < PPC_ELMTS; idx++)
+      {
+        bits.ppc_vector[idx] = zero_vec;
+      }
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline const __vector unsigned long long& PPCBitMask<MAX>::operator()(
+                                                 const unsigned int &idx) const
+    //-------------------------------------------------------------------------
+    {
+      return bits.ppc_vector[idx];
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline __vector unsigned long long& PPCBitMask<MAX>::operator()(
+                                                       const unsigned int &idx)
+    //-------------------------------------------------------------------------
+    {
+      return bits.ppc_vector[idx];
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline const uint64_t& PPCBitMask<MAX>::operator[](
+                                                 const unsigned int &idx) const
+    //-------------------------------------------------------------------------
+    {
+      return bits.bit_vector[idx];
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline uint64_t& PPCBitMask<MAX>::operator[](const unsigned int &idx) 
+    //-------------------------------------------------------------------------
+    {
+      return bits.bit_vector[idx]; 
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline bool PPCBitMask<MAX>::operator==(const PPCBitMask &rhs) const
+    //-------------------------------------------------------------------------
+    {
+      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+      {
+	if (bits.bit_vector[idx] != rhs[idx])
+          return false;
+      }
+      return true;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline bool PPCBitMask<MAX>::operator<(const PPCBitMask &rhs) const
+    //-------------------------------------------------------------------------
+    {
+      // Only be less than if the bits are a subset of the rhs bits
+      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+      {
+        if (bits.ppc_vector[idx] < rhs[idx])
+          return true;
+        else if (bits.bits_vector[idx] > rhs[idx])
+          return false;
+      }
+      // Otherwise they are equal so false
+      return false;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline bool PPCBitMask<MAX>::operator!=(const PPCBitMask &rhs) const
+    //-------------------------------------------------------------------------
+    {
+      return !(*this == rhs);
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline PPCBitMask<MAX>& PPCBitMask<MAX>::operator=(const PPCBitMask &rhs)
+    //-------------------------------------------------------------------------
+    {
+      for (unsigned idx = 0; idx < PPC_ELMTS; idx++)
+      {
+        bits.ppc_vector[idx] = rhs(idx);
+      }
+      return *this;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline PPCBitMask<MAX> PPCBitMask<MAX>::operator~(void) const
+    //-------------------------------------------------------------------------
+    {
+      PPCBitMask<MAX> result;
+      for (unsigned idx = 0; idx < PPC_ELMTS; idx++)
+      {
+        result(idx) = ~(bits.ppc_vector[idx]);
+      }
+      return result;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline PPCBitMask<MAX> PPCBitMask<MAX>::operator|(
+                                                   const PPCBitMask &rhs) const
+    //-------------------------------------------------------------------------
+    {
+      PPCBitMask<MAX> result;
+      for (unsigned idx = 0; idx < PPC_ELMTS; idx++)
+      {
+        result(idx) = vec_or(bits.ppc_vector[idx], rhs(idx));
+      }
+      return result;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline PPCBitMask<MAX> PPCBitMask<MAX>::operator&(
+                                                   const PPCBitMask &rhs) const
+    //-------------------------------------------------------------------------
+    {
+      PPCBitMask<MAX> result;
+      for (unsigned idx = 0; idx < PPC_ELMTS; idx++)
+      {
+        result(idx) = vec_and(bits.ppc_vector[idx], rhs(idx));
+      }
+      return result;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline PPCBitMask<MAX> PPCBitMask<MAX>::operator^(
+                                                   const PPCBitMask &rhs) const
+    //-------------------------------------------------------------------------
+    {
+      PPCBitMask<MAX> result;
+      for (unsigned idx = 0; idx < PPC_ELMTS; idx++)
+      {
+        result(idx) = vec_xor(bits.ppc_vector[idx], rhs(idx));
+      }
+      return result;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline PPCBitMask<MAX>& PPCBitMask<MAX>::operator|=(const PPCBitMask &rhs) 
+    //-------------------------------------------------------------------------
+    {
+      for (unsigned idx = 0; idx < PPC_ELMTS; idx++)
+      {
+        bits.ppc_vector[idx] = vec_or(bits.ppc_vector[idx], rhs(idx));
+      }
+      return *this;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline PPCBitMask<MAX>& PPCBitMask<MAX>::operator&=(const PPCBitMask &rhs)
+    //-------------------------------------------------------------------------
+    {
+      for (unsigned idx = 0; idx < PPC_ELMTS; idx++)
+      {
+        bits.ppc_vector[idx] = vec_and(bits.ppc_vector[idx], rhs(idx));
+      }
+      return *this;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline PPCBitMask<MAX>& PPCBitMask<MAX>::operator^=(const PPCBitMask &rhs)
+    //-------------------------------------------------------------------------
+    {
+      for (unsigned idx = 0; idx < PPC_ELMTS; idx++)
+      {
+        bits.ppc_vector[idx] = vec_xor(bits.ppc_vector[idx], rhs(idx));
+      }
+      return *this;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline bool PPCBitMask<MAX>::operator*(const PPCBitMask &rhs) const
+    //-------------------------------------------------------------------------
+    {
+      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+      {
+        if (bits.bit_vector[idx] & rhs[idx])
+          return false;
+      }
+      return true;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline PPCBitMask<MAX> PPCBitMask<MAX>::operator-(
+                                                   const PPCBitMask &rhs) const
+    //-------------------------------------------------------------------------
+    {
+      PPCBitMask<MAX> result;
+      for (unsigned idx = 0; idx < PPC_ELMTS; idx++)
+      {
+        result(idx) = vec_and(rhs(idx), ~bits.ppc_vector[idx]);
+      }
+      return result;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline PPCBitMask<MAX>& PPCBitMask<MAX>::operator-=(const PPCBitMask &rhs)
+    //-------------------------------------------------------------------------
+    {
+      for (unsigned idx = 0; idx < PPC_ELMTS; idx++)
+      {
+        bits.ppc_vector[idx] = vec_and(rhs(idx), ~bits.ppc_vector[idx]);
+      }
+      return *this;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline bool PPCBitMask<MAX>::operator!(void) const
+    //-------------------------------------------------------------------------
+    {
+      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+      {
+        if (bits.bit_vector[idx] != 0)
+          return false;
+      }
+      return true;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline PPCBitMask<MAX> PPCBitMask<MAX>::operator<<(unsigned shift) const
+    //-------------------------------------------------------------------------
+    {
+      // Find the range
+      unsigned range = shift >> 6;
+      unsigned local = shift & 0x3F;
+      PPCBitMask<MAX> result;
+      if (!local)
+      {
+        // Fast case where we just have to move the individual words
+        for (int idx = (BIT_ELMTS-1); idx >= int(range); idx--)
+        {
+          result[idx] = bits.bit_vector[idx-range]; 
+        }
+        // fill in everything else with zeros
+        for (unsigned idx = 0; idx < range; idx++)
+          result[idx] = 0;
+      }
+      else
+      {
+        // Slow case with merging words
+        for (int idx = (BIT_ELMTS-1); idx > int(range); idx--)
+        {
+          uint64_t left = bits.bit_vector[idx-range] << local;
+          uint64_t right = bits.bit_vector[idx-(range+1)] >> ((1 << 6) - local);
+          result[idx] = left | right;
+        }
+        // Handle the last case
+        result[range] = bits.bit_vector[0] << local; 
+        // Fill in everything else with zeros
+        for (unsigned idx = 0; idx < range; idx++)
+          result[idx] = 0;
+      }
+      return result;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline PPCBitMask<MAX> PPCBitMask<MAX>::operator>>(unsigned shift) const
+    //-------------------------------------------------------------------------
+    {
+      unsigned range = shift >> 6;
+      unsigned local = shift & 0x3F;
+      PPCBitMask<MAX> result;
+      if (!local)
+      {
+        // Fast case where we just have to move individual words
+        for (unsigned idx = 0; idx < (BIT_ELMTS-range); idx++)
+        {
+          result[idx] = bits.bit_vector[idx+range];
+        }
+        // Fill in everything else with zeros
+        for (unsigned idx = (BIT_ELMTS-range); idx < (BIT_ELMTS); idx++)
+          result[idx] = 0;
+      }
+      else
+      {
+        // Slow case with merging words
+        for (unsigned idx = 0; idx < (BIT_ELMTS-(range+1)); idx++)
+        {
+          uint64_t right = bits.bit_vector[idx+range] >> local;
+          uint64_t left = bits.bit_vector[idx+range+1] << ((1 << 6) - local);
+          result[idx] = left | right;
+        }
+        // Handle the last case
+        result[BIT_ELMTS-(range+1)] = bits.bit_vector[BIT_ELMTS-1] >> local;
+        // Fill in everything else with zeros
+        for (unsigned idx = (BIT_ELMTS-range); idx < BIT_ELMTS; idx++)
+          result[idx] = 0;
+      }
+      return result;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline PPCBitMask<MAX>& PPCBitMask<MAX>::operator<<=(unsigned shift)
+    //-------------------------------------------------------------------------
+    {
+      // Find the range
+      unsigned range = shift >> 6;
+      unsigned local = shift & 0x3F;
+      if (!local)
+      {
+        // Fast case where we just have to move the individual words
+        for (int idx = (BIT_ELMTS-1); idx >= int(range); idx--)
+        {
+          bits.bit_vector[idx] = bits.bit_vector[idx-range]; 
+        }
+        // fill in everything else with zeros
+        for (unsigned idx = 0; idx < range; idx++)
+          bits.bit_vector[idx] = 0;
+      }
+      else
+      {
+        // Slow case with merging words
+        for (int idx = (BIT_ELMTS-1); idx > int(range); idx--)
+        {
+          uint64_t left = bits.bit_vector[idx-range] << local;
+          uint64_t right = bits.bit_vector[idx-(range+1)] >> ((1 << 6) - local);
+          bits.bit_vector[idx] = left | right;
+        }
+        // Handle the last case
+        bits.bit_vector[range] = bits.bit_vector[0] << local; 
+        // Fill in everything else with zeros
+        for (unsigned idx = 0; idx < range; idx++)
+          bits.bit_vector[idx] = 0;
+      }
+      return *this;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline PPCBitMask<MAX>& PPCBitMask<MAX>::operator>>=(unsigned shift)
+    //-------------------------------------------------------------------------
+    {
+      unsigned range = shift >> 6;
+      unsigned local = shift & 0x3F;
+      if (!local)
+      {
+        // Fast case where we just have to move individual words
+        for (unsigned idx = 0; idx < (BIT_ELMTS-range); idx++)
+        {
+          bits.bit_vector[idx] = bits.bit_vector[idx+range];
+        }
+        // Fill in everything else with zeros
+        for (unsigned idx = (BIT_ELMTS-range); idx < (BIT_ELMTS); idx++)
+          bits.bit_vector[idx] = 0;
+      }
+      else
+      {
+        // Slow case with merging words
+        uint64_t carry_mask = 0;
+        for (unsigned idx = 0; idx < local; idx++)
+          carry_mask |= (1 << idx);
+        for (unsigned idx = 0; idx < (BIT_ELMTS-(range+1)); idx++)
+        {
+          uint64_t right = bits.bit_vector[idx+range] >> local;
+          uint64_t left = bits.bit_vector[idx+range+1] << ((1 << 6) - local);
+          bits.bit_vector[idx] = left | right;
+        }
+        // Handle the last case
+        bits.bit_vector[BIT_ELMTS-(range+1)] = 
+                                      bits.bit_vector[BIT_ELMTS-1] >> local;
+        // Fill in everything else with zeros
+        for (unsigned idx = (BIT_ELMTS-range); idx < BIT_ELMTS; idx++)
+          bits.bit_vector[idx] = 0;
+      }
+      return *this;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline uint64_t PPCBitMask<MAX>::get_hash_key(void) const
+    //-------------------------------------------------------------------------
+    {
+      uint64_t result = 0;
+      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+      {
+        result |= bits.bit_vector[idx];
+      }
+      return result;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline const uint64_t* PPCBitMask<MAX>::base(void) const
+    //-------------------------------------------------------------------------
+    {
+      return bits.bit_vector;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline void PPCBitMask<MAX>::serialize(Serializer &rez) const
+    //-------------------------------------------------------------------------
+    {
+      rez.serialize(bits.bit_vector, (MAX/8));
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline void PPCBitMask<MAX>::deserialize(Deserializer &derez)
+    //-------------------------------------------------------------------------
+    {
+      derez.deserialize(bits.bit_vector, (MAX/8));
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline char* PPCBitMask<MAX>::to_string(void) const
+    //-------------------------------------------------------------------------
+    {
+      return BitMaskHelper::to_string(bits.bit_vector, MAX);
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    /*static*/ inline int PPCBitMask<MAX>::pop_count(
+                                                   const PPCBitMask<MAX> &mask)
+    //-------------------------------------------------------------------------
+    {
+      int result = 0;
+#ifndef VALGRIND
+      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+      {
+        result += __builtin_popcountl(mask[idx]);
+      }
+#else
+      for (unsigned idx = 0; idx < MAX; idx++)
+      {
+        if (mask.is_set(idx))
+          result++;
+      }
+#endif
+      return result;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    PPCTLBitMask<MAX>::PPCTLBitMask(uint64_t init /*= 0*/)
+      : sum_mask(init)
+    //-------------------------------------------------------------------------
+    {
+      LEGION_STATIC_ASSERT((MAX % 128) == 0);
+      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+      {
+        bits.bit_vector[idx] = init;
+      }
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    PPCTLBitMask<MAX>::PPCTLBitMask(const PPCTLBitMask &rhs)
+      : sum_mask(rhs.sum_mask)
+    //-------------------------------------------------------------------------
+    {
+      LEGION_STATIC_ASSERT((MAX % 128) == 0);
+      for (unsigned idx = 0; idx < PPC_ELMTS; idx++)
+      {
+        bits.ppc_vector[idx] = rhs(idx);
+      }
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    PPCTLBitMask<MAX>::~PPCTLBitMask(void)
+    //-------------------------------------------------------------------------
+    {
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline void PPCTLBitMask<MAX>::set_bit(unsigned bit)
+    //-------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(bit < MAX);
+#endif
+      unsigned idx = bit >> 6;
+      const uint64_t set_mask = (1UL << (bit & 0x3F));
+      bits.bit_vector[idx] |= set_mask;
+      sum_mask |= set_mask;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline void PPCTLBitMask<MAX>::unset_bit(unsigned bit)
+    //-------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(bit < MAX);
+#endif
+      unsigned idx = bit >> 6;
+      const uint64_t set_mask = (1UL << (bit & 0x3F));
+      const uint64_t unset_mask = ~set_mask;
+      bits.bit_vector[idx] &= unset_mask;
+      // Unset the summary mask and then reset if necessary
+      sum_mask &= unset_mask;
+      for (unsigned i = 0; i < BIT_ELMTS; i++)
+        sum_mask |= bits.bit_vector[i];
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline void PPCTLBitMask<MAX>::assign_bit(unsigned bit, bool val)
+    //-------------------------------------------------------------------------
+    {
+      if (val)
+        set_bit(bit);
+      else
+        unset_bit(bit);
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline bool PPCTLBitMask<MAX>::is_set(unsigned bit) const
+    //-------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(bit < MAX);
+#endif
+      unsigned idx = bit >> 6;
+      return (bits.bit_vector[idx] & (1UL << (bit & 0x3F)));
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline int PPCTLBitMask<MAX>::find_first_set(void) const
+    //-------------------------------------------------------------------------
+    {
+      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+      {
+        if (bits.bit_vector[idx])
+        {
+          for (unsigned j = 0; j < ELEMENT_SIZE; j++)
+          {
+            if (bits.bit_vector[idx] & (1UL << j))
+            {
+              return (idx*ELEMENT_SIZE + j);
+            }
+          }
+        }
+      }
+      return -1;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline int PPCTLBitMask<MAX>::find_index_set(int index) const
+    //-------------------------------------------------------------------------
+    {
+      int offset = 0;
+      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+      {
+        int local = __builtin_popcount(bits.bit_vector[idx]);
+        if (index <= local)
+        {
+          for (unsigned j = 0; j < ELEMENT_SIZE; j++)
+          {
+            if (bits.bit_vector[idx] & (1ULL << j))
+            {
+              if (index == 0)
+                return (offset + j);
+              index--;
+            }
+          }
+        }
+        index -= local;
+        offset += ELEMENT_SIZE;
+      }
+      return -1;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline int PPCTLBitMask<MAX>::find_next_set(int start) const
+    //-------------------------------------------------------------------------
+    {
+      if (start < 0)
+        start = 0;
+      int idx = start / ELEMENT_SIZE; // truncate
+      int offset = idx * ELEMENT_SIZE; 
+      int j = start % ELEMENT_SIZE;
+      if (j > 0) // if we are already in the middle of element search it
+      {
+        for ( ; j < int(ELEMENT_SIZE); j++)
+        {
+          if (bits.bit_vector[idx] & (1ULL << j))
+            return (offset + j);
+        }
+        idx++;
+        offset += ELEMENT_SIZE;
+      }
+      for ( ; idx < int(BIT_ELMTS); idx++)
+      {
+        if (bits.bit_vector[idx] > 0) // if it has any valid entries, find next
+        {
+          for (j = 0; j < int(ELEMENT_SIZE); j++)
+          {
+            if (bits.bit_vector[idx] & (1ULL << j))
+              return (offset + j);
+          }
+        }
+        offset += ELEMENT_SIZE;
+      }
+      return -1;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline void PPCTLBitMask<MAX>::clear(void)
+    //-------------------------------------------------------------------------
+    {
+      const __vector unsigned long long zero_vec = { 0, 0 };
+      for (unsigned idx = 0; idx < PPC_ELMTS; idx++)
+      {
+        bits.ppc_vector[idx] = zero_vec; 
+      }
+      sum_mask = 0;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline const __vector unsigned long long& PPCTLBitMask<MAX>::operator()(
+                                                 const unsigned int &idx) const
+    //-------------------------------------------------------------------------
+    {
+      return bits.ppc_vector[idx];
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline __vector unsigned long long& 
+                         PPCTLBitMask<MAX>::operator()(const unsigned int &idx)
+    //-------------------------------------------------------------------------
+    {
+      return bits.ppc_vector[idx];
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline const uint64_t& PPCTLBitMask<MAX>::operator[](
+                                                 const unsigned int &idx) const
+    //-------------------------------------------------------------------------
+    {
+      return bits.bit_vector[idx];
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline uint64_t& PPCTLBitMask<MAX>::operator[](const unsigned int &idx) 
+    //-------------------------------------------------------------------------
+    {
+      return bits.bit_vector[idx]; 
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline bool PPCTLBitMask<MAX>::operator==(const PPCTLBitMask &rhs) const
+    //-------------------------------------------------------------------------
+    {
+      if (sum_mask != rhs.sum_mask)
+        return false;
+      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+      {
+	if (bits.bit_vector[idx] != rhs[idx])
+          return false;
+      }
+      return true;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline bool PPCTLBitMask<MAX>::operator<(const PPCTLBitMask &rhs) const
+    //-------------------------------------------------------------------------
+    {
+      // Only be less than if the bits are a subset of the rhs bits
+      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+      {
+        if (bits.bit_vector[idx] < rhs[idx])
+          return true;
+        else if (bits.bit_vector[idx] > rhs[idx])
+          return false;
+      }
+      // Otherwise they are equal so false
+      return false;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline bool PPCTLBitMask<MAX>::operator!=(const PPCTLBitMask &rhs) const
+    //-------------------------------------------------------------------------
+    {
+      return !(*this == rhs);
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline PPCTLBitMask<MAX>& PPCTLBitMask<MAX>::operator=(
+                                                       const PPCTLBitMask &rhs)
+    //-------------------------------------------------------------------------
+    {
+      sum_mask = rhs.sum_mask;
+      for (unsigned idx = 0; idx < PPC_ELMTS; idx++)
+      {
+        bits.ppc_vector[idx] = rhs(idx);
+      }
+      return *this;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline PPCTLBitMask<MAX> PPCTLBitMask<MAX>::operator~(void) const
+    //-------------------------------------------------------------------------
+    {
+      PPCTLBitMask<MAX> result;
+      __vector unsigned long long result_mask = { 0, 0 };
+      for (unsigned idx = 0; idx < PPC_ELMTS; idx++)
+      {
+        result(idx) = ~(bits.ppc_vector[idx]);
+        result_mask = vec_or(result_mask, result(idx));
+      }
+      result.sum_mask = extract_mask(result_mask);
+      return result;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline PPCTLBitMask<MAX> PPCTLBitMask<MAX>::operator|(
+                                                 const PPCTLBitMask &rhs) const
+    //-------------------------------------------------------------------------
+    {
+      PPCTLBitMask<MAX> result;
+      result.sum_mask = sum_mask | rhs.sum_mask;
+      for (unsigned idx = 0; idx < PPC_ELMTS; idx++)
+      {
+        result(idx) = vec_or(bits.ppc_vector[idx], rhs(idx));
+      }
+      return result;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline PPCTLBitMask<MAX> PPCTLBitMask<MAX>::operator&(
+                                                 const PPCTLBitMask &rhs) const
+    //-------------------------------------------------------------------------
+    {
+      PPCTLBitMask<MAX> result;
+      // If they are independent then we are done
+      if (sum_mask & rhs.sum_mask)
+      {
+        __vector unsigned long long temp_sum = { 0, 0 };
+        for (unsigned idx = 0; idx < PPC_ELMTS; idx++)
+        {
+          result(idx) = vec_and(bits.ppc_vector[idx], rhs(idx));
+          temp_sum = vec_or(temp_sum, result(idx));
+        }
+        result.sum_mask = extract_mask(temp_sum); 
+      }
+      return result;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline PPCTLBitMask<MAX> PPCTLBitMask<MAX>::operator^(
+                                                 const PPCTLBitMask &rhs) const
+    //-------------------------------------------------------------------------
+    {
+      PPCTLBitMask<MAX> result;
+      __vector unsigned long long temp_sum = { 0, 0 };
+      for (unsigned idx = 0; idx < PPC_ELMTS; idx++)
+      {
+        result(idx) = vec_xor(bits.ppc_vector[idx], rhs(idx));
+        temp_sum = vec_or(temp_sum, result(idx));
+      }
+      result.sum_mask = extract_mask(temp_sum);
+      return result;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline PPCTLBitMask<MAX>& PPCTLBitMask<MAX>::operator|=(
+                                                       const PPCTLBitMask &rhs)
+    //-------------------------------------------------------------------------
+    {
+      sum_mask |= rhs.sum_mask;
+      for (unsigned idx = 0; idx < PPC_ELMTS; idx++)
+      {
+	//bits.ppc_vector[idx] |= rhs(idx);
+        bits.ppc_vector[idx] = vec_or(bits.ppc_vector[idx], rhs(idx));
+      }
+      return *this;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline PPCTLBitMask<MAX>& PPCTLBitMask<MAX>::operator&=(
+                                                       const PPCTLBitMask &rhs)
+    //-------------------------------------------------------------------------
+    {
+      if (sum_mask & rhs.sum_mask)
+      {
+        __vector unsigned long long temp_sum = { 0, 0 };
+        for (unsigned idx = 0; idx < PPC_ELMTS; idx++)
+        {
+          bits.ppc_vector[idx] = vec_and(bits.ppc_vector[idx], rhs(idx));
+          temp_sum = vec_or(temp_sum, bits.ppc_vector[idx]);
+        }
+        sum_mask = extract_mask(temp_sum); 
+      }
+      else
+      {
+        sum_mask = 0;
+	const __vector unsigned long long zero_vec = { 0, 0};
+        for (unsigned idx = 0; idx < PPC_ELMTS; idx++)
+          bits.ppc_vector[idx] = zero_vec;
+      }
+      return *this;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline PPCTLBitMask<MAX>& PPCTLBitMask<MAX>::operator^=(
+                                                       const PPCTLBitMask &rhs)
+    //-------------------------------------------------------------------------
+    {
+      __vector unsigned long long temp_sum = 0;
+      for (unsigned idx = 0; idx < PPC_ELMTS; idx++)
+      {
+        bits.ppc_vector[idx] = vec_xor(bits.ppc_vector[idx], rhs(idx));
+        temp_sum = vec_or(temp_sum, bits.ppc_vector[idx]);
+      }
+      sum_mask = extract_mask(temp_sum);
+      return *this;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline bool PPCTLBitMask<MAX>::operator*(const PPCTLBitMask &rhs) const
+    //-------------------------------------------------------------------------
+    {
+      if (sum_mask & rhs.sum_mask)
+      {
+        for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+        {
+          if (bits.bit_vector[idx] & rhs[idx])
+            return false;
+        }
+      }
+      return true;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline PPCTLBitMask<MAX> PPCTLBitMask<MAX>::operator-(
+                                                 const PPCTLBitMask &rhs) const
+    //-------------------------------------------------------------------------
+    {
+      PPCTLBitMask<MAX> result;
+      __vector unsigned long long temp_sum = { 0, 0 };
+      for (unsigned idx = 0; idx < PPC_ELMTS; idx++)
+      {
+        result(idx) = vec_and(rhs(idx), ~bits.ppc_vector[idx]);
+        temp_sum = vec_or(temp_sum, result(idx));
+      }
+      result.sum_mask = extract_mask(temp_sum);
+      return result;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline PPCTLBitMask<MAX>& PPCTLBitMask<MAX>::operator-=(
+                                                       const PPCTLBitMask &rhs)
+    //-------------------------------------------------------------------------
+    {
+      __vector unsigned long long temp_sum = { 0, 0 };
+      for (unsigned idx = 0; idx < PPC_ELMTS; idx++)
+      {
+        bits.ppc_vector[idx] = vec_and(rhs(idx), ~bits.ppc_vector[idx]);
+        temp_sum = vec_or(temp_sum, bits.ppc_vector[idx]);
+      }
+      sum_mask = extract_mask(temp_sum);
+      return *this;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline bool PPCTLBitMask<MAX>::operator!(void) const
+    //-------------------------------------------------------------------------
+    {
+      // A great reason to have a summary mask
+      return (sum_mask == 0);
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline PPCTLBitMask<MAX> PPCTLBitMask<MAX>::operator<<(
+                                                          unsigned shift) const
+    //-------------------------------------------------------------------------
+    {
+      // Find the range
+      unsigned range = shift >> 6;
+      unsigned local = shift & 0x3F;
+      PPCTLBitMask<MAX> result;
+      if (!local)
+      {
+        // Fast case where we just have to move the individual words
+        for (int idx = (BIT_ELMTS-1); idx >= int(range); idx--)
+        {
+          result[idx] = bits.bit_vector[idx-range]; 
+          result.sum_mask |= result[idx];
+        }
+        // fill in everything else with zeros
+        for (unsigned idx = 0; idx < range; idx++)
+          result[idx] = 0;
+      }
+      else
+      {
+        // Slow case with merging words
+        for (int idx = (BIT_ELMTS-1); idx > int(range); idx--)
+        {
+          uint64_t left = bits.bit_vector[idx-range] << local;
+          uint64_t right = bits.bit_vector[idx-(range+1)] >> ((1 << 6) - local);
+          result[idx] = left | right;
+          result.sum_mask |= result[idx];
+        }
+        // Handle the last case
+        result[range] = bits.bit_vector[0] << local; 
+        result.sum_mask |= result[range];
+        // Fill in everything else with zeros
+        for (unsigned idx = 0; idx < range; idx++)
+          result[idx] = 0;
+      }
+      return result;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline PPCTLBitMask<MAX> PPCTLBitMask<MAX>::operator>>(
+                                                          unsigned shift) const
+    //-------------------------------------------------------------------------
+    {
+      unsigned range = shift >> 6;
+      unsigned local = shift & 0x3F;
+      PPCTLBitMask<MAX> result;
+      if (!local)
+      {
+        // Fast case where we just have to move individual words
+        for (unsigned idx = 0; idx < (BIT_ELMTS-range); idx++)
+        {
+          result[idx] = bits.bit_vector[idx+range];
+          result.sum_mask |= result[idx];
+        }
+        // Fill in everything else with zeros
+        for (unsigned idx = (BIT_ELMTS-range); idx < (BIT_ELMTS); idx++)
+          result[idx] = 0;
+      }
+      else
+      {
+        // Slow case with merging words
+        for (unsigned idx = 0; idx < (BIT_ELMTS-(range+1)); idx++)
+        {
+          uint64_t right = bits.bit_vector[idx+range] >> local;
+          uint64_t left = bits.bit_vector[idx+range+1] << ((1 << 6) - local);
+          result[idx] = left | right;
+          result.sum_mask |= result[idx];
+        }
+        // Handle the last case
+        result[BIT_ELMTS-(range+1)] = bits.bit_vector[BIT_ELMTS-1] >> local;
+        result.sum_mask |= result[BIT_ELMTS-(range+1)];
+        // Fill in everything else with zeros
+        for (unsigned idx = (BIT_ELMTS-range); idx < BIT_ELMTS; idx++)
+          result[idx] = 0;
+      }
+      return result;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline PPCTLBitMask<MAX>& PPCTLBitMask<MAX>::operator<<=(unsigned shift)
+    //-------------------------------------------------------------------------
+    {
+      // Find the range
+      unsigned range = shift >> 6;
+      unsigned local = shift & 0x3F;
+      sum_mask = 0;
+      if (!local)
+      {
+        // Fast case where we just have to move the individual words
+        for (int idx = (BIT_ELMTS-1); idx >= int(range); idx--)
+        {
+          bits.bit_vector[idx] = bits.bit_vector[idx-range]; 
+          sum_mask |= bits.bit_vector[idx];
+        }
+        // fill in everything else with zeros
+        for (unsigned idx = 0; idx < range; idx++)
+          bits.bit_vector[idx] = 0;
+      }
+      else
+      {
+        // Slow case with merging words
+        for (int idx = (BIT_ELMTS-1); idx > int(range); idx--)
+        {
+          uint64_t left = bits.bit_vector[idx-range] << local;
+          uint64_t right = bits.bit_vector[idx-(range+1)] >> ((1 << 6) - local);
+          bits.bit_vector[idx] = left | right;
+          sum_mask |= bits.bit_vector[idx];
+        }
+        // Handle the last case
+        bits.bit_vector[range] = bits.bit_vector[0] << local; 
+        sum_mask |= bits.bit_vector[range];
+        // Fill in everything else with zeros
+        for (unsigned idx = 0; idx < range; idx++)
+          bits.bit_vector[idx] = 0;
+      }
+      return *this;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline PPCTLBitMask<MAX>& PPCTLBitMask<MAX>::operator>>=(unsigned shift)
+    //-------------------------------------------------------------------------
+    {
+      unsigned range = shift >> 6;
+      unsigned local = shift & 0x3F;
+      sum_mask = 0;
+      if (!local)
+      {
+        // Fast case where we just have to move individual words
+        for (unsigned idx = 0; idx < (BIT_ELMTS-range); idx++)
+        {
+          bits.bit_vector[idx] = bits.bit_vector[idx+range];
+          sum_mask |= bits.bit_vector[idx];
+        }
+        // Fill in everything else with zeros
+        for (unsigned idx = (BIT_ELMTS-range); idx < (BIT_ELMTS); idx++)
+          bits.bit_vector[idx] = 0;
+      }
+      else
+      {
+        // Slow case with merging words
+        uint64_t carry_mask = 0;
+        for (unsigned idx = 0; idx < local; idx++)
+          carry_mask |= (1 << idx);
+        for (unsigned idx = 0; idx < (BIT_ELMTS-(range+1)); idx++)
+        {
+          uint64_t right = bits.bit_vector[idx+range] >> local;
+          uint64_t left = bits.bit_vector[idx+range+1] << ((1 << 6) - local);
+          bits.bit_vector[idx] = left | right;
+          sum_mask |= bits.bit_vector[idx];
+        }
+        // Handle the last case
+        bits.bit_vector[BIT_ELMTS-(range+1)] = 
+                                        bits.bit_vector[BIT_ELMTS-1] >> local;
+        sum_mask |= bits.bit_vector[BIT_ELMTS-(range+1)];
+        // Fill in everything else with zeros
+        for (unsigned idx = (BIT_ELMTS-range); idx < BIT_ELMTS; idx++)
+          bits.bit_vector[idx] = 0;
+      }
+      return *this;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline uint64_t PPCTLBitMask<MAX>::get_hash_key(void) const
+    //-------------------------------------------------------------------------
+    {
+      return sum_mask;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline const uint64_t* PPCTLBitMask<MAX>::base(void) const
+    //-------------------------------------------------------------------------
+    {
+      return bits.bit_vector;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline void PPCTLBitMask<MAX>::serialize(Serializer &rez) const
+    //-------------------------------------------------------------------------
+    {
+      rez.serialize(sum_mask);
+      rez.serialize(bits.bit_vector, (MAX/8));
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline void PPCTLBitMask<MAX>::deserialize(Deserializer &derez)
+    //-------------------------------------------------------------------------
+    {
+      derez.deserialize(sum_mask);
+      derez.deserialize(bits.bit_vector, (MAX/8));
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline char* PPCTLBitMask<MAX>::to_string(void) const
+    //-------------------------------------------------------------------------
+    {
+      return BitMaskHelper::to_string(bits.bit_vector, MAX);
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    /*static*/ inline int PPCTLBitMask<MAX>::pop_count(
+                                                 const PPCTLBitMask<MAX> &mask)
+    //-------------------------------------------------------------------------
+    {
+      int result = 0;
+#ifndef VALGRIND
+      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+      {
+        result += __builtin_popcountl(mask[idx]);
+      }
+#else
+      for (unsigned idx = 0; idx < MAX; idx++)
+      {
+        if (mask.is_set(idx))
+          result++;
+      }
+#endif
+      return result;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    /*static*/ inline uint64_t PPCTLBitMask<MAX>::extract_mask(
+                                             __vector unsigned long long value)
+    //-------------------------------------------------------------------------
+    {
+      uint64_t left = value[0];
+      uint64_t right = value[1];
+      return (left | right);
+    }
+#undef BIT_ELMTS
+#undef PPC_ELMTS
+#endif // __ALTIVEC__
 
     //-------------------------------------------------------------------------
     template<typename BITMASK, unsigned int MAX, unsigned int WORDS>

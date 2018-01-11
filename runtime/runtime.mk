@@ -121,7 +121,7 @@ ifneq (${MARCH},)
   # Summitdev is strange and wants to have this specified via -mcpu
   # instead of -march. Unclear if this is true in general for PPC.
   ifeq ($(findstring summitdev,$(shell uname -n)),summitdev)
-    CC_FLAGS += -mcpu=${MARCH}
+    CC_FLAGS += -mcpu=${MARCH} -maltivec -mabi=altivec -mvsx
   else
     CC_FLAGS += -march=${MARCH}
   endif
