@@ -562,7 +562,7 @@ namespace Legion {
         diff += sizeof(front) + strlen(front.name);
         free(const_cast<char*>(front.name));
         task_kinds.pop_front();
-        const double t_curr = Realm::Clock::current_time_in_microseconds();
+        const long long t_curr = Realm::Clock::current_time_in_microseconds();
         if (t_curr >= t_stop)
           return diff;
       }
