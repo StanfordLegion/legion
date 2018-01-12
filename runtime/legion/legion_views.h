@@ -1426,13 +1426,15 @@ namespace Legion {
     public:
       static const AllocationType alloc_type = COMPOSITE_NODE_ALLOC;
     public:
-      struct DeferCompositeNodeRefArgs : 
-        public LgTaskArgs<DeferCompositeNodeRefArgs> {
+      struct DeferCompositeNodeStateArgs : 
+        public LgTaskArgs<DeferCompositeNodeStateArgs> {
       public:
-        static const LgTaskID TASK_ID = LG_DEFER_COMPOSITE_NODE_REF_TASK_ID;
+        static const LgTaskID TASK_ID = LG_DEFER_COMPOSITE_NODE_STATE_TASK_ID;
       public:
+        CompositeNode *proxy_this;
         VersionState *state;
         DistributedID owner_did;
+        FieldMask *mask;
         bool root_owner;
       };
       struct DeferCaptureArgs : public LgTaskArgs<DeferCaptureArgs> {
@@ -1480,7 +1482,8 @@ namespace Legion {
                  bool root_owner);
       void unpack_version_states(Deserializer &derez, Runtime *runtime,
                        std::set<RtEvent> &preconditions, bool need_lock);
-      static void handle_deferred_node_ref(const void *args);
+      void add_uncaptured_state(VersionState *state, const FieldMask &mask);
+      static void handle_deferred_node_state(const void *args);
     public:
       void record_dirty_fields(const FieldMask &dirty_mask);
       void record_valid_view(LogicalView *view, const FieldMask &mask);

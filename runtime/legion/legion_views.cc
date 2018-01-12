@@ -7362,55 +7362,96 @@ namespace Legion {
         {
           FieldMask state_mask;
           derez.deserialize(state_mask);
-          uncaptured_states[state] |= (state_mask - finder->second);
-          uncaptured_fields |= (state_mask - finder->second);
+          const FieldMask diff_mask = state_mask - finder->second;
+          if (!!diff_mask)
+          {
+            uncaptured_states[state] |= diff_mask;
+            uncaptured_fields |= diff_mask;
+          }
           finder->second |= state_mask;
           // No need to add any references since it was already captured
-          if (ready.exists() && !ready.has_triggered())
-            preconditions.insert(ready);
-          continue;
-        }
-        else // Can just unpack it directly
-        {
-          FieldMask &state_mask = version_states[state];
-          derez.deserialize(state_mask);
-          uncaptured_states[state] = state_mask;
-          uncaptured_fields |= state_mask;
-        }
-        if (ready.exists() && !ready.has_triggered())
-        {
-          DeferCompositeNodeRefArgs args;
-          args.state = state;
-          args.owner_did = owner_did;
-          args.root_owner = root_owner;
-          RtEvent precondition = 
-            runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY,
-                                             NULL/*op*/, ready);
-          preconditions.insert(precondition);
+#ifdef DEBUG_LEGION
+          assert(!ready.exists() || ready.has_triggered());
+#endif
         }
         else
         {
-          state->add_nested_resource_ref(owner_did);
-          // If we're the root owner then we also have to add our
-          // gc ref, but no valid ref since we don't own it
-          if (root_owner)
-            state->add_nested_gc_ref(owner_did, &mutator);
+          // It's not safe to actually add this to our data structures
+          // until we know that the state is valid, so defer it if necessary
+          if (ready.exists() && !ready.has_triggered())
+          {
+            // Defer adding this state
+            DeferCompositeNodeStateArgs args;
+            args.proxy_this = this;
+            args.state = state;
+            args.owner_did = owner_did;
+            args.root_owner = root_owner;
+            args.mask = new FieldMask();
+            derez.deserialize(*args.mask);
+            RtEvent precondition = 
+              runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY,
+                                               NULL/*op*/, ready);
+            preconditions.insert(precondition);
+          }
+          else
+          {
+            // Version State is ready now, so we can unpack it directly
+            FieldMask &state_mask = version_states[state];
+            derez.deserialize(state_mask);
+            uncaptured_states[state] = state_mask;
+            uncaptured_fields |= state_mask;
+            state->add_nested_resource_ref(owner_did);
+            // If we're the root owner then we also have to add our
+            // gc ref, but no valid ref since we don't own it
+            if (root_owner)
+              state->add_nested_gc_ref(owner_did, &mutator);
+          }
+          
         }
       }
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void CompositeNode::handle_deferred_node_ref(const void *args)
+    void CompositeNode::add_uncaptured_state(VersionState *state, 
+                                             const FieldMask &state_mask)
     //--------------------------------------------------------------------------
     {
-      const DeferCompositeNodeRefArgs *nargs = 
-        (const DeferCompositeNodeRefArgs*)args;
-      nargs->state->add_nested_resource_ref(nargs->owner_did);
-      if (nargs->root_owner)
+      AutoLock n_lock(node_lock);
+      std::map<VersionState*,FieldMask>::iterator finder = 
+          version_states.find(state);
+      if (finder != version_states.end())
       {
-        LocalReferenceMutator mutator;
-        nargs->state->add_nested_gc_ref(nargs->owner_did, &mutator);
+        const FieldMask diff_mask = state_mask - finder->second;
+        if (!!diff_mask)
+        {
+          uncaptured_states[state] |= diff_mask;
+          uncaptured_fields |= diff_mask;
+        }
+        finder->second |= state_mask;
       }
+      else
+      {
+        uncaptured_states[state] = state_mask;
+        uncaptured_fields |= state_mask;
+        version_states[state] = state_mask;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void CompositeNode::handle_deferred_node_state(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const DeferCompositeNodeStateArgs *nargs = 
+        (const DeferCompositeNodeStateArgs*)args;
+      // Add our references
+      nargs->state->add_nested_resource_ref(nargs->owner_did);
+      LocalReferenceMutator mutator;
+      if (nargs->root_owner)
+        nargs->state->add_nested_gc_ref(nargs->owner_did, &mutator);
+      // Add the state to the view
+      nargs->proxy_this->add_uncaptured_state(nargs->state, *nargs->mask);
+      // Free up the mask that we allocated
+      delete nargs->mask;
     }
 
     //--------------------------------------------------------------------------
