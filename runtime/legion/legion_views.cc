@@ -7366,6 +7366,8 @@ namespace Legion {
           uncaptured_fields |= (state_mask - finder->second);
           finder->second |= state_mask;
           // No need to add any references since it was already captured
+          if (ready.exists() && !ready.has_triggered())
+            preconditions.insert(ready);
           continue;
         }
         else // Can just unpack it directly
