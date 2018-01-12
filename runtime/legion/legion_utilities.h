@@ -6814,7 +6814,7 @@ namespace Legion {
       PPCBitMask<MAX> result;
       for (unsigned idx = 0; idx < PPC_ELMTS; idx++)
       {
-        result(idx) = vec_and(rhs(idx), ~bits.ppc_vector[idx]);
+        result(idx) = vec_and(~rhs(idx), bits.ppc_vector[idx]);
       }
       return result;
     }
@@ -6826,7 +6826,7 @@ namespace Legion {
     {
       for (unsigned idx = 0; idx < PPC_ELMTS; idx++)
       {
-        bits.ppc_vector[idx] = vec_and(rhs(idx), ~bits.ppc_vector[idx]);
+        bits.ppc_vector[idx] = vec_and(~rhs(idx), bits.ppc_vector[idx]);
       }
       return *this;
     }
@@ -7488,7 +7488,7 @@ namespace Legion {
       __vector unsigned long long temp_sum = { 0, 0 };
       for (unsigned idx = 0; idx < PPC_ELMTS; idx++)
       {
-        result(idx) = vec_and(rhs(idx), ~bits.ppc_vector[idx]);
+        result(idx) = vec_and(~rhs(idx), bits.ppc_vector[idx]);
         temp_sum = vec_or(temp_sum, result(idx));
       }
       result.sum_mask = extract_mask(temp_sum);
@@ -7504,7 +7504,7 @@ namespace Legion {
       __vector unsigned long long temp_sum = { 0, 0 };
       for (unsigned idx = 0; idx < PPC_ELMTS; idx++)
       {
-        bits.ppc_vector[idx] = vec_and(rhs(idx), ~bits.ppc_vector[idx]);
+        bits.ppc_vector[idx] = vec_and(~rhs(idx), bits.ppc_vector[idx]);
         temp_sum = vec_or(temp_sum, bits.ppc_vector[idx]);
       }
       sum_mask = extract_mask(temp_sum);

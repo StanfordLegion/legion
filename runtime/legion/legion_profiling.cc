@@ -546,11 +546,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    size_t LegionProfInstance::dump_inter(LegionProfSerializer *serializer)
+    size_t LegionProfInstance::dump_inter(LegionProfSerializer *serializer,
+                                          const double over)
     //--------------------------------------------------------------------------
     {
       // Start the timing so we know how long we are taking
       const long long t_start = Realm::Clock::current_time_in_microseconds();
+      // Scale our latency by how much we are over the space limit
+      const long long t_stop = t_start + over * owner->output_target_latency;
       size_t diff = 0; 
       while (!task_kinds.empty())
       {
@@ -560,7 +563,7 @@ namespace Legion {
         free(const_cast<char*>(front.name));
         task_kinds.pop_front();
         const long long t_curr = Realm::Clock::current_time_in_microseconds();
-        if ((t_curr - t_start) >= owner->output_target_latency)
+        if (t_curr >= t_stop)
           return diff;
       }
       while (!task_variants.empty())
@@ -571,7 +574,7 @@ namespace Legion {
         free(const_cast<char*>(front.name));
         task_variants.pop_front();
         const long long t_curr = Realm::Clock::current_time_in_microseconds();
-        if ((t_curr - t_start) >= owner->output_target_latency)
+        if (t_curr >= t_stop)
           return diff;
       }
       while (!operation_instances.empty())
@@ -581,7 +584,7 @@ namespace Legion {
         diff += sizeof(front);
         operation_instances.pop_front();
         const long long t_curr = Realm::Clock::current_time_in_microseconds();
-        if ((t_curr - t_start) >= owner->output_target_latency)
+        if (t_curr >= t_stop)
           return diff;
       }
       while (!multi_tasks.empty())
@@ -591,7 +594,7 @@ namespace Legion {
         diff += sizeof(front);
         multi_tasks.pop_front();
         const long long t_curr = Realm::Clock::current_time_in_microseconds();
-        if ((t_curr - t_start) >= owner->output_target_latency)
+        if (t_curr >= t_stop)
           return diff;
       }
       while (!slice_owners.empty())
@@ -601,7 +604,7 @@ namespace Legion {
         diff += sizeof(front);
         slice_owners.pop_front();
         const long long t_curr = Realm::Clock::current_time_in_microseconds();
-        if ((t_curr - t_start) >= owner->output_target_latency)
+        if (t_curr >= t_stop)
           return diff;
       }
       while (!task_infos.empty())
@@ -616,7 +619,7 @@ namespace Legion {
         diff += sizeof(front) + front.wait_intervals.size() * sizeof(WaitInfo);
         task_infos.pop_front();
         const long long t_curr = Realm::Clock::current_time_in_microseconds();
-        if ((t_curr - t_start) >= owner->output_target_latency)
+        if (t_curr >= t_stop)
           return diff;
       }
       while (!meta_infos.empty())
@@ -631,7 +634,7 @@ namespace Legion {
         diff += sizeof(front) + front.wait_intervals.size() * sizeof(WaitInfo);
         meta_infos.pop_front();
         const long long t_curr = Realm::Clock::current_time_in_microseconds();
-        if ((t_curr - t_start) >= owner->output_target_latency)
+        if (t_curr >= t_stop)
           return diff;
       }
       while (!copy_infos.empty())
@@ -641,7 +644,7 @@ namespace Legion {
         diff += sizeof(front);
         copy_infos.pop_front();
         const long long t_curr = Realm::Clock::current_time_in_microseconds();
-        if ((t_curr - t_start) >= owner->output_target_latency)
+        if (t_curr >= t_stop)
           return diff;
       }
       while (!fill_infos.empty())
@@ -651,7 +654,7 @@ namespace Legion {
         diff += sizeof(front);
         fill_infos.pop_front();
         const long long t_curr = Realm::Clock::current_time_in_microseconds();
-        if ((t_curr - t_start) >= owner->output_target_latency)
+        if (t_curr >= t_stop)
           return diff;
       }
       while (!inst_create_infos.empty())
@@ -661,7 +664,7 @@ namespace Legion {
         diff += sizeof(front);
         inst_create_infos.pop_front();
         const long long t_curr = Realm::Clock::current_time_in_microseconds();
-        if ((t_curr - t_start) >= owner->output_target_latency)
+        if (t_curr >= t_stop)
           return diff;
       }
       while (!inst_timeline_infos.empty())
@@ -671,7 +674,7 @@ namespace Legion {
         diff += sizeof(front);
         inst_timeline_infos.pop_front();
         const long long t_curr = Realm::Clock::current_time_in_microseconds();
-        if ((t_curr - t_start) >= owner->output_target_latency)
+        if (t_curr >= t_stop)
           return diff;
       }
       while (!partition_infos.empty())
@@ -681,7 +684,7 @@ namespace Legion {
         diff += sizeof(front);
         partition_infos.pop_front();
         const long long t_curr = Realm::Clock::current_time_in_microseconds();
-        if ((t_curr - t_start) >= owner->output_target_latency)
+        if (t_curr >= t_stop)
           return diff;
       }
       while (!message_infos.empty())
@@ -691,7 +694,7 @@ namespace Legion {
         diff += sizeof(front);
         message_infos.pop_front();
         const long long t_curr = Realm::Clock::current_time_in_microseconds();
-        if ((t_curr - t_start) >= owner->output_target_latency)
+        if (t_curr >= t_stop)
           return diff;
       }
       while (!mapper_call_infos.empty())
@@ -701,7 +704,7 @@ namespace Legion {
         diff += sizeof(front);
         mapper_call_infos.pop_front();
         const long long t_curr = Realm::Clock::current_time_in_microseconds();
-        if ((t_curr - t_start) >= owner->output_target_latency)
+        if (t_curr >= t_stop)
           return diff;
       }
       while (!runtime_call_infos.empty())
@@ -711,7 +714,7 @@ namespace Legion {
         diff += sizeof(front);
         runtime_call_infos.pop_front();
         const long long t_curr = Realm::Clock::current_time_in_microseconds();
-        if ((t_curr - t_start) >= owner->output_target_latency)
+        if (t_curr >= t_stop)
           return diff;
       }
 #ifdef LEGION_PROF_SELF_PROFILE
@@ -722,7 +725,7 @@ namespace Legion {
         diff += sizeof(front);
         prof_task_infos.pop_front();
         const long long t_curr = Realm::Clock::current_time_in_microseconds();
-        if ((t_curr - t_start) >= owner->output_target_latency)
+        if (t_curr >= t_stop)
           return diff;
       }
 #endif
@@ -934,8 +937,8 @@ namespace Legion {
       info.id2 = vid;
       info.op_id = task->get_unique_id();
       Realm::ProfilingRequest &req = requests.add_request((target_proc.exists())
-                ? target_proc : Processor::get_executing_processor(),
-                LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_LOW_PRIORITY);
+          ? target_proc : Processor::get_executing_processor(),
+          LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_THROUGHPUT_PRIORITY);
       req.add_measurement<
                 Realm::ProfilingMeasurements::OperationTimeline>();
       req.add_measurement<
@@ -958,8 +961,8 @@ namespace Legion {
       info.id = tid;
       info.op_id = (op != NULL) ? op->get_unique_op_id() : 0;
       Realm::ProfilingRequest &req = requests.add_request((target_proc.exists())
-                ? target_proc : Processor::get_executing_processor(),
-                LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_LOW_PRIORITY);
+          ? target_proc : Processor::get_executing_processor(),
+          LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_THROUGHPUT_PRIORITY);
       req.add_measurement<
                 Realm::ProfilingMeasurements::OperationTimeline>();
       req.add_measurement<
@@ -977,7 +980,7 @@ namespace Legion {
       // that is where we know the profiler is going to handle the results
       ProfilingInfo info(NULL, LEGION_PROF_MESSAGE);
       Realm::ProfilingRequest &req = requests.add_request(remote_target,
-                LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_LOW_PRIORITY);
+          LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_THROUGHPUT_PRIORITY);
       req.add_measurement<
                 Realm::ProfilingMeasurements::OperationTimeline>();
       req.add_measurement<
@@ -1000,8 +1003,8 @@ namespace Legion {
       // No ID here
       info.op_id = (op != NULL) ? op->get_unique_op_id() : 0;
       Realm::ProfilingRequest &req = requests.add_request((target_proc.exists())
-                ? target_proc : Processor::get_executing_processor(),
-                LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_LOW_PRIORITY);
+          ? target_proc : Processor::get_executing_processor(),
+          LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_THROUGHPUT_PRIORITY);
       req.add_measurement<
                 Realm::ProfilingMeasurements::OperationTimeline>();
       req.add_measurement<
@@ -1022,8 +1025,8 @@ namespace Legion {
       // No ID here
       info.op_id = (op != NULL) ? op->get_unique_op_id() : 0;
       Realm::ProfilingRequest &req = requests.add_request((target_proc.exists())
-                ? target_proc : Processor::get_executing_processor(),
-                LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_LOW_PRIORITY);
+          ? target_proc : Processor::get_executing_processor(),
+          LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_THROUGHPUT_PRIORITY);
       req.add_measurement<
                 Realm::ProfilingMeasurements::OperationTimeline>();
       req.add_measurement<
@@ -1049,11 +1052,11 @@ namespace Legion {
       Processor p = (target_proc.exists() 
                         ? target_proc : Processor::get_executing_processor());
       Realm::ProfilingRequest &req1 = requests.add_request(p,
-                LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_LOW_PRIORITY);
+          LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_THROUGHPUT_PRIORITY);
       req1.add_measurement<
                  Realm::ProfilingMeasurements::InstanceMemoryUsage>();
       Realm::ProfilingRequest &req2 = requests.add_request(p,
-                LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_LOW_PRIORITY);
+          LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_THROUGHPUT_PRIORITY);
       req2.add_measurement<
                  Realm::ProfilingMeasurements::InstanceTimeline>();
     }
@@ -1095,8 +1098,8 @@ namespace Legion {
       info.id2 = vid;
       info.op_id = uid;
       Realm::ProfilingRequest &req = requests.add_request((target_proc.exists())
-                ? target_proc : Processor::get_executing_processor(),
-                LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_LOW_PRIORITY);
+          ? target_proc : Processor::get_executing_processor(),
+          LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_THROUGHPUT_PRIORITY);
       req.add_measurement<
                 Realm::ProfilingMeasurements::OperationTimeline>();
       req.add_measurement<
@@ -1119,8 +1122,8 @@ namespace Legion {
       info.id = tid;
       info.op_id = uid;
       Realm::ProfilingRequest &req = requests.add_request((target_proc.exists())
-                ? target_proc : Processor::get_executing_processor(),
-                LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_LOW_PRIORITY);
+          ? target_proc : Processor::get_executing_processor(),
+          LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_THROUGHPUT_PRIORITY);
       req.add_measurement<
                 Realm::ProfilingMeasurements::OperationTimeline>();
       req.add_measurement<
@@ -1143,8 +1146,8 @@ namespace Legion {
       // No ID here
       info.op_id = uid;
       Realm::ProfilingRequest &req = requests.add_request((target_proc.exists())
-                ? target_proc : Processor::get_executing_processor(),
-                LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_LOW_PRIORITY);
+          ? target_proc : Processor::get_executing_processor(),
+          LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_THROUGHPUT_PRIORITY);
       req.add_measurement<
                 Realm::ProfilingMeasurements::OperationTimeline>();
       req.add_measurement<
@@ -1165,8 +1168,8 @@ namespace Legion {
       // No ID here
       info.op_id = uid;
       Realm::ProfilingRequest &req = requests.add_request((target_proc.exists())
-                ? target_proc : Processor::get_executing_processor(),
-                LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_LOW_PRIORITY);
+          ? target_proc : Processor::get_executing_processor(),
+          LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_THROUGHPUT_PRIORITY);
       req.add_measurement<
                 Realm::ProfilingMeasurements::OperationTimeline>();
       req.add_measurement<
@@ -1192,11 +1195,11 @@ namespace Legion {
       Processor p = (target_proc.exists() 
                         ? target_proc : Processor::get_executing_processor());
       Realm::ProfilingRequest &req1 = requests.add_request(p,
-                LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_LOW_PRIORITY);
+          LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_THROUGHPUT_PRIORITY);
       req1.add_measurement<
                  Realm::ProfilingMeasurements::InstanceMemoryUsage>();
       Realm::ProfilingRequest &req2 = requests.add_request(p,
-                LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_LOW_PRIORITY);
+          LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_THROUGHPUT_PRIORITY);
       req2.add_measurement<
                  Realm::ProfilingMeasurements::InstanceTimeline>();
     }
@@ -1571,14 +1574,26 @@ namespace Legion {
       size_t footprint = __sync_add_and_fetch(&total_memory_footprint, diff);
       if (footprint > output_footprint_threshold)
       {
+        // An important bit of logic here, if we're over the threshold then
+        // we want to have a little bit of a feedback loop so the more over
+        // the limit we are then the more time we give the profiler to dump
+        // out things to the output file. We'll try to make this continuous
+        // so there are no discontinuities in performance. If the threshold
+        // is zero we'll just choose an arbitrarily large scale factor to 
+        // ensure that things work properly.
+        double over_scale = output_footprint_threshold == 0 ? double(1 << 20) :
+                        double(footprint) / double(output_footprint_threshold);
+        // Let's actually make this quadratic so it's not just linear
+        if (output_footprint_threshold > 0)
+          over_scale *= over_scale;
         if (!serializer->is_thread_safe())
         {
           // Need a lock to protect the serializer
           AutoLock p_lock(profiler_lock);
-          diff = inst->dump_inter(serializer);
+          diff = inst->dump_inter(serializer, over_scale);
         }
         else
-          diff = inst->dump_inter(serializer);
+          diff = inst->dump_inter(serializer, over_scale);
 #ifdef DEBUG_LEGION
 #ifndef NDEBUG
         footprint = 
