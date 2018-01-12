@@ -753,6 +753,9 @@ namespace Legion {
         total_memory_footprint(0)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(target_proc.exists());
+#endif
       profiler_lock = Reservation::create_reservation();
 
       if (!strcmp(serializer_type, "binary")) 
@@ -936,9 +939,8 @@ namespace Legion {
       info.id = tid;
       info.id2 = vid;
       info.op_id = task->get_unique_id();
-      Realm::ProfilingRequest &req = requests.add_request((target_proc.exists())
-          ? target_proc : Processor::get_executing_processor(),
-          LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_THROUGHPUT_PRIORITY);
+      Realm::ProfilingRequest &req = requests.add_request(target_proc,
+                LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_MIN_PRIORITY);
       req.add_measurement<
                 Realm::ProfilingMeasurements::OperationTimeline>();
       req.add_measurement<
@@ -960,9 +962,8 @@ namespace Legion {
       ProfilingInfo info(this, LEGION_PROF_META); 
       info.id = tid;
       info.op_id = (op != NULL) ? op->get_unique_op_id() : 0;
-      Realm::ProfilingRequest &req = requests.add_request((target_proc.exists())
-          ? target_proc : Processor::get_executing_processor(),
-          LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_THROUGHPUT_PRIORITY);
+      Realm::ProfilingRequest &req = requests.add_request(target_proc,
+                LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_MIN_PRIORITY);
       req.add_measurement<
                 Realm::ProfilingMeasurements::OperationTimeline>();
       req.add_measurement<
@@ -980,7 +981,7 @@ namespace Legion {
       // that is where we know the profiler is going to handle the results
       ProfilingInfo info(NULL, LEGION_PROF_MESSAGE);
       Realm::ProfilingRequest &req = requests.add_request(remote_target,
-          LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_THROUGHPUT_PRIORITY);
+                LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_MIN_PRIORITY);
       req.add_measurement<
                 Realm::ProfilingMeasurements::OperationTimeline>();
       req.add_measurement<
@@ -1002,9 +1003,8 @@ namespace Legion {
       ProfilingInfo info(this, LEGION_PROF_COPY); 
       // No ID here
       info.op_id = (op != NULL) ? op->get_unique_op_id() : 0;
-      Realm::ProfilingRequest &req = requests.add_request((target_proc.exists())
-          ? target_proc : Processor::get_executing_processor(),
-          LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_THROUGHPUT_PRIORITY);
+      Realm::ProfilingRequest &req = requests.add_request(target_proc,
+                LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_MIN_PRIORITY);
       req.add_measurement<
                 Realm::ProfilingMeasurements::OperationTimeline>();
       req.add_measurement<
@@ -1024,9 +1024,8 @@ namespace Legion {
       ProfilingInfo info(this, LEGION_PROF_FILL);
       // No ID here
       info.op_id = (op != NULL) ? op->get_unique_op_id() : 0;
-      Realm::ProfilingRequest &req = requests.add_request((target_proc.exists())
-          ? target_proc : Processor::get_executing_processor(),
-          LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_THROUGHPUT_PRIORITY);
+      Realm::ProfilingRequest &req = requests.add_request(target_proc,
+                LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_MIN_PRIORITY);
       req.add_measurement<
                 Realm::ProfilingMeasurements::OperationTimeline>();
       req.add_measurement<
@@ -1049,14 +1048,12 @@ namespace Legion {
       info.op_id = (op != NULL) ? op->get_unique_op_id() : 0;
       // Instances use two profiling requests so that we can get MemoryUsage
       // right away - the Timeline doesn't come until we delete the instance
-      Processor p = (target_proc.exists() 
-                        ? target_proc : Processor::get_executing_processor());
-      Realm::ProfilingRequest &req1 = requests.add_request(p,
-          LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_THROUGHPUT_PRIORITY);
+      Realm::ProfilingRequest &req1 = requests.add_request(target_proc,
+                 LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_MIN_PRIORITY);
       req1.add_measurement<
                  Realm::ProfilingMeasurements::InstanceMemoryUsage>();
-      Realm::ProfilingRequest &req2 = requests.add_request(p,
-          LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_THROUGHPUT_PRIORITY);
+      Realm::ProfilingRequest &req2 = requests.add_request(target_proc,
+                 LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_MIN_PRIORITY);
       req2.add_measurement<
                  Realm::ProfilingMeasurements::InstanceTimeline>();
     }
@@ -1097,9 +1094,8 @@ namespace Legion {
       info.id = tid;
       info.id2 = vid;
       info.op_id = uid;
-      Realm::ProfilingRequest &req = requests.add_request((target_proc.exists())
-          ? target_proc : Processor::get_executing_processor(),
-          LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_THROUGHPUT_PRIORITY);
+      Realm::ProfilingRequest &req = requests.add_request(target_proc,
+                LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_MIN_PRIORITY);
       req.add_measurement<
                 Realm::ProfilingMeasurements::OperationTimeline>();
       req.add_measurement<
@@ -1121,9 +1117,8 @@ namespace Legion {
       ProfilingInfo info(this, LEGION_PROF_META); 
       info.id = tid;
       info.op_id = uid;
-      Realm::ProfilingRequest &req = requests.add_request((target_proc.exists())
-          ? target_proc : Processor::get_executing_processor(),
-          LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_THROUGHPUT_PRIORITY);
+      Realm::ProfilingRequest &req = requests.add_request(target_proc,
+                LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_MIN_PRIORITY);
       req.add_measurement<
                 Realm::ProfilingMeasurements::OperationTimeline>();
       req.add_measurement<
@@ -1145,9 +1140,8 @@ namespace Legion {
       ProfilingInfo info(this, LEGION_PROF_COPY); 
       // No ID here
       info.op_id = uid;
-      Realm::ProfilingRequest &req = requests.add_request((target_proc.exists())
-          ? target_proc : Processor::get_executing_processor(),
-          LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_THROUGHPUT_PRIORITY);
+      Realm::ProfilingRequest &req = requests.add_request(target_proc,
+                LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_MIN_PRIORITY);
       req.add_measurement<
                 Realm::ProfilingMeasurements::OperationTimeline>();
       req.add_measurement<
@@ -1167,9 +1161,8 @@ namespace Legion {
       ProfilingInfo info(this, LEGION_PROF_FILL);
       // No ID here
       info.op_id = uid;
-      Realm::ProfilingRequest &req = requests.add_request((target_proc.exists())
-          ? target_proc : Processor::get_executing_processor(),
-          LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_THROUGHPUT_PRIORITY);
+      Realm::ProfilingRequest &req = requests.add_request(target_proc,
+                LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_MIN_PRIORITY);
       req.add_measurement<
                 Realm::ProfilingMeasurements::OperationTimeline>();
       req.add_measurement<
@@ -1192,14 +1185,12 @@ namespace Legion {
       info.op_id = uid;
       // Instances use two profiling requests so that we can get MemoryUsage
       // right away - the Timeline doesn't come until we delete the instance
-      Processor p = (target_proc.exists() 
-                        ? target_proc : Processor::get_executing_processor());
-      Realm::ProfilingRequest &req1 = requests.add_request(p,
-          LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_THROUGHPUT_PRIORITY);
+      Realm::ProfilingRequest &req1 = requests.add_request(target_proc,
+                 LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_MIN_PRIORITY);
       req1.add_measurement<
                  Realm::ProfilingMeasurements::InstanceMemoryUsage>();
-      Realm::ProfilingRequest &req2 = requests.add_request(p,
-          LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_THROUGHPUT_PRIORITY);
+      Realm::ProfilingRequest &req2 = requests.add_request(target_proc,
+                 LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_MIN_PRIORITY);
       req2.add_measurement<
                  Realm::ProfilingMeasurements::InstanceTimeline>();
     }
@@ -1219,9 +1210,8 @@ namespace Legion {
       // Pass the partition op kind as the ID
       info.id = part_op;
       info.op_id = uid;
-      Realm::ProfilingRequest &req = requests.add_request((target_proc.exists())
-                        ? target_proc : Processor::get_executing_processor(),
-                        LG_LEGION_PROFILING_ID, &info, sizeof(info));
+      Realm::ProfilingRequest &req = requests.add_request(target_proc,
+                  LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_MIN_PRIORITY);
       req.add_measurement<
                   Realm::ProfilingMeasurements::OperationTimeline>();
     }
