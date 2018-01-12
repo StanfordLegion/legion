@@ -2141,6 +2141,9 @@ namespace Legion {
         // If it's empty we're done, otherwise we go back on the queue
         if (!launch_space.exists())
         {
+          // We aren't participating directly, but we still have to 
+          // participate in the collective operations
+          thunk->perform(this, runtime->forest, ApEvent::NO_AP_EVENT,instances);
           // We have no local points, so we can just trigger
           complete_mapping();
           complete_execution();
