@@ -749,7 +749,8 @@ typedef enum legion_isa_kind_t {
   AVX_ISA   = 0x00002000,
   AVX2_ISA  = 0x00004000,
   FMA_ISA   = 0x00008000,
-  MIC_ISA   = 0x00010000,
+  // PowerPC Vector Insructions
+  VSX_ISA   = 0x00010000,
   // GPU variants
   SM_10_ISA = 0x00020000,
   SM_20_ISA = 0x00040000,
