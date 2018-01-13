@@ -16799,14 +16799,6 @@ namespace Legion {
     void Runtime::free_distributed_id(DistributedID did)
     //--------------------------------------------------------------------------
     {
-      // Special case for did 0 on shutdown
-      if (did == 0)
-        return;
-      did &= LEGION_DISTRIBUTED_ID_MASK;
-#ifdef DEBUG_LEGION
-      // Should only be getting back our own DIDs
-      assert(determine_owner(did) == address_space);
-#endif
       // Don't recycle distributed IDs if we're doing LegionSpy or LegionGC
 #ifndef LEGION_GC
 #ifndef LEGION_SPY
@@ -16825,12 +16817,20 @@ namespace Legion {
                                             RtEvent recycle_event)
     //--------------------------------------------------------------------------
     {
+      // Special case for did 0 on shutdown
+      if (did == 0)
+        return RtEvent::NO_RT_EVENT;
+      did &= LEGION_DISTRIBUTED_ID_MASK;
+#ifdef DEBUG_LEGION
+      // Should only be getting back our own DIDs
+      assert(determine_owner(did) == address_space);
+#endif
       if (!recycle_event.has_triggered())
       {
         DeferredRecycleArgs deferred_recycle_args;
         deferred_recycle_args.did = did;
         return issue_runtime_meta_task(deferred_recycle_args, 
-            LG_RESOURCE_PRIORITY, NULL, recycle_event);
+                LG_THROUGHPUT_PRIORITY, NULL, recycle_event);
       }
       else
       {

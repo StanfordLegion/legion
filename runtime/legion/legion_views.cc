@@ -681,7 +681,8 @@ namespace Legion {
             children[c] = child_view;
           }
           if (free_child_did)
-            context->runtime->free_distributed_id(child_did);
+            context->runtime->recycle_distributed_id(child_did,
+                                                     RtEvent::NO_RT_EVENT);
           return child_view;
         }
       }

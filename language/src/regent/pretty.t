@@ -89,7 +89,6 @@ function render.top(cx, node)
 end
 
 function render.entry(cx, node)
-  if not cx then cx = context.new_render_scope() end
   return render.top(cx, node):concat("\n")
 end
 
@@ -634,7 +633,6 @@ function pretty.expr_future_get_result(cx, node)
 end
 
 function pretty.expr(cx, node)
-  if not cx then cx = context.new_render_scope() end
   if node:is(ast.typed.expr.ID) then
     return pretty.expr_id(cx, node)
 
@@ -1064,7 +1062,6 @@ function pretty.stat_parallelize_with(cx, node)
 end
 
 function pretty.stat(cx, node)
-  if not cx then cx = context.new_global_scope() end
   if node:is(ast.typed.stat.If) then
     return pretty.stat_if(cx, node)
 
@@ -1295,7 +1292,15 @@ function pretty.entry(node)
   return render.entry(cx:new_render_scope(), pretty.top(cx, node))
 end
 
-pretty.render = render
+function pretty.entry_stat(node)
+  local cx = context.new_global_scope()
+  return render.entry(cx:new_render_scope(), pretty.stat(cx, node))
+end
+
+function pretty.entry_expr(node)
+  local cx = context.new_global_scope()
+  return render.entry(cx:new_render_scope(), pretty.expr(cx, node))
+end
 
 return pretty
 
