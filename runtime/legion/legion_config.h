@@ -734,7 +734,7 @@ typedef enum legion_isa_kind_t {
   // Top-level ISA Kinds
   X86_ISA   = 0x00000001,
   ARM_ISA   = 0x00000002,
-  POW_ISA   = 0x00000004, // Power PC
+  PPC_ISA   = 0x00000004, // Power PC
   PTX_ISA   = 0x00000008, // auto-launch by runtime
   CUDA_ISA  = 0x00000010, // run on CPU thread bound to CUDA context
   LUA_ISA   = 0x00000020, // run on Lua processor
