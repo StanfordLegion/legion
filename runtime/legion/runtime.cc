@@ -1,4 +1,4 @@
-/* Copyright 2017 Stanford University, NVIDIA Corporation
+/* Copyright 2018 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -9616,26 +9616,28 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       LG_TASK_DESCRIPTIONS(lg_task_descriptions);
-      // Check to see if we have any I/O processors, if we do then we'll do
-      // all our output on the I/O processors since we'll be writing to files 
-      // Otherwise we'll use our utility group, lacking even that then
-      // we'll just do it on whatever the executing processor is
-      Machine::ProcessorQuery local_io_procs(machine);
-      local_io_procs.local_address_space();
-      local_io_procs.only_kind(Processor::IO_PROC);
-      Processor target_proc_for_profiler = Processor::NO_PROC;
-      if (local_io_procs.count() > 1)
+      // For the profiler we want to find as many "holes" in the execution
+      // as possible in which to run profiler tasks so we can minimize the
+      // overhead on the application. To do this we want profiler tasks to
+      // run on any processor that has a dedicated core which is either any
+      // CPU processor a utility processor. There's no need to use GPU or
+      // I/O processors since they share the same cores as the utility cores. 
+      Machine::ProcessorQuery local_prof_procs(machine);
+      local_prof_procs.local_address_space();
+      std::vector<Processor> prof_procs;
+      for (Machine::ProcessorQuery::iterator it = local_prof_procs.begin();
+            it != local_prof_procs.end(); it++)
       {
-        std::vector<Processor> io_procs;
-        for (Machine::ProcessorQuery::iterator it = local_io_procs.begin();
-              it != local_io_procs.end(); it++)
-          io_procs.push_back(*it);
-        target_proc_for_profiler = Processor::create_group(io_procs);
+        if (it->kind() == Processor::LOC_PROC)
+          prof_procs.push_back(*it);
+        else if (it->kind() == Processor::UTIL_PROC)
+          prof_procs.push_back(*it);
       }
-      else if (local_io_procs.count() == 1)
-        target_proc_for_profiler = local_io_procs.first();
-      else if (!local_utils.empty())
-        target_proc_for_profiler = utility_group;
+#ifdef DEBUG_LEGION
+      assert(!prof_procs.empty());
+#endif
+      const Processor target_proc_for_profiler = prof_procs.size() > 1 ?
+        Processor::create_group(prof_procs) : prof_procs.front();
       profiler = new LegionProfiler(target_proc_for_profiler,
                                     machine, this, LG_LAST_TASK_ID,
                                     lg_task_descriptions,
@@ -15412,14 +15414,6 @@ namespace Legion {
     void Runtime::free_distributed_id(DistributedID did)
     //--------------------------------------------------------------------------
     {
-      // Special case for did 0 on shutdown
-      if (did == 0)
-        return;
-      did &= LEGION_DISTRIBUTED_ID_MASK;
-#ifdef DEBUG_LEGION
-      // Should only be getting back our own DIDs
-      assert(determine_owner(did) == address_space);
-#endif
       // Don't recycle distributed IDs if we're doing LegionSpy or LegionGC
 #ifndef LEGION_GC
 #ifndef LEGION_SPY
@@ -15438,12 +15432,20 @@ namespace Legion {
                                             RtEvent recycle_event)
     //--------------------------------------------------------------------------
     {
+      // Special case for did 0 on shutdown
+      if (did == 0)
+        return RtEvent::NO_RT_EVENT;
+      did &= LEGION_DISTRIBUTED_ID_MASK;
+#ifdef DEBUG_LEGION
+      // Should only be getting back our own DIDs
+      assert(determine_owner(did) == address_space);
+#endif
       if (!recycle_event.has_triggered())
       {
         DeferredRecycleArgs deferred_recycle_args;
         deferred_recycle_args.did = did;
         return issue_runtime_meta_task(deferred_recycle_args, 
-            LG_RESOURCE_PRIORITY, NULL, recycle_event);
+                LG_THROUGHPUT_PRIORITY, NULL, recycle_event);
       }
       else
       {

@@ -1,4 +1,4 @@
--- Copyright 2017 Stanford University
+-- Copyright 2018 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -42,6 +42,8 @@ else
   if os.execute("grep avx /proc/cpuinfo > /dev/null") == 0 then
     SIMD_REG_SIZE = 32
   elseif os.execute("grep sse /proc/cpuinfo > /dev/null") == 0 then
+    SIMD_REG_SIZE = 16
+  elseif os.execute("grep POWER8 /proc/cpuinfo > /dev/null") == 0 then
     SIMD_REG_SIZE = 16
   else
     error("Unable to determine CPU architecture")

@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-# Copyright 2017 Stanford University
+# Copyright 2018 Stanford University
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -101,6 +101,35 @@ def inside_legion_executable():
         return False
     else:
         return True
+
+def input_args(filter_runtime_options=False):
+    raw_args = c.legion_runtime_get_input_args()
+
+    args = []
+    for i in range(raw_args.argc):
+        args.append(ffi.string(raw_args.argv[i]))
+
+    if filter_runtime_options:
+        i = 1 # Skip program name
+
+        prefixes = ['-lg:', '-hl:', '-realm:', '-ll:', '-cuda:', '-numa:',
+                    '-dm:', '-bishop:']
+        while i < len(args):
+            match = False
+            for prefix in prefixes:
+                if args[i].startswith(prefix):
+                    match = True
+                    break
+            if args[i] == '-level':
+                match = True
+            if args[i] == '-logfile':
+                match = True
+            if match:
+                args.pop(i)
+                args.pop(i) # Assume that every option has an argument
+                continue
+            i += 1
+    return args
 
 # The Legion context is stored in thread-local storage. This assumes
 # that the Python processor maintains the invariant that every task

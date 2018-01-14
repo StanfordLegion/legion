@@ -1,4 +1,4 @@
--- Copyright 2017 Stanford University
+-- Copyright 2018 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -344,9 +344,9 @@ end
 function ast_util.render(expr)
   if expr == nil then return "nil" end
   if expr:is(ast.typed.expr) then
-    return pretty.render.entry(nil, pretty.expr(nil, expr))
+    return pretty.entry_expr(expr)
   elseif expr:is(ast.typed.stat) then
-    return pretty.render.entry(nil, pretty.stat(nil, expr))
+    return pretty.entry_stat(expr)
   end
 end
 

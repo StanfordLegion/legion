@@ -1,4 +1,4 @@
-/* Copyright 2017 Stanford University, NVIDIA Corporation
+/* Copyright 2018 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -387,7 +387,8 @@ namespace Legion {
             children[c] = child_view;
           }
           if (free_child_did)
-            context->runtime->free_distributed_id(child_did);
+            context->runtime->recycle_distributed_id(child_did,
+                                                     RtEvent::NO_RT_EVENT);
           return child_view;
         }
       }

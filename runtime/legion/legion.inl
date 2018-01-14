@@ -1,4 +1,4 @@
-/* Copyright 2017 Stanford University, NVIDIA Corporation
+/* Copyright 2018 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -3489,23 +3489,21 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    inline void CopyLauncher::set_gather_field(RegionTreeID in_tid, 
-                                               FieldID in_fid) 
+    inline void CopyLauncher::add_gather_field(const RegionRequirement &req,
+                                               FieldID gather_field, bool inst)
     //--------------------------------------------------------------------------
     {
-      copy_kind = GATHER_COPY;
-      indirect_tid = in_tid;
-      indirect_fid = in_fid;
+      gather_requirements.push_back(req);
+      gather_requirements.back().add_field(gather_field, inst);
     }
 
     //--------------------------------------------------------------------------
-    inline void CopyLauncher::set_scatter_field(RegionTreeID in_tid, 
-                                                FieldID in_fid) 
+    inline void CopyLauncher::add_scatter_field(const RegionRequirement &req,
+                                                FieldID scatter_field,bool inst)
     //--------------------------------------------------------------------------
     {
-      copy_kind = SCATTER_COPY;
-      indirect_tid = in_tid;
-      indirect_fid = in_fid;
+      scatter_requirements.push_back(req);
+      scatter_requirements.back().add_field(scatter_field, inst);
     }
 
     //--------------------------------------------------------------------------
@@ -3583,23 +3581,21 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    inline void IndexCopyLauncher::set_gather_field(RegionTreeID in_tid, 
-                                                    FieldID in_fid)
+    inline void IndexCopyLauncher::add_gather_field(const RegionRequirement &r,
+                                               FieldID gather_field, bool inst)
     //--------------------------------------------------------------------------
     {
-      copy_kind = GATHER_COPY;
-      indirect_tid = in_tid;
-      indirect_fid = in_fid;
+      gather_requirements.push_back(r);
+      gather_requirements.back().add_field(gather_field, inst);
     }
 
     //--------------------------------------------------------------------------
-    inline void IndexCopyLauncher::set_scatter_field(RegionTreeID in_tid, 
-                                                     FieldID in_fid)
+    inline void IndexCopyLauncher::add_scatter_field(const RegionRequirement &r,
+                                                FieldID scatter_field,bool inst)
     //--------------------------------------------------------------------------
     {
-      copy_kind = SCATTER_COPY;
-      indirect_tid = in_tid;
-      indirect_fid = in_fid;
+      scatter_requirements.push_back(r);
+      scatter_requirements.back().add_field(scatter_field, inst);
     }
 
     //--------------------------------------------------------------------------
@@ -4137,6 +4133,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       idempotent_variant = is_idemp;
+    }
+
+    //--------------------------------------------------------------------------
+    inline void TaskVariantRegistrar::set_replicable(bool is_repl/*= true*/)
+    //--------------------------------------------------------------------------
+    {
+      replicable_variant = is_repl;
     }
 
     //--------------------------------------------------------------------------

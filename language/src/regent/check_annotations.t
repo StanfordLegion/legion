@@ -1,4 +1,4 @@
--- Copyright 2017 Stanford University, NVIDIA Corporation
+-- Copyright 2018 Stanford University, NVIDIA Corporation
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -189,7 +189,15 @@ local function check_annotations_node(cx)
       check(cx, node, data.set({}))
 
     elseif node:is(ast.typed.top.Task) then
-      check(cx, node, data.set({"cuda", "external", "inline", "parallel"}))
+      check(cx, node,
+            data.set({
+              "cuda",
+              "external",
+              "inline",
+              "inner",
+              "leaf",
+              "parallel",
+            }))
 
     -- Miscellaneous:
     elseif node:is(ast.typed.Block) or

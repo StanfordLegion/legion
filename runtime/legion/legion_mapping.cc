@@ -1,4 +1,4 @@
-/* Copyright 2017 Stanford University, NVIDIA Corporation
+/* Copyright 2018 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -819,6 +819,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool MapperRuntime::has_index_partition(MapperContext ctx,
+                                           IndexSpace parent, Color color) const
+    //--------------------------------------------------------------------------
+    {
+      return ctx->manager->has_index_partition(ctx, parent, color);
+    }
+
+    //--------------------------------------------------------------------------
     IndexPartition MapperRuntime::get_index_partition(MapperContext ctx,
                                            IndexSpace parent, Color color) const
     //--------------------------------------------------------------------------
@@ -888,6 +896,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return ctx->manager->is_index_partition_disjoint(ctx, p);
+    }
+
+    //--------------------------------------------------------------------------
+    bool MapperRuntime::is_index_partition_complete(MapperContext ctx,
+                                                    IndexPartition p) const
+    //--------------------------------------------------------------------------
+    {
+      return ctx->manager->is_index_partition_complete(ctx, p);
     }
 
     //--------------------------------------------------------------------------

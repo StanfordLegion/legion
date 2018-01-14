@@ -1,5 +1,5 @@
-# Copyright 2017 Stanford University, NVIDIA Corporation
-# Copyright 2017 Los Alamos National Laboratory 
+# Copyright 2018 Stanford University, NVIDIA Corporation
+# Copyright 2018 Los Alamos National Laboratory 
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -123,7 +123,13 @@ endif
 MARCH ?= native
 
 ifneq (${MARCH},)
-  CC_FLAGS += -march=${MARCH}
+  # Summitdev is strange and wants to have this specified via -mcpu
+  # instead of -march. Unclear if this is true in general for PPC.
+  ifeq ($(findstring summitdev,$(shell uname -n)),summitdev)
+    CC_FLAGS += -mcpu=${MARCH} -maltivec -mabi=altivec -mvsx
+  else
+    CC_FLAGS += -march=${MARCH}
+  endif
 endif
 
 INC_FLAGS	+= -I$(LG_RT_DIR) -I$(LG_RT_DIR)/mappers
@@ -416,7 +422,10 @@ ifeq ($(strip $(USE_MPI)),1)
     CC		:= mpicc
     CXX		:= mpicxx
     F90         := mpif90
-    LEGION_LD_FLAGS	+= -L$(MPI)/lib -lmpi
+    # Summitdev is strange and links this automatically (but still uses mpicxx).
+    ifneq ($(findstring summitdev,$(shell uname -n)),summitdev)
+      LEGION_LD_FLAGS	+= -L$(MPI)/lib -lmpi
+    endif
     LAPACK_LIBS ?= -lblas
   endif
 endif

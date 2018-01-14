@@ -1,4 +1,4 @@
--- Copyright 2017 Stanford University, NVIDIA Corporation
+-- Copyright 2018 Stanford University, NVIDIA Corporation
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -79,8 +79,8 @@ ast.annotation:leaf("Forbid", {"value"}, true)
 ast.annotation:leaf("Unroll", {"value"}, true)
 
 -- Annotation: Sets
-ast.annotation:leaf("Set", {"cuda", "external", "inline", "openmp",
-                            "parallel", "spmd", "trace", "vectorize"},
+ast.annotation:leaf("Set", {"cuda", "external", "inline", "inner", "leaf",
+                            "openmp", "parallel", "spmd", "trace", "vectorize"},
                     false, true)
 
 function ast.default_annotations()
@@ -89,6 +89,8 @@ function ast.default_annotations()
     cuda = allow,
     external = allow,
     inline = allow,
+    inner = allow,
+    leaf = allow,
     openmp = allow,
     parallel = allow,
     spmd = allow,

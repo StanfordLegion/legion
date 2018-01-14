@@ -1,4 +1,4 @@
-/* Copyright 2017 Stanford University, NVIDIA Corporation
+/* Copyright 2018 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -271,7 +271,7 @@ namespace Legion {
 #endif
     public:
       void dump_state(LegionProfSerializer *serializer);
-      size_t dump_inter(LegionProfSerializer *serializer);
+      size_t dump_inter(LegionProfSerializer *serializer, const double over);
     private:
       LegionProfiler *const owner;
       std::deque<TaskKind>          task_kinds;

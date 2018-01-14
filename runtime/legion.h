@@ -1,4 +1,4 @@
-/* Copyright 2017 Stanford University, NVIDIA Corporation
+/* Copyright 2018 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -55,6 +55,10 @@
 
 // temporary helper macro to turn link errors into runtime errors
 #define UNIMPLEMENTED_METHOD(retval) do { assert(0); return retval; } while(0)
+
+// There will be a new implementation of this for control replication
+#define LEGION_PRINT_ONCE(runtime, ctx, file, fmt, ...)   \
+  fprintf(file, fmt, ##__VA_ARGS__);            
 
 /**
  * \namespace Legion
@@ -1587,11 +1591,11 @@ namespace Legion {
       inline void add_src_field(unsigned idx, FieldID fid, bool inst = true);
       inline void add_dst_field(unsigned idx, FieldID fid, bool inst = true);
     public:
-      // Specify gather/scatter properties
-      inline void set_gather_field(RegionTreeID indirect_tid, 
-                                   FieldID indirect_fid);
-      inline void set_scatter_field(RegionTreeID indirect_tid, 
-                                    FieldID indirect_fid);
+      // Specify gather/scatter region requirements (must have exactly 1 field)
+      inline void add_gather_field(const RegionRequirement &gather_req,
+                                   FieldID gather_fid, bool inst = true);
+      inline void add_scatter_field(const RegionRequirement &scatter_req,
+                                    FieldID scatter_fid, bool inst = true);
     public:
       inline void add_grant(Grant g);
       inline void add_wait_barrier(PhaseBarrier bar);
@@ -1601,6 +1605,8 @@ namespace Legion {
     public:
       std::vector<RegionRequirement>  src_requirements;
       std::vector<RegionRequirement>  dst_requirements;
+      std::vector<RegionRequirement>  gather_requirements;
+      std::vector<RegionRequirement>  scatter_requirements;
       std::vector<Grant>              grants;
       std::vector<PhaseBarrier>       wait_barriers;
       std::vector<PhaseBarrier>       arrive_barriers;
@@ -1608,12 +1614,6 @@ namespace Legion {
       MapperID                        map_id;
       MappingTagID                    tag;
       DomainPoint                     point;
-    public:
-      // For handling indirect kinds of copies
-      CopyKind                        copy_kind;
-      // Indirect field for scatter/gather through a field
-      RegionTreeID                    indirect_tid;
-      FieldID                         indirect_fid;
     public:
       // Inform the runtime about any static dependences
       // These will be ignored outside of static traces
@@ -1644,12 +1644,12 @@ namespace Legion {
 					    const RegionRequirement &dst);
       inline void add_src_field(unsigned idx, FieldID fid, bool inst = true);
       inline void add_dst_field(unsigned idx, FieldID fid, bool inst = true);
-     public:
-      // Specify gather/scatter copy properties
-      inline void set_gather_field(RegionTreeID indirect_tid, 
-                                   FieldID indirect_fid);
-      inline void set_scatter_field(RegionTreeID indirect_tid, 
-                                    FieldID indirect_fid);
+    public:
+      // Specify gather/scatter region requirements (must have exactly 1 field)
+      inline void add_gather_field(const RegionRequirement &gather_req,
+                                   FieldID gather_fid, bool inst = true);
+      inline void add_scatter_field(const RegionRequirement &scatter_req,
+                                    FieldID scatter_fid, bool inst = true);
     public:
       inline void add_grant(Grant g);
       inline void add_wait_barrier(PhaseBarrier bar);
@@ -1659,6 +1659,8 @@ namespace Legion {
     public:
       std::vector<RegionRequirement>  src_requirements;
       std::vector<RegionRequirement>  dst_requirements;
+      std::vector<RegionRequirement>  gather_requirements;
+      std::vector<RegionRequirement>  scatter_requirements;
       std::vector<Grant>              grants;
       std::vector<PhaseBarrier>       wait_barriers;
       std::vector<PhaseBarrier>       arrive_barriers;
@@ -1667,12 +1669,6 @@ namespace Legion {
       Predicate                       predicate;
       MapperID                        map_id;
       MappingTagID                    tag;
-    public:
-      // For handling indirect kinds of copies
-      CopyKind                        copy_kind;
-      // Indirect field for scatter/gather through a field
-      RegionTreeID                    indirect_tid;
-      FieldID                         indirect_fid;
     public:
       // Inform the runtime about any static dependences
       // These will be ignored outside of static traces
@@ -1972,6 +1968,7 @@ namespace Legion {
       inline void set_leaf(bool is_leaf = true);
       inline void set_inner(bool is_inner = true);
       inline void set_idempotent(bool is_idempotent = true);
+      inline void set_replicable(bool is_replicable = true);
     public:
       TaskID                            task_id;
       GeneratorContext                  generator;
@@ -1984,6 +1981,7 @@ namespace Legion {
       bool                              leaf_variant;
       bool                              inner_variant;
       bool                              idempotent_variant;
+      bool                              replicable_variant;
     };
 
     //==========================================================================
