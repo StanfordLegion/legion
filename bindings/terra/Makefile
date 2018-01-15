@@ -78,6 +78,10 @@ endif
 CC_FLAGS += -DREALM_ALLOW_MISSING_LLVM_LIBS
 $(OUTFILE) : LLVM_LIBS=
 
+# Also static-link all application objects
+OUTLIB = liblegion_terra_bindings.a
+OUTLINK_FLAGS = link_flags.txt
+
 ###########################################################################
 #
 #   Don't change anything below here

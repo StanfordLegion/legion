@@ -3455,6 +3455,8 @@ end
 function std.start(main_task, extra_setup_thunk)
   if std.config["pretty"] then os.exit() end
 
+  terralib.linklibrary("liblegion_terra.so")
+
   assert(std.is_task(main_task))
   local main = std.setup(main_task, extra_setup_thunk)
 
@@ -3476,6 +3478,13 @@ function std.start(main_task, extra_setup_thunk)
   wrapper()
 end
 
+local function split(str, sep)
+  local fields = terralib.newlist()
+  local pattern = string.format("([^%s]+)", sep)
+  str:gsub(pattern, function(c) fields:insert(c) end)
+  return fields
+end
+
 function std.saveobj(main_task, filename, filetype, extra_setup_thunk, link_flags)
   assert(std.is_task(main_task))
   local main, names = std.setup(main_task, extra_setup_thunk)
@@ -3483,7 +3492,11 @@ function std.saveobj(main_task, filename, filetype, extra_setup_thunk, link_flag
 
   local flags = terralib.newlist()
   if link_flags then flags:insertall(link_flags) end
-  flags:insertall({"-L" .. lib_dir, "-llegion_terra"})
+  flags:insertall({"-L" .. lib_dir, "-llegion_terra_bindings"})
+  local legion_flags_cache = io.open(lib_dir .. "/link_flags.txt", "r")
+  flags:insertall(split(legion_flags_cache:read(), ' '))
+  legion_flags_cache:close()
+  flags:insert('-lstdc++')
   if filetype ~= nil then
     terralib.saveobj(filename, filetype, names, flags)
   else
