@@ -17,36 +17,55 @@
 local ast = require("regent/ast")
 local std = require("regent/std_base")
 
-local context = {}
+local pretty_context = {}
 
-function context:__index (field)
-  local value = context [field]
+function pretty_context:__index (field)
+  local value = pretty_context [field]
   if value ~= nil then
     return value
   end
-  error ("context has no field '" .. field .. "' (in lookup)", 2)
+  error ("pretty_context has no field '" .. field .. "' (in lookup)", 2)
 end
 
-function context:__newindex (field, value)
-  error ("context has no field '" .. field .. "' (in assignment)", 2)
+function pretty_context:__newindex (field, value)
+  error ("pretty_context has no field '" .. field .. "' (in assignment)", 2)
 end
 
-function context.new_global_scope()
+function pretty_context.new_global_scope()
   return setmetatable({
-  }, context)
+  }, pretty_context)
 end
 
-function context:new_render_scope()
+function pretty_context:new_local_scope()
+  return setmetatable({
+  }, pretty_context)
+end
+
+local render_context = {}
+
+function render_context:__index (field)
+  local value = render_context [field]
+  if value ~= nil then
+    return value
+  end
+  error ("render_context has no field '" .. field .. "' (in lookup)", 2)
+end
+
+function render_context:__newindex (field, value)
+  error ("render_context has no field '" .. field .. "' (in assignment)", 2)
+end
+
+function render_context.new_render_scope()
   return setmetatable({
     indent = 0,
-  }, context)
+  }, render_context)
 end
 
-function context:new_indent_scope(increment)
+function render_context:new_indent_scope(increment)
   assert(increment >= 0)
   return setmetatable({
     indent = self.indent + increment,
-  }, context)
+  }, render_context)
 end
 
 local text = ast.make_factory("text")
@@ -1287,19 +1306,18 @@ function pretty.top(cx, node)
 end
 
 function pretty.entry(node)
-  local cx = context.new_global_scope()
-  return render.entry(cx:new_render_scope(), pretty.top(cx, node))
+  local cx = pretty_context.new_global_scope()
+  return render.entry(render_context.new_render_scope(), pretty.top(cx, node))
 end
 
 function pretty.entry_stat(node)
-  local cx = context.new_global_scope()
-  return render.entry(cx:new_render_scope(), pretty.stat(cx, node))
+  local cx = pretty_context.new_global_scope()
+  return render.entry(render_context.new_render_scope(), pretty.stat(cx, node))
 end
 
 function pretty.entry_expr(node)
-  local cx = context.new_global_scope()
-  return render.entry(cx:new_render_scope(), pretty.expr(cx, node))
+  local cx = pretty_context.new_global_scope()
+  return render.entry(render_context.new_render_scope(), pretty.expr(cx, node))
 end
 
 return pretty
-
