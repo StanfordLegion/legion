@@ -16,7 +16,7 @@
 #
 
 from __future__ import print_function
-import argparse, hashlib, multiprocessing, os, platform, subprocess, sys
+import argparse, hashlib, multiprocessing, os, platform, re, subprocess, sys
 
 def discover_llvm_version():
     if platform.node().startswith('titan'):
