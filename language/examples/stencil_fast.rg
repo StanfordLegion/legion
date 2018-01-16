@@ -562,19 +562,6 @@ if os.getenv('SAVEOBJ') == '1' then
   local root_dir = arg[0]:match(".*/") or "./"
   local out_dir = (os.getenv('OBJNAME') and os.getenv('OBJNAME'):match('.*/')) or root_dir
   local link_flags = {"-L" .. out_dir, "-lstencil", "-lstencil_mapper"}
-  if os.getenv('CRAYPE_VERSION') then
-    local new_flags = terralib.newlist({"-Wl,-Bdynamic"})
-    new_flags:insertall(link_flags)
-    for flag in os.getenv('CRAY_UGNI_POST_LINK_OPTS'):gmatch("%S+") do
-      new_flags:insert(flag)
-    end
-    new_flags:insert("-lugni")
-    for flag in os.getenv('CRAY_UDREG_POST_LINK_OPTS'):gmatch("%S+") do
-      new_flags:insert(flag)
-    end
-    new_flags:insert("-ludreg")
-    link_flags = new_flags
-  end
 
   if os.getenv('STANDALONE') == '1' then
     os.execute('cp ' .. os.getenv('LG_RT_DIR') .. '/../bindings/terra/liblegion_terra.so ' .. out_dir)
