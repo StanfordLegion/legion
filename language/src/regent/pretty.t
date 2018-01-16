@@ -48,7 +48,7 @@ end
 
 function pretty_context:print_var(v)
   local name = self.name_map:safe_lookup(v)
-  return name and name or tostring(v)
+  return name or tostring(v)
 end
 
 function pretty_context:record_var(node, v)
@@ -896,12 +896,12 @@ function pretty.stat_for_num(cx, node)
   local result = terralib.newlist()
   result:insert(pretty.annotations(cx, node.annotations))
   local values = pretty.expr_list(cx, node.values)
-  cx = cx:new_local_scope()
+  local cx = cx:new_local_scope()
   cx:record_var(node, node.symbol)
   result:insert(join({"for", cx:print_var(node.symbol),
                       ":", tostring(node.symbol:gettype()),
                       "=", values, "do"}, true))
-  cx = cx:new_local_scope()
+  local cx = cx:new_local_scope()
   result:insert(pretty.block(cx, node.block))
   result:insert(text.Line { value = "end" })
   return text.Lines { lines = result }
@@ -911,12 +911,12 @@ function pretty.stat_for_num_vectorized(cx, node)
   local result = terralib.newlist()
   result:insert(pretty.annotations(cx, node.annotations))
   local values = pretty.expr_list(cx, node.values)
-  cx = cx:new_local_scope()
+  local cx = cx:new_local_scope()
   cx:record_var(node, node.symbol)
   result:insert(join({"for", cx:print_var(node.symbol),
                       ":", tostring(node.symbol:gettype()),
                       "=", values, "do -- vectorized"}, true))
-  cx = cx:new_local_scope()
+  local cx = cx:new_local_scope()
   result:insert(pretty.block(cx, node.block))
   result:insert(text.Line { value = "end" })
   return text.Lines { lines = result }
@@ -926,12 +926,12 @@ function pretty.stat_for_list(cx, node)
   local result = terralib.newlist()
   result:insert(pretty.annotations(cx, node.annotations))
   local value = pretty.expr(cx, node.value)
-  cx = cx:new_local_scope()
+  local cx = cx:new_local_scope()
   cx:record_var(node, node.symbol)
   result:insert(join({"for", cx:print_var(node.symbol),
                       ":", tostring(node.symbol:gettype()),
                       "in", value, "do"}, true))
-  cx = cx:new_local_scope()
+  local cx = cx:new_local_scope()
   result:insert(pretty.block(cx, node.block))
   result:insert(text.Line { value = "end" })
   return text.Lines { lines = result }
@@ -941,12 +941,12 @@ function pretty.stat_for_list_vectorized(cx, node)
   local result = terralib.newlist()
   result:insert(pretty.annotations(cx, node.annotations))
   local value = pretty.expr(cx, node.value)
-  cx = cx:new_local_scope()
+  local cx = cx:new_local_scope()
   cx:record_var(node, node.symbol)
   result:insert(join({"for", cx:print_var(node.symbol),
                       ":", tostring(node.symbol:gettype()),
                       "in", value, "do -- vectorized"}, true))
-  cx = cx:new_local_scope()
+  local cx = cx:new_local_scope()
   result:insert(pretty.block(cx, node.block))
   result:insert(text.Line { value = "end" })
   return text.Lines { lines = result }
@@ -984,7 +984,7 @@ function pretty.stat_index_launch_num(cx, node)
   local result = terralib.newlist()
   result:insert(pretty.annotations(cx, node.annotations))
   local values = pretty.expr_list(cx, node.values)
-  cx = cx:new_local_scope()
+  local cx = cx:new_local_scope()
   cx:record_var(node, node.symbol)
   result:insert(join({"for", cx:print_var(node.symbol), "=", values,
                       "do -- index launch"}, true))
@@ -1001,7 +1001,7 @@ function pretty.stat_index_launch_list(cx, node)
   local result = terralib.newlist()
   result:insert(pretty.annotations(cx, node.annotations))
   local value = pretty.expr(cx, node.value)
-  cx = cx:new_local_scope()
+  local cx = cx:new_local_scope()
   cx:record_var(node, node.symbol)
   result:insert(join({"for", cx:print_var(node.symbol), "in", value,
                       "do -- index launch"}, true))
@@ -1019,12 +1019,11 @@ function pretty.stat_var(cx, node)
   result:insert(pretty.annotations(cx, node.annotations))
   local value = node.value and pretty.expr(cx, node.value)
   cx:record_var(node, node.symbol)
-  local decls = terralib.newlist()
-  decls:insert(join({cx:print_var(node.symbol), ":", tostring(node.type)}, true))
-  if node.value then
-    result:insert(join({"var", commas(decls), "=", value}, true))
+  local decl = join({cx:print_var(node.symbol), ":", tostring(node.type)}, true)
+  if value then
+    result:insert(join({"var", decl, "=", value}, true))
   else
-    result:insert(join({"var", commas(decls)}, true))
+    result:insert(join({"var", decl}, true))
   end
   return text.Lines { lines = result }
 end
@@ -1033,8 +1032,8 @@ function pretty.stat_var_unpack(cx, node)
   local result = terralib.newlist()
   result:insert(pretty.annotations(cx, node.annotations))
   local value = pretty.expr(cx, node.value)
-  for _,sym in ipairs(node.symbols) do
-    cx:record_var(node, sym)
+  for _, symbol in ipairs(node.symbols) do
+    cx:record_var(node, symbol)
   end
   local symbols = commas(node.symbols:map(function(symbol) return cx:print_var(symbol) end))
   local fields = commas(node.fields:map(function(field) return field end))
