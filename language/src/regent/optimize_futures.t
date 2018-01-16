@@ -1340,13 +1340,11 @@ function optimize_futures.stat_var(cx, node)
   if cx:is_var_future(node.symbol) then
     new_symbol = cx:symbol(node.symbol)
   end
-  local symbol = new_symbol
 
   local new_type = value_type
   if cx:is_var_future(node.symbol) then
     new_type = std.future(value_type)
   end
-  local type = new_type
 
   local new_value = value
   if value then
@@ -1377,12 +1375,11 @@ function optimize_futures.stat_var(cx, node)
       stats:insert(empty_var)
     end
   end
-  value = new_value
 
   stats:insert(node {
-    symbol = symbol,
-    type = type,
-    value = value,
+    symbol = new_symbol,
+    type = new_type,
+    value = new_value,
   })
   return stats
 end
