@@ -109,160 +109,69 @@ function analyze_var_flow.expr(cx, node)
   if node:is(ast.typed.expr.ID) then
     return analyze_var_flow.expr_id(cx, node)
 
-  elseif node:is(ast.typed.expr.Constant) then
-    return nil
-
-  elseif node:is(ast.typed.expr.Function) then
-    return nil
-
-  elseif node:is(ast.typed.expr.FieldAccess) then
-    return nil
-
-  elseif node:is(ast.typed.expr.IndexAccess) then
-    return nil
-
-  elseif node:is(ast.typed.expr.MethodCall) then
+  elseif node:is(ast.typed.expr.Constant) or
+    node:is(ast.typed.expr.Function) or
+    node:is(ast.typed.expr.FieldAccess) or
+    node:is(ast.typed.expr.IndexAccess) or
+    node:is(ast.typed.expr.MethodCall)
+  then
     return nil
 
   elseif node:is(ast.typed.expr.Call) then
     return analyze_var_flow.expr_call(cx, node)
 
-  elseif node:is(ast.typed.expr.Cast) then
-    return nil
-
-  elseif node:is(ast.typed.expr.Ctor) then
-    return nil
-
-  elseif node:is(ast.typed.expr.RawContext) then
-    return nil
-
-  elseif node:is(ast.typed.expr.RawFields) then
-    return nil
-
-  elseif node:is(ast.typed.expr.RawPhysical) then
-    return nil
-
-  elseif node:is(ast.typed.expr.RawRuntime) then
-    return nil
-
-  elseif node:is(ast.typed.expr.RawValue) then
-    return nil
-
-  elseif node:is(ast.typed.expr.Isnull) then
-    return nil
-
-  elseif node:is(ast.typed.expr.Null) then
-    return nil
-
-  elseif node:is(ast.typed.expr.DynamicCast) then
-    return nil
-
-  elseif node:is(ast.typed.expr.StaticCast) then
-    return nil
-
-  elseif node:is(ast.typed.expr.UnsafeCast) then
-    return nil
-
-  elseif node:is(ast.typed.expr.Ispace) then
-    return nil
-
-  elseif node:is(ast.typed.expr.Region) then
-    return nil
-
-  elseif node:is(ast.typed.expr.Partition) then
-    return nil
-
-  elseif node:is(ast.typed.expr.PartitionEqual) then
-    return nil
-
-  elseif node:is(ast.typed.expr.PartitionByField) then
-    return nil
-
-  elseif node:is(ast.typed.expr.Image) then
-    return nil
-
-  elseif node:is(ast.typed.expr.Preimage) then
-    return nil
-
-  elseif node:is(ast.typed.expr.CrossProduct) then
-    return nil
-
-  elseif node:is(ast.typed.expr.CrossProductArray) then
-    return nil
-
-  elseif node:is(ast.typed.expr.ListSlicePartition) then
-    return nil
-
-  elseif node:is(ast.typed.expr.ListDuplicatePartition) then
-    return nil
-
-  elseif node:is(ast.typed.expr.ListSliceCrossProduct) then
-    return nil
-
-  elseif node:is(ast.typed.expr.ListCrossProduct) then
-    return nil
-
-  elseif node:is(ast.typed.expr.ListCrossProductComplete) then
-    return nil
-
-  elseif node:is(ast.typed.expr.ListPhaseBarriers) then
-    return nil
-
-  elseif node:is(ast.typed.expr.ListInvert) then
-    return nil
-
-  elseif node:is(ast.typed.expr.ListRange) then
-    return nil
-
-  elseif node:is(ast.typed.expr.ListIspace) then
-    return nil
-
-  elseif node:is(ast.typed.expr.ListFromElement) then
-    return nil
-
-  elseif node:is(ast.typed.expr.PhaseBarrier) then
-    return nil
-
-  elseif node:is(ast.typed.expr.DynamicCollective) then
+  elseif node:is(ast.typed.expr.Cast) or
+    node:is(ast.typed.expr.Ctor) or
+    node:is(ast.typed.expr.RawContext) or
+    node:is(ast.typed.expr.RawFields) or
+    node:is(ast.typed.expr.RawPhysical) or
+    node:is(ast.typed.expr.RawRuntime) or
+    node:is(ast.typed.expr.RawValue) or
+    node:is(ast.typed.expr.Isnull) or
+    node:is(ast.typed.expr.Null) or
+    node:is(ast.typed.expr.DynamicCast) or
+    node:is(ast.typed.expr.StaticCast) or
+    node:is(ast.typed.expr.UnsafeCast) or
+    node:is(ast.typed.expr.Ispace) or
+    node:is(ast.typed.expr.Region) or
+    node:is(ast.typed.expr.Partition) or
+    node:is(ast.typed.expr.PartitionEqual) or
+    node:is(ast.typed.expr.PartitionByField) or
+    node:is(ast.typed.expr.Image) or
+    node:is(ast.typed.expr.Preimage) or
+    node:is(ast.typed.expr.CrossProduct) or
+    node:is(ast.typed.expr.CrossProductArray) or
+    node:is(ast.typed.expr.ListSlicePartition) or
+    node:is(ast.typed.expr.ListDuplicatePartition) or
+    node:is(ast.typed.expr.ListSliceCrossProduct) or
+    node:is(ast.typed.expr.ListCrossProduct) or
+    node:is(ast.typed.expr.ListCrossProductComplete) or
+    node:is(ast.typed.expr.ListPhaseBarriers) or
+    node:is(ast.typed.expr.ListInvert) or
+    node:is(ast.typed.expr.ListRange) or
+    node:is(ast.typed.expr.ListIspace) or
+    node:is(ast.typed.expr.ListFromElement) or
+    node:is(ast.typed.expr.PhaseBarrier) or
+    node:is(ast.typed.expr.DynamicCollective)
+  then
     return nil
 
   elseif node:is(ast.typed.expr.DynamicCollectiveGetResult) then
     return analyze_var_flow.expr_dynamic_collective_get_result(cx, node)
 
-  elseif node:is(ast.typed.expr.Advance) then
-    return nil
-
-  elseif node:is(ast.typed.expr.Adjust) then
-    return nil
-
-  elseif node:is(ast.typed.expr.Arrive) then
-    return nil
-
-  elseif node:is(ast.typed.expr.Await) then
-    return nil
-
-  elseif node:is(ast.typed.expr.Copy) then
-    return nil
-
-  elseif node:is(ast.typed.expr.Fill) then
-    return nil
-
-  elseif node:is(ast.typed.expr.Acquire) then
-    return nil
-
-  elseif node:is(ast.typed.expr.Release) then
-    return nil
-
-  elseif node:is(ast.typed.expr.AttachHDF5) then
-    return nil
-
-  elseif node:is(ast.typed.expr.DetachHDF5) then
-    return nil
-
-  elseif node:is(ast.typed.expr.AllocateScratchFields) then
-    return nil
-
-  elseif node:is(ast.typed.expr.WithScratchFields) then
+  elseif node:is(ast.typed.expr.Advance) or
+    node:is(ast.typed.expr.Adjust) or
+    node:is(ast.typed.expr.Arrive) or
+    node:is(ast.typed.expr.Await) or
+    node:is(ast.typed.expr.Copy) or
+    node:is(ast.typed.expr.Fill) or
+    node:is(ast.typed.expr.Acquire) or
+    node:is(ast.typed.expr.Release) or
+    node:is(ast.typed.expr.AttachHDF5) or
+    node:is(ast.typed.expr.DetachHDF5) or
+    node:is(ast.typed.expr.AllocateScratchFields) or
+    node:is(ast.typed.expr.WithScratchFields)
+  then
     return nil
 
   elseif node:is(ast.typed.expr.Unary) then
