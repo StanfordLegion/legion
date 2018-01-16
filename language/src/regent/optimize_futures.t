@@ -67,6 +67,43 @@ end
 
 local analyze_var_flow = {}
 
+function flow_future()
+  return {[true] = true} -- Represents an unconditional future r-value
+end
+
+function flow_var(v)
+  return {[v] = true} -- Represents a variable
+end
+
+function flow_future_into(cx, lhs) -- Unconditionally flow future into l-value
+  if lhs then
+    for v, _ in pairs(lhs) do
+      local var_flow = cx:get_flow(v)
+      var_flow[true] = true
+    end
+  end
+end
+
+function flow_value_into_var(cx, symbol, value) -- Flow r-value into variable
+  local var_flow = cx:get_flow(symbol)
+  if value then
+    for v, _ in pairs(value) do
+      var_flow[v] = true
+    end
+  end
+end
+
+function flow_value_into(cx, lhs, rhs) -- Flow r-value into l-value
+  if lhs and rhs then
+    for lhv, _ in pairs(lhs) do
+      local lhv_flow = cx:get_flow(lhv)
+      for rhv, _ in pairs(rhs) do
+        lhv_flow[rhv] = true
+      end
+    end
+  end
+end
+
 function meet_flow(...)
   local flow = {}
   for _, a in ipairs({...}) do
@@ -80,19 +117,19 @@ function meet_flow(...)
 end
 
 function analyze_var_flow.expr_id(cx, node)
-  return {[node.value] = true}
+  return flow_var(node.value)
 end
 
 function analyze_var_flow.expr_call(cx, node)
   if std.is_task(node.fn.value) and
     node.expr_type ~= terralib.types.unit
   then
-    return {[true] = true}
+    return flow_future()
   end
 end
 
 function analyze_var_flow.expr_dynamic_collective_get_result(cx, node)
-  return {[true] = true}
+  return flow_future()
 end
 
 function analyze_var_flow.expr_unary(cx, node)
@@ -231,25 +268,13 @@ end
 function analyze_var_flow.stat_index_launch_num(cx, node)
   local reduce_lhs = node.reduce_lhs and
     analyze_var_flow.expr(cx, node.reduce_lhs)
-
-  if reduce_lhs then
-    for v, _ in pairs(reduce_lhs) do
-      local var_flow = cx:get_flow(v)
-      var_flow[true] = true
-    end
-  end
+  flow_future_into(cx, reduce_lhs)
 end
 
 function analyze_var_flow.stat_index_launch_list(cx, node)
   local reduce_lhs = node.reduce_lhs and
     analyze_var_flow.expr(cx, node.reduce_lhs)
-
-  if reduce_lhs then
-    for v, _ in pairs(reduce_lhs) do
-      local var_flow = cx:get_flow(v)
-      var_flow[true] = true
-    end
-  end
+  flow_future_into(cx, reduce_lhs)
 end
 
 function analyze_var_flow.stat_var(cx, node)
@@ -257,41 +282,19 @@ function analyze_var_flow.stat_var(cx, node)
   if value then
     value = analyze_var_flow.expr(cx, value)
   end
-
-  local var_flow = cx:get_flow(node.symbol)
-  if value then
-    for v, _ in pairs(value) do
-      var_flow[v] = true
-    end
-  end
+  flow_value_into_var(cx, node.symbol, value)
 end
 
 function analyze_var_flow.stat_assignment(cx, node)
   local lhs = analyze_var_flow.expr(cx, node.lhs)
   local rhs = analyze_var_flow.expr(cx, node.rhs)
-
-  if lhs and rhs then
-    for lhv, _ in pairs(lhs) do
-      local lhv_flow = cx:get_flow(lhv)
-      for rhv, _ in pairs(rhs) do
-        lhv_flow[rhv] = true
-      end
-    end
-  end
+  flow_value_into(cx, lhs, rhs)
 end
 
 function analyze_var_flow.stat_reduce(cx, node)
   local lhs = analyze_var_flow.expr(cx, node.lhs)
   local rhs = analyze_var_flow.expr(cx, node.rhs)
-
-  if lhs and rhs then
-    for lhv, _ in pairs(lhs) do
-      local lhv_flow = cx:get_flow(lhv)
-      for rhv, _ in pairs(rhs) do
-        lhv_flow[rhv] = true
-      end
-    end
-  end
+  flow_value_into(cx, lhs, rhs)
 end
 
 function analyze_var_flow.stat(cx, node)
