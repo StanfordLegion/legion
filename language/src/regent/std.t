@@ -3482,19 +3482,19 @@ function std.saveobj(main_task, filename, filetype, extra_setup_thunk, link_flag
   local lib_dir = os.getenv("LG_RT_DIR") .. "/../bindings/terra"
 
   local flags = terralib.newlist()
+  if os.getenv('CRAYPE_VERSION') then
+    flags:insert("-Wl,-Bdynamic")
+  end
   if link_flags then flags:insertall(link_flags) end
   if os.getenv('CRAYPE_VERSION') then
-    local new_flags = terralib.newlist({"-Wl,-Bdynamic"})
-    new_flags:insertall(link_flags)
     for flag in os.getenv('CRAY_UGNI_POST_LINK_OPTS'):gmatch("%S+") do
-      new_flags:insert(flag)
+      flags:insert(flag)
     end
-    new_flags:insert("-lugni")
+    flags:insert("-lugni")
     for flag in os.getenv('CRAY_UDREG_POST_LINK_OPTS'):gmatch("%S+") do
-      new_flags:insert(flag)
+      flags:insert(flag)
     end
-    new_flags:insert("-ludreg")
-    link_flags = new_flags
+    flags:insert("-ludreg")
   end
   flags:insertall({"-L" .. lib_dir, "-llegion_terra"})
   if filetype ~= nil then
