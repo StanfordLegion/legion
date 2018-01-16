@@ -16,7 +16,7 @@
 #
 
 from __future__ import print_function
-import argparse, hashlib, multiprocessing, os, platform, subprocess, sys
+import argparse, hashlib, multiprocessing, os, platform, re, subprocess, sys
 
 def discover_llvm_version():
     if platform.node().startswith('titan'):
@@ -153,15 +153,15 @@ def install_llvm(llvm_dir, llvm_install_dir, llvm_version, llvm_use_cmake, cmake
         llvm_source_dir = os.path.join(llvm_dir, 'llvm-3.8.1.src')
         clang_tarball = os.path.join(llvm_dir, 'cfe-3.8.1.src.tar.xz')
         clang_source_dir = os.path.join(llvm_dir, 'cfe-3.8.1.src')
-        download(llvm_tarball, 'http://llvm.org/releases/3.8.1/llvm-3.8.1.src.tar.xz', 'e0c48c4c182424b99999367d688cd8ce7876827b', insecure=insecure)
-        download(clang_tarball, 'http://llvm.org/releases/3.8.1/cfe-3.8.1.src.tar.xz', 'b5ff24dc6ad8f84654f4859389990bace1cfb6d5', insecure=insecure)
+        download(llvm_tarball, 'http://sapling.stanford.edu/~eslaught/llvm/3.8.1/llvm-3.8.1.src.tar.xz', 'e0c48c4c182424b99999367d688cd8ce7876827b', insecure=insecure)
+        download(clang_tarball, 'http://sapling.stanford.edu/~eslaught/llvm/3.8.1/cfe-3.8.1.src.tar.xz', 'b5ff24dc6ad8f84654f4859389990bace1cfb6d5', insecure=insecure)
     elif llvm_version == '39':
         llvm_tarball = os.path.join(llvm_dir, 'llvm-3.9.1.src.tar.xz')
         llvm_source_dir = os.path.join(llvm_dir, 'llvm-3.9.1.src')
         clang_tarball = os.path.join(llvm_dir, 'cfe-3.9.1.src.tar.xz')
         clang_source_dir = os.path.join(llvm_dir, 'cfe-3.9.1.src')
-        download(llvm_tarball, 'http://llvm.org/releases/3.9.1/llvm-3.9.1.src.tar.xz', 'ce801cf456b8dacd565ce8df8288b4d90e7317ff', insecure=insecure)
-        download(clang_tarball, 'http://llvm.org/releases/3.9.1/cfe-3.9.1.src.tar.xz', '95e4be54b70f32cf98a8de36821ea5495b84add8', insecure=insecure)
+        download(llvm_tarball, 'http://sapling.stanford.edu/~eslaught/llvm/3.9.1/llvm-3.9.1.src.tar.xz', 'ce801cf456b8dacd565ce8df8288b4d90e7317ff', insecure=insecure)
+        download(clang_tarball, 'http://sapling.stanford.edu/~eslaught/llvm/3.9.1/cfe-3.9.1.src.tar.xz', '95e4be54b70f32cf98a8de36821ea5495b84add8', insecure=insecure)
     extract(llvm_dir, llvm_tarball, 'xz')
     extract(llvm_dir, clang_tarball, 'xz')
     os.rename(clang_source_dir, os.path.join(llvm_source_dir, 'tools', 'clang'))
@@ -287,8 +287,18 @@ def driver(prefix_dir, llvm_version, terra_url, terra_branch, insecure):
     assert os.path.exists(gasnet_build_result)
 
     cmake_exe = None
-    if subprocess.call(["which", "cmake"]) == 0:
-        cmake_exe = "cmake"
+    try:
+        cmake_version = subprocess.check_output(['cmake', '--version'])
+    except:
+        pass # Can't find CMake, continue to download
+    else:
+        m = re.match(r'cmake version (\d+)[.](\d+)', cmake_version)
+        if m is not None and (int(m.group(1)) < 3 or int(m.group(2)) < 1):
+            pass # CMake is too old, continue to download
+        elif m is None:
+            raise Exception('Cannot parse CMake version:\n\n%s' % cmake_version)
+        else:
+            cmake_exe = 'cmake' # CMake is ok, use it
     if llvm_use_cmake and cmake_exe is None:
         cmake_dir = os.path.realpath(os.path.join(prefix_dir, 'cmake'))
         cmake_install_dir = os.path.join(cmake_dir, 'cmake-3.7.2-Linux-x86_64')

@@ -664,12 +664,6 @@ typedef enum legion_partition_kind_t {
   COMPUTE_KIND,
 } legion_partition_kind_t;
 
-typedef enum legion_copy_kind_t {
-  NORMAL_COPY,
-  GATHER_COPY,
-  SCATTER_COPY,
-} legion_copy_kind_t;
-
 typedef enum legion_external_resource_t {
   EXTERNAL_POSIX_FILE,
   EXTERNAL_HDF5_FILE,
@@ -742,7 +736,7 @@ typedef enum legion_isa_kind_t {
   // Top-level ISA Kinds
   X86_ISA   = 0x00000001,
   ARM_ISA   = 0x00000002,
-  POW_ISA   = 0x00000004, // Power PC
+  PPC_ISA   = 0x00000004, // Power PC
   PTX_ISA   = 0x00000008, // auto-launch by runtime
   CUDA_ISA  = 0x00000010, // run on CPU thread bound to CUDA context
   LUA_ISA   = 0x00000020, // run on Lua processor
@@ -757,7 +751,8 @@ typedef enum legion_isa_kind_t {
   AVX_ISA   = 0x00002000,
   AVX2_ISA  = 0x00004000,
   FMA_ISA   = 0x00008000,
-  MIC_ISA   = 0x00010000,
+  // PowerPC Vector Insructions
+  VSX_ISA   = 0x00010000,
   // GPU variants
   SM_10_ISA = 0x00020000,
   SM_20_ISA = 0x00040000,

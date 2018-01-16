@@ -1591,11 +1591,11 @@ namespace Legion {
       inline void add_src_field(unsigned idx, FieldID fid, bool inst = true);
       inline void add_dst_field(unsigned idx, FieldID fid, bool inst = true);
     public:
-      // Specify gather/scatter properties
-      inline void set_gather_field(RegionTreeID indirect_tid, 
-                                   FieldID indirect_fid);
-      inline void set_scatter_field(RegionTreeID indirect_tid, 
-                                    FieldID indirect_fid);
+      // Specify gather/scatter region requirements (must have exactly 1 field)
+      inline void add_gather_field(const RegionRequirement &gather_req,
+                                   FieldID gather_fid, bool inst = true);
+      inline void add_scatter_field(const RegionRequirement &scatter_req,
+                                    FieldID scatter_fid, bool inst = true);
     public:
       inline void add_grant(Grant g);
       inline void add_wait_barrier(PhaseBarrier bar);
@@ -1605,6 +1605,8 @@ namespace Legion {
     public:
       std::vector<RegionRequirement>  src_requirements;
       std::vector<RegionRequirement>  dst_requirements;
+      std::vector<RegionRequirement>  gather_requirements;
+      std::vector<RegionRequirement>  scatter_requirements;
       std::vector<Grant>              grants;
       std::vector<PhaseBarrier>       wait_barriers;
       std::vector<PhaseBarrier>       arrive_barriers;
@@ -1612,12 +1614,6 @@ namespace Legion {
       MapperID                        map_id;
       MappingTagID                    tag;
       DomainPoint                     point;
-    public:
-      // For handling indirect kinds of copies
-      CopyKind                        copy_kind;
-      // Indirect field for scatter/gather through a field
-      RegionTreeID                    indirect_tid;
-      FieldID                         indirect_fid;
     public:
       // Inform the runtime about any static dependences
       // These will be ignored outside of static traces
@@ -1648,12 +1644,12 @@ namespace Legion {
 					    const RegionRequirement &dst);
       inline void add_src_field(unsigned idx, FieldID fid, bool inst = true);
       inline void add_dst_field(unsigned idx, FieldID fid, bool inst = true);
-     public:
-      // Specify gather/scatter copy properties
-      inline void set_gather_field(RegionTreeID indirect_tid, 
-                                   FieldID indirect_fid);
-      inline void set_scatter_field(RegionTreeID indirect_tid, 
-                                    FieldID indirect_fid);
+    public:
+      // Specify gather/scatter region requirements (must have exactly 1 field)
+      inline void add_gather_field(const RegionRequirement &gather_req,
+                                   FieldID gather_fid, bool inst = true);
+      inline void add_scatter_field(const RegionRequirement &scatter_req,
+                                    FieldID scatter_fid, bool inst = true);
     public:
       inline void add_grant(Grant g);
       inline void add_wait_barrier(PhaseBarrier bar);
@@ -1663,6 +1659,8 @@ namespace Legion {
     public:
       std::vector<RegionRequirement>  src_requirements;
       std::vector<RegionRequirement>  dst_requirements;
+      std::vector<RegionRequirement>  gather_requirements;
+      std::vector<RegionRequirement>  scatter_requirements;
       std::vector<Grant>              grants;
       std::vector<PhaseBarrier>       wait_barriers;
       std::vector<PhaseBarrier>       arrive_barriers;
@@ -1671,12 +1669,6 @@ namespace Legion {
       Predicate                       predicate;
       MapperID                        map_id;
       MappingTagID                    tag;
-    public:
-      // For handling indirect kinds of copies
-      CopyKind                        copy_kind;
-      // Indirect field for scatter/gather through a field
-      RegionTreeID                    indirect_tid;
-      FieldID                         indirect_fid;
     public:
       // Inform the runtime about any static dependences
       // These will be ignored outside of static traces
@@ -2228,7 +2220,9 @@ namespace Legion {
     public:
       FieldAccessor(void) { }
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    size_t element_count = 1,// number of FT elements in field
+                    // The actual field size in case it is different from the 
+                    // one being used in FT and we still want to check it
+                    size_t actual_field_size = sizeof(FT),
 #ifdef DEBUG_LEGION
                     bool check_field_size = true,
 #else

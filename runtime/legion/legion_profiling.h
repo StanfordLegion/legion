@@ -271,7 +271,7 @@ namespace Legion {
 #endif
     public:
       void dump_state(LegionProfSerializer *serializer);
-      size_t dump_inter(LegionProfSerializer *serializer);
+      size_t dump_inter(LegionProfSerializer *serializer, const double over);
     private:
       LegionProfiler *const owner;
       std::deque<TaskKind>          task_kinds;
