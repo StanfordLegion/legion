@@ -292,7 +292,7 @@ def driver(prefix_dir, llvm_version, terra_url, terra_branch, insecure):
     except:
         pass # Can't find CMake, continue to download
     else:
-        m = re.match(r'cmake version (\d+)[.](\d+)')
+        m = re.match(r'cmake version (\d+)[.](\d+)', cmake_version)
         if m is not None and (int(m.group(1)) < 3 or int(m.group(2)) < 1):
             pass # CMake is too old, continue to download
         elif m is None:
