@@ -436,16 +436,17 @@ namespace Legion {
     public:
       FieldAccessor(void) { }
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
+                    size_t actual_field_size = sizeof(FT),
 #ifdef DEBUG_LEGION
-                    size_t elems = 1, bool check_field_size = true,
+                    bool check_field_size = true,
 #else
-                    size_t elems = 1, bool check_field_size = false,
+                    bool check_field_size = false,
 #endif
                     bool silence_warnings = false)
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(READ_ONLY, fid, elems * sizeof(FT), &is,
+          region.get_instance_info(READ_ONLY, fid, actual_field_size, &is,
               Internal::NT_TemplateHelper::encode_tag<N,T>(), 
               silence_warnings, true/*generic accessor*/, check_field_size);
         accessor = Realm::GenericAccessor<FT,N,T>(instance, fid, is.bounds);
@@ -480,10 +481,11 @@ namespace Legion {
     public:
       FieldAccessor(void) { }
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
+                    size_t actual_field_size = sizeof(FT),
 #ifdef DEBUG_LEGION
-                    size_t elems = 1, bool check_field_size = true,
+                    bool check_field_size = true,
 #else
-                    size_t elems = 1, bool check_field_size = false,
+                    bool check_field_size = false,
 #endif
                     bool silence_warnings = false)
         : field(fid), field_region(region), 
@@ -491,7 +493,7 @@ namespace Legion {
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(READ_ONLY, fid, elems * sizeof(FT), &is,
+          region.get_instance_info(READ_ONLY, fid, actual_field_size, &is,
               Internal::NT_TemplateHelper::encode_tag<N,T>(), 
               silence_warnings, true/*generic accessor*/, check_field_size);
         accessor = Realm::GenericAccessor<FT,N,T>(instance, fid, is.bounds);
@@ -533,16 +535,17 @@ namespace Legion {
     public:
       FieldAccessor(void) { }
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
+                    size_t actual_field_size = sizeof(FT),
 #ifdef DEBUG_LEGION
-                    size_t elems = 1, bool check_field_size = true,
+                    bool check_field_size = true,
 #else
-                    size_t elems = 1, bool check_field_size = false,
+                    bool check_field_size = false,
 #endif
                     bool silence_warnings = false)
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(READ_ONLY, fid, elems * sizeof(FT), &is,
+          region.get_instance_info(READ_ONLY, fid, actual_field_size, &is,
               Internal::NT_TemplateHelper::encode_tag<1,T>(), 
               silence_warnings, true/*generic accessor*/, check_field_size);
         accessor = Realm::GenericAccessor<FT,1,T>(instance, fid, is.bounds);
@@ -570,10 +573,11 @@ namespace Legion {
       // No CUDA support due to PhysicalRegion constructor
       FieldAccessor(void) { }
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
+                    size_t actual_field_size = sizeof(FT),
 #ifdef DEBUG_LEGION
-                    size_t elems = 1, bool check_field_size = true,
+                    bool check_field_size = true,
 #else
-                    size_t elems = 1, bool check_field_size = false,
+                    bool check_field_size = false,
 #endif
                     bool silence_warnings = false)
         : field(fid), field_region(region), 
@@ -581,7 +585,7 @@ namespace Legion {
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(READ_ONLY, fid, elems * sizeof(FT), &is,
+          region.get_instance_info(READ_ONLY, fid, actual_field_size, &is,
               Internal::NT_TemplateHelper::encode_tag<1,T>(), 
               silence_warnings, true/*generic accessor*/, check_field_size);
         accessor = Realm::GenericAccessor<FT,1,T>(instance, fid, is.bounds);
@@ -614,16 +618,17 @@ namespace Legion {
     public:
       FieldAccessor(void) { }
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
+                    size_t actual_field_size = sizeof(FT),
 #ifdef DEBUG_LEGION
-                    size_t elems = 1, bool check_field_size = true,
+                    bool check_field_size = true,
 #else
-                    size_t elems = 1, bool check_field_size = false,
+                    bool check_field_size = false,
 #endif
                     bool silence_warnings = false)
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(READ_WRITE, fid, elems * sizeof(FT), &is,
+          region.get_instance_info(READ_WRITE, fid, actual_field_size, &is,
               Internal::NT_TemplateHelper::encode_tag<N,T>(), 
               silence_warnings, true/*generic accessor*/, check_field_size);
         accessor = Realm::GenericAccessor<FT,N,T>(instance, fid, is.bounds);
@@ -663,10 +668,11 @@ namespace Legion {
     public:
       FieldAccessor(void) { }
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
+                    size_t actual_field_size = sizeof(FT),
 #ifdef DEBUG_LEGION
-                    size_t elems = 1, bool check_field_size = true,
+                    bool check_field_size = true,
 #else
-                    size_t elems = 1, bool check_field_size = false,
+                    bool check_field_size = false,
 #endif
                     bool silence_warnings = false)
         : field(fid), field_region(region), 
@@ -674,7 +680,7 @@ namespace Legion {
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(READ_WRITE, fid, elems * sizeof(FT), &is,
+          region.get_instance_info(READ_WRITE, fid, actual_field_size, &is,
               Internal::NT_TemplateHelper::encode_tag<N,T>(), 
               silence_warnings, true/*generic accessor*/, check_field_size);
         accessor = Realm::GenericAccessor<FT,N,T>(instance, fid, is.bounds);
@@ -723,16 +729,17 @@ namespace Legion {
     public:
       FieldAccessor(void) { }
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
+                    size_t actual_field_size = sizeof(FT),
 #ifdef DEBUG_LEGION
-                    size_t elems = 1, bool check_field_size = true,
+                    bool check_field_size = true,
 #else
-                    size_t elems = 1, bool check_field_size = false,
+                    bool check_field_size = false,
 #endif
                     bool silence_warnings = false)
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(READ_WRITE, fid, elems * sizeof(FT), &is,
+          region.get_instance_info(READ_WRITE, fid, actual_field_size, &is,
               Internal::NT_TemplateHelper::encode_tag<1,T>(), 
               silence_warnings, true/*generic accessor*/, check_field_size);
         accessor = Realm::GenericAccessor<FT,1,T>(instance, fid, is.bounds);
@@ -764,10 +771,11 @@ namespace Legion {
     public:
       FieldAccessor(void) { }
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
+                    size_t actual_field_size = sizeof(FT),
 #ifdef DEBUG_LEGION
-                    size_t elems = 1, bool check_field_size = true,
+                    bool check_field_size = true,
 #else
-                    size_t elems = 1, bool check_field_size = false,
+                    bool check_field_size = false,
 #endif
                     bool silence_warnings = false)
         : field(fid), field_region(region), 
@@ -775,7 +783,7 @@ namespace Legion {
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(READ_WRITE, fid, elems * sizeof(FT), &is,
+          region.get_instance_info(READ_WRITE, fid, actual_field_size, &is,
               Internal::NT_TemplateHelper::encode_tag<1,T>(), 
               silence_warnings, true/*generic accessor*/, check_field_size);
         accessor = Realm::GenericAccessor<FT,1,T>(instance, fid, is.bounds);
@@ -815,16 +823,17 @@ namespace Legion {
     public:
       FieldAccessor(void) { }
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
+                    size_t actual_field_size = sizeof(FT),
 #ifdef DEBUG_LEGION
-                    size_t elems = 1, bool check_field_size = true,
+                    bool check_field_size = true,
 #else
-                    size_t elems = 1, bool check_field_size = false,
+                    bool check_field_size = false,
 #endif
                     bool silence_warnings = false)
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(WRITE_DISCARD, fid, elems * sizeof(FT), &is,
+          region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
               Internal::NT_TemplateHelper::encode_tag<N,T>(), 
               silence_warnings, true/*generic accessor*/, check_field_size);
         accessor = Realm::GenericAccessor<FT,N,T>(instance, fid, is.bounds);
@@ -864,10 +873,11 @@ namespace Legion {
       // No CUDA support due to PhysicalRegion constructor
       FieldAccessor(void) { }
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
+                    size_t actual_field_size = sizeof(FT),
 #ifdef DEBUG_LEGION
-                    size_t elems = 1, bool check_field_size = true,
+                    bool check_field_size = true,
 #else
-                    size_t elems = 1, bool check_field_size = false,
+                    bool check_field_size = false,
 #endif
                     bool silence_warnings = false)
         : field(fid), field_region(region), 
@@ -875,7 +885,7 @@ namespace Legion {
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(WRITE_DISCARD, fid, elems * sizeof(FT), &is,
+          region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
               Internal::NT_TemplateHelper::encode_tag<N,T>(), 
               silence_warnings, true/*generic accessor*/, check_field_size);
         accessor = Realm::GenericAccessor<FT,N,T>(instance, fid, is.bounds);
@@ -923,16 +933,17 @@ namespace Legion {
     public:
       FieldAccessor(void) { }
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
+                    size_t actual_field_size = sizeof(FT),
 #ifdef DEBUG_LEGION
-                    size_t elems = 1, bool check_field_size = true,
+                    bool check_field_size = true,
 #else
-                    size_t elems = 1, bool check_field_size = false,
+                    bool check_field_size = false,
 #endif
                     bool silence_warnings = false)
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(WRITE_DISCARD, fid, elems * sizeof(FT), &is,
+          region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
               Internal::NT_TemplateHelper::encode_tag<1,T>(), 
               silence_warnings, true/*generic accessor*/, check_field_size);
         accessor = Realm::GenericAccessor<FT,1,T>(instance, fid, is.bounds);
@@ -963,10 +974,11 @@ namespace Legion {
     public:
       FieldAccessor(void) { }
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
+                    size_t actual_field_size = sizeof(FT),
 #ifdef DEBUG_LEGION
-                    size_t elems = 1, bool check_field_size = true,
+                    bool check_field_size = true,
 #else
-                    size_t elems = 1, bool check_field_size = false,
+                    bool check_field_size = false,
 #endif
                     bool silence_warnings = false)
         : field(fid), field_region(region), 
@@ -974,7 +986,7 @@ namespace Legion {
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(WRITE_DISCARD, fid, elems * sizeof(FT), &is,
+          region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
               Internal::NT_TemplateHelper::encode_tag<1,T>(), 
               silence_warnings, true/*generic accessor*/, check_field_size);
         accessor = Realm::GenericAccessor<FT,1,T>(instance, fid, is.bounds);
@@ -1018,16 +1030,17 @@ namespace Legion {
       __CUDA_HD__
       FieldAccessor(void) { }
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
+                    size_t actual_field_size = sizeof(FT),
 #ifdef DEBUG_LEGION
-                    size_t elems = 1, bool check_field_size = true,
+                    bool check_field_size = true,
 #else
-                    size_t elems = 1, bool check_field_size = false,
+                    bool check_field_size = false,
 #endif
                     bool silence_warnings = false)
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(READ_ONLY, fid, elems * sizeof(FT), &is,
+          region.get_instance_info(READ_ONLY, fid, actual_field_size, &is,
               Internal::NT_TemplateHelper::encode_tag<N,T>(), 
               silence_warnings, false/*generic accessor*/, check_field_size);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, is.bounds);
@@ -1084,10 +1097,11 @@ namespace Legion {
       // No CUDA support due to PhysicalRegion constructor
       FieldAccessor(void) { }
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
+                    size_t actual_field_size = sizeof(FT),
 #ifdef DEBUG_LEGION
-                    size_t elems = 1, bool check_field_size = true,
+                    bool check_field_size = true,
 #else
-                    size_t elems = 1, bool check_field_size = false,
+                    bool check_field_size = false,
 #endif
                     bool silence_warnings = false)
         : field(fid), field_region(region), 
@@ -1096,7 +1110,7 @@ namespace Legion {
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(READ_ONLY, fid, elems * sizeof(FT), &is,
+          region.get_instance_info(READ_ONLY, fid, actual_field_size, &is,
               Internal::NT_TemplateHelper::encode_tag<N,T>(), 
               silence_warnings, false/*generic accessor*/, check_field_size);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, is.bounds);
@@ -1205,16 +1219,17 @@ namespace Legion {
       __CUDA_HD__
       FieldAccessor(void) { }
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
+                    size_t actual_field_size = sizeof(FT),
 #ifdef DEBUG_LEGION
-                    size_t elems = 1, bool check_field_size = true,
+                    bool check_field_size = true,
 #else
-                    size_t elems = 1, bool check_field_size = false,
+                    bool check_field_size = false,
 #endif
                     bool silence_warnings = false)
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(READ_ONLY, fid, elems * sizeof(FT), &is,
+          region.get_instance_info(READ_ONLY, fid, actual_field_size, &is,
               Internal::NT_TemplateHelper::encode_tag<1,T>(), 
               silence_warnings, false/*generic accessor*/, check_field_size);
         accessor = Realm::AffineAccessor<FT,1,T>(instance, fid, is.bounds);
@@ -1262,10 +1277,11 @@ namespace Legion {
       // No CUDA support due to PhysicalRegion constructor
       FieldAccessor(void) { }
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
+                    size_t actual_field_size = sizeof(FT),
 #ifdef DEBUG_LEGION
-                    size_t elems = 1, bool check_field_size = true,
+                    bool check_field_size = true,
 #else
-                    size_t elems = 1, bool check_field_size = false,
+                    bool check_field_size = false,
 #endif
                     bool silence_warnings = false)
         : field(fid), field_region(region), 
@@ -1274,7 +1290,7 @@ namespace Legion {
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(READ_ONLY, fid, elems * sizeof(FT), &is,
+          region.get_instance_info(READ_ONLY, fid, actual_field_size, &is,
               Internal::NT_TemplateHelper::encode_tag<1,T>(), 
               silence_warnings, false/*generic accessor*/, check_field_size);
         accessor = Realm::AffineAccessor<FT,1,T>(instance, fid, is.bounds);
@@ -1373,16 +1389,17 @@ namespace Legion {
       __CUDA_HD__
       FieldAccessor(void) { }
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
+                    size_t actual_field_size = sizeof(FT),
 #ifdef DEBUG_LEGION
-                    size_t elems = 1, bool check_field_size = true,
+                    bool check_field_size = true,
 #else
-                    size_t elems = 1, bool check_field_size = false,
+                    bool check_field_size = false,
 #endif
                     bool silence_warnings = false)
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(READ_WRITE, fid, elems * sizeof(FT), &is,
+          region.get_instance_info(READ_WRITE, fid, actual_field_size, &is,
               Internal::NT_TemplateHelper::encode_tag<N,T>(), 
               silence_warnings, false/*generic accessor*/, check_field_size);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, is.bounds);
@@ -1450,10 +1467,11 @@ namespace Legion {
       // No CUDA support due to PhysicalRegion constructor
       FieldAccessor(void) { }
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
+                    size_t actual_field_size = sizeof(FT),
 #ifdef DEBUG_LEGION
-                    size_t elems = 1, bool check_field_size = true,
+                    bool check_field_size = true,
 #else
-                    size_t elems = 1, bool check_field_size = false,
+                    bool check_field_size = false,
 #endif
                     bool silence_warnings = false)
         : field(fid), field_region(region), 
@@ -1462,7 +1480,7 @@ namespace Legion {
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(READ_WRITE, fid, elems * sizeof(FT), &is,
+          region.get_instance_info(READ_WRITE, fid, actual_field_size, &is,
               Internal::NT_TemplateHelper::encode_tag<N,T>(), 
               silence_warnings, false/*generic accessor*/, check_field_size);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, is.bounds);
@@ -1606,16 +1624,17 @@ namespace Legion {
       __CUDA_HD__
       FieldAccessor(void) { }
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
+                    size_t actual_field_size = sizeof(FT),
 #ifdef DEBUG_LEGION
-                    size_t elems = 1, bool check_field_size = true,
+                    bool check_field_size = true,
 #else
-                    size_t elems = 1, bool check_field_size = false,
+                    bool check_field_size = false,
 #endif
                     bool silence_warnings = false)
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(READ_WRITE, fid, sizeof(FT), &is,
+          region.get_instance_info(READ_WRITE, fid, actual_field_size, &is,
               Internal::NT_TemplateHelper::encode_tag<1,T>(), 
               silence_warnings, false/*generic accessor*/, check_field_size);
         accessor = Realm::AffineAccessor<FT,1,T>(instance, fid, is.bounds);
@@ -1674,10 +1693,11 @@ namespace Legion {
       // No CUDA support due to PhysicalRegion constructor
       FieldAccessor(void) { }
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
+                    size_t actual_field_size = sizeof(FT),
 #ifdef DEBUG_LEGION
-                    size_t elems = 1, bool check_field_size = true,
+                    bool check_field_size = true,
 #else
-                    size_t elems = 1, bool check_field_size = false,
+                    bool check_field_size = false,
 #endif
                     bool silence_warnings = false)
         : field(fid), field_region(region), 
@@ -1686,7 +1706,7 @@ namespace Legion {
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(READ_WRITE, fid, elems * sizeof(FT), &is,
+          region.get_instance_info(READ_WRITE, fid, actual_field_size, &is,
               Internal::NT_TemplateHelper::encode_tag<1,T>(), 
               silence_warnings, false/*generic accessor*/, check_field_size);
         accessor = Realm::AffineAccessor<FT,1,T>(instance, fid, is.bounds);
@@ -1820,16 +1840,17 @@ namespace Legion {
       __CUDA_HD__
       FieldAccessor(void) { }
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
+                    size_t actual_field_size = sizeof(FT),
 #ifdef DEBUG_LEGION
-                    size_t elems = 1, bool check_field_size = true,
+                    bool check_field_size = true,
 #else
-                    size_t elems = 1, bool check_field_size = false,
+                    bool check_field_size = false,
 #endif
                     bool silence_warnings = false)
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(WRITE_DISCARD, fid, elems * sizeof(FT), &is,
+          region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
               Internal::NT_TemplateHelper::encode_tag<N,T>(), 
               silence_warnings, false/*generic accessor*/, check_field_size);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, is.bounds);
@@ -1891,10 +1912,11 @@ namespace Legion {
       // No CUDA support due to PhysicalRegion constructor
       FieldAccessor(void) { }
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
+                    size_t actual_field_size = sizeof(FT),
 #ifdef DEBUG_LEGION
-                    size_t elems = 1, bool check_field_size = true,
+                    bool check_field_size = true,
 #else
-                    size_t elems = 1, bool check_field_size = false,
+                    bool check_field_size = false,
 #endif
                     bool silence_warnings = false)
         : field(fid), field_region(region), 
@@ -1903,7 +1925,7 @@ namespace Legion {
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(WRITE_DISCARD, fid, elems * sizeof(FT), &is,
+          region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
               Internal::NT_TemplateHelper::encode_tag<N,T>(), 
               silence_warnings, false/*generic accessor*/, check_field_size);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, is.bounds);
@@ -2029,16 +2051,17 @@ namespace Legion {
       __CUDA_HD__
       FieldAccessor(void) { }
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
+                    size_t actual_field_size = sizeof(FT),
 #ifdef DEBUG_LEGION
-                    size_t elems = 1, bool check_field_size = true,
+                    bool check_field_size = true,
 #else
-                    size_t elems = 1, bool check_field_size = false,
+                    bool check_field_size = false,
 #endif
                     bool silence_warnings = false)
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(WRITE_DISCARD, fid, elems * sizeof(FT), &is,
+          region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
               Internal::NT_TemplateHelper::encode_tag<1,T>(), 
               silence_warnings, false/*generic accessor*/, check_field_size);
         accessor = Realm::AffineAccessor<FT,1,T>(instance, fid, is.bounds);
@@ -2091,10 +2114,11 @@ namespace Legion {
       // No CUDA support due to PhysicalRegion constructor
       FieldAccessor(void) { }
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
+                    size_t actual_field_size = sizeof(FT),
 #ifdef DEBUG_LEGION
-                    size_t elems = 1, bool check_field_size = true,
+                    bool check_field_size = true,
 #else
-                    size_t elems = 1, bool check_field_size = false,
+                    bool check_field_size = false,
 #endif
                     bool silence_warnings = false)
         : field(fid), field_region(region), 
@@ -2103,7 +2127,7 @@ namespace Legion {
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(WRITE_DISCARD, fid, elems * sizeof(FT), &is,
+          region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
               Internal::NT_TemplateHelper::encode_tag<1,T>(), 
               silence_warnings, false/*generic accessor*/, check_field_size);
         accessor = Realm::AffineAccessor<FT,1,T>(instance, fid, is.bounds);

@@ -2227,7 +2227,9 @@ namespace Legion {
     public:
       FieldAccessor(void) { }
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    size_t element_count = 1,// number of FT elements in field
+                    // The actual field size in case it is different from the 
+                    // one being used in FT and we still want to check it
+                    size_t actual_field_size = sizeof(FT),
 #ifdef DEBUG_LEGION
                     bool check_field_size = true,
 #else
