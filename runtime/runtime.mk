@@ -581,10 +581,15 @@ endif
 
 # Provide build rules unless the user asks us not to
 ifndef NO_BUILD_RULES
+
 # Provide an all unless the user asks us not to
 ifndef NO_BUILD_ALL
 .PHONY: all
+ifdef OUTLIB
+all: $(OUTFILE) $(OUTLIB)
+else
 all: $(OUTFILE)
+endif
 endif
 
 # If we're using CUDA we have to link with nvcc
@@ -592,13 +597,21 @@ $(OUTFILE) : $(GEN_OBJS) $(GEN_GPU_OBJS) $(SLIB_LEGION) $(SLIB_REALM)
 	@echo "---> Linking objects into one binary: $(OUTFILE)"
 	$(CXX) -o $(OUTFILE) $(GEN_OBJS) $(GEN_GPU_OBJS) $(LD_FLAGS) $(LEGION_LIBS) $(LEGION_LD_FLAGS) $(GASNET_FLAGS)
 
+ifdef OUTLIB
+$(OUTLIB) : $(GEN_OBJS) $(GEN_GPU_OBJS)
+	@echo "---> Linking application objects into a static archive: $(OUTLIB)"
+	@echo "---> Required link flags stored in $(OUTLINK_FLAGS)"
+	$(AR) rcs $(OUTLIB) $(GEN_OBJS) $(GEN_GPU_OBJS)
+	@echo "-llegion -lrealm $(LEGION_LD_FLAGS) $(GASNET_FLAGS)" > $(OUTLINK_FLAGS)
+endif
+
 $(SLIB_LEGION) : $(LEGION_OBJS) $(MAPPER_OBJS)
 	rm -f $@
-	$(AR) rc $@ $^
+	$(AR) rcs $@ $^
 
 $(SLIB_REALM) : $(REALM_OBJS)
 	rm -f $@
-	$(AR) rc $@ $^
+	$(AR) rcs $@ $^
 
 $(GEN_OBJS) : %.cc.o : %.cc
 	$(CXX) -o $@ -c $< $(CC_FLAGS) $(INC_FLAGS)
