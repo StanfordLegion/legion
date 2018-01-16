@@ -351,7 +351,9 @@ function analyze_var_flow.stat_var(cx, node)
 
   local var_flow = cx:get_flow(node.symbol)
   if value then
-    var_flow[value] = true
+    for v, _ in pairs(value) do
+      var_flow[v] = true
+    end
   end
 end
 
