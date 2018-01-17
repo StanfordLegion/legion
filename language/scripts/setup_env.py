@@ -16,7 +16,7 @@
 #
 
 from __future__ import print_function
-import argparse, hashlib, multiprocessing, os, platform, subprocess, sys
+import argparse, hashlib, multiprocessing, os, platform, re, subprocess, sys
 
 def discover_llvm_version():
     if platform.node().startswith('titan'):
@@ -287,8 +287,18 @@ def driver(prefix_dir, llvm_version, terra_url, terra_branch, insecure):
     assert os.path.exists(gasnet_build_result)
 
     cmake_exe = None
-    if subprocess.call(["which", "cmake"]) == 0:
-        cmake_exe = "cmake"
+    try:
+        cmake_version = subprocess.check_output(['cmake', '--version'])
+    except:
+        pass # Can't find CMake, continue to download
+    else:
+        m = re.match(r'cmake version (\d+)[.](\d+)', cmake_version)
+        if m is not None and (int(m.group(1)) < 3 or int(m.group(2)) < 1):
+            pass # CMake is too old, continue to download
+        elif m is None:
+            raise Exception('Cannot parse CMake version:\n\n%s' % cmake_version)
+        else:
+            cmake_exe = 'cmake' # CMake is ok, use it
     if llvm_use_cmake and cmake_exe is None:
         cmake_dir = os.path.realpath(os.path.join(prefix_dir, 'cmake'))
         cmake_install_dir = os.path.join(cmake_dir, 'cmake-3.7.2-Linux-x86_64')

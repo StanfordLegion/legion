@@ -279,7 +279,7 @@ namespace Legion {
         args.disjointness_collective = NULL;
         args.owner = true;
         RtEvent disjointness_event = runtime->issue_runtime_meta_task(args,
-            LG_DEFERRED_THROUGHPUT_PRIORITY, NULL,
+            LG_THROUGHPUT_DEFERRED_PRIORITY, NULL,
             Runtime::protect_event(partition_ready));
         create_node(pid, parent_node, color_node, partition_color,
                     disjointness_event, did, partition_ready, partial_pending);
@@ -461,7 +461,7 @@ namespace Legion {
           // Don't do the disjointness test until all the partition
           // is ready and has been created on all the nodes
           disjointness_event = runtime->issue_runtime_meta_task(args,
-              LG_DEFERRED_THROUGHPUT_PRIORITY, NULL,
+              LG_THROUGHPUT_DEFERRED_PRIORITY, NULL,
               Runtime::merge_events(creation_ready,
                 Runtime::protect_event(partition_ready)));
         }
@@ -507,7 +507,7 @@ namespace Legion {
           // We only need to wait for the creation to be ready 
           // if we're not the owner
           disjointness_event = runtime->issue_runtime_meta_task(args,
-              LG_DEFERRED_THROUGHPUT_PRIORITY, NULL, creation_ready);
+              LG_THROUGHPUT_DEFERRED_PRIORITY, NULL, creation_ready);
         }
 #ifdef DEBUG_LEGION
         else
@@ -5248,8 +5248,8 @@ namespace Legion {
           args.proxy_this = this;
           args.tag = tag;
           args.source = source;
-          context->runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY,
-                                                    NULL/*op*/, precondition);
+          context->runtime->issue_runtime_meta_task(args, 
+              LG_LATENCY_WORK_PRIORITY, NULL/*op*/, precondition);
         }
       }
       else
@@ -5470,7 +5470,7 @@ namespace Legion {
               Runtime::merge_events(left->partition_ready,
                                     right->partition_ready));
           ready = context->runtime->issue_runtime_meta_task(args,
-                                      LG_LATENCY_PRIORITY, NULL, pre);
+                                      LG_LATENCY_WORK_PRIORITY, NULL, pre);
           pending_tests[key] = ready;
           pending_tests[std::pair<LegionColor,LegionColor>(c2,c1)] = ready;
         }
@@ -5806,8 +5806,8 @@ namespace Legion {
         args.target = target;
         args.to_trigger = to_trigger;
         args.source = source;
-        forest->runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY,
-                                                 NULL/*op*/, defer);
+        forest->runtime->issue_runtime_meta_task(args, 
+            LG_LATENCY_DEFERRED_PRIORITY, NULL/*op*/, defer);
         return;
       }
       if (child != NULL)
@@ -6200,8 +6200,8 @@ namespace Legion {
           args.proxy_this = this;
           args.tag = tag;
           args.source = source;
-          context->runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY,
-                                                    NULL/*op*/, precondition);
+          context->runtime->issue_runtime_meta_task(args, 
+              LG_LATENCY_WORK_PRIORITY, NULL/*op*/, precondition);
         }
       }
       else
@@ -6552,7 +6552,7 @@ namespace Legion {
           args.right = right;
           ApEvent pre = Runtime::merge_events(left_pre, right_pre);
           ready_event = context->runtime->issue_runtime_meta_task(args, 
-                    LG_LATENCY_PRIORITY, NULL, Runtime::protect_event(pre));
+                  LG_LATENCY_WORK_PRIORITY, NULL, Runtime::protect_event(pre));
           pending_tests[key] = ready_event;
           pending_tests[std::pair<LegionColor,LegionColor>(c2,c1)] =ready_event;
         }
@@ -6951,8 +6951,8 @@ namespace Legion {
         args.target = target;
         args.to_trigger = to_trigger;
         args.source = source;
-        forest->runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY,
-                                                 NULL/*op*/, defer);
+        forest->runtime->issue_runtime_meta_task(args, 
+            LG_LATENCY_DEFERRED_PRIORITY, NULL/*op*/, defer);
       }
       else
       {
@@ -7659,8 +7659,8 @@ namespace Legion {
           args.proxy_this = this;
           args.tag = tag;
           args.source = source;
-          context->runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY,
-                                                    NULL/*op*/, precondition);
+          context->runtime->issue_runtime_meta_task(args, 
+              LG_LATENCY_WORK_PRIORITY, NULL/*op*/, precondition);
         }
       }
       else
@@ -7717,8 +7717,8 @@ namespace Legion {
           args.fid = fid;
           args.tag = tag;
           args.source = source;
-          context->runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY,
-                                                    NULL/*op*/, precondition);
+          context->runtime->issue_runtime_meta_task(args, 
+              LG_LATENCY_WORK_PRIORITY, NULL/*op*/, precondition);
         }
       }
       else
@@ -15357,8 +15357,8 @@ namespace Legion {
           args.proxy_this = this;
           args.tag = tag;
           args.source = source;
-          context->runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY,
-                                                    NULL/*op*/, precondition);
+          context->runtime->issue_runtime_meta_task(args, 
+              LG_LATENCY_WORK_PRIORITY, NULL/*op*/, precondition);
         }
       }
       else
@@ -16360,8 +16360,8 @@ namespace Legion {
           args.proxy_this = this;
           args.tag = tag;
           args.source = source;
-          context->runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY,
-                                                    NULL/*op*/, precondition);
+          context->runtime->issue_runtime_meta_task(args, 
+              LG_LATENCY_WORK_PRIORITY, NULL/*op*/, precondition);
         }
       }
       else

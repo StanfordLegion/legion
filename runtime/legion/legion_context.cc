@@ -3670,8 +3670,8 @@ namespace Legion {
             args.future_map = result;
             args.result = launcher.predicate_false_future.impl;
             args.domain = launcher.launch_domain;
-            runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY, NULL,
-                                        Runtime::protect_event(ready_event));
+            runtime->issue_runtime_meta_task(args,LG_LATENCY_WORK_PRIORITY,NULL,
+                                           Runtime::protect_event(ready_event));
           }
           return FutureMap(result);
         }
@@ -4685,8 +4685,8 @@ namespace Legion {
                                             dependence_precondition);
         RtEvent next = runtime->issue_runtime_meta_task(args,
                                         currently_active_context ? 
-                                          LG_THROUGHPUT_PRIORITY :
-                                          LG_DEFERRED_THROUGHPUT_PRIORITY,
+                                          LG_THROUGHPUT_WORK_PRIORITY :
+                                          LG_THROUGHPUT_DEFERRED_PRIORITY,
                                         op, pre);
         dependence_precondition = next;
       }
@@ -4694,8 +4694,8 @@ namespace Legion {
       {
         RtEvent next = runtime->issue_runtime_meta_task(args,
                                         currently_active_context ? 
-                                          LG_THROUGHPUT_PRIORITY :
-                                          LG_DEFERRED_THROUGHPUT_PRIORITY,
+                                          LG_THROUGHPUT_WORK_PRIORITY :
+                                          LG_THROUGHPUT_DEFERRED_PRIORITY,
                                         op, dependence_precondition);
         dependence_precondition = next;
       }
@@ -5163,7 +5163,7 @@ namespace Legion {
         // We know that the issuing is done in order because we block after
         // we launch this meta-task which blocks the application task
         RtEvent wait_on = runtime->issue_runtime_meta_task(args,
-                                      LG_LATENCY_PRIORITY, owner_task);
+                                      LG_LATENCY_WORK_PRIORITY, owner_task);
         wait_on.lg_wait();
       }
     }
@@ -5362,7 +5362,7 @@ namespace Legion {
           PostDecrementArgs post_decrement_args;
           post_decrement_args.parent_ctx = this;
           RtEvent done = runtime->issue_runtime_meta_task(post_decrement_args,
-              LG_LATENCY_PRIORITY, NULL, wait_on); 
+              LG_LATENCY_WORK_PRIORITY, NULL, wait_on); 
           Runtime::trigger_event(to_trigger, done);
           return to_trigger;
         }
@@ -5955,7 +5955,7 @@ namespace Legion {
       args.target = target;
       args.to_trigger = to_trigger;
       args.source = source;
-      runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY, 
+      runtime->issue_runtime_meta_task(args, LG_LATENCY_DEFERRED_PRIORITY,
                                        context->get_owner_task(), ready);
     }
 
@@ -6167,10 +6167,10 @@ namespace Legion {
         }
         else
           post_end_args.result = const_cast<void*>(res);
-        // Give these high priority too since they are cleaning up 
+        // Give these slightly higher priority too since they are cleaning up 
         // and will allow other tasks to run
         runtime->issue_runtime_meta_task(post_end_args,
-           LG_LATENCY_PRIORITY, owner_task, last_registration);
+           LG_THROUGHPUT_DEFERRED_PRIORITY, owner_task, last_registration);
       }
       else
         post_end_task(res, res_size, owned);
@@ -9324,8 +9324,8 @@ namespace Legion {
             args.future_map = result;
             args.result = launcher.predicate_false_future.impl;
             args.domain = launcher.launch_domain;
-            runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY, NULL,
-                                        Runtime::protect_event(ready_event));
+            runtime->issue_runtime_meta_task(args, LG_LATENCY_DEFERRED_PRIORITY,
+                                     NULL, Runtime::protect_event(ready_event));
           }
           return FutureMap(result);
         }
@@ -10373,8 +10373,8 @@ namespace Legion {
       args.impl = map;
       // Add a reference to the context to prevent premature deletion
       this->add_reference();
-      runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY, map->op,
-                          Runtime::protect_event(map->future_map_barrier));
+      runtime->issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY, map->op,
+                              Runtime::protect_event(map->future_map_barrier));
     }
 
     //--------------------------------------------------------------------------
@@ -11250,7 +11250,7 @@ namespace Legion {
       args.source = source;
       args.to_trigger = to_trigger;
       args.runtime = runtime;
-      runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY);
+      runtime->issue_runtime_meta_task(args, LG_LATENCY_DEFERRED_PRIORITY);
     }
 
     //--------------------------------------------------------------------------
@@ -11327,7 +11327,7 @@ namespace Legion {
         args.handle = handle;
         args.runtime = runtime;
         RtEvent done = 
-          runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY);
+          runtime->issue_runtime_meta_task(args, LG_LATENCY_DEFERRED_PRIORITY);
         Runtime::trigger_event(to_trigger, done);
       }
       else
@@ -12566,10 +12566,10 @@ namespace Legion {
         }
         else
           post_end_args.result = const_cast<void*>(res);
-        // Give these high priority too since they are cleaning up 
-        // and will allow other tasks to run
-        runtime->issue_runtime_meta_task(post_end_args,
-                                         LG_LATENCY_PRIORITY, owner_task);
+        // Give these slightly higher priority too since they are 
+        // cleaning up and will allow other tasks to run
+        runtime->issue_runtime_meta_task(post_end_args, 
+            LG_THROUGHPUT_DEFERRED_PRIORITY, owner_task);
       }
       else
         post_end_task(res, res_size, owned);

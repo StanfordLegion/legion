@@ -2798,11 +2798,11 @@ namespace Legion {
         {
           RtEvent precondition = Runtime::merge_events(preconditions);
           done = runtime->issue_runtime_meta_task(args, 
-                LG_DEFERRED_THROUGHPUT_PRIORITY, args.owner, precondition); 
+                LG_THROUGHPUT_DEFERRED_PRIORITY, args.owner, precondition); 
         }
         else
           done = runtime->issue_runtime_meta_task(args, 
-                LG_DEFERRED_THROUGHPUT_PRIORITY, args.owner);
+                LG_THROUGHPUT_DEFERRED_PRIORITY, args.owner);
         local_mapped_events.insert(done);
         if (own_point)
         {
@@ -2839,7 +2839,7 @@ namespace Legion {
           dist_args.task = *it;
           RtEvent wait = 
             runtime->issue_runtime_meta_task(dist_args, 
-                LG_DEFERRED_THROUGHPUT_PRIORITY, owner);
+                LG_THROUGHPUT_DEFERRED_PRIORITY, owner);
           if (wait.exists())
             wait_events.insert(wait);
         }
@@ -2848,7 +2848,7 @@ namespace Legion {
           launch_args.task = *it;
           RtEvent wait = 
             runtime->issue_runtime_meta_task(launch_args,
-                  LG_DEFERRED_THROUGHPUT_PRIORITY, owner);
+                  LG_THROUGHPUT_DEFERRED_PRIORITY, owner);
           if (wait.exists())
             wait_events.insert(wait);
         }
@@ -2898,7 +2898,7 @@ namespace Legion {
           dist_args.task = *it;
           RtEvent wait = 
             runtime->issue_runtime_meta_task(dist_args, 
-                LG_DEFERRED_THROUGHPUT_PRIORITY, owner);
+                LG_THROUGHPUT_DEFERRED_PRIORITY, owner);
           if (wait.exists())
             wait_events.insert(wait);
         }
@@ -2907,7 +2907,7 @@ namespace Legion {
           launch_args.task = *it;
           RtEvent wait = 
             runtime->issue_runtime_meta_task(launch_args,
-                 LG_DEFERRED_THROUGHPUT_PRIORITY, owner);
+                 LG_THROUGHPUT_DEFERRED_PRIORITY, owner);
           if (wait.exists())
             wait_events.insert(wait);
         }
@@ -3572,7 +3572,7 @@ namespace Legion {
     {
       ShardManagerLaunchArgs args;
       args.shard = task;
-      runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY, 
+      runtime->issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY, 
                                        original_task, precondition);
     }
 
@@ -6533,8 +6533,8 @@ namespace Legion {
     {
       DeferVersionBroadcastArgs args;
       args.proxy_this = this;
-      context->runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY,
-                                                op, precondition);
+      context->runtime->issue_runtime_meta_task(args, 
+          LG_LATENCY_DEFERRED_PRIORITY, op, precondition);
     }
 
     //--------------------------------------------------------------------------

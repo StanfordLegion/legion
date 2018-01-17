@@ -311,7 +311,7 @@ namespace Legion {
         // Give this deferred throughput priority so that it is always
         // ahead of the logical analysis
         return runtime->issue_runtime_meta_task(args, 
-              LG_DEFERRED_THROUGHPUT_PRIORITY, this);
+                LG_THROUGHPUT_DEFERRED_PRIORITY, this);
       }
       else
         return RtEvent::NO_RT_EVENT;
@@ -631,7 +631,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void Operation::enqueue_ready_operation(RtEvent wait_on/*=Event::NO_EVENT*/,
-                                LgPriority priority/*= LG_THROUGHPUT_PRIORITY*/)
+                           LgPriority priority/*= LG_THROUGHPUT_WORK_PRIORITY*/)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -639,19 +639,8 @@ namespace Legion {
       if (get_operation_kind() == TASK_OP_KIND)
         assert(dynamic_cast<IndexTask*>(this) != NULL);
 #endif
-      if (wait_on.exists() && !wait_on.has_triggered())
-      {
-        DeferredEnqueueArgs args;
-        args.proxy_this = this;
-        args.priority = priority;
-        runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY, 
-                                         this, wait_on);
-      }
-      else
-      {
-        Processor p = parent_ctx->get_executing_processor();
-        runtime->add_to_local_queue(p, this, priority);
-      }
+      Processor p = parent_ctx->get_executing_processor();
+      runtime->add_to_local_queue(p, this, priority, wait_on);
     }
 
     //--------------------------------------------------------------------------
@@ -677,7 +666,7 @@ namespace Legion {
         // We have to defer the execution of this operation
         DeferredExecArgs args;
         args.proxy_this = this;
-        runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY,
+        runtime->issue_runtime_meta_task(args, LG_THROUGHPUT_DEFERRED_PRIORITY,
                                          this, wait_on);
         return;
       }
@@ -700,7 +689,7 @@ namespace Legion {
           Runtime::merge_events(mapped_event, resolved_event);
         TriggerCompleteArgs args;
         args.proxy_this = this;
-        runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY,
+        runtime->issue_runtime_meta_task(args, LG_THROUGHPUT_DEFERRED_PRIORITY,
                                          this, trigger_pre);
       }
       else // Do the trigger now
@@ -729,7 +718,7 @@ namespace Legion {
       {
         DeferredCompleteArgs args;
         args.proxy_this = this;
-        runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY,
+        runtime->issue_runtime_meta_task(args, LG_THROUGHPUT_DEFERRED_PRIORITY,
                                          this, wait_on);
         return;
       }
@@ -806,7 +795,7 @@ namespace Legion {
         DeferredCommitArgs args;
         args.proxy_this = this;
         args.deactivate = do_deactivate;
-        runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY,
+        runtime->issue_runtime_meta_task(args, LG_THROUGHPUT_DEFERRED_PRIORITY,
                                          this, wait_on);
         return;
       }
@@ -1434,7 +1423,7 @@ namespace Legion {
         // We always launch the task to avoid expensive recursive calls
         DeferredReadyArgs args;
         args.proxy_this = op;
-        runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY,
+        runtime->issue_runtime_meta_task(args, LG_THROUGHPUT_DEFERRED_PRIORITY,
                                          op, map_precondition);
       }
       else if (!map_precondition.has_triggered())
@@ -1448,7 +1437,7 @@ namespace Legion {
         {
           DeferredResolutionArgs args;
           args.proxy_this = op;
-          runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY,
+          runtime->issue_runtime_meta_task(args,LG_THROUGHPUT_DEFERRED_PRIORITY,
                                            op, resolve_precondition);
           resolve_now = false;
         }
@@ -1470,7 +1459,7 @@ namespace Legion {
           DeferredCommitTriggerArgs args;
           args.proxy_this = op;
           args.gen = op->get_generation();
-          runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY,
+          runtime->issue_runtime_meta_task(args,LG_THROUGHPUT_DEFERRED_PRIORITY,
                                            op, commit_precondition);
           return false;
         }
@@ -2258,7 +2247,7 @@ namespace Legion {
       layout_constraint_id = 0;
       outstanding_profiling_requests = 1; // start at 1 to guard
       profiling_reported = RtUserEvent::NO_RT_USER_EVENT;
-      profiling_priority = LG_THROUGHPUT_PRIORITY;
+      profiling_priority = LG_THROUGHPUT_WORK_PRIORITY;
     }
 
     //--------------------------------------------------------------------------
@@ -2523,8 +2512,8 @@ namespace Legion {
         DeferredExecuteArgs deferred_execute_args;
         deferred_execute_args.proxy_this = this;
         runtime->issue_runtime_meta_task(deferred_execute_args,
-                                         LG_LATENCY_PRIORITY, this, 
-                               Runtime::protect_event(map_complete_event));
+                                         LG_THROUGHPUT_DEFERRED_PRIORITY, this,
+                                   Runtime::protect_event(map_complete_event));
       }
       else
         deferred_execute();
@@ -2867,7 +2856,7 @@ namespace Legion {
     {
       Mapper::MapInlineInput input;
       Mapper::MapInlineOutput output;
-      output.profiling_priority = LG_THROUGHPUT_PRIORITY;
+      output.profiling_priority = LG_THROUGHPUT_WORK_PRIORITY;
       if (restrict_info.has_restrictions())
       {
         prepare_for_mapping(restrict_info.get_instances(), 
@@ -3335,7 +3324,7 @@ namespace Legion {
       mapper = NULL;
       outstanding_profiling_requests = 1; // start at 1 to guard
       profiling_reported = RtUserEvent::NO_RT_USER_EVENT;
-      profiling_priority = LG_THROUGHPUT_PRIORITY;
+      profiling_priority = LG_THROUGHPUT_WORK_PRIORITY;
       predication_guard = PredEvent::NO_PRED_EVENT;
     }
 
@@ -3629,7 +3618,7 @@ namespace Legion {
       input.dst_instances.resize(dst_requirements.size());
       output.src_instances.resize(src_requirements.size());
       output.dst_instances.resize(dst_requirements.size());
-      output.profiling_priority = LG_THROUGHPUT_PRIORITY;
+      output.profiling_priority = LG_THROUGHPUT_WORK_PRIORITY;
       // First go through and do the traversals to find the valid instances
       for (unsigned idx = 0; idx < src_requirements.size(); idx++)
       {
@@ -5651,7 +5640,7 @@ namespace Legion {
         DeferredExecuteArgs deferred_execute_args;
         deferred_execute_args.proxy_this = this;
         runtime->issue_runtime_meta_task(deferred_execute_args,
-                                         LG_LATENCY_PRIORITY,
+                                         LG_THROUGHPUT_DEFERRED_PRIORITY,
                                          this, wait_on);
       }
       else
@@ -6710,7 +6699,7 @@ namespace Legion {
       mapper = NULL;
       outstanding_profiling_requests = 1; // start at 1 to guard
       profiling_reported = RtUserEvent::NO_RT_USER_EVENT;
-      profiling_priority = LG_THROUGHPUT_PRIORITY;
+      profiling_priority = LG_THROUGHPUT_WORK_PRIORITY;
     }
 
     //--------------------------------------------------------------------------
@@ -6956,7 +6945,7 @@ namespace Legion {
     {
       Mapper::MapCloseInput input;
       Mapper::MapCloseOutput output;
-      output.profiling_priority = LG_THROUGHPUT_PRIORITY;
+      output.profiling_priority = LG_THROUGHPUT_WORK_PRIORITY;
       // No need to filter for close operations
       if (restrict_info.has_restrictions())
         prepare_for_mapping(restrict_info.get_instances(), 
@@ -7625,7 +7614,7 @@ namespace Legion {
       mapper = NULL;
       outstanding_profiling_requests = 1; // start at 1 to guard
       profiling_reported = RtUserEvent::NO_RT_USER_EVENT;
-      profiling_priority = LG_THROUGHPUT_PRIORITY;
+      profiling_priority = LG_THROUGHPUT_WORK_PRIORITY;
     }
 
     //--------------------------------------------------------------------------
@@ -8081,7 +8070,7 @@ namespace Legion {
       mapper = NULL;
       outstanding_profiling_requests = 1; // start at 1 to guard
       profiling_reported = RtUserEvent::NO_RT_USER_EVENT;
-      profiling_priority = LG_THROUGHPUT_PRIORITY;
+      profiling_priority = LG_THROUGHPUT_WORK_PRIORITY;
     }
 
     //--------------------------------------------------------------------------
@@ -8539,7 +8528,7 @@ namespace Legion {
     {
       Mapper::MapAcquireInput input;
       Mapper::MapAcquireOutput output;
-      output.profiling_priority = LG_THROUGHPUT_PRIORITY;
+      output.profiling_priority = LG_THROUGHPUT_WORK_PRIORITY;
       if (mapper == NULL)
       {
         Processor exec_proc = parent_ctx->get_executing_processor();
@@ -8693,7 +8682,7 @@ namespace Legion {
       mapper = NULL;
       outstanding_profiling_requests = 1; // start at 1 to guard
       profiling_reported = RtUserEvent::NO_RT_USER_EVENT;
-      profiling_priority = LG_THROUGHPUT_PRIORITY;
+      profiling_priority = LG_THROUGHPUT_WORK_PRIORITY;
     }
 
     //--------------------------------------------------------------------------
@@ -9208,7 +9197,7 @@ namespace Legion {
     {
       Mapper::MapReleaseInput input;
       Mapper::MapReleaseOutput output;
-      output.profiling_priority = LG_THROUGHPUT_PRIORITY;
+      output.profiling_priority = LG_THROUGHPUT_WORK_PRIORITY;
       if (mapper == NULL)
       {
         Processor exec_proc = parent_ctx->get_executing_processor();
@@ -9384,7 +9373,7 @@ namespace Legion {
         DeferredExecuteArgs deferred_execute_args;
         deferred_execute_args.proxy_this = this;
         runtime->issue_runtime_meta_task(deferred_execute_args,
-                                         LG_LATENCY_PRIORITY, this, 
+                                         LG_THROUGHPUT_DEFERRED_PRIORITY, this,
                                          Runtime::protect_event(barrier));
       }
       else
@@ -9547,7 +9536,7 @@ namespace Legion {
         add_predicate_reference();
         ResolveFuturePredArgs args;
         args.future_pred_op = this;
-        runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY, this, 
+        runtime->issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY, this,
                                          Runtime::protect_event(
                                            future.impl->get_ready_event()));
       }
@@ -10558,7 +10547,7 @@ namespace Legion {
           args.task = indiv_tasks[idx];
           RtEvent wait = 
             owner->runtime->issue_runtime_meta_task(args, 
-                  LG_DEFERRED_THROUGHPUT_PRIORITY, owner);
+                  LG_THROUGHPUT_DEFERRED_PRIORITY, owner);
           if (wait.exists())
             wait_events.insert(wait);
         }
@@ -10572,7 +10561,7 @@ namespace Legion {
           args.task = index_tasks[idx];
           RtEvent wait = 
             owner->runtime->issue_runtime_meta_task(args,
-                  LG_DEFERRED_THROUGHPUT_PRIORITY, owner);
+                  LG_THROUGHPUT_DEFERRED_PRIORITY, owner);
           if (wait.exists())
             wait_events.insert(wait);
         }
@@ -10635,12 +10624,12 @@ namespace Legion {
           RtEvent precondition = Runtime::merge_events(preconditions);
           mapped_events[idx] = 
             runtime->issue_runtime_meta_task(args, 
-                LG_DEFERRED_THROUGHPUT_PRIORITY, args.owner, precondition); 
+                LG_THROUGHPUT_DEFERRED_PRIORITY, args.owner, precondition); 
         }
         else
           mapped_events[idx] = 
             runtime->issue_runtime_meta_task(args,
-                  LG_DEFERRED_THROUGHPUT_PRIORITY, args.owner);
+                  LG_THROUGHPUT_DEFERRED_PRIORITY, args.owner);
       }
       std::set<RtEvent> wait_events(mapped_events.begin(), mapped_events.end());
       if (!wait_events.empty())
@@ -10698,7 +10687,7 @@ namespace Legion {
           dist_args.task = *it;
           RtEvent wait = 
             runtime->issue_runtime_meta_task(dist_args, 
-                LG_DEFERRED_THROUGHPUT_PRIORITY, owner);
+                LG_THROUGHPUT_DEFERRED_PRIORITY, owner);
           if (wait.exists())
             wait_events.insert(wait);
         }
@@ -10707,7 +10696,7 @@ namespace Legion {
           launch_args.task = *it;
           RtEvent wait = 
             runtime->issue_runtime_meta_task(launch_args,
-                  LG_DEFERRED_THROUGHPUT_PRIORITY, owner);
+                  LG_THROUGHPUT_DEFERRED_PRIORITY, owner);
           if (wait.exists())
             wait_events.insert(wait);
         }
@@ -10721,7 +10710,7 @@ namespace Legion {
           dist_args.task = *it;
           RtEvent wait = 
             runtime->issue_runtime_meta_task(dist_args, 
-                LG_DEFERRED_THROUGHPUT_PRIORITY, owner);
+                LG_THROUGHPUT_DEFERRED_PRIORITY, owner);
           if (wait.exists())
             wait_events.insert(wait);
         }
@@ -10730,7 +10719,7 @@ namespace Legion {
           launch_args.task = *it;
           RtEvent wait = 
             runtime->issue_runtime_meta_task(launch_args,
-                 LG_DEFERRED_THROUGHPUT_PRIORITY, owner);
+                 LG_THROUGHPUT_DEFERRED_PRIORITY, owner);
           if (wait.exists())
             wait_events.insert(wait);
         }
@@ -11331,7 +11320,7 @@ namespace Legion {
       // Give these slightly higher priority since they are likely
       // needed by later operations
       enqueue_ready_operation(RtEvent::NO_RT_EVENT, 
-                              LG_DEFERRED_THROUGHPUT_PRIORITY);
+                              LG_THROUGHPUT_DEFERRED_PRIORITY);
     }
 
     //--------------------------------------------------------------------------
@@ -11906,10 +11895,10 @@ namespace Legion {
         // they are likely needed for other operations
         if (!preconditions.empty())
           enqueue_ready_operation(Runtime::merge_events(preconditions),
-                                  LG_DEFERRED_THROUGHPUT_PRIORITY);
+                                  LG_THROUGHPUT_DEFERRED_PRIORITY);
         else
           enqueue_ready_operation(RtEvent::NO_RT_EVENT, 
-                                  LG_DEFERRED_THROUGHPUT_PRIORITY);
+                                  LG_THROUGHPUT_DEFERRED_PRIORITY);
       }
     }
 
@@ -13047,8 +13036,8 @@ namespace Legion {
           DeferredExecuteArgs deferred_execute_args;
           deferred_execute_args.proxy_this = this;
           runtime->issue_runtime_meta_task(deferred_execute_args,
-                                           LG_LATENCY_PRIORITY, this, 
-                                 Runtime::protect_event(future_ready_event));
+                                           LG_THROUGHPUT_DEFERRED_PRIORITY,this,
+                                    Runtime::protect_event(future_ready_event));
         }
         else
           deferred_execute(); // can do the completion now
@@ -14851,7 +14840,7 @@ namespace Legion {
       {
         DeferredExecuteArgs args;
         args.proxy_this = this;
-        runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY, 
+        runtime->issue_runtime_meta_task(args, LG_THROUGHPUT_DEFERRED_PRIORITY,
                                          this, wait_on);
       }
       else

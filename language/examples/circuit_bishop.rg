@@ -681,19 +681,6 @@ end
 if os.getenv('SAVEOBJ') == '1' then
   local root_dir = arg[0]:match(".*/") or "./"
   local link_flags = terralib.newlist({"-lm"})
-  if os.getenv('CRAYPE_VERSION') then
-    local new_flags = terralib.newlist({"-Wl,-Bdynamic"})
-    new_flags:insertall(link_flags)
-    for flag in os.getenv('CRAY_UGNI_POST_LINK_OPTS'):gmatch("%S+") do
-      new_flags:insert(flag)
-    end
-    new_flags:insert("-lugni")
-    for flag in os.getenv('CRAY_UDREG_POST_LINK_OPTS'):gmatch("%S+") do
-      new_flags:insert(flag)
-    end
-    new_flags:insert("-ludreg")
-    link_flags = new_flags
-  end
   regentlib.saveobj(toplevel, "circuit", "executable", bishoplib.make_entry(), link_flags)
 else
   regentlib.start(toplevel, bishoplib.make_entry())

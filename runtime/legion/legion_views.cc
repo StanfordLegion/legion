@@ -3686,7 +3686,7 @@ namespace Legion {
           // Have to static cast this since it might not be ready
           args.parent = static_cast<MaterializedView*>(par_view);
           args.context_uid = context_uid;
-          runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY,
+          runtime->issue_runtime_meta_task(args, LG_LATENCY_DEFERRED_PRIORITY,
              NULL/*op*/, Runtime::merge_events(par_ready, man_ready));
           return;
         }
@@ -5879,7 +5879,7 @@ namespace Legion {
         // when the shard invalid barrier has triggered
         DeferInvalidateArgs args;
         args.view = this;
-        runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY, 
+        runtime->issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY, 
                                          NULL/*op*/, shard_invalid_barrier);
       }
       // Tell the nested views that they can be potentially collected too
@@ -6486,7 +6486,7 @@ namespace Legion {
         RtEvent wait_on = Runtime::merge_events(ready_events);
         DeferCompositeViewRegistrationArgs args;
         args.view = view;
-        runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY, 
+        runtime->issue_runtime_meta_task(args, LG_LATENCY_DEFERRED_PRIORITY,
                                          NULL/*op*/, wait_on);
         // Not ready to perform registration yet
         return;
@@ -6850,7 +6850,7 @@ namespace Legion {
       args.dc = dc;
       args.did = did;
       return context->runtime->issue_runtime_meta_task(args, 
-          LG_LATENCY_PRIORITY, NULL/*op*/, precondition);
+          LG_LATENCY_DEFERRED_PRIORITY, NULL/*op*/, precondition);
     }
 
     //--------------------------------------------------------------------------
@@ -7126,7 +7126,7 @@ namespace Legion {
               args.capture_mask = &it->second;
               capture_preconditions.insert(
                 owner_context->runtime->issue_runtime_meta_task(args,
-                    LG_LATENCY_PRIORITY, NULL/*op*/, version_precondition));
+                  LG_LATENCY_WORK_PRIORITY, NULL/*op*/, version_precondition));
               continue;
             }
           }
@@ -7390,8 +7390,8 @@ namespace Legion {
             args.mask = new FieldMask();
             derez.deserialize(*args.mask);
             RtEvent precondition = 
-              runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY,
-                                               NULL/*op*/, ready);
+              runtime->issue_runtime_meta_task(args, 
+                  LG_LATENCY_DEFERRED_PRIORITY, NULL/*op*/, ready);
             preconditions.insert(precondition);
           }
           else
@@ -8331,7 +8331,7 @@ namespace Legion {
       args.dc = dc;
       args.did = did;
       return context->runtime->issue_runtime_meta_task(args,
-          LG_LATENCY_PRIORITY, NULL/*op*/, precondition);
+          LG_LATENCY_DEFERRED_PRIORITY, NULL/*op*/, precondition);
     }
 
     //--------------------------------------------------------------------------
@@ -8465,7 +8465,7 @@ namespace Legion {
         RtEvent wait_on = Runtime::merge_events(ready_events);
         DeferPhiViewRegistrationArgs args;
         args.view = view;
-        runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY,
+        runtime->issue_runtime_meta_task(args, LG_LATENCY_DEFERRED_PRIORITY,
                                          NULL/*op*/, wait_on);
         return;
       }
