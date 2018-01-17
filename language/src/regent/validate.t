@@ -265,6 +265,7 @@ local function validate_vars_node(cx)
       node:is(ast.typed.stat.Reduce) or
       node:is(ast.typed.stat.Expr) or
       node:is(ast.typed.stat.RawDelete) or
+      node:is(ast.typed.stat.Fence) or
       node:is(ast.typed.stat.BeginTrace) or
       node:is(ast.typed.stat.EndTrace) or
       node:is(ast.typed.stat.MapRegions) or
@@ -273,7 +274,8 @@ local function validate_vars_node(cx)
       node:is(ast.location) or
       node:is(ast.annotation) or
       node:is(ast.condition_kind) or
-      node:is(ast.disjointness_kind)
+      node:is(ast.disjointness_kind) or
+      node:is(ast.fence_kind)
     then
       continuation(node, true)
 

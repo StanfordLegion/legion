@@ -432,6 +432,17 @@ function parser.disjointness_kind(p)
   end
 end
 
+function parser.fence_kind(p)
+  local start = ast.save(p)
+  if p:nextif("__execution") then
+    return ast.fence_kind.Execution {}
+  elseif p:nextif("__mapping") then
+    return ast.fence_kind.Mapping {}
+  else
+    p:error("expected fence kind (__execution or __mapping)")
+  end
+end
+
 function parser.effect(p)
   local start = ast.save(p)
   p:expect("[")
@@ -1675,6 +1686,25 @@ function parser.stat_raw_delete(p, annotations)
   }
 end
 
+function parser.stat_fence(p, annotations)
+  local start = ast.save(p)
+  p:expect("__fence")
+  p:expect("(")
+  local kind = p:fence_kind()
+  local blocking = false
+  if p:nextif(",") then
+    p:expect("__block")
+    blocking = true
+  end
+  p:expect(")")
+  return ast.unspecialized.stat.Fence {
+    kind = kind,
+    blocking = blocking,
+    annotations = ast.default_annotations(),
+    span = ast.span(start, p),
+  }
+end
+
 function parser.stat_parallelize_with(p, annotations)
   local start = ast.save(p)
   p:expect("__parallelize_with")
@@ -1826,6 +1856,9 @@ function parser.stat(p)
 
   elseif p:matches("__delete") then
     return p:stat_raw_delete(annotations)
+
+  elseif p:matches("__fence") then
+    return p:stat_fence(annotations)
 
   elseif p:matches("__parallelize_with") then
     return p:stat_parallelize_with(annotations)

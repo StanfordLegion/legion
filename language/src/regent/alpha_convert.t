@@ -102,7 +102,8 @@ end
 local function alpha_convert_node(cx)
   return function(node, continuation)
     if node:is(ast.condition_kind) or
-      node:is(ast.disjointness_kind)
+      node:is(ast.disjointness_kind) or
+      node:is(ast.fence_kind)
     then
       return continuation(node, true)
 
@@ -331,6 +332,7 @@ local function alpha_convert_node(cx)
       node:is(ast.specialized.stat.Reduce) or
       node:is(ast.specialized.stat.Expr) or
       node:is(ast.specialized.stat.RawDelete) or
+      node:is(ast.specialized.stat.Fence) or
       node:is(ast.specialized.Block) or
       node:is(ast.location) or
       node:is(ast.annotation)
