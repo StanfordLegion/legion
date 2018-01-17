@@ -4533,27 +4533,20 @@ namespace Legion {
             (local_shard >= (manager->total_shards - 
                              shard_collective_participating_shards)))
         {
-          // Can send stage 0 without preconditions
-          send_stage(0);
-          // Do our arrival on stage 1 and see if it is ready
-          for (int stage = 0; stage < shard_collective_stages; stage++)
-          {
-            // Once we are not the last arriver, we can break out
-            if (!arrive_stage(stage))
-              break;
-            send_stage(stage+1);
-          }
+          int stage = 0;
+          while (send_stage(stage++)) { }
         }
         else
         {
-          // Have a precondition for stage 0 so start at 0 
-          for (int stage = -1; stage < shard_collective_stages; stage++)
+          // Have a precondition for stage 0 so start at -1
+          int stage = -1;
+          bool next_stage = false;
           {
-            // Once we are not the last arriver, we can break out
-            if (!arrive_stage(stage))
-              break;
-            send_stage(stage+1);
+            AutoLock c_lock(collective_lock);
+            next_stage = arrive_stage(stage++);
           }
+          while (next_stage)
+            next_stage = send_stage(stage++);
         }
       }
       else
@@ -4583,23 +4576,19 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(participating || (stage == -1));
 #endif
-      unpack_stage(stage, derez);
+      bool send_next = unpack_stage(stage, derez);
       if (participating)
       {
         // Keep doing local arrivals until we are not the last one
-        for ( /*nothing*/; stage < shard_collective_stages; stage++)
-        {
-          if (!arrive_stage(stage))
-            break;
-          send_stage(stage+1);
-        }
+        while (send_next)
+          send_next = send_stage(++stage);
       }
       else
         complete_exchange();
     }
 
     //--------------------------------------------------------------------------
-    void AllGatherCollective::send_stage(int stage)
+    bool AllGatherCollective::send_stage(int stage)
     //--------------------------------------------------------------------------
     {
       // A few special cases here
@@ -4616,6 +4605,8 @@ namespace Legion {
           Serializer rez;
           construct_message(target, stage, rez);
           manager->send_collective_message(target, rez);
+          AutoLock c_lock(collective_lock);
+          return arrive_stage(stage);
         }
         else
         {
@@ -4624,12 +4615,14 @@ namespace Legion {
           Serializer rez;
           construct_message(target, stage, rez);
           manager->send_collective_message(target, rez);
+          return false;
         }
       }
       else if (stage == shard_collective_stages)
       {
         // Complete the exchange case 
         complete_exchange();
+        return false;
       }
       else if (stage == (shard_collective_stages-1))
       {
@@ -4644,7 +4637,7 @@ namespace Legion {
           construct_message(target, stage, rez);
           manager->send_collective_message(target, rez);
         }
-        update_current_stage(stage);
+        return update_current_stage(stage);
       }
       else
       {
@@ -4660,7 +4653,7 @@ namespace Legion {
           manager->send_collective_message(target, rez);
         }
         // Once we've sent the messages we can update the current stage
-        update_current_stage(stage);
+        return update_current_stage(stage);
       }
     }
 
@@ -4686,7 +4679,6 @@ namespace Legion {
 #endif
       if (stage == -1)
       {
-        AutoLock c_lock(collective_lock);
         if (!prefix_stage_notification)
         {
           prefix_stage_notification = true;
@@ -4697,7 +4689,6 @@ namespace Legion {
       }
       else
       {
-        AutoLock c_lock(collective_lock);
 #ifdef DEBUG_LEGION
         assert(stage < shard_collective_stages);
 #endif
@@ -4737,7 +4728,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void AllGatherCollective::update_current_stage(int stage)
+    bool AllGatherCollective::update_current_stage(int stage)
     //--------------------------------------------------------------------------
     {
       AutoLock c_lock(collective_lock);
@@ -4768,14 +4759,18 @@ namespace Legion {
           pending_notifications.erase(next);
         }
       }
+      return arrive_stage(stage);
     }
 
     //--------------------------------------------------------------------------
-    void AllGatherCollective::unpack_stage(int stage, Deserializer &derez)
+    bool AllGatherCollective::unpack_stage(int stage, Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       AutoLock c_lock(collective_lock);
       unpack_collective_stage(derez, stage);
+      if ((stage < 0) && !participating)
+        return false;
+      return arrive_stage(stage);
     }
 
     //--------------------------------------------------------------------------
