@@ -3754,7 +3754,7 @@ namespace Legion {
       ContinuationArgs args;
       args.continuation = this;
       RtEvent wait_on = runtime->issue_runtime_meta_task(args,
-                       LG_LATENCY_PRIORITY, op, precondition);
+                         LG_LATENCY_DEFERRED_PRIORITY, op, precondition);
       wait_on.lg_wait();
     }
 
