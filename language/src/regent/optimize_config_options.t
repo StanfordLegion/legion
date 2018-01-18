@@ -386,7 +386,7 @@ local function analyze_idempotent_node(cx)
       node:is(ast.typed.stat.Assignment) or
       node:is(ast.typed.stat.Reduce) or
       node:is(ast.typed.stat.Expr) or
-      node:is(ast.typed.stat.RawDelete)
+      node:is(ast.typed.stat.RawDelete) or
       node:is(ast.typed.stat.Fence)
     then
       return true
