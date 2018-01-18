@@ -119,7 +119,7 @@ namespace Legion {
       virtual void unpack_collective(Deserializer &derez) = 0;
     public:
       void perform_collective_async(void);
-      void perform_collective_wait(void);
+      RtEvent perform_collective_wait(bool block = true);
       virtual void handle_collective_message(Deserializer &derez);
     public:
       RtEvent get_done_event(void) const;
@@ -150,7 +150,7 @@ namespace Legion {
     public:
       void perform_collective_async(void);
       // Make sure to call this in the destructor of anything not the target
-      void perform_collective_wait(void);
+      RtEvent perform_collective_wait(bool block = true);
       virtual void handle_collective_message(Deserializer &derez);
       inline bool is_target(void) const { return (target == local_shard); }
     protected:
@@ -183,7 +183,7 @@ namespace Legion {
     public:
       void perform_collective_sync(void);
       void perform_collective_async(void);
-      void perform_collective_wait(void);
+      RtEvent perform_collective_wait(bool block = true);
       virtual void handle_collective_message(Deserializer &derez);
     protected:
       bool send_stage(int stage);
@@ -640,6 +640,7 @@ namespace Legion {
     public:
       virtual void trigger_prepipeline_stage(void);
       virtual void trigger_ready(void);
+      virtual void deferred_execute(void);
       virtual RtEvent perform_mapping(MustEpochOp *owner = NULL);
     public:
       // Override these so we can broadcast the future result
@@ -823,6 +824,7 @@ namespace Legion {
       virtual void trigger_prepipeline_stage(void);
       virtual void trigger_ready(void);
       virtual void trigger_mapping(void);
+      virtual void deferred_execute(void);
     protected:
       ShardingID sharding_functor;
       ShardingFunction *sharding_function;
@@ -839,6 +841,7 @@ namespace Legion {
 #endif
     protected:
       CollectiveID versioning_collective_id; // id for version state broadcasts
+      VersioningInfoBroadcast *version_broadcast_collective;
     };
 
     /**

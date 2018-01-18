@@ -343,20 +343,52 @@ namespace Legion {
     void ReplIndividualTask::perform_unowned_shard(ReplicateContext *repl_ctx)
     //--------------------------------------------------------------------------
     {
+      // Since we're not going to run this task, we need to tell the
+      // profiler about its task ID so it can give it a name
+      // We use the same method as we do normally for multi tasks
+      if (runtime->profiler != NULL)
+        runtime->profiler->register_multi_task(this, task_id);
+#ifdef DEBUG_LEGION
+      assert(version_broadcast_collective == NULL);
+#endif
       // We don't own it, so we can pretend like we
       // mapped and executed this task already
       // Before we can do that though we have to get the version state
       // names for any writes so we can update our local state
-      VersioningInfoBroadcast version_broadcast(repl_ctx, 
-                    versioning_collective_id, owner_shard);
-      version_broadcast.wait_for_states(map_applied_conditions);
+      version_broadcast_collective = new VersioningInfoBroadcast(repl_ctx,
+                                      versioning_collective_id, owner_shard);
+      RtEvent versions_ready = 
+        version_broadcast_collective->perform_collective_wait(false/*block*/);
+      if (versions_ready.exists() && !versions_ready.has_triggered())
+      {
+        // Defer completion until the versions are ready
+        DeferredExecuteArgs deferred_execute_args;
+        deferred_execute_args.proxy_this = this;
+        runtime->issue_runtime_meta_task(deferred_execute_args,
+                                         LG_THROUGHPUT_DEFERRED_PRIORITY,
+                                         this, versions_ready);
+      }
+      else
+        deferred_execute();
+      trigger_children_complete();
+      trigger_children_committed();
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplIndividualTask::deferred_execute(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(version_broadcast_collective != NULL);
+#endif
+      version_broadcast_collective->wait_for_states(map_applied_conditions);
       const UniqueID logical_context_uid = parent_ctx->get_context_uid();
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
         if (IS_WRITE(regions[idx]))
         {
           const VersioningSet<> &remote_advance_states = 
-            version_broadcast.find_advance_states(idx);
+            version_broadcast_collective->find_advance_states(idx);
           const RegionRequirement &req = regions[idx];
           const bool parent_is_upper_bound = (req.region == req.parent);
           runtime->forest->advance_remote_versions(this, idx, req,
@@ -371,13 +403,11 @@ namespace Legion {
         // Record the map applied precondition in the versioning
         // broadcast as well so we know when it is safe to remove
         // our valid references
-        version_broadcast.record_precondition(map_applied);
+        version_broadcast_collective->record_precondition(map_applied);
       }
       else
         complete_mapping();
       complete_execution();
-      trigger_children_complete();
-      trigger_children_committed();
     }
 
     //--------------------------------------------------------------------------
@@ -444,7 +474,11 @@ namespace Legion {
       if (must_epoch_owner != NULL)
       {
         version_broadcast->perform_collective_async();
-        delete version_broadcast;
+#ifdef DEBUG_LEGION
+        assert(version_broadcast_collective == NULL);
+#endif
+        // Copy it over so we will own and delete as necessary
+        version_broadcast_collective = version_broadcast;
       }
       else // Will take ownership of deleting the collective
         version_broadcast->defer_perform_collective(this, map_wait);
@@ -1236,6 +1270,7 @@ namespace Legion {
       sharding_collective = NULL;
 #endif
       versioning_collective_id = UINT_MAX;
+      version_broadcast_collective = NULL;
     }
 
     //--------------------------------------------------------------------------
@@ -1246,6 +1281,8 @@ namespace Legion {
       if (sharding_collective != NULL)
         delete sharding_collective;
 #endif
+      if (version_broadcast_collective != NULL)
+        delete version_broadcast_collective;
       deactivate_copy();
       src_projection_infos.clear();
       dst_projection_infos.clear();
@@ -1315,38 +1352,24 @@ namespace Legion {
         // mapped and executed this copy already
         // Before we do this though we have to get the version state
         // names for any writes so we can update our local state
-        VersioningInfoBroadcast version_broadcast(repl_ctx, 
-                      versioning_collective_id, owner_shard);
-        version_broadcast.wait_for_states(map_applied_conditions);
-        const UniqueID logical_context_uid = parent_ctx->get_context_uid();
-        for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
+#ifdef DEBUG_LEGION
+        assert(version_broadcast_collective == NULL);
+#endif
+        version_broadcast_collective = new VersioningInfoBroadcast(repl_ctx, 
+                                        versioning_collective_id, owner_shard);
+        RtEvent versions_ready = 
+          version_broadcast_collective->perform_collective_wait(false/*block*/);
+        if (versions_ready.exists() && !versions_ready.has_triggered())
         {
-          const VersioningSet<> &remote_advance_states = 
-            version_broadcast.find_advance_states(idx);
-          RegionRequirement &req = dst_requirements[idx];
-          // Switch the privileges to read-write if necessary
-          const bool is_reduce_req = IS_REDUCE(dst_requirements[idx]);
-          if (is_reduce_req)
-            req.privilege = READ_WRITE;
-          const bool parent_is_upper_bound = (req.region == req.parent);
-          runtime->forest->advance_remote_versions(this, 
-              src_requirements.size() + idx, req,
-              parent_is_upper_bound, logical_context_uid, 
-              remote_advance_states, map_applied_conditions);
-          // Switch the privileges back when we are done
-          if (is_reduce_req)
-            req.privilege = REDUCE;
-        }
-        if (!map_applied_conditions.empty())
-        {
-          RtEvent map_applied = Runtime::merge_events(map_applied_conditions);
-          complete_mapping(map_applied);
-          // Also record a precondition for our versioning info being done
-          version_broadcast.record_precondition(map_applied);
+          // Defer completion until the versions are ready
+          DeferredExecuteArgs deferred_execute_args;
+          deferred_execute_args.proxy_this = this;
+          runtime->issue_runtime_meta_task(deferred_execute_args,
+                                           LG_THROUGHPUT_DEFERRED_PRIORITY,
+                                           this, versions_ready);
         }
         else
-          complete_mapping();
-        complete_execution();
+          deferred_execute();
       }
       else // We own it, so do the base call
       {
@@ -1355,6 +1378,45 @@ namespace Legion {
         // Then we can do the enqueue
         enqueue_ready_operation(ready);
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplCopyOp::deferred_execute(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(version_broadcast_collective != NULL);
+#endif
+      version_broadcast_collective->wait_for_states(map_applied_conditions);
+      const UniqueID logical_context_uid = parent_ctx->get_context_uid();
+      for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
+      {
+        const VersioningSet<> &remote_advance_states = 
+          version_broadcast_collective->find_advance_states(idx);
+        RegionRequirement &req = dst_requirements[idx];
+        // Switch the privileges to read-write if necessary
+        const bool is_reduce_req = IS_REDUCE(dst_requirements[idx]);
+        if (is_reduce_req)
+          req.privilege = READ_WRITE;
+        const bool parent_is_upper_bound = (req.region == req.parent);
+        runtime->forest->advance_remote_versions(this, 
+            src_requirements.size() + idx, req,
+            parent_is_upper_bound, logical_context_uid, 
+            remote_advance_states, map_applied_conditions);
+        // Switch the privileges back when we are done
+        if (is_reduce_req)
+          req.privilege = REDUCE;
+      }
+      if (!map_applied_conditions.empty())
+      {
+        RtEvent map_applied = Runtime::merge_events(map_applied_conditions);
+        complete_mapping(map_applied);
+        // Also record a precondition for our versioning info being done
+        version_broadcast_collective->record_precondition(map_applied);
+      }
+      else
+        complete_mapping();
+      complete_execution();
     }
 
     //--------------------------------------------------------------------------
@@ -1395,7 +1457,11 @@ namespace Legion {
       {
         // We can do it now
         version_broadcast->perform_collective_async();
-        delete version_broadcast;
+#ifdef DEBUG_LEGION
+        assert(version_broadcast_collective == NULL);
+#endif
+        // By copying this here we take ownership of it and will clean it up
+        version_broadcast_collective = version_broadcast;
       }
       else // Will take ownership of deleting the collective
         version_broadcast->defer_perform_collective(this, map_wait);
@@ -3120,7 +3186,18 @@ namespace Legion {
       if (repl_ctx->owner_shard->shard_id > 0)
       {
         complete_mapping();
-        deferred_execute();
+        RtEvent result_ready = timing_collective->get_done_event();
+        if (result_ready.exists() && !result_ready.has_triggered())
+        {
+          // Defer completion until the value is ready
+          DeferredExecuteArgs deferred_execute_args;
+          deferred_execute_args.proxy_this = this;
+          runtime->issue_runtime_meta_task(deferred_execute_args,
+                                           LG_THROUGHPUT_DEFERRED_PRIORITY,
+                                           this, result_ready);
+        }
+        else
+          deferred_execute();
       }
       else // Shard 0 does the normal timing operation
         TimingOp::trigger_mapping();
@@ -4265,7 +4342,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void BroadcastCollective::perform_collective_wait(void)
+    RtEvent BroadcastCollective::perform_collective_wait(bool block/*=true*/)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -4274,7 +4351,13 @@ namespace Legion {
       // Register this with the context
       context->register_collective(this);
       if (!done_event.has_triggered())
-        done_event.lg_wait();
+      {
+        if (block)
+          done_event.lg_wait();
+        else
+          return done_event;
+      }
+      return RtEvent::NO_RT_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -4371,11 +4454,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void GatherCollective::perform_collective_wait(void)
+    RtEvent GatherCollective::perform_collective_wait(bool block/*=true*/)
     //--------------------------------------------------------------------------
     {
       if (done_event.exists() && !done_event.has_triggered())
-        done_event.lg_wait();
+      {
+        if (block)
+          done_event.lg_wait();
+        else
+          return done_event;
+      }
+      return RtEvent::NO_RT_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -4558,13 +4647,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void AllGatherCollective::perform_collective_wait(void)
+    RtEvent AllGatherCollective::perform_collective_wait(bool block/*=true*/)
     //--------------------------------------------------------------------------
     {
       if (manager->total_shards <= 1)
-        return;
+        return RtEvent::NO_RT_EVENT;
       if (!done_event.has_triggered())
-        done_event.lg_wait();
+      {
+        if (block)
+          done_event.lg_wait();
+        else
+          return done_event;
+      }
+      return RtEvent::NO_RT_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -6480,7 +6575,9 @@ namespace Legion {
                                               std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
-      perform_collective_wait(); 
+#ifdef DEBUG_LEGION
+      assert(get_done_event().has_triggered());
+#endif
       std::set<RtEvent> wait_on;
       Runtime *runtime = context->runtime;
       // Now convert everything over to the results
