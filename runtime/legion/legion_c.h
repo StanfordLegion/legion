@@ -1036,6 +1036,40 @@ extern "C" {
     int color /* = AUTO_GENERATE_ID */);
 
   /**
+   * @return Caller takes ownership of return value.
+   *
+   * @see Legion::Runtime::create_partition_by_image_range()
+   */
+  legion_index_partition_t
+  legion_index_partition_create_by_image_range(
+    legion_runtime_t runtime,
+    legion_context_t ctx,
+    legion_index_space_t handle,
+    legion_logical_partition_t projection,
+    legion_logical_region_t parent,
+    legion_field_id_t fid,
+    legion_index_space_t color_space,
+    legion_partition_kind_t part_kind /* = COMPUTE_KIND */,
+    int color /* = AUTO_GENERATE_ID */);
+
+  /**
+   * @return Caller takes ownership of return value.
+   *
+   * @see Legion::Runtime::create_partition_by_preimage()
+   */
+  legion_index_partition_t
+  legion_index_partition_create_by_preimage_range(
+    legion_runtime_t runtime,
+    legion_context_t ctx,
+    legion_index_partition_t projection,
+    legion_logical_region_t handle,
+    legion_logical_region_t parent,
+    legion_field_id_t fid,
+    legion_index_space_t color_space,
+    legion_partition_kind_t part_kind /* = COMPUTE_KIND */,
+    int color /* = AUTO_GENERATE_ID */);
+
+  /**
    * @see LegionRuntime::HighLevel::Runtime::is_index_partition_disjoint()
    */
   bool

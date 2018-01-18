@@ -1657,8 +1657,9 @@ function type_check.expr_image(cx, node)
   end
 
   local field_type = std.get_field_path(region_type:fspace(), region.fields[1])
-  if not ((std.is_bounded_type(field_type) and std.is_index_type(field_type.index_type)) or std.is_index_type(field_type)) then
-    report.error(node, "type mismatch in argument 3: expected field of index type but got " .. tostring(field_type))
+  if not ((std.is_bounded_type(field_type) and std.is_index_type(field_type.index_type)) or
+           std.is_index_type(field_type) or std.is_rect_type(field_type)) then
+    report.error(node, "type mismatch in argument 3: expected field of index or rect type but got " .. tostring(field_type))
   else
     -- TODO: indexspaces should be parametrized by index types.
     --       currently they only support 64-bit points, which is why we do this check here.
@@ -1838,8 +1839,9 @@ function type_check.expr_preimage(cx, node)
   end
 
   local field_type = std.get_field_path(region_type:fspace(), region.fields[1])
-  if not ((std.is_bounded_type(field_type) and std.is_index_type(field_type.index_type)) or std.is_index_type(field_type)) then
-    report.error(node, "type mismatch in argument 3: expected field of index type but got " .. tostring(field_type))
+  if not ((std.is_bounded_type(field_type) and std.is_index_type(field_type.index_type)) or
+           std.is_index_type(field_type) or std.is_rect_type(field_type)) then
+    report.error(node, "type mismatch in argument 3: expected field of index or rect type but got " .. tostring(field_type))
   else
     -- TODO: indexspaces should be parametrized by index types.
     --       currently they only support 64-bit points, which is why we do this check here.
@@ -1884,7 +1886,11 @@ function type_check.expr_preimage(cx, node)
   else
     parent_symbol = std.newsymbol()
   end
-  local expr_type = std.partition(partition_type.disjointness, parent_symbol, partition_type.colors_symbol)
+  local disjointness = partition_type.disjointness
+  if std.is_rect_type(field_type) then
+    disjointness = std.aliased
+  end
+  local expr_type = std.partition(disjointness, parent_symbol, partition_type.colors_symbol)
 
   -- Hack: Stuff the region type back into the partition's region
   -- argument, if necessary.
