@@ -14123,7 +14123,7 @@ namespace Legion {
       for (unsigned idx = 0; idx < dst_fields.size(); idx++)
         realm_dst_fields[idx] = dst_fields[idx];
       result = row_source->issue_copy(op, realm_src_fields, 
-          realm_dst_fields, precondition, predicate_guard, 
+          realm_dst_fields, precondition, predicate_guard, trace_info,
           (intersect == NULL) ? NULL : intersect->get_row_source(),
           redop, reduction_fold);
       LegionSpy::log_copy_events(op->get_unique_op_id(), handle, 
@@ -14186,7 +14186,7 @@ namespace Legion {
       for (unsigned idx = 0; idx < dst_fields.size(); idx++)
         realm_dst_fields[idx] = dst_fields[idx];
       result = row_source->issue_fill(op, realm_dst_fields,
-          fill_value, fill_size, precondition, predicate_guard,
+          fill_value, fill_size, precondition, predicate_guard, trace_info,
           (intersect == NULL) ? NULL : intersect->get_row_source());
       LegionSpy::log_fill_events(op->get_unique_op_id(), handle, 
                                  precondition, result, fill_uid);
