@@ -7031,7 +7031,7 @@ namespace Legion {
         // We need to get the barrier result 
         ValueBroadcast<ISBroadcast> collective_space(this,
                             index_space_allocator_shard, COLLECTIVE_LOC_3);
-        const ISBroadcast value = collective_space;
+        const ISBroadcast value = collective_space.get_value();
         handle = value.handle;
 #ifdef DEBUG_LEGION
         assert(handle.exists());
@@ -7084,7 +7084,7 @@ namespace Legion {
         // We need to get the barrier result 
         ValueBroadcast<ISBroadcast> collective_space(this,
                             index_space_allocator_shard, COLLECTIVE_LOC_4);
-        const ISBroadcast value = collective_space;
+        const ISBroadcast value = collective_space.get_value();
         handle = value.handle;
 #ifdef DEBUG_LEGION
         assert(handle.exists());
@@ -7140,7 +7140,7 @@ namespace Legion {
         // We need to get the barrier result 
         ValueBroadcast<ISBroadcast> space_collective(this,
                             index_space_allocator_shard, COLLECTIVE_LOC_5);
-        const ISBroadcast value = space_collective;
+        const ISBroadcast value = space_collective.get_value();
         handle = value.handle;
 #ifdef DEBUG_LEGION
         assert(handle.exists());
@@ -7194,7 +7194,7 @@ namespace Legion {
         // We need to get the barrier result 
         ValueBroadcast<ISBroadcast> space_collective(this, 
                             index_space_allocator_shard, COLLECTIVE_LOC_6);
-        const ISBroadcast value = space_collective;
+        const ISBroadcast value = space_collective.get_value();
         handle = value.handle;
 #ifdef DEBUG_LEGION
         assert(handle.exists());
@@ -7311,7 +7311,7 @@ namespace Legion {
         // We need to get the barrier result
         ValueBroadcast<IPBroadcast> pid_collective(this,
                           index_partition_allocator_shard, COLLECTIVE_LOC_7);
-        const IPBroadcast value = pid_collective;
+        const IPBroadcast value = pid_collective.get_value();
         pid = value.pid;
 #ifdef DEBUG_LEGION
         assert(pid.exists());
@@ -7321,7 +7321,7 @@ namespace Legion {
         {
           ValueBroadcast<LegionColor> color_collective(this,
                             index_partition_allocator_shard, COLLECTIVE_LOC_8);
-          partition_color = color_collective;
+          partition_color = color_collective.get_value();
 #ifdef DEBUG_LEGION
           assert(partition_color != INVALID_COLOR);
 #endif
@@ -7448,7 +7448,7 @@ namespace Legion {
         // We need to get the barrier result
         ValueBroadcast<IPBroadcast> pid_collective(this, 
                             index_partition_allocator_shard, COLLECTIVE_LOC_9);
-        const IPBroadcast value = pid_collective;
+        const IPBroadcast value = pid_collective.get_value();
         pid = value.pid;
 #ifdef DEBUG_LEGION
         assert(pid.exists());
@@ -7457,7 +7457,7 @@ namespace Legion {
         {
           ValueBroadcast<LegionColor> color_collective(this,
                             index_partition_allocator_shard, COLLECTIVE_LOC_10);
-          partition_color = color_collective;
+          partition_color = color_collective.get_value();
 #ifdef DEBUG_LEGION
           assert(partition_color != INVALID_COLOR);
 #endif
@@ -7584,7 +7584,7 @@ namespace Legion {
         // We need to get the barrier result
         ValueBroadcast<IPBroadcast> pid_collective(this,
                           index_partition_allocator_shard, COLLECTIVE_LOC_11);
-        const IPBroadcast value = pid_collective;
+        const IPBroadcast value = pid_collective.get_value();
         pid = value.pid;
 #ifdef DEBUG_LEGION
         assert(pid.exists());
@@ -7593,7 +7593,7 @@ namespace Legion {
         {
           ValueBroadcast<LegionColor> color_collective(this,
                             index_partition_allocator_shard, COLLECTIVE_LOC_12);
-          partition_color = color_collective;
+          partition_color = color_collective.get_value();
 #ifdef DEBUG_LEGION
           assert(partition_color != INVALID_COLOR);
 #endif
@@ -7717,7 +7717,7 @@ namespace Legion {
         // We need to get the barrier result
         ValueBroadcast<IPBroadcast> pid_collective(this,
                           index_partition_allocator_shard, COLLECTIVE_LOC_13);
-        const IPBroadcast value = pid_collective;
+        const IPBroadcast value = pid_collective.get_value();
         pid = value.pid;
 #ifdef DEBUG_LEGION
         assert(pid.exists());
@@ -7726,7 +7726,7 @@ namespace Legion {
         {
           ValueBroadcast<LegionColor> color_collective(this,
                             index_partition_allocator_shard, COLLECTIVE_LOC_14);
-          partition_color = color_collective;
+          partition_color = color_collective.get_value();
 #ifdef DEBUG_LEGION
           assert(partition_color != INVALID_COLOR);
 #endif
@@ -7805,7 +7805,7 @@ namespace Legion {
         // Get the color result from the owner node
         ValueBroadcast<LegionColor> color_collective(this,
                           index_partition_allocator_shard, COLLECTIVE_LOC_15);
-        partition_color = color_collective;
+        partition_color = color_collective.get_value();
 #ifdef DEBUG_LEGION
         assert(partition_color != INVALID_COLOR);
 #endif
@@ -7941,7 +7941,7 @@ namespace Legion {
         // We need to get the barrier result
         ValueBroadcast<IPBroadcast> pid_collective(this, 
                           index_partition_allocator_shard, COLLECTIVE_LOC_16);
-        const IPBroadcast value = pid_collective;
+        const IPBroadcast value = pid_collective.get_value();
         pid = value.pid;
 #ifdef DEBUG_LEGION
         assert(pid.exists());
@@ -7950,7 +7950,7 @@ namespace Legion {
         {
           ValueBroadcast<LegionColor> color_collective(this,
                             index_partition_allocator_shard, COLLECTIVE_LOC_17);
-          part_color = color_collective;
+          part_color = color_collective.get_value();
 #ifdef DEBUG_LEGION
           assert(part_color != INVALID_COLOR);
 #endif
@@ -8051,7 +8051,7 @@ namespace Legion {
         // We need to get the barrier result
         ValueBroadcast<IPBroadcast> pid_collective(this,
                           index_partition_allocator_shard, COLLECTIVE_LOC_18);
-        const IPBroadcast value = pid_collective;
+        const IPBroadcast value = pid_collective.get_value();
         pid = value.pid;
 #ifdef DEBUG_LEGION
         assert(pid.exists());
@@ -8060,7 +8060,7 @@ namespace Legion {
         {
           ValueBroadcast<LegionColor> color_collective(this,
                             index_partition_allocator_shard, COLLECTIVE_LOC_19);
-          part_color = color_collective;
+          part_color = color_collective.get_value();
 #ifdef DEBUG_LEGION
           assert(part_color != INVALID_COLOR);
 #endif
@@ -8188,7 +8188,7 @@ namespace Legion {
         // We need to get the barrier result
         ValueBroadcast<IPBroadcast> pid_collective(this, 
                           index_partition_allocator_shard, COLLECTIVE_LOC_20);
-        const IPBroadcast value = pid_collective;
+        const IPBroadcast value = pid_collective.get_value();
         pid = value.pid;
 #ifdef DEBUG_LEGION
         assert(pid.exists());
@@ -8197,7 +8197,7 @@ namespace Legion {
         {
           ValueBroadcast<LegionColor> color_collective(this, 
                             index_partition_allocator_shard, COLLECTIVE_LOC_21);
-          part_color = color_collective;
+          part_color = color_collective.get_value();
 #ifdef DEBUG_LEGION
           assert(part_color != INVALID_COLOR);
 #endif
@@ -8325,7 +8325,7 @@ namespace Legion {
         // We need to get the barrier result
         ValueBroadcast<IPBroadcast> pid_collective(this,
                           index_partition_allocator_shard, COLLECTIVE_LOC_22);
-        const IPBroadcast value = pid_collective;
+        const IPBroadcast value = pid_collective.get_value();
         pid = value.pid;
 #ifdef DEBUG_LEGION
         assert(pid.exists());
@@ -8334,7 +8334,7 @@ namespace Legion {
         {
           ValueBroadcast<LegionColor> color_collective(this,
                             index_partition_allocator_shard, COLLECTIVE_LOC_23);
-          part_color = color_collective;
+          part_color = color_collective.get_value();
 #ifdef DEBUG_LEGION
           assert(part_color != INVALID_COLOR);
 #endif
@@ -8470,7 +8470,7 @@ namespace Legion {
         // We need to get the barrier result
         ValueBroadcast<IPBroadcast> pid_collective(this,
                           index_partition_allocator_shard, COLLECTIVE_LOC_24);
-        const IPBroadcast value = pid_collective;
+        const IPBroadcast value = pid_collective.get_value();
         pid = value.pid;
 #ifdef DEBUG_LEGION
         assert(pid.exists());
@@ -8479,7 +8479,7 @@ namespace Legion {
         {
           ValueBroadcast<LegionColor> color_collective(this,
                             index_partition_allocator_shard, COLLECTIVE_LOC_25);
-          part_color = color_collective;
+          part_color = color_collective.get_value();
 #ifdef DEBUG_LEGION
           assert(part_color != INVALID_COLOR);
 #endif
@@ -8608,7 +8608,7 @@ namespace Legion {
         // We need to get the barrier result
         ValueBroadcast<IPBroadcast> pid_collective(this,
                           index_partition_allocator_shard, COLLECTIVE_LOC_26);
-        const IPBroadcast value = pid_collective;
+        const IPBroadcast value = pid_collective.get_value();
         pid = value.pid;
 #ifdef DEBUG_LEGION
         assert(pid.exists());
@@ -8617,7 +8617,7 @@ namespace Legion {
         {
           ValueBroadcast<LegionColor> color_collective(this,
                             index_partition_allocator_shard, COLLECTIVE_LOC_27);
-          part_color = color_collective;
+          part_color = color_collective.get_value();
 #ifdef DEBUG_LEGION
           assert(part_color != INVALID_COLOR);
 #endif
@@ -8748,17 +8748,17 @@ namespace Legion {
                             index_partition_allocator_shard, COLLECTIVE_LOC_28);
         ValueBroadcast<ApBarrier> bar_collective(this,
                             index_partition_allocator_shard, COLLECTIVE_LOC_29);
-        const IPBroadcast value = pid_collective;
+        const IPBroadcast value = pid_collective.get_value();
         pid = value.pid;
 #ifdef DEBUG_LEGION
         assert(pid.exists());
 #endif
-        ApBarrier partition_ready = bar_collective;
+        ApBarrier partition_ready = bar_collective.get_value();
         if (color_generated)
         {
           ValueBroadcast<LegionColor> color_collective(this,
                             index_partition_allocator_shard, COLLECTIVE_LOC_30);
-          part_color = color_collective;
+          part_color = color_collective.get_value();
 #ifdef DEBUG_LEGION
           assert(part_color != INVALID_COLOR);
 #endif
@@ -8936,7 +8936,7 @@ namespace Legion {
         // We need to get the barrier result
         ValueBroadcast<FSBroadcast> space_collective(this,
                             field_space_allocator_shard, COLLECTIVE_LOC_31);
-        const FSBroadcast value = space_collective;
+        const FSBroadcast value = space_collective.get_value();
         space = value.handle;
 #ifdef DEBUG_LEGION
         assert(space.exists());
@@ -9013,7 +9013,7 @@ namespace Legion {
         // We need to get the barrier result
         ValueBroadcast<FieldID> field_collective(this, 
                                   field_allocator_shard, COLLECTIVE_LOC_33);
-        fid = field_collective;
+        fid = field_collective.get_value();
         // No need to do the allocation since it was already done
       }
       register_field_creation(space, fid, local);
@@ -9099,7 +9099,7 @@ namespace Legion {
         // We need to get the barrier result
         ValueBroadcast<RegionTreeID> tree_collective(this,
                           logical_region_allocator_shard, COLLECTIVE_LOC_34);
-        handle.tree_id = tree_collective;
+        handle.tree_id = tree_collective.get_value();
 #ifdef DEBUG_LEGION
         assert(handle.exists());
 #endif
@@ -9781,7 +9781,7 @@ namespace Legion {
         return result;
       }
       else
-        return bar_collective;
+        return bar_collective.get_value();
     }
 
     //--------------------------------------------------------------------------

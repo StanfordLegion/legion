@@ -3186,7 +3186,8 @@ namespace Legion {
       if (repl_ctx->owner_shard->shard_id > 0)
       {
         complete_mapping();
-        RtEvent result_ready = timing_collective->get_done_event();
+        RtEvent result_ready = 
+          timing_collective->perform_collective_wait(false/*block*/);
         if (result_ready.exists() && !result_ready.has_triggered())
         {
           // Defer completion until the value is ready
@@ -3216,7 +3217,7 @@ namespace Legion {
       // Shard 0 will handle the timing operation
       if (repl_ctx->owner_shard->shard_id > 0)     
       {
-        long long value = *timing_collective;
+        long long value = timing_collective->get_value(false/*already waited*/);
         result.impl->set_result(&value, sizeof(value), false);
       }
       else

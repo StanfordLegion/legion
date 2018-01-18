@@ -254,7 +254,8 @@ namespace Legion {
         { assert(false); return *this; }
       inline void broadcast(const T &v) 
         { value = v; perform_collective_async(); }
-      inline operator T(void) { perform_collective_wait(); return value; }
+      inline T get_value(bool wait = true)
+        { if (wait) perform_collective_wait(); return value; }
     public:
       virtual void pack_collective(Serializer &rez) const 
         { rez.serialize(value); }

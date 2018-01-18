@@ -6468,7 +6468,7 @@ namespace Legion {
 #endif
         // No need to wait, we know this was a precondition for launching
         // the task to compute the disjointness
-        disjoint = *collective;
+        disjoint = collective->get_value();
       }
     }
 
