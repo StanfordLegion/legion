@@ -188,6 +188,8 @@ namespace Legion {
       LocalReferenceMutator& operator=(const LocalReferenceMutator &rhs);
     public:
       virtual void record_reference_mutation_effect(RtEvent event);
+    public:
+      RtEvent get_done_event(void);
     private:
       std::set<RtEvent> mutation_effects;
     };

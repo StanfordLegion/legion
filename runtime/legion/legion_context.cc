@@ -3655,8 +3655,8 @@ namespace Legion {
             args.future_map = result;
             args.result = launcher.predicate_false_future.impl;
             args.domain = launcher.launch_domain;
-            runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY, NULL,
-                                        Runtime::protect_event(ready_event));
+            runtime->issue_runtime_meta_task(args,LG_LATENCY_WORK_PRIORITY,NULL,
+                                           Runtime::protect_event(ready_event));
           }
           return FutureMap(result);
         }
@@ -4550,8 +4550,8 @@ namespace Legion {
                                             dependence_precondition);
         RtEvent next = runtime->issue_runtime_meta_task(args,
                                         currently_active_context ? 
-                                          LG_THROUGHPUT_PRIORITY :
-                                          LG_DEFERRED_THROUGHPUT_PRIORITY,
+                                          LG_THROUGHPUT_WORK_PRIORITY :
+                                          LG_THROUGHPUT_DEFERRED_PRIORITY,
                                         op, pre);
         dependence_precondition = next;
       }
@@ -4559,8 +4559,8 @@ namespace Legion {
       {
         RtEvent next = runtime->issue_runtime_meta_task(args,
                                         currently_active_context ? 
-                                          LG_THROUGHPUT_PRIORITY :
-                                          LG_DEFERRED_THROUGHPUT_PRIORITY,
+                                          LG_THROUGHPUT_WORK_PRIORITY :
+                                          LG_THROUGHPUT_DEFERRED_PRIORITY,
                                         op, dependence_precondition);
         dependence_precondition = next;
       }
@@ -4754,6 +4754,8 @@ namespace Legion {
 #endif
       }
 #ifdef LEGION_SPY
+      // Have to record this operation in case there is a fence later
+      ops_since_last_fence.push_back(op->get_unique_op_id());
       return current_fence_event;
 #else
       if (current_fence_event.exists())
@@ -4781,10 +4783,8 @@ namespace Legion {
     {
       std::map<Operation*,GenerationID> previous_operations;
 #ifdef LEGION_SPY
-      // Now see if we have any created regions
-      // Track separately for the two possible contexts
-      std::set<LogicalRegion> local_regions;
-      std::set<LogicalRegion> outermost_regions;
+      // Record dependences on all operations since the last fence
+      std::deque<UniqueID> all_previous_ops;
 #endif
       // Take the lock and iterate through our current pending
       // operations and find all the ones with a context index
@@ -4832,14 +4832,7 @@ namespace Legion {
             previous_operations.insert(*it);
         }
 #ifdef LEGION_SPY
-        for (unsigned idx = 0; idx < created_requirements.size(); idx++)
-        {
-          const LogicalRegion &handle = created_requirements[idx].region;
-          if (returnable_privileges[idx])
-            outermost_regions.insert(handle);
-          else
-            local_regions.insert(handle);
-        }
+        all_previous_ops = ops_since_last_fence;
 #endif
       }
 
@@ -4849,25 +4842,18 @@ namespace Legion {
         op->register_dependence(it->first, it->second);
 
 #ifdef LEGION_SPY
-      // Legion Spy still requires region tree analysis for verification
-      RegionTreeContext ctx = get_context();
-      // Do our internal regions first
-      for (unsigned idx = 0; idx < regions.size(); idx++)
-        runtime->forest->perform_fence_analysis(ctx, op, 
-                                        regions[idx].region, true/*dominate*/);
-      if (!local_regions.empty())
+      // Record a dependence on the previous fence
+      if (current_fence != NULL)
+        LegionSpy::log_mapping_dependence(get_unique_id(), current_fence_uid,
+            0/*index*/, op->get_unique_op_id(), 0/*index*/, TRUE_DEPENDENCE);
+      for (std::deque<UniqueID>::const_iterator it = 
+            all_previous_ops.begin(); it != all_previous_ops.end(); it++)
       {
-        for (std::set<LogicalRegion>::const_iterator it = 
-              local_regions.begin(); it != local_regions.end(); it++)
-          runtime->forest->perform_fence_analysis(ctx,op,*it,true/*dominate*/);
-      }
-      if (!outermost_regions.empty())
-      {
-        // Need outermost context for these regions
-        ctx = find_outermost_local_context()->get_context();
-        for (std::set<LogicalRegion>::const_iterator it = 
-              outermost_regions.begin(); it != outermost_regions.end(); it++)
-          runtime->forest->perform_fence_analysis(ctx,op,*it,true/*dominate*/);
+        // Skip ourselves if we are here
+        if ((*it) == op->get_unique_op_id())
+          continue;
+        LegionSpy::log_mapping_dependence(get_unique_id(), *it, 0/*index*/,
+            op->get_unique_op_id(), 0/*index*/, TRUE_DEPENDENCE); 
       }
 #endif
     }
@@ -4888,6 +4874,7 @@ namespace Legion {
         current_fence_event = current_fence->get_completion_event();
 #ifdef LEGION_SPY
       current_fence_uid = op->get_unique_op_id();
+      ops_since_last_fence.clear();
 #endif
     }
 
@@ -5073,7 +5060,7 @@ namespace Legion {
         // We know that the issuing is done in order because we block after
         // we launch this meta-task which blocks the application task
         RtEvent wait_on = runtime->issue_runtime_meta_task(args,
-                                      LG_LATENCY_PRIORITY, owner_task);
+                                      LG_LATENCY_WORK_PRIORITY, owner_task);
         wait_on.lg_wait();
       }
     }
@@ -5272,7 +5259,7 @@ namespace Legion {
           PostDecrementArgs post_decrement_args;
           post_decrement_args.parent_ctx = this;
           RtEvent done = runtime->issue_runtime_meta_task(post_decrement_args,
-              LG_LATENCY_PRIORITY, NULL, wait_on); 
+              LG_LATENCY_WORK_PRIORITY, NULL, wait_on); 
           Runtime::trigger_event(to_trigger, done);
           return to_trigger;
         }
@@ -5846,7 +5833,7 @@ namespace Legion {
       args.target = target;
       args.to_trigger = to_trigger;
       args.source = source;
-      runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY, 
+      runtime->issue_runtime_meta_task(args, LG_LATENCY_DEFERRED_PRIORITY,
                                        context->get_owner_task());
     }
 
@@ -6058,10 +6045,10 @@ namespace Legion {
         }
         else
           post_end_args.result = const_cast<void*>(res);
-        // Give these high priority too since they are cleaning up 
+        // Give these slightly higher priority too since they are cleaning up 
         // and will allow other tasks to run
         runtime->issue_runtime_meta_task(post_end_args,
-           LG_LATENCY_PRIORITY, owner_task, last_registration);
+           LG_THROUGHPUT_DEFERRED_PRIORITY, owner_task, last_registration);
       }
       else
         post_end_task(res, res_size, owned);
@@ -7224,7 +7211,7 @@ namespace Legion {
       args.source = source;
       args.to_trigger = to_trigger;
       args.runtime = runtime;
-      runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY);
+      runtime->issue_runtime_meta_task(args, LG_LATENCY_DEFERRED_PRIORITY);
     }
 
     //--------------------------------------------------------------------------
@@ -7301,7 +7288,7 @@ namespace Legion {
         args.handle = handle;
         args.runtime = runtime;
         RtEvent done = 
-          runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY);
+          runtime->issue_runtime_meta_task(args, LG_LATENCY_DEFERRED_PRIORITY);
         Runtime::trigger_event(to_trigger, done);
       }
       else
@@ -8453,10 +8440,10 @@ namespace Legion {
         }
         else
           post_end_args.result = const_cast<void*>(res);
-        // Give these high priority too since they are cleaning up 
-        // and will allow other tasks to run
-        runtime->issue_runtime_meta_task(post_end_args,
-                                         LG_LATENCY_PRIORITY, owner_task);
+        // Give these slightly higher priority too since they are 
+        // cleaning up and will allow other tasks to run
+        runtime->issue_runtime_meta_task(post_end_args, 
+            LG_THROUGHPUT_DEFERRED_PRIORITY, owner_task);
       }
       else
         post_end_task(res, res_size, owned);

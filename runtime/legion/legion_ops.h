@@ -370,7 +370,7 @@ namespace Legion {
       //
       // Add this to the list of ready operations
       void enqueue_ready_operation(RtEvent wait_on = RtEvent::NO_RT_EVENT,
-                            LgPriority priority = LG_THROUGHPUT_PRIORITY);
+                            LgPriority priority = LG_THROUGHPUT_WORK_PRIORITY);
       // Indicate that we are done mapping this operation
       void complete_mapping(RtEvent wait_on = RtEvent::NO_RT_EVENT); 
       // Indicate when this operation has finished executing

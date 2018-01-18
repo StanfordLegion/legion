@@ -2614,16 +2614,6 @@ class LogicalRegion(object):
             self.logical_state[field] = LogicalState(self, field)
         self.logical_state[field].register_logical_user(op, req)
 
-    def perform_logical_fence(self, op, field, checks):
-        if field not in self.logical_state:
-            self.logical_state[field] = LogicalState(self, field)
-        if not self.logical_state[field].perform_logical_fence(op, checks):
-            return False
-        for child in self.children.itervalues():
-            if not child.perform_logical_fence(op, field, checks):
-                return False
-        return True
-
     def perform_logical_deletion(self, depth, path, op, req, field, prev, checks):
         assert self is path[depth]
         if field not in self.logical_state:
@@ -2951,16 +2941,6 @@ class LogicalPartition(object):
             self.logical_state[field] = LogicalState(self, field)
         self.logical_state[field].register_logical_user(op, req)
 
-    def perform_logical_fence(self, op, field, checks):
-        if field not in self.logical_state:
-            self.logical_state[field] = LogicalState(self, field)
-        if not self.logical_state[field].perform_logical_fence(op, checks):
-            return False
-        for child in self.children.itervalues():
-            if not child.perform_logical_fence(op, field, checks):
-                return False
-        return True
-
     def perform_logical_deletion(self, depth, path, op, req, field, prev, checks):
         assert self is path[depth]
         if field not in self.logical_state:
@@ -3134,43 +3114,6 @@ class LogicalState(object):
 
     def register_logical_user(self, op, req):
         self.current_epoch_users.append((op,req))
-
-    def perform_logical_fence(self, op, perform_checks):
-        if perform_checks: 
-            for prev_op,prev_req in self.current_epoch_users:
-                found = False
-                if op.incoming:
-                    for dep in op.incoming:
-                        if dep.op1 is not prev_op:
-                            # If the prev op is a close op see if we have a dependence 
-                            # on its creator
-                            # We need this transitivity to deal with tracing properly
-                            if prev_op.is_internal() and prev_op.creator is dep.op1 and \
-                                prev_op.internal_idx == dep.idx1:
-                                found = True
-                                break
-                            continue
-                        if dep.idx1 is not prev_req.index:
-                            continue
-                        found = True
-                        break
-                if not found:
-                    found = op.has_transitive_mapping_dependence(prev_op)
-                if not found:
-                    print(("ERROR: missing logical fence dependence between %s "+
-                          "(UID %s) and %s (UID %s)") % (prev_op, prev_op.uid, op, op.uid))
-                    if self.node.state.assert_on_error:
-                        assert False
-                    return False
-        else:
-            for prev_op,prev_req in self.current_epoch_users:
-                dep = MappingDependence(prev_op, op, 0, 0, TRUE_DEPENDENCE)
-                prev_op.add_outgoing(dep)
-                op.add_incoming(dep)
-        # Clear out the user lists
-        self.current_epoch_users = list()
-        self.previous_epoch_users = list()
-        return True
 
     def perform_logical_deletion(self, op, req, next_child, 
                                  previous_deps, perform_checks, force_close):
@@ -5730,10 +5673,38 @@ class Operation(object):
         return True
 
     def analyze_logical_fence(self, perform_checks):
-        for index,req in self.context.op.reqs.iteritems():
-            for field in req.fields:
-                if not req.logical_node.perform_logical_fence(self, field, perform_checks):
-                    return False
+        # Find all the operations since the previous fence and then make sure
+        # we either depend on them directly or we have a transitive dependence
+        start_index = 0 if self.context.current_fence is None else \
+            self.context.operations.index(self.context.current_fence)
+        stop_index = self.context.operations.index(self)
+        for index in range(start_index, stop_index):
+            prev_op = self.context.operations[index]
+            if perform_checks:
+                found = False
+                if self.incoming:
+                    for dep in self.incoming:
+                        if dep.op1 is not prev_op:
+                            # If the prev op is a close op see if we have a dependence 
+                            # on its creator
+                            # We need this transitivity to deal with tracing properly
+                            if prev_op.is_internal() and prev_op.creator is dep.op1 and \
+                                prev_op.internal_idx == dep.idx1:
+                                found = True
+                                break
+                            continue
+                        found = True
+                        break
+                if not found and not self.has_transitive_mapping_dependence(prev_op):
+                    print(("ERROR: missing logical fence dependence between %s "+
+                          "(UID %s) and %s (UID %s)") % (prev_op, prev_op.uid, self, self.uid))
+                    if self.state.assert_on_error:
+                        assert False
+                    return False 
+            else:
+                dep = MappingDependence(prev_op, self, 0, 0, TRUE_DEPENDENCE)
+                prev_op.add_outgoing(dep)
+                self.add_incoming(prev_op)
         return True
 
     def analyze_logical_deletion(self, index, perform_checks):

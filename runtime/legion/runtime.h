@@ -624,7 +624,8 @@ namespace Legion {
       void process_advertisement(Processor advertiser, MapperID mid);
     public:
       void add_to_ready_queue(TaskOp *op);
-      void add_to_local_ready_queue(Operation *op, LgPriority priority);
+      void add_to_local_ready_queue(Operation *op, LgPriority priority,
+                                    RtEvent wait_on);
     public:
       inline void find_visible_memories(std::set<Memory> &visible) const
         { visible = visible_memories; }
@@ -2415,7 +2416,8 @@ namespace Legion {
       void add_to_dependence_queue(TaskContext *ctx, Processor p,Operation *op);
       void add_to_ready_queue(Processor p, TaskOp *task_op, 
                               RtEvent wait_on = RtEvent::NO_RT_EVENT);
-      void add_to_local_queue(Processor p, Operation *op, LgPriority priority);
+      void add_to_local_queue(Processor p, Operation *op, LgPriority priority,
+                              RtEvent wait_on = RtEvent::NO_RT_EVENT);
     public:
       inline Processor find_utility_group(void) { return utility_group; }
       Processor find_processor_group(const std::vector<Processor> &procs);

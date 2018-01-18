@@ -142,6 +142,10 @@ ast.disjointness_kind:leaf("Aliased"):set_memoize():set_print_custom("aliased")
 ast.disjointness_kind:leaf("Disjoint"):set_memoize():set_print_custom(
   "disjoint")
 
+ast:inner("fence_kind")
+ast.fence_kind:leaf("Execution"):set_memoize():set_print_custom("__execution")
+ast.fence_kind:leaf("Mapping"):set_memoize():set_print_custom("__mapping")
+
 -- Constraints
 
 ast:inner("constraint")
@@ -259,6 +263,7 @@ ast.unspecialized.stat:leaf("Reduce", {"op", "lhs", "rhs"})
 ast.unspecialized.stat:leaf("Expr", {"expr"})
 ast.unspecialized.stat:leaf("Escape", {"expr"})
 ast.unspecialized.stat:leaf("RawDelete", {"value"})
+ast.unspecialized.stat:leaf("Fence", {"kind", "blocking"})
 ast.unspecialized.stat:leaf("ParallelizeWith", {"hints", "block"})
 
 ast.unspecialized:inner("top", {"annotations"})
@@ -377,6 +382,7 @@ ast.specialized.stat:leaf("Assignment", {"lhs", "rhs"})
 ast.specialized.stat:leaf("Reduce", {"op", "lhs", "rhs"})
 ast.specialized.stat:leaf("Expr", {"expr"})
 ast.specialized.stat:leaf("RawDelete", {"value"})
+ast.specialized.stat:leaf("Fence", {"kind", "blocking"})
 ast.specialized.stat:leaf("ParallelizeWith", {"hints", "block"})
 
 ast.specialized:inner("top", {"annotations"})
@@ -494,6 +500,7 @@ ast.typed.stat:leaf("Assignment", {"lhs", "rhs"})
 ast.typed.stat:leaf("Reduce", {"op", "lhs", "rhs"})
 ast.typed.stat:leaf("Expr", {"expr"})
 ast.typed.stat:leaf("RawDelete", {"value"})
+ast.typed.stat:leaf("Fence", {"kind", "blocking"})
 ast.typed.stat:leaf("ParallelizeWith", {"hints", "block"})
 ast.typed.stat:leaf("BeginTrace", {"trace_id"})
 ast.typed.stat:leaf("EndTrace", {"trace_id"})

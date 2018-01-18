@@ -3779,8 +3779,9 @@ namespace Legion {
     {
       ContinuationArgs args;
       args.continuation = this;
+      // Give this resource priority in case we are holding the mapper lock
       RtEvent wait_on = runtime->issue_runtime_meta_task(args,
-                       LG_LATENCY_PRIORITY, op, precondition);
+                         LG_RESOURCE_PRIORITY, op, precondition);
       wait_on.lg_wait();
     }
 
