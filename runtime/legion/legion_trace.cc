@@ -997,6 +997,10 @@ namespace Legion {
       // This also registers that we have dependences on all operations
       // in the trace.
       local_trace->end_trace_execution(this);
+#ifdef LEGION_SPY
+      // For Legion Spy we still have to run through the full fence analysis
+      parent_ctx->perform_fence_analysis(this);
+#endif
       // Now update the parent context with this fence before we can complete
       // the dependence analysis and possibly be deactivated
       parent_ctx->update_current_fence(this);
