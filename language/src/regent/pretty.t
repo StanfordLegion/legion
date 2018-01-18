@@ -1120,6 +1120,19 @@ function pretty.stat_raw_delete(cx, node)
   return text.Lines { lines = result }
 end
 
+function pretty.stat_fence(cx, node)
+  local args = terralib.newlist({tostring(node.kind)})
+  if node.blocking then args:insert("__block") end
+
+  local result = terralib.newlist()
+  result:insert(pretty.annotations(cx, node.annotations))
+  result:insert(join({
+    "__fence(",
+    commas(args),
+    ")"}))
+  return text.Lines { lines = result }
+end
+
 function pretty.stat_parallelize_with(cx, node)
   local result = terralib.newlist()
   result:insert(pretty.annotations(cx, node.annotations))
@@ -1200,6 +1213,9 @@ function pretty.stat(cx, node)
 
   elseif node:is(ast.typed.stat.RawDelete) then
     return pretty.stat_raw_delete(cx, node)
+
+  elseif node:is(ast.typed.stat.Fence) then
+    return pretty.stat_fence(cx, node)
 
   elseif node:is(ast.typed.stat.ParallelizeWith) then
     return pretty.stat_parallelize_with(cx, node)
