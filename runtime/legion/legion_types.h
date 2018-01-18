@@ -580,28 +580,41 @@ namespace Legion {
       "handle_task_result",                         \
     }
 
-    // Methodology for assigning priorities to meta-tasks
-    // The lowest priority is for the heavy lifting meta
-    // tasks, so they go through the queue at low priority.
-    // The deferred-throughput priority is for tasks that
-    // have already gone through the queue once with 
-    // throughput priority, but had to be deferred for
-    // some reason and therefore shouldn't get stuck at
-    // the back of the throughput queue again. Latency 
-    // priority is for very small tasks which take a 
-    // minimal amount of time to perform and therefore 
-    // shouldn't get stuck behind the heavy meta-tasks. 
-    // Resource priority means that this task holds a 
-    // Realm resource (e.g. reservation) and therefore 
-    // shouldn't be stuck behind anything.
+    // Methodology for assigning priorities to meta-tasks:
+    // Minimum and low priority are for things like profiling
+    // that we don't want to interfere with normal execution.
+    // Resource priority is highest and reserved for tasks that
+    // have been granted resources like reservations. The rest
+    // of the priorities are classified as either 'throughput'
+    // or 'latency' sensitive. Under each of these two major
+    // categories there are four sub-priorities:
+    //  - work: general work to be done
+    //  - deferred: work that was already scheduled but 
+    //              for which a continuation had to be 
+    //              made so we don't want to wait behind
+    //              work that hasn't started yet
+    //  - messsage: a message from a remote node that we
+    //              should handle sooner than our own
+    //              work since work on the other node is
+    //              blocked waiting on our response
+    //  - response: a response message from a remote node
+    //              that we should handle to unblock work
+    //              on our own node
     enum LgPriority {
       LG_MIN_PRIORITY = INT_MIN,
       LG_LOW_PRIORITY = -1,
-      LG_THROUGHPUT_PRIORITY = 0,
-      LG_DEFERRED_THROUGHPUT_PRIORITY = 1,
-      LG_LATENCY_PRIORITY = 2,
-      LG_RESPONSE_PRIORITY = 3,
-      LG_RESOURCE_PRIORITY = 4,
+      // Throughput priorities
+      LG_THROUGHPUT_WORK_PRIORITY = 0,
+      LG_THROUGHPUT_DEFERRED_PRIORITY = 1,
+      LG_THROUGHPUT_MESSAGE_PRIORITY = 2,
+      LG_THROUGHPUT_RESPONSE_PRIORITY = 3,
+      // Latency priorities
+      LG_LATENCY_WORK_PRIORITY = 4,
+      LG_LATENCY_DEFERRED_PRIORITY = 5,
+      LG_LATENCY_MESSAGE_PRIORITY = 6,
+      LG_LATENCY_RESPONSE_PRIORITY = 7,
+      // Resource priorities
+      LG_RESOURCE_PRIORITY = 8,
     };
 
     enum VirtualChannelKind {

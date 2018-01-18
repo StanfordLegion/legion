@@ -1642,6 +1642,15 @@ function specialize.stat_raw_delete(cx, node)
   }
 end
 
+function specialize.stat_fence(cx, node)
+  return ast.specialized.stat.Fence {
+    kind = node.kind,
+    blocking = node.blocking,
+    annotations = node.annotations,
+    span = node.span,
+  }
+end
+
 function specialize.stat_parallelize_with(cx, node)
   local hints = data.flatmap(function(expr)
     return specialize.expr(cx, expr, true) end, node.hints)
@@ -1721,6 +1730,9 @@ function specialize.stat(cx, node)
 
   elseif node:is(ast.unspecialized.stat.RawDelete) then
     return specialize.stat_raw_delete(cx, node)
+
+  elseif node:is(ast.unspecialized.stat.Fence) then
+    return specialize.stat_fence(cx, node)
 
   elseif node:is(ast.unspecialized.stat.ParallelizeWith) then
     return specialize.stat_parallelize_with(cx, node)

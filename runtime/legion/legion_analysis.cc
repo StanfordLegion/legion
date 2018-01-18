@@ -301,11 +301,20 @@ namespace Legion {
           valid_fields = mask;
           if (REF_KIND != LAST_SOURCE_REF)
           {
-            VersioningSetRefArgs args;
-            args.state = state;
-            args.kind = REF_KIND;
-            return runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY,
-                                                    NULL, pre);
+            if (pre.exists() && !pre.has_triggered())
+            {
+              VersioningSetRefArgs args;
+              args.state = state;
+              args.kind = REF_KIND;
+              return runtime->issue_runtime_meta_task(args, 
+                      LG_LATENCY_WORK_PRIORITY, NULL, pre);
+            }
+            else
+            {
+              LocalReferenceMutator mutator;
+              state->add_base_valid_ref(REF_KIND, &mutator);
+              return mutator.get_done_event();
+            }
           }
         }
         else if (versions.single_version == state)
@@ -324,11 +333,20 @@ namespace Legion {
           valid_fields |= mask;
           if (REF_KIND != LAST_SOURCE_REF)
           {
-            VersioningSetRefArgs args;
-            args.state = state;
-            args.kind = REF_KIND;
-            return runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY,
-                                                    NULL, pre);
+            if (pre.exists() && !pre.has_triggered())
+            {
+              VersioningSetRefArgs args;
+              args.state = state;
+              args.kind = REF_KIND;
+              return runtime->issue_runtime_meta_task(args, 
+                      LG_LATENCY_WORK_PRIORITY, NULL, pre);
+            }
+            else
+            {
+              LocalReferenceMutator mutator;
+              state->add_base_valid_ref(REF_KIND, &mutator);
+              return mutator.get_done_event();
+            }
           }
         }
       }
@@ -344,11 +362,20 @@ namespace Legion {
           (*versions.multi_versions)[state] = mask;
           if (REF_KIND != LAST_SOURCE_REF)
           {
-            VersioningSetRefArgs args;
-            args.state = state;
-            args.kind = REF_KIND;
-            return runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY,
-                                                    NULL, pre);
+            if (pre.exists() && !pre.has_triggered())
+            {
+              VersioningSetRefArgs args;
+              args.state = state;
+              args.kind = REF_KIND;
+              return runtime->issue_runtime_meta_task(args, 
+                      LG_LATENCY_WORK_PRIORITY, NULL, pre);
+            }
+            else
+            {
+              LocalReferenceMutator mutator;
+              state->add_base_valid_ref(REF_KIND, &mutator);
+              return mutator.get_done_event();
+            }
           }
         }
         else
@@ -1368,8 +1395,8 @@ namespace Legion {
         {
           DeferRestrictedManagerArgs args;
           args.manager = manager;
-          ready = runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY,
-                                                   NULL, ready);
+          ready = runtime->issue_runtime_meta_task(args, 
+              LG_LATENCY_DEFERRED_PRIORITY, NULL, ready);
           ready_events.insert(ready);
         }
         else
@@ -4954,7 +4981,7 @@ namespace Legion {
         args.proxy_this = this;
         args.to_reclaim = advanced;
         RtEvent done = 
-          runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY,
+          runtime->issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY,
                                            NULL, advanced);
         // Add this event to the set of applied preconditions
         // in order to avoid cleanup races
@@ -5400,8 +5427,8 @@ namespace Legion {
                 args.target = it->first;
                 args.capture_mask = new FieldMask(overlap);
                 RtEvent done = 
-                  runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY,
-                                                   NULL, precondition);
+                  runtime->issue_runtime_meta_task(args, 
+                      LG_LATENCY_WORK_PRIORITY, NULL, precondition);
                 applied_events.insert(done);
                 state_overlap -= overlap;
                 if (!state_overlap)
@@ -7360,7 +7387,7 @@ namespace Legion {
       // There is imprecision in our tracking of which nodes have valid
       // meta-data for different fields (i.e. we don't track it at all
       // currently), therefore we may get requests for updates that we
-      runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY,
+      runtime->issue_runtime_meta_task(args, LG_LATENCY_DEFERRED_PRIORITY,
                                        NULL/*op*/, precondition);
     }
 
@@ -7852,7 +7879,7 @@ namespace Legion {
               args.context = context;
               std::pair<RtEvent,FieldMask> &entry = pending_instances[manager];
               entry.first = runtime->issue_runtime_meta_task(args,
-                                             LG_LATENCY_PRIORITY, NULL, ready);
+                                       LG_LATENCY_WORK_PRIORITY, NULL, ready);
               derez.deserialize(entry.second);
               preconditions.insert(entry.first);
             }
@@ -7997,7 +8024,7 @@ namespace Legion {
           }
           args.view = it->first;
           preconditions.insert(
-              runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY,
+              runtime->issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY,
                                                NULL, it->second));
         }
       }
@@ -8044,7 +8071,7 @@ namespace Legion {
       RemoveVersionStateRefArgs args;
       args.proxy_this = this;
       args.ref_kind = ref_kind;
-      runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY,
+      runtime->issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY,
                                        NULL, done_event);
     }
 

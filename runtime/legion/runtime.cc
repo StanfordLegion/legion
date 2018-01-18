@@ -703,7 +703,7 @@ namespace Legion {
         args.dc = dc;
         args.count = count;
         // Spawn the task dependent on the future being ready
-        runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY, NULL, 
+        runtime->issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY, NULL,
                                          Runtime::protect_event(ready_event));
       }
       else // If we've already triggered, then we can do the arrival now
@@ -2721,7 +2721,7 @@ namespace Legion {
     {
       SchedulerArgs sched_args;
       sched_args.proc = local_proc;
-      runtime->issue_runtime_meta_task(sched_args, LG_LATENCY_PRIORITY);
+      runtime->issue_runtime_meta_task(sched_args, LG_LATENCY_WORK_PRIORITY);
     } 
 
     //--------------------------------------------------------------------------
@@ -3050,7 +3050,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ProcessorManager::add_to_local_ready_queue(Operation *op, 
-                                                    LgPriority priority) 
+                                           LgPriority priority, RtEvent wait_on) 
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -3058,7 +3058,7 @@ namespace Legion {
 #endif
       TriggerOpArgs args;
       args.op = op;
-      runtime->issue_runtime_meta_task(args, priority, op); 
+      runtime->issue_runtime_meta_task(args, priority, op, wait_on); 
     }
 
     //--------------------------------------------------------------------------
@@ -3153,7 +3153,7 @@ namespace Legion {
           args.proxy_this = this;
           args.map_id = map_id;
           args.deferral_event = wait_on;
-          runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY,
+          runtime->issue_runtime_meta_task(args, LG_LATENCY_DEFERRED_PRIORITY,
                                            NULL, wait_on);
           // We can continue because there is nothing left to do for this mapper
           continue;
@@ -3266,7 +3266,7 @@ namespace Legion {
           task->deactivate_outstanding_task();
           trigger_args.op = task;
           runtime->issue_runtime_meta_task(trigger_args,
-                                           LG_THROUGHPUT_PRIORITY, task);
+                                           LG_THROUGHPUT_WORK_PRIORITY, task);
         }
       }
 
@@ -5776,13 +5776,13 @@ namespace Legion {
         Realm::ProfilingRequestSet requests;
         LegionProfiler::add_message_request(requests, target);
         last_message_event = RtEvent(target.spawn(LG_TASK_ID, sending_buffer, 
-            sending_index, requests, last_message_event, 
-            response ? LG_RESPONSE_PRIORITY : LG_LATENCY_PRIORITY));
+            sending_index, requests, last_message_event, response ? 
+              LG_LATENCY_RESPONSE_PRIORITY : LG_LATENCY_MESSAGE_PRIORITY));
       }
       else
         last_message_event = RtEvent(target.spawn(LG_TASK_ID, sending_buffer, 
-              sending_index, last_message_event, 
-              response ? LG_RESPONSE_PRIORITY : LG_LATENCY_PRIORITY));
+              sending_index, last_message_event, response ? 
+                LG_LATENCY_RESPONSE_PRIORITY : LG_LATENCY_MESSAGE_PRIORITY));
       // Reset the state of the buffer
       sending_index = base_size + sizeof(header) + sizeof(unsigned);
       if (partial)
@@ -7087,7 +7087,7 @@ namespace Legion {
         it++;
         bool done = (it == collections.end());
         RtEvent e = runtime->issue_runtime_meta_task(args,
-                                         LG_THROUGHPUT_PRIORITY, NULL,
+                                         LG_THROUGHPUT_WORK_PRIORITY, NULL,
                                          precondition);
         events.insert(e);
         if (done)
@@ -7723,7 +7723,7 @@ namespace Legion {
           args.proxy_this = this;
           args.tag = tag;
           args.source = target;
-          runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY, 
+          runtime->issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY, 
                                            NULL/*op*/, precondition);
         }
       }
@@ -9805,7 +9805,7 @@ namespace Legion {
       TopFinishArgs args;
       args.ctx = top_context;
       ApEvent pre = top_task->get_task_completion();
-      issue_runtime_meta_task(args, LG_LATENCY_PRIORITY, NULL,
+      issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY, NULL,
                               Runtime::protect_event(pre));
       // Put the task in the ready queue
       add_to_ready_queue(target, top_task);
@@ -9843,7 +9843,7 @@ namespace Legion {
       args.event = result;
       args.ctx = map_context;
       ApEvent pre = f.impl->get_ready_event();
-      ApEvent post(issue_runtime_meta_task(args, LG_LATENCY_PRIORITY, NULL,
+      ApEvent post(issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY, NULL,
                                            Runtime::protect_event(pre)));
       // Chain the events properly
       Runtime::trigger_event(result, post);
@@ -11796,7 +11796,8 @@ namespace Legion {
         args.tunable_index = ctx->get_tunable_index();
       args.ctx = ctx;
       args.result = result;
-      issue_runtime_meta_task(args, LG_LATENCY_PRIORITY, ctx->get_owner_task());
+      issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY, 
+                              ctx->get_owner_task());
       ctx->end_runtime_call();
       return result_future;
     }
@@ -15281,7 +15282,7 @@ namespace Legion {
         DeferredEnqueueArgs args;
         args.manager = proc_managers[p];
         args.task = op;
-        issue_runtime_meta_task(args, LG_LATENCY_PRIORITY, op, wait_on);
+        issue_runtime_meta_task(args, LG_LATENCY_DEFERRED_PRIORITY, op,wait_on);
       }
       else
         proc_managers[p]->add_to_ready_queue(op);
@@ -15289,14 +15290,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void Runtime::add_to_local_queue(Processor p, Operation *op, 
-                                     LgPriority priority)
+                                     LgPriority priority, RtEvent wait_on)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(p.kind() != Processor::UTIL_PROC);
       assert(proc_managers.find(p) != proc_managers.end());
 #endif
-      proc_managers[p]->add_to_local_ready_queue(op, priority);
+      proc_managers[p]->add_to_local_ready_queue(op, priority, wait_on);
     }
 
     //--------------------------------------------------------------------------
@@ -15445,7 +15446,7 @@ namespace Legion {
         DeferredRecycleArgs deferred_recycle_args;
         deferred_recycle_args.did = did;
         return issue_runtime_meta_task(deferred_recycle_args, 
-                LG_THROUGHPUT_PRIORITY, NULL, recycle_event);
+                LG_THROUGHPUT_WORK_PRIORITY, NULL, recycle_event);
       }
       else
       {

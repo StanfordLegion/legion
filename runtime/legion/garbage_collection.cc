@@ -65,6 +65,18 @@ namespace Legion {
       mutation_effects.insert(event);
     }
 
+    //--------------------------------------------------------------------------
+    RtEvent LocalReferenceMutator::get_done_event(void)
+    //--------------------------------------------------------------------------
+    {
+      if (mutation_effects.empty())
+        return RtEvent::NO_RT_EVENT;
+      RtEvent result = Runtime::merge_events(mutation_effects);
+      // Can clear this since the user caller takes responsibility for waiting
+      mutation_effects.clear();
+      return result;
+    }
+
     /////////////////////////////////////////////////////////////
     // WrapperReferenceMutator 
     /////////////////////////////////////////////////////////////

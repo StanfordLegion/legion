@@ -123,7 +123,9 @@ local function analyze_leaf_node(cx)
     -- Statements:
     elseif node:is(ast.typed.stat.MustEpoch) or
       node:is(ast.typed.stat.IndexLaunchNum) or
-      node:is(ast.typed.stat.IndexLaunchList)
+      node:is(ast.typed.stat.IndexLaunchList) or
+      node:is(ast.typed.stat.RawDelete) or
+      node:is(ast.typed.stat.Fence)
     then
       return false
 
@@ -140,8 +142,7 @@ local function analyze_leaf_node(cx)
       node:is(ast.typed.stat.Break) or
       node:is(ast.typed.stat.Assignment) or
       node:is(ast.typed.stat.Reduce) or
-      node:is(ast.typed.stat.Expr) or
-      node:is(ast.typed.stat.RawDelete)
+      node:is(ast.typed.stat.Expr)
     then
       return true
 
@@ -151,7 +152,8 @@ local function analyze_leaf_node(cx)
       node:is(ast.location) or
       node:is(ast.annotation) or
       node:is(ast.condition_kind) or
-      node:is(ast.disjointness_kind)
+      node:is(ast.disjointness_kind) or
+      node:is(ast.fence_kind)
     then
       return true
 
@@ -261,7 +263,8 @@ local function analyze_inner_node(cx)
       node:is(ast.typed.stat.Assignment) or
       node:is(ast.typed.stat.Reduce) or
       node:is(ast.typed.stat.Expr) or
-      node:is(ast.typed.stat.RawDelete)
+      node:is(ast.typed.stat.RawDelete) or
+      node:is(ast.typed.stat.Fence)
     then
       return true
 
@@ -271,7 +274,8 @@ local function analyze_inner_node(cx)
       node:is(ast.location) or
       node:is(ast.annotation) or
       node:is(ast.condition_kind) or
-      node:is(ast.disjointness_kind)
+      node:is(ast.disjointness_kind) or
+      node:is(ast.fence_kind)
     then
       return true
 

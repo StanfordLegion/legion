@@ -3118,7 +3118,7 @@ namespace Legion {
           // Have to static cast this since it might not be ready
           args.parent = static_cast<MaterializedView*>(par_view);
           args.context_uid = context_uid;
-          runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY,
+          runtime->issue_runtime_meta_task(args, LG_LATENCY_DEFERRED_PRIORITY,
              NULL/*op*/, Runtime::merge_events(par_ready, man_ready));
           return;
         }
@@ -5613,7 +5613,7 @@ namespace Legion {
         RtEvent wait_on = Runtime::merge_events(ready_events);
         DeferCompositeViewRegistrationArgs args;
         args.view = view;
-        runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY, 
+        runtime->issue_runtime_meta_task(args, LG_LATENCY_DEFERRED_PRIORITY,
                                          NULL/*op*/, wait_on);
         // Not ready to perform registration yet
         return;
@@ -5928,7 +5928,7 @@ namespace Legion {
       args.dc = dc;
       args.did = did;
       return context->runtime->issue_runtime_meta_task(args, 
-          LG_LATENCY_PRIORITY, NULL/*op*/, precondition);
+          LG_LATENCY_DEFERRED_PRIORITY, NULL/*op*/, precondition);
     }
 
     //--------------------------------------------------------------------------
@@ -6080,7 +6080,7 @@ namespace Legion {
           args.capture_event = capture_event;
           Runtime *runtime = logical_node->context->runtime;
           RtEvent precondition = 
-            runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY,
+            runtime->issue_runtime_meta_task(args, LG_LATENCY_DEFERRED_PRIORITY,
                                              NULL/*op*/, capture_precondition);
           preconditions.insert(precondition);
         }
@@ -6260,7 +6260,7 @@ namespace Legion {
           args.state = state;
           args.owner_did = owner_did;
           RtEvent precondition = 
-            runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY,
+            runtime->issue_runtime_meta_task(args, LG_LATENCY_DEFERRED_PRIORITY,
                                              NULL/*op*/, ready);
           preconditions.insert(precondition);
         }
@@ -7114,7 +7114,7 @@ namespace Legion {
       args.dc = dc;
       args.did = did;
       return context->runtime->issue_runtime_meta_task(args,
-          LG_LATENCY_PRIORITY, NULL/*op*/, precondition);
+          LG_LATENCY_DEFERRED_PRIORITY, NULL/*op*/, precondition);
     }
 
     //--------------------------------------------------------------------------
@@ -7233,7 +7233,7 @@ namespace Legion {
         RtEvent wait_on = Runtime::merge_events(ready_events);
         DeferPhiViewRegistrationArgs args;
         args.view = view;
-        runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY,
+        runtime->issue_runtime_meta_task(args, LG_LATENCY_DEFERRED_PRIORITY,
                                          NULL/*op*/, wait_on);
         return;
       }
