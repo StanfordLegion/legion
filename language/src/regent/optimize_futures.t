@@ -349,6 +349,9 @@ function analyze_var_flow.stat(cx, node)
   elseif node:is(ast.typed.stat.RawDelete) then
     return
 
+  elseif node:is(ast.typed.stat.Fence) then
+    return
+
   else
     assert(false, "unexpected node type " .. tostring(node:type()))
   end
@@ -1369,6 +1372,10 @@ function optimize_futures.stat_raw_delete(cx, node)
   })
 end
 
+function optimize_futures.stat_fence(cx, node)
+  return terralib.newlist({node})
+end
+
 function optimize_futures.stat(cx, node)
   if node:is(ast.typed.stat.If) then
     return optimize_futures.stat_if(cx, node)
@@ -1420,6 +1427,9 @@ function optimize_futures.stat(cx, node)
 
   elseif node:is(ast.typed.stat.RawDelete) then
     return optimize_futures.stat_raw_delete(cx, node)
+
+  elseif node:is(ast.typed.stat.Fence) then
+    return optimize_futures.stat_fence(cx, node)
 
   else
     assert(false, "unexpected node type " .. tostring(node:type()))

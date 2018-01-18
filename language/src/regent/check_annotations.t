@@ -180,6 +180,7 @@ local function check_annotations_node(cx)
       node:is(ast.typed.stat.Reduce) or
       node:is(ast.typed.stat.Expr) or
       node:is(ast.typed.stat.RawDelete) or
+      node:is(ast.typed.stat.Fence) or
       node:is(ast.typed.stat.ParallelizeWith)
     then
       check(cx, node, data.set({}))
@@ -209,6 +210,7 @@ local function check_annotations_node(cx)
       node:is(ast.privilege_kind) or
       node:is(ast.condition_kind) or
       node:is(ast.disjointness_kind) or
+      node:is(ast.fence_kind) or
       node:is(ast.constraint) or
       node:is(ast.privilege) or
       node:is(ast.TaskConfigOptions)

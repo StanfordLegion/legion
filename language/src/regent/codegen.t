@@ -8272,6 +8272,24 @@ function codegen.stat_raw_delete(cx, node)
   end
 end
 
+function codegen.stat_fence(cx, node)
+  local kind = node.kind
+  local blocking = node.blocking
+
+  local issue_fence
+  if kind:is(ast.fence_kind.Execution) then
+    issue_fence = c.legion_runtime_issue_execution_fence
+  elseif kind:is(ast.fence_kind.Mapping) then
+    issue_fence = c.legion_runtime_issue_mapping_fence
+  end
+
+  assert(not blocking, "unimplemented")
+
+  return quote
+    [issue_fence]([cx.runtime], [cx.context])
+  end
+end
+
 function codegen.stat_parallelize_with(cx, node)
   return quote [codegen.block(cx, node.block)] end
 end
@@ -8350,6 +8368,9 @@ function codegen.stat(cx, node)
 
   elseif node:is(ast.typed.stat.RawDelete) then
     return codegen.stat_raw_delete(cx, node)
+
+  elseif node:is(ast.typed.stat.Fence) then
+    return codegen.stat_fence(cx, node)
 
   elseif node:is(ast.typed.stat.ParallelizeWith) then
     return codegen.stat_parallelize_with(cx, node)

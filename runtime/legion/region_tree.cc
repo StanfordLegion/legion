@@ -1445,21 +1445,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeForest::perform_fence_analysis(RegionTreeContext ctx,
-                                                  Operation *fence,
-                                                  LogicalRegion handle,
-                                                  bool dominate)
-    //--------------------------------------------------------------------------
-    {
-      DETAILED_PROFILER(runtime, REGION_TREE_LOGICAL_FENCE_CALL);
-      // Register dependences for this fence on all users in the tree
-      RegionNode *top_node = get_node(handle);
-      LogicalRegistrar registrar(ctx.get_id(), fence, 
-                       FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES), dominate);
-      top_node->visit_node(&registrar);
-    }
-
-    //--------------------------------------------------------------------------
     void RegionTreeForest::perform_deletion_analysis(DeletionOp *op, 
                                                     unsigned idx,
                                                     RegionRequirement &req,

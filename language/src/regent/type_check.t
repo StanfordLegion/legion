@@ -3582,6 +3582,15 @@ function type_check.stat_raw_delete(cx, node)
   }
 end
 
+function type_check.stat_fence(cx, node)
+  return ast.typed.stat.Fence {
+    kind = node.kind,
+    blocking = node.blocking,
+    annotations = node.annotations,
+    span = node.span,
+  }
+end
+
 function type_check.stat_parallelize_with(cx, node)
   local hints = node.hints:map(function(expr)
     if expr:is(ast.specialized.expr.ID) then
@@ -3653,6 +3662,9 @@ function type_check.stat(cx, node)
 
   elseif node:is(ast.specialized.stat.RawDelete) then
     return type_check.stat_raw_delete(cx, node)
+
+  elseif node:is(ast.specialized.stat.Fence) then
+    return type_check.stat_fence(cx, node)
 
   elseif node:is(ast.specialized.stat.ParallelizeWith) then
     return type_check.stat_parallelize_with(cx, node)

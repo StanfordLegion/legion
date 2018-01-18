@@ -307,8 +307,6 @@ namespace Legion {
                                        VersionInfo &version_info,
                                        ProjectionInfo &projection_info,
                                        RegionTreePath &path);
-      void perform_fence_analysis(RegionTreeContext ctx, Operation *fence,
-                                  LogicalRegion handle, bool dominate);
       void perform_deletion_analysis(DeletionOp *op, unsigned idx,
                                      RegionRequirement &req,
                                      RestrictInfo &restrict_info,
