@@ -397,7 +397,8 @@ local function analyze_idempotent_node(cx)
       node:is(ast.location) or
       node:is(ast.annotation) or
       node:is(ast.condition_kind) or
-      node:is(ast.disjointness_kind)
+      node:is(ast.disjointness_kind) or
+      node:is(ast.fence_kind)
     then
       return true
 
@@ -513,7 +514,8 @@ local function analyze_replicable_node(cx)
       node:is(ast.typed.stat.Assignment) or
       node:is(ast.typed.stat.Reduce) or
       node:is(ast.typed.stat.Expr) or
-      node:is(ast.typed.stat.RawDelete)
+      node:is(ast.typed.stat.RawDelete) or
+      node:is(ast.typed.stat.Fence)
     then
       return true
 
@@ -523,7 +525,8 @@ local function analyze_replicable_node(cx)
       node:is(ast.location) or
       node:is(ast.annotation) or
       node:is(ast.condition_kind) or
-      node:is(ast.disjointness_kind)
+      node:is(ast.disjointness_kind) or
+      node:is(ast.fence_kind)
     then
       return true
 
