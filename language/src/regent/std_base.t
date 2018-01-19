@@ -495,7 +495,7 @@ function base.types.is_fspace_instance(t)
   return terralib.types.istype(t) and rawget(t, "is_fspace_instance") or false
 end
 
-function base.types.flatten_struct_fields(struct_type, pred)
+function base.types.flatten_struct_fields(struct_type)
   assert(terralib.types.istype(struct_type))
   local field_paths = terralib.newlist()
   local field_types = terralib.newlist()

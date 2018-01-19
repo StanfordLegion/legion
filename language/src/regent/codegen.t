@@ -3702,11 +3702,17 @@ function codegen.expr_image(cx, node)
 
   local ip = terralib.newsymbol(c.legion_index_partition_t, "ip")
   local lp = terralib.newsymbol(c.legion_logical_partition_t, "lp")
+  local create_partition
+  if std.is_rect_type(field_types[fields_i[1]]) then
+    create_partition = c.legion_index_partition_create_by_image_range
+  else
+    create_partition = c.legion_index_partition_create_by_image
+  end
   actions = quote
     [actions]
     var colors = c.legion_index_partition_get_color_space(
       [cx.runtime], [partition.value].impl.index_partition)
-    var [ip] = c.legion_index_partition_create_by_image(
+    var [ip] = [create_partition](
       [cx.runtime], [cx.context],
       [parent.value].impl.index_space,
       [partition.value].impl, [region_parent].impl, field_id,
@@ -3760,11 +3766,17 @@ function codegen.expr_preimage(cx, node)
 
   local ip = terralib.newsymbol(c.legion_index_partition_t, "ip")
   local lp = terralib.newsymbol(c.legion_logical_partition_t, "lp")
+  local create_partition
+  if std.is_rect_type(field_types[fields_i[1]]) then
+    create_partition = c.legion_index_partition_create_by_preimage_range
+  else
+    create_partition = c.legion_index_partition_create_by_preimage
+  end
   actions = quote
     [actions]
     var colors = c.legion_index_partition_get_color_space(
       [cx.runtime], [partition.value].impl.index_partition)
-    var [ip] = c.legion_index_partition_create_by_preimage(
+    var [ip] = [create_partition](
       [cx.runtime], [cx.context], [partition.value].impl.index_partition,
       [parent.value].impl, [region_parent].impl, field_id, colors,
       [(result_type:is_disjoint() and
