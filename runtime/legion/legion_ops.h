@@ -2611,6 +2611,8 @@ namespace Legion {
       virtual void trigger_commit(void);
       virtual ApEvent get_restrict_precondition(void) const;
       virtual const ProjectionInfo* get_projection_info(void);
+      virtual std::map<PhysicalManager*,std::pair<unsigned,bool> >*
+                                       get_acquired_instances_ref(void);
     public:
       void check_fill_privilege(void);
       void compute_parent_index(void);

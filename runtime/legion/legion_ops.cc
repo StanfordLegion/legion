@@ -13143,6 +13143,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    std::map<PhysicalManager*,std::pair<unsigned,bool> >* 
+                                        FillOp::get_acquired_instances_ref(void)
+    //--------------------------------------------------------------------------
+    {
+      // Normal fills will never need to acquire instances so this
+      // call is just here to appease the mapper manager
+      return NULL;
+    }
+
+    //--------------------------------------------------------------------------
     void FillOp::check_fill_privilege(void)
     //--------------------------------------------------------------------------
     {
