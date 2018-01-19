@@ -22,6 +22,7 @@ local symbol_table = require("regent/symbol_table")
 local codegen_hooks = require("regent/codegen_hooks")
 local cudahelper = require("regent/cudahelper")
 local openmphelper = require("regent/openmphelper")
+local pretty = require("regent/pretty")
 
 -- Configuration Variables
 
@@ -3034,6 +3035,24 @@ function codegen.expr_dynamic_cast(cx, node)
   local actions = quote
     [value.actions];
     [emit_debuginfo(node)]
+  end
+
+  if std.is_partition(expr_type) then
+    local result = terralib.newsymbol(expr_type)
+    actions = quote
+      [actions]
+      var [result] = [expr_type] { impl = [value.value].impl }
+    end
+    if expr_type:is_disjoint() and not value_type:is_disjoint() then
+      actions = quote
+        [actions]
+        std.assert_error(
+            c.legion_index_partition_is_disjoint([cx.runtime], [result].impl.index_partition),
+            [get_source_location(node) .. ": " .. pretty.entry_expr(node.value) ..
+            " is not a disjoint partition"])
+      end
+    end
+    return values.value(node, expr.once_only(actions, result, expr_type), expr_type)
   end
 
   local input = `([std.implicit_cast(value_type, expr_type.index_type, value.value)])

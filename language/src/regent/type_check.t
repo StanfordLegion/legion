@@ -1273,14 +1273,20 @@ function type_check.expr_dynamic_cast(cx, node)
   local value = type_check.expr(cx, node.value)
   local value_type = std.check_read(cx, value)
 
-  if not std.is_bounded_type(node.expr_type) then
-    report.error(node, "dynamic_cast requires ptr type as argument 1, got " .. tostring(node.expr_type))
+  if not (std.is_bounded_type(node.expr_type) or std.is_partition(node.expr_type)) then
+    report.error(node, "dynamic_cast requires ptr type or partition type as argument 1, got " .. tostring(node.expr_type))
   end
-  if not std.validate_implicit_cast(value_type, node.expr_type.index_type) then
-    report.error(node, "dynamic_cast requires ptr as argument 2, got " .. tostring(value_type))
+  if not (std.validate_implicit_cast(value_type, node.expr_type.index_type) or
+          std.is_partition(value_type)) then
+    report.error(node, "dynamic_cast requires ptr or partition as argument 2, got " .. tostring(value_type))
   end
   if std.is_bounded_type(value_type) and not std.type_eq(node.expr_type.points_to_type, value_type.points_to_type) then
     report.error(node, "incompatible pointers for dynamic_cast: " .. tostring(node.expr_type) .. " and " .. tostring(value_type))
+  end
+  if std.is_partition(value_type) and
+     not (std.type_eq(node.expr_type:colors(), value_type:colors()) and
+          node.expr_type.parent_region_symbol == value_type.parent_region_symbol) then
+    report.error(node, "incompatible partitions for dynamic_cast: " .. tostring(node.expr_type) .. " and " .. tostring(value_type))
   end
 
   return ast.typed.expr.DynamicCast {
