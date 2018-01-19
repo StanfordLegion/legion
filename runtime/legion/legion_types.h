@@ -609,8 +609,10 @@ namespace Legion {
     // Methodology for assigning priorities to meta-tasks:
     // Minimum and low priority are for things like profiling
     // that we don't want to interfere with normal execution.
-    // Resource priority is highest and reserved for tasks that
-    // have been granted resources like reservations. The rest
+    // Resource priority is reserved for tasks that have been 
+    // granted resources like reservations. Running priority
+    // is the highest and guarantees that we drain out any 
+    // previously running tasks over starting new ones. The rest
     // of the priorities are classified as either 'throughput'
     // or 'latency' sensitive. Under each of these two major
     // categories there are four sub-priorities:
@@ -641,6 +643,8 @@ namespace Legion {
       LG_LATENCY_RESPONSE_PRIORITY = 7,
       // Resource priorities
       LG_RESOURCE_PRIORITY = 8,
+      // Running priorities
+      LG_RUNNING_PRIORITY = 9,
     };
 
     enum VirtualChannelKind {
