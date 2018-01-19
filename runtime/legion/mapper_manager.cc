@@ -379,8 +379,8 @@ namespace Legion {
       if (info == NULL)
       {
         RtEvent continuation_precondition;
-        info = begin_mapper_call(TASK_SELECT_SHARDING_FUNCTOR_CALL,
-                            NULL, first_invocation, continuation_precondition);
+        info = begin_mapper_call(TASK_SELECT_SHARDING_FUNCTOR_CALL, task,
+                                 first_invocation, continuation_precondition);
         if (continuation_precondition.exists())
         {
           MapperContinuation3<TaskOp, Mapper::SelectShardingFunctorInput,
@@ -641,8 +641,8 @@ namespace Legion {
       if (info == NULL)
       {
         RtEvent continuation_precondition;
-        info = begin_mapper_call(COPY_SELECT_SHARDING_FUNCTOR_CALL,
-                            NULL, first_invocation, continuation_precondition);
+        info = begin_mapper_call(COPY_SELECT_SHARDING_FUNCTOR_CALL, op,
+                                 first_invocation, continuation_precondition);
         if (continuation_precondition.exists())
         {
           MapperContinuation3<CopyOp, Mapper::SelectShardingFunctorInput,
@@ -772,8 +772,8 @@ namespace Legion {
       if (info == NULL)
       {
         RtEvent continuation_precondition;
-        info = begin_mapper_call(CLOSE_SELECT_SHARDING_FUNCTOR_CALL,
-                            NULL, first_invocation, continuation_precondition);
+        info = begin_mapper_call(CLOSE_SELECT_SHARDING_FUNCTOR_CALL, op,
+                                 first_invocation, continuation_precondition);
         if (continuation_precondition.exists())
         {
           MapperContinuation3<CloseOp, Mapper::SelectShardingFunctorInput,
@@ -874,8 +874,8 @@ namespace Legion {
       if (info == NULL)
       {
         RtEvent continuation_precondition;
-        info = begin_mapper_call(ACQUIRE_SELECT_SHARDING_FUNCTOR_CALL,
-                            NULL, first_invocation, continuation_precondition);
+        info = begin_mapper_call(ACQUIRE_SELECT_SHARDING_FUNCTOR_CALL, op,
+                                 first_invocation, continuation_precondition);
         if (continuation_precondition.exists())
         {
           MapperContinuation3<AcquireOp, Mapper::SelectShardingFunctorInput,
@@ -1029,8 +1029,8 @@ namespace Legion {
       if (info == NULL)
       {
         RtEvent continuation_precondition;
-        info = begin_mapper_call(RELEASE_SELECT_SHARDING_FUNCTOR_CALL,
-                            NULL, first_invocation, continuation_precondition);
+        info = begin_mapper_call(RELEASE_SELECT_SHARDING_FUNCTOR_CALL, op,
+                                 first_invocation, continuation_precondition);
         if (continuation_precondition.exists())
         {
           MapperContinuation3<ReleaseOp, Mapper::SelectShardingFunctorInput,
@@ -1194,8 +1194,8 @@ namespace Legion {
       if (info == NULL)
       {
         RtEvent continuation_precondition;
-        info = begin_mapper_call(PARTITION_SELECT_SHARDING_FUNCTOR_CALL,
-                            NULL, first_invocation, continuation_precondition);
+        info = begin_mapper_call(PARTITION_SELECT_SHARDING_FUNCTOR_CALL, op,
+                                 first_invocation, continuation_precondition);
         if (continuation_precondition.exists())
         {
           MapperContinuation3<DependentPartitionOp, 
@@ -1221,8 +1221,8 @@ namespace Legion {
       if (info == NULL)
       {
         RtEvent continuation_precondition;
-        info = begin_mapper_call(FILL_SELECT_SHARDING_FUNCTOR_CALL,
-                            NULL, first_invocation, continuation_precondition);
+        info = begin_mapper_call(FILL_SELECT_SHARDING_FUNCTOR_CALL, op, 
+                                 first_invocation, continuation_precondition);
         if (continuation_precondition.exists())
         {
           MapperContinuation3<FillOp, 
@@ -1302,8 +1302,8 @@ namespace Legion {
       if (info == NULL)
       {
         RtEvent continuation_precondition;
-        info = begin_mapper_call(MUST_EPOCH_SELECT_SHARDING_FUNCTOR_CALL,
-                              op, first_invocation, continuation_precondition);
+        info = begin_mapper_call(MUST_EPOCH_SELECT_SHARDING_FUNCTOR_CALL, op,
+                                 first_invocation, continuation_precondition);
         if (continuation_precondition.exists())
         {
           MapperContinuation3<MustEpochOp,
