@@ -3633,6 +3633,14 @@ namespace Legion {
       else
         executing_call = result;
       Runtime::release_reservation(mapper_lock);
+      // If we have a precondition and we're not the first invocation then we 
+      // know we're already in a continuation so we can just wait here 
+      // because we've now given up our lock so there is nothing else to do
+      if (precondition.exists() && !first_invocation)
+      {
+        precondition.lg_wait();
+        precondition = RtEvent::NO_RT_EVENT;
+      }
       return result;
     }
 
