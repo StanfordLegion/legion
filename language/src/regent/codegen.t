@@ -8338,6 +8338,7 @@ local make_dummy_task = terralib.memoize(
         leaf = true,
         inner = false,
         idempotent = true,
+        replicable = false,
       },
       region_divergence = false,
       prototype = task,
