@@ -478,11 +478,8 @@ namespace Legion {
       if (must_epoch_owner != NULL)
       {
         version_broadcast->perform_collective_async();
-#ifdef DEBUG_LEGION
-        assert(version_broadcast_collective == NULL);
-#endif
-        // Copy it over so we will own and delete as necessary
-        version_broadcast_collective = version_broadcast;
+        // We have to delete this now so we know the effects are propagated
+        delete version_broadcast;
       }
       else // Will take ownership of deleting the collective
         version_broadcast->defer_perform_collective(this, map_wait);
