@@ -3257,6 +3257,143 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
+    // Repl Fence Op 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    ReplFenceOp::ReplFenceOp(Runtime *rt)
+      : FenceOp(rt)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    ReplFenceOp::ReplFenceOp(const ReplFenceOp &rhs)
+      : FenceOp(rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    ReplFenceOp::~ReplFenceOp(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    ReplFenceOp& ReplFenceOp::operator=(const ReplFenceOp &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplFenceOp::activate(void)
+    //--------------------------------------------------------------------------
+    {
+      FenceOp::activate();
+      mapping_fence_barrier = RtBarrier::NO_RT_BARRIER;
+      execution_fence_barrier = ApBarrier::NO_AP_BARRIER;
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplFenceOp::deactivate(void)
+    //--------------------------------------------------------------------------
+    {
+      deactivate_fence();
+      runtime->free_repl_fence_op(this);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplFenceOp::initialize_repl_fence(ReplicateContext *ctx, FenceKind k)
+    //--------------------------------------------------------------------------
+    {
+      initialize(ctx, k);
+      if (fence_kind != EXECUTION_FENCE)
+        mapping_fence_barrier = ctx->get_next_mapping_fence_barrier();
+      if (fence_kind != MAPPING_FENCE)
+        execution_fence_barrier = ctx->get_next_execution_fence_barrier();
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplFenceOp::trigger_mapping(void)
+    //--------------------------------------------------------------------------
+    {
+      switch (fence_kind)
+      {
+        case MAPPING_FENCE:
+          {
+            // Do our arrival
+            Runtime::phase_barrier_arrive(mapping_fence_barrier, 1/*count*/);
+            // We're mapped when everyone is mapped
+            complete_mapping(mapping_fence_barrier);
+            complete_execution();
+            break;
+          }
+        case MIXED_FENCE:
+          {
+            // Do our arrival on our mapping fence, we're mapped when
+            // everyone is mapped
+            Runtime::phase_barrier_arrive(mapping_fence_barrier, 1/*count*/);
+            complete_mapping(mapping_fence_barrier);
+            // Intentionally fall through
+          }
+        case EXECUTION_FENCE:
+          {
+            // Go through and launch a completion task dependent upon
+            // all the completion events of our incoming dependences.
+            // Make sure that the events that we pulled out our still valid.
+            // Note since we are performing this operation, then we know
+            // that we are mapped and therefore our set of input dependences
+            // have been fixed so we can read them without holding the lock.
+            std::set<ApEvent> arrival_events;
+            for (std::map<Operation*,GenerationID>::const_iterator it = 
+                  incoming.begin(); it != incoming.end(); it++)
+            {
+              ApEvent complete = it->first->get_completion_event();
+              if (it->second == it->first->get_generation())
+                arrival_events.insert(complete);
+            }
+#ifdef LEGION_SPY
+            // If we're doing Legion Spy verification, we also need to 
+            // validate that we have all the completion events from ALL
+            // the previous events in the context since the last fence
+            arrival_events.insert(execution_precondition);   
+#endif
+            // We do our arrival on our execution fence contingent on
+            // all the previous trigger events
+            Runtime::phase_barrier_arrive(execution_fence_barrier, 1/*count*/,
+                                        Runtime::merge_events(arrival_events));
+            // We can always trigger the completion event when these are done
+            Runtime::trigger_event(completion_event, execution_fence_barrier);
+            need_completion_trigger = false;
+            if (!execution_fence_barrier.has_triggered())
+            {
+              RtEvent wait_on = Runtime::protect_event(execution_fence_barrier);
+              // Was already handled above
+              if (fence_kind != MIXED_FENCE)
+                complete_mapping(wait_on);
+              complete_execution(wait_on);
+            }
+            else
+            {
+              // Was already handled above
+              if (fence_kind != MIXED_FENCE)
+                complete_mapping();
+              complete_execution();
+            }
+            break;
+          }
+        default:
+          assert(false); // should never get here
+      }
+    }
+
+    /////////////////////////////////////////////////////////////
     // Shard Manager 
     /////////////////////////////////////////////////////////////
 
@@ -3378,6 +3515,11 @@ namespace Legion {
         // Same thing as above for deletion barriers
         deletion_barrier = 
           RtBarrier(Realm::Barrier::create_barrier(total_shards-1));
+        // Fence barriers need arrivals from everyone
+        mapping_fence_barrier = 
+          RtBarrier(Realm::Barrier::create_barrier(total_shards));
+        execution_fence_barrier = 
+          ApBarrier(Realm::Barrier::create_barrier(total_shards));
 #ifdef DEBUG_LEGION_COLLECTIVES
         collective_check_barrier = 
           RtBarrier(Realm::Barrier::create_barrier(total_shards,
@@ -3430,6 +3572,8 @@ namespace Legion {
           future_map_barrier.destroy_barrier();
           creation_barrier.destroy_barrier();
           deletion_barrier.destroy_barrier();
+          mapping_fence_barrier.destroy_barrier();
+          execution_fence_barrier.destroy_barrier();
 #ifdef DEBUG_LEGION_COLLECTIVES
           collective_check_barrier.destroy_barrier();
           close_check_barrier.destroy_barrier();
@@ -3571,12 +3715,16 @@ namespace Legion {
           assert(future_map_barrier.exists());
           assert(creation_barrier.exists());
           assert(deletion_barrier.exists());
+          assert(mapping_fence_barrier.exists());
+          assert(execution_fence_barrier.exists());
           assert(shard_mapping.size() == total_shards);
 #endif
           rez.serialize(pending_partition_barrier);
           rez.serialize(future_map_barrier);
           rez.serialize(creation_barrier);
           rez.serialize(deletion_barrier);
+          rez.serialize(mapping_fence_barrier);
+          rez.serialize(execution_fence_barrier);
 #ifdef DEBUG_LEGION_COLLECTIVES
           assert(collective_check_barrier.exists());
           rez.serialize(collective_check_barrier);
@@ -3617,6 +3765,8 @@ namespace Legion {
         derez.deserialize(future_map_barrier);
         derez.deserialize(creation_barrier);
         derez.deserialize(deletion_barrier);
+        derez.deserialize(mapping_fence_barrier);
+        derez.deserialize(execution_fence_barrier);
 #ifdef DEBUG_LEGION_COLLECTIVES
         derez.deserialize(collective_check_barrier);
         derez.deserialize(close_check_barrier);

@@ -2828,6 +2828,8 @@ namespace Legion {
                                                   bool has_lock = false);
       ReplTimingOp*         get_available_repl_timing_op(bool need_cont,
                                                   bool has_lock = false);
+      ReplFenceOp*          get_available_repl_fence_op(bool need_cont,
+                                                  bool has_lock = false);
     public:
       void free_individual_task(IndividualTask *task);
       void free_point_task(PointTask *task);
@@ -2880,6 +2882,7 @@ namespace Legion {
       void free_repl_dependent_partition_op(ReplDependentPartitionOp *op);
       void free_repl_epoch_op(ReplMustEpochOp *op);
       void free_repl_timing_op(ReplTimingOp *op);
+      void free_repl_fence_op(ReplFenceOp *op);
     public:
       RegionTreeContext allocate_region_tree_context(void);
       void free_region_tree_context(RegionTreeContext tree_ctx); 
@@ -3213,6 +3216,7 @@ namespace Legion {
                                         available_repl_dependent_partition_ops;
       std::deque<ReplMustEpochOp*>      available_repl_must_epoch_ops;
       std::deque<ReplTimingOp*>         available_repl_timing_ops;
+      std::deque<ReplFenceOp*>          available_repl_fence_ops;
 #ifdef DEBUG_LEGION
       TreeStateLogger *tree_state_logger;
       // For debugging purposes keep track of

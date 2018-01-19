@@ -1451,6 +1451,8 @@ namespace Legion {
       virtual void detach_resource(PhysicalRegion region);
       virtual FutureMap execute_must_epoch(const MustEpochLauncher &launcher);
       virtual Future issue_timing_measurement(const TimingLauncher &launcher);
+      virtual void issue_mapping_fence(void);
+      virtual void issue_execution_fence(void);
     public:
       virtual void record_dynamic_collective_contribution(DynamicCollective dc,
                                                           const Future &f);
@@ -1535,6 +1537,10 @@ namespace Legion {
       void record_clone_barrier(unsigned close_index, unsigned clone_index,
                                 RtBarrier bar);
     public:
+      // Fence barrier methods
+      RtBarrier get_next_mapping_fence_barrier(void);
+      ApBarrier get_next_execution_fence_barrier(void);
+    public:
       ShardTask *const owner_shard;
       ShardManager *const shard_manager;
       const size_t total_shards;
@@ -1563,6 +1569,8 @@ namespace Legion {
       ApBarrier future_map_barrier;
       RtBarrier creation_barrier;
       RtBarrier deletion_barrier;
+      RtBarrier mapping_fence_barrier;
+      ApBarrier execution_fence_barrier;
 #ifdef DEBUG_LEGION_COLLECTIVES
     protected:
       RtBarrier collective_check_barrier;

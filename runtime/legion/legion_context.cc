@@ -6812,6 +6812,8 @@ namespace Legion {
       future_map_barrier = manager->get_future_map_barrier();
       creation_barrier = manager->get_creation_barrier();
       deletion_barrier = manager->get_deletion_barrier();
+      mapping_fence_barrier = manager->get_mapping_fence_barrier();
+      execution_fence_barrier = manager->get_execution_fence_barrier();
 #ifdef DEBUG_LEGION_COLLECTIVES
       collective_check_barrier = manager->get_collective_check_barrier();
       close_check_barrier = manager->get_close_check_barrier();
@@ -9742,6 +9744,36 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ReplicateContext::issue_mapping_fence(void)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+#ifdef DEBUG_LEGION
+      if (owner_shard->shard_id == 0)
+        log_run.debug("Issuing a mapping fence in task %s (ID %lld)",
+                      get_task_name(), get_unique_id());
+#endif
+      ReplFenceOp *fence_op = runtime->get_available_repl_fence_op(true);
+      fence_op->initialize_repl_fence(this, FenceOp::EXECUTION_FENCE);
+      runtime->add_to_dependence_queue(this, executing_processor, fence_op);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplicateContext::issue_execution_fence(void)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+#ifdef DEBUG_LEGION
+      if (owner_shard->shard_id == 0)
+        log_run.debug("Issuing an execution fence in task %s (ID %lld)",
+                      get_task_name(), get_unique_id());
+#endif
+      ReplFenceOp *fence_op = runtime->get_available_repl_fence_op(true);
+      fence_op->initialize_repl_fence(this, FenceOp::EXECUTION_FENCE);
+      runtime->add_to_dependence_queue(this, executing_processor, fence_op);
+    }
+
+    //--------------------------------------------------------------------------
     void ReplicateContext::record_dynamic_collective_contribution(
                                           DynamicCollective dc, const Future &f)
     //--------------------------------------------------------------------------
@@ -10546,6 +10578,24 @@ namespace Legion {
         pending_clone_barriers.erase(finder);
       }
       Runtime::trigger_event(to_trigger);
+    }
+
+    //--------------------------------------------------------------------------
+    RtBarrier ReplicateContext::get_next_mapping_fence_barrier(void)
+    //--------------------------------------------------------------------------
+    {
+      RtBarrier result = mapping_fence_barrier;
+      Runtime::advance_barrier(mapping_fence_barrier);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    ApBarrier ReplicateContext::get_next_execution_fence_barrier(void)
+    //--------------------------------------------------------------------------
+    {
+      ApBarrier result = execution_fence_barrier;
+      Runtime::advance_barrier(execution_fence_barrier);
+      return result;
     }
 
     /////////////////////////////////////////////////////////////

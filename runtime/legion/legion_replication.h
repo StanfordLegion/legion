@@ -1116,6 +1116,31 @@ namespace Legion {
     }; 
 
     /**
+     * \class ReplFenceOp
+     * A fence operation that is aware that it is being 
+     * executed in a control replicated context. Currently
+     * this only applies to mixed and execution fences.
+     */
+    class ReplFenceOp : public FenceOp {
+    public:
+      ReplFenceOp(Runtime *rt);
+      ReplFenceOp(const ReplFenceOp &rhs);
+      virtual ~ReplFenceOp(void);
+    public:
+      ReplFenceOp& operator=(const ReplFenceOp &rhs);
+    public:
+      void initialize_repl_fence(ReplicateContext *ctx, FenceKind kind);
+    public:
+      virtual void activate(void);
+      virtual void deactivate(void);
+    public:
+      virtual void trigger_mapping(void);
+    protected:
+      RtBarrier mapping_fence_barrier;
+      ApBarrier execution_fence_barrier;
+    };
+
+    /**
      * \class ShardMapping
      * A mapping from the shard IDs to their address spaces
      */
@@ -1181,6 +1206,10 @@ namespace Legion {
         { return creation_barrier; }
       inline RtBarrier get_deletion_barrier(void) const
         { return deletion_barrier; }
+      inline RtBarrier get_mapping_fence_barrier(void) const
+        { return mapping_fence_barrier; }
+      inline ApBarrier get_execution_fence_barrier(void) const
+        { return execution_fence_barrier; }
 #ifdef DEBUG_LEGION_COLLECTIVES
       inline RtBarrier get_collective_check_barrier(void) const
         { return collective_check_barrier; }
@@ -1279,6 +1308,8 @@ namespace Legion {
       ApBarrier future_map_barrier;
       RtBarrier creation_barrier;
       RtBarrier deletion_barrier;
+      RtBarrier mapping_fence_barrier;
+      ApBarrier execution_fence_barrier;
 #ifdef DEBUG_LEGION_COLLECTIVES
       RtBarrier collective_check_barrier;
       RtBarrier close_check_barrier;

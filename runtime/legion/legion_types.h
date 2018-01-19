@@ -1452,21 +1452,6 @@ namespace Legion {
     class TimingOp;
     class TaskOp;
 
-    // legion_control.h
-    class ReplIndividualTask;
-    class ReplIndexTask;
-    class ReplReadCloseOp;
-    class ReplInterCloseOp;
-    // No need for ReplFillOp
-    class ReplIndexFillOp;
-    class ReplCopyOp;
-    class ReplIndexCopyOp;
-    class ReplDeletionOp;
-    class ReplPendingPartitionOp;
-    class ReplDependentPartitionOp;
-    class ReplMustEpochOp;
-    class ReplTimingOp;
-
     // legion_tasks.h
     class ExternalTask;
     class SingleTask;
@@ -1615,6 +1600,8 @@ namespace Legion {
     // legion_replication.h
     class ReplIndividualTask;
     class ReplIndexTask;
+    class ReplReadCloseOp;
+    class ReplInterCloseOp;
     class ReplFillOp;
     class ReplIndexFillOp;
     class ReplCopyOp;
@@ -1624,6 +1611,7 @@ namespace Legion {
     class ReplDependentPartitionOp;
     class ReplMustEpochOp;
     class ReplTimingOp;
+    class ReplFenceOp;
     class ShardMapping;
     class ShardManager;
     class ShardCollective;
@@ -1702,6 +1690,7 @@ namespace Legion {
     friend class Internal::ReplDependentPartitionOp;        \
     friend class Internal::ReplMustEpochOp;                 \
     friend class Internal::ReplTimingOp;                    \
+    friend class Internal::ReplFenceOp;                     \
     friend class Internal::RegionTreeForest;                \
     friend class Internal::IndexSpaceNode;                  \
     friend class Internal::IndexPartNode;                   \

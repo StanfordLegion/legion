@@ -10384,6 +10384,13 @@ namespace Legion {
         delete (*it);
       }
       available_repl_timing_ops.clear();
+      for (std::deque<ReplFenceOp*>::const_iterator it = 
+            available_repl_fence_ops.begin(); it !=
+            available_repl_fence_ops.end(); it++)
+      {
+        delete (*it);
+      }
+      available_repl_fence_ops.clear();
       for (std::map<TaskID,TaskImpl*>::const_iterator it = 
             task_table.begin(); it != task_table.end(); it++)
       {
@@ -18484,6 +18491,24 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    ReplFenceOp* Runtime::get_available_repl_fence_op(bool need_cont, 
+                                                      bool has_lock)
+    //--------------------------------------------------------------------------
+    {
+      if (need_cont)
+      {
+#ifdef DEBUG_LEGION
+        assert(!has_lock);
+#endif
+        GetAvailableContinuation<ReplFenceOp*,
+                      &Runtime::get_available_repl_fence_op>
+                        continuation(this, fence_op_lock);
+        return continuation.get_result();
+      }
+      return get_available(fence_op_lock, available_repl_fence_ops, has_lock);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::free_individual_task(IndividualTask *task)
     //--------------------------------------------------------------------------
     {
@@ -18901,6 +18926,14 @@ namespace Legion {
     {
       AutoLock t_lock(timing_op_lock);
       release_operation<false>(available_repl_timing_ops, op);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::free_repl_fence_op(ReplFenceOp *op)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock t_lock(fence_op_lock);
+      release_operation<false>(available_repl_fence_ops, op);
     }
 
     //--------------------------------------------------------------------------
