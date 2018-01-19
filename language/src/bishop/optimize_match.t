@@ -33,13 +33,13 @@ local function fetch_task_signatures()
         reqs = terralib.newlist(),
         region_params = {},
       }
-      local task_params = v:get_primary_variant():get_ast().params
+      local task_params = v:get_param_symbols()
       local num_reqs = 0
       for idx = 1, #task_params do
         local param_type_in_signature =
-          regent_std.as_read(task_params[idx].param_type)
+          regent_std.as_read(task_params[idx]:gettype())
         if regent_std.is_region(param_type_in_signature) then
-          local param_name = task_params[idx].symbol:hasname()
+          local param_name = task_params[idx]:hasname()
           local req_indices = {}
           local privileges, privilege_field_paths =
             regent_std.find_task_privileges(param_type_in_signature, v)
@@ -110,14 +110,16 @@ local function fetch_call_graph()
   for k, v in pairs(_G) do
     if regent_std.is_task(v) then
       call_graph[k] = {}
-      local task_ast = v:get_primary_variant():get_ast()
-      local function record_callees(node)
-        if node:is(regent_ast.typed.expr.Call) and
-           regent_std.is_task(node.fn.value) then
-          call_graph[k][node.fn.value.name:mkstring()] = true
+      if v:has_primary_variant() then
+        local task_ast = v:get_primary_variant():get_ast()
+        local function record_callees(node)
+          if node:is(regent_ast.typed.expr.Call) and
+             regent_std.is_task(node.fn.value) then
+            call_graph[k][node.fn.value.name:mkstring()] = true
+          end
         end
+        regent_ast.traverse_node_postorder(record_callees, task_ast)
       end
-      regent_ast.traverse_node_postorder(record_callees, task_ast)
     end
   end
   local all_callers = {}
