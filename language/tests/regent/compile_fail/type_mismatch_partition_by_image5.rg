@@ -13,7 +13,7 @@
 -- limitations under the License.
 
 -- fails-with:
--- type_mismatch_partition_by_image5.rg:26: type mismatch in argument 3: expected field of index type but got int32
+-- type_mismatch_partition_by_image5.rg:26: type mismatch in argument 3: expected field of index or rect type but got int32
 --   var q = image(r, p, s)
 --               ^
 

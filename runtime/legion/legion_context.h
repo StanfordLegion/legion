@@ -1008,6 +1008,9 @@ namespace Legion {
       // is often useful when things hang
       std::map<unsigned,Operation*> outstanding_children;
 #endif
+#ifdef LEGION_SPY
+      std::deque<UniqueID> ops_since_last_fence;
+#endif
     protected:
       // Traces for this task's execution
       LegionMap<TraceID,DynamicTrace*,TASK_TRACES_ALLOC>::tracked traces;

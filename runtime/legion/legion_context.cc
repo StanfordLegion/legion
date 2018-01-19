@@ -4755,6 +4755,8 @@ namespace Legion {
 #endif
       }
 #ifdef LEGION_SPY
+      // Have to record this operation in case there is a fence later
+      ops_since_last_fence.push_back(op->get_unique_op_id());
       return current_fence_event;
 #else
       if (current_fence_event.exists())
@@ -4782,10 +4784,8 @@ namespace Legion {
     {
       std::map<Operation*,GenerationID> previous_operations;
 #ifdef LEGION_SPY
-      // Now see if we have any created regions
-      // Track separately for the two possible contexts
-      std::set<LogicalRegion> local_regions;
-      std::set<LogicalRegion> outermost_regions;
+      // Record dependences on all operations since the last fence
+      std::deque<UniqueID> all_previous_ops;
 #endif
       // Take the lock and iterate through our current pending
       // operations and find all the ones with a context index
@@ -4833,14 +4833,7 @@ namespace Legion {
             previous_operations.insert(*it);
         }
 #ifdef LEGION_SPY
-        for (unsigned idx = 0; idx < created_requirements.size(); idx++)
-        {
-          const LogicalRegion &handle = created_requirements[idx].region;
-          if (returnable_privileges[idx])
-            outermost_regions.insert(handle);
-          else
-            local_regions.insert(handle);
-        }
+        all_previous_ops = ops_since_last_fence;
 #endif
       }
 
@@ -4850,25 +4843,18 @@ namespace Legion {
         op->register_dependence(it->first, it->second);
 
 #ifdef LEGION_SPY
-      // Legion Spy still requires region tree analysis for verification
-      RegionTreeContext ctx = get_context();
-      // Do our internal regions first
-      for (unsigned idx = 0; idx < regions.size(); idx++)
-        runtime->forest->perform_fence_analysis(ctx, op, 
-                                        regions[idx].region, true/*dominate*/);
-      if (!local_regions.empty())
+      // Record a dependence on the previous fence
+      if (current_fence != NULL)
+        LegionSpy::log_mapping_dependence(get_unique_id(), current_fence_uid,
+            0/*index*/, op->get_unique_op_id(), 0/*index*/, TRUE_DEPENDENCE);
+      for (std::deque<UniqueID>::const_iterator it = 
+            all_previous_ops.begin(); it != all_previous_ops.end(); it++)
       {
-        for (std::set<LogicalRegion>::const_iterator it = 
-              local_regions.begin(); it != local_regions.end(); it++)
-          runtime->forest->perform_fence_analysis(ctx,op,*it,true/*dominate*/);
-      }
-      if (!outermost_regions.empty())
-      {
-        // Need outermost context for these regions
-        ctx = find_outermost_local_context()->get_context();
-        for (std::set<LogicalRegion>::const_iterator it = 
-              outermost_regions.begin(); it != outermost_regions.end(); it++)
-          runtime->forest->perform_fence_analysis(ctx,op,*it,true/*dominate*/);
+        // Skip ourselves if we are here
+        if ((*it) == op->get_unique_op_id())
+          continue;
+        LegionSpy::log_mapping_dependence(get_unique_id(), *it, 0/*index*/,
+            op->get_unique_op_id(), 0/*index*/, TRUE_DEPENDENCE); 
       }
 #endif
     }
@@ -4889,6 +4875,7 @@ namespace Legion {
         current_fence_event = current_fence->get_completion_event();
 #ifdef LEGION_SPY
       current_fence_uid = op->get_unique_op_id();
+      ops_since_last_fence.clear();
 #endif
     }
 
