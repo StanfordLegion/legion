@@ -449,11 +449,15 @@ namespace Legion {
       // Grab the mapped event so we can know when to do the broadcast
       RtEvent map_wait = get_mapped_event();
       // Do the base call  
-      RtEvent result = IndividualTask::perform_mapping(must_epoch_owner);
-      // If there is an event then the mapping isn't done so we don't have
-      // the final versions yet and can't do the broadcast
-      if (result.exists())
-        return result;
+#ifdef DEBUG_LEGION
+#ifndef NDEBUG
+      RtEvent result = 
+#endif
+#endif
+        IndividualTask::perform_mapping(must_epoch_owner);
+#ifdef DEBUG_LEGION
+      assert(!result.exists());
+#endif
       // Then broadcast the versioning results for any region requirements
       // that are writes which are going to advance the version numbers
       // Have to new this on the heap in case we have to defer it

@@ -1511,6 +1511,9 @@ namespace Legion {
 #ifdef ENABLE_LEGION_TLS
     extern __thread TaskContext *implicit_context;
 #endif
+#ifdef DEBUG_LEGION_WAITS
+    extern __thread int meta_task_id;
+#endif
     
     // legion_trace.h
     class LegionTrace;
@@ -2064,6 +2067,10 @@ namespace Legion {
   public:
     inline void lg_wait(void) const
       {
+#ifdef DEBUG_LEGION_WAITS
+        const int local_meta_task_id = Internal::meta_task_id;
+        const long long start = Realm::Clock::current_time_in_microseconds();
+#endif
 #ifdef ENABLE_LEGION_TLS
         // Save the context locally
         Internal::TaskContext *local_ctx = Internal::implicit_context; 
@@ -2074,6 +2081,12 @@ namespace Legion {
 #else
         // Just do the normal wait call
         wait(); 
+#endif
+#ifdef DEBUG_LEGION_WAITS
+        Internal::meta_task_id = local_meta_task_id;
+        const long long stop = Realm::Clock::current_time_in_microseconds();
+        if (((stop - start) >= LIMIT) && (local_meta_task_id == BAD_TASK_ID))
+          assert(false);
 #endif
       }
   };

@@ -73,6 +73,9 @@ namespace Legion {
 #ifdef ENABLE_LEGION_TLS
     __thread TaskContext *implicit_context = NULL;
 #endif
+#ifdef DEBUG_LEGION_WAITS
+    __thread int meta_task_id = -1;
+#endif
 
     /////////////////////////////////////////////////////////////
     // Argument Map Impl
@@ -21514,6 +21517,9 @@ namespace Legion {
       LgTaskID tid = *((const LgTaskID*)data);
       data += sizeof(tid);
       arglen -= sizeof(tid);
+#ifdef DEBUG_LEGION_WAITS
+      meta_task_id = tid;
+#endif
       switch (tid)
       {
         case LG_SCHEDULER_ID:
