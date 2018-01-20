@@ -9768,9 +9768,27 @@ namespace Legion {
     }
     
     //--------------------------------------------------------------------------
-    void Runtime::launch_top_level_task(Processor target)
+    void Runtime::launch_top_level_task(void)
     //--------------------------------------------------------------------------
     {
+      // Grab the first local processor to be the initial target
+#ifdef DEBUG_LEGION
+      assert(!local_procs.empty());
+#endif
+      Processor target = *(local_procs.begin());
+      // For backwards compatibility right now we'll make sure this
+      // is a CPU processor if possible
+      if (target.kind() != Processor::LOC_PROC)
+      {
+        for (std::set<Processor>::const_iterator it = 
+              local_procs.begin(); it != local_procs.end(); it++)
+        {
+          if (it->kind() != Processor::LOC_PROC)
+            continue;
+          target = *it;
+          break;
+        }
+      }
       // Get an individual task to be the top-level task
       IndividualTask *top_task = get_available_individual_task(false);
       // Get a remote task to serve as the top of the top-level task
@@ -20333,7 +20351,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       Runtime *rt = Runtime::get_runtime(p);
-      rt->launch_top_level_task(p);
+      rt->launch_top_level_task();
     }
 
     //--------------------------------------------------------------------------
