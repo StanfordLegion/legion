@@ -4124,7 +4124,8 @@ namespace Legion {
     {
       const ContinuationArgs *conargs = (const ContinuationArgs*)args;
       // Update the timing if necessary since we did a continuation
-      if (conargs->continuation->manager->profile_mapper)
+      if (conargs->continuation->manager->profile_mapper &&
+          (conargs->continuation->info != NULL))
         conargs->continuation->info->start_time =
           Realm::Clock::current_time_in_nanoseconds();
       conargs->continuation->execute();
