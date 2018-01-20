@@ -47,6 +47,7 @@ namespace Legion {
     MapperManager::MapperManager(Runtime *rt, Mapping::Mapper *mp, 
                                  MapperID mid, Processor p)
       : runtime(rt), mapper(mp), mapper_id(mid), processor(p),
+        profile_mapper(runtime->profiler != NULL),
         mapper_lock(Reservation::create_reservation())
     //--------------------------------------------------------------------------
     {
@@ -3348,14 +3349,9 @@ namespace Legion {
         result->operation = op;
         if (op != NULL)
           result->acquired_instances = op->get_acquired_instances_ref();
-        if (runtime->profiler != NULL)
-          result->start_time = Realm::Clock::current_time_in_nanoseconds();
         return result;
       }
-      MappingCallInfo *result = new MappingCallInfo(this, kind, op);
-      if (runtime->profiler != NULL)
-        result->start_time = Realm::Clock::current_time_in_nanoseconds();
-      return result;
+      return new MappingCallInfo(this, kind, op);
     }
 
     //--------------------------------------------------------------------------
@@ -3368,18 +3364,15 @@ namespace Legion {
         free_call_info(info, false/*need lock*/);
         return;
       }
-      if (runtime->profiler != NULL)
-      {
-        unsigned long long stop_time = 
-          Realm::Clock::current_time_in_nanoseconds();
+      if (profile_mapper)
         runtime->profiler->record_mapper_call(info->kind, 
             (info->operation == NULL) ? 0 : info->operation->get_unique_op_id(),
-            info->start_time, stop_time); 
-      }
+            info->start_time, info->stop_time); 
       info->resume = RtUserEvent::NO_RT_USER_EVENT;
       info->operation = NULL;
       info->acquired_instances = NULL;
       info->start_time = 0;
+      info->stop_time = 0;
       available_infos.push_back(info);
     }
 
@@ -3650,7 +3643,14 @@ namespace Legion {
       {
         precondition.lg_wait();
         precondition = RtEvent::NO_RT_EVENT;
+        // Update the start time of the mapper call since we waited
+        if (profile_mapper)
+          result->start_time = Realm::Clock::current_time_in_nanoseconds();
       }
+      else if (!precondition.exists() && profile_mapper) 
+        // Record our start time in this case since there is no continuation
+        result->start_time = Realm::Clock::current_time_in_nanoseconds();
+      // else the continuation will initialize the start time
       return result;
     }
 
@@ -3724,6 +3724,9 @@ namespace Legion {
 #endif
       if (first_invocation)
       {
+        // Record our finish time when we're done
+        if (profile_mapper)
+          info->stop_time = Realm::Clock::current_time_in_nanoseconds();
         // Set this flag asynchronously without the lock, there will
         // be a race to see who gets the lock next and therefore can
         // do the rest of the finish mapper call routine, we do this
@@ -3989,6 +3992,9 @@ namespace Legion {
       }
       MappingCallInfo *result = allocate_call_info(kind, op,false/*need lock*/);
       Runtime::release_reservation(mapper_lock);
+      // Record our mapper start time when we're ready to run
+      if (profile_mapper)
+        result->start_time = Realm::Clock::current_time_in_nanoseconds();
       return result;
     }
 
@@ -4013,6 +4019,9 @@ namespace Legion {
     {
       if (first_invocation)
       {
+        // Record our finish time when we are done
+        if (profile_mapper)
+          info->stop_time = Realm::Clock::current_time_in_nanoseconds();
         RtEvent precondition = 
           Runtime::acquire_rt_reservation(mapper_lock, true/*exclusive*/);
         if (!precondition.has_triggered())
@@ -4114,6 +4123,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       const ContinuationArgs *conargs = (const ContinuationArgs*)args;
+      // Update the timing if necessary since we did a continuation
+      if (conargs->continuation->manager->profile_mapper)
+        conargs->continuation->info->start_time =
+          Realm::Clock::current_time_in_nanoseconds();
       conargs->continuation->execute();
     }
 
