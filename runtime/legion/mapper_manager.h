@@ -34,6 +34,7 @@ namespace Legion {
       std::map<PhysicalManager*,
         std::pair<unsigned/*count*/,bool/*created*/> >* acquired_instances;
       unsigned long long                start_time;
+      unsigned long long                stop_time;
     };
 
     /**
@@ -564,6 +565,7 @@ namespace Legion {
       Mapping::Mapper *const mapper;
       const MapperID mapper_id;
       const Processor processor;
+      const bool profile_mapper;
     protected:
       Reservation mapper_lock;
     protected:
