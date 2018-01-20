@@ -12,25 +12,43 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
+-- runs-with:
+-- [
+--   ["-ll:cpu", "4"]
+-- ]
+
 import "regent"
 
+local c = terralib.includecstring([[
+#include <stdio.h>
+#include <unistd.h>
+]])
+
 task f(x : int)
-  var y = x * 2
-  regentlib.c.printf("f returned %d\n", y)
-  return y
+  var t = regentlib.c.legion_get_current_time_in_micros()
+  c.printf("f %d (time %.1fs)\n", x, t/1.0e6)
+
+  c.usleep(1000000)
 end
 
 task g(x : int)
-  regentlib.c.printf("g got %d\n", x)
+  var t = regentlib.c.legion_get_current_time_in_micros()
+  c.printf("g %d (time %.1fs)\n", x, t/1.0e6)
 end
 
 task main()
-  var y = f(1)
-  __fence(__execution)
-  g(y)
+  for i = 0, 2 do
+    f(1)
+    if i == 0 then __fence(__execution) end
+    g(2)
 
-  var z = f(10)
-  __fence(__mapping)
-  g(z)
+    f(3)
+    if i == 0 then __fence(__mapping, __block) end
+    g(4)
+
+    __fence(__execution, __block)
+
+    c.printf("\n\n")
+  end
 end
 regentlib.start(main)

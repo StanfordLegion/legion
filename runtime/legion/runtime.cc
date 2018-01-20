@@ -19663,6 +19663,9 @@ namespace Legion {
 				  Processor p)
     //--------------------------------------------------------------------------
     {
+      // We immediately bump the priority of all meta-tasks once they start
+      // up to the highest level to ensure that they drain once they begin
+      Processor::set_current_task_priority(LG_RUNNING_PRIORITY);
       const char *data = (const char*)args;
       LgTaskID tid = *((const LgTaskID*)data);
       data += sizeof(tid);

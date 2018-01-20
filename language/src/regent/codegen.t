@@ -22,6 +22,7 @@ local symbol_table = require("regent/symbol_table")
 local codegen_hooks = require("regent/codegen_hooks")
 local cudahelper = require("regent/cudahelper")
 local openmphelper = require("regent/openmphelper")
+local pretty = require("regent/pretty")
 
 -- Configuration Variables
 
@@ -3034,6 +3035,24 @@ function codegen.expr_dynamic_cast(cx, node)
   local actions = quote
     [value.actions];
     [emit_debuginfo(node)]
+  end
+
+  if std.is_partition(expr_type) then
+    local result = terralib.newsymbol(expr_type)
+    actions = quote
+      [actions]
+      var [result] = [expr_type] { impl = [value.value].impl }
+    end
+    if expr_type:is_disjoint() and not value_type:is_disjoint() then
+      actions = quote
+        [actions]
+        std.assert_error(
+            c.legion_index_partition_is_disjoint([cx.runtime], [result].impl.index_partition),
+            [get_source_location(node) .. ": " .. pretty.entry_expr(node.value) ..
+            " is not a disjoint partition"])
+      end
+    end
+    return values.value(node, expr.once_only(actions, result, expr_type), expr_type)
   end
 
   local input = `([std.implicit_cast(value_type, expr_type.index_type, value.value)])
@@ -8282,6 +8301,57 @@ function codegen.stat_raw_delete(cx, node)
   end
 end
 
+local make_dummy_task = terralib.memoize(
+  function()
+    local name = data.newtuple("__dummy")
+    local task = std.new_task(name)
+    local variant = task:make_variant("primary")
+    task:set_primary_variant(variant)
+    local expr_type = int
+    local node = ast.typed.top.Task {
+      name = name,
+      params = terralib.newlist(),
+      return_type = expr_type,
+      privileges = terralib.newlist(),
+      coherence_modes = data.newmap(),
+      flags = data.newmap(),
+      conditions = {},
+      constraints = terralib.newlist(),
+      body = ast.typed.Block {
+        stats = terralib.newlist({
+            ast.typed.stat.Return {
+              value = ast.typed.expr.Constant {
+                value = 0,
+                expr_type = expr_type,
+                annotations = ast.default_annotations(),
+                span = ast.trivial_span(),
+              },
+              annotations = ast.default_annotations(),
+              span = ast.trivial_span(),
+            },
+        }),
+        span = ast.trivial_span(),
+      },
+      config_options = ast.TaskConfigOptions {
+        leaf = true,
+        inner = false,
+        idempotent = true,
+      },
+      region_divergence = false,
+      prototype = task,
+      annotations = ast.default_annotations(),
+      span = ast.trivial_span(),
+    }
+    task:set_type(
+      terralib.types.functype(terralib.newlist(), node.return_type, false))
+    task:set_privileges(node.privileges)
+    task:set_conditions({})
+    task:set_param_constraints(node.constraints)
+    task:set_constraints({})
+    task:set_region_universe(data.newmap())
+    return codegen.entry(node)
+  end)
+
 function codegen.stat_fence(cx, node)
   local kind = node.kind
   local blocking = node.blocking
@@ -8293,10 +8363,37 @@ function codegen.stat_fence(cx, node)
     issue_fence = c.legion_runtime_issue_mapping_fence
   end
 
-  assert(not blocking, "unimplemented")
+  local actions = terralib.newlist()
+
+  actions:insert(
+    quote
+      [issue_fence]([cx.runtime], [cx.context])
+    end)
+
+  if blocking then
+    local task = make_dummy_task()
+
+    local call = ast.typed.expr.Call {
+      fn = ast.typed.expr.Function {
+        value = task,
+        expr_type = task:get_type(),
+        annotations = ast.default_annotations(),
+        span = node.span,
+      },
+      args = terralib.newlist(),
+      conditions = terralib.newlist(),
+      replicable = false,
+      expr_type = task:get_type().returntype,
+      annotations = node.annotations,
+      span = node.span,
+    }
+
+    local call_expr = codegen.expr(cx, call):read(cx)
+    actions:insert(call_expr.actions)
+  end
 
   return quote
-    [issue_fence]([cx.runtime], [cx.context])
+    [actions]
   end
 end
 

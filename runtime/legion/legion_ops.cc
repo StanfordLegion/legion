@@ -14590,6 +14590,9 @@ namespace Legion {
         if ((it->impl != NULL) && !it->impl->ready_event.has_triggered())
           pre_events.insert(it->impl->get_ready_event());
       }
+      // Also make sure we wait for any execution fences that we have
+      if (execution_fence_event.exists())
+        pre_events.insert(execution_fence_event);
       RtEvent wait_on;
       if (!pre_events.empty())
         wait_on = Runtime::protect_event(Runtime::merge_events(pre_events));
