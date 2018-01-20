@@ -3213,8 +3213,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     SerializingManager::SerializingManager(Runtime *rt, Mapping::Mapper *mp,
                              MapperID map_id, Processor p, bool init_reentrant)
-      : MapperManager(rt, mp, map_id, p), permit_reentrant(init_reentrant), 
-        executing_call(NULL), paused_calls(0)
+      : MapperManager(rt, mp, map_id, p), executing_call(NULL), paused_calls(0),
+        permit_reentrant(init_reentrant), pending_pause_call(false),
+        pending_finish_call(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -3334,6 +3335,12 @@ namespace Legion {
         if (!precondition.has_triggered())
           return NULL;
       }
+      // See if there is a pending call for us to handle
+      RtUserEvent to_trigger;
+      if (pending_pause_call)
+        to_trigger = complete_pending_pause_mapper_call();
+      else if (pending_finish_call)
+        to_trigger = complete_pending_finish_mapper_call();
       result = allocate_call_info(kind, op, false/*need lock*/);
       // See if we are ready to run this or not
       if ((executing_call != NULL) || (!permit_reentrant && 
@@ -3347,6 +3354,9 @@ namespace Legion {
       else
         executing_call = result;
       Runtime::release_reservation(mapper_lock);
+      // Wake up a pending mapper call to run if necessary
+      if (to_trigger.exists())
+        Runtime::trigger_event(to_trigger);
       // If we have a precondition and we're not the first invocation then we 
       // know we're already in a continuation so we can just wait here 
       // because we've now given up our lock so there is nothing else to do
@@ -3369,30 +3379,22 @@ namespace Legion {
                       "for the mapper call to which they are passed. They "
                       "cannot be stored beyond the lifetime of the "
                       "mapper call.", mapper->get_mapper_name())
+#ifdef DEBUG_LEGION
+      assert(!pending_pause_call);
+#endif
+      // Set the flag indicating there is a paused mapper call that
+      // needs to be handled, do this asynchronoulsy and check to 
+      // see if we lost the race later
+      pending_pause_call = true; 
       // We definitely know we can't start any non_reentrant calls
       // Screw fairness, we care about throughput, see if there are any
       // pending calls to wake up, and then go to sleep ourself
       RtUserEvent to_trigger;
       {
         AutoLock m_lock(mapper_lock);
-        // Increment the count of the paused mapper calls
-        paused_calls++;
-        if (permit_reentrant && !ready_calls.empty())
-        {
-          // Get the next ready call to continue executing
-          executing_call = ready_calls.front();
-          ready_calls.pop_front();
-          to_trigger = executing_call->resume;
-        }
-        else if (permit_reentrant && !pending_calls.empty())
-        {
-          // Get the next available call to handle
-          executing_call = pending_calls.front();
-          pending_calls.pop_front();
-          to_trigger = executing_call->resume; 
-        }
-        else // No one to wake up
-          executing_call = NULL;
+        // See if we lost the race
+        if (pending_pause_call)
+          to_trigger = complete_pending_pause_mapper_call(); 
       }
       if (to_trigger.exists())
         Runtime::trigger_event(to_trigger);
@@ -3436,6 +3438,15 @@ namespace Legion {
 #endif
       if (first_invocation)
       {
+        // Set this flag asynchronously without the lock, there will
+        // be a race to see who gets the lock next and therefore can
+        // do the rest of the finish mapper call routine, we do this
+        // to avoid the priority inversion that can occur where this
+        // lock acquire gets stuck behind a bunch of pending ones
+#ifdef DEBUG_LEGION
+        assert(!pending_finish_call);
+#endif
+        pending_finish_call = true;
         RtEvent precondition = 
           Runtime::acquire_rt_reservation(mapper_lock, true/*exclusive*/);
         if (!precondition.has_triggered())
@@ -3451,6 +3462,56 @@ namespace Legion {
         }
       }
       RtUserEvent to_trigger;
+      // We've got the lock, see if we won the race to the flag
+      if (pending_finish_call)
+        to_trigger = complete_pending_finish_mapper_call();
+      // Return our call info
+      free_call_info(info, false/*need lock*/);
+      Runtime::release_reservation(mapper_lock);
+      // Wake up the next task if necessary
+      if (to_trigger.exists())
+        Runtime::trigger_event(to_trigger);
+    }
+
+    //--------------------------------------------------------------------------
+    RtUserEvent SerializingManager::complete_pending_pause_mapper_call(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(pending_pause_call);
+      assert(!pending_finish_call);
+#endif
+      pending_pause_call = false;
+      // Increment the count of the paused mapper calls
+      paused_calls++;
+      if (permit_reentrant && !ready_calls.empty())
+      {
+        // Get the next ready call to continue executing
+        executing_call = ready_calls.front();
+        ready_calls.pop_front();
+        return executing_call->resume;
+      }
+      else if (permit_reentrant && !pending_calls.empty())
+      {
+        // Get the next available call to handle
+        executing_call = pending_calls.front();
+        pending_calls.pop_front();
+        return executing_call->resume; 
+      }
+      else // No one to wake up
+        executing_call = NULL;
+      return RtUserEvent::NO_RT_USER_EVENT;
+    }
+
+    //--------------------------------------------------------------------------
+    RtUserEvent SerializingManager::complete_pending_finish_mapper_call(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!pending_pause_call);
+      assert(pending_finish_call);
+#endif
+      pending_finish_call = false;
       // See if can start a non-reentrant task
       if (!non_reentrant_calls.empty() && 
           (paused_calls == 0) && ready_calls.empty())
@@ -3459,28 +3520,23 @@ namespace Legion {
         permit_reentrant = false;
         executing_call = non_reentrant_calls.front();
         non_reentrant_calls.pop_front();
-        to_trigger = executing_call->resume;
+        return executing_call->resume;
       }
       else if (!ready_calls.empty())
       {
         executing_call = ready_calls.front();
         ready_calls.pop_front();
-        to_trigger = executing_call->resume;
+        return executing_call->resume;
       }
       else if (!pending_calls.empty())
       {
         executing_call = pending_calls.front();
         pending_calls.pop_front();
-        to_trigger = executing_call->resume;
+        return executing_call->resume;
       }
       else
         executing_call = NULL;
-      // Return our call info
-      free_call_info(info, false/*need lock*/);
-      Runtime::release_reservation(mapper_lock);
-      // Wake up the next task if necessary
-      if (to_trigger.exists())
-        Runtime::trigger_event(to_trigger);
+      return RtUserEvent::NO_RT_USER_EVENT;
     }
 
     /////////////////////////////////////////////////////////////
