@@ -20,12 +20,16 @@ from __future__ import print_function
 import legion
 import numpy
 
-init = legion.extern_task(task_id=3, privileges=[legion.RW])
-
 @legion.task
 def f(x, y, z):
     print("inside task f%s" % ((x, y, z),))
     return x+1
+
+@legion.task(privileges=[legion.RW], leaf=True)
+def init(R):
+    for x in range(0, 4):
+        for y in range(0, 4):
+            R.x[x][y] = x*4 + y
 
 @legion.task(privileges=[legion.RW], leaf=True)
 def inc(R, step):
@@ -66,7 +70,7 @@ def main_task():
     x = f(1, "asdf", True)
     print("result of f is %s" % x.get())
 
-    R = legion.Region.create([4, 4], {'x': (legion.float64, 1)})
+    R = legion.Region.create([4, 4], {'x': legion.float64})
     init(R)
     inc(R, 1)
 

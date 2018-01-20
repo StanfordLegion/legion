@@ -594,7 +594,7 @@ class Task (object):
             arg_ptr = ffi.cast('char *', c.legion_task_get_args(task[0]))
             arg_size = c.legion_task_get_arglen(task[0])
 
-        if arg_size > 0:
+        if arg_size > 0 and c.legion_task_get_depth(task[0]) > 0:
             args = pickle.loads(ffi.unpack(arg_ptr, arg_size))
         else:
             args = ()
