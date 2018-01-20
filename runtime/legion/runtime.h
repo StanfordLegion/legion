@@ -1696,7 +1696,7 @@ namespace Legion {
       void initialize_mappers(void);
       void startup_mappers(void);
       void finalize_runtime(void);
-      void launch_top_level_task(Processor target);
+      void launch_top_level_task(void);
       ApEvent launch_mapper_task(Mapper *mapper, Processor proc, 
                                  Processor::TaskFuncID tid,
                                  const TaskArgument &arg, MapperID map_id);

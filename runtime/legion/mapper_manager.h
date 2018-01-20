@@ -28,7 +28,7 @@ namespace Legion {
                       Operation *op = NULL); 
     public:
       MapperManager*const               manager;
-      RtUserEvent                         resume;
+      RtUserEvent                       resume;
       MappingCallKind                   kind;
       Operation*                        operation;
       std::map<PhysicalManager*,
@@ -663,7 +663,9 @@ namespace Legion {
       virtual void finish_mapper_call(MappingCallInfo *info,
                                       bool first_invocation = true);
     protected:
-      bool permit_reentrant;
+      // Must be called while holding the mapper reservation
+      RtUserEvent complete_pending_pause_mapper_call(void);
+      RtUserEvent complete_pending_finish_mapper_call(void);
     protected:
       // The one executing call if any otherwise NULL
       MappingCallInfo *executing_call; 
@@ -675,6 +677,12 @@ namespace Legion {
       std::deque<MappingCallInfo*> ready_calls;
       // Calls that are waiting for diabling of reentrancy
       std::deque<MappingCallInfo*> non_reentrant_calls;
+      // Whether or not we are currently supporting reentrant calls
+      bool permit_reentrant;
+      // A flag checking whether we have a pending paused mapper call
+      bool pending_pause_call;
+      // A flag checking whether we have a pending finished call
+      bool pending_finish_call;
     };
 
     /**

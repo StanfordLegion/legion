@@ -2892,16 +2892,22 @@ extern "C" {
   // -----------------------------------------------------------------------
 
   /**
-   * @see Legion::Mappable::get_unique_id
+   * @see Legion::Mappable::get_unique_id()
    */
   legion_unique_id_t
   legion_context_get_unique_id(legion_context_t ctx);
 
   /**
-   * @see Legion::Mappable::get_unique_id
+   * @see Legion::Mappable::get_unique_id()
    */
   legion_unique_id_t
   legion_task_get_unique_id(legion_task_t task);
+
+  /**
+   * @see Legion::Mappable::get_depth()
+   */
+  int
+  legion_task_get_depth(legion_task_t task);
 
   /**
    * @see Legion::Mappable::tag

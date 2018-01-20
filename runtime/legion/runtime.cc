@@ -10709,9 +10709,27 @@ namespace Legion {
     }
     
     //--------------------------------------------------------------------------
-    void Runtime::launch_top_level_task(Processor target)
+    void Runtime::launch_top_level_task(void)
     //--------------------------------------------------------------------------
     {
+      // Grab the first local processor to be the initial target
+#ifdef DEBUG_LEGION
+      assert(!local_procs.empty());
+#endif
+      Processor target = *(local_procs.begin());
+      // For backwards compatibility right now we'll make sure this
+      // is a CPU processor if possible
+      if (target.kind() != Processor::LOC_PROC)
+      {
+        for (std::set<Processor>::const_iterator it = 
+              local_procs.begin(); it != local_procs.end(); it++)
+        {
+          if (it->kind() != Processor::LOC_PROC)
+            continue;
+          target = *it;
+          break;
+        }
+      }
       // Make a top-level context
       TopLevelContext *top_context = 
         new TopLevelContext(this, get_unique_operation_id());
@@ -20696,6 +20714,7 @@ namespace Legion {
       // Check for exceeding the local number of processors
       // and get a top-level processor if we need one
       Processor top_level_proc = Processor::NO_PROC;
+      Processor::Kind startup_kind = Processor::NO_KIND;
       {
         Machine::ProcessorQuery local_procs(machine);
         local_procs.local_address_space();
@@ -20705,15 +20724,39 @@ namespace Legion {
                         "compile time maximum of %d.  Change the value "
                         "in legion_config.h and recompile.",
                         local_procs.count(), MAX_NUM_PROCS)
-        // Either we are multi-node and we're doing control
-        // replication or we are single node so we need a top processor
-        local_procs.only_kind(Processor::LOC_PROC);
-        // If we don't have one that is very bad
-        if (local_procs.count() == 0)
-          REPORT_LEGION_ERROR(ERROR_NO_PROCESSORS, 
-                        "Machine model contains no CPU processors!")
-        top_level_proc = local_procs.first();
+        const AddressSpace local_space = local_procs.begin()->address_space();
+        // We'll prefer CPUs for startup for now, but if we get
+        // a utility processor then we'll use it
+        for (Machine::ProcessorQuery::iterator it = 
+              local_procs.begin(); it != local_procs.end(); it++)
+        {
+          if (it->kind() == Processor::LOC_PROC)
+          {
+            startup_kind = Processor::LOC_PROC;
+            if (local_space == 0)
+              top_level_proc = *it;
+            break;
+          }
+          else if ((it->kind() == Processor::UTIL_PROC) &&
+                   (startup_kind == Processor::NO_KIND))
+          {
+            startup_kind = Processor::UTIL_PROC;
+            if (local_space == 0)
+              top_level_proc = *it;
+            // Keep going for now to see if we have a CPU processor
+          }
+        }
       }
+      // Check to make sure we have something to do startup
+      if (startup_kind == Processor::NO_KIND)
+        REPORT_LEGION_ERROR(ERROR_NO_PROCESSORS, "Machine model contains "
+            "no CPU processors and no utility processors! At least one "
+            "CPU or one utility processor is required for Legion.")
+#ifdef DEBUG_LEGION
+      // Startup kind should be a CPU or a Utility processor
+      assert((startup_kind == Processor::LOC_PROC) ||
+              (startup_kind == Processor::UTIL_PROC));
+#endif
       // Right now we launch a dummy barrier task on all the processors
       // to ensure that Realm has started them such that any interpreter
       // processors have loaded all their code
@@ -20728,15 +20771,14 @@ namespace Legion {
       // init task on every processor on all nodes, otherwise we just
       // need to launch one task on a CPU processor on every node
       RtEvent runtime_startup_event(realm.collective_spawn_by_kind(
-          (separate_runtime_instances ? Processor::NO_KIND : 
-           Processor::LOC_PROC), INIT_TASK_ID, NULL, 0,
-          !separate_runtime_instances, procs_started));
+          (separate_runtime_instances ? Processor::NO_KIND : startup_kind), 
+           INIT_TASK_ID, NULL, 0, !separate_runtime_instances, procs_started));
       // See if we need to do any initialization for MPI interoperability
       if (mpi_rank >= 0)
       {
         // Do another collective to construct the rank tables
         RtEvent mpi_init_event(realm.collective_spawn_by_kind(
-              Processor::LOC_PROC, LG_MPI_INTEROP_ID, NULL, 0,
+              startup_kind, LG_MPI_INTEROP_ID, NULL, 0,
               true/*one per node*/, runtime_startup_event));
         // The mpi init event then becomes the new runtime startup event
         runtime_startup_event = mpi_init_event;
@@ -20753,7 +20795,7 @@ namespace Legion {
 	  // all ranks have initialized their handshakes before
 	  // the top-level task is started
 	  RtEvent startup_sync_event(realm.collective_spawn_by_kind(
-                Processor::LOC_PROC, LG_STARTUP_SYNC_ID, NULL, 0,
+                startup_kind, LG_STARTUP_SYNC_ID, NULL, 0,
                 true/*one per node*/, runtime_startup_event));
 	  // The startup sync event then becomes the new runtime startup event
 	  runtime_startup_event = startup_sync_event;
@@ -20763,7 +20805,7 @@ namespace Legion {
           // Even if we don't have any pending handshakes we have to 
           // do a startup sync if stealing is enabled
           RtEvent startup_sync_event(realm.collective_spawn_by_kind(
-                Processor::LOC_PROC, LG_STARTUP_SYNC_ID, NULL, 0,
+                startup_kind, LG_STARTUP_SYNC_ID, NULL, 0,
                 true/*one per node*/, runtime_startup_event));
           // The startup sync event then becomes the new runtime startup event
 	  runtime_startup_event = startup_sync_event;
@@ -20775,7 +20817,7 @@ namespace Legion {
         // to have the mappers kick off any stealing they are going to do
         RtEvent startup_sync_event(realm.collective_spawn_by_kind(
               (separate_runtime_instances ? Processor::NO_KIND : 
-               Processor::LOC_PROC), LG_STARTUP_SYNC_ID, NULL, 0,
+               startup_kind), LG_STARTUP_SYNC_ID, NULL, 0,
               !separate_runtime_instances, runtime_startup_event));
         // The startup sync event then becomes the new runtime startup event
         runtime_startup_event = startup_sync_event;
@@ -22210,7 +22252,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       Runtime *rt = Runtime::get_runtime(p);
-      rt->launch_top_level_task(p);
+      rt->launch_top_level_task();
     }
 
     //--------------------------------------------------------------------------

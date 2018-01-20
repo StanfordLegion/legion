@@ -20,13 +20,7 @@
 using namespace Legion;
 
 enum TaskIDs {
-  TOP_LEVEL_TASK_ID = 1,
-  MAIN_TASK_ID = 2,
-  INIT_TASK_ID = 3,
-};
-
-enum FieldIDs {
-  X_FIELD_ID = 1,
+  MAIN_TASK_ID = 1,
 };
 
 VariantID preregister_python_task_variant(
@@ -44,30 +38,6 @@ VariantID preregister_python_task_variant(
     registrar.task_variant_name);
 }
 
-void init_task(const Task *task,
-               const std::vector<PhysicalRegion> &regions,
-               Context ctx, Runtime *runtime)
-{
-  const FieldAccessor<READ_WRITE,double,2> acc(regions[0], X_FIELD_ID);
-
-  Rect<2> rect = runtime->get_index_space_domain(ctx,
-      task->regions[0].region.get_index_space());
-
-  // Fill memory with some recognizable pattern.
-  for (PointInRectIterator<2> pir(rect); pir(); pir++) {
-    double value = (double)((*pir)[0]*(rect.hi.y - rect.lo.y + 1) + (*pir)[1]);
-    acc[*pir] = value;
-  }
-}
-
-void top_level_task(const Task *task,
-                    const std::vector<PhysicalRegion> &regions,
-                    Context ctx, Runtime *runtime)
-{
-  TaskLauncher launcher(MAIN_TASK_ID, TaskArgument());
-  runtime->execute_task(ctx, launcher);
-}
-
 int main(int argc, char **argv)
 {
   // do this before any threads are spawned
@@ -79,24 +49,12 @@ int main(int argc, char **argv)
   Realm::Python::PythonModule::import_python_module("python_bindings");
 
   {
-    TaskVariantRegistrar registrar(TOP_LEVEL_TASK_ID, "top_level_task");
-    registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
-    Runtime::preregister_task_variant<top_level_task>(registrar, "top_level_task");
-  }
-
-  {
-    TaskVariantRegistrar registrar(INIT_TASK_ID, "init_task");
-    registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
-    Runtime::preregister_task_variant<init_task>(registrar, "init_task");
-  }
-
-  {
     TaskVariantRegistrar registrar(MAIN_TASK_ID, "main_task");
     registrar.add_constraint(ProcessorConstraint(Processor::PY_PROC));
     preregister_python_task_variant(registrar, "python_bindings", "main_task");
   }
 
-  Runtime::set_top_level_task_id(TOP_LEVEL_TASK_ID);
+  Runtime::set_top_level_task_id(MAIN_TASK_ID);
 
   return Runtime::start(argc, argv);
 }
