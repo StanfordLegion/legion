@@ -92,7 +92,7 @@ end
 
 terra register_all()
   cextern_task.register_tasks()
-  [bishoplib.make_entry()]
+  [bishoplib.make_entry()]()
 end
 
 regentlib.start(main, register_all)
