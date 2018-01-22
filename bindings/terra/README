@@ -1,42 +1,17 @@
-* Compiling binding library
+# Compiling binding library
 
 Compiling the binding library requires three shell variables to be set:
 
-- LG_RT_DIR : a path to the Legion runtime source code
-- TERRA_DIR : a path to the local installation of the Terra interpreter.
-              The Makefile finds the 'terra.h' header under $TERRA_DIR/src.
-- LUAJIT_DIR : a path to the local installation of the LuaJIT interpreter.
-               The Makefile finds the 'lua.h' header under $LUAJIT_DIR/src.
+  * LG_RT_DIR: path to the Legion `runtime` directory.
+  * TERRA_DIR: path to the local installation of the Terra interpreter.
+    The Makefile looks for `terra.h` under `$TERRA_DIR/include`.
 
-Running make in a shell will generate the binding library 'liblegion_terra.so'.
+Running `make` in a shell will generate the binding library `liblegion_terra.so`.
 
-* Using binding library
+# Using binding library
 
-We provide a set of Lua/Terra API functions to make the binding library easy to
-use. In order to use this API, the following line should be added to the
-begining of a Lua/Terra code:
+Terra code can begin using the bindings by linking the shared library
+and calling through the C API.
 
-  terralib.require("legionlib")
-
-This 'require' call will find and load the 'liblegion_terra.so' shared library
-in the directories designated by the LD_LIBRARY_PATH variable (or the
-DYLD_LIBRARY_PATH variable in the case of Mac). There are also two shell
-variables to be set to discover the required headers and Lua/Terra scripts:
-
-- LUA_PATH : a path to the Lua/Terra API scripts ('legionlib.t' and
-             'legionlib-terra.t'). Unlike the other variables, this variable
-             takes a semicolon separated list of patterns to search Lua/Terra
-             scripts when the interpreter encounters 'require' calls.
-             For example, you can set this variable like this:
-
-               export LUA_PATH=directory-to-find-terra-scripts/?.t
-
-- INCLUDE_PATH : paths where the Terra itnerpreter could find the 'legion_c.h'
-                 header (for Legion C API) and the 'legion_terra.h' header (for
-                 the bidning library). This variable takes a semicolon separated
-                 list of paths. The list should contain $LG_RT_DIR where the
-                 'legion_c.h' header locates.
-
-You can find some examples of using binding library under examples/lua, which
-are essentially the same as the tutorial examples on the Legion GitHub page
-modulo the language they are written in.
+    terralib.linklibrary("liblegion_terra.so")
+    local c = terralib.includec("legion.h")
