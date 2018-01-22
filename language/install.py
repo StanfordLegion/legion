@@ -234,7 +234,7 @@ def install(gasnet=False, cuda=False, openmp=False, hdf=False, llvm=False,
     terra_dir = os.path.join(regent_dir, 'terra')
     install_terra(terra_dir, external_terra_dir, thread_count, llvm)
 
-    bindings_dir = os.path.join(legion_dir, 'bindings', 'terra')
+    bindings_dir = os.path.join(legion_dir, 'bindings', 'regent')
     install_bindings(bindings_dir, runtime_dir, terra_dir, debug,
                      cuda, openmp, llvm, hdf, spy, gasnet, gasnet_dir, conduit,
                      clean_first, thread_count, extra_flags)

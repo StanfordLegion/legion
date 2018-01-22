@@ -36,7 +36,7 @@ if 'LG_RT_DIR' in os.environ:
     runtime_dir = os.path.realpath(os.environ['LG_RT_DIR'])
 else:
     runtime_dir = os.path.join(os.path.dirname(regent_dir), 'runtime')
-bindings_dir = os.path.join(os.path.dirname(runtime_dir), 'bindings', 'terra')
+bindings_dir = os.path.join(os.path.dirname(runtime_dir), 'bindings', 'regent')
 
 # Find CUDA.
 if 'CUDA' in os.environ:

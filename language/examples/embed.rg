@@ -24,7 +24,7 @@ do
   local legion_dir = runtime_dir .. "legion/"
   local mapper_dir = runtime_dir .. "mappers/"
   local realm_dir = runtime_dir .. "realm/"
-  local binding_dir = root_dir .. "../../bindings/terra/"
+  local binding_dir = root_dir .. "../../bindings/regent/"
 
   local embed_cc = root_dir .. "embed.cc"
   if os.getenv('SAVEOBJ') == '1' then
