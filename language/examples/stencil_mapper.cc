@@ -15,7 +15,7 @@
 
 #include "stencil_mapper.h"
 
-#include "default_mapper.h"
+#include "mappers/default_mapper.h"
 
 #define SPMD_SHARD_USE_IO_PROC 1
 
