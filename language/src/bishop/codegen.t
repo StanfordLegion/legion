@@ -23,7 +23,7 @@ local regent_std = require("regent/std")
 local regent_codegen_hooks = require("regent/codegen_hooks")
 
 local c = terralib.includecstring [[
-#include "legion_c.h"
+#include "legion.h"
 #include "bishop_c.h"
 #include <stdio.h>
 #include <stdlib.h>

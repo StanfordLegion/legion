@@ -19,7 +19,7 @@ local config = require("bishop/config")
 local log = require("bishop/log")
 
 local c = terralib.includecstring [[
-#include "legion_c.h"
+#include "legion.h"
 #include "bishop_c.h"
 #include <stdio.h>
 #include <stdlib.h>
