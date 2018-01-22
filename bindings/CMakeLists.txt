@@ -23,3 +23,5 @@ endif()
 if(Legion_USE_Python)
   add_subdirectory(python)
 endif()
+
+add_subdirectory(regent)
