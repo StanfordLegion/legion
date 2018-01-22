@@ -154,12 +154,11 @@ def symlink(from_path, to_path):
     if not os.path.lexists(to_path):
         os.symlink(from_path, to_path)
 
-def install_bindings(bindings_dir, runtime_dir, terra_dir, debug,
+def install_bindings(bindings_dir, runtime_dir, debug,
                      cuda, openmp, llvm, hdf, spy, gasnet, gasnet_dir, conduit,
                      clean_first, thread_count, extra_flags):
     env = dict(list(os.environ.items()) + [
         ('LG_RT_DIR', runtime_dir),
-        ('TERRA_DIR', terra_dir),                           # for bindings
     ])
 
     flags = (
@@ -235,7 +234,7 @@ def install(gasnet=False, cuda=False, openmp=False, hdf=False, llvm=False,
     install_terra(terra_dir, external_terra_dir, thread_count, llvm)
 
     bindings_dir = os.path.join(legion_dir, 'bindings', 'regent')
-    install_bindings(bindings_dir, runtime_dir, terra_dir, debug,
+    install_bindings(bindings_dir, runtime_dir, debug,
                      cuda, openmp, llvm, hdf, spy, gasnet, gasnet_dir, conduit,
                      clean_first, thread_count, extra_flags)
 
