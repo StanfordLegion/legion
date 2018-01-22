@@ -1556,7 +1556,9 @@ namespace Legion {
        * decisions about tunable values for a given task execution. The
        * mapper is told of the tunable ID and presented with the mapping
        * tag for the operation. It then must then allocate a buffer and 
-       * put the result in the buffer. The runtime will take ownership
+       * put the result in the buffer. Alternatively, it can also tell the
+       * runtime that it does not own the result by setting the take_ownership
+       * flag to false indicating that the runtime should make its own copy
        * of the resulting buffer. If the resulting future expects the 
        * future to be packed, it is the responsibility of the mapper 
        * to pack it. The utility method 'pack_tunable' will allocate
@@ -1569,6 +1571,7 @@ namespace Legion {
       struct SelectTunableOutput {
         void*                                   value;
         size_t                                  size;
+        bool                                    take_ownership; // = true 
       };
       //------------------------------------------------------------------------
       virtual void select_tunable_value(const MapperContext         ctx,

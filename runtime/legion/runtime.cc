@@ -12718,6 +12718,7 @@ namespace Legion {
       input.mapping_tag = args->tag;
       output.value = NULL;
       output.size = 0;
+      output.take_ownership = true;
       mapper->invoke_select_tunable_value(args->ctx->get_owner_task(), 
                                           &input, &output);
       if (legion_spy_enabled)
@@ -12725,7 +12726,8 @@ namespace Legion {
             args->tunable_index, output.value, output.size);
       // Set and complete the future
       if ((output.value != NULL) && (output.size > 0))
-        args->result->set_result(output.value, output.size, true/*own*/);
+        args->result->set_result(output.value, output.size, 
+                                 output.take_ownership);
       args->result->complete_future();
     }
 
