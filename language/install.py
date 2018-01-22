@@ -250,31 +250,31 @@ def driver():
         help = 'Build Legion with debugging enabled.')
     parser.add_argument(
         '--gasnet', dest = 'gasnet', action = 'store_true', required = False,
-        default = 'USE_GASNET' in os.environ and os.environ['USE_GASNET'] == '1',
+        default = os.environ.get('USE_GASNET') == '1',
         help = 'Build Legion with GASNet.')
     parser.add_argument(
         '--cuda', dest = 'cuda', action = 'store_true', required = False,
-        default = 'USE_CUDA' in os.environ and os.environ['USE_CUDA'] == '1',
+        default = os.environ.get('USE_CUDA') == '1',
         help = 'Build Legion with CUDA.')
     parser.add_argument(
         '--openmp', dest = 'openmp', action = 'store_true', required = False,
-        default = 'USE_OPENMP' in os.environ and os.environ['USE_OPENMP'] == '1',
+        default = os.environ.get('USE_OPENMP') == '1',
         help = 'Build Legion with OpenMP support.')
     parser.add_argument(
         '--llvm', dest = 'llvm', action = 'store_true', required = False,
-        default = 'USE_LLVM' in os.environ and os.environ['USE_LLVM'] == '1',
+        default = os.environ.get('USE_LLVM') == '1',
         help = 'Build Legion (and compatible Terra) with LLVM support.')
     parser.add_argument(
         '--hdf5', '--hdf', dest = 'hdf', action = 'store_true', required = False,
-        default = 'USE_HDF' in os.environ and os.environ['USE_HDF'] == '1',
+        default = os.environ.get('USE_HDF') == '1',
         help = 'Build Legion with HDF.')
     parser.add_argument(
         '--spy', dest = 'spy', action = 'store_true', required = False,
-        default = 'USE_SPY' in os.environ and os.environ['USE_SPY'] == '1',
+        default = os.environ.get('USE_SPY') == '1',
         help = 'Build Legion with detailed Legion Spy enabled.')
     parser.add_argument(
         '--conduit', dest = 'conduit', action = 'store', required = False,
-        default = os.environ['CONDUIT'] if 'CONDUIT' in os.environ else None,
+        default = os.environ.get('CONDUIT'),
         help = 'Build Legion with specified GASNet conduit.')
     parser.add_argument(
         '--rdir', dest = 'rdir', required = False,
