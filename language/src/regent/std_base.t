@@ -25,7 +25,7 @@ base.config, base.args = config.args()
 -- ## Legion Bindings
 -- #################
 
-terralib.linklibrary("liblegion_terra.so")
+terralib.linklibrary("libregent.so")
 local c = terralib.includecstring([[
 #include "legion.h"
 #include "legion_terra.h"

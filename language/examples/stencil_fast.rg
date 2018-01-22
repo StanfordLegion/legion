@@ -564,7 +564,7 @@ if os.getenv('SAVEOBJ') == '1' then
   local link_flags = {"-L" .. out_dir, "-lstencil", "-lstencil_mapper"}
 
   if os.getenv('STANDALONE') == '1' then
-    os.execute('cp ' .. os.getenv('LG_RT_DIR') .. '/../bindings/regent/liblegion_terra.so ' .. out_dir)
+    os.execute('cp ' .. os.getenv('LG_RT_DIR') .. '/../bindings/regent/libregent.so ' .. out_dir)
   end
 
   local exe = os.getenv('OBJNAME') or "stencil"

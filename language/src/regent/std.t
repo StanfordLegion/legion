@@ -3496,7 +3496,7 @@ function std.saveobj(main_task, filename, filetype, extra_setup_thunk, link_flag
     end
     flags:insert("-ludreg")
   end
-  flags:insertall({"-L" .. lib_dir, "-llegion_terra"})
+  flags:insertall({"-L" .. lib_dir, "-lregent"})
   if filetype ~= nil then
     terralib.saveobj(filename, filetype, names, flags)
   else
@@ -3600,7 +3600,7 @@ function std.save_tasks(header_filename, filename, filetype,
 
   local flags = terralib.newlist()
   if link_flags then flags:insertall(link_flags) end
-  flags:insertall({"-L" .. lib_dir, "-llegion_terra"})
+  flags:insertall({"-L" .. lib_dir, "-lregent"})
   if filetype ~= nil then
     terralib.saveobj(filename, filetype, names, flags)
   else

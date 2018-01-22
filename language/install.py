@@ -189,8 +189,8 @@ def install_bindings(bindings_dir, runtime_dir, terra_dir, debug,
         ['-j', str(thread_count)],
         cwd = bindings_dir,
         env = env)
-    symlink(os.path.join(bindings_dir, 'liblegion_terra.so'),
-            os.path.join(bindings_dir, 'liblegion_terra%s' % dylib_ext))
+    symlink(os.path.join(bindings_dir, 'libregent.so'),
+            os.path.join(bindings_dir, 'libregent%s' % dylib_ext))
 
     # This last bit is necessary because Mac OS X shared libraries
     # have paths hard-coded into them, and in this case those paths
@@ -200,15 +200,15 @@ def install_bindings(bindings_dir, runtime_dir, terra_dir, debug,
     # You can sanity check that this step actually worked with the
     # commands:
     #
-    # otool -L liblegion_terra.so
+    # otool -L libregent.so
     # ./regent.py
-    #   =package.loadlib('liblegion_terra.so', 'init')
+    #   =package.loadlib('libregent.so', 'init')
 
     if os_name == 'Darwin':
         subprocess.check_call(
             ['install_name_tool', '-change',
              '/usr/local/lib/libluajit-5.1.2.dylib', 'libluajit-5.1.2.dylib',
-             os.path.join(bindings_dir, 'liblegion_terra.so')])
+             os.path.join(bindings_dir, 'libregent.so')])
 
 def install(gasnet=False, cuda=False, openmp=False, hdf=False, llvm=False,
             spy=False, conduit=None, rdir=None, external_terra_dir=None, gasnet_dir=None,

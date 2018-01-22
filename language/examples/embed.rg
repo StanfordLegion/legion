@@ -41,7 +41,7 @@ do
                 " -I " .. mapper_dir .. " " .. " -I " .. legion_dir .. " " ..
                 " -I " .. realm_dir .. " " ..  embed_cc ..
                  " -L " .. root_dir .. " " .. " -l" .. embed_tasks_lib .. " " ..
-                 " -L " .. binding_dir .. " -llegion_terra " ..
+                 " -L " .. binding_dir .. " -lregent " ..
                  " -o " .. exe)
   if os.execute(cmd) ~= 0 then
     print("Error: failed to compile " .. embed_cc)

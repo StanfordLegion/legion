@@ -19,7 +19,7 @@
 
 local tasklib = {}
 
-terralib.linklibrary("liblegion_terra.so")
+terralib.linklibrary("libregent.so")
 
 local c = terralib.includecstring([[
 #include "legion.h"
