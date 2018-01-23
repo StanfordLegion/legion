@@ -129,7 +129,8 @@ def build_terra(terra_dir, llvm_dir, is_cray, thread_count):
         cwd=terra_dir,
         env=env)
 
-def build_regent(root_dir, gasnet_dir, llvm_dir, terra_dir, conduit, thread_count):
+def build_regent(root_dir, use_cmake, cmake_exe,
+                 gasnet_dir, llvm_dir, terra_dir, conduit, thread_count):
     env = dict(list(os.environ.items()) + [
         ('CONDUIT', conduit),
         ('GASNET', gasnet_dir),
@@ -139,6 +140,8 @@ def build_regent(root_dir, gasnet_dir, llvm_dir, terra_dir, conduit, thread_coun
 
     subprocess.check_call(
         [os.path.join(root_dir, 'install.py'),
+         '--cmake',
+         '--with-cmake', cmake_exe,
          '--with-terra', terra_dir,
          '--rdir', 'auto',
          '-j', str(thread_count),
@@ -230,7 +233,8 @@ def check_dirty_build(name, build_result, component_dir):
         print('Good luck and please ask for help if you get stuck!')
         sys.exit(1)
 
-def driver(prefix_dir, llvm_version, terra_url, terra_branch, insecure):
+def driver(prefix_dir=None, legion_use_cmake=False, llvm_version=None,
+           terra_url=None, terra_branch=None, insecure=False):
     if 'CC' not in os.environ:
         raise Exception('Please set CC in your environment')
     if 'CXX' not in os.environ:
@@ -299,11 +303,15 @@ def driver(prefix_dir, llvm_version, terra_url, terra_branch, insecure):
             raise Exception('Cannot parse CMake version:\n\n%s' % cmake_version)
         else:
             cmake_exe = 'cmake' # CMake is ok, use it
-    if llvm_use_cmake and cmake_exe is None:
+    if (legion_use_cmake or llvm_use_cmake) and cmake_exe is None:
         cmake_dir = os.path.realpath(os.path.join(prefix_dir, 'cmake'))
         cmake_install_dir = os.path.join(cmake_dir, 'cmake-3.7.2-Linux-x86_64')
         if not os.path.exists(cmake_dir):
             os.mkdir(cmake_dir)
+
+            proc_type = subprocess.check_output(['uname', '-p'])
+            if proc_type != 'x86_64':
+                raise Exception("Don't know how to download CMake binary for %s" % proc_type)
 
             cmake_tarball = os.path.join(cmake_dir, 'cmake-3.7.2-Linux-x86_64.tar.gz')
             download(cmake_tarball, 'https://cmake.org/files/v3.7/cmake-3.7.2-Linux-x86_64.tar.gz', '915bc981aab354821fb9fd28374a720fdb3aa180', insecure=insecure)
@@ -335,18 +343,24 @@ def driver(prefix_dir, llvm_version, terra_url, terra_branch, insecure):
         check_dirty_build('terra', terra_build_result, terra_dir)
     assert os.path.exists(terra_build_result)
 
-    build_regent(root_dir, gasnet_release_dir, llvm_install_dir, terra_dir, conduit, thread_count)
+    build_regent(root_dir, legion_use_cmake, cmake_exe,
+                 gasnet_release_dir, llvm_install_dir, terra_dir,
+                 conduit, thread_count)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
         description='Setup tool for Regent.')
     parser.add_argument(
-        '--prefix', dest='prefix', required=False,
+        '--prefix', dest='prefix_dir', required=False,
         help='Directory in which to install dependencies.')
     parser.add_argument(
-        '--skip-certificate-check', dest='skip_certificate_check', action='store_true',
+        '--skip-certificate-check', dest='insecure', action='store_true',
         default=discover_skip_certificate_check(),
         help='Skip certificate checks on downloads.')
+    parser.add_argument(
+        '--cmake', dest='legion_use_cmake', required=False, action='store_true',
+        default=os.environ.get('USE_CMAKE') == 1,
+        help='Use CMake to build Legion.')
     parser.add_argument(
         '--llvm-version', dest='llvm_version', required=False, choices=('38', '39'),
         default=discover_llvm_version(),
@@ -360,4 +374,4 @@ if __name__ == '__main__':
         default='compiler-sc17-snapshot',
         help='Branch of Terra repository to checkout.')
     args = parser.parse_args()
-    driver(args.prefix, args.llvm_version, args.terra_url, args.terra_branch, args.skip_certificate_check)
+    driver(**vars(args))

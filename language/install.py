@@ -155,8 +155,9 @@ def symlink(from_path, to_path):
         os.symlink(from_path, to_path)
 
 def install_bindings(regent_dir, legion_dir, bindings_dir, runtime_dir,
-                     cmake, build_dir, debug, cuda, openmp, llvm, hdf,
-                     spy, gasnet, gasnet_dir, conduit, clean_first,
+                     cmake, cmake_exe, build_dir,
+                     debug, cuda, openmp, llvm, hdf, spy,
+                     gasnet, gasnet_dir, conduit, clean_first,
                      extra_flags, thread_count, verbose):
     # Don't blow away an existing directory
     assert not (clean_first and build_dir is not None)
@@ -195,7 +196,7 @@ def install_bindings(regent_dir, legion_dir, bindings_dir, runtime_dir,
         make_flags = ['VERBOSE=1'] if verbose else []
         assert not spy # unimplemented
         subprocess.check_call(
-            ['cmake'] + flags + [legion_dir],
+            [cmake_exe] + flags + [legion_dir],
             cwd=build_dir)
         subprocess.check_call(
             ['make'] + make_flags + ['-j', str(thread_count)],
@@ -256,9 +257,9 @@ def get_cmake_config(cmake, regent_dir, default=None):
 
 def install(gasnet=False, cuda=False, openmp=False, hdf=False, llvm=False,
             spy=False, conduit=None, cmake=None, rdir=None,
-            cmake_build_dir=None, external_terra_dir=None, gasnet_dir=None,
-            debug=False, clean_first=True, extra_flags=[], thread_count=None,
-            verbose=False):
+            cmake_exe=None, cmake_build_dir=None, external_terra_dir=None,
+            gasnet_dir=None, debug=False, clean_first=True, extra_flags=[],
+            thread_count=None, verbose=False):
     regent_dir = os.path.dirname(os.path.realpath(__file__))
     legion_dir = os.path.dirname(regent_dir)
 
@@ -293,8 +294,9 @@ def install(gasnet=False, cuda=False, openmp=False, hdf=False, llvm=False,
 
     bindings_dir = os.path.join(legion_dir, 'bindings', 'regent')
     install_bindings(regent_dir, legion_dir, bindings_dir, runtime_dir,
-                     cmake, cmake_build_dir, debug, cuda, openmp, llvm, hdf,
-                     spy, gasnet, gasnet_dir, conduit, clean_first,
+                     cmake, cmake_exe, cmake_build_dir,
+                     debug, cuda, openmp, llvm, hdf, spy,
+                     gasnet, gasnet_dir, conduit, clean_first,
                      extra_flags, thread_count, verbose)
 
 def driver():
@@ -341,6 +343,10 @@ def driver():
     parser.add_argument(
         '--no-cmake', dest='cmake', action='store_false', required=False,
         help="Don't build Legion with CMake (instead use GNU Make).")
+    parser.add_argument(
+        '--with-cmake', dest='cmake_exe', metavar='EXE', required=False,
+        default='cmake',
+        help='Path to CMake executable (if not on PATH).')
     parser.add_argument(
         '--with-cmake-build', dest='cmake_build_dir', metavar='DIR', required=False,
         help='Path to CMake build directory (optional).')
