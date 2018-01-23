@@ -263,7 +263,7 @@ gcc49_cxx98_debug_llvm_regent:
 gcc49_cxx98_debug_hdf5_legion:
   <<: [*linux, *image, *tests]
   variables:
-    <<: [*gcc49, *terra38, *debug, *cxx98_normal, *hdf5, *legion, *ctest]
+    <<: [*gcc49, *terra38, *debug, *cxx98_normal, *hdf5, *legion]
 gcc49_cxx98_debug_hdf5_cmake_regent:
   <<: [*linux_compute, *image, *tests]
   variables:
@@ -373,7 +373,7 @@ clang38_cxx98_debug_llvm_regent:
 clang38_cxx98_debug_hdf5_legion:
   <<: [*linux, *image, *tests]
   variables:
-    <<: [*clang38, *terra38, *debug, *cxx98_normal, *hdf5, *legion, *ctest]
+    <<: [*clang38, *terra38, *debug, *cxx98_normal, *hdf5, *legion]
 clang38_cxx98_debug_hdf5_cmake_regent:
   <<: [*linux_compute, *image, *tests]
   variables:

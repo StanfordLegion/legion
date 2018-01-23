@@ -57,7 +57,7 @@ else:
 
 # Detect use of CMake.
 if 'USE_CMAKE' in os.environ:
-    use_cmake = os.environ['USE_CMAKE']
+    cmake = os.environ['USE_CMAKE'] == '1'
 else:
     cmake_config_filename = os.path.join(regent_dir, '.cmake.json')
     cmake = load_json_config(cmake_config_filename)
