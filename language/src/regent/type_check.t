@@ -1273,14 +1273,20 @@ function type_check.expr_dynamic_cast(cx, node)
   local value = type_check.expr(cx, node.value)
   local value_type = std.check_read(cx, value)
 
-  if not std.is_bounded_type(node.expr_type) then
-    report.error(node, "dynamic_cast requires ptr type as argument 1, got " .. tostring(node.expr_type))
+  if not (std.is_bounded_type(node.expr_type) or std.is_partition(node.expr_type)) then
+    report.error(node, "dynamic_cast requires ptr type or partition type as argument 1, got " .. tostring(node.expr_type))
   end
-  if not std.validate_implicit_cast(value_type, node.expr_type.index_type) then
-    report.error(node, "dynamic_cast requires ptr as argument 2, got " .. tostring(value_type))
+  if not (std.validate_implicit_cast(value_type, node.expr_type.index_type) or
+          std.is_partition(value_type)) then
+    report.error(node, "dynamic_cast requires ptr or partition as argument 2, got " .. tostring(value_type))
   end
   if std.is_bounded_type(value_type) and not std.type_eq(node.expr_type.points_to_type, value_type.points_to_type) then
     report.error(node, "incompatible pointers for dynamic_cast: " .. tostring(node.expr_type) .. " and " .. tostring(value_type))
+  end
+  if std.is_partition(value_type) and
+     not (std.type_eq(node.expr_type:colors(), value_type:colors()) and
+          node.expr_type.parent_region_symbol == value_type.parent_region_symbol) then
+    report.error(node, "incompatible partitions for dynamic_cast: " .. tostring(node.expr_type) .. " and " .. tostring(value_type))
   end
 
   return ast.typed.expr.DynamicCast {
@@ -1657,8 +1663,9 @@ function type_check.expr_image(cx, node)
   end
 
   local field_type = std.get_field_path(region_type:fspace(), region.fields[1])
-  if not ((std.is_bounded_type(field_type) and std.is_index_type(field_type.index_type)) or std.is_index_type(field_type)) then
-    report.error(node, "type mismatch in argument 3: expected field of index type but got " .. tostring(field_type))
+  if not ((std.is_bounded_type(field_type) and std.is_index_type(field_type.index_type)) or
+           std.is_index_type(field_type) or std.is_rect_type(field_type)) then
+    report.error(node, "type mismatch in argument 3: expected field of index or rect type but got " .. tostring(field_type))
   else
     -- TODO: indexspaces should be parametrized by index types.
     --       currently they only support 64-bit points, which is why we do this check here.
@@ -1838,8 +1845,9 @@ function type_check.expr_preimage(cx, node)
   end
 
   local field_type = std.get_field_path(region_type:fspace(), region.fields[1])
-  if not ((std.is_bounded_type(field_type) and std.is_index_type(field_type.index_type)) or std.is_index_type(field_type)) then
-    report.error(node, "type mismatch in argument 3: expected field of index type but got " .. tostring(field_type))
+  if not ((std.is_bounded_type(field_type) and std.is_index_type(field_type.index_type)) or
+           std.is_index_type(field_type) or std.is_rect_type(field_type)) then
+    report.error(node, "type mismatch in argument 3: expected field of index or rect type but got " .. tostring(field_type))
   else
     -- TODO: indexspaces should be parametrized by index types.
     --       currently they only support 64-bit points, which is why we do this check here.
@@ -1884,7 +1892,11 @@ function type_check.expr_preimage(cx, node)
   else
     parent_symbol = std.newsymbol()
   end
-  local expr_type = std.partition(partition_type.disjointness, parent_symbol, partition_type.colors_symbol)
+  local disjointness = partition_type.disjointness
+  if std.is_rect_type(field_type) then
+    disjointness = std.aliased
+  end
+  local expr_type = std.partition(disjointness, parent_symbol, partition_type.colors_symbol)
 
   -- Hack: Stuff the region type back into the partition's region
   -- argument, if necessary.

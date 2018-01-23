@@ -13,42 +13,24 @@
  * limitations under the License.
  */
 
-#ifndef __BINDING_H__
-#define __BINDING_H__
+#include "extern_task.h"
 
-struct TIndexSpace
+#include "legion.h"
+
+using namespace Legion;
+
+void task_f(const Task *task,
+            const std::vector<PhysicalRegion> &regions,
+            Context ctx, Runtime *runtime)
 {
-  unsigned id;
-};
+  printf("Hello Legion!\n");
+}
 
-struct TFieldSpace
+void register_tasks()
 {
-  unsigned id;
-};
-
-struct TLogicalRegion
-{
-  unsigned int tree_id;
-  struct TIndexSpace index_space;
-  struct TFieldSpace field_space;
-};
-
-struct TLogicalPartition
-{
-  unsigned int tree_id;
-  unsigned int index_partition;
-  struct TFieldSpace field_space;
-};
-
-struct TPhysicalRegion
-{
-  void* rawptr;
-  unsigned int redop;
-};
-
-struct TTask
-{
-  void* rawptr;
-};
-
-#endif // __BINDING_H_
+  {
+    TaskVariantRegistrar registrar(TID_F, "f");
+    registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+    Runtime::preregister_task_variant<task_f>(registrar, "f");
+  }
+}

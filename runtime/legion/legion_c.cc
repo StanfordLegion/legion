@@ -1057,6 +1057,58 @@ legion_index_partition_create_by_preimage(
   return CObjectWrapper::wrap(ip);
 }
 
+legion_index_partition_t
+legion_index_partition_create_by_image_range(
+  legion_runtime_t runtime_,
+  legion_context_t ctx_,
+  legion_index_space_t handle_,
+  legion_logical_partition_t projection_,
+  legion_logical_region_t parent_,
+  legion_field_id_t fid,
+  legion_index_space_t color_space_,
+  legion_partition_kind_t part_kind /* = COMPUTE_KIND */,
+  int color /* = AUTO_GENERATE_ID */)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+  IndexSpace handle = CObjectWrapper::unwrap(handle_);
+  LogicalPartition projection = CObjectWrapper::unwrap(projection_);
+  LogicalRegion parent = CObjectWrapper::unwrap(parent_);
+  IndexSpace color_space = CObjectWrapper::unwrap(color_space_);
+
+  IndexPartition ip =
+    runtime->create_partition_by_image_range(
+      ctx, handle, projection, parent, fid, color_space, part_kind, color);
+
+  return CObjectWrapper::wrap(ip);
+}
+
+legion_index_partition_t
+legion_index_partition_create_by_preimage_range(
+  legion_runtime_t runtime_,
+  legion_context_t ctx_,
+  legion_index_partition_t projection_,
+  legion_logical_region_t handle_,
+  legion_logical_region_t parent_,
+  legion_field_id_t fid,
+  legion_index_space_t color_space_,
+  legion_partition_kind_t part_kind /* = COMPUTE_KIND */,
+  int color /* = AUTO_GENERATE_ID */)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+  IndexPartition projection = CObjectWrapper::unwrap(projection_);
+  LogicalRegion handle = CObjectWrapper::unwrap(handle_);
+  LogicalRegion parent = CObjectWrapper::unwrap(parent_);
+  IndexSpace color_space = CObjectWrapper::unwrap(color_space_);
+
+  IndexPartition ip =
+    runtime->create_partition_by_preimage_range(
+      ctx, projection, handle, parent, fid, color_space, part_kind, color);
+
+  return CObjectWrapper::wrap(ip);
+}
+
 bool
 legion_index_partition_is_disjoint(legion_runtime_t runtime_,
                                    legion_index_partition_t handle_)
@@ -3508,6 +3560,12 @@ legion_unique_id_t
 legion_task_get_unique_id(legion_task_t task_)
 {
   return CObjectWrapper::unwrap(task_)->get_unique_id();
+}
+
+int
+legion_task_get_depth(legion_task_t task_)
+{
+  return CObjectWrapper::unwrap(task_)->get_depth();
 }
 
 legion_mapping_tag_id_t

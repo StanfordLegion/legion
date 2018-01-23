@@ -211,7 +211,6 @@ namespace Legion {
             break;
         }
       }
-      assert(!local_cpus.empty()); // better have some cpus
       // check to make sure we complete sets of ios, cpus, and gpus
       for (unsigned idx = 0; idx < remote_cpus.size(); idx++) {
 	if (idx == node_id) continue;  // ignore our own node

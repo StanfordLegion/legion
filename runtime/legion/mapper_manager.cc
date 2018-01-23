@@ -47,6 +47,7 @@ namespace Legion {
     MapperManager::MapperManager(Runtime *rt, Mapping::Mapper *mp, 
                                  MapperID mid, Processor p)
       : runtime(rt), mapper(mp), mapper_id(mid), processor(p),
+        profile_mapper(runtime->profiler != NULL),
         mapper_lock(Reservation::create_reservation())
     //--------------------------------------------------------------------------
     {
@@ -3088,14 +3089,9 @@ namespace Legion {
         result->operation = op;
         if (op != NULL)
           result->acquired_instances = op->get_acquired_instances_ref();
-        if (runtime->profiler != NULL)
-          result->start_time = Realm::Clock::current_time_in_nanoseconds();
         return result;
       }
-      MappingCallInfo *result = new MappingCallInfo(this, kind, op);
-      if (runtime->profiler != NULL)
-        result->start_time = Realm::Clock::current_time_in_nanoseconds();
-      return result;
+      return new MappingCallInfo(this, kind, op);
     }
 
     //--------------------------------------------------------------------------
@@ -3108,18 +3104,15 @@ namespace Legion {
         free_call_info(info, false/*need lock*/);
         return;
       }
-      if (runtime->profiler != NULL)
-      {
-        unsigned long long stop_time = 
-          Realm::Clock::current_time_in_nanoseconds();
+      if (profile_mapper)
         runtime->profiler->record_mapper_call(info->kind, 
             (info->operation == NULL) ? 0 : info->operation->get_unique_op_id(),
-            info->start_time, stop_time); 
-      }
+            info->start_time, info->stop_time); 
       info->resume = RtUserEvent::NO_RT_USER_EVENT;
       info->operation = NULL;
       info->acquired_instances = NULL;
       info->start_time = 0;
+      info->stop_time = 0;
       available_infos.push_back(info);
     }
 
@@ -3239,8 +3232,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     SerializingManager::SerializingManager(Runtime *rt, Mapping::Mapper *mp,
                              MapperID map_id, Processor p, bool init_reentrant)
-      : MapperManager(rt, mp, map_id, p), permit_reentrant(init_reentrant), 
-        executing_call(NULL), paused_calls(0)
+      : MapperManager(rt, mp, map_id, p), executing_call(NULL), paused_calls(0),
+        permit_reentrant(init_reentrant), pending_pause_call(false),
+        pending_finish_call(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -3360,6 +3354,12 @@ namespace Legion {
         if (!precondition.has_triggered())
           return NULL;
       }
+      // See if there is a pending call for us to handle
+      RtUserEvent to_trigger;
+      if (pending_pause_call)
+        to_trigger = complete_pending_pause_mapper_call();
+      else if (pending_finish_call)
+        to_trigger = complete_pending_finish_mapper_call();
       result = allocate_call_info(kind, op, false/*need lock*/);
       // See if we are ready to run this or not
       if ((executing_call != NULL) || (!permit_reentrant && 
@@ -3373,6 +3373,24 @@ namespace Legion {
       else
         executing_call = result;
       Runtime::release_reservation(mapper_lock);
+      // Wake up a pending mapper call to run if necessary
+      if (to_trigger.exists())
+        Runtime::trigger_event(to_trigger);
+      // If we have a precondition and we're not the first invocation then we 
+      // know we're already in a continuation so we can just wait here 
+      // because we've now given up our lock so there is nothing else to do
+      if (precondition.exists() && !first_invocation)
+      {
+        precondition.lg_wait();
+        precondition = RtEvent::NO_RT_EVENT;
+        // Update the start time of the mapper call since we waited
+        if (profile_mapper)
+          result->start_time = Realm::Clock::current_time_in_nanoseconds();
+      }
+      else if (!precondition.exists() && profile_mapper) 
+        // Record our start time in this case since there is no continuation
+        result->start_time = Realm::Clock::current_time_in_nanoseconds();
+      // else the continuation will initialize the start time
       return result;
     }
 
@@ -3387,30 +3405,22 @@ namespace Legion {
                       "for the mapper call to which they are passed. They "
                       "cannot be stored beyond the lifetime of the "
                       "mapper call.", mapper->get_mapper_name())
+#ifdef DEBUG_LEGION
+      assert(!pending_pause_call);
+#endif
+      // Set the flag indicating there is a paused mapper call that
+      // needs to be handled, do this asynchronoulsy and check to 
+      // see if we lost the race later
+      pending_pause_call = true; 
       // We definitely know we can't start any non_reentrant calls
       // Screw fairness, we care about throughput, see if there are any
       // pending calls to wake up, and then go to sleep ourself
       RtUserEvent to_trigger;
       {
         AutoLock m_lock(mapper_lock);
-        // Increment the count of the paused mapper calls
-        paused_calls++;
-        if (permit_reentrant && !ready_calls.empty())
-        {
-          // Get the next ready call to continue executing
-          executing_call = ready_calls.front();
-          ready_calls.pop_front();
-          to_trigger = executing_call->resume;
-        }
-        else if (permit_reentrant && !pending_calls.empty())
-        {
-          // Get the next available call to handle
-          executing_call = pending_calls.front();
-          pending_calls.pop_front();
-          to_trigger = executing_call->resume; 
-        }
-        else // No one to wake up
-          executing_call = NULL;
+        // See if we lost the race
+        if (pending_pause_call)
+          to_trigger = complete_pending_pause_mapper_call(); 
       }
       if (to_trigger.exists())
         Runtime::trigger_event(to_trigger);
@@ -3454,6 +3464,18 @@ namespace Legion {
 #endif
       if (first_invocation)
       {
+        // Record our finish time when we're done
+        if (profile_mapper)
+          info->stop_time = Realm::Clock::current_time_in_nanoseconds();
+        // Set this flag asynchronously without the lock, there will
+        // be a race to see who gets the lock next and therefore can
+        // do the rest of the finish mapper call routine, we do this
+        // to avoid the priority inversion that can occur where this
+        // lock acquire gets stuck behind a bunch of pending ones
+#ifdef DEBUG_LEGION
+        assert(!pending_finish_call);
+#endif
+        pending_finish_call = true;
         RtEvent precondition = 
           Runtime::acquire_rt_reservation(mapper_lock, true/*exclusive*/);
         if (!precondition.has_triggered())
@@ -3469,6 +3491,56 @@ namespace Legion {
         }
       }
       RtUserEvent to_trigger;
+      // We've got the lock, see if we won the race to the flag
+      if (pending_finish_call)
+        to_trigger = complete_pending_finish_mapper_call();
+      // Return our call info
+      free_call_info(info, false/*need lock*/);
+      Runtime::release_reservation(mapper_lock);
+      // Wake up the next task if necessary
+      if (to_trigger.exists())
+        Runtime::trigger_event(to_trigger);
+    }
+
+    //--------------------------------------------------------------------------
+    RtUserEvent SerializingManager::complete_pending_pause_mapper_call(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(pending_pause_call);
+      assert(!pending_finish_call);
+#endif
+      pending_pause_call = false;
+      // Increment the count of the paused mapper calls
+      paused_calls++;
+      if (permit_reentrant && !ready_calls.empty())
+      {
+        // Get the next ready call to continue executing
+        executing_call = ready_calls.front();
+        ready_calls.pop_front();
+        return executing_call->resume;
+      }
+      else if (permit_reentrant && !pending_calls.empty())
+      {
+        // Get the next available call to handle
+        executing_call = pending_calls.front();
+        pending_calls.pop_front();
+        return executing_call->resume; 
+      }
+      else // No one to wake up
+        executing_call = NULL;
+      return RtUserEvent::NO_RT_USER_EVENT;
+    }
+
+    //--------------------------------------------------------------------------
+    RtUserEvent SerializingManager::complete_pending_finish_mapper_call(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!pending_pause_call);
+      assert(pending_finish_call);
+#endif
+      pending_finish_call = false;
       // See if can start a non-reentrant task
       if (!non_reentrant_calls.empty() && 
           (paused_calls == 0) && ready_calls.empty())
@@ -3477,28 +3549,23 @@ namespace Legion {
         permit_reentrant = false;
         executing_call = non_reentrant_calls.front();
         non_reentrant_calls.pop_front();
-        to_trigger = executing_call->resume;
+        return executing_call->resume;
       }
       else if (!ready_calls.empty())
       {
         executing_call = ready_calls.front();
         ready_calls.pop_front();
-        to_trigger = executing_call->resume;
+        return executing_call->resume;
       }
       else if (!pending_calls.empty())
       {
         executing_call = pending_calls.front();
         pending_calls.pop_front();
-        to_trigger = executing_call->resume;
+        return executing_call->resume;
       }
       else
         executing_call = NULL;
-      // Return our call info
-      free_call_info(info, false/*need lock*/);
-      Runtime::release_reservation(mapper_lock);
-      // Wake up the next task if necessary
-      if (to_trigger.exists())
-        Runtime::trigger_event(to_trigger);
+      return RtUserEvent::NO_RT_USER_EVENT;
     }
 
     /////////////////////////////////////////////////////////////
@@ -3665,6 +3732,9 @@ namespace Legion {
       }
       MappingCallInfo *result = allocate_call_info(kind, op,false/*need lock*/);
       Runtime::release_reservation(mapper_lock);
+      // Record our mapper start time when we're ready to run
+      if (profile_mapper)
+        result->start_time = Realm::Clock::current_time_in_nanoseconds();
       return result;
     }
 
@@ -3689,6 +3759,9 @@ namespace Legion {
     {
       if (first_invocation)
       {
+        // Record our finish time when we are done
+        if (profile_mapper)
+          info->stop_time = Realm::Clock::current_time_in_nanoseconds();
         RtEvent precondition = 
           Runtime::acquire_rt_reservation(mapper_lock, true/*exclusive*/);
         if (!precondition.has_triggered())
@@ -3790,6 +3863,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       const ContinuationArgs *conargs = (const ContinuationArgs*)args;
+      // Update the timing if necessary since we did a continuation
+      if (conargs->continuation->manager->profile_mapper &&
+          (conargs->continuation->info != NULL))
+        conargs->continuation->info->start_time =
+          Realm::Clock::current_time_in_nanoseconds();
       conargs->continuation->execute();
     }
 

@@ -4833,7 +4833,7 @@ namespace Legion {
       uint64_t right = _mm_extract_epi64(value, 1);
 #else // Assume we have sse 2
       uint64_t left = _mm_cvtsi128_si64(value);
-      uint64_t right = _mm_cvtsi128_si64(_mm_shuffle_epi32(value, 7));
+      uint64_t right = _mm_cvtsi128_si64(_mm_shuffle_epi32(value, 14));
 #endif
       return (left | right);
     }
@@ -6355,9 +6355,9 @@ namespace Legion {
       result |= _mm_extract_epi64(left, 1);
 #else // Assume we have sse 2
       uint64_t result = _mm_cvtsi128_si64(right);
-      result |= _mm_cvtsi128_si64(_mm_shuffle_epi32(right, 7));
+      result |= _mm_cvtsi128_si64(_mm_shuffle_epi32(right, 14));
       result |= _mm_cvtsi128_si64(left);
-      result |= _mm_cvtsi128_si64(_mm_shuffle_epi32(left, 7));
+      result |= _mm_cvtsi128_si64(_mm_shuffle_epi32(left, 14));
 #endif
       return result;
     }

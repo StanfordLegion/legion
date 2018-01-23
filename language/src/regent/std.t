@@ -3479,7 +3479,11 @@ end
 function std.saveobj(main_task, filename, filetype, extra_setup_thunk, link_flags)
   assert(std.is_task(main_task))
   local main, names = std.setup(main_task, extra_setup_thunk)
-  local lib_dir = os.getenv("LG_RT_DIR") .. "/../bindings/terra"
+  local use_cmake = os.getenv("USE_CMAKE") == "1"
+  local lib_dir = os.getenv("LG_RT_DIR") .. "/../bindings/regent"
+  if use_cmake then
+    lib_dir = os.getenv("CMAKE_BUILD_DIR") .. "/lib"
+  end
 
   local flags = terralib.newlist()
   if os.getenv('CRAYPE_VERSION') then
@@ -3496,7 +3500,10 @@ function std.saveobj(main_task, filename, filetype, extra_setup_thunk, link_flag
     end
     flags:insert("-ludreg")
   end
-  flags:insertall({"-L" .. lib_dir, "-llegion_terra"})
+  flags:insertall({"-L" .. lib_dir, "-lregent"})
+  if use_cmake then
+    flags:insertall({"-llegion", "-lrealm"})
+  end
   if filetype ~= nil then
     terralib.saveobj(filename, filetype, names, flags)
   else
@@ -3591,7 +3598,11 @@ function std.save_tasks(header_filename, filename, filetype,
   assert(header_filename and filename)
   local registration_name, task_impl = write_header(header_filename)
   local _, names = std.setup(nil, extra_setup_thunk, registration_name)
-  local lib_dir = os.getenv("LG_RT_DIR") .. "/../bindings/terra"
+  local use_cmake = os.getenv("USE_CMAKE") == "1"
+  local lib_dir = os.getenv("LG_RT_DIR") .. "/../bindings/regent"
+  if use_cmake then
+    lib_dir = os.getenv("CMAKE_BUILD_DIR") .. "/lib"
+  end
 
   -- Export task interface implementations
   for k, v in pairs(task_impl) do
@@ -3600,7 +3611,10 @@ function std.save_tasks(header_filename, filename, filetype,
 
   local flags = terralib.newlist()
   if link_flags then flags:insertall(link_flags) end
-  flags:insertall({"-L" .. lib_dir, "-llegion_terra"})
+  flags:insertall({"-L" .. lib_dir, "-lregent"})
+  if use_cmake then
+    flags:insertall({"-llegion", "-lrealm"})
+  end
   if filetype ~= nil then
     terralib.saveobj(filename, filetype, names, flags)
   else

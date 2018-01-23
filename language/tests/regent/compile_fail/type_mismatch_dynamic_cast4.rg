@@ -13,14 +13,17 @@
 -- limitations under the License.
 
 -- fails-with:
--- type_mismatch_dynamic_cast1.rg:24: dynamic_cast requires ptr type or partition type as argument 1, got int32
---   var y = dynamic_cast(int, x)
---                      ^
+-- type_mismatch_dynamic_cast4.rg:28: incompatible partitions for dynamic_cast: partition(disjoint, $s, $cs) and partition(aliased, $r, ispace(int1d))
+--   var p_disjoint = dynamic_cast(partition(disjoint, s, cs), p_aliased)
+--                               ^
 
 import "regent"
 
-task f()
-  var x = 5
-  var y = dynamic_cast(int, x)
+task main()
+  var r = region(ispace(int1d, 4), int)
+  var s = region(ispace(int1d, 4), int1d(int, r))
+  var q = partition(equal, s, ispace(int1d, 4))
+  var p_aliased = image(r, q, s)
+  var cs = p_aliased.colors
+  var p_disjoint = dynamic_cast(partition(disjoint, s, cs), p_aliased)
 end
-f:compile()

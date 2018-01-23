@@ -25,9 +25,9 @@ base.config, base.args = config.args()
 -- ## Legion Bindings
 -- #################
 
-terralib.linklibrary("liblegion_terra.so")
+terralib.linklibrary("libregent.so")
 local c = terralib.includecstring([[
-#include "legion_c.h"
+#include "legion.h"
 #include "legion_terra.h"
 #include "legion_terra_partitions.h"
 #include <stdio.h>
@@ -495,7 +495,7 @@ function base.types.is_fspace_instance(t)
   return terralib.types.istype(t) and rawget(t, "is_fspace_instance") or false
 end
 
-function base.types.flatten_struct_fields(struct_type, pred)
+function base.types.flatten_struct_fields(struct_type)
   assert(terralib.types.istype(struct_type))
   local field_paths = terralib.newlist()
   local field_types = terralib.newlist()

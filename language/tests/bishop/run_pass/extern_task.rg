@@ -13,16 +13,25 @@
 -- limitations under the License.
 
 import "regent"
+import "bishop"
 
-local clegion_interop
+mapper
+
+task#f {
+  target : processors[isa=x86][0];    
+}
+
+end
+
+local cextern_task
 do
   assert(os.getenv('LG_RT_DIR') ~= nil, "$LG_RT_DIR should be set!")
   local root_dir = arg[0]:match(".*/") or "./"
   local runtime_dir = os.getenv('LG_RT_DIR') .. "/"
-  local legion_interop_cc = root_dir .. "legion_interop.cc"
+  local legion_interop_cc = root_dir .. "extern_task.cc"
   local legion_interop_so
   if os.getenv('SAVEOBJ') == '1' then
-    legion_interop_so = root_dir .. "liblegion_interop.so"
+    legion_interop_so = root_dir .. "libextern_task.so"
   else
     legion_interop_so = os.tmpname() .. ".so" -- root_dir .. "mapper.so"
   end
@@ -45,8 +54,8 @@ do
     assert(false)
   end
   terralib.linklibrary(legion_interop_so)
-  clegion_interop =
-    terralib.includec("legion_interop.h", {"-I", root_dir, "-I", runtime_dir})
+  cextern_task =
+    terralib.includec("extern_task.h", {"-I", root_dir, "-I", runtime_dir})
 end
 
 struct s {
@@ -65,7 +74,7 @@ where
   reads(r.c),
   reads writes(r.d)
 end
-f:set_task_id(clegion_interop.TID_F)
+f:set_task_id(cextern_task.TID_F)
 f:set_calling_convention(regentlib.convention.manual())
 
 task main()
@@ -74,4 +83,10 @@ task main()
 
   f(r, 2.0)
 end
-regentlib.start(main, clegion_interop.register_tasks)
+
+terra register_all()
+  cextern_task.register_tasks()
+  [bishoplib.make_entry()]()
+end
+
+regentlib.start(main, register_all)

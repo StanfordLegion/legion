@@ -68,15 +68,9 @@ local DriverAPI = {
   cuCtxGetDevice = ef("cuCtxGetDevice",{&int32} -> uint32);
   cuDeviceGet = ef("cuDeviceGet",{&int32,int32} -> uint32);
   cuCtxCreate_v2 = ef("cuCtxCreate_v2",{&&CUctx_st,uint32,int32} -> uint32);
+  cuCtxDestroy = ef("cuCtxDestroy",{&CUctx_st} -> uint32);
   cuDeviceComputeCapability = ef("cuDeviceComputeCapability",
     {&int32,&int32,int32} -> uint32);
-  cuLinkCreate_v2 = ef("cuLinkCreate_v2",
-    {uint32,&uint32,&&opaque,&&CUlinkState_st} -> uint32);
-  cuLinkAddData_v2 = ef("cuLinkAddData_v2",
-    {&CUlinkState_st,uint32,&opaque,uint64,&int8,uint32,&uint32,&&opaque} -> uint32);
-  cuLinkComplete = ef("cuLinkComplete",
-    {&CUlinkState_st,&&opaque,&uint64} -> uint32);
-  cuLinkDestroy = ef("cuLinkDestroy", {&CUlinkState_st} -> uint32);
 }
 
 local dlfcn = terralib.includec("dlfcn.h")
@@ -115,29 +109,31 @@ local terra assert(x : bool, message : rawstring)
   end
 end
 
-local terra init_cuda() : int32
+local terra get_cuda_version() : uint64
   var cx : &CUctx_st
+  var cx_created = false
   var r = DriverAPI.cuCtxGetCurrent(&cx)
   assert(r == 0, "CUDA error in cuCtxGetCurrent")
-  var d : int32
+  var device : int32
   if cx ~= nil then
-    r = DriverAPI.cuCtxGetDevice(&d)
+    r = DriverAPI.cuCtxGetDevice(&device)
     assert(r == 0, "CUDA error in cuCtxGetDevice")
   else
-    r = DriverAPI.cuDeviceGet(&d, 0)
+    r = DriverAPI.cuDeviceGet(&device, 0)
     assert(r == 0, "CUDA error in cuDeviceGet")
-    r = DriverAPI.cuCtxCreate_v2(&cx, 0, d)
+    r = DriverAPI.cuCtxCreate_v2(&cx, 0, device)
     assert(r == 0, "CUDA error in cuCtxCreate_v2")
+    cx_created = true
   end
 
-  return d
-end
-
-local terra get_cuda_version(device : int) : uint64
   var major : int, minor : int
-  var r = DriverAPI.cuDeviceComputeCapability(&major, &minor, device)
+  r = DriverAPI.cuDeviceComputeCapability(&major, &minor, device)
   assert(r == 0, "CUDA error in cuDeviceComputeCapability")
-  return [uint64](major * 10 + minor)
+  var version = [uint64](major * 10 + minor)
+  if cx_created then
+    DriverAPI.cuCtxDestroy(cx)
+  end
+  return version
 end
 
 --
@@ -183,8 +179,7 @@ function cudahelper.jit_compile_kernels_and_register(kernels)
   for k, v in pairs(kernels) do
     module[v.name] = v.kernel
   end
-  local device = init_cuda()
-  local version = get_cuda_version(device)
+  local version = get_cuda_version()
   local libdevice = find_device_library(tonumber(version))
   local llvmbc = terralib.linkllvm(libdevice)
   externcall_builtin = function(name, ftype)

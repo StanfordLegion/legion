@@ -39,25 +39,47 @@ endif()
 set(SOVERSION 1)
 
 #------------------------------------------------------------------------------#
-# More boilerplate to deal with build type and lib type
+# Build type and shared vs static library
 #------------------------------------------------------------------------------#
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CXX_FLAGS)
   set(CMAKE_BUILD_TYPE  Debug CACHE STRING "Choose the type of build" FORCE)
 endif(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CXX_FLAGS)
-set(BUILD_SHARED_LIBS OFF   CACHE BOOL   "Whether or not to build shared libraries instead of static")
-
-#https://github.com/StanfordLegion/legion/issues/168#issuecomment-244582958
-include(CheckCXXCompilerFlag)
-check_cxx_compiler_flag("-fno-strict-aliasing" COMPILER_SUPPORTS_NO_STRICT_ALIASING)
-if(COMPILER_SUPPORTS_NO_STRICT_ALIASING)
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-strict-aliasing")
-endif()
 
 if (CMAKE_BUILD_TYPE AND ( CMAKE_BUILD_TYPE STREQUAL "Debug"))
   # define variable for realm_defines.h
   set(DEBUG_REALM ON)
   # define variable for legion_defines.h
   set(DEBUG_LEGION ON)
+endif()
+
+set(BUILD_SHARED_LIBS OFF   CACHE BOOL   "Whether or not to build shared libraries instead of static")
+
+#------------------------------------------------------------------------------#
+# Architecture
+#------------------------------------------------------------------------------#
+if(DEFINED BUILD_MARCH)
+  set(USER_DEFINED_BUILD_MARCH ON)
+else()
+  set(BUILD_MARCH "native")
+endif()
+
+include(CheckCXXCompilerFlag)
+check_cxx_compiler_flag("-march=${BUILD_MARCH}" COMPILER_SUPPORTS_MARCH)
+if(COMPILER_SUPPORTS_MARCH)
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -march=${BUILD_MARCH}")
+elseif(USER_DEFINED_BUILD_MARCH)
+  message(FATAL_ERROR "The flag -march=${BUILD_MARCH} is not supported by the compiler")
+endif()
+
+#------------------------------------------------------------------------------#
+# Optimizations
+#------------------------------------------------------------------------------#
+
+# Legion can't handle certain optimizations. See:
+# https://github.com/StanfordLegion/legion/issues/168#issuecomment-244582958
+check_cxx_compiler_flag("-fno-strict-aliasing" COMPILER_SUPPORTS_NO_STRICT_ALIASING)
+if(COMPILER_SUPPORTS_NO_STRICT_ALIASING)
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-strict-aliasing")
 endif()
 
 #------------------------------------------------------------------------------#

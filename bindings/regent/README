@@ -1,0 +1,17 @@
+# Compiling binding library
+
+Compiling the binding library requires three shell variables to be set:
+
+  * LG_RT_DIR: path to the Legion `runtime` directory.
+  * TERRA_DIR: path to the local installation of the Terra interpreter.
+    The Makefile looks for `terra.h` under `$TERRA_DIR/include`.
+
+Running `make` in a shell will generate the binding library `liblegion_terra.so`.
+
+# Using binding library
+
+Terra code can begin using the bindings by linking the shared library
+and calling through the C API.
+
+    terralib.linklibrary("liblegion_terra.so")
+    local c = terralib.includec("legion.h")

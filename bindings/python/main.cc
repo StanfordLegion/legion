@@ -22,8 +22,7 @@
 using namespace Legion;
 
 enum TaskIDs {
-  TOP_LEVEL_TASK_ID = 1,
-  MAIN_TASK_ID = 2,
+  MAIN_TASK_ID = 1,
 };
 
 VariantID preregister_python_task_variant(
@@ -39,14 +38,6 @@ VariantID preregister_python_task_variant(
   return Runtime::preregister_task_variant(
     registrar, code_desc, userdata, userlen,
     registrar.task_variant_name);
-}
-
-void top_level_task(const Task *task,
-                    const std::vector<PhysicalRegion> &regions,
-                    Context ctx, Runtime *runtime)
-{
-  TaskLauncher launcher(MAIN_TASK_ID, TaskArgument());
-  runtime->execute_task(ctx, launcher);
 }
 
 int main(int argc, char **argv)
@@ -93,18 +84,12 @@ int main(int argc, char **argv)
   Realm::Python::PythonModule::import_python_module(module_name);
 
   {
-    TaskVariantRegistrar registrar(TOP_LEVEL_TASK_ID, "top_level_task");
-    registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
-    Runtime::preregister_task_variant<top_level_task>(registrar, "top_level_task");
-  }
-
-  {
     TaskVariantRegistrar registrar(MAIN_TASK_ID, "main");
     registrar.add_constraint(ProcessorConstraint(Processor::PY_PROC));
     preregister_python_task_variant(registrar, module_name, "main");
   }
 
-  Runtime::set_top_level_task_id(TOP_LEVEL_TASK_ID);
+  Runtime::set_top_level_task_id(MAIN_TASK_ID);
 
   return Runtime::start(argc, argv);
 }

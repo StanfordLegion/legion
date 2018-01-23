@@ -22,7 +22,7 @@
 #include <map>
 #include <vector>
 
-#include "default_mapper.h"
+#include "mappers/default_mapper.h"
 
 using namespace Legion;
 using namespace Legion::Mapping;

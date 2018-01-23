@@ -260,14 +260,14 @@ gcc49_cxx98_debug_llvm_regent:
   variables:
     <<: [*gcc49, *terra38, *debug, *cxx98_normal, *llvm, *regent]
 #   * HDF5
-gcc49_cxx98_debug_hdf5_cmake_legion:
+gcc49_cxx98_debug_hdf5_legion:
   <<: [*linux, *image, *tests]
   variables:
-    <<: [*gcc49, *terra38, *debug, *cxx98_normal, *hdf5, *cmake, *legion, *ctest]
-gcc49_cxx98_debug_hdf5_regent:
+    <<: [*gcc49, *terra38, *debug, *cxx98_normal, *hdf5, *legion]
+gcc49_cxx98_debug_hdf5_cmake_regent:
   <<: [*linux_compute, *image, *tests]
   variables:
-    <<: [*gcc49, *terra38, *debug, *cxx98_normal, *hdf5, *regent]
+    <<: [*gcc49, *terra38, *debug, *cxx98_normal, *hdf5, *cmake, *regent]
 #   * GASNet
 gcc49_cxx98_debug_gasnet_cmake_legion:
   <<: [*linux_compute, *image, *tests]
@@ -370,14 +370,14 @@ clang38_cxx98_debug_llvm_regent:
   variables:
     <<: [*clang38, *terra38, *debug, *cxx98_normal, *llvm, *regent]
 #   * HDF5
-clang38_cxx98_debug_hdf5_cmake_legion:
+clang38_cxx98_debug_hdf5_legion:
   <<: [*linux, *image, *tests]
   variables:
-    <<: [*clang38, *terra38, *debug, *cxx98_normal, *hdf5, *cmake, *legion, *ctest]
-clang38_cxx98_debug_hdf5_regent:
+    <<: [*clang38, *terra38, *debug, *cxx98_normal, *hdf5, *legion]
+clang38_cxx98_debug_hdf5_cmake_regent:
   <<: [*linux_compute, *image, *tests]
   variables:
-    <<: [*clang38, *terra38, *debug, *cxx98_normal, *hdf5, *regent]
+    <<: [*clang38, *terra38, *debug, *cxx98_normal, *hdf5, *cmake, *regent]
 #   * GASNet
 clang38_cxx98_debug_gasnet_cmake_legion:
   <<: [*linux_compute, *image, *tests]
