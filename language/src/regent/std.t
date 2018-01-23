@@ -3479,7 +3479,11 @@ end
 function std.saveobj(main_task, filename, filetype, extra_setup_thunk, link_flags)
   assert(std.is_task(main_task))
   local main, names = std.setup(main_task, extra_setup_thunk)
+  local use_cmake = os.getenv("USE_CMAKE") == "1"
   local lib_dir = os.getenv("LG_RT_DIR") .. "/../bindings/regent"
+  if use_cmake then
+    lib_dir = os.getenv("CMAKE_BUILD_DIR") .. "/lib"
+  end
 
   local flags = terralib.newlist()
   if os.getenv('CRAYPE_VERSION') then
@@ -3497,6 +3501,9 @@ function std.saveobj(main_task, filename, filetype, extra_setup_thunk, link_flag
     flags:insert("-ludreg")
   end
   flags:insertall({"-L" .. lib_dir, "-lregent"})
+  if use_cmake then
+    flags:insertall({"-llegion", "-lrealm"})
+  end
   if filetype ~= nil then
     terralib.saveobj(filename, filetype, names, flags)
   else
