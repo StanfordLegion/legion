@@ -1,6 +1,8 @@
 *.exe
 *.so
+/build
 /luabind
 /terra
 /src/rdir
+/.cmake.json
 /.rdir.json
