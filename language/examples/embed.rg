@@ -34,10 +34,17 @@ do
 
   local cxx_flags = "-O2 -Wall -Werror"
 
+  local use_cmake = os.getenv("USE_CMAKE") == "1"
+  local lib_dir = binding_dir
+  local libs = "-lregent"
+  if use_cmake then
+    lib_dir = os.getenv("CMAKE_BUILD_DIR") .. "/lib"
+    libs = libs .. " -llegion -lrealm"
+  end
   local cmd = (cxx .. " " .. cxx_flags .. " -I " .. runtime_dir .. " " ..
                  embed_cc ..
                  " -L " .. root_dir .. " " .. " -l" .. embed_tasks_lib .. " " ..
-                 " -L " .. binding_dir .. " -lregent " ..
+                 " -L " .. lib_dir .. " " .. libs .. " " ..
                  " -o " .. exe)
   if os.execute(cmd) ~= 0 then
     print("Error: failed to compile " .. embed_cc)
