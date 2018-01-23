@@ -21,10 +21,7 @@ local exe
 local root_dir = arg[0]:match(".*/") or "./"
 do
   local runtime_dir = os.getenv("LG_RT_DIR") .. "/"
-  local legion_dir = runtime_dir .. "legion/"
-  local mapper_dir = runtime_dir .. "mappers/"
-  local realm_dir = runtime_dir .. "realm/"
-  local binding_dir = root_dir .. "../../bindings/terra/"
+  local binding_dir = root_dir .. "../../bindings/regent/"
 
   local embed_cc = root_dir .. "embed.cc"
   if os.getenv('SAVEOBJ') == '1' then
@@ -37,11 +34,17 @@ do
 
   local cxx_flags = "-O2 -Wall -Werror"
 
+  local use_cmake = os.getenv("USE_CMAKE") == "1"
+  local lib_dir = binding_dir
+  local libs = "-lregent"
+  if use_cmake then
+    lib_dir = os.getenv("CMAKE_BUILD_DIR") .. "/lib"
+    libs = libs .. " -llegion -lrealm"
+  end
   local cmd = (cxx .. " " .. cxx_flags .. " -I " .. runtime_dir .. " " ..
-                " -I " .. mapper_dir .. " " .. " -I " .. legion_dir .. " " ..
-                " -I " .. realm_dir .. " " ..  embed_cc ..
+                 embed_cc ..
                  " -L " .. root_dir .. " " .. " -l" .. embed_tasks_lib .. " " ..
-                 " -L " .. binding_dir .. " -llegion_terra " ..
+                 " -L " .. lib_dir .. " " .. libs .. " " ..
                  " -o " .. exe)
   if os.execute(cmd) ~= 0 then
     print("Error: failed to compile " .. embed_cc)

@@ -22,7 +22,7 @@
 #include <map>
 #include <vector>
 
-#include "default_mapper.h"
+#include "mappers/default_mapper.h"
 
 #include <sys/time.h>
 #include <sys/resource.h>

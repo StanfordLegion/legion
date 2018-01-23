@@ -80,13 +80,13 @@ legion_openmp_cxx_tests = [
 
 legion_python_cxx_tests = [
     # Bindings
-    ['bindings/python/legion_python', ['hello', '-ll:py', '1']],
+    ['bindings/python/legion_python', ['hello', '-ll:py', '1', '-ll:cpu', '0']],
 
     # Examples
     ['examples/python_interop/python_interop', ['-ll:py', '1']],
 
     # Tests
-    ['test/python_bindings/python_bindings', ['-ll:py', '1']],
+    ['test/python_bindings/python_bindings', ['-ll:py', '1', '-ll:cpu', '0']],
 ]
 
 legion_hdf_cxx_tests = [
@@ -476,7 +476,7 @@ def check_test_legion_cxx(root_dir):
         raise Exception('There are tests that are NOT in the test suite')
 
 def build_cmake(root_dir, tmp_dir, env, thread_count,
-                test_legion_cxx, test_perf, test_ctest):
+                test_regent, test_legion_cxx, test_perf, test_ctest):
     build_dir = os.path.join(tmp_dir, 'build')
     install_dir = os.path.join(tmp_dir, 'install')
     os.mkdir(build_dir)
@@ -497,8 +497,10 @@ def build_cmake(root_dir, tmp_dir, env, thread_count,
         cmdline.append('-DLegion_ENABLE_TESTING=OFF')
     if 'CC_FLAGS' in env:
         cmdline.append('-DCMAKE_CXX_FLAGS=%s' % env['CC_FLAGS'])
-    if test_legion_cxx or test_perf or test_ctest:
+    if test_regent or test_legion_cxx or test_perf or test_ctest:
         cmdline.append('-DLegion_BUILD_ALL=ON')
+    if test_regent:
+        cmdline.append('-DBUILD_SHARED_LIBS=ON')
     # last argument to cmake is the root of the tree
     cmdline.append(root_dir)
 
@@ -650,6 +652,22 @@ def run_tests(test_modules=None,
 
     gcov_flags = ' -ftest-coverage -fprofile-arcs'
 
+    if check_ownership:
+        check_test_legion_cxx(root_dir)
+        return
+
+    report_mode(debug, launcher,
+                test_regent, test_legion_cxx, test_fuzzer, test_realm,
+                test_external, test_private, test_perf, test_ctest,
+                use_gasnet,
+                use_cuda, use_openmp, use_python, use_llvm, use_hdf, use_spy,
+                use_gcov, use_cmake, use_rdir)
+
+    tmp_dir = tempfile.mkdtemp(dir=root_dir)
+    if verbose:
+        print('Using build directory: %s' % tmp_dir)
+        print()
+
     # Normalize the test environment.
     env = dict(list(os.environ.items()) + [
         ('DEBUG', '1' if debug else '0'),
@@ -667,7 +685,8 @@ def run_tests(test_modules=None,
         ('TEST_SPY', '1' if use_spy else '0'),
         ('TEST_GCOV', '1' if use_gcov else '0'),
         ('USE_RDIR', '1' if use_rdir else '0'),
-        ('LG_RT_DIR', os.path.join(root_dir, 'runtime'))] + (
+        ('LG_RT_DIR', os.path.join(root_dir, 'runtime')),
+        ('CMAKE_BUILD_DIR', os.path.join(tmp_dir, 'build'))] + (
 
         # Gcov doesn't get a USE_GCOV flag, but instead stuff the GCC
         # options for Gcov on to the compile and link flags.
@@ -677,27 +696,13 @@ def run_tests(test_modules=None,
                        if 'LD_FLAGS' in os.environ else gcov_flags)),
         ] if use_gcov else []))
 
-    if check_ownership:
-        check_test_legion_cxx(root_dir)
-        return
-
-    report_mode(debug, launcher,
-                test_regent, test_legion_cxx, test_fuzzer, test_realm,
-                test_external, test_private, test_perf, test_ctest,
-                use_gasnet,
-                use_cuda, use_openmp, use_python, use_llvm, use_hdf, use_spy,
-                use_gcov, use_cmake, use_rdir)
-
-    tmp_dir = tempfile.mkdtemp(dir=root_dir)
-    if verbose:
-        print('Using build directory: %s' % tmp_dir)
-        print()
     try:
         # Build tests.
         with Stage('build'):
             if use_cmake:
                 bin_dir = build_cmake(
-                    root_dir, tmp_dir, env, thread_count, test_legion_cxx, test_perf, test_ctest)
+                    root_dir, tmp_dir, env, thread_count,
+                    test_regent, test_legion_cxx, test_perf, test_ctest)
             else:
                 # With GNU Make, builds happen inline. But clean here.
                 build_make_clean(

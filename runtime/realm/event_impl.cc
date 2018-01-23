@@ -2100,10 +2100,11 @@ static void *bytedup(const void *data, size_t datalen)
 	  //  candidate for migration
           // don't migrate a barrier more than once though (i.e. only if it's on the creator node still)
 	  // also, do not migrate a barrier if we have any local involvement in future generations
-	  //  (either arrivals or waiters)
+	  //  (either arrivals or waiters or a subscription that will become a waiter)
 	  // finally (hah!), do not migrate barriers using reduction ops
 	  if(local_notifications.empty() && (remote_notifications.size() == 1) &&
-	     generations.empty() && (redop == 0) &&
+	     generations.empty() && (gen_subscribed <= generation) &&
+	     (redop == 0) &&
              (ID(me).barrier.creator_node == my_node_id)) {
 	    log_barrier.info() << "barrier migration: " << me << " -> " << remote_notifications[0].node;
 	    migration_target = remote_notifications[0].node;
@@ -2205,18 +2206,27 @@ static void *bytedup(const void *data, size_t datalen)
       // no need to take lock to check current generation
       if(needed_gen <= generation) return true;
 
-      // if we're not the owner, subscribe if we haven't already
-      if(owner != my_node_id) {
+      // update the subscription (even on the local node), but do a
+      //  quick test first to avoid taking a lock if the subscription is
+      //  clearly already done
+      if(gen_subscribed < needed_gen) {
+	// looks like it needs an update - take lock to avoid duplicate
+	//  subscriptions
 	gen_t previous_subscription;
-	// take lock to avoid duplicate subscriptions
+	bool send_subscription_request = false;
 	{
 	  AutoHSLLock a(mutex);
 	  previous_subscription = gen_subscribed;
-	  if(gen_subscribed < needed_gen)
+	  if(gen_subscribed < needed_gen) {
 	    gen_subscribed = needed_gen;
+	    // test ownership while holding the mutex
+	    if(owner != my_node_id)
+	      send_subscription_request = true;
+	  }
 	}
 
-	if(previous_subscription < needed_gen) {
+	// if we're not the owner, send subscription if we haven't already
+	if(send_subscription_request) {
 	  log_barrier.info() << "subscribing to barrier " << make_barrier(needed_gen) << " (prev=" << previous_subscription << ")";
 	  BarrierSubscribeMessage::send_request(owner, me.id, needed_gen, my_node_id, false/*!forwarded*/);
 	}

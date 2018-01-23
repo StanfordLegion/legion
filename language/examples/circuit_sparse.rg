@@ -26,9 +26,6 @@ local ccircuit
 do
   local root_dir = arg[0]:match(".*/") or "./"
   local runtime_dir = os.getenv('LG_RT_DIR') .. "/"
-  local legion_dir = runtime_dir .. "legion/"
-  local mapper_dir = runtime_dir .. "mappers/"
-  local realm_dir = runtime_dir .. "realm/"
   local circuit_cc = root_dir .. "circuit.cc"
   local circuit_so
   if os.getenv('OBJNAME') then
@@ -52,16 +49,13 @@ do
   end
 
   local cmd = (cxx .. " " .. cxx_flags .. " -I " .. runtime_dir .. " " ..
-                 " -I " .. mapper_dir .. " " .. " -I " .. legion_dir .. " " ..
-                 " -I " .. realm_dir .. " " .. circuit_cc .. " -o " .. circuit_so)
+                 circuit_cc .. " -o " .. circuit_so)
   if os.execute(cmd) ~= 0 then
     print("Error: failed to compile " .. circuit_cc)
     assert(false)
   end
   terralib.linklibrary(circuit_so)
-  ccircuit = terralib.includec("circuit.h", {"-I", root_dir, "-I", runtime_dir, 
-                                             "-I", mapper_dir, "-I", legion_dir,
-                                             "-I", realm_dir})
+  ccircuit = terralib.includec("circuit.h", {"-I", root_dir, "-I", runtime_dir})
 end
 
 local c = regentlib.c
@@ -947,7 +941,7 @@ if os.getenv('SAVEOBJ') == '1' then
   local link_flags = terralib.newlist({"-L" .. out_dir, "-lcircuit", "-lm"})
 
   if os.getenv('STANDALONE') == '1' then
-    os.execute('cp ' .. os.getenv('LG_RT_DIR') .. '/../bindings/terra/liblegion_terra.so ' .. out_dir)
+    os.execute('cp ' .. os.getenv('LG_RT_DIR') .. '/../bindings/regent/libregent.so ' .. out_dir)
   end
 
   local exe = os.getenv('OBJNAME') or "circuit"

@@ -28,9 +28,6 @@ do
   assert(os.getenv('LG_RT_DIR') ~= nil, "$LG_RT_DIR should be set!")
   local root_dir = arg[0]:match(".*/") or "./"
   local runtime_dir = os.getenv('LG_RT_DIR') .. "/"
-  local legion_dir = runtime_dir .. "legion/"
-  local mapper_dir = runtime_dir .. "mappers/"
-  local realm_dir = runtime_dir .. "realm/"
   local legion_interop_cc = root_dir .. "extern_task.cc"
   local legion_interop_so
   if os.getenv('SAVEOBJ') == '1' then
@@ -51,17 +48,14 @@ do
   end
 
   local cmd = (cxx .. " " .. cxx_flags .. " -I " .. runtime_dir .. " " ..
-                 " -I " .. mapper_dir .. " " .. " -I " .. legion_dir .. " " ..
-                 " -I " .. realm_dir .. " " .. legion_interop_cc .. " -o " .. legion_interop_so)
+                 legion_interop_cc .. " -o " .. legion_interop_so)
   if os.execute(cmd) ~= 0 then
     print("Error: failed to compile " .. legion_interop_cc)
     assert(false)
   end
   terralib.linklibrary(legion_interop_so)
   cextern_task =
-    terralib.includec("extern_task.h", {"-I", root_dir, "-I", runtime_dir,
-                                           "-I", mapper_dir, "-I", legion_dir,
-                                           "-I", realm_dir})
+    terralib.includec("extern_task.h", {"-I", root_dir, "-I", runtime_dir})
 end
 
 struct s {
@@ -92,7 +86,7 @@ end
 
 terra register_all()
   cextern_task.register_tasks()
-  [bishoplib.make_entry()]
+  [bishoplib.make_entry()]()
 end
 
 regentlib.start(main, register_all)

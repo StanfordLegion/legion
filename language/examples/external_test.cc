@@ -15,7 +15,7 @@
 
 #include "external_test.h"
 
-#include "default_mapper.h"
+#include "mappers/default_mapper.h"
 
 using namespace Legion;
 using namespace Legion::Mapping;
