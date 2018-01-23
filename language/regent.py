@@ -61,7 +61,6 @@ if 'USE_CMAKE' in os.environ:
 else:
     cmake_config_filename = os.path.join(regent_dir, '.cmake.json')
     cmake = load_json_config(cmake_config_filename)
-    use_cmake = '1' if cmake else '0'
 cmake_build_dir = os.path.join(regent_dir, 'build')
 
 include_path = (
@@ -80,8 +79,8 @@ if os_name == 'Darwin':
 lib_path = (
     (os.environ[LD_LIBRARY_PATH].split(':')
      if LD_LIBRARY_PATH in os.environ else []) +
-    [os.path.join(terra_dir, 'build')] +
-    ([os.path.join(cmake_build_dir, 'lib') if use_cmake else bindings_dir]))
+    [os.path.join(terra_dir, 'build'),
+     (os.path.join(cmake_build_dir, 'lib') if cmake else bindings_dir)])
 
 def root_dir():
     return os.path.dirname(runtime_dir)
@@ -113,7 +112,7 @@ def regent(args, env = {}, **kwargs):
         LD_LIBRARY_PATH: ':'.join(lib_path),
         'INCLUDE_PATH': ';'.join(include_path),
         'LG_RT_DIR': runtime_dir,
-        'USE_CMAKE': use_cmake,
+        'USE_CMAKE': '1' if cmake else '0',
         'CMAKE_BUILD_DIR': cmake_build_dir,
         'USE_RDIR': use_rdir,
     }
