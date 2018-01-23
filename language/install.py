@@ -156,8 +156,8 @@ def symlink(from_path, to_path):
 
 def install_bindings(regent_dir, legion_dir, bindings_dir, runtime_dir,
                      cmake, debug, cuda, openmp, llvm, hdf, spy, gasnet,
-                     gasnet_dir, conduit, clean_first, thread_count,
-                     extra_flags):
+                     gasnet_dir, conduit, clean_first, extra_flags,
+                     thread_count, verbose):
     if cmake:
         build_dir = os.path.join(regent_dir, 'build')
         if clean_first:
@@ -178,9 +178,14 @@ def install_bindings(regent_dir, legion_dir, bindings_dir, runtime_dir,
             (['-DGASNet_ROOT_DIR=%s' % gasnet_dir] if gasnet_dir is not None else []) +
             (['-DGASNet_CONDUIT=%s' % conduit] if conduit is not None else []) +
             (['-DCMAKE_CXX_COMPILER=%s' % os.environ['CXX']] if 'CXX' in os.environ else []))
+        make_flags = ['VERBOSE=1'] if verbose else []
         assert not spy # unimplemented
-        subprocess.check_call(['cmake'] + flags + [legion_dir], cwd=build_dir)
-        subprocess.check_call(['make', '-j', str(thread_count)], cwd=build_dir)
+        subprocess.check_call(
+            ['cmake'] + flags + [legion_dir],
+            cwd=build_dir)
+        subprocess.check_call(
+            ['make'] + make_flags + ['-j', str(thread_count)],
+            cwd=build_dir)
     else:
         flags = (
             ['LG_RT_DIR=%s' % runtime_dir,
@@ -238,7 +243,8 @@ def get_cmake_config(cmake, regent_dir, default=None):
 def install(gasnet=False, cuda=False, openmp=False, hdf=False, llvm=False,
             spy=False, conduit=None, cmake=None, rdir=None,
             external_terra_dir=None, gasnet_dir=None,
-            debug=False, clean_first=True, thread_count=None, extra_flags=[]):
+            debug=False, clean_first=True, extra_flags=[], thread_count=None,
+            verbose=False):
     regent_dir = os.path.dirname(os.path.realpath(__file__))
     legion_dir = os.path.dirname(regent_dir)
 
@@ -268,8 +274,8 @@ def install(gasnet=False, cuda=False, openmp=False, hdf=False, llvm=False,
     bindings_dir = os.path.join(legion_dir, 'bindings', 'regent')
     install_bindings(regent_dir, legion_dir, bindings_dir, runtime_dir,
                      cmake, debug, cuda, openmp, llvm, hdf, spy, gasnet,
-                     gasnet_dir, conduit, clean_first, thread_count,
-                     extra_flags)
+                     gasnet_dir, conduit, clean_first, extra_flags, thread_count,
+                     verbose)
 
 def driver():
     parser = argparse.ArgumentParser(
@@ -333,6 +339,9 @@ def driver():
     parser.add_argument(
         '-j', dest = 'thread_count', nargs = '?', type = int,
         help = 'Number threads used to compile.')
+    parser.add_argument(
+        '-v', '--verbose', dest = 'verbose', action = 'store_true', required = False,
+        help = 'Enable verbose build output.')
     args = parser.parse_args()
 
     install(**vars(args))
