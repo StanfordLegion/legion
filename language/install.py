@@ -44,7 +44,7 @@ def download(dest_path, url, sha1):
     dest_file = os.path.basename(dest_path)
     subprocess.check_call(['wget', '-O', dest_path, url])
     shasum = subprocess.Popen(
-        ['shasum', '--check'], stdin = subprocess.PIPE, cwd = dest_dir)
+        ['shasum', '--check'], stdin=subprocess.PIPE, cwd=dest_dir)
     shasum.communicate('%s  %s' % (sha1, dest_file))
     assert shasum.wait() == 0
 
@@ -56,12 +56,12 @@ def git_clone(repo_dir, url, branch=None):
 def git_update(repo_dir):
     subprocess.check_call(
         ['git', 'pull', '--ff-only'],
-        cwd = repo_dir)
+        cwd=repo_dir)
 
 def git_submodule_update(repo_dir):
     subprocess.check_call(
         ['git', 'submodule', 'update', '--init'],
-        cwd = repo_dir)
+        cwd=repo_dir)
 
 def load_json_config(filename):
     try:
@@ -113,7 +113,7 @@ def build_terra(terra_dir, thread_count, llvm):
     subprocess.check_call(
         ['make', 'all', '-j', str(thread_count)] +
         (['REEXPORT_LLVM_COMPONENTS=irreader mcjit x86'] if llvm else []),
-        cwd = terra_dir)
+        cwd=terra_dir)
 
 def install_terra(terra_dir, external_terra_dir, thread_count, llvm):
     if external_terra_dir is not None:
@@ -156,8 +156,8 @@ def symlink(from_path, to_path):
 
 def install_bindings(regent_dir, legion_dir, bindings_dir, runtime_dir,
                      cmake, debug, cuda, openmp, llvm, hdf, spy, gasnet,
-                     gasnet_dir, conduit, clean_first, thread_count,
-                     extra_flags):
+                     gasnet_dir, conduit, clean_first, extra_flags,
+                     thread_count, verbose):
     if cmake:
         build_dir = os.path.join(regent_dir, 'build')
         if clean_first:
@@ -178,9 +178,14 @@ def install_bindings(regent_dir, legion_dir, bindings_dir, runtime_dir,
             (['-DGASNet_ROOT_DIR=%s' % gasnet_dir] if gasnet_dir is not None else []) +
             (['-DGASNet_CONDUIT=%s' % conduit] if conduit is not None else []) +
             (['-DCMAKE_CXX_COMPILER=%s' % os.environ['CXX']] if 'CXX' in os.environ else []))
+        make_flags = ['VERBOSE=1'] if verbose else []
         assert not spy # unimplemented
-        subprocess.check_call(['cmake'] + flags + [legion_dir], cwd=build_dir)
-        subprocess.check_call(['make', '-j', str(thread_count)], cwd=build_dir)
+        subprocess.check_call(
+            ['cmake'] + flags + [legion_dir],
+            cwd=build_dir)
+        subprocess.check_call(
+            ['make'] + make_flags + ['-j', str(thread_count)],
+            cwd=build_dir)
     else:
         flags = (
             ['LG_RT_DIR=%s' % runtime_dir,
@@ -200,10 +205,10 @@ def install_bindings(regent_dir, legion_dir, bindings_dir, runtime_dir,
         if clean_first:
             subprocess.check_call(
                 ['make'] + flags + ['clean'],
-                cwd = bindings_dir)
+                cwd=bindings_dir)
         subprocess.check_call(
             ['make'] + flags + ['-j', str(thread_count)],
-            cwd = bindings_dir)
+            cwd=bindings_dir)
         symlink(os.path.join(bindings_dir, 'libregent.so'),
                 os.path.join(bindings_dir, 'libregent%s' % dylib_ext))
 
@@ -238,7 +243,8 @@ def get_cmake_config(cmake, regent_dir, default=None):
 def install(gasnet=False, cuda=False, openmp=False, hdf=False, llvm=False,
             spy=False, conduit=None, cmake=None, rdir=None,
             external_terra_dir=None, gasnet_dir=None,
-            debug=False, clean_first=True, thread_count=None, extra_flags=[]):
+            debug=False, clean_first=True, extra_flags=[], thread_count=None,
+            verbose=False):
     regent_dir = os.path.dirname(os.path.realpath(__file__))
     legion_dir = os.path.dirname(regent_dir)
 
@@ -268,71 +274,74 @@ def install(gasnet=False, cuda=False, openmp=False, hdf=False, llvm=False,
     bindings_dir = os.path.join(legion_dir, 'bindings', 'regent')
     install_bindings(regent_dir, legion_dir, bindings_dir, runtime_dir,
                      cmake, debug, cuda, openmp, llvm, hdf, spy, gasnet,
-                     gasnet_dir, conduit, clean_first, thread_count,
-                     extra_flags)
+                     gasnet_dir, conduit, clean_first, extra_flags, thread_count,
+                     verbose)
 
 def driver():
     parser = argparse.ArgumentParser(
-        description = 'Install Regent front end.')
+        description='Install Regent front end.')
     parser.add_argument(
-        '--with-terra', dest = 'external_terra_dir', metavar = 'DIR', required = False,
-        help = 'Path to Terra installation directory (optional).')
+        '--with-terra', dest='external_terra_dir', metavar='DIR', required=False,
+        help='Path to Terra installation directory (optional).')
     parser.add_argument(
-        '--debug', dest = 'debug', action = 'store_true', required = False,
-        help = 'Build Legion with debugging enabled.')
+        '--debug', dest='debug', action='store_true', required=False,
+        help='Build Legion with debugging enabled.')
     parser.add_argument(
-        '--gasnet', dest = 'gasnet', action = 'store_true', required = False,
-        default = os.environ.get('USE_GASNET') == '1',
-        help = 'Build Legion with GASNet.')
+        '--gasnet', dest='gasnet', action='store_true', required=False,
+        default=os.environ.get('USE_GASNET') == '1',
+        help='Build Legion with GASNet.')
     parser.add_argument(
-        '--cuda', dest = 'cuda', action = 'store_true', required = False,
-        default = os.environ.get('USE_CUDA') == '1',
-        help = 'Build Legion with CUDA.')
+        '--cuda', dest='cuda', action='store_true', required=False,
+        default=os.environ.get('USE_CUDA') == '1',
+        help='Build Legion with CUDA.')
     parser.add_argument(
-        '--openmp', dest = 'openmp', action = 'store_true', required = False,
-        default = os.environ.get('USE_OPENMP') == '1',
-        help = 'Build Legion with OpenMP support.')
+        '--openmp', dest='openmp', action='store_true', required=False,
+        default=os.environ.get('USE_OPENMP') == '1',
+        help='Build Legion with OpenMP support.')
     parser.add_argument(
-        '--llvm', dest = 'llvm', action = 'store_true', required = False,
-        default = os.environ.get('USE_LLVM') == '1',
-        help = 'Build Legion (and compatible Terra) with LLVM support.')
+        '--llvm', dest='llvm', action='store_true', required=False,
+        default=os.environ.get('USE_LLVM') == '1',
+        help='Build Legion (and compatible Terra) with LLVM support.')
     parser.add_argument(
-        '--hdf5', '--hdf', dest = 'hdf', action = 'store_true', required = False,
-        default = os.environ.get('USE_HDF') == '1',
-        help = 'Build Legion with HDF.')
+        '--hdf5', '--hdf', dest='hdf', action='store_true', required=False,
+        default=os.environ.get('USE_HDF') == '1',
+        help='Build Legion with HDF.')
     parser.add_argument(
-        '--spy', dest = 'spy', action = 'store_true', required = False,
-        default = os.environ.get('USE_SPY') == '1',
-        help = 'Build Legion with detailed Legion Spy enabled.')
+        '--spy', dest='spy', action='store_true', required=False,
+        default=os.environ.get('USE_SPY') == '1',
+        help='Build Legion with detailed Legion Spy enabled.')
     parser.add_argument(
-        '--conduit', dest = 'conduit', action = 'store', required = False,
-        default = os.environ.get('CONDUIT'),
-        help = 'Build Legion with specified GASNet conduit.')
+        '--conduit', dest='conduit', action='store', required=False,
+        default=os.environ.get('CONDUIT'),
+        help='Build Legion with specified GASNet conduit.')
     parser.add_argument(
-        '--cmake', dest = 'cmake', action = 'store_true', required = False,
-        default = os.environ['USE_CMAKE'] == '1' if 'USE_CMAKE' in os.environ else None,
-        help = 'Build Legion with CMake.')
+        '--cmake', dest='cmake', action='store_true', required=False,
+        default=os.environ['USE_CMAKE'] == '1' if 'USE_CMAKE' in os.environ else None,
+        help='Build Legion with CMake.')
     parser.add_argument(
-        '--no-cmake', dest = 'cmake', action = 'store_false', required = False,
-        help = "Don't build Legion with CMake (instead use GNU Make).")
+        '--no-cmake', dest='cmake', action='store_false', required=False,
+        help="Don't build Legion with CMake (instead use GNU Make).")
     parser.add_argument(
-        '--rdir', dest = 'rdir', required = False,
-        choices = ['prompt', 'auto', 'manual', 'skip', 'never'], default = None,
-        help = 'Enable RDIR compiler plugin.')
+        '--rdir', dest='rdir', required=False,
+        choices=['prompt', 'auto', 'manual', 'skip', 'never'], default=None,
+        help='Enable RDIR compiler plugin.')
     parser.add_argument(
-        '--clean', dest = 'clean_first', action = 'store_true', required = False,
-        default = None,
-        help = 'Clean before build.')
+        '--clean', dest='clean_first', action='store_true', required=False,
+        default=None,
+        help='Clean before build.')
     parser.add_argument(
-        '--no-clean', '--noclean', dest = 'clean_first', action = 'store_false', required = False,
-        help = 'Skip clean before build.')
+        '--no-clean', '--noclean', dest='clean_first', action='store_false', required=False,
+        help='Skip clean before build.')
     parser.add_argument(
-        '--extra', dest = 'extra_flags', action = 'append', required = False,
-        default = [],
-        help = 'Extra flags for make command.')
+        '--extra', dest='extra_flags', action='append', required=False,
+        default=[],
+        help='Extra flags for make command.')
     parser.add_argument(
-        '-j', dest = 'thread_count', nargs = '?', type = int,
-        help = 'Number threads used to compile.')
+        '-j', dest='thread_count', nargs='?', type=int,
+        help='Number threads used to compile.')
+    parser.add_argument(
+        '-v', '--verbose', dest='verbose', action='store_true', required=False,
+        help='Enable verbose build output.')
     args = parser.parse_args()
 
     install(**vars(args))
