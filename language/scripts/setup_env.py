@@ -309,7 +309,7 @@ def driver(prefix_dir=None, legion_use_cmake=False, llvm_version=None,
         if not os.path.exists(cmake_dir):
             os.mkdir(cmake_dir)
 
-            proc_type = subprocess.check_output(['uname', '-p'])
+            proc_type = subprocess.check_output(['uname', '-p']).strip()
             if proc_type != 'x86_64':
                 raise Exception("Don't know how to download CMake binary for %s" % proc_type)
 

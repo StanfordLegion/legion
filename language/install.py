@@ -192,7 +192,8 @@ def install_bindings(regent_dir, legion_dir, bindings_dir, runtime_dir,
             extra_flags +
             (['-DGASNet_ROOT_DIR=%s' % gasnet_dir] if gasnet_dir is not None else []) +
             (['-DGASNet_CONDUIT=%s' % conduit] if conduit is not None else []) +
-            (['-DCMAKE_CXX_COMPILER=%s' % os.environ['CXX']] if 'CXX' in os.environ else []))
+            (['-DCMAKE_CXX_COMPILER=%s' % os.environ['CXX']] if 'CXX' in os.environ else []) +
+            (['-DCMAKE_CXX_FLAGS=%s' % os.environ['CC_FLAGS']] if 'CC_FLAGS' in os.environ else []))
         make_flags = ['VERBOSE=1'] if verbose else []
         assert not spy # unimplemented
         subprocess.check_call(
@@ -312,6 +313,10 @@ def driver():
         '--gasnet', dest='gasnet', action='store_true', required=False,
         default=os.environ.get('USE_GASNET') == '1',
         help='Build Legion with GASNet.')
+    parser.add_argument(
+        '--with-gasnet', dest='gasnet_dir', metavar='DIR', required=False,
+        default=os.environ.get('GASNET'),
+        help='Path to GASNet installation directory.')
     parser.add_argument(
         '--cuda', dest='cuda', action='store_true', required=False,
         default=os.environ.get('USE_CUDA') == '1',
