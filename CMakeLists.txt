@@ -107,9 +107,9 @@ check_cxx_compiler_flag("-mabi=altivec" COMPILER_SUPPORTS_MABI_ALTIVEC)
 if(COMPILER_SUPPORTS_MABI_ALTIVEC)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -mabi=altivec")
 endif()
-check_cxx_compiler_flag("-msvx" COMPILER_SUPPORTS_MSVX)
-if(COMPILER_SUPPORTS_MSVX)
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -msvx")
+check_cxx_compiler_flag("-mvsx" COMPILER_SUPPORTS_MVSX)
+if(COMPILER_SUPPORTS_MVSX)
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -mvsx")
 endif()
 
 #------------------------------------------------------------------------------#
