@@ -38,8 +38,6 @@
 #include "legion/legion_template_help.h"
 
 // Make sure we have the appropriate defines in place for including realm
-// SJT: too late to define this here...
-//define REALM_USE_LEGION_LAYOUT_CONSTRAINTS
 #include "realm.h"
 #include "realm/dynamic_templates.h"
 

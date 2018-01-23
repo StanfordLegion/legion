@@ -292,6 +292,163 @@ namespace Legion {
   }
 
   //----------------------------------------------------------------------------
+  template<int M, int N, typename T> __CUDA_HD__
+  inline AffineTransform<M,N,T>::AffineTransform(void)
+  //----------------------------------------------------------------------------
+  {
+    for (int i = 0; i < M; i++)
+      for (int j = 0; j < N; j++)
+        if (i == j)
+          transform[i][j] = 1;
+        else
+          transform[i][j] = 0;
+    for (int i = 0; i < M; i++)
+      offset[i] = 0;
+  }
+
+  //----------------------------------------------------------------------------
+  template<int M, int N, typename T> template<typename T2> __CUDA_HD__
+  inline AffineTransform<M,N,T>::AffineTransform(
+                                             const AffineTransform<M,N,T2> &rhs)
+    : transform(rhs.transform), offset(rhs.offset)
+  //----------------------------------------------------------------------------
+  {
+  }
+
+  //----------------------------------------------------------------------------
+  template<int M, int N, typename T> 
+    template<typename T2, typename T3> __CUDA_HD__
+  inline AffineTransform<M,N,T>::AffineTransform(
+                               const Transform<M,N,T2> t, const Point<M,T3> off)
+    : transform(t), offset(off)
+  //----------------------------------------------------------------------------
+  {
+  }
+
+  //----------------------------------------------------------------------------
+  template<int M, int N, typename T> template<typename T2> __CUDA_HD__
+  inline AffineTransform<M,N,T>& AffineTransform<M,N,T>::operator=(
+                                             const AffineTransform<M,N,T2> &rhs)
+  //----------------------------------------------------------------------------
+  {
+    transform = rhs.transform;
+    offset = rhs.offset;
+    return *this;
+  }
+
+  //----------------------------------------------------------------------------
+  template<int M, int N, typename T> template<typename T2> __CUDA_HD__
+  inline Point<M,T> AffineTransform<M,N,T>::operator[](
+                                                  const Point<N,T2> point) const
+  //----------------------------------------------------------------------------
+  {
+    return (transform * point) + offset;
+  }
+
+  //----------------------------------------------------------------------------
+  template<int M, int N, typename T> __CUDA_HD__
+  inline bool AffineTransform<M,N,T>::is_identity(void) const
+  //----------------------------------------------------------------------------
+  {
+    for (int i = 0; i < M; i++)
+      for (int j = 0; j < N; j++)
+        if (i == j) {
+          if (transform[i][j] != 1)
+            return false;
+        } else {
+          if (transform[i][j] != 0)
+            return false;
+        }
+    for (int i = 0; i < M; i++)
+      if (offset[i] != 0)
+        return false;
+    return true;
+  }
+
+  //----------------------------------------------------------------------------
+  template<int M, int N, typename T> __CUDA_HD__
+  inline ScaleTransform<M,N,T>::ScaleTransform(void)
+  //----------------------------------------------------------------------------
+  {
+    for (int i = 0; i < M; i++)
+      for (int j = 0; j < N; j++)
+        if (i == j)
+          transform[i][j] = 1;
+        else
+          transform[i][j] = 0;
+    for (int i = 0; i < M; i++)
+      extent.lo[i] = 0;
+    extent.hi = extent.lo;
+    for (int i = 0; i < M; i++)
+      divisor[i] = 1;
+  }
+
+  //----------------------------------------------------------------------------
+  template<int M, int N, typename T> template<typename T2> __CUDA_HD__
+  inline ScaleTransform<M,N,T>::ScaleTransform(
+                                              const ScaleTransform<M,N,T2> &rhs)
+    : transform(rhs.transform), extent(rhs.extent), divisor(rhs.divisor)
+  //----------------------------------------------------------------------------
+  {
+  }
+
+  //----------------------------------------------------------------------------
+  template<int M, int N, typename T> 
+    template<typename T2, typename T3, typename T4> __CUDA_HD__
+  inline ScaleTransform<M,N,T>::ScaleTransform(const Transform<M,N,T2> t,
+                                    const Rect<M,T3> ext, const Point<M,T4> div)
+    : transform(t), extent(ext), divisor(div)
+  //----------------------------------------------------------------------------
+  {
+  }
+
+  //----------------------------------------------------------------------------
+  template<int M, int N, typename T> template<typename T2> __CUDA_HD__
+  inline ScaleTransform<M,N,T>& ScaleTransform<M,N,T>::operator=(
+                                              const ScaleTransform<M,N,T2> &rhs)
+  //----------------------------------------------------------------------------
+  {
+    transform = rhs.transform;
+    extent = rhs.extent;
+    divisor = rhs.divisor;
+    return *this;
+  }
+
+  //----------------------------------------------------------------------------
+  template<int M, int N, typename T> template<typename T2> __CUDA_HD__
+  inline Rect<M,T> ScaleTransform<M,N,T>::operator[](
+                                                  const Point<N,T2> point) const
+  //----------------------------------------------------------------------------
+  {
+    return ((transform * point) + extent) / divisor; 
+  }
+
+  //----------------------------------------------------------------------------
+  template<int M, int N, typename T>
+  inline bool ScaleTransform<M,N,T>::is_identity(void) const
+  //----------------------------------------------------------------------------
+  {
+    for (int i = 0; i < M; i++)
+      for (int j = 0; j < N; j++)
+        if (i == j) {
+          if (transform[i][j] != 1)
+            return false;
+        } else {
+          if (transform[i][j] != 0)
+            return false;
+        }
+    for (int i = 0; i < M; i++)
+      if (extent.lo[i] != 0)
+        return false;
+    if (extent.lo != extent.hi)
+      return false;
+    for (int i = 0; i < M; i++)
+      if (divisor[i] != 1)
+        return false;
+    return true;
+  }
+
+  //----------------------------------------------------------------------------
   template<int DIM, typename T>
   inline DomainT<DIM,T>::DomainT(void)
     : Realm::IndexSpace<DIM,T>()
