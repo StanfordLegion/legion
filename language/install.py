@@ -162,8 +162,18 @@ def install_bindings(regent_dir, legion_dir, bindings_dir, runtime_dir,
     assert not (clean_first and build_dir is not None)
 
     if cmake:
+        regent_build_dir = os.path.join(regent_dir, 'build')
         if build_dir is None:
-            build_dir = os.path.join(regent_dir, 'build')
+            build_dir = regent_build_dir
+        else:
+            try:
+                os.symlink(build_dir, regent_build_dir)
+            except OSError:
+                print('Error: Attempting to build with an external build directory when an')
+                print('internal build directory already exists. Please remove the following')
+                print('directory to continue with the installation.')
+                print('    %s' % regent_build_dir)
+                sys.exit(1)
         if clean_first:
             shutil.rmtree(build_dir)
         if not os.path.exists(build_dir):
@@ -256,6 +266,9 @@ def install(gasnet=False, cuda=False, openmp=False, hdf=False, llvm=False,
 
     if clean_first is None:
         clean_first = not cmake
+
+    if not cmake and cmake_build_dir is not None:
+        raise Exception('Build directory is only permitted when building with CMake')
 
     if clean_first and cmake_build_dir is not None:
         raise Exception('Cannot clean a pre-existing build directory')

@@ -21,7 +21,9 @@ import argparse, os, platform, subprocess
 def test(root_dir, install_only, debug, short, spy, gcov, hdf5, openmp, env):
     threads = ['-j', '2'] if 'TRAVIS' in env else []
     terra = ['--with-terra', env['TERRA_DIR']] if 'TERRA_DIR' in env else []
-    build = ['--with-cmake-build', env['CMAKE_BUILD_DIR']] if 'CMAKE_BUILD_DIR' in env else []
+    build = (['--with-cmake-build', env['CMAKE_BUILD_DIR']]
+             if env.get('USE_CMAKE') == '1' and 'CMAKE_BUILD_DIR' in env
+             else [])
     debug_flag = ['--debug'] if debug else []
     short_flag = ['--short'] if short else []
     inner_flag = ['--extra=-flegion-inner', '--extra=0'] if 'DISABLE_INNER' in env else []
