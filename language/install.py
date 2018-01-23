@@ -313,6 +313,9 @@ def driver():
         default = os.environ['USE_CMAKE'] == '1' if 'USE_CMAKE' in os.environ else None,
         help = 'Build Legion with CMake.')
     parser.add_argument(
+        '--no-cmake', dest = 'cmake', action = 'store_false', required = False,
+        help = "Don't build Legion with CMake (instead use GNU Make).")
+    parser.add_argument(
         '--rdir', dest = 'rdir', required = False,
         choices = ['prompt', 'auto', 'manual', 'skip', 'never'], default = None,
         help = 'Enable RDIR compiler plugin.')
@@ -321,8 +324,7 @@ def driver():
         default = None,
         help = 'Clean before build.')
     parser.add_argument(
-        '--noclean', '--no-clean', dest = 'clean_first', action = 'store_false', required = False,
-        default = None,
+        '--no-clean', '--noclean', dest = 'clean_first', action = 'store_false', required = False,
         help = 'Skip clean before build.')
     parser.add_argument(
         '--extra', dest = 'extra_flags', action = 'append', required = False,
