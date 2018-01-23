@@ -155,11 +155,15 @@ def symlink(from_path, to_path):
         os.symlink(from_path, to_path)
 
 def install_bindings(regent_dir, legion_dir, bindings_dir, runtime_dir,
-                     cmake, debug, cuda, openmp, llvm, hdf, spy, gasnet,
-                     gasnet_dir, conduit, clean_first, extra_flags,
-                     thread_count, verbose):
+                     cmake, build_dir, debug, cuda, openmp, llvm, hdf,
+                     spy, gasnet, gasnet_dir, conduit, clean_first,
+                     extra_flags, thread_count, verbose):
+    # Don't blow away an existing directory
+    assert not (clean_first and build_dir is not None)
+
     if cmake:
-        build_dir = os.path.join(regent_dir, 'build')
+        if build_dir is None:
+            build_dir = os.path.join(regent_dir, 'build')
         if clean_first:
             shutil.rmtree(build_dir)
         if not os.path.exists(build_dir):
@@ -242,7 +246,7 @@ def get_cmake_config(cmake, regent_dir, default=None):
 
 def install(gasnet=False, cuda=False, openmp=False, hdf=False, llvm=False,
             spy=False, conduit=None, cmake=None, rdir=None,
-            external_terra_dir=None, gasnet_dir=None,
+            cmake_build_dir=None, external_terra_dir=None, gasnet_dir=None,
             debug=False, clean_first=True, extra_flags=[], thread_count=None,
             verbose=False):
     regent_dir = os.path.dirname(os.path.realpath(__file__))
@@ -252,6 +256,9 @@ def install(gasnet=False, cuda=False, openmp=False, hdf=False, llvm=False,
 
     if clean_first is None:
         clean_first = not cmake
+
+    if clean_first and cmake_build_dir is not None:
+        raise Exception('Cannot clean a pre-existing build directory')
 
     if spy and not debug:
         raise Exception('Debugging mode is required for detailed Legion Spy.')
@@ -273,9 +280,9 @@ def install(gasnet=False, cuda=False, openmp=False, hdf=False, llvm=False,
 
     bindings_dir = os.path.join(legion_dir, 'bindings', 'regent')
     install_bindings(regent_dir, legion_dir, bindings_dir, runtime_dir,
-                     cmake, debug, cuda, openmp, llvm, hdf, spy, gasnet,
-                     gasnet_dir, conduit, clean_first, extra_flags, thread_count,
-                     verbose)
+                     cmake, cmake_build_dir, debug, cuda, openmp, llvm, hdf,
+                     spy, gasnet, gasnet_dir, conduit, clean_first,
+                     extra_flags, thread_count, verbose)
 
 def driver():
     parser = argparse.ArgumentParser(
@@ -321,6 +328,9 @@ def driver():
     parser.add_argument(
         '--no-cmake', dest='cmake', action='store_false', required=False,
         help="Don't build Legion with CMake (instead use GNU Make).")
+    parser.add_argument(
+        '--with-cmake-build', dest='cmake_build_dir', metavar='DIR', required=False,
+        help='Path to CMake build directory (optional).')
     parser.add_argument(
         '--rdir', dest='rdir', required=False,
         choices=['prompt', 'auto', 'manual', 'skip', 'never'], default=None,
