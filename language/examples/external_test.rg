@@ -19,9 +19,6 @@ do
   assert(os.getenv('LG_RT_DIR') ~= nil, "$LG_RT_DIR should be set!")
   local root_dir = arg[0]:match(".*/") or "./"
   local runtime_dir = os.getenv("LG_RT_DIR") .. "/"
-  local legion_dir = runtime_dir .. "legion/"
-  local mapper_dir = runtime_dir .. "mappers/"
-  local realm_dir = runtime_dir .. "realm/"
   local external_test_cc = root_dir .. "external_test.cc"
   local external_test_so
   if os.getenv('SAVEOBJ') == '1' then
@@ -42,17 +39,14 @@ do
   end
 
   local cmd = (cxx .. " " .. cxx_flags .. " -I " .. runtime_dir .. " " ..
-                 " -I " .. mapper_dir .. " " .. " -I " .. legion_dir .. " " ..
-                 " -I " .. realm_dir .. " " .. external_test_cc .. " -o " .. external_test_so)
+                 external_test_cc .. " -o " .. external_test_so)
   if os.execute(cmd) ~= 0 then
     print("Error: failed to compile " .. external_test_cc)
     assert(false)
   end
   terralib.linklibrary(external_test_so)
   cexternal_test =
-    terralib.includec("external_test.h", {"-I", root_dir, "-I", runtime_dir,
-                                          "-I", mapper_dir, "-I", legion_dir,
-                                          "-I", realm_dir})
+    terralib.includec("external_test.h", {"-I", root_dir, "-I", runtime_dir})
 end
 
 local c = regentlib.c

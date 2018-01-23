@@ -16,7 +16,7 @@
 #
 
 from __future__ import print_function
-import argparse, json, multiprocessing, os, platform, subprocess, sys
+import argparse, json, multiprocessing, os, platform, shutil, subprocess, sys
 
 # Requires:
 #   * Terra-compatible LLVM installation on PATH
@@ -154,74 +154,105 @@ def symlink(from_path, to_path):
     if not os.path.lexists(to_path):
         os.symlink(from_path, to_path)
 
-def install_bindings(bindings_dir, runtime_dir, terra_dir, debug,
-                     cuda, openmp, llvm, hdf, spy, gasnet, gasnet_dir, conduit,
-                     clean_first, thread_count, extra_flags):
-    env = dict(list(os.environ.items()) + [
-        ('LG_RT_DIR', runtime_dir),
-        ('TERRA_DIR', terra_dir),                           # for bindings
-    ])
+def install_bindings(regent_dir, legion_dir, bindings_dir, runtime_dir,
+                     cmake, debug, cuda, openmp, llvm, hdf, spy, gasnet,
+                     gasnet_dir, conduit, clean_first, thread_count,
+                     extra_flags):
+    if cmake:
+        build_dir = os.path.join(regent_dir, 'build')
+        if clean_first:
+            shutil.rmtree(build_dir)
+        if not os.path.exists(build_dir):
+            os.mkdir(build_dir)
+        flags = (
+            ['-DCMAKE_BUILD_TYPE=%s' % ('Debug' if debug else 'Release'),
+             '-DLegion_USE_CUDA=%s' % ('ON' if cuda else 'OFF'),
+             '-DLegion_USE_OpenMP=%s' % ('ON' if openmp else 'OFF'),
+             '-DLegion_USE_LLVM=%s' % ('ON' if llvm else 'OFF'),
+             '-DLegion_USE_GASNet=%s' % ('ON' if gasnet else 'OFF'),
+             '-DLegion_USE_HDF5=%s' % ('ON' if hdf else 'OFF'),
+             '-DLegion_BUILD_BINDINGS=ON',
+             '-DBUILD_SHARED_LIBS=ON',
+            ] +
+            extra_flags +
+            (['-DGASNet_ROOT_DIR=%s' % gasnet_dir] if gasnet_dir is not None else []) +
+            (['-DGASNet_CONDUIT=%s' % conduit] if conduit is not None else []) +
+            (['-DCMAKE_CXX_COMPILER=%s' % os.environ['CXX']] if 'CXX' in os.environ else []))
+        assert not spy # unimplemented
+        subprocess.check_call(['cmake'] + flags + [legion_dir], cwd=build_dir)
+        subprocess.check_call(['make', '-j', str(thread_count)], cwd=build_dir)
+    else:
+        flags = (
+            ['LG_RT_DIR=%s' % runtime_dir,
+             'DEBUG=%s' % (1 if debug else 0),
+             'USE_CUDA=%s' % (1 if cuda else 0),
+             'USE_OPENMP=%s' % (1 if openmp else 0),
+             'USE_LLVM=%s' % (1 if llvm else 0),
+             'USE_GASNET=%s' % (1 if gasnet else 0),
+             'USE_HDF=%s' % (1 if hdf else 0),
+             'USE_SPY=%s' % (1 if spy else 0),
+             ] +
+            extra_flags +
+            (['GASNET=%s' % gasnet_dir] if gasnet_dir is not None else []) +
+            (['CONDUIT=%s' % conduit] if conduit is not None else []) +
+            (['GCC=%s' % os.environ['CXX']] if 'CXX' in os.environ else []))
 
-    flags = (
-        ['DEBUG=%s' % (1 if debug else 0),
-         'USE_CUDA=%s' % (1 if cuda else 0),
-         'USE_OPENMP=%s' % (1 if openmp else 0),
-         'USE_LLVM=%s' % (1 if llvm else 0),
-         'USE_GASNET=%s' % (1 if gasnet else 0),
-         'USE_HDF=%s' % (1 if hdf else 0),
-         'USE_SPY=%s' % (1 if spy else 0),
-         ] +
-        extra_flags +
-        (['GASNET=%s' % gasnet_dir] if gasnet_dir is not None else []) +
-        (['CONDUIT=%s' % conduit] if conduit is not None else []) +
-        (['GCC=%s' % os.environ['CXX']] if 'CXX' in os.environ else []))
-
-    if clean_first:
+        if clean_first:
+            subprocess.check_call(
+                ['make'] + flags + ['clean'],
+                cwd = bindings_dir)
         subprocess.check_call(
-            ['make'] +
-            flags +
-            ['clean'],
-            cwd = bindings_dir,
-            env = env)
-    subprocess.check_call(
-        ['make'] +
-        flags +
-        ['-j', str(thread_count)],
-        cwd = bindings_dir,
-        env = env)
-    symlink(os.path.join(bindings_dir, 'liblegion_terra.so'),
-            os.path.join(bindings_dir, 'liblegion_terra%s' % dylib_ext))
+            ['make'] + flags + ['-j', str(thread_count)],
+            cwd = bindings_dir)
+        symlink(os.path.join(bindings_dir, 'libregent.so'),
+                os.path.join(bindings_dir, 'libregent%s' % dylib_ext))
 
-    # This last bit is necessary because Mac OS X shared libraries
-    # have paths hard-coded into them, and in this case those paths
-    # are coming out wrong. Therefore, we need to fix them to use the
-    # search path again so our scripts can find them properly.
-    #
-    # You can sanity check that this step actually worked with the
-    # commands:
-    #
-    # otool -L liblegion_terra.so
-    # ./regent.py
-    #   =package.loadlib('liblegion_terra.so', 'init')
+        # This last bit is necessary because Mac OS X shared libraries
+        # have paths hard-coded into them, and in this case those paths
+        # are coming out wrong. Therefore, we need to fix them to use the
+        # search path again so our scripts can find them properly.
+        #
+        # You can sanity check that this step actually worked with the
+        # commands:
+        #
+        # otool -L libregent.so
+        # ./regent.py
+        #   =package.loadlib('libregent.so', 'init')
 
-    if os_name == 'Darwin':
-        subprocess.check_call(
-            ['install_name_tool', '-change',
-             '/usr/local/lib/libluajit-5.1.2.dylib', 'libluajit-5.1.2.dylib',
-             os.path.join(bindings_dir, 'liblegion_terra.so')])
+        if os_name == 'Darwin':
+            subprocess.check_call(
+                ['install_name_tool', '-change',
+                 '/usr/local/lib/libluajit-5.1.2.dylib', 'libluajit-5.1.2.dylib',
+                 os.path.join(bindings_dir, 'libregent.so')])
+
+def get_cmake_config(cmake, regent_dir, default=None):
+    config_filename = os.path.join(regent_dir, '.cmake.json')
+    if cmake is None:
+        cmake = load_json_config(config_filename)
+        if cmake is None:
+            cmake = default
+    assert cmake in [True, False]
+    dump_json_config(config_filename, cmake)
+    return cmake
 
 def install(gasnet=False, cuda=False, openmp=False, hdf=False, llvm=False,
-            spy=False, conduit=None, rdir=None, external_terra_dir=None, gasnet_dir=None,
+            spy=False, conduit=None, cmake=None, rdir=None,
+            external_terra_dir=None, gasnet_dir=None,
             debug=False, clean_first=True, thread_count=None, extra_flags=[]):
+    regent_dir = os.path.dirname(os.path.realpath(__file__))
+    legion_dir = os.path.dirname(regent_dir)
+
+    cmake = get_cmake_config(cmake, regent_dir, default=False)
+
+    if clean_first is None:
+        clean_first = not cmake
+
     if spy and not debug:
         raise Exception('Debugging mode is required for detailed Legion Spy.')
 
     thread_count = thread_count
     if thread_count is None:
         thread_count = multiprocessing.cpu_count()
-
-    regent_dir = os.path.dirname(os.path.realpath(__file__))
-    legion_dir = os.path.dirname(regent_dir)
 
     # Grab LG_RT_DIR from the environment if available, otherwise
     # assume we're running relative to our own location.
@@ -234,10 +265,11 @@ def install(gasnet=False, cuda=False, openmp=False, hdf=False, llvm=False,
     terra_dir = os.path.join(regent_dir, 'terra')
     install_terra(terra_dir, external_terra_dir, thread_count, llvm)
 
-    bindings_dir = os.path.join(legion_dir, 'bindings', 'terra')
-    install_bindings(bindings_dir, runtime_dir, terra_dir, debug,
-                     cuda, openmp, llvm, hdf, spy, gasnet, gasnet_dir, conduit,
-                     clean_first, thread_count, extra_flags)
+    bindings_dir = os.path.join(legion_dir, 'bindings', 'regent')
+    install_bindings(regent_dir, legion_dir, bindings_dir, runtime_dir,
+                     cmake, debug, cuda, openmp, llvm, hdf, spy, gasnet,
+                     gasnet_dir, conduit, clean_first, thread_count,
+                     extra_flags)
 
 def driver():
     parser = argparse.ArgumentParser(
@@ -250,40 +282,48 @@ def driver():
         help = 'Build Legion with debugging enabled.')
     parser.add_argument(
         '--gasnet', dest = 'gasnet', action = 'store_true', required = False,
-        default = 'USE_GASNET' in os.environ and os.environ['USE_GASNET'] == '1',
+        default = os.environ.get('USE_GASNET') == '1',
         help = 'Build Legion with GASNet.')
     parser.add_argument(
         '--cuda', dest = 'cuda', action = 'store_true', required = False,
-        default = 'USE_CUDA' in os.environ and os.environ['USE_CUDA'] == '1',
+        default = os.environ.get('USE_CUDA') == '1',
         help = 'Build Legion with CUDA.')
     parser.add_argument(
         '--openmp', dest = 'openmp', action = 'store_true', required = False,
-        default = 'USE_OPENMP' in os.environ and os.environ['USE_OPENMP'] == '1',
+        default = os.environ.get('USE_OPENMP') == '1',
         help = 'Build Legion with OpenMP support.')
     parser.add_argument(
         '--llvm', dest = 'llvm', action = 'store_true', required = False,
-        default = 'USE_LLVM' in os.environ and os.environ['USE_LLVM'] == '1',
+        default = os.environ.get('USE_LLVM') == '1',
         help = 'Build Legion (and compatible Terra) with LLVM support.')
     parser.add_argument(
         '--hdf5', '--hdf', dest = 'hdf', action = 'store_true', required = False,
-        default = 'USE_HDF' in os.environ and os.environ['USE_HDF'] == '1',
+        default = os.environ.get('USE_HDF') == '1',
         help = 'Build Legion with HDF.')
     parser.add_argument(
         '--spy', dest = 'spy', action = 'store_true', required = False,
-        default = 'USE_SPY' in os.environ and os.environ['USE_SPY'] == '1',
+        default = os.environ.get('USE_SPY') == '1',
         help = 'Build Legion with detailed Legion Spy enabled.')
     parser.add_argument(
         '--conduit', dest = 'conduit', action = 'store', required = False,
-        default = os.environ['CONDUIT'] if 'CONDUIT' in os.environ else None,
+        default = os.environ.get('CONDUIT'),
         help = 'Build Legion with specified GASNet conduit.')
+    parser.add_argument(
+        '--cmake', dest = 'cmake', action = 'store_true', required = False,
+        default = os.environ['USE_CMAKE'] == '1' if 'USE_CMAKE' in os.environ else None,
+        help = 'Build Legion with CMake.')
     parser.add_argument(
         '--rdir', dest = 'rdir', required = False,
         choices = ['prompt', 'auto', 'manual', 'skip', 'never'], default = None,
         help = 'Enable RDIR compiler plugin.')
     parser.add_argument(
-        '--noclean', dest = 'clean_first', action = 'store_false', required = False,
-        default = True,
-        help = 'Skip "make clean" step.')
+        '--clean', dest = 'clean_first', action = 'store_true', required = False,
+        default = None,
+        help = 'Clean before build.')
+    parser.add_argument(
+        '--noclean', '--no-clean', dest = 'clean_first', action = 'store_false', required = False,
+        default = None,
+        help = 'Skip clean before build.')
     parser.add_argument(
         '--extra', dest = 'extra_flags', action = 'append', required = False,
         default = [],

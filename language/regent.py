@@ -36,10 +36,7 @@ if 'LG_RT_DIR' in os.environ:
     runtime_dir = os.path.realpath(os.environ['LG_RT_DIR'])
 else:
     runtime_dir = os.path.join(os.path.dirname(regent_dir), 'runtime')
-realm_dir = os.path.join(runtime_dir, 'realm')
-mapper_dir = os.path.join(runtime_dir, 'mappers')
-legion_runtime_dir = os.path.join(runtime_dir, 'legion')
-bindings_dir = os.path.join(os.path.dirname(runtime_dir), 'bindings', 'terra')
+bindings_dir = os.path.join(os.path.dirname(runtime_dir), 'bindings', 'regent')
 
 # Find CUDA.
 if 'CUDA' in os.environ:
@@ -63,9 +60,6 @@ include_path = (
      if 'INCLUDE_PATH' in os.environ else []) +
     [bindings_dir,
      runtime_dir,
-     realm_dir,
-     mapper_dir,
-     legion_runtime_dir,
 ])
 if cuda_include_dir is not None:
     include_path.append(cuda_include_dir)

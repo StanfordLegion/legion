@@ -23,9 +23,6 @@ import "regent"
 do
   local root_dir = arg[0]:match(".*/") or "./"
   local runtime_dir = os.getenv('LG_RT_DIR') .. "/"
-  local legion_dir = runtime_dir .. "legion/"
-  local mapper_dir = runtime_dir .. "mappers/"
-  local realm_dir = runtime_dir .. "realm/"
   local pennant_cc = root_dir .. "pennant.cc"
   if os.getenv('OBJNAME') then
     local out_dir = os.getenv('OBJNAME'):match('.*/') or './'
@@ -47,16 +44,13 @@ do
   end
 
   local cmd = (cxx .. " " .. cxx_flags .. " -I " .. runtime_dir .. " " ..
-                " -I " .. mapper_dir .. " " .. " -I " .. legion_dir .. " " ..
-                " -I " .. realm_dir .. " " ..  pennant_cc .. " -o " .. pennant_so)
+                pennant_cc .. " -o " .. pennant_so)
   if os.execute(cmd) ~= 0 then
     print("Error: failed to compile " .. pennant_cc)
     assert(false)
   end
   terralib.linklibrary(pennant_so)
-  cpennant = terralib.includec("pennant.h", {"-I", root_dir, "-I", runtime_dir,
-                                             "-I", mapper_dir, "-I", legion_dir,
-                                             "-I", realm_dir})
+  cpennant = terralib.includec("pennant.h", {"-I", root_dir, "-I", runtime_dir})
 end
 
 -- Also copy input files into the destination directory.

@@ -26,20 +26,8 @@ USE_HDF         ?= 0		# Include HDF5 support (requires HDF5)
 ALT_MAPPERS     ?= 0		# Include alternative mappers (not recommended)
 USE_SPY         ?= 0    # Include detailed Legion Spy support
 
-# The following flag controls whether the binding library is allowed
-# to include and link against Terra/Lua itself. This is required for
-# use of the Lua bindings, but not for Regent and Terra-based programs
-# which do not use the Lua API wrappers.
-BINDINGS_USE_TERRA ?= 0
-
-ifeq ($(strip $(BINDINGS_USE_TERRA)),1)
-ifndef TERRA_DIR
-$(error TERRA_DIR variable is not defined, aborting build)
-endif
-endif
-
 # Put the binary file name here
-OUTFILE		?= liblegion_terra.so
+OUTFILE		?= libregent.so
 # List all the application source files here
 GEN_SRC		?= legion_terra.cc legion_terra_partitions.cc bishop_mapper.cc bishop_c.cc # .cc files
 GEN_GPU_SRC	?=		# .cu files
@@ -52,9 +40,6 @@ CC_FLAGS ?= #-DPROF_BINDING #-DBOUNDS_CHECKS #-DLEGION_SPY
 NVCC_FLAGS ?=
 GASNET_FLAGS ?=
 INC_FLAGS ?=
-ifeq ($(strip $(BINDINGS_USE_TERRA)),1)
-INC_FLAGS += -I$(TERRA_DIR)/release/include/terra -I$(TERRA_DIR)/include/terra
-endif
 LD_FLAGS ?=
 
 CC_FLAGS += -fPIC
