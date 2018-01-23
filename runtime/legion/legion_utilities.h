@@ -6543,7 +6543,7 @@ namespace Legion {
     inline void PPCBitMask<MAX>::clear(void)
     //-------------------------------------------------------------------------
     {
-      const __vector unsigned long long zero_vec = vec_splats(0);
+      const __vector unsigned long long zero_vec = vec_splats(0ULL);
       for (unsigned idx = 0; idx < PPC_ELMTS; idx++)
       {
         bits.ppc_vector[idx] = zero_vec;
@@ -7173,7 +7173,7 @@ namespace Legion {
     inline void PPCTLBitMask<MAX>::clear(void)
     //-------------------------------------------------------------------------
     {
-      const __vector unsigned long long zero_vec = vec_splats(0);
+      const __vector unsigned long long zero_vec = vec_splats(0ULL);
       for (unsigned idx = 0; idx < PPC_ELMTS; idx++)
       {
         bits.ppc_vector[idx] = zero_vec; 
@@ -7276,7 +7276,7 @@ namespace Legion {
     //-------------------------------------------------------------------------
     {
       PPCTLBitMask<MAX> result;
-      __vector unsigned long long result_mask = vec_splats(0);
+      __vector unsigned long long result_mask = vec_splats(0ULL);
       for (unsigned idx = 0; idx < PPC_ELMTS; idx++)
       {
         result(idx) = ~(bits.ppc_vector[idx]);
@@ -7311,7 +7311,7 @@ namespace Legion {
       // If they are independent then we are done
       if (sum_mask & rhs.sum_mask)
       {
-        __vector unsigned long long temp_sum = vec_splats(0);
+        __vector unsigned long long temp_sum = vec_splats(0ULL);
         for (unsigned idx = 0; idx < PPC_ELMTS; idx++)
         {
           result(idx) = vec_and(bits.ppc_vector[idx], rhs(idx));
@@ -7329,7 +7329,7 @@ namespace Legion {
     //-------------------------------------------------------------------------
     {
       PPCTLBitMask<MAX> result;
-      __vector unsigned long long temp_sum = vec_splats(0);
+      __vector unsigned long long temp_sum = vec_splats(0ULL);
       for (unsigned idx = 0; idx < PPC_ELMTS; idx++)
       {
         result(idx) = vec_xor(bits.ppc_vector[idx], rhs(idx));
@@ -7362,7 +7362,7 @@ namespace Legion {
     {
       if (sum_mask & rhs.sum_mask)
       {
-        __vector unsigned long long temp_sum = vec_splats(0);
+        __vector unsigned long long temp_sum = vec_splats(0ULL);
         for (unsigned idx = 0; idx < PPC_ELMTS; idx++)
         {
           bits.ppc_vector[idx] = vec_and(bits.ppc_vector[idx], rhs(idx));
@@ -7373,7 +7373,7 @@ namespace Legion {
       else
       {
         sum_mask = 0;
-	const __vector unsigned long long zero_vec = vec_splats(0);
+	const __vector unsigned long long zero_vec = vec_splats(0ULL);
         for (unsigned idx = 0; idx < PPC_ELMTS; idx++)
           bits.ppc_vector[idx] = zero_vec;
       }
@@ -7419,7 +7419,7 @@ namespace Legion {
     //-------------------------------------------------------------------------
     {
       PPCTLBitMask<MAX> result;
-      __vector unsigned long long temp_sum = vec_splats(0);
+      __vector unsigned long long temp_sum = vec_splats(0ULL);
       for (unsigned idx = 0; idx < PPC_ELMTS; idx++)
       {
         result(idx) = vec_and(~rhs(idx), bits.ppc_vector[idx]);
@@ -7435,7 +7435,7 @@ namespace Legion {
                                                        const PPCTLBitMask &rhs)
     //-------------------------------------------------------------------------
     {
-      __vector unsigned long long temp_sum = vec_splats(0);
+      __vector unsigned long long temp_sum = vec_splats(0ULL);
       for (unsigned idx = 0; idx < PPC_ELMTS; idx++)
       {
         bits.ppc_vector[idx] = vec_and(~rhs(idx), bits.ppc_vector[idx]);
