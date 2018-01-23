@@ -106,6 +106,80 @@ namespace Legion {
   };
 
   /**
+   * \class AffineTransform
+   * An affine transform is used to transform points in one 
+   * coordinate space into points in another coordinate space
+   * using the basic Ax + b transformation, where A is a 
+   * transform matrix and b is an offset vector
+   */
+  template<int M, int N, typename T = coord_t>
+  struct AffineTransform {
+  public:
+    __CUDA_HD__
+    AffineTransform(void); // default to identity transform
+    // allow type coercions where possible
+    template<typename T2> __CUDA_HD__
+    AffineTransform(const AffineTransform<M,N,T2> &rhs);
+    template<typename T2, typename T3> __CUDA_HD__
+    AffineTransform(const Transform<M,N,T2> transform, 
+                    const Point<M,T3> offset);
+  public:
+    template<typename T2> __CUDA_HD__
+    AffineTransform<M,N,T>& operator=(const AffineTransform<M,N,T2> &rhs);
+  public:
+    // Apply the transformation to a point
+    template<typename T2> __CUDA_HD__
+    Point<M,T> operator[](const Point<N,T2> point) const;
+    // Test whether this is the identity transform
+    __CUDA_HD__
+    bool is_identity(void) const;
+  public:
+    // Transform = Ax + b
+    Transform<M,N,T> transform; // A
+    Point<M,T>       offset; // b
+  };
+
+  /**
+   * \class ScaleTransform
+   * A scale transform is a used to do a projection transform
+   * that converts a point in one coordinate space into a range
+   * in another coordinate system using the transform:
+   *    [y0, y1] = Ax + [b, c]
+   *              ------------
+   *                   d
+   *  where all lower case letters are points and A is
+   *  transform matrix. Note that by making b == c then
+   *  we can make this a one-to-one point mapping.
+   */
+  template<int M, int N, typename T = coord_t>
+  struct ScaleTransform {
+  public:
+    __CUDA_HD__
+    ScaleTransform(void); // default to identity transform
+    // allow type coercions where possible
+    template<typename T2>
+    ScaleTransform(const ScaleTransform<M,N,T2> &rhs);
+    template<typename T2, typename T3, typename T4> __CUDA_HD__
+    ScaleTransform(const Transform<M,N,T2> transform,
+                   const Rect<M,T3> extent,
+                   const Point<M,T4> divisor);
+  public:
+    template<typename T2> __CUDA_HD__
+    ScaleTransform<M,N,T>& operator=(const ScaleTransform<M,N,T2> &rhs);
+  public:
+    // Apply the transformation to a point
+    template<typename T2> __CUDA_HD__
+    Rect<M,T> operator[](const Point<N,T2> point) const;
+    // Test whether this is the identity transform
+    __CUDA_HD__
+    bool is_identity(void) const;
+  public:
+    Transform<M,N,T> transform; // A
+    Rect<M,T>        extent; // [b=lo, c=hi]
+    Point<M,T>       divisor; // d
+  };
+
+  /**
    * \class DomainT
    * Our way of importing the templated Realm Rect class
    * into the Legion namespace without c++11 features
