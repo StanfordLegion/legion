@@ -3698,10 +3698,17 @@ end
 
 do
   local intrinsic_names = {}
-  intrinsic_names[vector(float,  4)] = "llvm.x86.sse.%s.ps"
-  intrinsic_names[vector(double, 2)] = "llvm.x86.sse2.%s.pd"
-  intrinsic_names[vector(float,  8)] = "llvm.x86.avx.%s.ps.256"
-  intrinsic_names[vector(double, 4)] = "llvm.x86.avx.%s.pd.256"
+  if os.execute("bash -c \"[ `uname` == 'Linux' ]\"") == 0 and
+    os.execute("grep POWER8 /proc/cpuinfo > /dev/null") == 0
+  then
+    intrinsic_names[vector(float,  4)] = "llvm.ppc.altivec.v%sfp"
+    intrinsic_names[vector(double, 2)] = "llvm.ppc.vsx.xv%sdp"
+  else
+    intrinsic_names[vector(float,  4)] = "llvm.x86.sse.%s.ps"
+    intrinsic_names[vector(double, 2)] = "llvm.x86.sse2.%s.pd"
+    intrinsic_names[vector(float,  8)] = "llvm.x86.avx.%s.ps.256"
+    intrinsic_names[vector(double, 4)] = "llvm.x86.avx.%s.pd.256"
+  end
 
   local function math_binary_op_factory(fname)
     return terralib.memoize(function(arg_type)
