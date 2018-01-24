@@ -168,11 +168,14 @@ def install_bindings(regent_dir, legion_dir, bindings_dir, runtime_dir,
             build_dir = regent_build_dir
         else:
             try:
-                os.symlink(build_dir, regent_build_dir)
+                # check if the link is already there (and pointing at the right
+                #  thing) first
+                if not os.path.islink(regent_build_dir) or (os.readlink(regent_build_dir) != build_dir):
+                    os.symlink(build_dir, regent_build_dir)
             except OSError:
                 print('Error: Attempting to build with an external build directory when an')
-                print('internal build directory already exists. Please remove the following')
-                print('directory to continue with the installation.')
+                print('internal (or different external) build directory already exists. Please')
+                print('remove the following directory to continue with the installation:')
                 print('    %s' % regent_build_dir)
                 sys.exit(1)
         if clean_first:
