@@ -3459,11 +3459,11 @@ namespace Legion {
                                                 bool first_invocation)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(executing_call == info);
-#endif
       if (first_invocation)
       {
+#ifdef DEBUG_LEGION
+        assert(executing_call == info);
+#endif
         // Record our finish time when we're done
         if (profile_mapper)
           info->stop_time = Realm::Clock::current_time_in_nanoseconds();
