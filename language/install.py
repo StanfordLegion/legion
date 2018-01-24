@@ -197,7 +197,7 @@ def install_bindings(regent_dir, legion_dir, bindings_dir, runtime_dir,
         make_flags = ['VERBOSE=1'] if verbose else []
         assert not spy # unimplemented
         try:
-            subprocess.check_output([cmake_exe, '-v'])
+            subprocess.check_output([cmake_exe, '--version'])
         except OSError:
             print('Error: CMake is not installed or otherwise not executable. Please check')
             print('your CMake installation and try again. You can use the --with-cmake flag')
