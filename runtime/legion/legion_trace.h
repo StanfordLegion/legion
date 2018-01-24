@@ -447,6 +447,10 @@ namespace Legion {
     public:
       void record_get_term_event(PhysicalTraceInfo &trace_info,
                                  ApEvent lhs, SingleTask* task);
+      void record_create_ap_user_event(PhysicalTraceInfo &trace_info,
+                                       ApUserEvent lhs);
+      void record_trigger_event(PhysicalTraceInfo &trace_info,
+                                ApUserEvent lhs, ApEvent rhs);
       void record_merge_events(PhysicalTraceInfo &trace_info, ApEvent &lhs,
                                ApEvent rhs);
       void record_merge_events(PhysicalTraceInfo &trace_info, ApEvent &lhs,
@@ -540,6 +544,7 @@ namespace Legion {
       ApEvent fence_completion;
       std::map<TraceLocalId, Operation*> operations;
       std::vector<ApEvent> events;
+      std::vector<ApUserEvent> user_events;
       std::vector<TraceLocalId> op_list;
       CachedMappings                                  cached_mappings;
       LegionMap<InstanceView*, FieldMask>::aligned    previous_valid_views;
@@ -560,6 +565,8 @@ namespace Legion {
     {
       GET_TERM_EVENT = 0,
       GET_COPY_TERM_EVENT,
+      CREATE_AP_USER_EVENT,
+      TRIGGER_EVENT,
       MERGE_EVENT,
       ISSUE_COPY,
       ISSUE_FILL,
@@ -582,6 +589,8 @@ namespace Legion {
 
       virtual InstructionKind get_kind() = 0;
       virtual GetTermEvent* as_get_term_event() = 0;
+      virtual CreateApUserEvent* as_create_ap_user_event() = 0;
+      virtual TriggerEvent* as_trigger_event() = 0;
       virtual MergeEvent* as_merge_event() = 0;
       virtual AssignFenceCompletion* as_assignment_fence_completion() = 0;
       virtual IssueCopy* as_issue_copy() = 0;
@@ -599,6 +608,7 @@ namespace Legion {
     protected:
       std::map<TraceLocalId, Operation*> &operations;
       std::vector<ApEvent> &events;
+      std::vector<ApUserEvent> &user_events;
     };
 
     /**
@@ -616,6 +626,10 @@ namespace Legion {
         { return GET_TERM_EVENT; }
       virtual GetTermEvent* as_get_term_event()
         { return this; }
+      virtual CreateApUserEvent* as_create_ap_user_event()
+        { return NULL; }
+      virtual TriggerEvent* as_trigger_event()
+        { return NULL; }
       virtual MergeEvent* as_merge_event()
         { return NULL; }
       virtual AssignFenceCompletion* as_assignment_fence_completion()
@@ -645,6 +659,97 @@ namespace Legion {
     };
 
     /**
+     * \class CreateApUserEvent
+     * This instruction has the following semantics:
+     *   events[lhs] = Runtime::create_ap_user_event()
+     */
+    struct CreateApUserEvent : public Instruction {
+      CreateApUserEvent(PhysicalTemplate& tpl, unsigned lhs);
+      virtual void execute();
+      virtual std::string to_string();
+
+      virtual InstructionKind get_kind()
+        { return CREATE_AP_USER_EVENT; }
+      virtual GetTermEvent* as_get_term_event()
+        { return NULL; }
+      virtual CreateApUserEvent* as_create_ap_user_event()
+        { return this; }
+      virtual TriggerEvent* as_trigger_event()
+        { return NULL; }
+      virtual MergeEvent* as_merge_event()
+        { return NULL; }
+      virtual AssignFenceCompletion* as_assignment_fence_completion()
+        { return NULL; }
+      virtual IssueCopy* as_issue_copy()
+        { return NULL; }
+      virtual IssueFill* as_issue_fill()
+        { return NULL; }
+      virtual SetReadyEvent* as_set_ready_event()
+        { return NULL; }
+      virtual GetCopyTermEvent* as_get_copy_term_event()
+        { return NULL; }
+      virtual SetCopySyncEvent* as_set_copy_sync_event()
+        { return NULL; }
+      virtual TriggerCopyCompletion* as_triger_copy_completion()
+        { return NULL; }
+
+      virtual Instruction* clone(PhysicalTemplate& tpl,
+                                 const std::map<unsigned, unsigned> &rewrite);
+
+      virtual TraceLocalId get_owner(const TraceLocalId &key) { return key; }
+
+    private:
+      friend struct PhysicalTemplate;
+      unsigned lhs;
+    };
+
+    /**
+     * \class TriggerEvent
+     * This instruction has the following semantics:
+     *   Runtime::trigger_event(events[lhs], events[rhs])
+     */
+    struct TriggerEvent : public Instruction {
+      TriggerEvent(PhysicalTemplate& tpl, unsigned lhs, unsigned rhs);
+      virtual void execute();
+      virtual std::string to_string();
+
+      virtual InstructionKind get_kind()
+        { return TRIGGER_EVENT; }
+      virtual GetTermEvent* as_get_term_event()
+        { return NULL; }
+      virtual CreateApUserEvent* as_create_ap_user_event()
+        { return NULL; }
+      virtual TriggerEvent* as_trigger_event()
+        { return this; }
+      virtual MergeEvent* as_merge_event()
+        { return NULL; }
+      virtual AssignFenceCompletion* as_assignment_fence_completion()
+        { return NULL; }
+      virtual IssueCopy* as_issue_copy()
+        { return NULL; }
+      virtual IssueFill* as_issue_fill()
+        { return NULL; }
+      virtual SetReadyEvent* as_set_ready_event()
+        { return NULL; }
+      virtual GetCopyTermEvent* as_get_copy_term_event()
+        { return NULL; }
+      virtual SetCopySyncEvent* as_set_copy_sync_event()
+        { return NULL; }
+      virtual TriggerCopyCompletion* as_triger_copy_completion()
+        { return NULL; }
+
+      virtual Instruction* clone(PhysicalTemplate& tpl,
+                                 const std::map<unsigned, unsigned> &rewrite);
+
+      virtual TraceLocalId get_owner(const TraceLocalId &key) { return key; }
+
+    private:
+      friend struct PhysicalTemplate;
+      unsigned lhs;
+      unsigned rhs;
+    };
+
+    /**
      * \class MergeEvent
      * This instruction has the following semantics:
      *   events[lhs] = Runtime::merge_events(events[rhs])
@@ -658,6 +763,10 @@ namespace Legion {
       virtual InstructionKind get_kind()
         { return MERGE_EVENT; }
       virtual GetTermEvent* as_get_term_event()
+        { return NULL; }
+      virtual CreateApUserEvent* as_create_ap_user_event()
+        { return NULL; }
+      virtual TriggerEvent* as_trigger_event()
         { return NULL; }
       virtual MergeEvent* as_merge_event()
         { return this; }
@@ -700,6 +809,10 @@ namespace Legion {
       virtual InstructionKind get_kind()
         { return ASSIGN_FENCE_COMPLETION; }
       virtual GetTermEvent* as_get_term_event()
+        { return NULL; }
+      virtual CreateApUserEvent* as_create_ap_user_event()
+        { return NULL; }
+      virtual TriggerEvent* as_trigger_event()
         { return NULL; }
       virtual MergeEvent* as_merge_event()
         { return NULL; }
@@ -756,6 +869,10 @@ namespace Legion {
       virtual InstructionKind get_kind()
         { return ISSUE_FILL; }
       virtual GetTermEvent* as_get_term_event()
+        { return NULL; }
+      virtual CreateApUserEvent* as_create_ap_user_event()
+        { return NULL; }
+      virtual TriggerEvent* as_trigger_event()
         { return NULL; }
       virtual MergeEvent* as_merge_event()
         { return NULL; }
@@ -820,6 +937,10 @@ namespace Legion {
         { return ISSUE_COPY; }
       virtual GetTermEvent* as_get_term_event()
         { return NULL; }
+      virtual CreateApUserEvent* as_create_ap_user_event()
+        { return NULL; }
+      virtual TriggerEvent* as_trigger_event()
+        { return NULL; }
       virtual MergeEvent* as_merge_event()
         { return NULL; }
       virtual AssignFenceCompletion* as_assignment_fence_completion()
@@ -878,6 +999,10 @@ namespace Legion {
         { return SET_READY_EVENT; }
       virtual GetTermEvent* as_get_term_event()
         { return NULL; }
+      virtual CreateApUserEvent* as_create_ap_user_event()
+        { return NULL; }
+      virtual TriggerEvent* as_trigger_event()
+        { return NULL; }
       virtual MergeEvent* as_merge_event()
         { return NULL; }
       virtual AssignFenceCompletion* as_assignment_fence_completion()
@@ -925,6 +1050,10 @@ namespace Legion {
         { return GET_COPY_TERM_EVENT; }
       virtual GetTermEvent* as_get_term_event()
         { return NULL; }
+      virtual CreateApUserEvent* as_create_ap_user_event()
+        { return NULL; }
+      virtual TriggerEvent* as_trigger_event()
+        { return NULL; }
       virtual MergeEvent* as_merge_event()
         { return NULL; }
       virtual AssignFenceCompletion* as_assignment_fence_completion()
@@ -967,6 +1096,10 @@ namespace Legion {
       virtual InstructionKind get_kind()
         { return SET_COPY_SYNC_EVENT; }
       virtual GetTermEvent* as_get_term_event()
+        { return NULL; }
+      virtual CreateApUserEvent* as_create_ap_user_event()
+        { return NULL; }
+      virtual TriggerEvent* as_trigger_event()
         { return NULL; }
       virtual MergeEvent* as_merge_event()
         { return NULL; }
@@ -1011,6 +1144,10 @@ namespace Legion {
         { return TRIGGER_COPY_COMPLETION; }
       virtual GetTermEvent* as_get_term_event()
         { return NULL; }
+      virtual CreateApUserEvent* as_create_ap_user_event()
+        { return NULL; }
+      virtual TriggerEvent* as_trigger_event()
+        { return NULL; }
       virtual MergeEvent* as_merge_event()
         { return NULL; }
       virtual AssignFenceCompletion* as_assignment_fence_completion()
@@ -1047,6 +1184,10 @@ namespace Legion {
       virtual InstructionKind get_kind()
         { return LAUNCH_TASK; }
       virtual GetTermEvent* as_get_term_event()
+        { return NULL; }
+      virtual CreateApUserEvent* as_create_ap_user_event()
+        { return NULL; }
+      virtual TriggerEvent* as_trigger_event()
         { return NULL; }
       virtual MergeEvent* as_merge_event()
         { return NULL; }

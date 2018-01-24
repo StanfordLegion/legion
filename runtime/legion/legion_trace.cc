@@ -1416,7 +1416,7 @@ namespace Legion {
     void PhysicalTrace::check_template_preconditions()
     //--------------------------------------------------------------------------
     {
-      if (previous_template != NULL)
+      if (previous_template != NULL && previous_template->is_replayable())
       {
         current_template = previous_template;
         tracing = false;
@@ -1769,6 +1769,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       tracing = false;
+      std::cerr << "[Instructions before optimization]" << std::endl;
+      for (std::vector<Instruction*>::iterator it = instructions.begin();
+           it != instructions.end(); ++it)
+        std::cerr << "  " << (*it)->to_string() << std::endl;
       optimize();
       replayable = check_preconditions();
       if (Runtime::dump_physical_traces) dump_template();
@@ -1801,7 +1805,17 @@ namespace Legion {
         {
           case ASSIGN_FENCE_COMPLETION:
           case GET_TERM_EVENT:
+          case CREATE_AP_USER_EVENT:
             {
+              generate[idx] = idx;
+              break;
+            }
+          case TRIGGER_EVENT:
+            {
+              TriggerEvent *inst = instructions[idx]->as_trigger_event();
+              unsigned rhs = inst->rhs;
+              pre.insert(preconditions[rhs].begin(), preconditions[rhs].end());
+              pre.insert(generate[rhs]);
               generate[idx] = idx;
               break;
             }
@@ -1938,6 +1952,8 @@ namespace Legion {
         {
           case ASSIGN_FENCE_COMPLETION:
           case GET_TERM_EVENT:
+          case CREATE_AP_USER_EVENT:
+          case TRIGGER_EVENT:
           case ISSUE_COPY:
           case ISSUE_FILL:
           case GET_COPY_TERM_EVENT:
@@ -2192,6 +2208,10 @@ namespace Legion {
       for (std::vector<Instruction*>::iterator it = instructions.begin();
            it != instructions.end(); ++it)
         std::cerr << "  " << (*it)->to_string() << std::endl;
+      for (std::map<unsigned, unsigned>::iterator it = frontiers.begin();
+           it != frontiers.end(); ++it)
+        std::cerr << "  events[" << it->second << "] = events["
+                  << it->first << "]" << std::endl;
       std::cerr << "[Previous Valid Views]" << std::endl;
       for (LegionMap<InstanceView*, FieldMask>::aligned::iterator it =
            previous_valid_views.begin(); it !=
@@ -2322,6 +2342,57 @@ namespace Legion {
       op_list.push_back(key);
 
       instructions.push_back(new GetTermEvent(*this, lhs_, key));
+#ifdef DEBUG_LEGION
+      assert(instructions.size() == events.size());
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTemplate::record_create_ap_user_event(
+                                                  PhysicalTraceInfo &trace_info,
+                                                  ApUserEvent lhs)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(lhs.exists());
+#endif
+      AutoLock tpl_lock(template_lock);
+
+      unsigned lhs_ = events.size();
+      user_events.resize(events.size());
+      events.push_back(lhs);
+      user_events.push_back(lhs);
+#ifdef DEBUG_LEGION
+      assert(event_map.find(lhs) == event_map.end());
+#endif
+      event_map[lhs] = lhs_;
+      instructions.push_back(new CreateApUserEvent(*this, lhs_));
+#ifdef DEBUG_LEGION
+      assert(instructions.size() == events.size());
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTemplate::record_trigger_event(PhysicalTraceInfo &trace_info,
+                                                ApUserEvent lhs, ApEvent rhs)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(lhs.exists());
+      assert(rhs.exists());
+#endif
+      AutoLock tpl_lock(template_lock);
+
+      events.push_back(ApEvent());
+      std::map<ApEvent, unsigned>::iterator lhs_finder = event_map.find(lhs);
+      std::map<ApEvent, unsigned>::iterator rhs_finder = event_map.find(rhs);
+#ifdef DEBUG_LEGION
+      assert(lhs_finder != event_map.end());
+      assert(rhs_finder != event_map.end());
+#endif
+      unsigned lhs_ = lhs_finder->second;
+      unsigned rhs_ = rhs_finder->second;
+      instructions.push_back(new TriggerEvent(*this, lhs_, rhs_));
 #ifdef DEBUG_LEGION
       assert(instructions.size() == events.size());
 #endif
@@ -2685,6 +2756,11 @@ namespace Legion {
                           0,
 #endif
                           NULL));
+        for (unsigned idx = 0; idx < fields.size(); ++idx)
+        {
+          const CopySrcDstField &field = fields[idx];
+          record_last_user(field.inst, field.field_id, lhs_, true);
+        }
         free(fill_buffer);
         ready_event_idx = lhs_;
       }
@@ -2919,7 +2995,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     Instruction::Instruction(PhysicalTemplate& tpl)
-      : operations(tpl.operations), events(tpl.events)
+      : operations(tpl.operations), events(tpl.events),
+        user_events(tpl.user_events)
     //--------------------------------------------------------------------------
     {
     }
@@ -2987,6 +3064,107 @@ namespace Legion {
       assert(finder != rewrite.end());
 #endif
       return new GetTermEvent(tpl, finder->second, rhs);
+    }
+
+    /////////////////////////////////////////////////////////////
+    // CreateApUserEvent
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    CreateApUserEvent::CreateApUserEvent(PhysicalTemplate& tpl, unsigned l)
+      : Instruction(tpl), lhs(l)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(lhs < events.size());
+      assert(lhs < user_events.size());
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    void CreateApUserEvent::execute()
+    //--------------------------------------------------------------------------
+    {
+      ApUserEvent ev = Runtime::create_ap_user_event();
+      events[lhs] = ev;
+      user_events[lhs] = ev;
+    }
+
+    //--------------------------------------------------------------------------
+    std::string CreateApUserEvent::to_string()
+    //--------------------------------------------------------------------------
+    {
+      std::stringstream ss;
+      ss << "events[" << lhs << "] = Runtime::create_ap_user_event()";
+      return ss.str();
+    }
+
+    //--------------------------------------------------------------------------
+    Instruction* CreateApUserEvent::clone(PhysicalTemplate& tpl,
+                                    const std::map<unsigned, unsigned> &rewrite)
+    //--------------------------------------------------------------------------
+    {
+      std::map<unsigned, unsigned>::const_iterator lhs_finder =
+        rewrite.find(lhs);
+#ifdef DEBUG_LEGION
+      assert(lhs_finder != rewrite.end());
+#endif
+      return new CreateApUserEvent(tpl, lhs_finder->second);
+    }
+
+    /////////////////////////////////////////////////////////////
+    // TriggerEvent
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    TriggerEvent::TriggerEvent(PhysicalTemplate& tpl, unsigned l, unsigned r)
+      : Instruction(tpl), lhs(l), rhs(r)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(lhs < events.size());
+      assert(lhs < user_events.size());
+      assert(rhs < events.size());
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    void TriggerEvent::execute()
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(events[lhs].exists());
+      assert(user_events[lhs].exists());
+      assert(events[rhs].exists());
+      assert(events[lhs].id == user_events[lhs].id);
+#endif
+      Runtime::trigger_event(user_events[lhs], events[rhs]);
+    }
+
+    //--------------------------------------------------------------------------
+    std::string TriggerEvent::to_string()
+    //--------------------------------------------------------------------------
+    {
+      std::stringstream ss;
+      ss << "Runtime::trigger_event(events[" << lhs
+         << "], events[" << rhs << "])";
+      return ss.str();
+    }
+
+    //--------------------------------------------------------------------------
+    Instruction* TriggerEvent::clone(PhysicalTemplate& tpl,
+                                    const std::map<unsigned, unsigned> &rewrite)
+    //--------------------------------------------------------------------------
+    {
+      std::map<unsigned, unsigned>::const_iterator lhs_finder =
+        rewrite.find(lhs);
+      std::map<unsigned, unsigned>::const_iterator rhs_finder =
+        rewrite.find(rhs);
+#ifdef DEBUG_LEGION
+      assert(lhs_finder != rewrite.end());
+      assert(rhs_finder != rewrite.end());
+#endif
+      return new TriggerEvent(tpl, lhs_finder->second, rhs_finder->second);
     }
 
     /////////////////////////////////////////////////////////////

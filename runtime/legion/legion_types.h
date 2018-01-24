@@ -572,6 +572,7 @@ namespace Legion {
       "select_tunable_value",                       \
       "map_must_epoch",                             \
       "map_dataflow_graph",                         \
+      "memoize_operation",                          \
       "select_tasks_to_map",                        \
       "select_steal_targets",                       \
       "permit_steal_request",                       \
@@ -1362,6 +1363,8 @@ namespace Legion {
     struct PhysicalTemplate;
     struct Instruction;
     struct GetTermEvent;
+    struct CreateApUserEvent;
+    struct TriggerEvent;
     struct MergeEvent;
     struct AssignFenceCompletion;
     struct IssueCopy;

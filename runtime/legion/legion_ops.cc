@@ -3775,6 +3775,15 @@ namespace Legion {
         // and add it to the set of copy complete events
         ApUserEvent local_completion = Runtime::create_ap_user_event();
         copy_complete_events.insert(local_completion);
+        if (memoizing)
+        {
+#ifdef DEBUG_LEGION
+          assert(trace_info.tpl != NULL && trace_info.tpl->is_tracing());
+#endif
+          trace_info.tpl->record_create_ap_user_event(trace_info,
+              local_completion);
+        }
+
         // Do the conversion and check for errors
         src_composite = 
           perform_conversion<true/*src*/>(idx, src_requirements[idx],
@@ -3885,8 +3894,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
             assert(trace_info.tpl != NULL && trace_info.tpl->is_tracing());
 #endif
-            trace_info.tpl->record_merge_events(trace_info, local_completion,
-                                                across_done);
+            trace_info.tpl->record_trigger_event(trace_info, local_completion,
+                                                 across_done);
           }
         }
         else
@@ -3907,8 +3916,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
             assert(trace_info.tpl != NULL && trace_info.tpl->is_tracing());
 #endif
-            trace_info.tpl->record_merge_events(trace_info, local_completion,
-                                                across_done);
+            trace_info.tpl->record_trigger_event(trace_info, local_completion,
+                                                 across_done);
           }
         }
         // Apply our changes to the version states
@@ -3938,7 +3947,7 @@ namespace Legion {
         copy_complete_event = Runtime::merge_events(restrict_postconditions);
         if (memoizing)
           trace_info.tpl->record_merge_events(trace_info, copy_complete_event,
-              copy_complete_events);
+              restrict_postconditions);
       }
 #ifdef LEGION_SPY
       if (Runtime::legion_spy_enabled)
