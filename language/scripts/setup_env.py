@@ -140,12 +140,11 @@ def build_regent(root_dir, use_cmake, cmake_exe,
 
     subprocess.check_call(
         [os.path.join(root_dir, 'install.py'),
-         '--cmake',
-         '--with-cmake', cmake_exe,
          '--with-terra', terra_dir,
          '--rdir', 'auto',
          '-j', str(thread_count),
-        ],
+        ] + (['--cmake', '--with-cmake', cmake_exe]
+             if use_cmake else ['--no-cmake']),
         env=env)
 
 def install_llvm(llvm_dir, llvm_install_dir, llvm_version, llvm_use_cmake, cmake_exe, thread_count, is_cray, insecure):
