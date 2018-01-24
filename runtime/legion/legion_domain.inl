@@ -350,6 +350,8 @@ namespace Legion {
   inline bool AffineTransform<M,N,T>::is_identity(void) const
   //----------------------------------------------------------------------------
   {
+    if (M != N)
+      return false;
     for (int i = 0; i < M; i++)
       for (int j = 0; j < N; j++)
         if (i == j) {
@@ -428,6 +430,8 @@ namespace Legion {
   inline bool ScaleTransform<M,N,T>::is_identity(void) const
   //----------------------------------------------------------------------------
   {
+    if (M != N)
+      return false;
     for (int i = 0; i < M; i++)
       for (int j = 0; j < N; j++)
         if (i == j) {

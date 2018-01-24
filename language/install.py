@@ -196,6 +196,15 @@ def install_bindings(regent_dir, legion_dir, bindings_dir, runtime_dir,
             (['-DCMAKE_CXX_FLAGS=%s' % os.environ['CC_FLAGS']] if 'CC_FLAGS' in os.environ else []))
         make_flags = ['VERBOSE=1'] if verbose else []
         assert not spy # unimplemented
+        try:
+            subprocess.check_output([cmake_exe, '-v'])
+        except OSError:
+            print('Error: CMake is not installed or otherwise not executable. Please check')
+            print('your CMake installation and try again. You can use the --with-cmake flag')
+            print('to specify the CMake executable if it is not on PATH.')
+            print()
+            print('Attempted to execute: %s' % cmake_exe)
+            sys.exit(1)
         subprocess.check_call(
             [cmake_exe] + flags + [legion_dir],
             cwd=build_dir)
