@@ -26,6 +26,10 @@
 #endif
 
 #include <pthread.h>
+#ifdef __FreeBSD__
+#include <pthread_np.h>
+typedef cpuset_t cpu_set_t;
+#endif
 #include <errno.h>
 // for PTHREAD_STACK_MIN
 #include <limits.h>
