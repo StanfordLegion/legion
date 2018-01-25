@@ -121,8 +121,6 @@ endif()
 # -O3 to -O2 and removes -DNDEBUG
 set(CMAKE_CXX_FLAGS_RELEASE "-O2")
 
-# We also want the flags to match for debug builds as well
-set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -DDEBUG_REALM -DDEBUG_LEGION")
 # For debug we can see if it supports the new -Og flag that gcc added recently
 check_cxx_compiler_flag("-Og" COMPILER_SUPPORTS_DEBUG_OPTIMIZATIONS)
 if(COMPILER_SUPPORTS_DEBUG_OPTIMIZATIONS)
