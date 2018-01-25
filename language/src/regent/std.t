@@ -1301,9 +1301,12 @@ end)
 function std.deserialize(value_type, fixed_ptr, data_ptr)
   local helper = deserialize_helper(value_type)
   local result = terralib.newsymbol(value_type, "result")
+  -- Force unaligned access because malloc does not provide
+  -- blocks aligned for all purposes (e.g. AVX vectors).
+  local value_type_alignment = 1 -- data.min(terralib.sizeof(value_type),8)
   local actions = quote
     var result_data = helper([fixed_ptr], [data_ptr])
-    var [result] = @result_data
+    var [result] = terralib.attrload(result_data, { align = [value_type_alignment] })
     c.free(result_data)
   end
   return actions, result
