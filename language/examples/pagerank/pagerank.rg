@@ -35,10 +35,10 @@ task#init_edge_partition[index=$i] {
   target : $CPUs[$i % $CPUs.size];
 }
 
-task#pagerank[target=$proc] region#nodes,
-task#pagerank[target=$proc] region#edges,
 task#pagerank[target=$proc] region#pr_old,
-task#pagerank[target=$proc] region#pr_new {
+task#pagerank[target=$proc] region#pr_new,
+task#pagerank[target=$proc] region#nodes,
+task#pagerank[target=$proc] region#edges {
   target : $HAS_ZCMEM ? $proc.memories[kind=fbmem]
                       : $proc.memories[kind=sysmem];
 }
@@ -201,9 +201,6 @@ do
   end
 end
 
-terra wait_for(x : int)
-end
-
 task main()
   var conf : Config
   conf.num_nodes = 10000
@@ -223,18 +220,15 @@ task main()
   var pr_score1 = region(is_nodes, float)
   var pr_workspace = region(is_edges, float)
 
-  do
-    c.printf("Load input graph...\n")
-    var _ = init_graph(all_nodes, all_edges, conf.num_nodes, conf.num_edges, conf.graph)
-    _ = _ + init_pr_score(pr_score0, conf.num_nodes)
-    wait_for(_)
-  end
+  c.printf("Load input graph...\n")
+  init_graph(all_nodes, all_edges, conf.num_nodes, conf.num_edges, conf.graph)
+  init_pr_score(pr_score0, conf.num_nodes)
 
   var part = ispace(int1d, conf.num_workers)
   var part_score0 = partition(equal, pr_score0, part)
   var part_score1 = partition(equal, pr_score1, part)
   var part_nodes = partition(equal, all_nodes, part)
-  -- compute edge partition
+  -- compute node and edge partition
     var range = region(part, regentlib.rect1d)
     var part_range = partition(equal, range, part)
     var total_num_edges : E_ID = 0
@@ -269,5 +263,14 @@ task main()
   c.printf("Elapsed time = %lldus\n", ts_end - ts_start)
 end
 
-regentlib.start(main, bishoplib.make_entry())
+if os.getenv('SAVEOBJ') == '1' then
+  local root_dir = arg[0]:match(".*/") or "./"
+  local out_dir = (os.getenv('OBJNAME') and os.getenv('OBJNAME'):match('.*/')) or root_dir
+  local link_flags = terralib.newlist({"-L" .. out_dir, "-lmpi", "-lm"})
+  local exe = os.getenv('OBJNAME') or "pagerank"
+  regentlib.saveobj(main, exe, "executable", bishoplib.make_entry(), link_flags)
+else
+  regentlib.start(main, bishoplib.make_entry())
+end
+
 

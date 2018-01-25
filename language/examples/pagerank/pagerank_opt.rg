@@ -86,6 +86,7 @@ do
   assert(os.getenv('LG_RT_DIR') ~= nil, "$LG_RT_DIR should be set!")
   local root_dir = arg[0]:match(".*/") or "./"
   local runtime_dir = os.getenv('LG_RT_DIR') .. "/"
+  local cubpath_dir = "/share/software/user/open/cub/1.7.3/"
   local legion_dir = runtime_dir .. "legion/"
   local mapper_dir = runtime_dir .. "mappers/"
   local realm_dir = runtime_dir .. "realm/"
@@ -110,7 +111,7 @@ do
   end
 
   local cmd = (cxx .. " " .. cxx_flags .. " -I " .. runtime_dir .. " " ..
-                 " -I " .. mapper_dir .. " " .. " -I " .. legion_dir .. " " ..
+                 " -I " .. mapper_dir .. " " .. " -I " .. legion_dir .. " " .. " -I " .. cubpath_dir .. " " ..
                  " -I " .. realm_dir .. " " .. legion_interop_cc .. " -o " .. legion_interop_so)
   if os.execute(cmd) ~= 0 then
     print("Error: failed to compile " .. legion_interop_cc)

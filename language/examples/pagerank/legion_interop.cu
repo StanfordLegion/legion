@@ -128,8 +128,8 @@ void pagerank(const Task *task,
   V_ID* srcs = (V_ID*) edge_ptr;
   V_ID* dsts = (V_ID*) (srcs + rect_edge.hi[0] - rect_edge.lo[0] + 1);
 
-  cudaMemcpy(workspace, pr_old_ptr, sizeof(float) * (rect_workspace.hi[0]-rect_workspace.lo[0]+1), cudaMemcpyHostToDevice);
-  float* fb_pr_ptr;
+  //cudaMemcpy(workspace, pr_old_ptr, sizeof(float) * (rect_workspace.hi[0]-rect_workspace.lo[0]+1), cudaMemcpyHostToDevice);
+  //float* fb_pr_ptr;
   //cudaMalloc(&fb_pr_ptr, sizeof(float) * (right_bound - left_bound + 1));
   //cudaDeviceSynchronize();
   //double cp_3 = Realm::Clock::current_time_in_microseconds();
