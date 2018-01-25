@@ -730,7 +730,123 @@ namespace Realm {
     }
 #ifdef REALM_ACCESSOR_DEBUG
     dbg_inst = inst;
-    dbg_bounds = alp->bounds;
+    dbg_bounds = subrect;  // stay inside the subrect we were given
+#endif
+  }
+
+  // these two constructors build accessors that incorporate an
+  //  affine coordinate transform before the lookup in the actual instance
+  template <typename FT, int N, typename T>
+  template <int N2, typename T2>
+  inline AffineAccessor<FT,N,T>::AffineAccessor(RegionInstance inst,
+						const Matrix<N2, N, T2>& transform,
+						const Point<N2, T2>& offset,
+						FieldID field_id,
+						size_t subfield_offset /*= 0*/)
+  {
+    // instance's dimensionality should be <N2,T2>
+    const InstanceLayout<N2,T2> *layout = dynamic_cast<const InstanceLayout<N2,T2> *>(inst.get_layout());
+    std::map<FieldID, InstanceLayoutGeneric::FieldLayout>::const_iterator it = layout->fields.find(field_id);
+    assert(it != layout->fields.end());
+    const InstancePieceList<N2,T2>& ipl = layout->piece_lists[it->second.list_idx];
+    
+    // Special case for empty instances
+    if(ipl.pieces.empty()) {
+      base = 0;
+      for(int i = 0; i < N; i++) strides[i] = 0;
+      return;
+    }
+
+    // this constructor only works if there's exactly one piece and it's affine
+    assert(ipl.pieces.size() == 1);
+    const InstanceLayoutPiece<N2,T2> *ilp = ipl.pieces[0];
+    assert((ilp->layout_type == InstanceLayoutPiece<N2,T2>::AffineLayoutType));
+    const AffineLayoutPiece<N2,T2> *alp = static_cast<const AffineLayoutPiece<N2,T2> *>(ilp);
+    base = reinterpret_cast<intptr_t>(inst.pointer_untyped(0,
+							   layout->bytes_used));
+    assert(base != 0);
+    base += alp->offset + it->second.rel_offset + subfield_offset;
+    // to get the effect of transforming every accessed x to Ax+b, we
+    //  add strides.b to the offset and left-multiply s'*A to get strides
+    //  that go directly from the view's space to the element's offset
+    //  in the instance
+    base += alp->strides.dot(offset);
+    for(int i = 0; i < N; i++) {
+      strides[i] = 0;
+      for(int j = 0; j < N2; j++)
+	strides[i] += alp->strides[j] * transform.rows[j][i];
+    }
+#ifdef REALM_ACCESSOR_DEBUG
+    dbg_inst = inst;
+    // bounds are not inferrable here!
+    dbg_bounds = Rect<N,T>();
+#endif
+  }
+
+  // note that the subrect here is in in the accessor's indexspace
+  //  (from which the corresponding subrectangle in the instance can be
+  //  easily determined)
+  template <typename FT, int N, typename T>
+  template <int N2, typename T2>
+  inline AffineAccessor<FT,N,T>::AffineAccessor(RegionInstance inst,
+						const Matrix<N2, N, T2>& transform,
+						const Point<N2, T2>& offset,
+						FieldID field_id,
+						const Rect<N,T>& subrect,
+						size_t subfield_offset /*= 0*/)
+  {
+    // instance's dimensionality should be <N2,T2>
+    const InstanceLayout<N2,T2> *layout = dynamic_cast<const InstanceLayout<N2,T2> *>(inst.get_layout());
+    std::map<FieldID, InstanceLayoutGeneric::FieldLayout>::const_iterator it = layout->fields.find(field_id);
+    assert(it != layout->fields.end());
+    const InstancePieceList<N2,T2>& ipl = layout->piece_lists[it->second.list_idx];
+
+    // special case for empty regions
+    if(subrect.empty()) {
+      base = 0;
+      for(int i = 0; i < N; i++) strides[i] = 0;
+    } else {
+      // if the subrect isn't empty, compute the bounding box of the image
+      //  of the subrectangle through the transform - this is a bit ugly
+      //  to account for negative elements in the matrix
+      Rect<N2,T2> subrect_image(offset, offset);
+      for(int i = 0; i < N2; i++)
+	for(int j = 0; j < N; j++) {
+	  T2 e = transform.rows[i][j];
+	  if(e > 0) {
+	    subrect_image.lo[i] += e * subrect.lo[j];
+	    subrect_image.hi[i] += e * subrect.hi[j];
+	  }
+	  if(e < 0) {
+	    subrect_image.lo[i] += e * subrect.hi[j];
+	    subrect_image.hi[i] += e * subrect.lo[j];
+	  }
+	}
+    
+      // find the piece that holds the lo corner of the subrect and insist it
+      //  exists, covers the whole subrect, and is affine
+      const InstanceLayoutPiece<N2,T2> *ilp = ipl.find_piece(subrect_image.lo);
+      assert(ilp && ilp->bounds.contains(subrect_image));
+      assert((ilp->layout_type == InstanceLayoutPiece<N2,T2>::AffineLayoutType));
+      const AffineLayoutPiece<N2,T2> *alp = static_cast<const AffineLayoutPiece<N2,T2> *>(ilp);
+      base = reinterpret_cast<intptr_t>(inst.pointer_untyped(0,
+							     layout->bytes_used));
+      assert(base != 0);
+      base += alp->offset + it->second.rel_offset + subfield_offset;
+      // to get the effect of transforming every accessed x to Ax+b, we
+      //  add strides.b to the offset and left-multiply s'*A to get strides
+      //  that go directly from the view's space to the element's offset
+      //  in the instance
+      base += alp->strides.dot(offset);
+      for(int i = 0; i < N; i++) {
+	strides[i] = 0;
+	for(int j = 0; j < N2; j++)
+	  strides[i] += alp->strides[j] * transform.rows[j][i];
+      }
+    }
+#ifdef REALM_ACCESSOR_DEBUG
+    dbg_inst = inst;
+    dbg_bounds = subrect;  // stay inside the subrect we were given
 #endif
   }
 
@@ -739,10 +855,10 @@ namespace Realm {
   {}
 
   template <typename FT, int N, typename T>
-  inline /*static*/ bool AffineAccessor<FT,N,T>::is_compatible(RegionInstance inst, ptrdiff_t field_offset)
+  inline /*static*/ bool AffineAccessor<FT,N,T>::is_compatible(RegionInstance inst, FieldID field_id)
   {
     const InstanceLayout<N,T> *layout = dynamic_cast<const InstanceLayout<N,T> *>(inst.get_layout());
-    std::map<FieldID, InstanceLayoutGeneric::FieldLayout>::const_iterator it = layout->fields.find(field_offset);
+    std::map<FieldID, InstanceLayoutGeneric::FieldLayout>::const_iterator it = layout->fields.find(field_id);
     if(it == layout->fields.end())
       return false;
     const InstancePieceList<N,T>& ipl = layout->piece_lists[it->second.list_idx];
@@ -762,10 +878,10 @@ namespace Realm {
   }
 
   template <typename FT, int N, typename T>
-  inline /*static*/ bool AffineAccessor<FT,N,T>::is_compatible(RegionInstance inst, ptrdiff_t field_offset, const Rect<N,T>& subrect)
+  inline /*static*/ bool AffineAccessor<FT,N,T>::is_compatible(RegionInstance inst, FieldID field_id, const Rect<N,T>& subrect)
   {
     const InstanceLayout<N,T> *layout = dynamic_cast<const InstanceLayout<N,T> *>(inst.get_layout());
-    std::map<FieldID, InstanceLayoutGeneric::FieldLayout>::const_iterator it = layout->fields.find(field_offset);
+    std::map<FieldID, InstanceLayoutGeneric::FieldLayout>::const_iterator it = layout->fields.find(field_id);
     if(it == layout->fields.end())
       return false;
     const InstancePieceList<N,T>& ipl = layout->piece_lists[it->second.list_idx];
@@ -791,21 +907,82 @@ namespace Realm {
   }
 
   template <typename FT, int N, typename T>
-  template <typename INST>
-  inline /*static*/ bool AffineAccessor<FT,N,T>::is_compatible(const INST &instance, unsigned field_id)
+  template <int N2, typename T2>
+  inline /*static*/ bool AffineAccessor<FT,N,T>::is_compatible(RegionInstance inst,
+							       const Matrix<N2, N, T2>& transform,
+							       const Point<N2, T2>& offset,
+							       FieldID field_id)
   {
-    ptrdiff_t field_offset = 0;
-    RegionInstance inst = instance.get_instance(field_id, field_offset);
-    return is_compatible(inst, field_offset);
+    // instance's dimensionality should be <N2,T2>
+    const InstanceLayout<N2,T2> *layout = dynamic_cast<const InstanceLayout<N2,T2> *>(inst.get_layout());
+    std::map<FieldID, InstanceLayoutGeneric::FieldLayout>::const_iterator it = layout->fields.find(field_id);
+    if(it == layout->fields.end())
+      return false;
+    const InstancePieceList<N2,T2>& ipl = layout->piece_lists[it->second.list_idx];
+    
+    // this constructor only works if there's exactly one piece and it's affine
+    if(ipl.pieces.size() != 1)
+      return false;
+    const InstanceLayoutPiece<N2,T2> *ilp = ipl.pieces[0];
+    if(ilp->layout_type != InstanceLayoutPiece<N2,T2>::AffineLayoutType)
+      return false;
+    void *base = inst.pointer_untyped(0, layout->bytes_used);
+    if(base == 0)
+      return false;
+
+    // all checks passed!
+    return true;
   }
 
   template <typename FT, int N, typename T>
-  template <typename INST>
-  inline /*static*/ bool AffineAccessor<FT,N,T>::is_compatible(const INST &instance, unsigned field_id, const Rect<N,T>& subrect)
+  template <int N2, typename T2>
+  inline /*static*/ bool AffineAccessor<FT,N,T>::is_compatible(RegionInstance inst,
+							       const Matrix<N2, N, T2>& transform,
+							       const Point<N2, T2>& offset,
+							       FieldID field_id, const Rect<N,T>& subrect)
   {
-    ptrdiff_t field_offset = 0;
-    RegionInstance inst = instance.get_instance(field_id, field_offset);
-    return is_compatible(inst, field_offset, subrect);
+    // instance's dimensionality should be <N2,T2>
+    const InstanceLayout<N2,T2> *layout = dynamic_cast<const InstanceLayout<N2,T2> *>(inst.get_layout());
+    std::map<FieldID, InstanceLayoutGeneric::FieldLayout>::const_iterator it = layout->fields.find(field_id);
+    if(it == layout->fields.end())
+      return false;
+    const InstancePieceList<N2,T2>& ipl = layout->piece_lists[it->second.list_idx];
+
+    // as long as we had the right field, we're always compatible with an
+    //  empty subrect
+    if(subrect.empty())
+      return true;
+
+    // if the subrect isn't empty, compute the bounding box of the image
+    //  of the subrectangle through the transform - this is a bit ugly
+    //  to account for negative elements in the matrix
+    Rect<N2,T2> subrect_image(offset, offset);
+    for(int i = 0; i < N2; i++)
+      for(int j = 0; j < N; j++) {
+	T2 e = transform.rows[i][j];
+	if(e > 0) {
+	  subrect_image.lo[i] += e * subrect.lo[j];
+	  subrect_image.hi[i] += e * subrect.hi[j];
+	}
+	if(e < 0) {
+	  subrect_image.lo[i] += e * subrect.hi[j];
+	  subrect_image.hi[i] += e * subrect.lo[j];
+	}
+      }
+    
+    // find the piece that holds the lo corner of the subrect and insist it
+    //  exists, covers the whole subrect, and is affine
+    const InstanceLayoutPiece<N2,T2> *ilp = ipl.find_piece(subrect_image.lo);
+    if(!(ilp && ilp->bounds.contains(subrect_image)))
+      return false;
+    if(ilp->layout_type != InstanceLayoutPiece<N2,T2>::AffineLayoutType)
+      return false;
+    void *base = inst.pointer_untyped(0, layout->bytes_used);
+    if(base == 0)
+      return false;
+
+    // all checks passed!
+    return true;
   }
 
   template <typename FT, int N, typename T>

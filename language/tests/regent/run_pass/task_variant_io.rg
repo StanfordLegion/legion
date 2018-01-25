@@ -20,9 +20,6 @@ import "regent"
 do
   local root_dir = arg[0]:match(".*/") or "./"
   local runtime_dir = os.getenv('LG_RT_DIR') .. "/"
-  local legion_dir = runtime_dir .. "legion/"
-  local mapper_dir = runtime_dir .. "mappers/"
-  local realm_dir = runtime_dir .. "realm/"
   local mapper_cc = root_dir .. "task_variant_io.cc"
   if os.getenv('SAVEOBJ') == '1' then
     mapper_so = root_dir .. "libtask_variant_io.so"
@@ -42,17 +39,14 @@ do
   end
 
   local cmd = (cxx .. " " .. cxx_flags .. " -I " .. runtime_dir .. " " ..
-                 " -I " .. mapper_dir .. " " .. " -I " .. legion_dir .. " " ..
-                 " -I " .. realm_dir .. " " .. mapper_cc .. " -o " .. mapper_so)
+                 mapper_cc .. " -o " .. mapper_so)
   if os.execute(cmd) ~= 0 then
     print(cmd)
     print("Error: failed to compile " .. mapper_cc)
     assert(false)
   end
   terralib.linklibrary(mapper_so)
-  cmapper = terralib.includec("task_variant_io.h", {"-I", root_dir, "-I", runtime_dir,
-                                                   "-I", mapper_dir, "-I", legion_dir,
-                                                   "-I", realm_dir})
+  cmapper = terralib.includec("task_variant_io.h", {"-I", root_dir, "-I", runtime_dir})
 end
 
 local c = regentlib.c

@@ -13,42 +13,27 @@
  * limitations under the License.
  */
 
-#ifndef __BINDING_H__
-#define __BINDING_H__
+#ifndef __LEGION_INTEROP_H__
+#define __LEGION_INTEROP_H__
 
-struct TIndexSpace
-{
-  unsigned id;
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+enum {
+  TID_F = 1,
+  TID_F2 = 2,
 };
 
-struct TFieldSpace
-{
-  unsigned id;
+enum FieldIDs {
+  FID_DATA = 101,
 };
 
-struct TLogicalRegion
-{
-  unsigned int tree_id;
-  struct TIndexSpace index_space;
-  struct TFieldSpace field_space;
-};
+void register_tasks();
 
-struct TLogicalPartition
-{
-  unsigned int tree_id;
-  unsigned int index_partition;
-  struct TFieldSpace field_space;
-};
+#ifdef __cplusplus
+}
+#endif
 
-struct TPhysicalRegion
-{
-  void* rawptr;
-  unsigned int redop;
-};
+#endif // __LEGION_INTEROP_H__
 
-struct TTask
-{
-  void* rawptr;
-};
-
-#endif // __BINDING_H_

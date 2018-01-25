@@ -295,16 +295,39 @@ namespace Realm {
 		   FieldID field_id, const Rect<N,T>& subrect,
 		   size_t subfield_offset = 0);
 
+    // these two constructors build accessors that incorporate an
+    //  affine coordinate transform before the lookup in the actual instance
+    template <int N2, typename T2>
+    AffineAccessor(RegionInstance inst,
+		   const Matrix<N2, N, T2>& transform,
+		   const Point<N2, T2>& offset,
+		   FieldID field_id, size_t subfield_offset = 0);
+
+    // note that the subrect here is in in the accessor's indexspace
+    //  (from which the corresponding subrectangle in the instance can be
+    //  easily determined)
+    template <int N2, typename T2>
+    AffineAccessor(RegionInstance inst,
+		   const Matrix<N2, N, T2>& transform,
+		   const Point<N2, T2>& offset,
+		   FieldID field_id, const Rect<N,T>& subrect,
+		   size_t subfield_offset = 0);
+
     __CUDA_HD__
     ~AffineAccessor(void);
 
-    static bool is_compatible(RegionInstance inst, ptrdiff_t field_offset);
-    static bool is_compatible(RegionInstance inst, ptrdiff_t field_offset, const Rect<N,T>& subrect);
-
-    template <typename INST>
-    static bool is_compatible(const INST &instance, unsigned field_id);
-    template <typename INST>
-    static bool is_compatible(const INST &instance, unsigned field_id, const Rect<N,T>& subrect);
+    static bool is_compatible(RegionInstance inst, FieldID field_id);
+    static bool is_compatible(RegionInstance inst, FieldID field_id, const Rect<N,T>& subrect);
+    template <int N2, typename T2>
+    static bool is_compatible(RegionInstance inst,
+			      const Matrix<N2, N, T2>& transform,
+			      const Point<N2, T2>& offset,
+			      FieldID field_id);
+    template <int N2, typename T2>
+    static bool is_compatible(RegionInstance inst,
+			      const Matrix<N2, N, T2>& transform,
+			      const Point<N2, T2>& offset,
+			      FieldID field_id, const Rect<N,T>& subrect);
 
     __CUDA_HD__
     FT *ptr(const Point<N,T>& p) const;

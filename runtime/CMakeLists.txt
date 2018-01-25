@@ -273,7 +273,6 @@ set_target_properties(LegionRuntime PROPERTIES POSITION_INDEPENDENT_CODE ON)
 set_target_properties(LegionRuntime PROPERTIES OUTPUT_NAME legion)
 set_target_properties(LegionRuntime PROPERTIES SOVERSION ${SOVERSION})
 target_compile_definitions(LegionRuntime PUBLIC LEGION_USE_CMAKE)
-target_compile_definitions(LegionRuntime PRIVATE ASSUME_UNALLOCABLE)
 
 target_include_directories(LegionRuntime
   INTERFACE

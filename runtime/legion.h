@@ -2216,7 +2216,7 @@ namespace Legion {
      *  - template<typename REDOP> void reduce(const Point<N,T>&, REDOP::RHS)
      *    (Affine Accessor only)
      */
-    template<PrivilegeMode M, typename FT, int N, typename COORD_T = coord_t,
+    template<PrivilegeMode MODE, typename FT, int N, typename COORD_T = coord_t,
              typename A = Realm::GenericAccessor<FT,N,COORD_T>,
 #ifdef BOUNDS_CHECKS
              bool CHECK_BOUNDS = true>
@@ -2227,6 +2227,48 @@ namespace Legion {
     public:
       FieldAccessor(void) { }
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
+                    // The actual field size in case it is different from the 
+                    // one being used in FT and we still want to check it
+                    size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                    bool check_field_size = true,
+#else
+                    bool check_field_size = false,
+#endif
+                    bool silence_warnings = false) { }
+      // For Realm::AffineAccessor specializations there are additional
+      // methods for creating accessors with limited bounding boxes and
+      // affine transformations for using alternative coordinates spaces
+      // Specify a specific bounds rectangle to use for the accessor
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,
+                    const Rect<N,COORD_T> bounds,
+                    // The actual field size in case it is different from the 
+                    // one being used in FT and we still want to check it
+                    size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                    bool check_field_size = true,
+#else
+                    bool check_field_size = false,
+#endif
+                    bool silence_warnings = false) { }
+      // Specify a specific Affine transform to use for interpreting points
+      template<int M>
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,
+                    const AffineTransform<M,N,COORD_T> transform,
+                    // The actual field size in case it is different from the 
+                    // one being used in FT and we still want to check it
+                    size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                    bool check_field_size = true,
+#else
+                    bool check_field_size = false,
+#endif
+                    bool silence_warnings = false) { }
+      // Specify both a transform and a bounds to use
+      template<int M>
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,
+                    const AffineTransform<M,N,COORD_T> transform,
+                    const Rect<N,COORD_T> bounds,
                     // The actual field size in case it is different from the 
                     // one being used in FT and we still want to check it
                     size_t actual_field_size = sizeof(FT),
