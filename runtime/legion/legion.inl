@@ -1048,7 +1048,7 @@ namespace Legion {
       public:
         static const int MAX_M_DIMS = 3;
       public:
-        Tester(void) { }
+        Tester(void) : M(0) { }
         Tester(const DomainT<1,T> b) 
           : M(1), has_source(false), has_transform(false), gpu_warning(true)
         { 
@@ -1084,6 +1084,8 @@ namespace Legion {
         {
           switch (M)
           {
+            case 0:
+              break;
             case 1:
               {
                 reinterpret_cast<DomainT<1,T>*>(bounds)->~DomainT<1,T>();
@@ -1331,7 +1333,7 @@ namespace Legion {
       public:
         static const int MAX_M_DIMS = 3;
       public:
-        Tester(void) { }
+        Tester(void) : M(0) { }
         Tester(const DomainT<2,T> b) 
           : M(2), has_source(false), has_transform(false), gpu_warning(true)
         { 
@@ -1366,6 +1368,8 @@ namespace Legion {
         {
           switch (M)
           {
+            case 0:
+              break;
             case 1:
               {
                 reinterpret_cast<DomainT<1,T>*>(bounds)->~DomainT<1,T>();
@@ -1613,7 +1617,7 @@ namespace Legion {
       public:
         static const int MAX_M_DIMS = 3;
       public:
-        Tester(void) { }
+        Tester(void) : M(0) { }
         Tester(const DomainT<3,T> b) 
           : M(3), has_source(false), has_transform(false), gpu_warning(true)
         { 
@@ -1648,6 +1652,8 @@ namespace Legion {
         {
           switch (M)
           {
+            case 0:
+              break;
             case 1:
               {
                 reinterpret_cast<DomainT<1,T>*>(bounds)->~DomainT<1,T>();

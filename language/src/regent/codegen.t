@@ -8542,8 +8542,8 @@ local function unpack_param_helper(cx, node, param_type, params_map_type, i)
   local deser_actions, deser_value = std.deserialize(
     param_type, fixed_ptr, data_ptr)
 
-  local terra helper([c_task], [params_map], [fixed_ptr], [data_ptr],
-                     [future_count], [future_i])
+  local terra unpack_param([c_task], [params_map], [fixed_ptr], [data_ptr],
+                           [future_count], [future_i])
     if ([params_map][ [math.floor((i-1)/64)] ] and [2ULL ^ math.fmod(i-1, 64)]) == 0 then
       [deser_actions]
       return [deser_value]
@@ -8557,8 +8557,8 @@ local function unpack_param_helper(cx, node, param_type, params_map_type, i)
       return result
     end
   end
-  helper:setinlined(false)
-  return helper
+  unpack_param:setinlined(false)
+  return unpack_param
 end
 
 local function setup_regent_calling_convention_metadata(node, task)

@@ -157,7 +157,7 @@ namespace Legion {
     __CUDA_HD__
     ScaleTransform(void); // default to identity transform
     // allow type coercions where possible
-    template<typename T2>
+    template<typename T2> __CUDA_HD__
     ScaleTransform(const ScaleTransform<M,N,T2> &rhs);
     template<typename T2, typename T3, typename T4> __CUDA_HD__
     ScaleTransform(const Transform<M,N,T2> transform,

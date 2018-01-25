@@ -295,7 +295,7 @@ def run_all_tests(thread_count, debug, run, spy, hdf5, openmp, extra_flags, verb
             else:
                 test_paths.extend(
                     path for path in sorted(_glob(test_dir))
-                    if os.path.isfile(path) and os.path.splitext(path)[1] in ('.rg', '.md'))
+                    if os.path.isfile(path) and os.path.splitext(path)[1] in ('.rg',))
 
         for test_path in test_paths:
             if only_patterns and not(any(re.search(p,test_path) for p in only_patterns)):

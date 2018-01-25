@@ -1282,9 +1282,17 @@ local deserialize_helper = terralib.memoize(function(value_type)
   local fixed_ptr = terralib.newsymbol(&opaque, "fixed_ptr")
   local data_ptr = terralib.newsymbol(&&uint8, "data_ptr")
   local actions, result = deserialize_inner(value_type, fixed_ptr, data_ptr)
+  -- Force unaligned access because malloc does not provide
+  -- blocks aligned for all purposes (e.g. AVX vectors).
+  local value_type_alignment = 1 -- data.min(terralib.sizeof(value_type),8)
   local terra deserialize([fixed_ptr], [data_ptr])
     [actions];
-    return [result]
+    -- FIXME: Terra on PowerPC has buggy support returning structs, so
+    -- work around it by mallocing the result and returning a pointer.
+    var result_data = [&value_type](c.malloc([terralib.sizeof(value_type)]))
+    std.assert(result_data ~= nil, "malloc failed in deserialize")
+    terralib.attrstore(result_data, [result], { align = [value_type_alignment] })
+    return result_data
   end
   deserialize:setinlined(false)
   return deserialize
@@ -1293,8 +1301,13 @@ end)
 function std.deserialize(value_type, fixed_ptr, data_ptr)
   local helper = deserialize_helper(value_type)
   local result = terralib.newsymbol(value_type, "result")
+  -- Force unaligned access because malloc does not provide
+  -- blocks aligned for all purposes (e.g. AVX vectors).
+  local value_type_alignment = 1 -- data.min(terralib.sizeof(value_type),8)
   local actions = quote
-    var [result] = helper([fixed_ptr], [data_ptr])
+    var result_data = helper([fixed_ptr], [data_ptr])
+    var [result] = terralib.attrload(result_data, { align = [value_type_alignment] })
+    c.free(result_data)
   end
   return actions, result
 end
@@ -3698,10 +3711,17 @@ end
 
 do
   local intrinsic_names = {}
-  intrinsic_names[vector(float,  4)] = "llvm.x86.sse.%s.ps"
-  intrinsic_names[vector(double, 2)] = "llvm.x86.sse2.%s.pd"
-  intrinsic_names[vector(float,  8)] = "llvm.x86.avx.%s.ps.256"
-  intrinsic_names[vector(double, 4)] = "llvm.x86.avx.%s.pd.256"
+  if os.execute("bash -c \"[ `uname` == 'Linux' ]\"") == 0 and
+    os.execute("grep POWER8 /proc/cpuinfo > /dev/null") == 0
+  then
+    intrinsic_names[vector(float,  4)] = "llvm.ppc.altivec.v%sfp"
+    intrinsic_names[vector(double, 2)] = "llvm.ppc.vsx.xv%sdp"
+  else
+    intrinsic_names[vector(float,  4)] = "llvm.x86.sse.%s.ps"
+    intrinsic_names[vector(double, 2)] = "llvm.x86.sse2.%s.pd"
+    intrinsic_names[vector(float,  8)] = "llvm.x86.avx.%s.ps.256"
+    intrinsic_names[vector(double, 4)] = "llvm.x86.avx.%s.pd.256"
+  end
 
   local function math_binary_op_factory(fname)
     return terralib.memoize(function(arg_type)
