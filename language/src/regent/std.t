@@ -1284,7 +1284,12 @@ local deserialize_helper = terralib.memoize(function(value_type)
   local actions, result = deserialize_inner(value_type, fixed_ptr, data_ptr)
   local terra deserialize([fixed_ptr], [data_ptr])
     [actions];
-    return [result]
+    -- FIXME: Terra on PowerPC has buggy support returning structs, so
+    -- work around it by mallocing the result and returning a pointer.
+    var result_data = [&value_type](c.malloc([terralib.sizeof(value_type)]))
+    std.assert(result_data ~= nil, "malloc failed in deserialize")
+    @result_data = [result]
+    return result_data
   end
   deserialize:setinlined(false)
   return deserialize
@@ -1294,7 +1299,9 @@ function std.deserialize(value_type, fixed_ptr, data_ptr)
   local helper = deserialize_helper(value_type)
   local result = terralib.newsymbol(value_type, "result")
   local actions = quote
-    var [result] = helper([fixed_ptr], [data_ptr])
+    var result_data = helper([fixed_ptr], [data_ptr])
+    var [result] = @result_data
+    c.free(result_data)
   end
   return actions, result
 end
