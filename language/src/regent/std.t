@@ -1282,13 +1282,16 @@ local deserialize_helper = terralib.memoize(function(value_type)
   local fixed_ptr = terralib.newsymbol(&opaque, "fixed_ptr")
   local data_ptr = terralib.newsymbol(&&uint8, "data_ptr")
   local actions, result = deserialize_inner(value_type, fixed_ptr, data_ptr)
+  -- Force unaligned access because malloc does not provide
+  -- blocks aligned for all purposes (e.g. AVX vectors).
+  local value_type_alignment = 1 -- data.min(terralib.sizeof(value_type),8)
   local terra deserialize([fixed_ptr], [data_ptr])
     [actions];
     -- FIXME: Terra on PowerPC has buggy support returning structs, so
     -- work around it by mallocing the result and returning a pointer.
     var result_data = [&value_type](c.malloc([terralib.sizeof(value_type)]))
     std.assert(result_data ~= nil, "malloc failed in deserialize")
-    @result_data = [result]
+    terralib.attrstore(result_data, [result], { align = [value_type_alignment] })
     return result_data
   end
   deserialize:setinlined(false)
