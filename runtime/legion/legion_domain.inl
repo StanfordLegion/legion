@@ -426,6 +426,17 @@ namespace Legion {
   }
 
   //----------------------------------------------------------------------------
+  template<int M, int N, typename T> template<int P> __CUDA_HD__
+  inline AffineTransform<M,P,T> AffineTransform<M,N,T>::operator()(
+                                        const AffineTransform<N,P,T> &rhs) const
+  //----------------------------------------------------------------------------
+  {
+    const Transform<M,P,T> t2 = transform * rhs.transform;
+    const Point<M,T> p2 = transform * rhs.offset + offset;
+    return AffineTransform<M,P,T>(t2, p2);
+  }
+
+  //----------------------------------------------------------------------------
   template<int M, int N, typename T>
   inline bool ScaleTransform<M,N,T>::is_identity(void) const
   //----------------------------------------------------------------------------
