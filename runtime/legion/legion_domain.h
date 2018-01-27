@@ -130,6 +130,9 @@ namespace Legion {
     // Apply the transformation to a point
     template<typename T2> __CUDA_HD__
     Point<M,T> operator[](const Point<N,T2> point) const;
+    // Compose the transform with another transform
+    template<int P> __CUDA_HD__
+    AffineTransform<M,P,T> operator()(const AffineTransform<N,P,T> &rhs) const;
     // Test whether this is the identity transform
     __CUDA_HD__
     bool is_identity(void) const;
