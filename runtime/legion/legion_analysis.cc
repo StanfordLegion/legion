@@ -6954,10 +6954,6 @@ namespace Legion {
     {
       state_lock.destroy_reservation();
       state_lock = Reservation::NO_RESERVATION;
-#ifdef DEBUG_LEGION
-      assert(!currently_active);
-      assert(!currently_valid);
-#endif 
     }
 
     //--------------------------------------------------------------------------
