@@ -39,7 +39,6 @@ namespace Legion {
         children_complete_invoked(false), children_commit_invoked(false)
     //--------------------------------------------------------------------------
     {
-      privilege_lock = Reservation::create_reservation();
     }
 
     //--------------------------------------------------------------------------
@@ -55,8 +54,6 @@ namespace Legion {
     TaskContext::~TaskContext(void)
     //--------------------------------------------------------------------------
     {
-      privilege_lock.destroy_reservation();
-      privilege_lock = Reservation::NO_RESERVATION;
       // Clean up any local variables that we have
       if (!task_local_variables.empty())
       {
@@ -1738,9 +1735,7 @@ namespace Legion {
     const std::vector<PhysicalRegion>& TaskContext::begin_task(void)
     //--------------------------------------------------------------------------
     {
-#ifdef ENABLE_LEGION_TLS
       implicit_context = this;
-#endif
       if (overhead_tracker != NULL)
         previous_profiling_time = Realm::Clock::current_time_in_nanoseconds();
       // Switch over the executing processor to the one
@@ -1807,7 +1802,7 @@ namespace Legion {
                       get_task_name(), get_unique_id())
       if (unmapped_regions.size() == 1)
       {
-        MapOp *op = runtime->get_available_map_op(true);
+        MapOp *op = runtime->get_available_map_op();
         op->initialize(this, unmapped_regions[0]);
         ApEvent mapped_event = op->get_completion_event();
         runtime->add_to_dependence_queue(this, executing_processor, op);
@@ -1822,7 +1817,7 @@ namespace Legion {
         std::set<ApEvent> mapped_events;
         for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
         {
-          MapOp *op = runtime->get_available_map_op(true);
+          MapOp *op = runtime->get_available_map_op();
           op->initialize(this, unmapped_regions[idx]);
           mapped_events.insert(op->get_completion_event());
           runtime->add_to_dependence_queue(this, executing_processor, op);
@@ -1903,13 +1898,6 @@ namespace Legion {
         current_fence(NULL), fence_gen(0), current_fence_index(0) 
     //--------------------------------------------------------------------------
     {
-      tree_owner_lock = Reservation::create_reservation();
-      local_field_lock = Reservation::create_reservation();
-      remote_lock = Reservation::create_reservation();
-      window_lock = Reservation::create_reservation();
-      child_op_lock = Reservation::create_reservation();
-      collective_lock = Reservation::create_reservation();
-      instance_view_lock = Reservation::create_reservation();
       // Set some of the default values for a context
       context_configuration.max_window_size = 
         Runtime::initial_task_window_size;
@@ -1958,16 +1946,6 @@ namespace Legion {
     {
       if (!remote_instances.empty())
         free_remote_contexts();
-      remote_lock.destroy_reservation();
-      remote_lock = Reservation::NO_RESERVATION;
-      window_lock.destroy_reservation();
-      window_lock = Reservation::NO_RESERVATION;
-      child_op_lock.destroy_reservation();
-      child_op_lock = Reservation::NO_RESERVATION;
-      collective_lock.destroy_reservation();
-      collective_lock = Reservation::NO_RESERVATION;
-      instance_view_lock.destroy_reservation();
-      instance_view_lock = Reservation::NO_RESERVATION;
       for (std::map<TraceID,DynamicTrace*>::const_iterator it = traces.begin();
             it != traces.end(); it++)
       {
@@ -2013,8 +1991,6 @@ namespace Legion {
             runtime->forest->free_local_fields(it->first, to_free, indexes);
         }
       }
-      local_field_lock.destroy_reservation();
-      local_field_lock = Reservation::NO_RESERVATION;
       // Unregister ourselves from any tracking contexts that we might have
       if (!region_tree_owners.empty())
       {
@@ -2024,8 +2000,6 @@ namespace Legion {
           it->first->unregister_tracking_context(this);
         region_tree_owners.clear();
       }
-      tree_owner_lock.destroy_reservation();
-      tree_owner_lock = Reservation::NO_RESERVATION;
 #ifdef DEBUG_LEGION
       assert(pending_top_views.empty());
       assert(outstanding_subtasks == 0);
@@ -2326,7 +2300,7 @@ namespace Legion {
       AutoRuntimeCall call(this); 
       IndexSpace handle(runtime->get_unique_index_space_id(),
                         runtime->get_unique_index_tree_id(), type_tag);
-      DistributedID did = runtime->get_available_distributed_id(true/*cont*/);
+      DistributedID did = runtime->get_available_distributed_id();
 #ifdef DEBUG_LEGION
       log_index.debug("Creating index space %x in task%s (ID %lld)", 
                       handle.id, get_task_name(), get_unique_id()); 
@@ -2349,7 +2323,7 @@ namespace Legion {
       IndexSpace handle(runtime->get_unique_index_space_id(),
                         runtime->get_unique_index_tree_id(), 
                         spaces[0].get_type_tag());
-      DistributedID did = runtime->get_available_distributed_id(true/*cont*/);
+      DistributedID did = runtime->get_available_distributed_id();
 #ifdef DEBUG_LEGION
       log_index.debug("Creating index space %x in task%s (ID %lld)", 
                       handle.id, get_task_name(), get_unique_id()); 
@@ -2372,7 +2346,7 @@ namespace Legion {
       IndexSpace handle(runtime->get_unique_index_space_id(),
                         runtime->get_unique_index_tree_id(), 
                         spaces[0].get_type_tag());
-      DistributedID did = runtime->get_available_distributed_id(true/*cont*/);
+      DistributedID did = runtime->get_available_distributed_id();
 #ifdef DEBUG_LEGION
       log_index.debug("Creating index space %x in task%s (ID %lld)", 
                       handle.id, get_task_name(), get_unique_id()); 
@@ -2393,7 +2367,7 @@ namespace Legion {
       IndexSpace handle(runtime->get_unique_index_space_id(),
                         runtime->get_unique_index_tree_id(), 
                         left.get_type_tag());
-      DistributedID did = runtime->get_available_distributed_id(true/*cont*/);
+      DistributedID did = runtime->get_available_distributed_id();
 #ifdef DEBUG_LEGION
       log_index.debug("Creating index space %x in task%s (ID %lld)", 
                       handle.id, get_task_name(), get_unique_id()); 
@@ -2414,7 +2388,7 @@ namespace Legion {
       log_index.debug("Destroying index space %x in task %s (ID %lld)", 
                       handle.id, get_task_name(), get_unique_id());
 #endif
-      DeletionOp *op = runtime->get_available_deletion_op(true);
+      DeletionOp *op = runtime->get_available_deletion_op();
       op->initialize_index_space_deletion(this, handle);
       runtime->add_to_dependence_queue(this, executing_processor, op);
     }
@@ -2428,7 +2402,7 @@ namespace Legion {
       log_index.debug("Destroying index partition %x in task %s (ID %lld)", 
                       handle.id, get_task_name(), get_unique_id());
 #endif
-      DeletionOp *op = runtime->get_available_deletion_op(true);
+      DeletionOp *op = runtime->get_available_deletion_op();
       op->initialize_index_part_deletion(this, handle);
       runtime->add_to_dependence_queue(this, executing_processor, op);
     }
@@ -2445,7 +2419,7 @@ namespace Legion {
       AutoRuntimeCall call(this);  
       IndexPartition pid(runtime->get_unique_index_partition_id(), 
                          parent.get_tree_id(), parent.get_type_tag());
-      DistributedID did = runtime->get_available_distributed_id(true/*cont*/);
+      DistributedID did = runtime->get_available_distributed_id();
 #ifdef DEBUG_LEGION
       log_index.debug("Creating equal partition %d with parent index space %x "
                       "in task %s (ID %lld)", pid.id, parent.id,
@@ -2455,7 +2429,7 @@ namespace Legion {
       if (color != AUTO_GENERATE_ID)
         partition_color = color;
       PendingPartitionOp *part_op = 
-        runtime->get_available_pending_partition_op(true);
+        runtime->get_available_pending_partition_op();
       part_op->initialize_equal_partition(this, pid, granularity);
       ApEvent term_event = part_op->get_completion_event();
       // Tell the region tree forest about this partition
@@ -2482,7 +2456,7 @@ namespace Legion {
       AutoRuntimeCall call(this);
       IndexPartition pid(runtime->get_unique_index_partition_id(), 
                          parent.get_tree_id(), parent.get_type_tag());
-      DistributedID did = runtime->get_available_distributed_id(true/*cont*/);
+      DistributedID did = runtime->get_available_distributed_id();
 #ifdef DEBUG_LEGION
       log_index.debug("Creating union partition %d with parent index "
                       "space %x in task %s (ID %lld)", pid.id, parent.id,
@@ -2502,7 +2476,7 @@ namespace Legion {
       if (color != AUTO_GENERATE_ID)
         partition_color = color;
       PendingPartitionOp *part_op = 
-        runtime->get_available_pending_partition_op(true);
+        runtime->get_available_pending_partition_op();
       part_op->initialize_union_partition(this, pid, handle1, handle2);
       ApEvent term_event = part_op->get_completion_event();
       // If either partition is aliased the result is aliased
@@ -2543,7 +2517,7 @@ namespace Legion {
       AutoRuntimeCall call(this);
       IndexPartition pid(runtime->get_unique_index_partition_id(), 
                          parent.get_tree_id(), parent.get_type_tag());
-      DistributedID did = runtime->get_available_distributed_id(true/*cont*/);
+      DistributedID did = runtime->get_available_distributed_id();
 #ifdef DEBUG_LEGION
       log_index.debug("Creating intersection partition %d with parent "
                       "index space %x in task %s (ID %lld)", pid.id, parent.id,
@@ -2563,7 +2537,7 @@ namespace Legion {
       if (color != AUTO_GENERATE_ID)
         partition_color = color;
       PendingPartitionOp *part_op = 
-        runtime->get_available_pending_partition_op(true);
+        runtime->get_available_pending_partition_op();
       part_op->initialize_intersection_partition(this, pid, handle1, handle2);
       ApEvent term_event = part_op->get_completion_event();
       // If either partition is disjoint then the result is disjoint
@@ -2604,7 +2578,7 @@ namespace Legion {
       AutoRuntimeCall call(this); 
       IndexPartition pid(runtime->get_unique_index_partition_id(), 
                          parent.get_tree_id(), parent.get_type_tag());
-      DistributedID did = runtime->get_available_distributed_id(true/*cont*/);
+      DistributedID did = runtime->get_available_distributed_id();
 #ifdef DEBUG_LEGION
       log_index.debug("Creating difference partition %d with parent "
                       "index space %x in task %s (ID %lld)", pid.id, parent.id,
@@ -2626,7 +2600,7 @@ namespace Legion {
       if (color != AUTO_GENERATE_ID)
         partition_color = color;
       PendingPartitionOp *part_op = 
-        runtime->get_available_pending_partition_op(true);
+        runtime->get_available_pending_partition_op();
       part_op->initialize_difference_partition(this, pid, handle1, handle2);
       ApEvent term_event = part_op->get_completion_event();
       // If the left-hand-side is disjoint the result is disjoint
@@ -2672,7 +2646,7 @@ namespace Legion {
       if (color != AUTO_GENERATE_ID)
         partition_color = color;
       PendingPartitionOp *part_op = 
-        runtime->get_available_pending_partition_op(true);
+        runtime->get_available_pending_partition_op();
       ApEvent term_event = part_op->get_completion_event();
       // Tell the region tree forest about this partition
       forest->create_pending_cross_product(handle1, handle2, handles, kind, 
@@ -2697,7 +2671,7 @@ namespace Legion {
                       get_task_name(), get_unique_id());
 #endif
       DependentPartitionOp *part_op = 
-        runtime->get_available_dependent_partition_op(true);
+        runtime->get_available_dependent_partition_op();
       part_op->initialize_by_association(this, domain, domain_parent, 
                                          domain_fid, range, id, tag);
       // Now figure out if we need to unmap and re-map any inline mappings
@@ -2739,7 +2713,7 @@ namespace Legion {
       AutoRuntimeCall call(this);
       IndexPartition pid(runtime->get_unique_index_partition_id(), 
                          parent.get_tree_id(), parent.get_type_tag());
-      DistributedID did = runtime->get_available_distributed_id(true/*cont*/);
+      DistributedID did = runtime->get_available_distributed_id();
 #ifdef DEBUG_LEGION
       log_index.debug("Creating restricted partition in task %s (ID %lld)", 
                       get_task_name(), get_unique_id());
@@ -2748,7 +2722,7 @@ namespace Legion {
       if (color != AUTO_GENERATE_ID)
         part_color = color; 
       PendingPartitionOp *part_op = 
-        runtime->get_available_pending_partition_op(true);
+        runtime->get_available_pending_partition_op();
       part_op->initialize_restricted_partition(this, pid, transform, 
                                 transform_size, extent, extent_size);
       ApEvent term_event = part_op->get_completion_event();
@@ -2778,7 +2752,7 @@ namespace Legion {
       IndexSpace parent = handle.get_index_space(); 
       IndexPartition pid(runtime->get_unique_index_partition_id(), 
                          parent.get_tree_id(), parent.get_type_tag());
-      DistributedID did = runtime->get_available_distributed_id(true/*cont*/);
+      DistributedID did = runtime->get_available_distributed_id();
 #ifdef DEBUG_LEGION
       log_index.debug("Creating partition by field in task %s (ID %lld)", 
                       get_task_name(), get_unique_id());
@@ -2788,7 +2762,7 @@ namespace Legion {
         part_color = color;
       // Allocate the partition operation
       DependentPartitionOp *part_op = 
-        runtime->get_available_dependent_partition_op(true);
+        runtime->get_available_dependent_partition_op();
       ApEvent term_event = part_op->get_completion_event();
       // Tell the region tree forest about this partition 
       RtEvent safe = forest->create_pending_partition(pid, parent, color_space,
@@ -2840,7 +2814,7 @@ namespace Legion {
       AutoRuntimeCall call(this); 
       IndexPartition pid(runtime->get_unique_index_partition_id(), 
                          handle.get_tree_id(), handle.get_type_tag());
-      DistributedID did = runtime->get_available_distributed_id(true/*cont*/);
+      DistributedID did = runtime->get_available_distributed_id();
 #ifdef DEBUG_LEGION
       log_index.debug("Creating partition by image in task %s (ID %lld)", 
                       get_task_name(), get_unique_id());
@@ -2850,7 +2824,7 @@ namespace Legion {
         part_color = color;
       // Allocate the partition operation
       DependentPartitionOp *part_op = 
-        runtime->get_available_dependent_partition_op(true);
+        runtime->get_available_dependent_partition_op();
       ApEvent term_event = part_op->get_completion_event(); 
       // Tell the region tree forest about this partition
       RtEvent safe = forest->create_pending_partition(pid, handle, color_space,
@@ -2902,7 +2876,7 @@ namespace Legion {
       AutoRuntimeCall call(this); 
       IndexPartition pid(runtime->get_unique_index_partition_id(), 
                          handle.get_tree_id(), handle.get_type_tag());
-      DistributedID did = runtime->get_available_distributed_id(true/*cont*/);
+      DistributedID did = runtime->get_available_distributed_id();
 #ifdef DEBUG_LEGION
       log_index.debug("Creating partition by image range in task %s (ID %lld)",
                       get_task_name(), get_unique_id());
@@ -2912,7 +2886,7 @@ namespace Legion {
         part_color = color;
       // Allocate the partition operation
       DependentPartitionOp *part_op = 
-        runtime->get_available_dependent_partition_op(true);
+        runtime->get_available_dependent_partition_op();
       ApEvent term_event = part_op->get_completion_event();
       // Tell the region tree forest about this partition
       RtEvent safe = forest->create_pending_partition(pid, handle, color_space,
@@ -2965,7 +2939,7 @@ namespace Legion {
       IndexPartition pid(runtime->get_unique_index_partition_id(), 
                          handle.get_index_space().get_tree_id(),
                          parent.get_type_tag());
-      DistributedID did = runtime->get_available_distributed_id(true/*cont*/);
+      DistributedID did = runtime->get_available_distributed_id();
 #ifdef DEBUG_LEGION
       log_index.debug("Creating partition by preimage in task %s (ID %lld)", 
                       get_task_name(), get_unique_id());
@@ -2975,7 +2949,7 @@ namespace Legion {
         part_color = color;
       // Allocate the partition operation
       DependentPartitionOp *part_op = 
-        runtime->get_available_dependent_partition_op(true); 
+        runtime->get_available_dependent_partition_op(); 
       ApEvent term_event = part_op->get_completion_event();
       // If the source of the preimage is disjoint then the result is disjoint
       // Note this only applies here and not to range
@@ -3037,7 +3011,7 @@ namespace Legion {
       IndexPartition pid(runtime->get_unique_index_partition_id(), 
                          handle.get_index_space().get_tree_id(),
                          parent.get_type_tag());
-      DistributedID did = runtime->get_available_distributed_id(true/*cont*/);
+      DistributedID did = runtime->get_available_distributed_id();
 #ifdef DEBUG_LEGION
       log_index.debug("Creating partition by preimage range in task %s "
                       "(ID %lld)", get_task_name(), get_unique_id());
@@ -3047,7 +3021,7 @@ namespace Legion {
         part_color = color;
       // Allocate the partition operation
       DependentPartitionOp *part_op = 
-        runtime->get_available_dependent_partition_op(true); 
+        runtime->get_available_dependent_partition_op(); 
       ApEvent term_event = part_op->get_completion_event();
       // Tell the region tree forest about this partition
       RtEvent safe = forest->create_pending_partition(pid, 
@@ -3096,7 +3070,7 @@ namespace Legion {
       AutoRuntimeCall call(this);
       IndexPartition pid(runtime->get_unique_index_partition_id(), 
                          parent.get_tree_id(), parent.get_type_tag());
-      DistributedID did = runtime->get_available_distributed_id(true/*cont*/);
+      DistributedID did = runtime->get_available_distributed_id();
 #ifdef DEBUG_LEGION
       log_index.debug("Creating pending partition in task %s (ID %lld)", 
                       get_task_name(), get_unique_id());
@@ -3130,7 +3104,7 @@ namespace Legion {
       IndexSpace result = forest->find_pending_space(parent, realm_color, 
                                                      type_tag, domain_ready);
       PendingPartitionOp *part_op = 
-        runtime->get_available_pending_partition_op(true);
+        runtime->get_available_pending_partition_op();
       part_op->initialize_index_space_union(this, result, handles);
       Runtime::trigger_event(domain_ready, part_op->get_completion_event());
       // Now we can add the operation to the queue
@@ -3155,7 +3129,7 @@ namespace Legion {
       IndexSpace result = forest->find_pending_space(parent, realm_color, 
                                                      type_tag, domain_ready);
       PendingPartitionOp *part_op = 
-        runtime->get_available_pending_partition_op(true);
+        runtime->get_available_pending_partition_op();
       part_op->initialize_index_space_union(this, result, handle);
       Runtime::trigger_event(domain_ready, part_op->get_completion_event());
       // Now we can add the operation to the queue
@@ -3181,7 +3155,7 @@ namespace Legion {
       IndexSpace result = forest->find_pending_space(parent, realm_color, 
                                                      type_tag, domain_ready);
       PendingPartitionOp *part_op = 
-        runtime->get_available_pending_partition_op(true);
+        runtime->get_available_pending_partition_op();
       part_op->initialize_index_space_intersection(this, result, handles);
       Runtime::trigger_event(domain_ready, part_op->get_completion_event());
       // Now we can add the operation to the queue
@@ -3207,7 +3181,7 @@ namespace Legion {
       IndexSpace result = forest->find_pending_space(parent, realm_color, 
                                                      type_tag, domain_ready);
       PendingPartitionOp *part_op = 
-        runtime->get_available_pending_partition_op(true);
+        runtime->get_available_pending_partition_op();
       part_op->initialize_index_space_intersection(this, result, handle);
       Runtime::trigger_event(domain_ready, part_op->get_completion_event());
       // Now we can add the operation to the queue
@@ -3234,7 +3208,7 @@ namespace Legion {
       IndexSpace result = forest->find_pending_space(parent, realm_color, 
                                                      type_tag, domain_ready);
       PendingPartitionOp *part_op = 
-        runtime->get_available_pending_partition_op(true);
+        runtime->get_available_pending_partition_op();
       part_op->initialize_index_space_difference(this, result, initial,handles);
       Runtime::trigger_event(domain_ready, part_op->get_completion_event());
       // Now we can add the operation to the queue
@@ -3248,7 +3222,7 @@ namespace Legion {
     {
       AutoRuntimeCall call(this);
       FieldSpace space(runtime->get_unique_field_space_id());
-      DistributedID did = runtime->get_available_distributed_id(true/*cont*/);
+      DistributedID did = runtime->get_available_distributed_id();
 #ifdef DEBUG_LEGION
       log_field.debug("Creating field space %x in task %s (ID %lld)", 
                       space.id, get_task_name(), get_unique_id());
@@ -3270,7 +3244,7 @@ namespace Legion {
       log_field.debug("Destroying field space %x in task %s (ID %lld)", 
                       handle.id, get_task_name(), get_unique_id());
 #endif
-      DeletionOp *op = runtime->get_available_deletion_op(true);
+      DeletionOp *op = runtime->get_available_deletion_op();
       op->initialize_field_space_deletion(this, handle);
       runtime->add_to_dependence_queue(this, executing_processor, op);
     }
@@ -3373,7 +3347,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      DeletionOp *op = runtime->get_available_deletion_op(true);
+      DeletionOp *op = runtime->get_available_deletion_op();
       op->initialize_field_deletion(this, space, fid);
       runtime->add_to_dependence_queue(this, executing_processor, op);
     }
@@ -3483,7 +3457,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      DeletionOp *op = runtime->get_available_deletion_op(true);
+      DeletionOp *op = runtime->get_available_deletion_op();
       op->initialize_field_deletions(this, space, to_free);
       runtime->add_to_dependence_queue(this, executing_processor, op);
     }
@@ -3522,7 +3496,7 @@ namespace Legion {
                        handle.index_space.id, handle.field_space.id, 
                        get_task_name(), get_unique_id());
 #endif
-      DeletionOp *op = runtime->get_available_deletion_op(true);
+      DeletionOp *op = runtime->get_available_deletion_op();
       op->initialize_logical_region_deletion(this, handle);
       runtime->add_to_dependence_queue(this, executing_processor, op);
     }
@@ -3537,7 +3511,7 @@ namespace Legion {
                        "(ID %lld)", handle.index_partition.id, 
                        handle.field_space.id, get_task_name(), get_unique_id());
 #endif
-      DeletionOp *op = runtime->get_available_deletion_op(true);
+      DeletionOp *op = runtime->get_available_deletion_op();
       op->initialize_logical_partition_deletion(this, handle);
       runtime->add_to_dependence_queue(this, executing_processor, op);
     }
@@ -3563,7 +3537,7 @@ namespace Legion {
           return launcher.predicate_false_future;
         // Otherwise check to see if we have a value
         FutureImpl *result = new FutureImpl(runtime, true/*register*/,
-          runtime->get_available_distributed_id(true), runtime->address_space);
+          runtime->get_available_distributed_id(), runtime->address_space);
         if (launcher.predicate_false_result.get_size() > 0)
           result->set_result(launcher.predicate_false_result.get_ptr(),
                              launcher.predicate_false_result.get_size(),
@@ -3588,7 +3562,7 @@ namespace Legion {
         result->complete_future();
         return Future(result);
       }
-      IndividualTask *task = runtime->get_available_individual_task(true);
+      IndividualTask *task = runtime->get_available_individual_task();
 #ifdef DEBUG_LEGION
       Future result = 
         task->initialize_task(this, launcher, Runtime::check_privileges);
@@ -3624,7 +3598,7 @@ namespace Legion {
       if (launcher.predicate == Predicate::FALSE_PRED)
       {
         FutureMapImpl *result = new FutureMapImpl(this, runtime,
-            runtime->get_available_distributed_id(true/*needs continuation*/),
+            runtime->get_available_distributed_id(),
             runtime->address_space);
         if (launcher.predicate_false_future.impl != NULL)
         {
@@ -3707,7 +3681,7 @@ namespace Legion {
       IndexSpace launch_space = launcher.launch_space;
       if (!launch_space.exists())
         launch_space = find_index_launch_space(launcher.launch_domain);
-      IndexTask *task = runtime->get_available_index_task(true);
+      IndexTask *task = runtime->get_available_index_task();
 #ifdef DEBUG_LEGION
       FutureMap result = 
         task->initialize_task(this, launcher, launch_space,
@@ -3741,7 +3715,7 @@ namespace Legion {
           return launcher.predicate_false_future;
         // Otherwise check to see if we have a value
         FutureImpl *result = new FutureImpl(runtime, true/*register*/, 
-          runtime->get_available_distributed_id(true), runtime->address_space);
+          runtime->get_available_distributed_id(), runtime->address_space);
         if (launcher.predicate_false_result.get_size() > 0)
           result->set_result(launcher.predicate_false_result.get_ptr(),
                              launcher.predicate_false_result.get_size(),
@@ -3778,7 +3752,7 @@ namespace Legion {
       IndexSpace launch_space = launcher.launch_space;
       if (!launch_space.exists())
         launch_space = find_index_launch_space(launcher.launch_domain);
-      IndexTask *task = runtime->get_available_index_task(true);
+      IndexTask *task = runtime->get_available_index_task();
 #ifdef DEBUG_LEGION
       Future result = 
         task->initialize_task(this, launcher, launch_space, redop, 
@@ -3804,7 +3778,7 @@ namespace Legion {
       AutoRuntimeCall call(this);
       if (IS_NO_ACCESS(launcher.requirement))
         return PhysicalRegion();
-      MapOp *map_op = runtime->get_available_map_op(true);
+      MapOp *map_op = runtime->get_available_map_op();
 #ifdef DEBUG_LEGION
       PhysicalRegion result = 
         map_op->initialize(this, launcher, Runtime::check_privileges);
@@ -3859,7 +3833,7 @@ namespace Legion {
       // if it is then we are done
       if (region.is_mapped())
         return;
-      MapOp *map_op = runtime->get_available_map_op(true);
+      MapOp *map_op = runtime->get_available_map_op();
       map_op->initialize(this, region);
       register_inline_mapped_region(region);
       runtime->add_to_dependence_queue(this, executing_processor, map_op);
@@ -3881,7 +3855,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      FillOp *fill_op = runtime->get_available_fill_op(true);
+      FillOp *fill_op = runtime->get_available_fill_op();
 #ifdef DEBUG_LEGION
       fill_op->initialize(this, launcher, Runtime::check_privileges);
       log_run.debug("Registering a fill operation in task %s (ID %lld)",
@@ -3930,7 +3904,7 @@ namespace Legion {
       IndexSpace launch_space = launcher.launch_space;
       if (!launch_space.exists())
         launch_space = find_index_launch_space(launcher.launch_domain);
-      IndexFillOp *fill_op = runtime->get_available_index_fill_op(true);
+      IndexFillOp *fill_op = runtime->get_available_index_fill_op();
 #ifdef DEBUG_LEGION
       fill_op->initialize(this, launcher, launch_space, 
                           Runtime::check_privileges);
@@ -3970,7 +3944,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      CopyOp *copy_op = runtime->get_available_copy_op(true);
+      CopyOp *copy_op = runtime->get_available_copy_op();
 #ifdef DEBUG_LEGION
       copy_op->initialize(this, launcher, Runtime::check_privileges);
       log_run.debug("Registering a copy operation in task %s (ID %lld)",
@@ -4019,7 +3993,7 @@ namespace Legion {
       IndexSpace launch_space = launcher.launch_space;
       if (!launch_space.exists())
         launch_space = find_index_launch_space(launcher.launch_domain);
-      IndexCopyOp *copy_op = runtime->get_available_index_copy_op(true);
+      IndexCopyOp *copy_op = runtime->get_available_index_copy_op();
 #ifdef DEBUG_LEGION
       copy_op->initialize(this, launcher, launch_space, 
                           Runtime::check_privileges);
@@ -4059,7 +4033,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      AcquireOp *acquire_op = runtime->get_available_acquire_op(true);
+      AcquireOp *acquire_op = runtime->get_available_acquire_op();
 #ifdef DEBUG_LEGION
       log_run.debug("Issuing an acquire operation in task %s (ID %lld)",
                     get_task_name(), get_unique_id());
@@ -4096,7 +4070,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      ReleaseOp *release_op = runtime->get_available_release_op(true);
+      ReleaseOp *release_op = runtime->get_available_release_op();
 #ifdef DEBUG_LEGION
       log_run.debug("Issuing a release operation in task %s (ID %lld)",
                     get_task_name(), get_unique_id());
@@ -4133,7 +4107,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      AttachOp *attach_op = runtime->get_available_attach_op(true);
+      AttachOp *attach_op = runtime->get_available_attach_op();
 #ifdef DEBUG_LEGION
       PhysicalRegion result = 
         attach_op->initialize(this, launcher, Runtime::check_privileges);
@@ -4180,7 +4154,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      DetachOp *detach_op = runtime->get_available_detach_op(true);
+      DetachOp *detach_op = runtime->get_available_detach_op();
       detach_op->initialize_detach(this, region);
       runtime->add_to_dependence_queue(this, executing_processor, detach_op);
       // If the region is still mapped, then unmap it
@@ -4197,7 +4171,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      MustEpochOp *epoch_op = runtime->get_available_epoch_op(true);
+      MustEpochOp *epoch_op = runtime->get_available_epoch_op();
 #ifdef DEBUG_LEGION
       log_run.debug("Executing a must epoch in task %s (ID %lld)",
                     get_task_name(), get_unique_id());
@@ -4240,7 +4214,7 @@ namespace Legion {
       log_run.debug("Issuing a timing measurement in task %s (ID %lld)",
                     get_task_name(), get_unique_id());
 #endif
-      TimingOp *timing_op = runtime->get_available_timing_op(true);
+      TimingOp *timing_op = runtime->get_available_timing_op();
       Future result = timing_op->initialize(this, launcher);
       runtime->add_to_dependence_queue(this, executing_processor, timing_op);
       return result;
@@ -4251,7 +4225,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      FenceOp *fence_op = runtime->get_available_fence_op(true);
+      FenceOp *fence_op = runtime->get_available_fence_op();
 #ifdef DEBUG_LEGION
       log_run.debug("Issuing a mapping fence in task %s (ID %lld)",
                     get_task_name(), get_unique_id());
@@ -4265,7 +4239,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      FenceOp *fence_op = runtime->get_available_fence_op(true);
+      FenceOp *fence_op = runtime->get_available_fence_op();
 #ifdef DEBUG_LEGION
       log_run.debug("Issuing an execution fence in task %s (ID %lld)",
                     get_task_name(), get_unique_id());
@@ -4279,7 +4253,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      FrameOp *frame_op = runtime->get_available_frame_op(true);
+      FrameOp *frame_op = runtime->get_available_frame_op();
 #ifdef DEBUG_LEGION
       log_run.debug("Issuing a frame in task %s (ID %lld)",
                     get_task_name(), get_unique_id());
@@ -4298,7 +4272,7 @@ namespace Legion {
           "Illegal predicate creation performed on "
                       "empty future inside of task %s (ID %lld).",
                       get_task_name(), get_unique_id())
-      FuturePredOp *pred_op = runtime->get_available_future_pred_op(true);
+      FuturePredOp *pred_op = runtime->get_available_future_pred_op();
       // Hold a reference before initialization
       Predicate result(pred_op);
       pred_op->initialize(this, f);
@@ -4311,7 +4285,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      NotPredOp *pred_op = runtime->get_available_not_pred_op(true);
+      NotPredOp *pred_op = runtime->get_available_not_pred_op();
       // Hold a reference before initialization
       Predicate result(pred_op);
       pred_op->initialize(this, p);
@@ -4349,7 +4323,7 @@ namespace Legion {
           return Predicate::TRUE_PRED;
         else if (actual_predicates.size() == 1)
           return actual_predicates[0];
-        AndPredOp *pred_op = runtime->get_available_and_pred_op(true);
+        AndPredOp *pred_op = runtime->get_available_and_pred_op();
         // Hold a reference before initialization
         Predicate result(pred_op);
         pred_op->initialize(this, actual_predicates);
@@ -4374,7 +4348,7 @@ namespace Legion {
           return Predicate::FALSE_PRED;
         else if (actual_predicates.size() == 1)
           return actual_predicates[0];
-        OrPredOp *pred_op = runtime->get_available_or_pred_op(true);
+        OrPredOp *pred_op = runtime->get_available_or_pred_op();
         // Hold a reference before initialization
         Predicate result(pred_op);
         pred_op->initialize(this, actual_predicates);
@@ -4428,25 +4402,7 @@ namespace Legion {
       if ((context_configuration.min_frames_to_schedule == 0) && 
           (context_configuration.max_window_size > 0) && 
             (outstanding_count > context_configuration.max_window_size))
-      {
-        // Try taking the lock first and see if we succeed
-        RtEvent precondition = 
-          Runtime::acquire_rt_reservation(window_lock, true/*exclusive*/);
-        begin_task_wait(false/*from runtime*/);
-        if (precondition.exists() && !precondition.has_triggered())
-        {
-          // Launch a window-wait task and then wait on the event 
-          WindowWaitArgs args;
-          args.parent_ctx = this;  
-          RtEvent wait_done = 
-            runtime->issue_runtime_meta_task(args, LG_RESOURCE_PRIORITY,
-                                             owner_task, precondition);
-          wait_done.lg_wait();
-        }
-        else // we can do the wait inline
-          perform_window_wait();
-        end_task_wait();
-      }
+        perform_window_wait();
       if (Runtime::legion_spy_enabled)
         LegionSpy::log_child_operation_index(get_context_uid(), result, 
                                              op->get_unique_op_id()); 
@@ -4481,51 +4437,41 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       RtEvent wait_event;
-      // We already hold our lock from the callsite above
-      // Outstanding children count has already been incremented for the
-      // operation being launched so decrement it in case we wait and then
-      // re-increment it when we wake up again
-      const int outstanding_count = 
-        __sync_fetch_and_add(&outstanding_children_count,-1);
-      // We already decided to wait, so we need to wait for any hysteresis
-      // to play a role here
-      if (outstanding_count >
-          int((100 - context_configuration.hysteresis_percentage) *
-              context_configuration.max_window_size / 100))
+      // Take the context lock in exclusive mode
       {
+        AutoLock win_lock(window_lock);
+        // We already hold our lock from the callsite above
+        // Outstanding children count has already been incremented for the
+        // operation being launched so decrement it in case we wait and then
+        // re-increment it when we wake up again
+        const int outstanding_count = 
+          __sync_fetch_and_add(&outstanding_children_count,-1);
+        // We already decided to wait, so we need to wait for any hysteresis
+        // to play a role here
+        if (outstanding_count >
+            int((100 - context_configuration.hysteresis_percentage) *
+                context_configuration.max_window_size / 100))
+        {
 #ifdef DEBUG_LEGION
-        assert(!valid_wait_event);
+          assert(!valid_wait_event);
 #endif
-        window_wait = Runtime::create_rt_user_event();
-        valid_wait_event = true;
-        wait_event = window_wait;
+          window_wait = Runtime::create_rt_user_event();
+          valid_wait_event = true;
+          wait_event = window_wait;
+        }
       }
-      // Release our lock now
-      window_lock.release();
+      begin_task_wait(false/*from runtime*/);
       wait_event.lg_wait();
+      end_task_wait();
       // Re-increment the count once we are awake again
       __sync_fetch_and_add(&outstanding_children_count,1);
     }
 
     //--------------------------------------------------------------------------
-    void InnerContext::add_to_dependence_queue(Operation *op, bool first,
+    void InnerContext::add_to_dependence_queue(Operation *op,
                                                RtEvent op_precondition)
     //--------------------------------------------------------------------------
     {
-      // If this is the first call, then defer it so we avoid
-      // trying to take the lock while being called from an 
-      // application task
-      if (first)
-      {
-        AddToDepQueueArgs args;
-        args.proxy_this = this;
-        args.op = op;
-        args.op_pre = op_precondition;
-        last_registration = 
-          runtime->issue_runtime_meta_task(args, LG_RESOURCE_PRIORITY,
-                                           op, last_registration);
-        return;
-      }
       AutoLock child_lock(child_op_lock);
       // We have the lock
       if (op->is_tracking_parent())
@@ -4936,14 +4882,14 @@ namespace Legion {
       if (current_trace->is_fixed())
       {
         // Already fixed, dump a complete trace op into the stream
-        TraceCompleteOp *complete_op = runtime->get_available_trace_op(true);
+        TraceCompleteOp *complete_op = runtime->get_available_trace_op();
         complete_op->initialize_complete(this);
         runtime->add_to_dependence_queue(this, executing_processor, complete_op);
       }
       else
       {
         // Not fixed yet, dump a capture trace op into the stream
-        TraceCaptureOp *capture_op = runtime->get_available_capture_op(true); 
+        TraceCaptureOp *capture_op = runtime->get_available_capture_op(); 
         capture_op->initialize_capture(this);
         runtime->add_to_dependence_queue(this, executing_processor, capture_op);
         // Mark that the current trace is now fixed
@@ -4994,7 +4940,7 @@ namespace Legion {
                        "task %s (UID %lld)", get_task_name(), get_unique_id())
       // We're done with this trace, need a trace complete op to clean up
       // This operation takes ownership of the static trace reference
-      TraceCompleteOp *complete_op = runtime->get_available_trace_op(true);
+      TraceCompleteOp *complete_op = runtime->get_available_trace_op();
       complete_op->initialize_complete(this);
       runtime->add_to_dependence_queue(this, executing_processor, complete_op);
       // We no longer have a trace that we're executing 
@@ -5171,19 +5117,7 @@ namespace Legion {
       // Don't need to do this if we are scheduled by frames
       if (context_configuration.min_tasks_to_schedule == 0)
         return RtEvent::NO_RT_EVENT;
-      RtEvent precondition = 
-        Runtime::acquire_rt_reservation(child_op_lock, true/*exclusive*/);
-      // If we didn't get the lock defer it
-      if (!precondition.has_triggered())
-      {
-        // This may involve waiting, so always issue it as a meta-task 
-        DecrementArgs decrement_args;
-        decrement_args.parent_ctx = this;
-        return runtime->issue_runtime_meta_task(decrement_args, 
-                    LG_RESOURCE_PRIORITY, child, precondition);  
-      }
-      else
-        return decrement_pending(true/*need deferral*/);
+      return decrement_pending(true/*need deferral*/);
     }
 
     //--------------------------------------------------------------------------
@@ -5192,21 +5126,21 @@ namespace Legion {
     {
       RtEvent wait_on;
       RtUserEvent to_trigger;
-      // We already hold the lock from the dispatch site (see above)
-#ifdef DEBUG_LEGION
-      assert(pending_subtasks > 0);
-#endif
-      pending_subtasks--;
-      if (!currently_active_context && (outstanding_subtasks > 0) &&
-          (pending_subtasks < context_configuration.min_tasks_to_schedule))
       {
-        wait_on = context_order_event;
-        to_trigger = Runtime::create_rt_user_event();
-        context_order_event = to_trigger;
-        currently_active_context = true;
+        AutoLock child_lock(child_op_lock);
+#ifdef DEBUG_LEGION
+        assert(pending_subtasks > 0);
+#endif
+        pending_subtasks--;
+        if (!currently_active_context && (outstanding_subtasks > 0) &&
+            (pending_subtasks < context_configuration.min_tasks_to_schedule))
+        {
+          wait_on = context_order_event;
+          to_trigger = Runtime::create_rt_user_event();
+          context_order_event = to_trigger;
+          currently_active_context = true;
+        }
       }
-      // Release the lock before doing the trigger or the wait
-      child_op_lock.release();
       // Do anything that we need to do
       if (to_trigger.exists())
       {
@@ -5964,7 +5898,7 @@ namespace Legion {
           assert(!physical_instances[idx].empty());
 #endif
           PostCloseOp *close_op = 
-            runtime->get_available_post_close_op(true);
+            runtime->get_available_post_close_op();
           close_op->initialize(this, idx, physical_instances[idx]);
           runtime->add_to_dependence_queue(this, executing_processor, close_op);
         }
@@ -5972,7 +5906,7 @@ namespace Legion {
         {
           // Make a virtual close op to close up the instance
           VirtualCloseOp *close_op = 
-            runtime->get_available_virtual_close_op(true);
+            runtime->get_available_virtual_close_op();
           close_op->initialize(this, idx, regions[idx]);
           runtime->add_to_dependence_queue(this, executing_processor, close_op);
         }
@@ -6256,7 +6190,7 @@ namespace Legion {
         if (phy_regions_mapped[idx] && !is_region_mapped(idx))
         {
           // Need to remap
-          MapOp *op = runtime->get_available_map_op(true);
+          MapOp *op = runtime->get_available_map_op();
           op->initialize(this, physical_regions[idx]);
           wait_events.insert(op->get_completion_event());
           runtime->add_to_dependence_queue(this, executing_processor, op);
@@ -7275,7 +7209,6 @@ namespace Legion {
       : TaskContext(rt, owner, owner->regions)
     //--------------------------------------------------------------------------
     {
-      leaf_lock = Reservation::create_reservation();
     }
 
     //--------------------------------------------------------------------------
@@ -7291,8 +7224,6 @@ namespace Legion {
     LeafContext::~LeafContext(void)
     //--------------------------------------------------------------------------
     {
-      leaf_lock.destroy_reservation();
-      leaf_lock = Reservation::NO_RESERVATION;
     }
 
     //--------------------------------------------------------------------------
@@ -8070,7 +8001,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LeafContext::add_to_dependence_queue(Operation *op, bool first,
+    void LeafContext::add_to_dependence_queue(Operation *op,
                                               RtEvent op_precondition)
     //--------------------------------------------------------------------------
     {
@@ -9211,11 +9142,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InlineContext::add_to_dependence_queue(Operation *op, bool first,
+    void InlineContext::add_to_dependence_queue(Operation *op,
                                                 RtEvent op_precondition)
     //--------------------------------------------------------------------------
     {
-      enclosing->add_to_dependence_queue(op, first, op_precondition);
+      enclosing->add_to_dependence_queue(op, op_precondition);
     }
 
     //--------------------------------------------------------------------------

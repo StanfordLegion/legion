@@ -115,7 +115,7 @@ namespace Legion {
     class MapperEvent {
     public:
       MapperEvent(void)
-        : impl(RtUserEvent::NO_RT_USER_EVENT) { }
+        : impl(Internal::RtUserEvent::NO_RT_USER_EVENT) { }
       FRIEND_ALL_RUNTIME_CLASSES
     public:
       inline bool exists(void) const { return impl.exists(); }
@@ -124,7 +124,7 @@ namespace Legion {
       inline bool operator<(const MapperEvent &rhs) const
         { return (impl.id < rhs.impl.id); }
     private:
-      RtUserEvent impl;
+      Internal::RtUserEvent impl;
     };
 
     namespace ProfilingMeasurements {

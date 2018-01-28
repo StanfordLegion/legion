@@ -851,7 +851,7 @@ namespace Legion {
     protected:
       // Only the runtime is allowed to make non-empty phase barriers
       FRIEND_ALL_RUNTIME_CLASSES
-      PhaseBarrier(ApBarrier b);
+      PhaseBarrier(Internal::ApBarrier b);
     public:
       bool operator<(const PhaseBarrier &rhs) const;
       bool operator==(const PhaseBarrier &rhs) const;
@@ -863,7 +863,7 @@ namespace Legion {
       Realm::Barrier get_barrier(void) const { return phase_barrier; }
       bool exists(void) const;
     protected:
-      ApBarrier phase_barrier;
+      Internal::ApBarrier phase_barrier;
       friend std::ostream& operator<<(std::ostream& os, const PhaseBarrier& pb);
     };
 
@@ -887,7 +887,7 @@ namespace Legion {
     protected:
       // Only the runtime is allowed to make non-empty dynamic collectives
       FRIEND_ALL_RUNTIME_CLASSES
-      DynamicCollective(ApBarrier b, ReductionOpID redop);
+      DynamicCollective(Internal::ApBarrier b, ReductionOpID redop);
     public:
       // All the same operations as a phase barrier
       void arrive(const void *value, size_t size, unsigned count = 1);
@@ -6895,17 +6895,14 @@ namespace Legion {
        * @return the Legion runtime pointer for the specified processor
        */
       static Runtime* get_runtime(Processor p = Processor::NO_PROC);
-#ifdef ENABLE_LEGION_TLS
+
       /**
-       * Provisional support for a way to implicitly find the context
-       * of the task in which we are running. This is only supported
-       * if the runtime is built with the ENABLE_LEGION_TLS macro.
-       * This macro has not been performance tested and may cause 
-       * performance degradation in the runtime. Use at your own risk.
+       * Get the context for the currently executing task this must
+       * be called inside of an actual Legion task. Calling it outside
+       * of a Legion task will result in undefined behavior
        * @return the context for the enclosing task in which we are executing
        */
       static Context get_context(void);
-#endif
     private:
       // Helper methods for templates
       IndexSpace create_index_space_internal(Context ctx, const void *realm_is,

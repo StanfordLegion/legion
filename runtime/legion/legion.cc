@@ -421,15 +421,7 @@ namespace Legion {
     };
 
     const LogicalRegion LogicalRegion::NO_REGION = LogicalRegion();
-    const LogicalPartition LogicalPartition::NO_PART = LogicalPartition(); 
-    const LgEvent LgEvent::NO_LG_EVENT = LgEvent();
-    const ApEvent ApEvent::NO_AP_EVENT = ApEvent();
-    const ApUserEvent ApUserEvent::NO_AP_USER_EVENT = ApUserEvent();
-    const ApBarrier ApBarrier::NO_AP_BARRIER = ApBarrier();
-    const RtEvent RtEvent::NO_RT_EVENT = RtEvent();
-    const RtUserEvent RtUserEvent::NO_RT_USER_EVENT = RtUserEvent();
-    const RtBarrier RtBarrier::NO_RT_BARRIER = RtBarrier();
-    const PredEvent PredEvent::NO_PRED_EVENT = PredEvent();
+    const LogicalPartition LogicalPartition::NO_PART = LogicalPartition();  
     const Domain Domain::NO_DOMAIN = Domain();
 
     // Cache static type tags so we don't need to recompute them all the time
@@ -965,7 +957,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(reservation_lock.exists());
 #endif
-      ApEvent lock_event(reservation_lock.acquire(mode,exclusive));
+      Internal::ApEvent lock_event(reservation_lock.acquire(mode,exclusive));
       lock_event.lg_wait();
     }
 
@@ -1041,13 +1033,13 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PhaseBarrier::PhaseBarrier(void)
-      : phase_barrier(ApBarrier::NO_AP_BARRIER)
+      : phase_barrier(Internal::ApBarrier::NO_AP_BARRIER)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
-    PhaseBarrier::PhaseBarrier(ApBarrier b)
+    PhaseBarrier::PhaseBarrier(Internal::ApBarrier b)
       : phase_barrier(b)
     //--------------------------------------------------------------------------
     {
@@ -1091,7 +1083,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(phase_barrier.exists());
 #endif
-      ApEvent e = Internal::Runtime::get_previous_phase(*this);
+      Internal::ApEvent e = Internal::Runtime::get_previous_phase(*this);
       e.lg_wait();
     }
 
@@ -1121,7 +1113,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    DynamicCollective::DynamicCollective(ApBarrier b, ReductionOpID r)
+    DynamicCollective::DynamicCollective(Internal::ApBarrier b, ReductionOpID r)
       : PhaseBarrier(b), redop(r)
     //--------------------------------------------------------------------------
     {
@@ -1133,7 +1125,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       Internal::Runtime::phase_barrier_arrive(*this, count, 
-                                            ApEvent::NO_AP_EVENT, value, size);
+                                  Internal::ApEvent::NO_AP_EVENT, value, size);
     }
 
     /////////////////////////////////////////////////////////////
@@ -6907,14 +6899,12 @@ namespace Legion {
       return Internal::Runtime::get_runtime(p)->external;
     }
 
-#ifdef ENABLE_LEGION_TLS
     //--------------------------------------------------------------------------
     /*static*/ Context Runtime::get_context(void)
     //--------------------------------------------------------------------------
     {
       return Internal::implicit_context;
     }
-#endif
 
     //--------------------------------------------------------------------------
     /*static*/ ReductionOpTable& Runtime::get_reduction_table(void)

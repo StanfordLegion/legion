@@ -299,6 +299,7 @@ namespace Legion {
       DistributedCollectable(Runtime *rt, DistributedID did,
                              AddressSpaceID owner_space,
                              bool register_with_runtime = true);
+      DistributedCollectable(const DistributedCollectable &rhs);
       virtual ~DistributedCollectable(void);
     public:
       inline void add_base_gc_ref(ReferenceSource source, 
@@ -454,7 +455,7 @@ namespace Legion {
       const AddressSpaceID owner_space;
       const AddressSpaceID local_space;
     protected: // derived users can get the gc lock
-      Reservation gc_lock;
+      mutable LocalLock gc_lock;
     private: // derived users can't see the state information
       State current_state;
       bool has_gc_references;

@@ -477,7 +477,7 @@ namespace Legion {
       bool acquired;
       ApEvent grant_event;
       std::set<ApEvent> completion_events;
-      Reservation grant_lock;
+      mutable LocalLock grant_lock;
     };
 
     class MPILegionHandshakeImpl : public Collectable,
@@ -536,7 +536,7 @@ namespace Legion {
       std::map<int,AddressSpace> forward_mapping;
       std::map<AddressSpace,int> reverse_mapping;
     protected:
-      Reservation reservation;
+      mutable LocalLock reservation;
       RtUserEvent done_event;
       std::vector<int> stage_notifications;
       std::vector<bool> sent_stages;
@@ -608,7 +608,7 @@ namespace Legion {
       void add_mapper(MapperID mid, MapperManager *m, 
                       bool check, bool own, bool skip_replay = false);
       void replace_default_mapper(MapperManager *m, bool own);
-      MapperManager* find_mapper(MapperID mid, bool need_lock = true) const;
+      MapperManager* find_mapper(MapperID mid) const;
     public:
       void perform_scheduling(void);
       void launch_task_scheduler(void);
@@ -649,11 +649,11 @@ namespace Legion {
       const bool replay_execution;
     protected:
       // Local queue state
-      Reservation local_queue_lock;
+      mutable LocalLock local_queue_lock;
       unsigned next_local_index;
     protected:
       // Scheduling state
-      Reservation queue_lock;
+      mutable LocalLock queue_lock;
       bool task_scheduler_enabled;
       unsigned total_active_contexts;
       unsigned total_active_mappers;
@@ -678,8 +678,8 @@ namespace Legion {
       };
       // State for each mapper for scheduling purposes
       std::map<MapperID,MapperState> mapper_states;
-      // Reservations for accessing mappers
-      Reservation mapper_lock;
+      // Lock for accessing mappers
+      mutable LocalLock mapper_lock;
       // The set of visible memories from this processor
       std::set<Memory> visible_memories;
     };
@@ -882,9 +882,9 @@ namespace Legion {
       // The runtime we are associate with
       Runtime *const runtime;
     protected:
-      // Reservation for controlling access to the data
+      // Lock for controlling access to the data
       // structures in this memory manager
-      Reservation manager_lock;
+      mutable LocalLock manager_lock;
       // We maintain several sets of instances here
       // This is a generic list that tracks all the allocated instances
       // It is only valid on the owner node
@@ -931,7 +931,7 @@ namespace Legion {
       void buffer_messages(unsigned num_messages,
                            const void *args, size_t arglen);
     private:
-      Reservation send_lock;
+      mutable LocalLock send_lock;
       char *const sending_buffer;
       unsigned sending_index;
       const size_t sending_buffer_size;
@@ -1041,7 +1041,7 @@ namespace Legion {
       const unsigned radix;
       ShutdownManager *const owner;
     protected:
-      Reservation shutdown_lock;
+      mutable LocalLock shutdown_lock;
       unsigned needed_responses;
       std::set<RtEvent> wait_for;
       bool result;
@@ -1108,27 +1108,6 @@ namespace Legion {
     private:
       int ctx;
     };
-
-    /**
-     * \class LegionContinuation
-     * A generic interface class for issuing a continuation
-     */
-    class LegionContinuation {
-    public:
-      struct ContinuationArgs : public LgTaskArgs<ContinuationArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_CONTINUATION_TASK_ID;
-      public:
-        LegionContinuation *continuation;
-      };
-    public:
-      RtEvent defer(Runtime *runtime, 
-                    RtEvent precondition = RtEvent::NO_RT_EVENT);
-    public:
-      virtual void execute(void) = 0;
-    public:
-      static void handle_continuation(const void *args);
-    }; 
 
     /**
      * \class PendingVariantRegistration
@@ -1220,7 +1199,7 @@ namespace Legion {
       Runtime *const runtime;
       char *const initial_name;
     private:
-      Reservation task_lock;
+      mutable LocalLock task_lock;
       std::map<VariantID,VariantImpl*> variants;
       std::map<VariantID,RtEvent> outstanding_requests;
       // VariantIDs that we've handed out but haven't registered yet
@@ -1372,7 +1351,7 @@ namespace Legion {
       Runtime *const runtime;
     protected:
       char *constraints_name;
-      Reservation layout_lock;
+      mutable LocalLock layout_lock;
     protected:
       std::map<LayoutConstraintID,bool> conflict_cache;
       std::map<LayoutConstraintID,bool> entailment_cache;
@@ -1453,7 +1432,7 @@ namespace Legion {
       const ProjectionID projection_id;
       ProjectionFunctor *const functor;
     private:
-      Reservation projection_reservation;
+      mutable LocalLock projection_reservation;
     }; 
 
     /**
@@ -2428,15 +2407,13 @@ namespace Legion {
                                    RtEvent precondition = RtEvent::NO_RT_EVENT,
                                    Processor proc = Processor::NO_PROC);
     public:
-      DistributedID get_available_distributed_id(bool need_cont, 
-                                                 bool has_lock = false);
+      DistributedID get_available_distributed_id(void); 
       void free_distributed_id(DistributedID did);
       RtEvent recycle_distributed_id(DistributedID did, RtEvent recycle_event);
       AddressSpaceID determine_owner(DistributedID did) const;
     public:
       void register_distributed_collectable(DistributedID did,
-                                            DistributedCollectable *dc,
-                                            bool needs_lock = true);
+                                            DistributedCollectable *dc);
       void unregister_distributed_collectable(DistributedID did);
       bool has_distributed_collectable(DistributedID did);
       DistributedCollectable* find_distributed_collectable(DistributedID did);
@@ -2494,84 +2471,47 @@ namespace Legion {
 #endif
     public:
       template<typename T>
-      inline T* get_available(Reservation reservation,
-                              std::deque<T*> &queue, bool has_lock);
+      inline T* get_available(LocalLock &local_lock, std::deque<T*> &queue);
 
       template<bool CAN_BE_DELETED, typename T>
       inline void release_operation(std::deque<T*> &queue, T* operation);
     public:
-      IndividualTask*       get_available_individual_task(bool need_cont,
-                                                  bool has_lock = false);
-      PointTask*            get_available_point_task(bool need_cont,
-                                                  bool has_lock = false);
-      IndexTask*            get_available_index_task(bool need_cont,
-                                                  bool has_lock = false);
-      SliceTask*            get_available_slice_task(bool need_cont,
-                                                  bool has_lock = false);
-      MapOp*                get_available_map_op(bool need_cont,
-                                                  bool has_lock = false);
-      CopyOp*               get_available_copy_op(bool need_cont,
-                                                  bool has_lock = false);
-      IndexCopyOp*          get_available_index_copy_op(bool need_cont,
-                                                  bool has_lock = false);
-      PointCopyOp*          get_available_point_copy_op(bool need_cont,
-                                                  bool has_lock = false);
-      FenceOp*              get_available_fence_op(bool need_cont,
-                                                  bool has_lock = false);
-      FrameOp*              get_available_frame_op(bool need_cont,
-                                                  bool has_lock = false);
-      DeletionOp*           get_available_deletion_op(bool need_cont,
-                                                  bool has_lock = false);
-      OpenOp*               get_available_open_op(bool need_cont,
-                                                  bool has_lock = false);
-      AdvanceOp*            get_available_advance_op(bool need_cont,
-                                                  bool has_lock = false);
-      InterCloseOp*         get_available_inter_close_op(bool need_cont,
-                                                  bool has_lock = false);
-      ReadCloseOp*          get_available_read_close_op(bool need_cont,
-                                                  bool has_lock = false);
-      PostCloseOp*          get_available_post_close_op(bool need_cont,
-                                                  bool has_lock = false);
-      VirtualCloseOp*       get_available_virtual_close_op(bool need_cont,
-                                                  bool has_lock = false);
-      DynamicCollectiveOp*  get_available_dynamic_collective_op(bool need_cont,
-                                                  bool has_lock = false);
-      FuturePredOp*         get_available_future_pred_op(bool need_cont,
-                                                  bool has_lock = false);
-      NotPredOp*            get_available_not_pred_op(bool need_cont,
-                                                  bool has_lock = false);
-      AndPredOp*            get_available_and_pred_op(bool need_cont,
-                                                  bool has_lock = false);
-      OrPredOp*             get_available_or_pred_op(bool need_cont,
-                                                  bool has_lock = false);
-      AcquireOp*            get_available_acquire_op(bool need_cont,
-                                                  bool has_lock = false);
-      ReleaseOp*            get_available_release_op(bool need_cont,
-                                                  bool has_lock = false);
-      TraceCaptureOp*       get_available_capture_op(bool need_cont,
-                                                  bool has_lock = false);
-      TraceCompleteOp*      get_available_trace_op(bool need_cont,
-                                                  bool has_lock = false);
-      MustEpochOp*          get_available_epoch_op(bool need_cont,
-                                                  bool has_lock = false);
-      PendingPartitionOp*   get_available_pending_partition_op(bool need_cont,
-                                                  bool has_lock = false);
-      DependentPartitionOp* get_available_dependent_partition_op(bool need_cont,
-                                                  bool has_lock = false);
-      PointDepPartOp*       get_available_point_dep_part_op(bool need_cont,
-                                                  bool has_lock = false);
-      FillOp*               get_available_fill_op(bool need_cont,
-                                                  bool has_lock = false);
-      IndexFillOp*          get_available_index_fill_op(bool need_cont,
-                                                  bool has_lock = false);
-      PointFillOp*          get_available_point_fill_op(bool need_cont,
-                                                  bool has_lock = false);
-      AttachOp*             get_available_attach_op(bool need_cont,
-                                                  bool has_lock = false);
-      DetachOp*             get_available_detach_op(bool need_cont,
-                                                  bool has_lock = false);
-      TimingOp*             get_available_timing_op(bool need_cont,
-                                                  bool has_lock = false);
+      IndividualTask*       get_available_individual_task(void);
+      PointTask*            get_available_point_task(void);
+      IndexTask*            get_available_index_task(void);
+      SliceTask*            get_available_slice_task(void);
+      MapOp*                get_available_map_op(void);
+      CopyOp*               get_available_copy_op(void);
+      IndexCopyOp*          get_available_index_copy_op(void);
+      PointCopyOp*          get_available_point_copy_op(void);
+      FenceOp*              get_available_fence_op(void);
+      FrameOp*              get_available_frame_op(void);
+      DeletionOp*           get_available_deletion_op(void);
+      OpenOp*               get_available_open_op(void);
+      AdvanceOp*            get_available_advance_op(void);
+      InterCloseOp*         get_available_inter_close_op(void);
+      ReadCloseOp*          get_available_read_close_op(void);
+      PostCloseOp*          get_available_post_close_op(void);
+      VirtualCloseOp*       get_available_virtual_close_op(void);
+      DynamicCollectiveOp*  get_available_dynamic_collective_op(void);
+      FuturePredOp*         get_available_future_pred_op(void);
+      NotPredOp*            get_available_not_pred_op(void);
+      AndPredOp*            get_available_and_pred_op(void);
+      OrPredOp*             get_available_or_pred_op(void);
+      AcquireOp*            get_available_acquire_op(void);
+      ReleaseOp*            get_available_release_op(void);
+      TraceCaptureOp*       get_available_capture_op(void);
+      TraceCompleteOp*      get_available_trace_op(void);
+      MustEpochOp*          get_available_epoch_op(void);
+      PendingPartitionOp*   get_available_pending_partition_op(void);
+      DependentPartitionOp* get_available_dependent_partition_op(void);
+      PointDepPartOp*       get_available_point_dep_part_op(void);
+      FillOp*               get_available_fill_op(void);
+      IndexFillOp*          get_available_index_fill_op(void);
+      PointFillOp*          get_available_point_fill_op(void);
+      AttachOp*             get_available_attach_op(void);
+      DetachOp*             get_available_detach_op(void);
+      TimingOp*             get_available_timing_op(void);
     public:
       void free_individual_task(IndividualTask *task);
       void free_point_task(PointTask *task);
@@ -2709,7 +2649,7 @@ namespace Legion {
       bool prepared_for_shutdown;
     protected:
 #ifdef DEBUG_LEGION
-      Reservation outstanding_task_lock;
+      mutable LocalLock outstanding_task_lock;
       std::map<std::pair<unsigned,bool>,unsigned> outstanding_task_counts;
 #endif
       unsigned total_outstanding_tasks;
@@ -2726,10 +2666,10 @@ namespace Legion {
       const std::set<Processor> local_utils;
       // Processor managers for each of the local processors
       std::map<Processor,ProcessorManager*> proc_managers;
-      // Reservation for looking up memory managers
-      Reservation memory_manager_lock;
-      // Reservation for initializing message managers
-      Reservation message_manager_lock;
+      // Lock for looking up memory managers
+      mutable LocalLock memory_manager_lock;
+      // Lock for initializing message managers
+      mutable LocalLock message_manager_lock;
       // Memory managers for all the memories we know about
       std::map<Memory,MemoryManager*> memory_managers;
       // Message managers for each of the other runtimes
@@ -2738,12 +2678,12 @@ namespace Legion {
       const std::map<Processor,AddressSpaceID> proc_spaces;
     protected:
       // The task table 
-      Reservation task_variant_lock;
+      mutable LocalLock task_variant_lock;
       std::map<TaskID,TaskImpl*> task_table;
       std::deque<VariantImpl*> variant_table;
     protected:
       // Constraint sets
-      Reservation layout_constraints_lock;
+      mutable LocalLock layout_constraints_lock;
       std::map<LayoutConstraintID,LayoutConstraints*> layout_constraints_table;
       std::map<LayoutConstraintID,RtEvent> pending_constraint_requests;
     protected:
@@ -2756,7 +2696,7 @@ namespace Legion {
         Processor proc;
         MapperID map_id;
       };
-      Reservation mapper_info_lock;
+      mutable LocalLock mapper_info_lock;
       // For every mapper remember its mapper ID and processor
       std::map<Mapper*,MapperInfo> mapper_infos;
 #ifdef DEBUG_LEGION
@@ -2778,31 +2718,31 @@ namespace Legion {
       unsigned unique_mapper_id;
       unsigned unique_projection_id;
     protected:
-      Reservation projection_lock;
+      mutable LocalLock projection_lock;
       std::map<ProjectionID,ProjectionFunction*> projection_functions;
     protected:
-      Reservation group_lock;
+      mutable LocalLock group_lock;
       LegionMap<uint64_t,LegionDeque<ProcessorGroupInfo>::aligned,
                 PROCESSOR_GROUP_ALLOC>::tracked processor_groups;
     protected:
-      Reservation processor_mapping_lock;
+      mutable LocalLock processor_mapping_lock;
       std::map<Processor,unsigned> processor_mapping;
     protected:
-      Reservation distributed_id_lock;
+      mutable LocalLock distributed_id_lock;
       DistributedID unique_distributed_id;
       LegionDeque<DistributedID,
           RUNTIME_DISTRIBUTED_ALLOC>::tracked available_distributed_ids;
     protected:
-      Reservation distributed_collectable_lock;
+      mutable LocalLock distributed_collectable_lock;
       LegionMap<DistributedID,DistributedCollectable*,
                 RUNTIME_DIST_COLLECT_ALLOC>::tracked dist_collectables;
       std::map<DistributedID,
         std::pair<DistributedCollectable*,RtUserEvent> > pending_collectables;
     protected:
-      Reservation is_launch_lock;
+      mutable LocalLock is_launch_lock;
       std::map<std::pair<Domain,TypeTag>,IndexSpace> index_launch_spaces;
     protected:
-      Reservation gc_epoch_lock;
+      mutable LocalLock gc_epoch_lock;
       GarbageCollectionEpoch *current_gc_epoch;
       LegionSet<GarbageCollectionEpoch*,
                 RUNTIME_GC_EPOCH_ALLOC>::tracked  pending_gc_epochs;
@@ -2810,7 +2750,7 @@ namespace Legion {
     protected:
       // The runtime keeps track of remote contexts so they
       // can be re-used by multiple tasks that get sent remotely
-      Reservation context_lock;
+      mutable LocalLock context_lock;
       std::map<UniqueID,InnerContext*> local_contexts;
       LegionMap<UniqueID,RemoteContext*,
                 RUNTIME_REMOTE_ALLOC>::tracked remote_contexts;
@@ -2819,7 +2759,7 @@ namespace Legion {
       std::deque<RegionTreeContext> available_contexts;
     protected:
       // For generating random numbers
-      Reservation random_lock;
+      mutable LocalLock random_lock;
       unsigned short random_state[3];
 #ifdef TRACE_ALLOCATION
     protected:
@@ -2834,43 +2774,43 @@ namespace Legion {
         int       diff_allocations;
         off_t           diff_bytes;
       };
-      Reservation allocation_lock; // leak this lock intentionally
+      mutable LocalLock allocation_lock; // leak this lock intentionally
       // Make these static so they live through the end of the runtime
       static std::map<AllocationType,AllocationTracker> allocation_manager;
       static unsigned long long allocation_tracing_count;
 #endif
     protected:
-      Reservation individual_task_lock;
-      Reservation point_task_lock;
-      Reservation index_task_lock;
-      Reservation slice_task_lock;
-      Reservation map_op_lock;
-      Reservation copy_op_lock;
-      Reservation fence_op_lock;
-      Reservation frame_op_lock;
-      Reservation deletion_op_lock;
-      Reservation open_op_lock;
-      Reservation advance_op_lock;
-      Reservation inter_close_op_lock;
-      Reservation read_close_op_lock;
-      Reservation post_close_op_lock;
-      Reservation virtual_close_op_lock;
-      Reservation dynamic_collective_op_lock;
-      Reservation future_pred_op_lock;
-      Reservation not_pred_op_lock;
-      Reservation and_pred_op_lock;
-      Reservation or_pred_op_lock;
-      Reservation acquire_op_lock;
-      Reservation release_op_lock;
-      Reservation capture_op_lock;
-      Reservation trace_op_lock;
-      Reservation epoch_op_lock;
-      Reservation pending_partition_op_lock;
-      Reservation dependent_partition_op_lock;
-      Reservation fill_op_lock;
-      Reservation attach_op_lock;
-      Reservation detach_op_lock;
-      Reservation timing_op_lock;
+      mutable LocalLock individual_task_lock;
+      mutable LocalLock point_task_lock;
+      mutable LocalLock index_task_lock;
+      mutable LocalLock slice_task_lock;
+      mutable LocalLock map_op_lock;
+      mutable LocalLock copy_op_lock;
+      mutable LocalLock fence_op_lock;
+      mutable LocalLock frame_op_lock;
+      mutable LocalLock deletion_op_lock;
+      mutable LocalLock open_op_lock;
+      mutable LocalLock advance_op_lock;
+      mutable LocalLock inter_close_op_lock;
+      mutable LocalLock read_close_op_lock;
+      mutable LocalLock post_close_op_lock;
+      mutable LocalLock virtual_close_op_lock;
+      mutable LocalLock dynamic_collective_op_lock;
+      mutable LocalLock future_pred_op_lock;
+      mutable LocalLock not_pred_op_lock;
+      mutable LocalLock and_pred_op_lock;
+      mutable LocalLock or_pred_op_lock;
+      mutable LocalLock acquire_op_lock;
+      mutable LocalLock release_op_lock;
+      mutable LocalLock capture_op_lock;
+      mutable LocalLock trace_op_lock;
+      mutable LocalLock epoch_op_lock;
+      mutable LocalLock pending_partition_op_lock;
+      mutable LocalLock dependent_partition_op_lock;
+      mutable LocalLock fill_op_lock;
+      mutable LocalLock attach_op_lock;
+      mutable LocalLock detach_op_lock;
+      mutable LocalLock timing_op_lock;
     protected:
       std::deque<IndividualTask*>       available_individual_tasks;
       std::deque<PointTask*>            available_point_tasks;
@@ -2933,7 +2873,7 @@ namespace Legion {
           LayoutConstraintID id);
       LayoutConstraints* register_layout(FieldSpace handle,
                                          const LayoutConstraintSet &cons);
-      bool register_layout(LayoutConstraints *new_constraints, bool needs_lock);
+      bool register_layout(LayoutConstraints *new_constraints);
       void release_layout(LayoutConstraintID layout_id);
       void unregister_layout(LayoutConstraintID layout_id);
       static LayoutConstraintID preregister_layout(
@@ -3100,125 +3040,15 @@ namespace Legion {
                                    LgEvent precondition = LgEvent::NO_LG_EVENT);
     };
 
-    /**
-     * \class GetAvailableContinuation
-     * Continuation class for obtaining resources from the runtime
-     */
-    template<typename T, T (Runtime::*FUNC_PTR)(bool,bool)>
-    class GetAvailableContinuation : public LegionContinuation {
-    public:
-      GetAvailableContinuation(Runtime *rt, Reservation r)
-        : runtime(rt), reservation(r) { }
-    public:
-      inline T get_result(void)
-      {
-        // Try to take the reservation, see if we get it
-        RtEvent acquire_event = 
-          Runtime::acquire_rt_reservation(reservation, true/*exclusive*/);
-        if (acquire_event.has_triggered())
-        {
-          // We got it! Do it now!
-          result = (runtime->*FUNC_PTR)(false/*do continuation*/,
-                                        true/*has lock*/);
-          Runtime::release_reservation(reservation);
-          return result;
-        }
-        // Otherwise we didn't get so issue the deferred task
-        // to avoid waiting for a reservation in an application task
-        RtEvent done_event = defer(runtime, acquire_event);
-        done_event.lg_wait();
-        return result;
-      }
-      virtual void execute(void)
-      {
-        // If we got here we know we have the reservation
-        result = (runtime->*FUNC_PTR)(false/*do continuation*/,
-                                      true/*has lock*/); 
-        // Now release the reservation 
-        Runtime::release_reservation(reservation);
-      }
-    protected:
-      Runtime *const runtime;
-      Reservation reservation;
-      T result;
-    };
-
-    /**
-     * \class RegisterDistributedContinuation
-     * Continuation class for registration of distributed collectables
-     */
-    class RegisterDistributedContinuation : public LegionContinuation {
-    public:
-      RegisterDistributedContinuation(DistributedID id,
-                                      DistributedCollectable *d,
-                                      Runtime *rt)
-        : did(id), dc(d), runtime(rt) { }
-    public:
-      virtual void execute(void)
-      {
-        runtime->register_distributed_collectable(did, dc, false/*need lock*/);
-      }
-    protected:
-      const DistributedID did;
-      DistributedCollectable *const dc;
-      Runtime *const runtime;
-    };
-
-    /**
-     * \class FindMapperContinuation
-     */
-    class FindMapperContinuation : public LegionContinuation {
-    public:
-      FindMapperContinuation(const ProcessorManager *man, MapperID mid)
-        : manager(man), map_id(mid), result(NULL) {  }
-    public:
-      virtual void execute(void)
-      {
-        result = manager->find_mapper(map_id, false/*need lock*/); 
-      }
-    public:
-      inline MapperManager* get_result(void) const { return result; }
-    protected:
-      const ProcessorManager *const manager;
-      const MapperID map_id;
-      MapperManager *result;
-    };
-
-    /**
-     * \class RegisterConstraintsContinuation
-     */
-    class RegisterConstraintsContinuation : public LegionContinuation {
-    public:
-      RegisterConstraintsContinuation(LayoutConstraints *cons, Runtime *rt)
-        : constraints(cons), runtime(rt) { }
-    public:
-      virtual void execute(void)
-      {
-        runtime->register_layout(constraints, false/*need lock*/);
-      }
-    protected:
-      LayoutConstraints *const constraints;
-      Runtime *const runtime;
-    };
-
     //--------------------------------------------------------------------------
     template<typename T>
-    inline T* Runtime::get_available(Reservation reservation, 
-                                      std::deque<T*> &queue, bool has_lock)
+    inline T* Runtime::get_available(LocalLock &local_lock, 
+                                     std::deque<T*> &queue)
     //--------------------------------------------------------------------------
     {
       T *result = NULL;
-      if (!has_lock)
       {
-        AutoLock r_lock(reservation);
-        if (!queue.empty())
-        {
-          result = queue.front();
-          queue.pop_front();
-        }
-      }
-      else
-      {
+        AutoLock l_lock(local_lock);
         if (!queue.empty())
         {
           result = queue.front();

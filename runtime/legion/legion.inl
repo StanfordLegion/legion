@@ -7783,8 +7783,6 @@ namespace LegionRuntime {
     LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Legion::CObjectWrapper CObjectWrapper;
     LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef Legion::ImmovableAutoLock AutoLock;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Legion::ISAConstraint ISAConstraint;
     LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Legion::ProcessorConstraint ProcessorConstraint;

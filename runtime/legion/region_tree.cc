@@ -41,7 +41,6 @@ namespace Legion {
       : runtime(rt)
     //--------------------------------------------------------------------------
     {
-      this->lookup_lock = Reservation::create_reservation();
     }
 
     //--------------------------------------------------------------------------
@@ -57,9 +56,6 @@ namespace Legion {
     RegionTreeForest::~RegionTreeForest(void)
     //--------------------------------------------------------------------------
     {
-      // We can delete the lookup lock now that we no longer need it
-      lookup_lock.destroy_reservation();
-      lookup_lock = Reservation::NO_RESERVATION;
     }
 
     //--------------------------------------------------------------------------
@@ -364,7 +360,7 @@ namespace Legion {
           IndexPartition pid(runtime->get_unique_index_partition_id(),
                              handle1.get_tree_id(), handle1.get_type_tag()); 
           DistributedID did = 
-            runtime->get_available_distributed_id(true/*continuation*/);
+            runtime->get_available_distributed_id();
           create_pending_partition(pid, child_node->handle, 
                                    source->color_space->handle, 
                                    part_color, kind, did, domain_ready);
@@ -385,7 +381,7 @@ namespace Legion {
           IndexPartition pid(runtime->get_unique_index_partition_id(),
                              handle1.get_tree_id(), handle1.get_type_tag()); 
           DistributedID did = 
-            runtime->get_available_distributed_id(true/*continuation*/);
+            runtime->get_available_distributed_id();
           create_pending_partition(pid, child_node->handle, 
                                    source->color_space->handle,
                                    part_color, kind, did, domain_ready);
@@ -4559,14 +4555,13 @@ namespace Legion {
       : DistributedCollectable(ctx->runtime, 
           LEGION_DISTRIBUTED_HELP_ENCODE(did, INDEX_TREE_NODE_DC), 
           owner, false/*register*/),
-        context(ctx), depth(d), color(c), destroyed(false)
+        context(ctx), depth(d), color(c), destroyed(false),
+        node_lock(this->gc_lock)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(ctx != NULL);
 #endif
-      // Use the gc_lock as the node lock here also
-      node_lock = this->gc_lock;
     }
 
     //--------------------------------------------------------------------------
@@ -6062,7 +6057,7 @@ namespace Legion {
           IndexSpace is(context->runtime->get_unique_index_space_id(),
                         handle.get_tree_id(), handle.get_type_tag());
           DistributedID did = 
-            context->runtime->get_available_distributed_id(false/*cont*/);
+            context->runtime->get_available_distributed_id();
           IndexSpaceNode *result = NULL;
           if (partial_pending.exists())
           {
@@ -6777,11 +6772,9 @@ namespace Legion {
       : DistributedCollectable(ctx->runtime, 
           LEGION_DISTRIBUTED_HELP_ENCODE(did, FIELD_SPACE_DC), 
           get_owner_space(sp, ctx->runtime), false/*register with runtime*/),
-        handle(sp), context(ctx), destroyed(false)
+        handle(sp), context(ctx), node_lock(this->gc_lock), destroyed(false)
     //--------------------------------------------------------------------------
     {
-      // Can use the gc lock for the node lock as well
-      this->node_lock = this->gc_lock;
       if (is_owner())
       {
         this->available_indexes = FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES);
@@ -6799,11 +6792,9 @@ namespace Legion {
       : DistributedCollectable(ctx->runtime, 
           LEGION_DISTRIBUTED_HELP_ENCODE(did, FIELD_SPACE_DC), 
           get_owner_space(sp, ctx->runtime), false/*register with runtime*/),
-        handle(sp), context(ctx), destroyed(false)
+        handle(sp), context(ctx), node_lock(this->gc_lock), destroyed(false)
     //--------------------------------------------------------------------------
     {
-      // Can use the gc lock for the node lock as well
-      this->node_lock = this->gc_lock;
       if (is_owner())
       {
         this->available_indexes = FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES);
@@ -6834,7 +6825,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     FieldSpaceNode::FieldSpaceNode(const FieldSpaceNode &rhs)
       : DistributedCollectable(NULL, 0, 0), 
-        handle(FieldSpace::NO_SPACE), context(NULL)
+        handle(FieldSpace::NO_SPACE), context(NULL), node_lock(rhs.node_lock)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -8526,7 +8517,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(layout != NULL);
 #endif
-      DistributedID did = context->runtime->get_available_distributed_id(false);
+      DistributedID did = context->runtime->get_available_distributed_id();
       MemoryManager *memory = 
         context->runtime->find_memory_manager(inst.get_location());
       InstanceManager *result = new InstanceManager(context, did, 
@@ -9005,19 +8996,17 @@ namespace Legion {
 #ifdef LEGION_GC
         DistributedCollectable(ctx->runtime, 
             LEGION_DISTRIBUTED_HELP_ENCODE(
-              ctx->runtime->get_available_distributed_id(false/*need cont*/),
+              ctx->runtime->get_available_distributed_id(),
               REGION_TREE_NODE_DC),
             ctx->runtime->address_space, false/*register with runtime*/),
 #endif
         context(ctx), column_source(column_src), 
         registered(false), destroyed(false)
+#ifdef LEGION_GC
+        , node_lock(this->gc_lock)
+#endif
     //--------------------------------------------------------------------------
     {
-#ifdef LEGION_GC
-      this->node_lock = gc_lock;
-#else
-      this->node_lock = Reservation::create_reservation(); 
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -9026,9 +9015,6 @@ namespace Legion {
     {
 #ifdef LEGION_GC
       remote_instances.clear();
-#else
-      node_lock.destroy_reservation();
-      node_lock = Reservation::NO_RESERVATION;
 #endif
       for (LegionMap<SemanticTag,SemanticInfo>::aligned::iterator it = 
             semantic_info.begin(); it != semantic_info.end(); it++)
@@ -9582,7 +9568,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       LogicalState &state = get_logical_state(ctx);
-      OpenOp *open = context->runtime->get_available_open_op(false); 
+      OpenOp *open = context->runtime->get_available_open_op(); 
       open->initialize(open_mask, this, path, trace_info,
                        creator.op, creator.idx);
       // Add it to the list of current users
@@ -9616,7 +9602,7 @@ namespace Legion {
     {
       // These are the fields for which we have to issue an advance op
       AdvanceOp *advance = 
-        context->runtime->get_available_advance_op(false); 
+        context->runtime->get_available_advance_op(); 
       advance->initialize(this, advance_mask, trace_info, creator.op, 
                           creator.idx, parent_is_upper_bound);
       LogicalUser advance_user(advance, 0/*idx*/, 
@@ -11934,7 +11920,7 @@ namespace Legion {
       // Fix the closed tree
       closed_tree->fix_closed_tree();
       // Prepare to make the new view
-      DistributedID did = context->runtime->get_available_distributed_id(false);
+      DistributedID did = context->runtime->get_available_distributed_id();
       // Copy the version info that we need
       DeferredVersionInfo *view_info = new DeferredVersionInfo();
       version_info.copy_to(*view_info);
@@ -14814,7 +14800,7 @@ namespace Legion {
       manager.record_advance_versions(fill_mask, inner_context, 
                                       version_info, map_applied_events);
       // Make the fill instance
-      DistributedID did = context->runtime->get_available_distributed_id(false);
+      DistributedID did = context->runtime->get_available_distributed_id();
       FillView::FillViewValue *fill_value = 
         new FillView::FillViewValue(value, value_size);
       FillView *fill_view = 
@@ -14834,7 +14820,7 @@ namespace Legion {
 #endif
         // Build a phi view and register that instead
         DistributedID did = 
-          context->runtime->get_available_distributed_id(false);
+          context->runtime->get_available_distributed_id();
         // Copy the version info that we need
         DeferredVersionInfo *view_info = new DeferredVersionInfo();
         version_info.copy_to(*view_info); 
