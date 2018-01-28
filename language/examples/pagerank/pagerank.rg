@@ -31,7 +31,7 @@ task#pagerank[index=$i] {
 
 task#init_graph[index=$i],
 task#init_pr_score[index=$i],
-task#init_edge_partition[index=$i] {
+task#init_partition[index=$i] {
   target : $CPUs[$i % $CPUs.size];
 }
 
@@ -46,8 +46,9 @@ task#pagerank[target=$proc] region#edges {
 task#init_pr_score[target=$proc] region#pr,
 task#init_graph[target=$proc] region#nodes,
 task#init_graph[target=$proc] region#edges,
-task#init_edge_partition[target=$proc] region#range,
-task#init_edge_partition[target=$proc] region#nodes {
+task#init_partition[target=$proc] region#node_range,
+task#init_partition[target=$proc] region#edge_range,
+task#init_partition[target=$proc] region#nodes {
   target : $HAS_ZCMEM ? $proc.memories[kind=zcmem]
                       : $proc.memories[kind=sysmem];
 }
@@ -153,19 +154,31 @@ do
   return 1
 end
 
-task init_edge_partition(range : region(ispace(int1d), regentlib.rect1d),
-                         nodes : region(ispace(int1d), NodeStruct),
-                         edge_idx : E_ID)
+task init_partition(node_range : region(ispace(int1d), regentlib.rect1d),
+                    edge_range : region(ispace(int1d), regentlib.rect1d),
+                    nodes : region(ispace(int1d), NodeStruct),
+                    avg_num_edges : E_ID,
+                    num_parts : int)
 where
-  writes(range), reads(nodes)
+  writes(node_range, edge_range), reads(nodes)
 do
-  var range_is = range.ispace
+  var range_is = node_range.ispace
   var node_is = nodes.ispace
-  regentlib.assert(range_is.bounds.lo == range_is.bounds.hi, "Range part mush contain a single element")
-  for n in range_is do
-    range[n] = {edge_idx, nodes[node_is.bounds.hi].index - 1}
+  var total_num_edges : E_ID = 0
+  var start_idx : E_ID = 0
+  var start_node : V_ID = 0
+  var p : int = 0
+  for n in node_is do
+    if ((nodes[n].index - start_idx > avg_num_edges) or (n == node_is.bounds.hi)) then
+      node_range[p] = {start_node, n}
+      edge_range[p] = {start_idx, nodes[n].index - 1}
+      start_idx = nodes[n].index
+      start_node = n + 1
+      p = p + 1
+    end
   end
-  return nodes[node_is.bounds.hi].index - edge_idx
+  regentlib.assert(p == range_is.volume, "Number of partitions don't match")
+  return nodes[node_is.bounds.hi].index
 end
 
 __demand(__cuda)
@@ -225,24 +238,34 @@ task main()
   init_pr_score(pr_score0, conf.num_nodes)
 
   var part = ispace(int1d, conf.num_workers)
-  var part_score0 = partition(equal, pr_score0, part)
-  var part_score1 = partition(equal, pr_score1, part)
-  var part_nodes = partition(equal, all_nodes, part)
   -- compute node and edge partition
-    var range = region(part, regentlib.rect1d)
-    var part_range = partition(equal, range, part)
-    var total_num_edges : E_ID = 0
-    for p in part do
-      var my_num_edges = init_edge_partition(part_range[p], part_nodes[p], total_num_edges) 
-      total_num_edges = total_num_edges + my_num_edges
-    end
-    regentlib.assert(total_num_edges == conf.num_edges, "Edge number not match")
-  var part_edges = image(all_edges, part_range, range)
+  var node_range = region(part, regentlib.rect1d)
+  var edge_range = region(part, regentlib.rect1d)   
+  var part_node_range = partition(equal, node_range, part)
+  var part_edge_range = partition(equal, edge_range, part)
+  var total_num_edges = init_partition(node_range, edge_range, all_nodes,
+                                       conf.num_edges/ conf.num_workers+1,
+                                       conf.num_workers) 
+  regentlib.assert(total_num_edges == conf.num_edges, "Edge number not match")
+  __fence(__execution, __block)
+  var part_nodes = image(all_nodes, part_node_range, node_range)
+  var part_aliased0 = image(pr_score0, part_node_range, node_range)
+  var cs0 = part_aliased0.colors
+  var part_score0 = dynamic_cast(partition(disjoint, pr_score0, cs0), part_aliased0)
+  var part_aliased1 = image(pr_score1, part_node_range, node_range)
+  var cs1 = part_aliased1.colors
+  var part_score1 = dynamic_cast(partition(disjoint, pr_score1, cs1), part_aliased1)
+  var part_edges = image(all_edges, part_edge_range, edge_range)
 
   __fence(__execution, __block)
   c.printf("Start PageRank computation...\n")
-  var ts_start = c.legion_get_current_time_in_micros()
-  for iter = 0, conf.num_iterations do
+  var ts_start : int64
+  for iter = 0, conf.num_iterations+2 do 
+    -- use the first two iterations to warm up the execution
+    if iter == 2 then
+      __fence(__execution, __block)
+      ts_start = c.legion_get_current_time_in_micros()
+    end
     if iter % 2 == 0 then
       __demand(__parallel)
       for p in part do
@@ -260,7 +283,7 @@ task main()
   -- Force all previous tasks to complete before stop the timer
   __fence(__execution, __block)
   var ts_end = c.legion_get_current_time_in_micros()
-  c.printf("Elapsed time = %lldus\n", ts_end - ts_start)
+  c.printf("Iterations = %d, elapsed time = %lldus\n", conf.num_iterations, ts_end - ts_start)
 end
 
 if os.getenv('SAVEOBJ') == '1' then
@@ -272,5 +295,4 @@ if os.getenv('SAVEOBJ') == '1' then
 else
   regentlib.start(main, bishoplib.make_entry())
 end
-
 

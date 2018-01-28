@@ -39,6 +39,21 @@ template<typename FT, int N, typename T = coord_t> using AccessorRW = FieldAcces
 template<typename FT, int N, typename T = coord_t> using AccessorWO = FieldAccessor<WRITE_ONLY,FT,N,T,Realm::AffineAccessor<FT,N,T> >; 
 
 __global__
+void load_kernel(V_ID left_bound,
+                 V_ID right_bound,
+                 V_ID cur_start_vtx,
+                 const float* ro_dists,
+                 float* ws)
+{
+  const V_ID tid = blockIdx.x * blockDim.x + threadIdx.x;
+  if (tid + cur_start_vtx <= right_bound)
+  {
+    V_ID cur_vtx = tid + cur_start_vtx;
+    ws[cur_vtx] = ro_dists[cur_vtx];
+  }
+}
+
+__global__
 void pr_lb_kernel(V_ID left_bound,
                   V_ID right_bound,
                   V_ID cur_start_vtx,
@@ -133,6 +148,15 @@ void pagerank(const Task *task,
   //cudaMalloc(&fb_pr_ptr, sizeof(float) * (right_bound - left_bound + 1));
   //cudaDeviceSynchronize();
   //double cp_3 = Realm::Clock::current_time_in_microseconds();
+  while (cur_vtx <= right_bound)
+  {
+    int num_blocks = (right_bound - cur_vtx + BLKSIZE) / BLKSIZE;
+    if (num_blocks > MAX_NUM_BLOCKS)
+      num_blocks = MAX_NUM_BLOCKS;
+    load_kernel<<<num_blocks, BLKSIZE>>>(left_bound, right_bound, cur_vtx, pr_old_ptr, workspace);
+    cur_vtx += num_blocks * BLKSIZE;
+  }
+  cur_vtx = left_bound;
   while (cur_vtx <= right_bound)
   {
     int num_blocks = (right_bound - cur_vtx + BLKSIZE) / BLKSIZE;
