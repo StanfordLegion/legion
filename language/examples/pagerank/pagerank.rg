@@ -231,7 +231,6 @@ task main()
 
   var pr_score0 = region(is_nodes, float)
   var pr_score1 = region(is_nodes, float)
-  var pr_workspace = region(is_edges, float)
 
   c.printf("Load input graph...\n")
   init_graph(all_nodes, all_edges, conf.num_nodes, conf.num_edges, conf.graph)
