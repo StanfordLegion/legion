@@ -3989,6 +3989,47 @@ namespace Legion {
               false/*generic accessor*/, false/*check field size*/);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, is.bounds);
       }
+      // With explicit bounds
+      UnsafeFieldAccessor(const PhysicalRegion &region, FieldID fid,
+                          const Rect<N,T> source_bounds,
+                          bool silence_warnings = false)
+      {
+        DomainT<N,T> is;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(NO_ACCESS, fid, sizeof(FT), &is,
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), silence_warnings,
+              false/*generic accessor*/, false/*check field size*/);
+        accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, source_bounds);
+      }
+      // With explicit transform
+      template<int M>
+      UnsafeFieldAccessor(const PhysicalRegion &region, FieldID fid,
+                          const AffineTransform<M,N,T> transform,
+                          bool silence_warnings = false)
+      {
+        DomainT<M,T> is;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(NO_ACCESS, fid, sizeof(FT), &is,
+              Internal::NT_TemplateHelper::encode_tag<M,T>(), silence_warnings,
+              false/*generic accessor*/, false/*check field size*/);
+        accessor = Realm::AffineAccessor<FT,N,T>(instance, transform.transform,
+            transform.offset, fid);
+      }
+      // With explicit transform and bounds
+      template<int M>
+      UnsafeFieldAccessor(const PhysicalRegion &region, FieldID fid,
+                          const AffineTransform<M,N,T> transform,
+                          const Rect<N,T> source_bounds,
+                          bool silence_warnings = false)
+      {
+        DomainT<M,T> is;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(NO_ACCESS, fid, sizeof(FT), &is,
+              Internal::NT_TemplateHelper::encode_tag<M,T>(), silence_warnings,
+              false/*generic accessor*/, false/*check field size*/);
+        accessor = Realm::AffineAccessor<FT,N,T>(instance, transform.transform,
+            transform.offset, fid, source_bounds);
+      }
     public:
       __CUDA_HD__
       inline FT read(const Point<N,T> &p) const
@@ -4050,6 +4091,47 @@ namespace Legion {
               Internal::NT_TemplateHelper::encode_tag<1,T>(), silence_warnings,
               false/*generic accessor*/, false/*check field size*/);
         accessor = Realm::AffineAccessor<FT,1,T>(instance, fid, is.bounds);
+      }
+      // With explicit bounds
+      UnsafeFieldAccessor(const PhysicalRegion &region, FieldID fid,
+                          const Rect<1,T> source_bounds,
+                          bool silence_warnings = false)
+      {
+        DomainT<1,T> is;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(NO_ACCESS, fid, sizeof(FT), &is,
+              Internal::NT_TemplateHelper::encode_tag<1,T>(), silence_warnings,
+              false/*generic accessor*/, false/*check field size*/);
+        accessor = Realm::AffineAccessor<FT,1,T>(instance, fid, source_bounds);
+      }
+      // With explicit transform
+      template<int M>
+      UnsafeFieldAccessor(const PhysicalRegion &region, FieldID fid,
+                          const AffineTransform<M,1,T> transform,
+                          bool silence_warnings = false)
+      {
+        DomainT<M,T> is;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(NO_ACCESS, fid, sizeof(FT), &is,
+              Internal::NT_TemplateHelper::encode_tag<M,T>(), silence_warnings,
+              false/*generic accessor*/, false/*check field size*/);
+        accessor = Realm::AffineAccessor<FT,1,T>(instance, transform.transform,
+            transform.offset, fid);
+      }
+      // With explicit transform and bounds
+      template<int M>
+      UnsafeFieldAccessor(const PhysicalRegion &region, FieldID fid,
+                          const AffineTransform<M,1,T> transform,
+                          const Rect<1,T> source_bounds,
+                          bool silence_warnings = false)
+      {
+        DomainT<M,T> is;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(NO_ACCESS, fid, sizeof(FT), &is,
+              Internal::NT_TemplateHelper::encode_tag<M,T>(), silence_warnings,
+              false/*generic accessor*/, false/*check field size*/);
+        accessor = Realm::AffineAccessor<FT,1,T>(instance, transform.transform,
+            transform.offset, fid, source_bounds);
       }
     public:
       __CUDA_HD__
@@ -4150,7 +4232,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     IndexSpaceT<DIM,T>::IndexSpaceT(void)
-      : IndexSpace()
+     : IndexSpace(0,0,Internal::NT_TemplateHelper::template encode_tag<DIM,T>())
     //--------------------------------------------------------------------------
     {
     }
@@ -4264,7 +4346,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     IndexPartitionT<DIM,T>::IndexPartitionT(IndexPartitionID id,IndexTreeID tid)
-      : IndexPartition(id, tid,Internal::NT_TemplateHelper::encode_tag<DIM,T>())
+      : IndexPartition(id, tid,
+          Internal::NT_TemplateHelper::template encode_tag<DIM,T>())
     //--------------------------------------------------------------------------
     {
     }
@@ -4272,7 +4355,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     IndexPartitionT<DIM,T>::IndexPartitionT(void)
-      : IndexPartition()
+      : IndexPartition(0,0,
+          Internal::NT_TemplateHelper::template encode_tag<DIM,T>())
     //--------------------------------------------------------------------------
     {
     }
