@@ -1,4 +1,6 @@
 #include "realm.h"
+// for WithDefault<>
+#include "realm/threads.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -87,17 +89,6 @@ static int check_empty(Event e, const std::vector<IndexSpace<1> >& p, const char
     }
   return errors;
 }
-
-template <typename T, T DEFVAL>
-class WithDefault {
-public:
-  WithDefault(void) : val(DEFVAL) {}
-  WithDefault(T _val) : val(_val) {}
-  WithDefault<T,DEFVAL>& operator=(T _val) { val = _val; return *this; }
-  operator T(void) const { return val; }
-protected:
-  T val;
-};
 
 class TestInterface {
 public:
