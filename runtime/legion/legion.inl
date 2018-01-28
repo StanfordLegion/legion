@@ -4232,7 +4232,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     IndexSpaceT<DIM,T>::IndexSpaceT(void)
-      : IndexSpace()
+     : IndexSpace(0,0,Internal::NT_TemplateHelper::template encode_tag<DIM,T>())
     //--------------------------------------------------------------------------
     {
     }
@@ -4346,7 +4346,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     IndexPartitionT<DIM,T>::IndexPartitionT(IndexPartitionID id,IndexTreeID tid)
-      : IndexPartition(id, tid,Internal::NT_TemplateHelper::encode_tag<DIM,T>())
+      : IndexPartition(id, tid,
+          Internal::NT_TemplateHelper::template encode_tag<DIM,T>())
     //--------------------------------------------------------------------------
     {
     }
@@ -4354,7 +4355,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     IndexPartitionT<DIM,T>::IndexPartitionT(void)
-      : IndexPartition()
+      : IndexPartition(0,0,
+          Internal::NT_TemplateHelper::template encode_tag<DIM,T>())
     //--------------------------------------------------------------------------
     {
     }
