@@ -822,16 +822,14 @@ namespace Legion {
         ProjectionFunction *function = 
           runtime->find_projection_function(regions[idx].projection);
         if (!function->is_functional)
-        {
-          log_run.error("Region requirement %d of task %s (UID %lld) in "
+          REPORT_LEGION_ERROR(ERROR_NON_FUNCTIONAL_REPLICATED_PROJECTION,
+                        "Region requirement %d of task %s (UID %lld) in "
                         "parent task %s (UID %lld) has non-functional "
                         "projection function. All projection functions "
                         "for control replication must be functional.",
                         idx, get_task_name(), get_unique_id(),
                         parent_ctx->get_task_name(), 
-                        parent_ctx->get_unique_id());
-          assert(false);
-        }
+                        parent_ctx->get_unique_id())
       }
 #endif
       // If we have a reduction op then we need an exchange
@@ -1199,15 +1197,13 @@ namespace Legion {
         ProjectionFunction *function = 
           runtime->find_projection_function(requirement.projection);
         if (!function->is_functional)
-        {
-          log_run.error("Region requirement of index fill op (UID %lld) in "
+          REPORT_LEGION_ERROR(ERROR_NON_FUNCTIONAL_REPLICATED_PROJECTION,
+                        "Region requirement of index fill op (UID %lld) in "
                         "parent task %s (UID %lld) has non-functional "
                         "projection function. All projection functions "
                         "for control replication must be functional.",
                         get_unique_id(), parent_ctx->get_task_name(), 
-                        parent_ctx->get_unique_id());
-          assert(false);
-        }
+                        parent_ctx->get_unique_id())
       }
 #endif
       launch_space = launch_sp;
@@ -1648,15 +1644,13 @@ namespace Legion {
         ProjectionFunction *function = 
           runtime->find_projection_function(dst_requirements[idx].projection);
         if (!function->is_functional)
-        {
-          log_run.error("Destination region requirement %d of index copy "
+          REPORT_LEGION_ERROR(ERROR_NON_FUNCTIONAL_REPLICATED_PROJECTION,
+                        "Destination region requirement %d of index copy "
                         "(UID %lld) in parent task %s (UID %lld) has "
                         "non-functional projection function. All projection "
                         "functions for control replication must be functional.",
                         idx, get_unique_id(), parent_ctx->get_task_name(), 
-                        parent_ctx->get_unique_id());
-          assert(false);
-        }
+                        parent_ctx->get_unique_id())
       }
 #endif
       launch_space = launch_sp;

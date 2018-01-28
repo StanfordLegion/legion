@@ -9479,7 +9479,6 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(is_functional);
-      assert(is_exclusive);
 #endif
       IndexTreeNode *row_source = root->get_row_source();
       RegionTreeForest *context = root->context;
@@ -9494,7 +9493,14 @@ namespace Legion {
         RegionNode *region = root->as_region_node();
         for (Domain::DomainPointIterator itr(launch_domain); itr; itr++)
         {
-          LogicalRegion result = functor->project(region->handle, itr.p);
+          LogicalRegion result;
+          if (!is_exclusive)
+          {
+            AutoLock p_lock(projection_reservation);
+            result = functor->project(region->handle, itr.p);
+          }
+          else
+            result = functor->project(region->handle, itr.p);
           if (!result.exists())
             continue;
           if (sharding_function != NULL)
@@ -9511,7 +9517,14 @@ namespace Legion {
         PartitionNode *partition = root->as_partition_node();
         for (Domain::DomainPointIterator itr(launch_domain); itr; itr++)
         {
-          LogicalRegion result = functor->project(partition->handle, itr.p);
+          LogicalRegion result;
+          if (!is_exclusive)
+          {
+            AutoLock p_lock(projection_reservation);
+            result = functor->project(partition->handle, itr.p);
+          }
+          else
+            result = functor->project(partition->handle, itr.p);
           if (!result.exists())
             continue;
           if (sharding_function != NULL)
@@ -9534,7 +9547,6 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(is_functional);
-      assert(is_exclusive);
 #endif
       IndexTreeNode *row_source = root->get_row_source();
       RegionTreeForest *context = root->context;
@@ -9546,7 +9558,14 @@ namespace Legion {
         RegionNode *region = root->as_region_node();
         for (Domain::DomainPointIterator itr(launch_domain); itr; itr++)
         {
-          LogicalRegion result = functor->project(region->handle, itr.p);
+          LogicalRegion result;
+          if (!is_exclusive)
+          {
+            AutoLock p_lock(projection_reservation);
+            result = functor->project(region->handle, itr.p);
+          }
+          else
+            result = functor->project(region->handle, itr.p);
           if (!result.exists())
             continue;
           if (sharding_function != NULL)
@@ -9563,7 +9582,14 @@ namespace Legion {
         PartitionNode *partition = root->as_partition_node();
         for (Domain::DomainPointIterator itr(launch_domain); itr; itr++)
         {
-          LogicalRegion result = functor->project(partition->handle, itr.p);
+          LogicalRegion result;
+          if (!is_exclusive)
+          {
+            AutoLock p_lock(projection_reservation);
+            result = functor->project(partition->handle, itr.p);
+          }
+          else
+            result = functor->project(partition->handle, itr.p);
           if (!result.exists())
             continue;
           if (sharding_function != NULL)
