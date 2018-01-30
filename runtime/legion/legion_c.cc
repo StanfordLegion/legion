@@ -4110,6 +4110,77 @@ legion_runtime_replace_default_mapper(
   runtime->replace_default_mapper(mapper, proc);
 }
 
+class FunctorWrapper : public ProjectionFunctor {
+public:
+  FunctorWrapper(Runtime *rt, unsigned dep,
+                 legion_projection_functor_logical_region_t region_fn,
+                 legion_projection_functor_logical_partition_t partition_fn)
+    : ProjectionFunctor(rt)
+    , depth(dep)
+    , region_functor(region_fn)
+    , partition_functor(partition_fn)
+  {
+  }
+
+  LogicalRegion project(Context ctx, Task *task,
+                        unsigned index,
+                        LogicalRegion upper_bound,
+                        const DomainPoint &point)
+  {
+    legion_runtime_t runtime_ = CObjectWrapper::wrap(runtime);
+    CContext cctx(ctx);
+    legion_context_t ctx_ = CObjectWrapper::wrap(&cctx);
+    legion_task_t task_ = CObjectWrapper::wrap(task);
+    legion_logical_region_t upper_bound_ = CObjectWrapper::wrap(upper_bound);
+    legion_domain_point_t point_ = CObjectWrapper::wrap(point);
+
+    assert(region_functor);
+    legion_logical_region_t result =
+      region_functor(runtime_, ctx_, task_, index, upper_bound_, point_);
+    return CObjectWrapper::unwrap(result);
+  }
+
+  LogicalRegion project(Context ctx, Task *task,
+                        unsigned index,
+                        LogicalPartition upper_bound,
+                        const DomainPoint &point)
+  {
+    legion_runtime_t runtime_ = CObjectWrapper::wrap(runtime);
+    CContext cctx(ctx);
+    legion_context_t ctx_ = CObjectWrapper::wrap(&cctx);
+    legion_task_t task_ = CObjectWrapper::wrap(task);
+    legion_logical_partition_t upper_bound_ = CObjectWrapper::wrap(upper_bound);
+    legion_domain_point_t point_ = CObjectWrapper::wrap(point);
+
+    assert(partition_functor);
+    legion_logical_region_t result =
+      partition_functor(runtime_, ctx_, task_, index, upper_bound_, point_);
+    return CObjectWrapper::unwrap(result);
+  }
+
+  unsigned get_depth(void) const { return depth; }
+
+private:
+  const unsigned depth;
+  legion_projection_functor_logical_region_t region_functor;
+  legion_projection_functor_logical_partition_t partition_functor;
+};
+
+void
+legion_runtime_register_projection_functor(
+  legion_runtime_t runtime_,
+  legion_projection_id_t id,
+  unsigned depth,
+  legion_projection_functor_logical_region_t region_functor,
+  legion_projection_functor_logical_partition_t partition_functor)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+
+  FunctorWrapper *functor =
+    new FunctorWrapper(runtime, depth, region_functor, partition_functor);
+  runtime->register_projection_functor(id, functor);
+}
+
 legion_task_id_t
 legion_runtime_register_task_variant_fnptr(
   legion_runtime_t runtime_,
@@ -4405,75 +4476,109 @@ legion_task_postamble(
 					   retsize);
 }
 
-class FunctorWrapper : public ProjectionFunctor {
-public:
-  FunctorWrapper(Runtime *rt, unsigned dep,
-                 legion_projection_functor_logical_region_t region_fn,
-                 legion_projection_functor_logical_partition_t partition_fn)
-    : ProjectionFunctor(rt)
-    , depth(dep)
-    , region_functor(region_fn)
-    , partition_functor(partition_fn)
-  {
-  }
+static void
+generator_wrapper(GeneratorContext ctx,
+                  const TaskGeneratorArguments &args, Runtime *runtime)
+{
+  legion_generator_context_t ctx_ = CObjectWrapper::wrap(ctx);
+  TaskGeneratorArguments args_copy = args; // FIXME: Copy to strip const-ness
+  legion_task_generator_arguments_t args_ = CObjectWrapper::wrap(&args_copy);
+  legion_runtime_t runtime_ = CObjectWrapper::wrap(runtime);
 
-  LogicalRegion project(Context ctx, Task *task,
-                        unsigned index,
-                        LogicalRegion upper_bound,
-                        const DomainPoint &point)
-  {
-    legion_runtime_t runtime_ = CObjectWrapper::wrap(runtime);
-    CContext cctx(ctx);
-    legion_context_t ctx_ = CObjectWrapper::wrap(&cctx);
-    legion_task_t task_ = CObjectWrapper::wrap(task);
-    legion_logical_region_t upper_bound_ = CObjectWrapper::wrap(upper_bound);
-    legion_domain_point_t point_ = CObjectWrapper::wrap(point);
+  assert(args.user_data_size == sizeof(legion_generator_pointer_t));
+  legion_generator_pointer_t generator =
+    reinterpret_cast<legion_generator_pointer_t>(args.user_data);
 
-    assert(region_functor);
-    legion_logical_region_t result =
-      region_functor(runtime_, ctx_, task_, index, upper_bound_, point_);
-    return CObjectWrapper::unwrap(result);
-  }
+  generator(ctx_, args_, runtime_);
+}
 
-  LogicalRegion project(Context ctx, Task *task,
-                        unsigned index,
-                        LogicalPartition upper_bound,
-                        const DomainPoint &point)
-  {
-    legion_runtime_t runtime_ = CObjectWrapper::wrap(runtime);
-    CContext cctx(ctx);
-    legion_context_t ctx_ = CObjectWrapper::wrap(&cctx);
-    legion_task_t task_ = CObjectWrapper::wrap(task);
-    legion_logical_partition_t upper_bound_ = CObjectWrapper::wrap(upper_bound);
-    legion_domain_point_t point_ = CObjectWrapper::wrap(point);
-
-    assert(partition_functor);
-    legion_logical_region_t result =
-      partition_functor(runtime_, ctx_, task_, index, upper_bound_, point_);
-    return CObjectWrapper::unwrap(result);
-  }
-
-  unsigned get_depth(void) const { return depth; }
-
-private:
-  const unsigned depth;
-  legion_projection_functor_logical_region_t region_functor;
-  legion_projection_functor_logical_partition_t partition_functor;
-};
-
-void
-legion_runtime_register_projection_functor(
+legion_task_id_t
+legion_runtime_register_task_generator_fnptr(
   legion_runtime_t runtime_,
-  legion_projection_id_t id,
-  unsigned depth,
-  legion_projection_functor_logical_region_t region_functor,
-  legion_projection_functor_logical_partition_t partition_functor)
+  legion_generator_id_t id /* = AUTO_GENERATE_ID */,
+  legion_task_id_t task_id /* = AUTO_GENERATE_ID */,
+  const char *task_name /* = NULL*/,
+  bool global,
+  legion_execution_constraint_set_t execution_constraints_,
+  legion_task_layout_constraint_set_t layout_constraints_,
+  legion_task_config_options_t options,
+  legion_generator_pointer_t generator_pointer,
+  const void *userdata,
+  size_t userlen)
 {
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  ExecutionConstraintSet *execution_constraints =
+    CObjectWrapper::unwrap(execution_constraints_);
+  TaskLayoutConstraintSet *layout_constraints =
+    CObjectWrapper::unwrap(layout_constraints_);
 
-  FunctorWrapper *functor =
-    new FunctorWrapper(runtime, depth, region_functor, partition_functor);
-  runtime->register_projection_functor(id, functor);
+  if (id == AUTO_GENERATE_ID)
+    id = runtime->generate_dynamic_generator_id();
+
+  if (task_id == AUTO_GENERATE_ID)
+    task_id = runtime->generate_dynamic_task_id();
+
+  assert(userlen == 0); // FIXME: Need to repack userdata to include pointer to generator
+
+  TaskGeneratorRegistrar registrar(
+    id, task_id, generator_wrapper,
+    reinterpret_cast<void *>(&generator_pointer), sizeof(generator_pointer),
+    task_name);
+  // FIXME: Add support for task config options
+  // registrar.set_leaf(options.leaf);
+  // registrar.set_inner(options.inner);
+  // registrar.set_idempotent(options.idempotent);
+  if (layout_constraints)
+    registrar.layout_constraints = *layout_constraints;
+  if (execution_constraints)
+    registrar.execution_constraints = *execution_constraints;
+
+  runtime->register_task_generator(registrar);
+
+  return task_id;
+}
+
+legion_task_id_t
+legion_runtime_preregister_task_generator_fnptr(
+  legion_generator_id_t id /* = AUTO_GENERATE_ID */,
+  legion_task_id_t task_id /* = AUTO_GENERATE_ID */,
+  const char *task_name /* = NULL*/,
+  legion_execution_constraint_set_t execution_constraints_,
+  legion_task_layout_constraint_set_t layout_constraints_,
+  legion_task_config_options_t options,
+  legion_generator_pointer_t generator_pointer,
+  const void *userdata,
+  size_t userlen)
+{
+  ExecutionConstraintSet *execution_constraints =
+    CObjectWrapper::unwrap(execution_constraints_);
+  TaskLayoutConstraintSet *layout_constraints =
+    CObjectWrapper::unwrap(layout_constraints_);
+
+  if (id == AUTO_GENERATE_ID)
+    id = Runtime::generate_static_generator_id();
+
+  if (task_id == AUTO_GENERATE_ID)
+    task_id = Runtime::generate_static_task_id();
+
+  assert(userlen == 0); // FIXME: Need to repack userdata to include pointer to generator
+
+  TaskGeneratorRegistrar registrar(
+    id, task_id, generator_wrapper,
+    reinterpret_cast<void *>(&generator_pointer), sizeof(generator_pointer),
+    task_name);
+  // FIXME: Add support for task config options
+  // registrar.set_leaf(options.leaf);
+  // registrar.set_inner(options.inner);
+  // registrar.set_idempotent(options.idempotent);
+  if (layout_constraints)
+    registrar.layout_constraints = *layout_constraints;
+  if (execution_constraints)
+    registrar.execution_constraints = *execution_constraints;
+
+  Runtime::preregister_task_generator(registrar);
+
+  return task_id;
 }
 
 // -----------------------------------------------------------------------
