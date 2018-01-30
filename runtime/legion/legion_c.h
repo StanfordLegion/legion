@@ -3362,7 +3362,7 @@ extern "C" {
     legion_execution_constraint_set_t execution_constraints,
     legion_task_layout_constraint_set_t layout_constraints,
     legion_task_config_options_t options,
-    legion_generator_pointer_t wrapped_task_pointer,
+    legion_task_pointer_t wrapped_task_pointer,
     const void *userdata,
     size_t userlen);
 
