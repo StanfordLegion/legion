@@ -4476,6 +4476,8 @@ legion_task_postamble(
 					   retsize);
 }
 
+// FIXME: do this once it's actually implemented
+#ifdef GENERATOR_REGISTRATION_IMPLEMENTED
 static void
 generator_wrapper(GeneratorContext ctx,
                   const TaskGeneratorArguments &args, Runtime *runtime)
@@ -4491,6 +4493,7 @@ generator_wrapper(GeneratorContext ctx,
 
   generator(ctx_, args_, runtime_);
 }
+#endif
 
 legion_task_id_t
 legion_runtime_register_task_generator_fnptr(
@@ -4506,6 +4509,8 @@ legion_runtime_register_task_generator_fnptr(
   const void *userdata,
   size_t userlen)
 {
+  // FIXME: do this once it's actually implemented
+#ifdef GENERATOR_REGISTRATION_IMPLEMENTED
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   ExecutionConstraintSet *execution_constraints =
     CObjectWrapper::unwrap(execution_constraints_);
@@ -4534,6 +4539,8 @@ legion_runtime_register_task_generator_fnptr(
     registrar.execution_constraints = *execution_constraints;
 
   runtime->register_task_generator(registrar);
+#endif
+  assert(0);
 
   return task_id;
 }
@@ -4550,6 +4557,8 @@ legion_runtime_preregister_task_generator_fnptr(
   const void *userdata,
   size_t userlen)
 {
+  // FIXME: do this once it's actually implemented
+#ifdef GENERATOR_REGISTRATION_IMPLEMENTED
   ExecutionConstraintSet *execution_constraints =
     CObjectWrapper::unwrap(execution_constraints_);
   TaskLayoutConstraintSet *layout_constraints =
@@ -4577,6 +4586,8 @@ legion_runtime_preregister_task_generator_fnptr(
     registrar.execution_constraints = *execution_constraints;
 
   Runtime::preregister_task_generator(registrar);
+#endif
+  assert(0);
 
   return task_id;
 }
