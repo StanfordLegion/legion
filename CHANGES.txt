@@ -2,11 +2,16 @@ This file lists the major changes as they appear in the stable branch.  No
 attempt is made to keep this list accurate for the master branch.
 
 Version 18.02.0 (February ??, 2018)
+  * Legion
+    - Support for PowerPC vector intrinsics
   * Realm
     - Operation priority can now be adjust after a task/copy is launched
     - Assorted bug/memory leak fixes
     - AffineAccessors support an optional translation from "view" coordinates
         to actual coordinates in the instance being accessed
+  * Regent
+    - Initial support for calling Regent tasks from C/C++
+    - Support for building with CMake
 
 Version 17.10.0 (October 27, 2017)
   * Legion
