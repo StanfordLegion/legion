@@ -14,6 +14,9 @@ Version 18.02.0 (February ??, 2018)
   * Regent
     - Initial support for calling Regent tasks from C/C++
     - Support for building with CMake
+  * Bindings
+    - Obsolete Lua and Terra bindings have been removed. The remaining Terra
+      bindings have been renamed to Regent and now produce libregent.so
 
 Version 17.10.0 (October 27, 2017)
   * Legion
