@@ -19,7 +19,7 @@ case $key in
     shift # pass argument
     shift # pass value
     ;;
-    -f | --file)
+    -p | --program)
     EXTENSION="$2"
     shift # pass argument
     shift # pass value
@@ -42,7 +42,7 @@ elif [ "$EXTENSION" == "baseline" ]; then
 elif [ "$EXTENSION" == "optimized" ]; then
   echo "Running PageRank demo with optimized CUDA kernel..."
 else
-  echo "Warning: --file must be one of baseline, mapping, optimized"
+  echo "Warning: --program must be one of baseline, mapping, optimized"
   exit
 fi
 
