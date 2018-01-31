@@ -4442,13 +4442,13 @@ legion_task_preamble(
   Context ctx;
   Runtime *runtime;
 
-  LegionTaskWrapper::legion_task_preamble(data,
-					  datalen,
-					  p,
-					  task,
-					  regions,
-					  ctx,
-					  runtime);
+  Runtime::legion_task_preamble(data,
+				datalen,
+				p,
+				task,
+				regions,
+				ctx,
+				runtime);
 
   CContext *cctx = new CContext(ctx, *regions);
   *taskptr = CObjectWrapper::wrap_const(task);
@@ -4470,10 +4470,10 @@ legion_task_postamble(
   Context ctx = cctx->context();
   delete cctx;
 
-  LegionTaskWrapper::legion_task_postamble(runtime,
-					   ctx,
-					   retval,
-					   retsize);
+  Runtime::legion_task_postamble(runtime,
+				 ctx,
+				 retval,
+				 retsize);
 }
 
 // FIXME: do this once it's actually implemented

@@ -7050,11 +7050,12 @@ namespace Legion {
 
     public:
       // Do-it-yourself pre/post-ambles for code generators
+      // These are deprecated and are just here for backwards compatibility
       static void legion_task_preamble(const void *data,
 				       size_t datalen,
 				       Processor p,
 				       const Task *& task,
-				       const std::vector<PhysicalRegion> *& regionsptr,
+				       const std::vector<PhysicalRegion> *& ptr,
 				       Context& ctx,
 				       Runtime *& runtime);
       static void legion_task_postamble(Runtime *runtime, Context ctx,
@@ -7190,6 +7191,31 @@ namespace Legion {
 
       // Send an empty return value back
       ctx->end_task(NULL, 0, false);
+    }
+
+    //--------------------------------------------------------------------------
+    inline void LegionTaskWrapper::legion_task_preamble(
+                  const void *data,
+		  size_t datalen,
+		  Processor p,
+		  const Task *& task,
+		  const std::vector<PhysicalRegion> *& regionsptr,
+		  Context& ctx,
+		  Runtime *& runtime)
+    //--------------------------------------------------------------------------
+    {
+      Runtime::legion_task_preamble(data, datalen, p, task, 
+                                    regionsptr, ctx, runtime);
+    }
+
+    //--------------------------------------------------------------------------
+    inline void LegionTaskWrapper::legion_task_postamble(
+                  Runtime *runtime, Context ctx,
+		  const void *retvalptr /*= NULL*/,
+		  size_t retvalsize /*= 0*/)
+    //--------------------------------------------------------------------------
+    {
+      Runtime::legion_task_postamble(runtime, ctx, retvalptr, retvalsize);
     }
 
     //--------------------------------------------------------------------------
