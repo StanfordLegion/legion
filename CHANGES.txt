@@ -12,8 +12,9 @@ Version 18.02.0 (February ??, 2018)
     - AffineAccessors support an optional translation from "view" coordinates
         to actual coordinates in the instance being accessed
   * Regent
-    - Initial support for calling Regent tasks from C/C++
+    - Experimental support for calling Regent tasks from C/C++
     - Support for building with CMake
+    - Support for running on PowerPC
   * Bindings
     - Obsolete Lua and Terra bindings have been removed. The remaining Terra
       bindings have been renamed to Regent and now produce libregent.so
