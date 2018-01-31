@@ -4487,7 +4487,7 @@ generator_wrapper(GeneratorContext ctx,
 
   assert(args.user_data_size == sizeof(legion_generator_pointer_t));
   legion_generator_pointer_t generator =
-    reinterpret_cast<legion_generator_pointer_t>(args.user_data);
+    *reinterpret_cast<const legion_generator_pointer_t *>(args.user_data);
 
   generator(ctx_, args_, runtime_);
 }
