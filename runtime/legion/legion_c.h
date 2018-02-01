@@ -46,6 +46,7 @@ extern "C" {
 #define NEW_OPAQUE_TYPE(T) typedef struct T { void *impl; } T
   NEW_OPAQUE_TYPE(legion_runtime_t);
   NEW_OPAQUE_TYPE(legion_context_t);
+  NEW_OPAQUE_TYPE(legion_generator_context_t);
   NEW_OPAQUE_TYPE(legion_domain_point_iterator_t);
   NEW_OPAQUE_TYPE(legion_coloring_t);
   NEW_OPAQUE_TYPE(legion_domain_coloring_t);
@@ -66,6 +67,7 @@ extern "C" {
   NEW_OPAQUE_TYPE(legion_release_launcher_t);
   NEW_OPAQUE_TYPE(legion_attach_launcher_t);
   NEW_OPAQUE_TYPE(legion_must_epoch_launcher_t);
+  NEW_OPAQUE_TYPE(legion_task_generator_arguments_t);
   NEW_OPAQUE_TYPE(legion_physical_region_t);
   NEW_OPAQUE_TYPE(legion_accessor_array_1d_t);
   NEW_OPAQUE_TYPE(legion_accessor_array_2d_t);
@@ -292,6 +294,15 @@ extern "C" {
       legion_runtime_t /* runtime */,
       const legion_processor_t * /* local_procs */,
       unsigned /* num_local_procs */);
+
+  /**
+   * Interface for a Legion C task generator.
+   */
+  typedef
+    void (*legion_generator_pointer_t)(
+      legion_generator_context_t /* context */,
+      legion_task_generator_arguments_t /* args */,
+      legion_runtime_t /* runtime */);
 
   /**
    * Interface for a Legion C task that is wrapped (i.e. this is the Realm
@@ -3343,6 +3354,15 @@ extern "C" {
     legion_processor_t proc);
 
   /**
+   * @see Legion::Runtime::register_projection_functor()
+   */
+  void
+  legion_runtime_register_projection_functor(
+    legion_projection_id_t id,
+    legion_projection_functor_logical_region_t region_functor,
+    legion_projection_functor_logical_partition_t partition_functor);
+
+  /**
    * @see Legion::Runtime::register_task_variant()
    */
   legion_task_id_t
@@ -3461,13 +3481,36 @@ extern "C" {
     size_t retsize);
 
   /**
-   * @see Legion::Runtime::register_projection_functor()
+   * @see Legion::Runtime::register_task_generator()
    */
-  void
-  legion_runtime_register_projection_functor(
-    legion_projection_id_t id,
-    legion_projection_functor_logical_region_t region_functor,
-    legion_projection_functor_logical_partition_t partition_functor);
+  legion_task_id_t
+  legion_runtime_register_task_generator_fnptr(
+    legion_runtime_t runtime,
+    legion_generator_id_t id /* = AUTO_GENERATE_ID */,
+    legion_task_id_t task_id /* = AUTO_GENERATE_ID */,
+    const char *task_name /* = NULL*/,
+    bool global,
+    legion_execution_constraint_set_t execution_constraints,
+    legion_task_layout_constraint_set_t layout_constraints,
+    legion_task_config_options_t options,
+    legion_generator_pointer_t generator_pointer,
+    const void *userdata,
+    size_t userlen);
+
+  /**
+   * @see Legion::Runtime::preregister_task_generator()
+   */
+  legion_task_id_t
+  legion_runtime_preregister_task_generator_fnptr(
+    legion_generator_id_t id /* = AUTO_GENERATE_ID */,
+    legion_task_id_t task_id /* = AUTO_GENERATE_ID */,
+    const char *task_name /* = NULL*/,
+    legion_execution_constraint_set_t execution_constraints,
+    legion_task_layout_constraint_set_t layout_constraints,
+    legion_task_config_options_t options,
+    legion_generator_pointer_t generator_pointer,
+    const void *userdata,
+    size_t userlen);
 
   // -----------------------------------------------------------------------
   // Timing Operations

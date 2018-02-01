@@ -6904,6 +6904,36 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    /*static*/ void Runtime::legion_task_preamble(
+                                       const void *data, size_t datalen,
+                                       Processor p, const Task *& task,
+                                       const std::vector<PhysicalRegion> *& reg,
+                                       Context& ctx, Runtime *& runtime)
+    //--------------------------------------------------------------------------
+    {
+      // Get the high level runtime
+      runtime = Runtime::get_runtime(p);
+
+      // Read the context out of the buffer
+#ifdef DEBUG_LEGION
+      assert(datalen == sizeof(Context));
+#endif
+      ctx = *((const Context*)data);
+      task = ctx->get_task();
+
+      reg = &ctx->begin_task();
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void Runtime::legion_task_postamble(Runtime *runtime,Context ctx,
+                                                   const void *retvalptr,
+                                                   size_t retvalsize)
+    //--------------------------------------------------------------------------
+    {
+      ctx->end_task(retvalptr, retvalsize, false/*owned*/);
+    }
+
+    //--------------------------------------------------------------------------
     VariantID Runtime::register_variant(const TaskVariantRegistrar &registrar,
                   bool has_return, const void *user_data, size_t user_data_size,
                   CodeDescriptor *realm)
@@ -6989,44 +7019,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return runtime->get_layout_constraints_name(id);
-    }
-
-    /////////////////////////////////////////////////////////////
-    // LegionTaskWrapper
-    /////////////////////////////////////////////////////////////
-
-    //--------------------------------------------------------------------------
-    /*static*/ void LegionTaskWrapper::legion_task_preamble(
-                  const void *data,
-		  size_t datalen,
-		  Processor p,
-		  const Task *& task,
-		  const std::vector<PhysicalRegion> *& regionsptr,
-		  Context& ctx,
-		  Runtime *& runtime)
-    //--------------------------------------------------------------------------
-    {
-      // Get the high level runtime
-      runtime = Runtime::get_runtime(p);
-
-      // Read the context out of the buffer
-#ifdef DEBUG_LEGION
-      assert(datalen == sizeof(Context));
-#endif
-      ctx = *((const Context*)data);
-      task = ctx->get_task();
-
-      regionsptr = &ctx->begin_task();
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void LegionTaskWrapper::legion_task_postamble(
-                  Runtime *runtime, Context ctx,
-		  const void *retvalptr /*= NULL*/,
-		  size_t retvalsize /*= 0*/)
-    //--------------------------------------------------------------------------
-    {
-      ctx->end_task(retvalptr, retvalsize, false/*owned*/);
     }
 
 }; // namespace Legion

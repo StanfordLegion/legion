@@ -1627,6 +1627,306 @@ namespace Legion {
     return *this;
   }
 
+  //----------------------------------------------------------------------------
+  inline DomainTransform::DomainTransform(void)
+    : m(0), n(0)
+  //----------------------------------------------------------------------------
+  {
+  }
+
+  //----------------------------------------------------------------------------
+  inline DomainTransform::DomainTransform(const DomainTransform &rhs)
+    : m(rhs.m), n(rhs.n)
+  //----------------------------------------------------------------------------
+  {
+    assert(m < ::MAX_POINT_DIM);
+    assert(n < ::MAX_POINT_DIM);
+    for (int i = 0; i < m; i++)
+      for (int j = 0; j < n; j++)
+        matrix[i * n + j] = rhs.matrix[i * n + j];
+  }
+
+  //----------------------------------------------------------------------------
+  template<int M, int N, typename T>
+  inline DomainTransform::DomainTransform(const Transform<M,N,T> &rhs)
+    : m(M), n(N)
+  //----------------------------------------------------------------------------
+  {
+    assert(m < ::MAX_POINT_DIM);
+    assert(n < ::MAX_POINT_DIM);
+    for (int i = 0; i < M; i++)
+      for (int j = 0; j < N; j++)
+        matrix[i * n + j] = rhs[i][j];
+  }
+
+  //----------------------------------------------------------------------------
+  inline DomainTransform& DomainTransform::operator=(const DomainTransform &rhs)
+  //----------------------------------------------------------------------------
+  {
+    m = rhs.m;
+    n = rhs.n;
+    assert(m < ::MAX_POINT_DIM);
+    assert(n < ::MAX_POINT_DIM);
+    for (int i = 0; i < m; i++)
+      for (int j = 0; j < n; j++)
+        matrix[i * n + j] = rhs.matrix[i * n + j];
+    return *this;
+  }
+
+  //----------------------------------------------------------------------------
+  template<int M, int N, typename T>
+  inline DomainTransform& 
+                         DomainTransform::operator=(const Transform<M,N,T> &rhs)
+  //----------------------------------------------------------------------------
+  {
+    m = M;
+    n = N;
+    assert(m < ::MAX_POINT_DIM);
+    assert(n < ::MAX_POINT_DIM);
+    for (int i = 0; i < M; i++)
+      for (int j = 0; j < N; j++)
+        matrix[i * n + j] = rhs[i][j];
+    return *this;
+  }
+
+  //----------------------------------------------------------------------------
+  template<int M, int N, typename T>
+  inline DomainTransform::operator Transform<M,N,T>(void) const
+  //----------------------------------------------------------------------------
+  {
+    assert(M == m);
+    assert(N == n);
+    Transform<M,N,T> result;
+    for (int i = 0; i < M; i++)
+      for (int j = 0; j < N; j++)
+        result[i][j] = matrix[i * n + j];
+    return result;
+  }
+
+  //----------------------------------------------------------------------------
+  inline DomainPoint DomainTransform::operator*(const DomainPoint &p) const
+  //----------------------------------------------------------------------------
+  {
+    assert(n == p.dim);
+    DomainPoint result;
+    result.dim = m;
+    for (int i = 0; i < m; i++)
+    {
+      result.point_data[i] = 0;
+      for (int j = 0; j < n; j++)
+        result.point_data[i] += matrix[i * n + j] * p.point_data[j];
+    }
+    return result;
+  }
+
+  //----------------------------------------------------------------------------
+  inline bool DomainTransform::is_identity(void) const
+  //----------------------------------------------------------------------------
+  {
+    for (int i = 0; i < m; i++)
+      for (int j = 0; j < n; j++)
+        if (i == j)
+        {
+          if (matrix[i * n + j] != 1)
+            return false;
+        }
+        else
+        {
+          if (matrix[i * n + j] != 0)
+            return false;
+        }
+    return true;
+  }
+
+  //----------------------------------------------------------------------------
+  inline DomainAffineTransform::DomainAffineTransform(void)
+  //----------------------------------------------------------------------------
+  {
+  }
+
+  //----------------------------------------------------------------------------
+  inline DomainAffineTransform::DomainAffineTransform(
+                                               const DomainAffineTransform &rhs)
+    : transform(rhs.transform), offset(rhs.offset)
+  //----------------------------------------------------------------------------
+  {
+    assert(transform.m == offset.dim);
+  }
+
+  //----------------------------------------------------------------------------
+  inline DomainAffineTransform::DomainAffineTransform(
+                                 const DomainTransform &t, const DomainPoint &p)
+    : transform(t), offset(p)
+  //----------------------------------------------------------------------------
+  {
+    assert(transform.m == offset.dim);
+  }
+
+  //----------------------------------------------------------------------------
+  template<int M, int N, typename T>
+  inline DomainAffineTransform::DomainAffineTransform(
+                                              const AffineTransform<M,N,T> &rhs)
+    : transform(rhs.transform), offset(rhs.offset)
+  //----------------------------------------------------------------------------
+  {
+    assert(transform.m == offset.dim);
+  }
+
+  //----------------------------------------------------------------------------
+  inline DomainAffineTransform& DomainAffineTransform::operator=(
+                                               const DomainAffineTransform &rhs)
+  //----------------------------------------------------------------------------
+  {
+    transform = rhs.transform;
+    offset = rhs.offset;
+    assert(transform.m == offset.dim);
+    return *this;
+  }
+
+  //----------------------------------------------------------------------------
+  template<int M, int N, typename T>
+  inline DomainAffineTransform& DomainAffineTransform::operator=(
+                                              const AffineTransform<M,N,T> &rhs)
+  //----------------------------------------------------------------------------
+  {
+    transform = rhs.transform;
+    offset = rhs.offset;
+    return *this;
+  }
+
+  //----------------------------------------------------------------------------
+  template<int M, int N, typename T>
+  inline DomainAffineTransform::operator AffineTransform<M,N,T>(void) const
+  //----------------------------------------------------------------------------
+  {
+    AffineTransform<M,N,T> result;
+    result.transform = transform;
+    result.offset = offset;
+    return result;
+  }
+
+  //----------------------------------------------------------------------------
+  inline DomainPoint DomainAffineTransform::operator[](
+                                                     const DomainPoint &p) const
+  //----------------------------------------------------------------------------
+  {
+    DomainPoint result = transform * p;
+    for (int i = 0; i < result.dim; i++)
+      result[i] += offset[i];
+    return result;
+  }
+
+  //----------------------------------------------------------------------------
+  inline bool DomainAffineTransform::is_identity(void) const
+  //----------------------------------------------------------------------------
+  {
+    if (!transform.is_identity())
+      return false;
+    for (int i = 0; i < offset.dim; i++)
+      if (offset.point_data[i] != 0)
+        return false;
+    return true;
+  }
+
+  //----------------------------------------------------------------------------
+  inline DomainScaleTransform::DomainScaleTransform(void)
+  //----------------------------------------------------------------------------
+  {
+  }
+
+  //----------------------------------------------------------------------------
+  inline DomainScaleTransform::DomainScaleTransform(
+                                                const DomainScaleTransform &rhs)
+    : transform(rhs.transform), extent(rhs.extent), divisor(rhs.divisor)
+  //----------------------------------------------------------------------------
+  {
+    assert(transform.m == divisor.dim);
+    assert(transform.m == extent.dim);
+  }
+
+  //----------------------------------------------------------------------------
+  inline DomainScaleTransform::DomainScaleTransform(const DomainTransform &t,
+                                          const Domain &e, const DomainPoint &d)
+    : transform(t), extent(e), divisor(d)
+  //----------------------------------------------------------------------------
+  {
+    assert(transform.m == divisor.dim);
+    assert(transform.m == extent.dim);
+  }
+
+  //----------------------------------------------------------------------------
+  template<int M, int N, typename T>
+  inline DomainScaleTransform::DomainScaleTransform(
+                                               const ScaleTransform<M,N,T> &rhs)
+    : transform(rhs.transform), extent(rhs.extent), divisor(rhs.divisor)
+  //----------------------------------------------------------------------------
+  {
+  }
+  
+  //----------------------------------------------------------------------------
+  inline DomainScaleTransform& DomainScaleTransform::operator=(
+                                                const DomainScaleTransform &rhs)
+  //----------------------------------------------------------------------------
+  {
+    transform = rhs.transform;
+    extent = rhs.extent;
+    divisor = rhs.divisor;
+    assert(transform.m == divisor.dim);
+    assert(transform.m == extent.dim);
+    return *this;
+  }
+
+  //----------------------------------------------------------------------------
+  template<int M, int N, typename T>
+  inline DomainScaleTransform& DomainScaleTransform::operator=(
+                                               const ScaleTransform<M,N,T> &rhs)
+  //----------------------------------------------------------------------------
+  {
+    transform = rhs.transform;
+    extent = rhs.extent;
+    divisor = rhs.divisor;
+    return *this;
+  }
+
+  //----------------------------------------------------------------------------
+  template<int M, int N, typename T>
+  inline DomainScaleTransform::operator ScaleTransform<M,N,T>(void) const
+  //----------------------------------------------------------------------------
+  {
+    ScaleTransform<M,N,T> result;
+    result.transform = transform;
+    result.extent = extent;
+    result.divisor = divisor;
+    return result;
+  }
+
+  //----------------------------------------------------------------------------
+  inline Domain DomainScaleTransform::operator[](const DomainPoint &p) const
+  //----------------------------------------------------------------------------
+  {
+    DomainPoint p2 = transform * p;
+    DomainPoint lo, hi;
+    for (int i = 0; i < p2.dim; i++)
+      lo[i] = (extent.lo()[i] + p2[i]) / divisor[i];
+    for (int i = 0; i < p2.dim; i++)
+      hi[i] = (extent.hi()[i] + p2[i]) / divisor[i];
+    return Domain(lo, hi);
+  }
+
+  //----------------------------------------------------------------------------
+  inline bool DomainScaleTransform::is_identity(void) const
+  //----------------------------------------------------------------------------
+  {
+    if (!transform.is_identity())
+      return false;
+    if (extent.lo() != extent.hi())
+      return false;
+    for (int i = 0; i < divisor.dim; i++)
+      if (divisor[i] != 1)
+        return false;
+    return true;
+  }
+
 }; // namespace Legion
 
 // Specializations of std::less<T> for Point,Rect,DomainT for use in containers

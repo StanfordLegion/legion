@@ -440,6 +440,93 @@ namespace Legion {
     bool column_major;
   };
 
+  /**
+   * \class DomainTransform
+   * A type-erased version of a Transform for removing template
+   * parameters from a Transform object
+   */
+  class DomainTransform {
+  public:
+    DomainTransform(void);
+    DomainTransform(const DomainTransform &rhs);
+    template<int M, int N, typename T>
+    DomainTransform(const Transform<M,N,T> &rhs);
+  public:
+    DomainTransform& operator=(const DomainTransform &rhs);
+    template<int M, int N, typename T>
+    DomainTransform& operator=(const Transform<M,N,T> &rhs);
+  public:
+    template<int M, int N, typename T>
+    operator Transform<M,N,T>(void) const;
+  public:
+    DomainPoint operator*(const DomainPoint &p) const;
+  public:
+    bool is_identity(void) const;
+  public:
+    int m, n;
+    coord_t matrix[::MAX_POINT_DIM * ::MAX_POINT_DIM];
+  };
+
+  /**
+   * \class DomainAffineTransform
+   * A type-erased version of an AffineTransform for removing
+   * template parameters from an AffineTransform type
+   */
+  class DomainAffineTransform {
+  public:
+    DomainAffineTransform(void);
+    DomainAffineTransform(const DomainAffineTransform &rhs);
+    DomainAffineTransform(const DomainTransform &t, const DomainPoint &p);
+    template<int M, int N, typename T>
+    DomainAffineTransform(const AffineTransform<M,N,T> &transform);
+  public:
+    DomainAffineTransform& operator=(const DomainAffineTransform &rhs);
+    template<int M, int N, typename T>
+    DomainAffineTransform& operator=(const AffineTransform<M,N,T> &rhs);
+  public:
+    template<int M, int N, typename T>
+    operator AffineTransform<M,N,T>(void) const;
+  public:
+    // Apply the transformation to a point
+    DomainPoint operator[](const DomainPoint &p) const;
+    // Test for the identity
+    bool is_identity(void) const;
+  public:
+    DomainTransform transform;
+    DomainPoint     offset;
+  };
+
+  /**
+   * \class DomainScaleTransform
+   * A type-erased version of a ScaleTransform for removing
+   * template parameters from a ScaleTransform type
+   */
+  class DomainScaleTransform {
+  public:
+    DomainScaleTransform(void);
+    DomainScaleTransform(const DomainScaleTransform &rhs);
+    DomainScaleTransform(const DomainTransform &transform,
+                         const Domain &extent, const DomainPoint &divisor);
+    template<int M, int N, typename T>
+    DomainScaleTransform(const ScaleTransform<M,N,T> &transform);
+  public:
+    DomainScaleTransform& operator=(const DomainScaleTransform &rhs);
+    template<int M, int N, typename T>
+    DomainScaleTransform& operator=(const ScaleTransform<M,N,T> &rhs);
+  public:
+    template<int M, int N, typename T>
+    operator ScaleTransform<M,N,T>(void) const;
+  public:
+    // Apply the transformation to a point
+    Domain operator[](const DomainPoint &p) const;
+    // Test for the identity
+    bool is_identity(void) const;
+  public:
+    DomainTransform transform;
+    Domain          extent;
+    DomainPoint     divisor;
+  };
+
 }; // namespace Legion
 
 #include "legion/legion_domain.inl"

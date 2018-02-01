@@ -6848,6 +6848,58 @@ namespace Legion {
       static VariantID preregister_task_variant(
               const TaskVariantRegistrar &registrar, const UDT &user_data, 
               const char *task_name = NULL, VariantID vid = AUTO_GENERATE_ID);
+
+      /**
+       * Statically register a new task variant with the runtime that
+       * has already built in the necessary preamble/postamble (i.e.
+       * calls to LegionTaskWrapper::legion_task_{pre,post}amble).
+       * This call must be made on all nodes and it will fail if done 
+       * after the Runtime::start method has been invoked.
+       * @param registrar the task variant registrar for describing the task
+       * @param codedesc the code descriptor for the pre-wrapped task
+       * @param user_data pointer to optional user data to associate with the
+       * task variant
+       * @param user_len size of optional user_data in bytes
+       * @return variant ID for the task
+       */
+      static VariantID preregister_task_variant(
+              const TaskVariantRegistrar &registrar,
+	      const CodeDescriptor &codedesc,
+	      const void *user_data = NULL,
+	      size_t user_len = 0,
+	      const char *task_name = NULL);
+
+      /**
+       * This is the necessary preamble call to use when registering a 
+       * task variant with an explicit CodeDescriptor. It takes the base 
+       * Realm task arguments and will return the equivalent Legion task 
+       * arguments from the runtime.
+       * @param data pointer to the Realm task data
+       * @param datalen size of the Realm task data in bytes
+       * @param p Realm processor on which the task is running
+       * @param task reference to the Task pointer to be set
+       * @param regionsptr pointer to the vector of regions reference to set
+       * @param ctx the context to set
+       * @param runtime the runtime pointer to set
+       */
+      static void legion_task_preamble(const void *data, size_t datalen,
+                                       Processor p, const Task *& task,
+                                       const std::vector<PhysicalRegion> *& reg,
+                                       Context& ctx, Runtime *& runtime);
+
+      /**
+       * This is the necessary postamble call to use when registering a task
+       * variant with an explicit CodeDescriptor. It passes back the task
+       * return value and completes the task. It should be the last thing
+       * called before the task finishes.
+       * @param runtime the runtime pointer
+       * @param ctx the context for the task
+       * @param retvalptr pointer to the return value
+       * @param retvalsize the size of the return value in bytes
+       */
+      static void legion_task_postamble(Runtime *runtime, Context ctx,
+                                        const void *retvalptr = NULL,
+                                        size_t retvalsize = 0);
     public:
       //------------------------------------------------------------------------
       // Task Generator Registration Operations
@@ -6882,28 +6934,6 @@ namespace Legion {
        */
       static void preregister_task_generator(
                                    const TaskGeneratorRegistrar &registrar);
-                                   
-
-      /**
-       * Statically register a new task variant with the runtime that
-       * has already built in the necessary preamble/postamble (i.e.
-       * calls to LegionTaskWrapper::legion_task_{pre,post}amble).
-       * This call must be made on all nodes and it will fail if done 
-       * after the Runtime::start method has been invoked.
-       * @param registrar the task variant registrar for describing the task
-       * @param codedesc the code descriptor for the pre-wrapped task
-       * @param user_data pointer to optional user data to associate with the
-       * task variant
-       * @param user_len size of optional user_data in bytes
-       * @return variant ID for the task
-       */
-      static VariantID preregister_task_variant(
-              const TaskVariantRegistrar &registrar,
-	      const CodeDescriptor &codedesc,
-	      const void *user_data = NULL,
-	      size_t user_len = 0,
-	      const char *task_name = NULL);
-
     public:
       // ------------------ Deprecated task registration -----------------------
       /**
