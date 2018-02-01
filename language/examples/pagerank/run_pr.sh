@@ -77,7 +77,7 @@ echo "#SBATCH --cpus-per-task=16" >> submit_pr.sh
 echo "" >> submit_pr.sh
 
 if [ $NUM_GPUS -gt 0 ]; then
-    echo "LAUNCHER='srun -n ${NUM_NODES}' ~/legion/language/regent.py ~/legion/language/examples/pagerank/pagerank_${EXTENSION}.rg -graph ~/legion/language/examples/pagerank/twitter.gr -ni 10 -nw ${NUM_PARTS} -ll:gpu ${NUM_GPUS} -l:fsize 15000 -ll:zsize 20000 -ll:cpu ${NUM_CPUS} -lg:prof ${NUM_NODES} -lg:prof_logfile prof%.gz" >> submit_pr.sh
+    echo "LAUNCHER='srun -n ${NUM_NODES}' ~/legion/language/regent.py ~/legion/language/examples/pagerank/pagerank_${EXTENSION}.rg -graph ~/legion/language/examples/pagerank/twitter.gr -ni 10 -nw ${NUM_PARTS} -ll:gpu ${NUM_GPUS} -ll:fsize 15000 -ll:zsize 20000 -ll:cpu ${NUM_CPUS} -lg:prof ${NUM_NODES} -lg:prof_logfile prof%.gz" >> submit_pr.sh
 else
     echo "LAUNCHER='srun -n ${NUM_NODES}' ~/legion/language/regent.py ~/legion/language/examples/pagerank/pagerank_${EXTENSION}.rg -graph ~/legion/language/examples/pagerank/twitter.gr -ni 10 -nw ${NUM_PARTS} -ll:csize 20000 -ll:cpu ${NUM_CPUS} -lg:prof ${NUM_NODES} -lg:prof_logfile prof%.gz" >> submit_pr.sh
 fi
