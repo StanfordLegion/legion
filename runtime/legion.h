@@ -3561,6 +3561,14 @@ namespace Legion {
        * @param color optional new color for the index partition
        * @return a new index partition of the parent index space
        */
+      IndexPartition create_partition_by_restriction(Context ctx,
+                                        IndexSpace parent,
+                                        IndexSpace color_space,
+                                        DomainTransform transform,
+                                        Domain extent,
+                                        PartitionKind part_kind = COMPUTE_KIND,
+                                        Color color = AUTO_GENERATE_ID);
+      // Template version
       template<int DIM, int COLOR_DIM, typename COORD_T>
       IndexPartitionT<DIM,COORD_T> create_partition_by_restriction(Context ctx,
                                 IndexSpaceT<DIM,COORD_T> parent,
@@ -3583,6 +3591,11 @@ namespace Legion {
        * @param color optional new color for the index partition
        * @return a new index partition of the parent index space
        */
+      IndexPartition create_partition_by_blockify(Context ctx,
+                                        IndexSpace parent,
+                                        DomainPoint blocking_factor,
+                                        Color color = AUTO_GENERATE_ID);
+      // Template version
       template<int DIM, typename COORD_T>
       IndexPartitionT<DIM,COORD_T> create_partition_by_blockify(Context ctx,
                                     IndexSpaceT<DIM,COORD_T> parent,
@@ -3598,6 +3611,12 @@ namespace Legion {
        * @param color optional new color for the index partition
        * @return a new index partition of the parent index space
        */
+      IndexPartition create_partition_by_blockify(Context ctx,
+                                        IndexSpace parent,
+                                        DomainPoint blockify_factor,
+                                        DomainPoint origin,
+                                        Color color = AUTO_GENERATE_ID);
+      // Template version
       template<int DIM, typename COORD_T>
       IndexPartitionT<DIM,COORD_T> create_partition_by_blockify(Context ctx,
                                     IndexSpaceT<DIM,COORD_T> parent,

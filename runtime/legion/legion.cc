@@ -4164,6 +4164,193 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    IndexPartition Runtime::create_partition_by_restriction(Context ctx,
+                                                        IndexSpace par,
+                                                        IndexSpace cs,
+                                                        DomainTransform tran,
+                                                        Domain ext,
+                                                        PartitionKind part_kind,
+                                                        Color color)
+    //--------------------------------------------------------------------------
+    {
+      switch (ext.get_dim())
+      {
+        case 1:
+          {
+            const IndexSpaceT<1,coord_t> parent(par);
+            const Rect<1,coord_t> extent(ext);
+            switch (tran.n)
+            {
+              case 1:
+                {
+                  const Transform<1,1> transform(tran);
+                  const IndexSpaceT<1,coord_t> color_space(cs);
+                  return create_partition_by_restriction<1,1,coord_t>(ctx, 
+                      parent, color_space, transform, extent, part_kind, color);
+                }
+              case 2:
+                {
+                  const Transform<1,2> transform(tran);
+                  const IndexSpaceT<2,coord_t> color_space(cs);
+                  return create_partition_by_restriction<1,2,coord_t>(ctx,
+                      parent, color_space, transform, extent, part_kind, color);
+                }
+              case 3:
+                {
+                  const Transform<1,3> transform(tran);
+                  const IndexSpaceT<3,coord_t> color_space(cs);
+                  return create_partition_by_restriction<1,3,coord_t>(ctx,
+                      parent, color_space, transform, extent, part_kind, color);
+                }
+              default:
+                assert(false);
+            }
+          }
+        case 2:
+          {
+            const IndexSpaceT<2,coord_t> parent(par);
+            const Rect<2,coord_t> extent(ext);
+            switch (tran.n)
+            {
+              case 1:
+                {
+                  const Transform<2,1> transform(tran);
+                  const IndexSpaceT<1,coord_t> color_space(cs);
+                  return create_partition_by_restriction<2,1,coord_t>(ctx, 
+                      parent, color_space, transform, extent, part_kind, color);
+                }
+              case 2:
+                {
+                  const Transform<2,2> transform(tran);
+                  const IndexSpaceT<2,coord_t> color_space(cs);
+                  return create_partition_by_restriction<2,2,coord_t>(ctx,
+                      parent, color_space, transform, extent, part_kind, color);
+                }
+              case 3:
+                {
+                  const Transform<2,3> transform(tran);
+                  const IndexSpaceT<3,coord_t> color_space(cs);
+                  return create_partition_by_restriction<2,3,coord_t>(ctx,
+                      parent, color_space, transform, extent, part_kind, color);
+                }
+              default:
+                assert(false);
+            }
+          }
+        case 3:
+          {
+            const IndexSpaceT<3,coord_t> parent(par);
+            const Rect<3,coord_t> extent(ext);
+            switch (tran.n)
+            {
+              case 1:
+                {
+                  const Transform<3,1> transform(tran);
+                  const IndexSpaceT<1,coord_t> color_space(cs);
+                  return create_partition_by_restriction<3,1,coord_t>(ctx, 
+                      parent, color_space, transform, extent, part_kind, color);
+                }
+              case 2:
+                {
+                  const Transform<3,2> transform(tran);
+                  const IndexSpaceT<2,coord_t> color_space(cs);
+                  return create_partition_by_restriction<3,2,coord_t>(ctx,
+                      parent, color_space, transform, extent, part_kind, color);
+                }
+              case 3:
+                {
+                  const Transform<3,3> transform(tran);
+                  const IndexSpaceT<3,coord_t> color_space(cs);
+                  return create_partition_by_restriction<3,3,coord_t>(ctx,
+                      parent, color_space, transform, extent, part_kind, color);
+                }
+              default:
+                assert(false);
+            }
+          }
+        default:
+          assert(false);
+      }
+      return IndexPartition::NO_PART;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition Runtime::create_partition_by_blockify(Context ctx,
+                                                         IndexSpace par,
+                                                         DomainPoint bf,
+                                                         Color color)
+    //--------------------------------------------------------------------------
+    {
+      switch (bf.get_dim())
+      {
+        case 1:
+          {
+            const IndexSpaceT<1,coord_t> parent(par);
+            const Point<1,coord_t> blocking_factor(bf);
+            return create_partition_by_blockify<1,coord_t>(ctx, parent, 
+                                                blocking_factor, color);
+          }
+        case 2:
+          {
+            const IndexSpaceT<2,coord_t> parent(par);
+            const Point<2,coord_t> blocking_factor(bf);
+            return create_partition_by_blockify<2,coord_t>(ctx, parent, 
+                                                blocking_factor, color);
+          }
+        case 3:
+          {
+            const IndexSpaceT<3,coord_t> parent(par);
+            const Point<3,coord_t> blocking_factor(bf);
+            return create_partition_by_blockify<3,coord_t>(ctx, parent, 
+                                                blocking_factor, color);
+          }
+        default:
+          assert(false);
+      }
+      return IndexPartition::NO_PART;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition Runtime::create_partition_by_blockify(Context ctx,
+                                                         IndexSpace par,
+                                                         DomainPoint bf,
+                                                         DomainPoint orig,
+                                                         Color color)
+    //--------------------------------------------------------------------------
+    {
+      switch (bf.get_dim())
+      {
+        case 1:
+          {
+            const IndexSpaceT<1,coord_t> parent(par);
+            const Point<1,coord_t> blocking_factor(bf);
+            const Point<1,coord_t> origin(orig);
+            return create_partition_by_blockify<1,coord_t>(ctx, parent, 
+                                        blocking_factor, origin, color);
+          }
+        case 2:
+          {
+            const IndexSpaceT<2,coord_t> parent(par);
+            const Point<2,coord_t> blocking_factor(bf);
+            const Point<2,coord_t> origin(orig);
+            return create_partition_by_blockify<2,coord_t>(ctx, parent, 
+                                        blocking_factor, origin, color);
+          }
+        case 3:
+          {
+            const IndexSpaceT<3,coord_t> parent(par);
+            const Point<3,coord_t> blocking_factor(bf);
+            const Point<3,coord_t> origin(orig);
+            return create_partition_by_blockify<3,coord_t>(ctx, parent, 
+                                        blocking_factor, origin, color);
+          }
+        default:
+          assert(false);
+      }
+      return IndexPartition::NO_PART;
+    }
+
+    //--------------------------------------------------------------------------
     IndexPartition Runtime::create_restricted_partition(Context ctx,
                                                         IndexSpace parent, 
                                                         IndexSpace color_space,
