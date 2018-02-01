@@ -203,7 +203,7 @@ function cudahelper.jit_compile_kernels_and_register(kernels)
   return register
 end
 
-function cudahelper.codegen_kernel_call(kernel_id, counts, args)
+function cudahelper.codegen_kernel_call(kernel_id, count, args)
   local setupArguments = terralib.newlist()
 
   local offset = 0
@@ -218,45 +218,25 @@ function cudahelper.codegen_kernel_call(kernel_id, counts, args)
 
   local grid = terralib.newsymbol(RuntimeAPI.dim3, "grid")
   local block = terralib.newsymbol(RuntimeAPI.dim3, "block")
-  local launch_domain_init
 
   local function round_exp(v, n)
     return `((v + (n - 1)) / n)
   end
 
-  -- TODO: Make this handle different thread block sizes and access strides
-  if #counts == 1 then
-    local threadSizeX = 128
-    launch_domain_init = quote
+  local THREAD_BLOCK_SIZE = 128
+  local MAX_NUM_BLOCK = 32768
+  local launch_domain_init = quote
+    [block].x, [block].y, [block].z = THREAD_BLOCK_SIZE, 1, 1
+    var num_blocks = [round_exp(count, THREAD_BLOCK_SIZE)]
+    if num_blocks <= MAX_NUM_BLOCK then
+      [grid].x, [grid].y, [grid].z = num_blocks, 1, 1
+    elseif [count] / MAX_NUM_BLOCK <= MAX_NUM_BLOCK then
       [grid].x, [grid].y, [grid].z =
-        [round_exp(counts[1], threadSizeX)], 1, 1
-      [block].x, [block].y, [block].z =
-        threadSizeX, 1, 1
-    end
-  elseif #counts == 2 then
-    local threadSizeX = 16
-    local threadSizeY = 16
-    launch_domain_init = quote
+        MAX_NUM_BLOCK, [round_exp(num_blocks, MAX_NUM_BLOCK)], 1
+    else
       [grid].x, [grid].y, [grid].z =
-        [round_exp(counts[1], threadSizeX)],
-        [round_exp(counts[2], threadSizeY)], 1
-      [block].x, [block].y, [block].z =
-        [threadSizeX], [threadSizeY], 1
+        MAX_NUM_BLOCK, MAX_NUM_BLOCK, [round_exp(num_blocks, MAX_NUM_BLOCK, MAX_NUM_BLOCK)]
     end
-  elseif #counts == 3 then
-    local threadSizeX = 16
-    local threadSizeY = 8
-    local threadSizeZ = 2
-    launch_domain_init = quote
-      [grid].x, [grid].y, [grid].z =
-        [round_exp(counts[1], threadSizeX)],
-        [round_exp(counts[2], threadSizeY)],
-        [round_exp(counts[3], threadSizeZ)]
-      [block].x, [block].y, [block].z =
-        [threadSizeX], [threadSizeY], [threadSizeZ]
-    end
-  else
-    assert(false, "Indexspaces more than 3 dimensions are not supported")
   end
 
   return quote
