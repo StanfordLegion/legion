@@ -732,7 +732,7 @@ function std.validate_args(node, params, args, isvararg, return_type, mapping, s
       -- Ok
       need_cast[i] = false
     elseif type_compatible(param_type, arg_type) then
-      -- Regions (and other unique types) require a special pass here 
+      -- Regions (and other unique types) require a special pass here
 
       -- Check for previous mappings. This can happen if two
       -- parameters are aliased to the same region.
@@ -3150,38 +3150,6 @@ function std.register_variant(variant)
   variants:insert(variant)
 end
 
-local function make_task_wrapper(task_body)
-  local return_type = task_body:gettype().returntype
-  if return_type == terralib.types.unit then
-    return terra(data : &opaque, datalen : c.size_t,
-                 userdata : &opaque, userlen : c.size_t,
-                 proc_id : c.legion_proc_id_t)
-      var task : c.legion_task_t,
-          regions : &c.legion_physical_region_t,
-          num_regions : uint32,
-          ctx : c.legion_context_t,
-          runtime : c.legion_runtime_t
-      c.legion_task_preamble(data, datalen, proc_id, &task, &regions, &num_regions, &ctx, &runtime)
-      task_body(task, regions, num_regions, ctx, runtime)
-      c.legion_task_postamble(runtime, ctx, nil, 0)
-    end
-  else
-    return terra(data : &opaque, datalen : c.size_t,
-                 userdata : &opaque, userlen : c.size_t,
-                 proc_id : c.legion_proc_id_t)
-      var task : c.legion_task_t,
-          regions : &c.legion_physical_region_t,
-          num_regions : uint32,
-          ctx : c.legion_context_t,
-          runtime : c.legion_runtime_t
-      c.legion_task_preamble(data, datalen, proc_id, &task, &regions, &num_regions, &ctx, &runtime)
-      var result = task_body(task, regions, num_regions, ctx, runtime)
-      c.legion_task_postamble(runtime, ctx, result.value, result.size)
-      c.free(result.value)
-    end
-  end
-end
-
 local max_dim = 3 -- Maximum dimension of an index space supported in Regent
 
 local function make_ordering_constraint(layout, dim)
@@ -3353,7 +3321,7 @@ function std.setup(main_task, extra_setup_thunk, registration_name)
         proc_types[#proc_types + 1] = c.TOC_PROC
       end
 
-      local wrapped_task = make_task_wrapper(variant:get_definition())
+      local wrapped_task = variant:get_wrapper()
 
       local layout_constraints = terralib.newsymbol(
         c.legion_task_layout_constraint_set_t, "layout_constraints")

@@ -738,6 +738,45 @@ function base.variant:disas()
   return self:get_definition():disas()
 end
 
+function base.variant:get_wrapper()
+  if self.wrapper then
+    return self.wrapper
+  end
+  self.task:complete()
+  local body = self:get_definition()
+  local return_type = body:gettype().returntype
+  if return_type == terralib.types.unit then
+    terra self.wrapper(data : &opaque, datalen : c.size_t,
+                       userdata : &opaque, userlen : c.size_t,
+                       proc_id : c.legion_proc_id_t)
+      var task : c.legion_task_t,
+          regions : &c.legion_physical_region_t,
+          num_regions : uint32,
+          ctx : c.legion_context_t,
+          runtime : c.legion_runtime_t
+      c.legion_task_preamble(data, datalen, proc_id, &task, &regions, &num_regions, &ctx, &runtime)
+      body(task, regions, num_regions, ctx, runtime)
+      c.legion_task_postamble(runtime, ctx, nil, 0)
+    end
+  else
+    terra self.wrapper(data : &opaque, datalen : c.size_t,
+                       userdata : &opaque, userlen : c.size_t,
+                       proc_id : c.legion_proc_id_t)
+      var task : c.legion_task_t,
+          regions : &c.legion_physical_region_t,
+          num_regions : uint32,
+          ctx : c.legion_context_t,
+          runtime : c.legion_runtime_t
+      c.legion_task_preamble(data, datalen, proc_id, &task, &regions, &num_regions, &ctx, &runtime)
+      var result = body(task, regions, num_regions, ctx, runtime)
+      c.legion_task_postamble(runtime, ctx, result.value, result.size)
+      c.free(result.value)
+    end
+  end
+  self.wrapper:setname(tostring(self.task:get_name()) .. '__' .. tostring(self:get_name()))
+  return self.wrapper
+end
+
 function base.variant:__tostring()
   return tostring(self:get_name())
 end
@@ -764,6 +803,7 @@ do
       inline = false,
       cudakernels = false,
       config_options = false,
+      wrapper = false,
     }, base.variant)
 
     task.variants:insert(variant)
