@@ -64,13 +64,13 @@ cat > submit_pr.sh <<EOL
 #!/bin/bash
 #
 #SBATCH --job-name=pagerank
-#SBATCH --output=res_%j.txt
 #SBATCH --export=TERRA_PATH,INCLUDE_PATH,PATH,LD_LIBRARY_PATH,CUDA_HOME,LG_RT_DIR,C_PATH
 #SBATCH --time=10:00
 #SBATCH --mem-per-cpu=6000MB
 #SBATCH -p aaiken
 EOL
 
+echo "#SBATCH --output=res_%j_${EXTENSION}_nodes${NUM_NODES}_gpus${NUM_GPUS}_cpus${NUM_CPUS}.txt" >> submit_pr.sh
 echo "#SBATCH --nodes=${NUM_NODES}" >> submit_pr.sh
 echo "#SBATCH --gres gpu:4" >> submit_pr.sh
 echo "#SBATCH --cpus-per-task=16" >> submit_pr.sh
