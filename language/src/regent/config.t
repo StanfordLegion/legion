@@ -24,6 +24,8 @@ local default_options = {
 
   -- Main user-facing optimization flags:
   ["cuda"] = true,
+  ["cuda-offline"] = false,
+  ["cuda-arch"] = os.getenv("GPU_ARCH") or "fermi",
   ["index-launch"] = true,
   ["inline"] = true,
   ["future"] = true,
