@@ -190,6 +190,7 @@ local supported_archs = {
 }
 
 local function parse_cuda_arch(arch)
+  arch = string.lower(arch)
   local sm = supported_archs[arch]
   if sm == nil then
     local archs
