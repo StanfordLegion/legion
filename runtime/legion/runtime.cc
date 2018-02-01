@@ -8629,6 +8629,12 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(req.handle_type != SINGULAR);
 #endif
+      // It's actually unsafe to evaluate projection region requirements
+      // with NO_ACCESS since they can race with deletion operations for
+      // the region requirement as NO_ACCESS region requirements aren't
+      // recorded in the region tree
+      if (req.privilege == NO_ACCESS)
+        return LogicalRegion::NO_REGION;
       if (projection_reservation.exists())
       {
         AutoLock p_lock(projection_reservation);
@@ -8672,6 +8678,20 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(req.handle_type != SINGULAR);
 #endif
+      // It's actually unsafe to evaluate projection region requirements
+      // with NO_ACCESS since they can race with deletion operations for
+      // the region requirement as NO_ACCESS region requirements aren't
+      // recorded in the region tree
+      if (req.privilege == NO_ACCESS)
+      {
+        for (std::vector<PointTask*>::const_iterator it =
+              point_tasks.begin(); it != point_tasks.end(); it++)
+        {
+          (*it)->set_projection_result(idx, LogicalRegion::NO_REGION);
+        }
+        return;
+      }
+
       if (projection_reservation.exists())
       {
         AutoLock p_lock(projection_reservation);
@@ -8740,6 +8760,20 @@ namespace Legion {
       assert(req.handle_type != SINGULAR);
       assert(mappable != NULL);
 #endif
+      // It's actually unsafe to evaluate projection region requirements
+      // with NO_ACCESS since they can race with deletion operations for
+      // the region requirement as NO_ACCESS region requirements aren't
+      // recorded in the region tree
+      if (req.privilege == NO_ACCESS)
+      {
+        for (std::vector<ProjectionPoint*>::const_iterator it =
+              points.begin(); it != points.end(); it++)
+        {
+          (*it)->set_projection_result(idx, LogicalRegion::NO_REGION);
+        }
+        return;
+      }
+
       if (projection_reservation.exists())
       {
         AutoLock p_lock(projection_reservation);
