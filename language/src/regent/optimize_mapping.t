@@ -332,7 +332,12 @@ function optimize_mapping.stat_if(cx, node)
     function(block) return optimize_mapping.stat_elseif(cx, block) end)
   local else_annotated = optimize_mapping.block(cx, node.else_block)
 
-  local initial_usage = data.reduce(usage_meet, elseif_cond_usage, then_cond_usage)
+  local initial_usage = data.reduce(
+    usage_meet,
+    elseif_annotated:map(annotated_in_usage),
+    usage_meet(usage_meet(annotated_in_usage(then_annotated),
+                          annotated_in_usage(else_annotated)),
+               usage_meet(elseif_cond_usage, then_cond_usage)))
   local final_usage = data.reduce(
     usage_meet,
     elseif_annotated:map(annotated_out_usage),
