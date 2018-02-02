@@ -1,7 +1,7 @@
 This file lists the major changes as they appear in the stable branch.  No
 attempt is made to keep this list accurate for the master branch.
 
-Version 18.02.0 (February ??, 2018)
+Version 18.02.0 (February 2, 2018)
   * Legion
     - Support for PowerPC vector intrinsics
     - FieldAccessors support "view" coordinates and equivalent bounds checks
