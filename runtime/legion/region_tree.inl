@@ -19,6 +19,318 @@ namespace Legion {
     LEGION_EXTERN_LOGGER_DECLARATIONS
 
     /////////////////////////////////////////////////////////////
+    // Index Space Operations 
+    /////////////////////////////////////////////////////////////
+    
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    IndexSpaceOperationT<DIM,T>::IndexSpaceOperationT(OperationKind kind,
+                                                      RegionTreeForest *ctx)
+      : IndexSpaceOperation(NT_TemplateHelper::encode_tag<DIM,T>(),
+                            kind, ctx), is_index_space_tight(false)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    IndexSpaceOperationT<DIM,T>::~IndexSpaceOperationT(void)
+    //--------------------------------------------------------------------------
+    {
+      realm_index_space.destroy(realm_index_space_ready);
+      tight_index_space.destroy(tight_index_space_ready);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    ApEvent IndexSpaceOperationT<DIM,T>::get_expr_index_space(void *result,
+                                            TypeTag tag, bool need_tight_result)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(tag == type_tag);
+#endif
+      Realm::IndexSpace<DIM,T> *space = 
+        reinterpret_cast<Realm::IndexSpace<DIM,T>*>(result);
+      return get_realm_index_space(*space, need_tight_result);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    ApEvent IndexSpaceOperationT<DIM,T>::get_realm_index_space(
+                        Realm::IndexSpace<DIM,T> &space, bool need_tight_result)
+    //--------------------------------------------------------------------------
+    {
+      if (!is_index_space_tight)
+      {
+        if (need_tight_result)
+        {
+          // Wait for the index space to be tight
+          tight_index_space_ready.lg_wait();
+          space = tight_index_space;
+          return ApEvent::NO_AP_EVENT;
+        }
+        else
+        {
+          space = realm_index_space;
+          return realm_index_space_ready;
+        }
+      }
+      else
+      {
+        // Already tight so we can just return that
+        space = tight_index_space;
+        return ApEvent::NO_AP_EVENT;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    void IndexSpaceOperationT<DIM,T>::tighten_index_space(void)
+    //--------------------------------------------------------------------------
+    {
+      tight_index_space = realm_index_space.tighten();
+      // Small memory fence to propagate writes before setting the flag
+      __sync_synchronize();
+      is_index_space_tight = true;
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    IndexSpaceUnion<DIM,T>::IndexSpaceUnion(
+                                const std::set<IndexSpaceExpression*> &to_union,
+                                RegionTreeForest *ctx, Operation *op)
+      : IndexSpaceOperationT<DIM,T>(IndexSpaceOperation::UNION_OP_KIND, ctx),
+        sub_expressions(
+           std::vector<IndexSpaceExpression*>(to_union.begin(), to_union.end()))
+    //--------------------------------------------------------------------------
+    {
+      std::set<ApEvent> preconditions;
+      std::vector<Realm::IndexSpace<DIM,T> > spaces(to_union.size());
+      unsigned idx = 0;
+      for (std::set<IndexSpaceExpression*>::const_iterator it = 
+            to_union.begin(); it != to_union.end(); it++, idx++)
+      {
+        ApEvent precondition = (*it)->get_expr_index_space(
+            &spaces[idx], this->type_tag, false/*need tight result*/);
+        if (precondition.exists())
+          preconditions.insert(precondition);
+      }
+      // Kick this off to Realm
+      ApEvent precondition = Runtime::merge_events(preconditions);
+      Realm::ProfilingRequestSet requests;
+      if (ctx->runtime->profiler != NULL)
+        ctx->runtime->profiler->add_partition_request(requests,
+                                      op, DEP_PART_UNION_REDUCTION);
+      this->realm_index_space_ready = ApEvent(
+          Realm::IndexSpace<DIM,T>::compute_union(
+              spaces, this->realm_index_space, requests, precondition));
+      // Then launch the tighten call for it too since we know we're
+      // going to want this eventually
+      IndexSpaceExpression::TightenIndexSpaceArgs args;
+      args.proxy_this = this;
+      this->tight_index_space_ready = 
+        ctx->runtime->issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY, 
+                  op, Runtime::protect_event(this->realm_index_space_ready));
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    IndexSpaceUnion<DIM,T>::IndexSpaceUnion(const IndexSpaceUnion<DIM,T> &rhs)
+      : IndexSpaceOperationT<DIM,T>(IndexSpaceOperation::UNION_OP_KIND, NULL)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    IndexSpaceUnion<DIM,T>::~IndexSpaceUnion(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    IndexSpaceUnion<DIM,T>& IndexSpaceUnion<DIM,T>::operator=(
+                                              const IndexSpaceUnion<DIM,T> &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    bool IndexSpaceUnion<DIM,T>::matches(
+                             const std::set<IndexSpaceExpression*> &exprs) const
+    //--------------------------------------------------------------------------
+    {
+      unsigned index = 0;
+      for (std::set<IndexSpaceExpression*>::const_iterator it =
+            exprs.begin(); it != exprs.end(); it++, index++)
+        if ((*it)->expr_id != sub_expressions[index]->expr_id)
+          return false;
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    IndexSpaceIntersection<DIM,T>::IndexSpaceIntersection(
+                                const std::set<IndexSpaceExpression*> &to_inter,
+                                RegionTreeForest *ctx, Operation *op)
+      : IndexSpaceOperationT<DIM,T>(IndexSpaceOperation::INTERSECT_OP_KIND,ctx),
+        sub_expressions(
+           std::vector<IndexSpaceExpression*>(to_inter.begin(), to_inter.end()))
+    //--------------------------------------------------------------------------
+    {
+      std::set<ApEvent> preconditions;
+      std::vector<Realm::IndexSpace<DIM,T> > spaces(to_inter.size());
+      unsigned idx = 0;
+      for (std::set<IndexSpaceExpression*>::const_iterator it = 
+            to_inter.begin(); it != to_inter.end(); it++, idx++)
+      {
+        ApEvent precondition = (*it)->get_expr_index_space(
+            &spaces[idx], this->type_tag, false/*need tight result*/);
+        if (precondition.exists())
+          preconditions.insert(precondition);
+      }
+      // Kick this off to Realm
+      ApEvent precondition = Runtime::merge_events(preconditions);
+      Realm::ProfilingRequestSet requests;
+      if (ctx->runtime->profiler != NULL)
+        ctx->runtime->profiler->add_partition_request(requests,
+                                      op, DEP_PART_INTERSECTION_REDUCTION);
+      this->realm_index_space_ready = ApEvent(
+          Realm::IndexSpace<DIM,T>::compute_intersection(
+              spaces, this->realm_index_space, requests, precondition));
+      // Then launch the tighten call for it too since we know we're
+      // going to want this eventually
+      IndexSpaceExpression::TightenIndexSpaceArgs args;
+      args.proxy_this = this;
+      this->tight_index_space_ready = 
+        ctx->runtime->issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY,
+                  op, Runtime::protect_event(this->realm_index_space_ready));
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    IndexSpaceIntersection<DIM,T>::IndexSpaceIntersection(
+                                      const IndexSpaceIntersection<DIM,T> &rhs)
+      : IndexSpaceOperationT<DIM,T>(IndexSpaceOperation::INTERSECT_OP_KIND,NULL)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    IndexSpaceIntersection<DIM,T>::~IndexSpaceIntersection(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    IndexSpaceIntersection<DIM,T>& IndexSpaceIntersection<DIM,T>::operator=(
+                                       const IndexSpaceIntersection<DIM,T> &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    bool IndexSpaceIntersection<DIM,T>::matches(
+                             const std::set<IndexSpaceExpression*> &exprs) const
+    //--------------------------------------------------------------------------
+    {
+      unsigned index = 0;
+      for (std::set<IndexSpaceExpression*>::const_iterator it =
+            exprs.begin(); it != exprs.end(); it++, index++)
+        if ((*it)->expr_id != sub_expressions[index]->expr_id)
+          return false;
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    IndexSpaceDifference<DIM,T>::IndexSpaceDifference(IndexSpaceExpression *l,
+                IndexSpaceExpression *r, RegionTreeForest *ctx, Operation *op) 
+      : IndexSpaceOperationT<DIM,T>(IndexSpaceOperation::DIFFERENCE_OP_KIND,ctx)
+        , lhs(l), rhs(r)
+    //--------------------------------------------------------------------------
+    {
+      Realm::IndexSpace<DIM,T> lhs_space, rhs_space;
+      ApEvent left_ready = 
+        lhs->get_expr_index_space(&lhs_space, this->type_tag, false/*tight*/);
+      ApEvent right_ready = 
+        rhs->get_expr_index_space(&rhs_space, this->type_tag, false/*tight*/);
+      ApEvent precondition = Runtime::merge_events(left_ready, right_ready);
+      Realm::ProfilingRequestSet requests;
+      if (ctx->runtime->profiler != NULL)
+        ctx->runtime->profiler->add_partition_request(requests,
+                                          op, DEP_PART_DIFFERENCE);
+      this->realm_index_space_ready = ApEvent(
+          Realm::IndexSpace<DIM,T>::compute_difference(lhs_space, rhs_space, 
+                            this->realm_index_space, requests, precondition));
+      // Then launch the tighten call for it too since we know we're
+      // going to want this eventually
+      IndexSpaceExpression::TightenIndexSpaceArgs args;
+      args.proxy_this = this;
+      this->tight_index_space_ready = 
+        ctx->runtime->issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY,
+                  op, Runtime::protect_event(this->realm_index_space_ready));
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    IndexSpaceDifference<DIM,T>::IndexSpaceDifference(
+                                      const IndexSpaceDifference<DIM,T> &rhs)
+     : IndexSpaceOperationT<DIM,T>(IndexSpaceOperation::DIFFERENCE_OP_KIND,NULL)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    IndexSpaceDifference<DIM,T>::~IndexSpaceDifference(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    IndexSpaceDifference<DIM,T>& IndexSpaceDifference<DIM,T>::operator=(
+                                         const IndexSpaceDifference<DIM,T> &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    bool IndexSpaceDifference<DIM,T>::matches(IndexSpaceExpression *left,
+                                              IndexSpaceExpression *right) const
+    //--------------------------------------------------------------------------
+    {
+      if (left->expr_id != lhs->expr_id)
+        return false;
+      if (right->expr_id != rhs->expr_id)
+        return false;
+      return true;
+    }
+
+    /////////////////////////////////////////////////////////////
     // Templated Index Space Node 
     /////////////////////////////////////////////////////////////
 
@@ -155,6 +467,20 @@ namespace Legion {
         AutoLock n_lock(node_lock,1,false/*exclusive*/);
         remote_instances.map(functor); 
       }
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    ApEvent IndexSpaceNodeT<DIM,T>::get_expr_index_space(void *result,
+                                            TypeTag tag, bool need_tight_result)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(type_tag == handle.get_type_tag());
+#endif
+      Realm::IndexSpace<DIM,T> *space = 
+        reinterpret_cast<Realm::IndexSpace<DIM,T>*>(result);
+      return get_realm_index_space(*space, need_tight_result);
     }
 
     //--------------------------------------------------------------------------

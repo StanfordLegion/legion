@@ -1353,6 +1353,12 @@ namespace Legion {
 
     // region_tree.h
     class RegionTreeForest;
+    class IndexSpaceExpression;
+    class IndexSpaceOperation;
+    template<int DIM, typename T> class IndexSpaceOperationT;
+    template<int DIM, typename T> class IndexSpaceUnion;
+    template<int DIM, typename T> class IndexSpaceIntersection;
+    template<int DIM, typename T> class IndexSpaceDifference;
     class IndexTreeNode;
     class IndexSpaceNode;
     template<int DIM, typename T> class IndexSpaceNodeT;
@@ -1626,6 +1632,7 @@ namespace Legion {
     const LegionColor INVALID_COLOR = LLONG_MAX;
     // This is only needed internally
     typedef Realm::RegionInstance PhysicalInstance;
+    typedef unsigned long long IndexSpaceExprID;
     // Helper for encoding templates
     struct NT_TemplateHelper : 
       public Realm::DynamicTemplates::ListProduct2<Realm::DIMCOUNTS, 

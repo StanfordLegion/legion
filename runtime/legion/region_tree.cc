@@ -42,6 +42,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       this->lookup_lock = Reservation::create_reservation();
+      this->lookup_is_op_lock = Reservation::create_reservation();
     }
 
     //--------------------------------------------------------------------------
@@ -60,6 +61,8 @@ namespace Legion {
       // We can delete the lookup lock now that we no longer need it
       lookup_lock.destroy_reservation();
       lookup_lock = Reservation::NO_RESERVATION;
+      lookup_is_op_lock.destroy_reservation();
+      lookup_is_op_lock = Reservation::NO_RESERVATION;
     }
 
     //--------------------------------------------------------------------------
@@ -4549,6 +4552,127 @@ namespace Legion {
                                                          can_fail, wait_until);
     }
 
+    //--------------------------------------------------------------------------
+    IndexSpaceExpression* RegionTreeForest::union_index_spaces(Operation *op,
+                                   const std::set<IndexSpaceExpression*> &exprs)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!exprs.empty());
+#endif
+      IndexSpaceExpression *first = *(exprs.begin());
+      if (exprs.size() == 1)
+        return first;
+      const std::pair<TypeTag,size_t> key(first->type_tag, exprs.size());
+      {
+        AutoLock l_lock(lookup_is_op_lock,1,false/*exclusive*/);
+        const std::deque<IndexSpaceOperation*> &unions = union_ops[key];
+        for (std::deque<IndexSpaceOperation*>::const_iterator it = 
+              unions.begin(); it != unions.end(); it++)
+        {
+          if ((*it)->matches(exprs))
+            return (*it);
+        }
+      }
+      // Didn't find it, retake the lock, see if we lost the race
+      // and if not make the actual operation node
+      AutoLock l_lock(lookup_is_op_lock);
+      std::deque<IndexSpaceOperation*> &unions = union_ops[key];
+      // Check to see if we lost the race
+      for (std::deque<IndexSpaceOperation*>::const_iterator it = 
+            unions.begin(); it != unions.end(); it++)
+      {
+        if ((*it)->matches(exprs))
+          return (*it);
+      }
+      // Didn't lose the race so go ahead and make it 
+      UnionOpCreator creator(this, op, exprs);
+      NT_TemplateHelper::demux<UnionOpCreator>(key.first, &creator);
+      IndexSpaceOperation *result = creator.result;
+      unions.push_back(result);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpaceExpression* RegionTreeForest::intersect_index_spaces(
+                    Operation *op, const std::set<IndexSpaceExpression*> &exprs)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!exprs.empty());
+#endif
+      IndexSpaceExpression *first = *(exprs.begin());
+      if (exprs.size() == 1)
+        return first;
+      const std::pair<TypeTag,size_t> key(first->type_tag, exprs.size());
+      {
+        AutoLock l_lock(lookup_is_op_lock,1,false/*exclusive*/);
+        const std::deque<IndexSpaceOperation*> &intersections = 
+          intersection_ops[key];
+        for (std::deque<IndexSpaceOperation*>::const_iterator it = 
+              intersections.begin(); it != intersections.end(); it++)
+        {
+          if ((*it)->matches(exprs))
+            return (*it);
+        }
+      }
+      // Didn't find it, retake the lock, see if we lost the race
+      // and if not make the actual operation node
+      AutoLock l_lock(lookup_is_op_lock);
+      std::deque<IndexSpaceOperation*> &intersections = intersection_ops[key];
+      // Check to see if we lost the race
+      for (std::deque<IndexSpaceOperation*>::const_iterator it = 
+            intersections.begin(); it != intersections.end(); it++)
+      {
+        if ((*it)->matches(exprs))
+          return (*it);
+      }
+      // Didn't lose the race so go ahead and make it 
+      IntersectionOpCreator creator(this, op, exprs);
+      NT_TemplateHelper::demux<IntersectionOpCreator>(key.first, &creator);
+      IndexSpaceOperation *result = creator.result;
+      intersections.push_back(result);
+      return result;
+    }
+    
+    //--------------------------------------------------------------------------
+    IndexSpaceExpression* RegionTreeForest::diff_index_spaces(Operation *op,
+                           IndexSpaceExpression *lhs, IndexSpaceExpression *rhs)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(lhs->type_tag != rhs->type_tag);
+#endif
+      {
+        AutoLock l_lock(lookup_is_op_lock,1,false/*exclusive*/);
+        const std::deque<IndexSpaceOperation*> &differences = 
+          difference_ops[lhs->type_tag];
+        for (std::deque<IndexSpaceOperation*>::const_iterator it = 
+              differences.begin(); it != differences.end(); it++)
+        {
+          if ((*it)->matches(lhs, rhs))
+            return (*it);
+        }
+      }
+      // Didn't find, retake the lock, see if we lost the race
+      // and if not make the actual operation node
+      AutoLock l_lock(lookup_is_op_lock);
+      std::deque<IndexSpaceOperation*> &differences = 
+        difference_ops[lhs->type_tag];
+      for (std::deque<IndexSpaceOperation*>::const_iterator it = 
+            differences.begin(); it != differences.end(); it++)
+      {
+        if ((*it)->matches(lhs, rhs))
+          return (*it);
+      }
+      // Didn't lose the race so go ahead and make it
+      DifferenceOpCreator creator(this, op, lhs, rhs);
+      NT_TemplateHelper::demux<DifferenceOpCreator>(lhs->type_tag, &creator);
+      IndexSpaceOperation *result = creator.result;
+      differences.push_back(result);
+      return result;
+    }
+
     /////////////////////////////////////////////////////////////
     // Index Tree Node 
     /////////////////////////////////////////////////////////////
@@ -5392,15 +5516,7 @@ namespace Legion {
     {
       const bool disjoint = !left->intersects_with(right);
       parent->record_disjointness(disjoint, left->color, right->color);
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void IndexSpaceNode::handle_tighten_index_space(const void *args)
-    //--------------------------------------------------------------------------
-    {
-      const TightenIndexSpaceArgs *targs = (const TightenIndexSpaceArgs*)args;
-      targs->proxy_this->tighten_index_space();
-    }
+    } 
 
     //--------------------------------------------------------------------------
     void IndexSpaceNode::send_node(AddressSpaceID target, bool up)

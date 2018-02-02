@@ -20319,7 +20319,7 @@ namespace Legion {
           }
         case LG_TIGHTEN_INDEX_SPACE_TASK_ID:
           {
-            IndexSpaceNode::handle_tighten_index_space(args);
+            IndexSpaceExpression::handle_tighten_index_space(args);
             break;
           }
         case LG_REMOTE_PHYSICAL_REQUEST_TASK_ID:

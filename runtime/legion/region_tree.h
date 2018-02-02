@@ -626,9 +626,26 @@ namespace Legion {
                                          const void *&result, size_t &size,
                                          bool can_fail, bool wait_until);
     public:
+      // These three methods a something pretty awesome and crazy
+      // We want to do common sub-expression elimination on index space
+      // unions, intersections, and difference operations to avoid repeating
+      // expensive Realm dependent partition calls where possible, by 
+      // running everything through this interface we first check to see
+      // if these operations have been requested before and if so will 
+      // return the common sub-expression, if not we will actually do 
+      // the computation and memoize it for the future
+      IndexSpaceExpression* union_index_spaces(Operation *op,
+                                 const std::set<IndexSpaceExpression*> &exprs);
+      IndexSpaceExpression* intersect_index_spaces(Operation *op,
+                                 const std::set<IndexSpaceExpression*> &exprs);
+      IndexSpaceExpression* diff_index_spaces(Operation *op,
+                                              IndexSpaceExpression *lhs, 
+                                              IndexSpaceExpression *rhs);
+    public:
       Runtime *const runtime;
     protected:
       Reservation lookup_lock;
+      Reservation lookup_is_op_lock;
     private:
       // The lookup lock must be held when accessing these
       // data structures
@@ -644,6 +661,212 @@ namespace Legion {
       std::map<IndexPartition,RtEvent>    index_part_requests;
       std::map<FieldSpace,RtEvent>       field_space_requests;
       std::map<RegionTreeID,RtEvent>     region_tree_requests;
+    private:
+      // Index space operations
+      std::map<std::pair<TypeTag,size_t/*sub expression count*/>,
+               std::deque<IndexSpaceOperation*> > union_ops;
+      std::map<std::pair<TypeTag,size_t/*sub expression count*/>,
+               std::deque<IndexSpaceOperation*> > intersection_ops;
+      std::map<TypeTag,
+               std::deque<IndexSpaceOperation*> > difference_ops;
+    };
+
+    /**
+     * \class IndexSpaceExpression
+     * An IndexSpaceExpression represents a set computation
+     * one on or more index spaces. IndexSpaceExpressions
+     * currently are either IndexSpaceNodes at the leaves
+     * or have intermeidate set operations that are either
+     * set union, intersection, or difference.
+     */
+    class IndexSpaceExpression {
+    public:
+      struct TightenIndexSpaceArgs : public LgTaskArgs<TightenIndexSpaceArgs> {
+      public:
+        static const LgTaskID TASK_ID = 
+          LG_TIGHTEN_INDEX_SPACE_TASK_ID;
+      public:
+        IndexSpaceExpression *proxy_this;
+      };
+    public:
+      IndexSpaceExpression(void) : type_tag(0), expr_id(0) { }
+      IndexSpaceExpression(TypeTag tag) : type_tag(tag),
+        expr_id(next_expr_id()) { }
+      virtual ~IndexSpaceExpression(void) { }
+    public:
+      virtual ApEvent get_expr_index_space(void *result, TypeTag tag, 
+                                           bool need_tight_result) = 0;
+      virtual void tighten_index_space(void) = 0;
+    public:
+      static void handle_tighten_index_space(const void *args)
+      {
+        const TightenIndexSpaceArgs *targs = (const TightenIndexSpaceArgs*)args;
+        targs->proxy_this->tighten_index_space();
+      }
+      static IndexSpaceExprID next_expr_id(void)
+      {
+        // Monotonically increasing counter of expression IDs for uniqueness
+        static IndexSpaceExprID next_id = 1;
+        IndexSpaceExprID result = __sync_fetch_and_add(&next_id, 1);
+#ifdef DEBUG_LEGION
+        assert(result <= next_id); // check for overflow
+#endif
+        return result;
+      }
+    public:
+      const TypeTag type_tag;
+      const IndexSpaceExprID expr_id;
+    };
+
+    class IndexSpaceOperation : public IndexSpaceExpression {
+    public:
+      enum OperationKind {
+        UNION_OP_KIND,
+        INTERSECT_OP_KIND,
+        DIFFERENCE_OP_KIND,
+      };
+    public:
+      IndexSpaceOperation(TypeTag tag, OperationKind kind,
+                          RegionTreeForest *ctx)
+        : IndexSpaceExpression(tag), op_kind(kind), context(ctx) { }
+      virtual ~IndexSpaceOperation(void) { }
+    public:
+      virtual ApEvent get_expr_index_space(void *result, TypeTag tag, 
+                                           bool need_tight_result) = 0;
+      virtual void tighten_index_space(void) = 0;
+    public:
+      virtual bool matches(const std::set<IndexSpaceExpression*> &exprs) const
+        { assert(false); return false; }
+      virtual bool matches(IndexSpaceExpression *lhs, 
+                           IndexSpaceExpression *rhs) const
+        { assert(false); return false; }
+    public:
+      const OperationKind op_kind;
+      RegionTreeForest *const context;
+    };
+
+    template<int DIM, typename T>
+    class IndexSpaceOperationT : public IndexSpaceOperation {
+    public:
+      IndexSpaceOperationT(OperationKind kind, RegionTreeForest *ctx);
+      virtual ~IndexSpaceOperationT(void);
+    public:
+      virtual ApEvent get_expr_index_space(void *result, TypeTag tag,
+                                           bool need_tight_result);
+      virtual void tighten_index_space(void);
+    public:
+      ApEvent get_realm_index_space(Realm::IndexSpace<DIM,T> &space,
+                                    bool need_tight_result);
+    protected:
+      Realm::IndexSpace<DIM,T> realm_index_space, tight_index_space;
+      ApEvent realm_index_space_ready; 
+      RtEvent tight_index_space_ready;
+      bool is_index_space_tight;
+    };
+
+    template<int DIM, typename T>
+    class IndexSpaceUnion : public IndexSpaceOperationT<DIM,T> {
+    public:
+      IndexSpaceUnion(const std::set<IndexSpaceExpression*> &to_union,
+                      RegionTreeForest *context, Operation *op);
+      IndexSpaceUnion(const IndexSpaceUnion<DIM,T> &rhs);
+      virtual ~IndexSpaceUnion(void);
+    public:
+      IndexSpaceUnion& operator=(const IndexSpaceUnion &rhs);
+    public:
+      virtual bool matches(const std::set<IndexSpaceExpression*> &exprs) const;
+    protected:
+      const std::vector<IndexSpaceExpression*> sub_expressions;
+    };
+
+    class UnionOpCreator {
+    public:
+      UnionOpCreator(RegionTreeForest *f, Operation *o,
+                     const std::set<IndexSpaceExpression*> &e)
+        : forest(f), op(o), exprs(e) { }
+    public:
+      template<typename N, typename T>
+      static inline void demux(UnionOpCreator *creator)
+      {
+        creator->result = new IndexSpaceUnion<N::N,T>(creator->exprs,
+            creator->forest, creator->op);
+      }
+    public:
+      RegionTreeForest *const forest;
+      Operation *const op;
+      const std::set<IndexSpaceExpression*> &exprs;
+      IndexSpaceOperation *result;
+    };
+
+    template<int DIM, typename T>
+    class IndexSpaceIntersection : public IndexSpaceOperationT<DIM,T> {
+    public:
+      IndexSpaceIntersection(const std::set<IndexSpaceExpression*> &to_inter,
+                             RegionTreeForest *context, Operation *op);
+      IndexSpaceIntersection(const IndexSpaceIntersection &rhs);
+      virtual ~IndexSpaceIntersection(void);
+    public:
+      IndexSpaceIntersection& operator=(const IndexSpaceIntersection &rhs);
+    public:
+      virtual bool matches(const std::set<IndexSpaceExpression*> &exprs) const;
+    protected:
+      const std::vector<IndexSpaceExpression*> sub_expressions;
+    };
+
+    class IntersectionOpCreator {
+    public:
+      IntersectionOpCreator(RegionTreeForest *f, Operation *o,
+                            const std::set<IndexSpaceExpression*> &e)
+        : forest(f), op(o), exprs(e) { }
+    public:
+      template<typename N, typename T>
+      static inline void demux(IntersectionOpCreator *creator)
+      {
+        creator->result = new IndexSpaceIntersection<N::N,T>(creator->exprs,
+            creator->forest, creator->op);
+      }
+    public:
+      RegionTreeForest *const forest;
+      Operation *const op;
+      const std::set<IndexSpaceExpression*> &exprs;
+      IndexSpaceOperation *result;
+    };
+
+    template<int DIM, typename T>
+    class IndexSpaceDifference : public IndexSpaceOperationT<DIM,T> {
+    public:
+      IndexSpaceDifference(IndexSpaceExpression *lhs,IndexSpaceExpression *rhs,
+                           RegionTreeForest *context, Operation *op);
+      IndexSpaceDifference(const IndexSpaceDifference &rhs);
+      virtual ~IndexSpaceDifference(void);
+    public:
+      IndexSpaceDifference& operator=(const IndexSpaceDifference &rhs);
+    public:
+      virtual bool matches(IndexSpaceExpression *lhs, 
+                           IndexSpaceExpression *rhs) const;
+    protected:
+      IndexSpaceExpression *const lhs;
+      IndexSpaceExpression *const rhs;
+    };
+
+    class DifferenceOpCreator {
+    public:
+      DifferenceOpCreator(RegionTreeForest *f, Operation *o,
+                          IndexSpaceExpression *l, IndexSpaceExpression *r)
+        : forest(f), op(o), lhs(l), rhs(r) { }
+    public:
+      template<typename N, typename T>
+      static inline void demux(DifferenceOpCreator *creator)
+      {
+        creator->result = new IndexSpaceDifference<N::N,T>(creator->lhs,
+            creator->rhs, creator->forest, creator->op);
+      }
+    public:
+      RegionTreeForest *const forest;
+      Operation *const op;
+      IndexSpaceExpression *const lhs;
+      IndexSpaceExpression *const rhs;
+      IndexSpaceOperation *result;
     };
 
     /**
@@ -707,7 +930,7 @@ namespace Legion {
      * \class IndexSpaceNode
      * A class for representing a generic index space node.
      */
-    class IndexSpaceNode : public IndexTreeNode {
+    class IndexSpaceNode : public IndexTreeNode, public IndexSpaceExpression {
     public:
       struct DynamicIndependenceArgs : 
         public LgTaskArgs<DynamicIndependenceArgs> {
@@ -725,14 +948,7 @@ namespace Legion {
         IndexSpaceNode *proxy_this;
         SemanticTag tag;
         AddressSpaceID source;
-      };
-      struct TightenIndexSpaceArgs : public LgTaskArgs<TightenIndexSpaceArgs> {
-      public:
-        static const LgTaskID TASK_ID = 
-          LG_TIGHTEN_INDEX_SPACE_TASK_ID;
-      public:
-        IndexSpaceNode *proxy_this;
-      };
+      }; 
       struct DeferChildArgs : public LgTaskArgs<DeferChildArgs> {
       public:
         static const LgTaskID TASK_ID = LG_INDEX_SPACE_DEFER_CHILD_TASK_ID;
@@ -818,8 +1034,7 @@ namespace Legion {
     public:
       static void handle_disjointness_test(IndexSpaceNode *parent,
                                            IndexPartNode *left,
-                                           IndexPartNode *right);
-      static void handle_tighten_index_space(const void *args);
+                                           IndexPartNode *right); 
     public:
       virtual void send_node(AddressSpaceID target, bool up);
       static void handle_node_creation(RegionTreeForest *context,
@@ -840,6 +1055,9 @@ namespace Legion {
       static void handle_index_space_set(RegionTreeForest *forest,
                            Deserializer &derez, AddressSpaceID source);
     public:
+      // From IndexSpaceExpression
+      virtual ApEvent get_expr_index_space(void *result, TypeTag tag,
+                                           bool need_tight_result) = 0;
       virtual void tighten_index_space(void) = 0;
     public:
       virtual void initialize_union_space(ApUserEvent to_trigger,
@@ -1036,6 +1254,9 @@ namespace Legion {
       inline void set_realm_index_space(AddressSpaceID source,
                                         const Realm::IndexSpace<DIM,T> &value);
     public:
+      // From IndexSpaceExpression
+      virtual ApEvent get_expr_index_space(void *result, TypeTag tag,
+                                           bool need_tight_result);
       virtual void tighten_index_space(void);
     public:
       virtual void initialize_union_space(ApUserEvent to_trigger,
