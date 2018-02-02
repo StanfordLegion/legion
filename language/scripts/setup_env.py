@@ -275,23 +275,22 @@ def driver(prefix_dir=None, cache=False, legion_use_cmake=False, llvm_version=No
 
     thread_count = multiprocessing.cpu_count()
 
-    conduit = discover_conduit()
     gasnet_dir = os.path.realpath(os.path.join(prefix_dir, 'gasnet'))
-    gasnet_release_dir = os.path.join(gasnet_dir, 'release')
-    gasnet_build_result = os.path.join(
-        gasnet_release_dir, '%s-conduit' % conduit,
-        'libgasnet-%s-par.a' % conduit)
     if not os.path.exists(gasnet_dir):
         git_clone(gasnet_dir, 'https://github.com/StanfordLegion/gasnet.git')
-    if not os.path.exists(gasnet_release_dir):
-        if not cache:
+    if not cache:
+        conduit = discover_conduit()
+        gasnet_release_dir = os.path.join(gasnet_dir, 'release')
+        gasnet_build_result = os.path.join(
+            gasnet_release_dir, '%s-conduit' % conduit,
+            'libgasnet-%s-par.a' % conduit)
+        if not os.path.exists(gasnet_release_dir):
             try:
                 build_gasnet(gasnet_dir, conduit)
             except Exception as e:
                 report_build_failure('gasnet', gasnet_dir, e)
-    else:
-        check_dirty_build('gasnet', gasnet_build_result, gasnet_dir)
-    if not cache:
+        else:
+            check_dirty_build('gasnet', gasnet_build_result, gasnet_dir)
         assert os.path.exists(gasnet_build_result)
 
     cmake_exe = None
