@@ -388,7 +388,7 @@ namespace Legion {
       Runtime *runtime;
     private:
       bool tracing;
-      Reservation trace_lock;
+      mutable LocalLock trace_lock;
       PhysicalTemplate* current_template;
       PhysicalTemplate* previous_template;
       std::vector<PhysicalTemplate*> templates;
@@ -527,7 +527,7 @@ namespace Legion {
       PhysicalTrace *trace;
       bool tracing;
       bool replayable;
-      Reservation template_lock;
+      mutable LocalLock template_lock;
       unsigned fence_completion_id;
     private:
       std::map<ApEvent, unsigned> event_map;

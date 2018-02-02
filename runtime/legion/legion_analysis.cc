@@ -3717,7 +3717,7 @@ namespace Legion {
                                 READ_WRITE, EXCLUSIVE, trace_info.req.parent);
       if (!!normal_close_mask)
       {
-        normal_close_op = creator->runtime->get_available_inter_close_op(false);
+        normal_close_op = creator->runtime->get_available_inter_close_op();
         normal_close_gen = normal_close_op->get_generation();
         // Compute the set of fields that we need
         root_node->column_source->get_field_set(normal_close_mask,
@@ -3755,7 +3755,7 @@ namespace Legion {
       if (!!read_only_close_mask)
       {
         read_only_close_op = 
-          creator->runtime->get_available_read_close_op(false);
+          creator->runtime->get_available_read_close_op();
         read_only_close_gen = read_only_close_op->get_generation();
         req.privilege_fields.clear();
         root_node->column_source->get_field_set(read_only_close_mask,
@@ -3770,7 +3770,7 @@ namespace Legion {
       if (!!flush_only_close_mask)
       {
         flush_only_close_op =
-          creator->runtime->get_available_inter_close_op(false);
+          creator->runtime->get_available_inter_close_op();
         flush_only_close_gen = flush_only_close_op->get_generation();
         req.privilege_fields.clear();
         // Compute the set of fields that we need
@@ -4382,7 +4382,6 @@ namespace Legion {
         current_context(NULL), is_owner(false)
     //--------------------------------------------------------------------------
     {
-      manager_lock = Reservation::create_reservation();
     }
 
     //--------------------------------------------------------------------------
@@ -4398,8 +4397,6 @@ namespace Legion {
     VersionManager::~VersionManager(void)
     //--------------------------------------------------------------------------
     {
-      manager_lock.destroy_reservation();
-      manager_lock = Reservation::NO_RESERVATION;
     }
 
     //--------------------------------------------------------------------------
@@ -4517,16 +4514,14 @@ namespace Legion {
               !(version_mask * pending_remote_advance_summary))
           {
             // Release the lock before sending the message
-            Runtime::release_reservation(manager_lock);
+            m_lock.release();
             // Always pass in the full mask as the call will recompute
             // the request_mask in case we lose a race
             RtEvent wait_on = send_remote_version_request(version_mask,
                                                           ready_events);
+            wait_on.lg_wait();
             // Only retake the reservation, when we are ready
-            RtEvent lock_reacquired = Runtime::acquire_rt_reservation(
-                            manager_lock, false/*exclusive*/, wait_on);
-            // Might as well wait since we just sent a message
-            lock_reacquired.lg_wait();
+            m_lock.reacquire();
 #ifdef DEBUG_LEGION
             // When we wake up everything should be good
             assert(!(version_mask - remote_valid_fields));
@@ -4581,16 +4576,14 @@ namespace Legion {
               !(version_mask * pending_remote_advance_summary))
           {
             // Release the lock before sending the message
-            Runtime::release_reservation(manager_lock);
+            m_lock.release();
             // Always pass in the full mask as the call will recompute
             // the request_mask in case we lose a race
             RtEvent wait_on = send_remote_version_request(version_mask,
                                                           ready_events);
             // Only retake the reservation, when we are ready
-            RtEvent lock_reacquired = Runtime::acquire_rt_reservation(
-                            manager_lock, false/*exclusive*/, wait_on);
-            // Might as well wait since we just sent a message
-            lock_reacquired.lg_wait();
+            wait_on.lg_wait();
+            m_lock.reacquire();
 #ifdef DEBUG_LEGION
             // When we wake up everything should be good
             assert(!(version_mask - remote_valid_fields));
@@ -4713,16 +4706,14 @@ namespace Legion {
             !(version_mask * pending_remote_advance_summary))
         {
           // Release the lock before sending the message
-          Runtime::release_reservation(manager_lock);
+          m_lock.release();
           // Always pass in the full mask as the call will recompute
           // the request_mask in case we lose a race
           RtEvent wait_on = send_remote_version_request(version_mask,
                                                         ready_events);
           // Retake the lock only once we're ready to
-          RtEvent lock_reacquired = Runtime::acquire_rt_reservation(
-                          manager_lock, false/*exclusive*/, wait_on);
-          // Might as well wait since we're sending a remote message
-          lock_reacquired.lg_wait();
+          wait_on.lg_wait();
+          m_lock.reacquire();
 #ifdef DEBUG_LEGION
           // When we wake up everything should be good
           assert(!(version_mask - remote_valid_fields));
@@ -4776,16 +4767,14 @@ namespace Legion {
             !(version_mask * pending_remote_advance_summary))
         {
           // Release the lock before sending the message
-          Runtime::release_reservation(manager_lock);
+          m_lock.release();
           // Always pass in the full mask as the call will recompute
           // the request_mask in case we lose a race
           RtEvent wait_on = send_remote_version_request(version_mask,
                                                         ready_events); 
           // Retake the lock only once we're ready to
-          RtEvent lock_reacquired = Runtime::acquire_rt_reservation(
-                          manager_lock, false/*exclusive*/, wait_on);
-          // Might as well wait since we're sending a remote message
-          lock_reacquired.lg_wait();
+          wait_on.lg_wait();
+          m_lock.reacquire();
 #ifdef DEBUG_LEGION
           // When we wake up everything should be good
           assert(!(version_mask - remote_valid_fields));
@@ -4841,16 +4830,14 @@ namespace Legion {
             !(version_mask * pending_remote_advance_summary))
         {
           // Release the lock before sending the message
-          Runtime::release_reservation(manager_lock);
+          m_lock.release();
           // Always pass in the full mask as the call will recompute
           // the request_mask in case we lose a race
           RtEvent wait_on = send_remote_version_request(version_mask,
                                                         ready_events); 
           // Retake the lock only once we're ready to
-          RtEvent lock_reacquired = Runtime::acquire_rt_reservation(
-                          manager_lock, false/*exclusive*/, wait_on);
-          // Might as well wait since we're sending a remote message
-          lock_reacquired.lg_wait();
+          wait_on.lg_wait();
+          m_lock.reacquire();
 #ifdef DEBUG_LEGION
           // When we wake up everything should be good
           assert(!(version_mask - remote_valid_fields));
@@ -5073,16 +5060,14 @@ namespace Legion {
             !(version_mask * pending_remote_advance_summary))
         {
           // Release the lock before sending the message
-          Runtime::release_reservation(manager_lock);
+          m_lock.release();
           // Always pass in the full mask as the call will recompute
           // the request_mask in case we lose a race
           RtEvent wait_on = send_remote_version_request(version_mask,
                                                         ready_events); 
           // Retake the lock only once we're ready to
-          RtEvent lock_reacquired = Runtime::acquire_rt_reservation(
-                          manager_lock, false/*exclusive*/, wait_on);
-          // Might as well wait since we're sending a remote message
-          lock_reacquired.lg_wait();
+          wait_on.lg_wait();
+          m_lock.reacquire();
 #ifdef DEBUG_LEGION
           // When we wake up everything should be good
           assert(!(version_mask - remote_valid_fields));
@@ -5870,16 +5855,14 @@ namespace Legion {
             !(new_states.get_valid_mask() * pending_remote_advance_summary))
         {
           // Release the lock before sending the message
-          Runtime::release_reservation(manager_lock);
+          m_lock.release();
           // Always pass in the full mask as the call will recompute
           // the request_mask in case we lose a race
           RtEvent wait_on = send_remote_version_request(
               new_states.get_valid_mask(), applied_events);
           // Retake the lock only once we're ready to
-          RtEvent lock_reacquired = Runtime::acquire_rt_reservation(
-                          manager_lock, false/*exclusive*/, wait_on);
-          // Might as well wait since we're sending a remote message
-          lock_reacquired.lg_wait();
+          wait_on.lg_wait();
+          m_lock.reacquire();
 #ifdef DEBUG_LEGION
           // When we wake up everything should be good
           assert(!(new_states.get_valid_mask() - remote_valid_fields));
@@ -6053,7 +6036,7 @@ namespace Legion {
     VersionState* VersionManager::create_new_version_state(VersionID vid)
     //--------------------------------------------------------------------------
     {
-      DistributedID did = runtime->get_available_distributed_id(false);
+      DistributedID did = runtime->get_available_distributed_id();
       return new VersionState(vid, runtime, did, 
           runtime->address_space, node, true/*register now*/);
     }
@@ -6658,8 +6641,7 @@ namespace Legion {
       : DistributedCollectable(rt, 
           LEGION_DISTRIBUTED_HELP_ENCODE(id, VERSION_STATE_DC), 
           own_sp, register_now),
-        version_number(vid), logical_node(node), 
-        state_lock(Reservation::create_reservation())
+        version_number(vid), logical_node(node)
 #ifdef DEBUG_LEGION
         , currently_active(true), currently_valid(true)
 #endif
@@ -6691,8 +6673,6 @@ namespace Legion {
     VersionState::~VersionState(void)
     //--------------------------------------------------------------------------
     {
-      state_lock.destroy_reservation();
-      state_lock = Reservation::NO_RESERVATION;
 #ifdef DEBUG_LEGION
       if (is_owner())
         assert(!currently_valid);
@@ -7967,16 +7947,9 @@ namespace Legion {
                   args.child_color = child;
                   // Takes ownership for deallocation
                   args.children = deferred_children;
-                  args.state_lock = state_lock;
-                  // Take the lock on behalf of the this task
-                  // Kind of scary asking for the lock we currently
-                  // hold but such is the world of deferred execution
-                  RtEvent actual_pre = 
-                    Runtime::acquire_rt_reservation(state_lock, 
-                        true/*exclusive*/, precondition);
                   // Need resource priority since we asked for the lock
                   RtEvent done = runtime->issue_runtime_meta_task(args, 
-                              LG_RESOURCE_PRIORITY, NULL, actual_pre);
+                          LG_LATENCY_WORK_PRIORITY, NULL, precondition);
                   preconditions.insert(done);
                 }
                 else // We can run it now
@@ -8037,14 +8010,9 @@ namespace Legion {
                   args.child_color = child;
                   // Takes ownership for deallocation
                   args.children = reduce_children;
-                  args.state_lock = state_lock;
-                  // Ask for the reservation on behalf of the task
-                  RtEvent actual_pre = 
-                    Runtime::acquire_rt_reservation(state_lock,
-                        true/*exclusive*/, precondition);
                   // Need resource priority since we asked for the lock
                   RtEvent done = runtime->issue_runtime_meta_task(args,
-                      LG_RESOURCE_PRIORITY, NULL, actual_pre);
+                          LG_LATENCY_WORK_PRIORITY, NULL, precondition);
                   preconditions.insert(done);
                 }
                 else // We can run it now
@@ -8265,10 +8233,8 @@ namespace Legion {
       // Lock was acquired by the caller
       reduce_args->proxy_this->reduce_open_children(reduce_args->child_color,
           update_mask, *reduce_args->children, done_events, 
-          false/*need lock*/, false/*local update*/);
+          true/*need lock*/, false/*local update*/);
       delete reduce_args->children;
-      // Release the lock before waiting
-      Runtime::release_reservation(reduce_args->state_lock);
       // Wait for all the effects to be applied
       if (!done_events.empty())
       {

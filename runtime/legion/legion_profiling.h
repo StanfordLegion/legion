@@ -430,7 +430,7 @@ namespace Legion {
       const Processor target_proc;
     private:
       LegionProfSerializer* serializer;
-      Reservation profiler_lock;
+      mutable LocalLock profiler_lock;
       std::vector<LegionProfInstance*> instances;
 #ifdef DEBUG_LEGION
       unsigned total_outstanding_requests[LEGION_PROF_LAST];

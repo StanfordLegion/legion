@@ -756,8 +756,6 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(target_proc.exists());
 #endif
-      profiler_lock = Reservation::create_reservation();
-
       if (!strcmp(serializer_type, "binary")) 
       {
         if (prof_logfile == NULL) 
@@ -856,8 +854,6 @@ namespace Legion {
     LegionProfiler::~LegionProfiler(void)
     //--------------------------------------------------------------------------
     {
-      profiler_lock.destroy_reservation();
-      profiler_lock = Reservation::NO_RESERVATION;
       for (std::vector<LegionProfInstance*>::const_iterator it = 
             instances.begin(); it != instances.end(); it++)
         delete (*it);

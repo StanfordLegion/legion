@@ -851,7 +851,7 @@ namespace Legion {
     protected:
       // Only the runtime is allowed to make non-empty phase barriers
       FRIEND_ALL_RUNTIME_CLASSES
-      PhaseBarrier(ApBarrier b);
+      PhaseBarrier(Internal::ApBarrier b);
     public:
       bool operator<(const PhaseBarrier &rhs) const;
       bool operator==(const PhaseBarrier &rhs) const;
@@ -863,7 +863,7 @@ namespace Legion {
       Realm::Barrier get_barrier(void) const { return phase_barrier; }
       bool exists(void) const;
     protected:
-      ApBarrier phase_barrier;
+      Internal::ApBarrier phase_barrier;
       friend std::ostream& operator<<(std::ostream& os, const PhaseBarrier& pb);
     };
 
@@ -887,7 +887,7 @@ namespace Legion {
     protected:
       // Only the runtime is allowed to make non-empty dynamic collectives
       FRIEND_ALL_RUNTIME_CLASSES
-      DynamicCollective(ApBarrier b, ReductionOpID redop);
+      DynamicCollective(Internal::ApBarrier b, ReductionOpID redop);
     public:
       // All the same operations as a phase barrier
       void arrive(const void *value, size_t size, unsigned count = 1);
@@ -2209,7 +2209,7 @@ namespace Legion {
      *  - template<typename REDOP> void reduce(const Point<N,T>&, REDOP::RHS)
      *    (Affine Accessor only)
      */
-    template<PrivilegeMode M, typename FT, int N, typename COORD_T = coord_t,
+    template<PrivilegeMode MODE, typename FT, int N, typename COORD_T = coord_t,
              typename A = Realm::GenericAccessor<FT,N,COORD_T>,
 #ifdef BOUNDS_CHECKS
              bool CHECK_BOUNDS = true>
@@ -2220,6 +2220,48 @@ namespace Legion {
     public:
       FieldAccessor(void) { }
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
+                    // The actual field size in case it is different from the 
+                    // one being used in FT and we still want to check it
+                    size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                    bool check_field_size = true,
+#else
+                    bool check_field_size = false,
+#endif
+                    bool silence_warnings = false) { }
+      // For Realm::AffineAccessor specializations there are additional
+      // methods for creating accessors with limited bounding boxes and
+      // affine transformations for using alternative coordinates spaces
+      // Specify a specific bounds rectangle to use for the accessor
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,
+                    const Rect<N,COORD_T> bounds,
+                    // The actual field size in case it is different from the 
+                    // one being used in FT and we still want to check it
+                    size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                    bool check_field_size = true,
+#else
+                    bool check_field_size = false,
+#endif
+                    bool silence_warnings = false) { }
+      // Specify a specific Affine transform to use for interpreting points
+      template<int M>
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,
+                    const AffineTransform<M,N,COORD_T> transform,
+                    // The actual field size in case it is different from the 
+                    // one being used in FT and we still want to check it
+                    size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                    bool check_field_size = true,
+#else
+                    bool check_field_size = false,
+#endif
+                    bool silence_warnings = false) { }
+      // Specify both a transform and a bounds to use
+      template<int M>
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,
+                    const AffineTransform<M,N,COORD_T> transform,
+                    const Rect<N,COORD_T> bounds,
                     // The actual field size in case it is different from the 
                     // one being used in FT and we still want to check it
                     size_t actual_field_size = sizeof(FT),
@@ -3520,6 +3562,14 @@ namespace Legion {
        * @param color optional new color for the index partition
        * @return a new index partition of the parent index space
        */
+      IndexPartition create_partition_by_restriction(Context ctx,
+                                        IndexSpace parent,
+                                        IndexSpace color_space,
+                                        DomainTransform transform,
+                                        Domain extent,
+                                        PartitionKind part_kind = COMPUTE_KIND,
+                                        Color color = AUTO_GENERATE_ID);
+      // Template version
       template<int DIM, int COLOR_DIM, typename COORD_T>
       IndexPartitionT<DIM,COORD_T> create_partition_by_restriction(Context ctx,
                                 IndexSpaceT<DIM,COORD_T> parent,
@@ -3542,6 +3592,11 @@ namespace Legion {
        * @param color optional new color for the index partition
        * @return a new index partition of the parent index space
        */
+      IndexPartition create_partition_by_blockify(Context ctx,
+                                        IndexSpace parent,
+                                        DomainPoint blocking_factor,
+                                        Color color = AUTO_GENERATE_ID);
+      // Template version
       template<int DIM, typename COORD_T>
       IndexPartitionT<DIM,COORD_T> create_partition_by_blockify(Context ctx,
                                     IndexSpaceT<DIM,COORD_T> parent,
@@ -3557,6 +3612,12 @@ namespace Legion {
        * @param color optional new color for the index partition
        * @return a new index partition of the parent index space
        */
+      IndexPartition create_partition_by_blockify(Context ctx,
+                                        IndexSpace parent,
+                                        DomainPoint blockify_factor,
+                                        DomainPoint origin,
+                                        Color color = AUTO_GENERATE_ID);
+      // Template version
       template<int DIM, typename COORD_T>
       IndexPartitionT<DIM,COORD_T> create_partition_by_blockify(Context ctx,
                                     IndexSpaceT<DIM,COORD_T> parent,
@@ -6640,6 +6701,58 @@ namespace Legion {
       static VariantID preregister_task_variant(
               const TaskVariantRegistrar &registrar, const UDT &user_data, 
               const char *task_name = NULL, VariantID vid = AUTO_GENERATE_ID);
+
+      /**
+       * Statically register a new task variant with the runtime that
+       * has already built in the necessary preamble/postamble (i.e.
+       * calls to LegionTaskWrapper::legion_task_{pre,post}amble).
+       * This call must be made on all nodes and it will fail if done 
+       * after the Runtime::start method has been invoked.
+       * @param registrar the task variant registrar for describing the task
+       * @param codedesc the code descriptor for the pre-wrapped task
+       * @param user_data pointer to optional user data to associate with the
+       * task variant
+       * @param user_len size of optional user_data in bytes
+       * @return variant ID for the task
+       */
+      static VariantID preregister_task_variant(
+              const TaskVariantRegistrar &registrar,
+	      const CodeDescriptor &codedesc,
+	      const void *user_data = NULL,
+	      size_t user_len = 0,
+	      const char *task_name = NULL);
+
+      /**
+       * This is the necessary preamble call to use when registering a 
+       * task variant with an explicit CodeDescriptor. It takes the base 
+       * Realm task arguments and will return the equivalent Legion task 
+       * arguments from the runtime.
+       * @param data pointer to the Realm task data
+       * @param datalen size of the Realm task data in bytes
+       * @param p Realm processor on which the task is running
+       * @param task reference to the Task pointer to be set
+       * @param regionsptr pointer to the vector of regions reference to set
+       * @param ctx the context to set
+       * @param runtime the runtime pointer to set
+       */
+      static void legion_task_preamble(const void *data, size_t datalen,
+                                       Processor p, const Task *& task,
+                                       const std::vector<PhysicalRegion> *& reg,
+                                       Context& ctx, Runtime *& runtime);
+
+      /**
+       * This is the necessary postamble call to use when registering a task
+       * variant with an explicit CodeDescriptor. It passes back the task
+       * return value and completes the task. It should be the last thing
+       * called before the task finishes.
+       * @param runtime the runtime pointer
+       * @param ctx the context for the task
+       * @param retvalptr pointer to the return value
+       * @param retvalsize the size of the return value in bytes
+       */
+      static void legion_task_postamble(Runtime *runtime, Context ctx,
+                                        const void *retvalptr = NULL,
+                                        size_t retvalsize = 0);
     public:
       //------------------------------------------------------------------------
       // Task Generator Registration Operations
@@ -6674,28 +6787,6 @@ namespace Legion {
        */
       static void preregister_task_generator(
                                    const TaskGeneratorRegistrar &registrar);
-                                   
-
-      /**
-       * Statically register a new task variant with the runtime that
-       * has already built in the necessary preamble/postamble (i.e.
-       * calls to LegionTaskWrapper::legion_task_{pre,post}amble).
-       * This call must be made on all nodes and it will fail if done 
-       * after the Runtime::start method has been invoked.
-       * @param registrar the task variant registrar for describing the task
-       * @param codedesc the code descriptor for the pre-wrapped task
-       * @param user_data pointer to optional user data to associate with the
-       * task variant
-       * @param user_len size of optional user_data in bytes
-       * @return variant ID for the task
-       */
-      static VariantID preregister_task_variant(
-              const TaskVariantRegistrar &registrar,
-	      const CodeDescriptor &codedesc,
-	      const void *user_data = NULL,
-	      size_t user_len = 0,
-	      const char *task_name = NULL);
-
     public:
       // ------------------ Deprecated task registration -----------------------
       /**
@@ -6805,17 +6896,14 @@ namespace Legion {
        * @return the Legion runtime pointer for the specified processor
        */
       static Runtime* get_runtime(Processor p = Processor::NO_PROC);
-#ifdef ENABLE_LEGION_TLS
+
       /**
-       * Provisional support for a way to implicitly find the context
-       * of the task in which we are running. This is only supported
-       * if the runtime is built with the ENABLE_LEGION_TLS macro.
-       * This macro has not been performance tested and may cause 
-       * performance degradation in the runtime. Use at your own risk.
+       * Get the context for the currently executing task this must
+       * be called inside of an actual Legion task. Calling it outside
+       * of a Legion task will result in undefined behavior
        * @return the context for the enclosing task in which we are executing
        */
       static Context get_context(void);
-#endif
     private:
       // Helper methods for templates
       IndexSpace create_index_space_internal(Context ctx, const void *realm_is,

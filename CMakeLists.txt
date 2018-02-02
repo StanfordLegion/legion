@@ -99,15 +99,15 @@ if (NOT INTERNAL_BUILD_MARCH)
 endif()
 
 # Add flags for Power architectures
-check_cxx_compiler_flag("-maltivec" COMPILER_SUPPORTS_MALTIVEC)
+check_cxx_compiler_flag("-maltivec -Werror" COMPILER_SUPPORTS_MALTIVEC)
 if(COMPILER_SUPPORTS_MALTIVEC)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -maltivec")
 endif()
-check_cxx_compiler_flag("-mabi=altivec" COMPILER_SUPPORTS_MABI_ALTIVEC)
+check_cxx_compiler_flag("-mabi=altivec -Werror" COMPILER_SUPPORTS_MABI_ALTIVEC)
 if(COMPILER_SUPPORTS_MABI_ALTIVEC)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -mabi=altivec")
 endif()
-check_cxx_compiler_flag("-mvsx" COMPILER_SUPPORTS_MVSX)
+check_cxx_compiler_flag("-mvsx -Werror" COMPILER_SUPPORTS_MVSX)
 if(COMPILER_SUPPORTS_MVSX)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -mvsx")
 endif()
@@ -115,6 +115,17 @@ endif()
 #------------------------------------------------------------------------------#
 # Optimizations
 #------------------------------------------------------------------------------#
+
+# For now we want the optimization flags to match on both normal make and cmake
+# builds so we override the cmake defaults here for release, this changes 
+# -O3 to -O2 and removes -DNDEBUG
+set(CMAKE_CXX_FLAGS_RELEASE "-O2")
+
+# For debug we can see if it supports the new -Og flag that gcc added recently
+check_cxx_compiler_flag("-Og" COMPILER_SUPPORTS_DEBUG_OPTIMIZATIONS)
+if(COMPILER_SUPPORTS_DEBUG_OPTIMIZATIONS)
+  set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -Og")
+endif()
 
 # Legion can't handle certain optimizations. See:
 # https://github.com/StanfordLegion/legion/issues/168#issuecomment-244582958

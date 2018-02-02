@@ -1324,7 +1324,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     PhysicalTrace::PhysicalTrace(Runtime *rt)
       : runtime(rt), tracing(false),
-        trace_lock(Reservation::create_reservation()),
         current_template(NULL), previous_template(NULL)
     //--------------------------------------------------------------------------
     {
@@ -1342,8 +1341,6 @@ namespace Legion {
     PhysicalTrace::~PhysicalTrace()
     //--------------------------------------------------------------------------
     {
-      trace_lock.destroy_reservation();
-      trace_lock = Reservation::NO_RESERVATION;
       for (std::vector<PhysicalTemplate*>::iterator it = templates.begin();
            it != templates.end(); ++it)
         delete (*it);
@@ -1468,8 +1465,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PhysicalTemplate::PhysicalTemplate(PhysicalTrace *pt)
-      : trace(pt), tracing(true), replayable(true),
-        template_lock(Reservation::create_reservation()), fence_completion_id(0)
+      : trace(pt), tracing(true), replayable(true), fence_completion_id(0)
     //--------------------------------------------------------------------------
     {
       events.push_back(ApEvent());
@@ -1500,13 +1496,10 @@ namespace Legion {
         }
         cached_mappings.clear();
       }
-      template_lock.destroy_reservation();
-      template_lock = Reservation::NO_RESERVATION;
     }
 
     //--------------------------------------------------------------------------
     PhysicalTemplate::PhysicalTemplate(const PhysicalTemplate &rhs)
-      : template_lock(Reservation::NO_RESERVATION)
     //--------------------------------------------------------------------------
     {
       // should never be called

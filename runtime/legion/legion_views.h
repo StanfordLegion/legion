@@ -93,7 +93,7 @@ namespace Legion {
       RegionTreeForest *const context;
       RegionTreeNode *const logical_node;
     protected:
-      Reservation view_lock;
+      mutable LocalLock view_lock;
     };
 
     /**
@@ -1145,7 +1145,7 @@ namespace Legion {
      */
     class CompositeBase {
     public:
-      CompositeBase(Reservation &base_lock);
+      CompositeBase(LocalLock &base_lock);
       virtual ~CompositeBase(void);
     protected:
       CompositeCopyNode* construct_copy_tree(MaterializedView *dst,
@@ -1179,7 +1179,7 @@ namespace Legion {
     public:
       CompositeNode* find_child_node(RegionTreeNode *child);
     private:
-      Reservation &base_lock;
+      LocalLock &base_lock;
     protected:
       FieldMask dirty_mask, reduction_mask;
       LegionMap<CompositeNode*,FieldMask>::aligned children;
@@ -1400,7 +1400,7 @@ namespace Legion {
       CompositeBase *const parent;
       const DistributedID owner_did;
     protected:
-      Reservation node_lock;
+      mutable LocalLock node_lock;
       // No need to hold references in general, but we do have to hold
       // them if we are the root child of a composite view subtree
       LegionMap<VersionState*,FieldMask>::aligned version_states;

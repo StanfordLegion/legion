@@ -102,6 +102,11 @@ endif
 ifeq ($(findstring cori,$(shell uname -n)),cori)
 CONDUIT=aries
 endif
+ifeq ($(findstring sh,$(shell uname -n)), sh)
+GPU_ARCH=pascal
+CONDUIT=ibv#not sure if this is true
+CUDA=${CUDA_HOME}
+endif
 
 # Customization specific to Cray programming environment
 ifneq (${CRAYPE_VERSION},)

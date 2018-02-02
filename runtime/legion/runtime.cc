@@ -69,9 +69,17 @@ namespace Legion {
       Realm::Logger log_spy("legion_spy");
     };
 
-#ifdef ENABLE_LEGION_TLS
     __thread TaskContext *implicit_context = NULL;
-#endif
+    __thread AutoLock *local_lock_list = NULL;
+
+    const LgEvent LgEvent::NO_LG_EVENT = LgEvent();
+    const ApEvent ApEvent::NO_AP_EVENT = ApEvent();
+    const ApUserEvent ApUserEvent::NO_AP_USER_EVENT = ApUserEvent();
+    const ApBarrier ApBarrier::NO_AP_BARRIER = ApBarrier();
+    const RtEvent RtEvent::NO_RT_EVENT = RtEvent();
+    const RtUserEvent RtUserEvent::NO_RT_USER_EVENT = RtUserEvent();
+    const RtBarrier RtBarrier::NO_RT_BARRIER = RtBarrier();
+    const PredEvent PredEvent::NO_PRED_EVENT = PredEvent();
 
     /////////////////////////////////////////////////////////////
     // Argument Map Impl
@@ -221,7 +229,7 @@ namespace Legion {
         return NULL;
       // Otherwise we have to make a future map and set all the futures
       // We know that they are already completed 
-      DistributedID did = runtime->get_available_distributed_id(true/*cont*/);
+      DistributedID did = runtime->get_available_distributed_id();
       future_map = new FutureMapImpl(ctx, runtime, did, 
                                      runtime->address_space);
       future_map->add_base_gc_ref(FUTURE_HANDLE_REF);
@@ -883,28 +891,21 @@ namespace Legion {
           ready_event.lg_wait();
         if (valid)
         {
-          RtEvent lock_event = 
-            Runtime::acquire_rt_reservation(gc_lock, true/*exclusive*/);
-          lock_event.lg_wait();
-          // Check to see if we already have a future for the point
-          std::map<DomainPoint,Future>::const_iterator finder = 
-                                                futures.find(point);
-          if (finder != futures.end())
+          Future result;
           {
-            Future result = finder->second;
-            gc_lock.release();
-            return result;
+            AutoLock gc(gc_lock);
+            // Check to see if we already have a future for the point
+            std::map<DomainPoint,Future>::const_iterator finder = 
+                                                  futures.find(point);
+            if (finder != futures.end())
+              return finder->second;
+            if (allow_empty)
+              return Future();
+            // Otherwise we need a future from the context to use for
+            // the point that we will fill in later
+            result = runtime->help_create_future(op);
+            futures[point] = result;
           }
-          if (allow_empty)
-          {
-            gc_lock.release();
-            return Future();
-          }
-          // Otherwise we need a future from the context to use for
-          // the point that we will fill in later
-          Future result = runtime->help_create_future(op);
-          futures[point] = result;
-          Runtime::release_reservation(gc_lock);
           if (Runtime::legion_spy_enabled)
             LegionSpy::log_future_creation(op->get_unique_op_id(),
                            result.impl->get_ready_event(), point);
@@ -1881,15 +1882,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     GrantImpl::GrantImpl(void)
-      : acquired(false), grant_lock(Reservation::create_reservation())
+      : acquired(false)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     GrantImpl::GrantImpl(const std::vector<ReservationRequest> &reqs)
-      : requests(reqs), acquired(false), 
-        grant_lock(Reservation::create_reservation())
+      : requests(reqs), acquired(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -1906,9 +1906,6 @@ namespace Legion {
     GrantImpl::~GrantImpl(void)
     //--------------------------------------------------------------------------
     {
-      // clean up our reservation
-      grant_lock.destroy_reservation();
-      grant_lock = Reservation::NO_RESERVATION;
     }
 
     //--------------------------------------------------------------------------
@@ -2131,8 +2128,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     MPIRankTable::MPIRankTable(Runtime *rt)
       : runtime(rt), participating(int(runtime->address_space) <
-          Runtime::legion_collective_participating_spaces),
-        reservation(Reservation::create_reservation())
+          Runtime::legion_collective_participating_spaces)
     //--------------------------------------------------------------------------
     {
       // We already have our contributions for each stage so
@@ -2180,8 +2176,6 @@ namespace Legion {
     MPIRankTable::~MPIRankTable(void)
     //--------------------------------------------------------------------------
     {
-      reservation.destroy_reservation();
-      reservation = Reservation::NO_RESERVATION;
     }
 
     //--------------------------------------------------------------------------
@@ -2530,9 +2524,6 @@ namespace Legion {
         total_active_contexts(0), total_active_mappers(0)
     //--------------------------------------------------------------------------
     {
-      this->local_queue_lock = Reservation::create_reservation();
-      this->queue_lock = Reservation::create_reservation();
-      this->mapper_lock = Reservation::create_reservation();
       context_states.resize(DEFAULT_CONTEXTS);
       // Find our set of visible memories
       Machine::MemoryQuery vis_mems(runtime->machine);
@@ -2559,12 +2550,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       mapper_states.clear();
-      local_queue_lock.destroy_reservation();
-      local_queue_lock = Reservation::NO_RESERVATION;
-      queue_lock.destroy_reservation();
-      queue_lock = Reservation::NO_RESERVATION;
-      mapper_lock.destroy_reservation();
-      mapper_lock = Reservation::NO_RESERVATION;
     }
 
     //--------------------------------------------------------------------------
@@ -2659,8 +2644,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    MapperManager* ProcessorManager::find_mapper(MapperID mid, 
-                                                 bool need_lock) const
+    MapperManager* ProcessorManager::find_mapper(MapperID mid) const 
     //--------------------------------------------------------------------------
     {
       // Easy case if we are doing replay execution
@@ -2673,29 +2657,14 @@ namespace Legion {
 #endif
         return finder->second.first;
       }
-      // This call is frequently called from application tasks that are
-      // launching sub-tasks and therefore can never block on an acquire
-      RtEvent precondition;
-      if (need_lock)
-        precondition = 
-          Runtime::acquire_rt_reservation(mapper_lock, false/*exclusive*/);
-      if (precondition.has_triggered())
-      {
-        MapperManager *result = NULL;
-        // We've got the lock, so do the operation
-        std::map<MapperID,std::pair<MapperManager*,bool> >::const_iterator
-          finder = mappers.find(mid);
-        if (finder != mappers.end())
-          result = finder->second.first;
-        // Unlock the lock
-        Runtime::release_reservation(mapper_lock);
-        return result;
-      }
-      // Otherwise build the continuation to get the mapper
-      FindMapperContinuation continuation(this, mid);
-      RtEvent wait_on = continuation.defer(runtime, precondition);
-      wait_on.lg_wait();
-      return continuation.get_result();
+      AutoLock m_lock(mapper_lock, 0/*mode*/, false/*exclusive*/);
+      MapperManager *result = NULL;
+      // We've got the lock, so do the operation
+      std::map<MapperID,std::pair<MapperManager*,bool> >::const_iterator
+        finder = mappers.find(mid);
+      if (finder != mappers.end())
+        result = finder->second.first;
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -3305,8 +3274,7 @@ namespace Legion {
     MemoryManager::MemoryManager(Memory m, Runtime *rt)
       : memory(m), owner_space(m.address_space()), 
         is_owner(m.address_space() == rt->address_space),
-        capacity(m.capacity()), remaining_capacity(capacity), runtime(rt), 
-        manager_lock(Reservation::create_reservation())
+        capacity(m.capacity()), remaining_capacity(capacity), runtime(rt)
     //--------------------------------------------------------------------------
     {
     }
@@ -3325,8 +3293,6 @@ namespace Legion {
     MemoryManager::~MemoryManager(void)
     //--------------------------------------------------------------------------
     {
-      manager_lock.destroy_reservation();
-      manager_lock = Reservation::NO_RESERVATION;
     }
 
     //--------------------------------------------------------------------------
@@ -5630,7 +5596,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     //
     {
-      send_lock = Reservation::create_reservation();
       receiving_buffer_size = max_message_size;
       receiving_buffer = (char*)legion_malloc(MESSAGE_BUFFER_ALLOC,
                                               receiving_buffer_size);
@@ -5672,8 +5637,6 @@ namespace Legion {
     VirtualChannel::~VirtualChannel(void)
     //--------------------------------------------------------------------------
     {
-      send_lock.destroy_reservation();
-      send_lock = Reservation::NO_RESERVATION;
       free(sending_buffer);
       free(receiving_buffer);
       receiving_buffer = NULL;
@@ -6784,7 +6747,6 @@ namespace Legion {
                                      AddressSpaceID s, unsigned r, 
                                      ShutdownManager *own)
       : phase(p), runtime(rt), source(s), radix(r), owner(own),
-        shutdown_lock(Reservation::create_reservation()), 
         needed_responses(0), result(true)
     //--------------------------------------------------------------------------
     {
@@ -6803,8 +6765,6 @@ namespace Legion {
     ShutdownManager::~ShutdownManager(void)
     //--------------------------------------------------------------------------
     {
-      shutdown_lock.destroy_reservation();
-      shutdown_lock = Reservation::NO_RESERVATION;
     }
 
     //--------------------------------------------------------------------------
@@ -7199,7 +7159,6 @@ namespace Legion {
     TaskImpl::TaskImpl(TaskID tid, Runtime *rt, const char *name/*=NULL*/)
       : task_id(tid), runtime(rt), initial_name(static_cast<char*>(
           malloc(((name == NULL) ? 64 : strlen(name) + 1) * sizeof(char)))),
-        task_lock(Reservation::create_reservation()),
         has_return_type(false), all_idempotent(false)
     //--------------------------------------------------------------------------
     {
@@ -7241,8 +7200,6 @@ namespace Legion {
     TaskImpl::~TaskImpl(void)
     //-------------------------------------------------------------------------
     {
-      task_lock.destroy_reservation();
-      task_lock = Reservation::NO_RESERVATION;
       for (std::map<SemanticTag,SemanticInfo>::const_iterator it = 
             semantic_infos.begin(); it != semantic_infos.end(); it++)
       {
@@ -8195,7 +8152,6 @@ namespace Legion {
         constraints_name(NULL) 
     //--------------------------------------------------------------------------
     {
-      layout_lock = Reservation::create_reservation();
     }
 
     //--------------------------------------------------------------------------
@@ -8214,7 +8170,6 @@ namespace Legion {
       }
       else
         constraints_name = strdup(registrar.layout_name);
-      layout_lock = Reservation::create_reservation();
     }
 
     //--------------------------------------------------------------------------
@@ -8228,7 +8183,6 @@ namespace Legion {
     {
       constraints_name = (char*)malloc(64*sizeof(char));
       snprintf(constraints_name,64,"layout constraints %ld", layout_id);
-      layout_lock = Reservation::create_reservation();
     }
 
     //--------------------------------------------------------------------------
@@ -8254,8 +8208,6 @@ namespace Legion {
     {
       if (constraints_name != NULL)
         free(constraints_name);
-      layout_lock.destroy_reservation();
-      layout_lock = Reservation::NO_RESERVATION;
     }
 
     //--------------------------------------------------------------------------
@@ -8525,7 +8477,7 @@ namespace Legion {
         new LayoutConstraints(lay_id, handle, runtime,
                               source, runtime->address_space);
       new_constraints->update_constraints(derez);
-      if (!runtime->register_layout(new_constraints, true/*need lock*/))
+      if (!runtime->register_layout(new_constraints))
         delete (new_constraints);
       // Now try to register this with the runtime
       // Trigger our done event and then return it
@@ -8593,10 +8545,6 @@ namespace Legion {
         projection_id(pid), functor(func)
     //--------------------------------------------------------------------------
     {
-      if (is_exclusive)
-        projection_reservation = Reservation::create_reservation();
-      else
-        projection_reservation = Reservation::NO_RESERVATION;
     }
 
     //--------------------------------------------------------------------------
@@ -8616,8 +8564,6 @@ namespace Legion {
       // These can be shared in the case of multiple runtime instances
       if (!Runtime::separate_runtime_instances)
         delete functor;
-      if (projection_reservation.exists())
-        projection_reservation.destroy_reservation();
     }
 
     //--------------------------------------------------------------------------
@@ -8629,7 +8575,13 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(req.handle_type != SINGULAR);
 #endif
-      if (projection_reservation.exists())
+      // It's actually unsafe to evaluate projection region requirements
+      // with NO_ACCESS since they can race with deletion operations for
+      // the region requirement as NO_ACCESS region requirements aren't
+      // recorded in the region tree
+      if (req.privilege == NO_ACCESS)
+        return LogicalRegion::NO_REGION;
+      if (!is_exclusive)
       {
         AutoLock p_lock(projection_reservation);
         if (req.handle_type == PART_PROJECTION)
@@ -8672,7 +8624,21 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(req.handle_type != SINGULAR);
 #endif
-      if (projection_reservation.exists())
+      // It's actually unsafe to evaluate projection region requirements
+      // with NO_ACCESS since they can race with deletion operations for
+      // the region requirement as NO_ACCESS region requirements aren't
+      // recorded in the region tree
+      if (req.privilege == NO_ACCESS)
+      {
+        for (std::vector<PointTask*>::const_iterator it =
+              point_tasks.begin(); it != point_tasks.end(); it++)
+        {
+          (*it)->set_projection_result(idx, LogicalRegion::NO_REGION);
+        }
+        return;
+      }
+
+      if (!is_exclusive)
       {
         AutoLock p_lock(projection_reservation);
         if (req.handle_type == PART_PROJECTION)
@@ -8740,7 +8706,21 @@ namespace Legion {
       assert(req.handle_type != SINGULAR);
       assert(mappable != NULL);
 #endif
-      if (projection_reservation.exists())
+      // It's actually unsafe to evaluate projection region requirements
+      // with NO_ACCESS since they can race with deletion operations for
+      // the region requirement as NO_ACCESS region requirements aren't
+      // recorded in the region tree
+      if (req.privilege == NO_ACCESS)
+      {
+        for (std::vector<ProjectionPoint*>::const_iterator it =
+              points.begin(); it != points.end(); it++)
+        {
+          (*it)->set_projection_result(idx, LogicalRegion::NO_REGION);
+        }
+        return;
+      }
+
+      if (!is_exclusive)
       {
         AutoLock p_lock(projection_reservation);
         if (req.handle_type == PART_PROJECTION)
@@ -8963,16 +8943,9 @@ namespace Legion {
         forest(new RegionTreeForest(this)), 
         has_explicit_utility_procs(!local_utilities.empty()), 
         prepared_for_shutdown(false),
-#ifdef DEBUG_LEGION
-        outstanding_task_lock(Reservation::create_reservation()),
-#endif
         total_outstanding_tasks(0), outstanding_top_level_tasks(0), 
         local_procs(locals), local_utils(local_utilities),
-        memory_manager_lock(Reservation::create_reservation()),
-        message_manager_lock(Reservation::create_reservation()),
         proc_spaces(processor_spaces),
-        task_variant_lock(Reservation::create_reservation()),
-        layout_constraints_lock(Reservation::create_reservation()),
         unique_index_space_id((unique == 0) ? runtime_stride : unique),
         unique_index_partition_id((unique == 0) ? runtime_stride : unique), 
         unique_field_space_id((unique == 0) ? runtime_stride : unique),
@@ -8987,48 +8960,8 @@ namespace Legion {
         unique_task_id(get_current_static_task_id()+unique),
         unique_mapper_id(get_current_static_mapper_id()+unique),
         unique_projection_id(get_current_static_projection_id()+unique),
-        projection_lock(Reservation::create_reservation()),
-        group_lock(Reservation::create_reservation()),
-        processor_mapping_lock(Reservation::create_reservation()),
-        distributed_id_lock(Reservation::create_reservation()),
         unique_distributed_id((unique == 0) ? runtime_stride : unique),
-        distributed_collectable_lock(Reservation::create_reservation()),
-        is_launch_lock(Reservation::create_reservation()),
-        gc_epoch_lock(Reservation::create_reservation()), gc_epoch_counter(0),
-        context_lock(Reservation::create_reservation()),
-        random_lock(Reservation::create_reservation()),
-        individual_task_lock(Reservation::create_reservation()), 
-        point_task_lock(Reservation::create_reservation()),
-        index_task_lock(Reservation::create_reservation()), 
-        slice_task_lock(Reservation::create_reservation()),
-        map_op_lock(Reservation::create_reservation()), 
-        copy_op_lock(Reservation::create_reservation()), 
-        fence_op_lock(Reservation::create_reservation()),
-        frame_op_lock(Reservation::create_reservation()),
-        deletion_op_lock(Reservation::create_reservation()), 
-        open_op_lock(Reservation::create_reservation()),
-        advance_op_lock(Reservation::create_reservation()),
-        inter_close_op_lock(Reservation::create_reservation()), 
-        read_close_op_lock(Reservation::create_reservation()),
-        post_close_op_lock(Reservation::create_reservation()),
-        virtual_close_op_lock(Reservation::create_reservation()),
-        dynamic_collective_op_lock(Reservation::create_reservation()),
-        future_pred_op_lock(Reservation::create_reservation()), 
-        not_pred_op_lock(Reservation::create_reservation()),
-        and_pred_op_lock(Reservation::create_reservation()),
-        or_pred_op_lock(Reservation::create_reservation()),
-        acquire_op_lock(Reservation::create_reservation()),
-        release_op_lock(Reservation::create_reservation()),
-        capture_op_lock(Reservation::create_reservation()),
-        trace_op_lock(Reservation::create_reservation()),
-        replay_op_lock(Reservation::create_reservation()),
-        epoch_op_lock(Reservation::create_reservation()),
-        pending_partition_op_lock(Reservation::create_reservation()),
-        dependent_partition_op_lock(Reservation::create_reservation()),
-        fill_op_lock(Reservation::create_reservation()),
-        attach_op_lock(Reservation::create_reservation()),
-        detach_op_lock(Reservation::create_reservation()),
-        timing_op_lock(Reservation::create_reservation())
+        gc_epoch_counter(0)
     //--------------------------------------------------------------------------
     {
       log_run.debug("Initializing high-level runtime in address space %x",
@@ -9108,7 +9041,6 @@ namespace Legion {
       }
 #endif
 #ifdef TRACE_ALLOCATION
-      allocation_lock = Reservation::create_reservation(); 
       allocation_tracing_count = 0;
       // Instantiate all the kinds of allocations
       for (unsigned idx = ARGUMENT_MAP_ALLOC; idx < LAST_ALLOC; idx++)
@@ -9157,8 +9089,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Make sure we don't send anymore messages
-      message_manager_lock.destroy_reservation();
-      message_manager_lock = Reservation::NO_RESERVATION;
       for (unsigned idx = 0; idx < MAX_NUM_NODES; idx++)
       {
         if (message_managers[idx] != NULL)
@@ -9200,8 +9130,6 @@ namespace Legion {
         delete (*it);
       }
       available_individual_tasks.clear();
-      individual_task_lock.destroy_reservation();
-      individual_task_lock = Reservation::NO_RESERVATION;
       for (std::deque<PointTask*>::const_iterator it = 
             available_point_tasks.begin(); it != 
             available_point_tasks.end(); it++)
@@ -9209,8 +9137,6 @@ namespace Legion {
         delete (*it);
       }
       available_point_tasks.clear();
-      point_task_lock.destroy_reservation();
-      point_task_lock = Reservation::NO_RESERVATION;
       for (std::deque<IndexTask*>::const_iterator it = 
             available_index_tasks.begin(); it != 
             available_index_tasks.end(); it++)
@@ -9218,8 +9144,6 @@ namespace Legion {
         delete (*it);
       }
       available_index_tasks.clear();
-      index_task_lock.destroy_reservation();
-      index_task_lock = Reservation::NO_RESERVATION;
       for (std::deque<SliceTask*>::const_iterator it = 
             available_slice_tasks.begin(); it != 
             available_slice_tasks.end(); it++)
@@ -9227,8 +9151,6 @@ namespace Legion {
         delete (*it);
       }
       available_slice_tasks.clear();
-      slice_task_lock.destroy_reservation();
-      slice_task_lock = Reservation::NO_RESERVATION;
       for (std::deque<MapOp*>::const_iterator it = 
             available_map_ops.begin(); it != 
             available_map_ops.end(); it++)
@@ -9236,8 +9158,6 @@ namespace Legion {
         delete (*it);
       }
       available_map_ops.clear();
-      map_op_lock.destroy_reservation();
-      map_op_lock = Reservation::NO_RESERVATION;
       for (std::deque<CopyOp*>::const_iterator it = 
             available_copy_ops.begin(); it != 
             available_copy_ops.end(); it++)
@@ -9245,8 +9165,6 @@ namespace Legion {
         delete (*it);
       }
       available_copy_ops.clear();
-      copy_op_lock.destroy_reservation();
-      copy_op_lock = Reservation::NO_RESERVATION;
       for (std::deque<FenceOp*>::const_iterator it = 
             available_fence_ops.begin(); it != 
             available_fence_ops.end(); it++)
@@ -9254,8 +9172,6 @@ namespace Legion {
         delete (*it);
       }
       available_fence_ops.clear();
-      fence_op_lock.destroy_reservation();
-      fence_op_lock = Reservation::NO_RESERVATION;
       for (std::deque<FrameOp*>::const_iterator it = 
             available_frame_ops.begin(); it !=
             available_frame_ops.end(); it++)
@@ -9263,8 +9179,6 @@ namespace Legion {
         delete (*it);
       }
       available_frame_ops.clear();
-      frame_op_lock.destroy_reservation();
-      frame_op_lock = Reservation::NO_RESERVATION;
       for (std::deque<DeletionOp*>::const_iterator it = 
             available_deletion_ops.begin(); it != 
             available_deletion_ops.end(); it++)
@@ -9272,8 +9186,6 @@ namespace Legion {
         delete (*it);
       }
       available_deletion_ops.clear();
-      deletion_op_lock.destroy_reservation();
-      deletion_op_lock = Reservation::NO_RESERVATION;
       for (std::deque<OpenOp*>::const_iterator it = 
             available_open_ops.begin(); it !=
             available_open_ops.end(); it++)
@@ -9281,8 +9193,6 @@ namespace Legion {
         delete (*it);
       }
       available_open_ops.clear();
-      open_op_lock.destroy_reservation();
-      open_op_lock = Reservation::NO_RESERVATION;
       for (std::deque<AdvanceOp*>::const_iterator it = 
             available_advance_ops.begin(); it !=
             available_advance_ops.end(); it++)
@@ -9290,8 +9200,6 @@ namespace Legion {
         delete (*it);
       }
       available_advance_ops.clear();
-      advance_op_lock.destroy_reservation();
-      advance_op_lock = Reservation::NO_RESERVATION;
       for (std::deque<InterCloseOp*>::const_iterator it = 
             available_inter_close_ops.begin(); it !=
             available_inter_close_ops.end(); it++)
@@ -9299,16 +9207,12 @@ namespace Legion {
         delete (*it);
       }
       available_inter_close_ops.clear();
-      inter_close_op_lock.destroy_reservation();
-      inter_close_op_lock = Reservation::NO_RESERVATION;
       for (std::deque<ReadCloseOp*>::const_iterator it = 
             available_read_close_ops.begin(); it != 
             available_read_close_ops.end(); it++)
       {
         delete (*it);
       }
-      read_close_op_lock.destroy_reservation();
-      read_close_op_lock = Reservation::NO_RESERVATION;
       for (std::deque<PostCloseOp*>::const_iterator it = 
             available_post_close_ops.begin(); it !=
             available_post_close_ops.end(); it++)
@@ -9316,8 +9220,6 @@ namespace Legion {
         delete (*it);
       }
       available_post_close_ops.clear();
-      post_close_op_lock.destroy_reservation();
-      post_close_op_lock = Reservation::NO_RESERVATION;
       for (std::deque<VirtualCloseOp*>::const_iterator it = 
             available_virtual_close_ops.begin(); it !=
             available_virtual_close_ops.end(); it++)
@@ -9325,8 +9227,6 @@ namespace Legion {
         delete (*it);
       }
       available_virtual_close_ops.clear();
-      virtual_close_op_lock.destroy_reservation();
-      virtual_close_op_lock = Reservation::NO_RESERVATION;
       for (std::deque<DynamicCollectiveOp*>::const_iterator it = 
             available_dynamic_collective_ops.begin(); it !=
             available_dynamic_collective_ops.end(); it++)
@@ -9334,8 +9234,6 @@ namespace Legion {
         delete (*it);
       }
       available_dynamic_collective_ops.end();
-      dynamic_collective_op_lock.destroy_reservation();
-      dynamic_collective_op_lock = Reservation::NO_RESERVATION;
       for (std::deque<FuturePredOp*>::const_iterator it = 
             available_future_pred_ops.begin(); it !=
             available_future_pred_ops.end(); it++)
@@ -9343,8 +9241,6 @@ namespace Legion {
         delete (*it);
       }
       available_future_pred_ops.clear();
-      future_pred_op_lock.destroy_reservation();
-      future_pred_op_lock = Reservation::NO_RESERVATION;
       for (std::deque<NotPredOp*>::const_iterator it = 
             available_not_pred_ops.begin(); it !=
             available_not_pred_ops.end(); it++)
@@ -9352,8 +9248,6 @@ namespace Legion {
         delete (*it);
       }
       available_not_pred_ops.clear();
-      not_pred_op_lock.destroy_reservation();
-      not_pred_op_lock = Reservation::NO_RESERVATION;
       for (std::deque<AndPredOp*>::const_iterator it = 
             available_and_pred_ops.begin(); it !=
             available_and_pred_ops.end(); it++)
@@ -9361,8 +9255,6 @@ namespace Legion {
         delete (*it);
       }
       available_and_pred_ops.clear();
-      and_pred_op_lock.destroy_reservation();
-      and_pred_op_lock = Reservation::NO_RESERVATION;
       for (std::deque<OrPredOp*>::const_iterator it = 
             available_or_pred_ops.begin(); it !=
             available_or_pred_ops.end(); it++)
@@ -9370,8 +9262,6 @@ namespace Legion {
         delete (*it);
       }
       available_or_pred_ops.clear();
-      or_pred_op_lock.destroy_reservation();
-      or_pred_op_lock = Reservation::NO_RESERVATION;
       for (std::deque<AcquireOp*>::const_iterator it = 
             available_acquire_ops.begin(); it !=
             available_acquire_ops.end(); it++)
@@ -9379,8 +9269,6 @@ namespace Legion {
         delete (*it);
       }
       available_acquire_ops.clear();
-      acquire_op_lock.destroy_reservation();
-      acquire_op_lock = Reservation::NO_RESERVATION;
       for (std::deque<ReleaseOp*>::const_iterator it = 
             available_release_ops.begin(); it !=
             available_release_ops.end(); it++)
@@ -9388,8 +9276,6 @@ namespace Legion {
         delete (*it);
       }
       available_release_ops.clear();
-      release_op_lock.destroy_reservation();
-      release_op_lock = Reservation::NO_RESERVATION;
       for (std::deque<TraceCaptureOp*>::const_iterator it = 
             available_capture_ops.begin(); it !=
             available_capture_ops.end(); it++)
@@ -9397,8 +9283,6 @@ namespace Legion {
         delete (*it);
       }
       available_capture_ops.clear();
-      capture_op_lock.destroy_reservation();
-      capture_op_lock = Reservation::NO_RESERVATION;
       for (std::deque<TraceCompleteOp*>::const_iterator it = 
             available_trace_ops.begin(); it !=
             available_trace_ops.end(); it++)
@@ -9406,8 +9290,6 @@ namespace Legion {
         delete (*it);
       }
       available_trace_ops.clear();
-      trace_op_lock.destroy_reservation();
-      trace_op_lock = Reservation::NO_RESERVATION;
       for (std::deque<MustEpochOp*>::const_iterator it = 
             available_epoch_ops.begin(); it !=
             available_epoch_ops.end(); it++)
@@ -9415,8 +9297,6 @@ namespace Legion {
         delete (*it);
       }
       available_epoch_ops.clear();
-      epoch_op_lock.destroy_reservation();
-      epoch_op_lock = Reservation::NO_RESERVATION;
       for (std::deque<PendingPartitionOp*>::const_iterator it = 
             available_pending_partition_ops.begin(); it !=
             available_pending_partition_ops.end(); it++)
@@ -9424,8 +9304,6 @@ namespace Legion {
         delete (*it);
       }
       available_pending_partition_ops.clear();
-      pending_partition_op_lock.destroy_reservation();
-      pending_partition_op_lock = Reservation::NO_RESERVATION;
       for (std::deque<DependentPartitionOp*>::const_iterator it = 
             available_dependent_partition_ops.begin(); it !=
             available_dependent_partition_ops.end(); it++)
@@ -9433,8 +9311,6 @@ namespace Legion {
         delete (*it);
       }
       available_dependent_partition_ops.clear();
-      dependent_partition_op_lock.destroy_reservation();
-      dependent_partition_op_lock = Reservation::NO_RESERVATION;
       for (std::deque<FillOp*>::const_iterator it = 
             available_fill_ops.begin(); it !=
             available_fill_ops.end(); it++)
@@ -9442,8 +9318,6 @@ namespace Legion {
         delete (*it);
       }
       available_fill_ops.clear();
-      fill_op_lock.destroy_reservation();
-      fill_op_lock = Reservation::NO_RESERVATION;
       for (std::deque<AttachOp*>::const_iterator it = 
             available_attach_ops.begin(); it !=
             available_attach_ops.end(); it++)
@@ -9451,8 +9325,6 @@ namespace Legion {
         delete (*it);
       }
       available_attach_ops.clear();
-      attach_op_lock.destroy_reservation();
-      attach_op_lock = Reservation::NO_RESERVATION;
       for (std::deque<DetachOp*>::const_iterator it = 
             available_detach_ops.begin(); it !=
             available_detach_ops.end(); it++)
@@ -9460,8 +9332,6 @@ namespace Legion {
         delete (*it);
       }
       available_detach_ops.clear();
-      detach_op_lock.destroy_reservation();
-      detach_op_lock = Reservation::NO_RESERVATION;
       for (std::deque<TimingOp*>::const_iterator it = 
             available_timing_ops.begin(); it != 
             available_timing_ops.end(); it++)
@@ -9469,8 +9339,6 @@ namespace Legion {
         delete (*it);
       }
       available_timing_ops.clear();
-      timing_op_lock.destroy_reservation();
-      timing_op_lock = Reservation::NO_RESERVATION;
       for (std::map<TaskID,TaskImpl*>::const_iterator it = 
             task_table.begin(); it != task_table.end(); it++)
       {
@@ -9487,8 +9355,6 @@ namespace Legion {
         }
       }
       variant_table.clear();
-      task_variant_lock.destroy_reservation();
-      task_variant_lock = Reservation::NO_RESERVATION;
       // Skip this if we are in separate runtime mode
       if (!Runtime::separate_runtime_instances)
       {
@@ -9502,35 +9368,13 @@ namespace Legion {
             delete (next);
         }
       }
-      layout_constraints_lock.destroy_reservation();
-      layout_constraints_lock = Reservation::NO_RESERVATION;
-      memory_manager_lock.destroy_reservation();
-      memory_manager_lock = Reservation::NO_RESERVATION; 
       for (std::map<Memory,MemoryManager*>::const_iterator it =
             memory_managers.begin(); it != memory_managers.end(); it++)
       {
         delete it->second;
       }
       memory_managers.clear();
-      projection_lock.destroy_reservation();
-      projection_lock = Reservation::NO_RESERVATION;
-      group_lock.destroy_reservation();
-      group_lock = Reservation::NO_RESERVATION;
-      processor_mapping_lock.destroy_reservation();
-      processor_mapping_lock = Reservation::NO_RESERVATION;
-      distributed_id_lock.destroy_reservation();
-      distributed_id_lock = Reservation::NO_RESERVATION;
-      distributed_collectable_lock.destroy_reservation();
-      distributed_collectable_lock = Reservation::NO_RESERVATION;
-      is_launch_lock.destroy_reservation();
-      is_launch_lock = Reservation::NO_RESERVATION;
-      gc_epoch_lock.destroy_reservation();
-      gc_epoch_lock = Reservation::NO_RESERVATION;
-      context_lock.destroy_reservation();
-      context_lock = Reservation::NO_RESERVATION;
 #ifdef DEBUG_LEGION
-      outstanding_task_lock.destroy_reservation();
-      outstanding_task_lock = Reservation::NO_RESERVATION;
       if (logging_region_tree_state)
 	delete tree_state_logger;
 #endif
@@ -9791,7 +9635,7 @@ namespace Legion {
         }
       }
       // Get an individual task to be the top-level task
-      IndividualTask *top_task = get_available_individual_task(false);
+      IndividualTask *top_task = get_available_individual_task();
       // Get a remote task to serve as the top of the top-level task
       TopLevelContext *top_context = 
         new TopLevelContext(this, get_unique_operation_id());
@@ -9837,7 +9681,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Get an individual task to be the top-level task
-      IndividualTask *mapper_task = get_available_individual_task(false);
+      IndividualTask *mapper_task = get_available_individual_task();
       // Get a remote task to serve as the top of the top-level task
       TopLevelContext *map_context = 
         new TopLevelContext(this, get_unique_operation_id());
@@ -11652,7 +11496,7 @@ namespace Legion {
 #endif
       ctx->begin_runtime_call();
       DynamicCollectiveOp *collective = 
-        get_available_dynamic_collective_op(true);
+        get_available_dynamic_collective_op();
       Future result = collective->initialize(ctx, dc);
       Processor proc = ctx->get_executing_processor();
       add_to_dependence_queue(ctx, proc, collective);
@@ -11802,7 +11646,7 @@ namespace Legion {
                     ctx->get_unique_id());
 #endif
       FutureImpl *result = new FutureImpl(this, true/*register*/,
-                              get_available_distributed_id(true),
+                              get_available_distributed_id(),
                               address_space, ctx->get_owner_task());
       // Make this here to get a local reference on it now
       Future result_future(result);
@@ -12579,7 +12423,6 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(sid < MAX_NUM_NODES);
       assert(sid != address_space); // shouldn't be sending messages to ourself
-      assert(message_manager_lock.exists());
 #endif
       MessageManager *result = message_managers[sid];
       if (result != NULL)
@@ -15281,13 +15124,13 @@ namespace Legion {
       if (program_order_execution)
       {
         ApEvent term_event = op->get_completion_event();
-        ctx->add_to_dependence_queue(op, true/*first*/, precondition);
+        ctx->add_to_dependence_queue(op, precondition);
         ctx->begin_task_wait(true/*from runtime*/);
         term_event.lg_wait();
         ctx->end_task_wait();
       }
       else
-        ctx->add_to_dependence_queue(op, true/*first*/, precondition);
+        ctx->add_to_dependence_queue(op, precondition);
     }
     
     //--------------------------------------------------------------------------
@@ -15399,25 +15242,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    DistributedID Runtime::get_available_distributed_id(bool need_cont,
-                                                        bool has_lock)
+    DistributedID Runtime::get_available_distributed_id(void)
     //--------------------------------------------------------------------------
     {
-      if (need_cont)
-      {
-#ifdef DEBUG_LEGION
-        assert(!has_lock);
-#endif
-        GetAvailableContinuation<DistributedID,
-                     &Runtime::get_available_distributed_id> 
-                       continuation(this, distributed_id_lock);
-        return continuation.get_result();
-      }
-      else if (!has_lock)
-      {
-        AutoLock d_lock(distributed_id_lock);
-        return get_available_distributed_id(false,true);
-      }
+      AutoLock d_lock(distributed_id_lock);
       if (!available_distributed_ids.empty())
       {
         DistributedID result = available_distributed_ids.front();
@@ -15485,41 +15313,31 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void Runtime::register_distributed_collectable(DistributedID did,
-                                                   DistributedCollectable *dc,
-                                                   bool needs_lock)
+                                                   DistributedCollectable *dc)
     //--------------------------------------------------------------------------
     {
       did &= LEGION_DISTRIBUTED_ID_MASK;
-      if (needs_lock)
+      RtUserEvent to_trigger;
       {
-        RtEvent acquire_event = Runtime::acquire_rt_reservation(
-                        distributed_collectable_lock, true/*exclusive*/);
-        if (!acquire_event.has_triggered())
+        AutoLock dc_lock(distributed_collectable_lock);
+        // If we make it here then we have the lock
+#ifdef DEBUG_LEGION
+        assert(dist_collectables.find(did) == dist_collectables.end());
+#endif
+        dist_collectables[did] = dc;
+        // See if this was a pending collectable
+        std::map<DistributedID,
+                 std::pair<DistributedCollectable*,RtUserEvent> >::iterator 
+            finder = pending_collectables.find(did);
+        if (finder != pending_collectables.end())
         {
-          RegisterDistributedContinuation continuation(did, dc, this);
-          RtEvent done_event = continuation.defer(this, acquire_event);
-          done_event.lg_wait();
-          return;
+#ifdef DEBUG_LEGION
+          assert(finder->second.first == dc);
+#endif
+          to_trigger = finder->second.second;
+          pending_collectables.erase(finder);
         }
       }
-      RtUserEvent to_trigger;
-      // If we make it here then we have the lock
-#ifdef DEBUG_LEGION
-      assert(dist_collectables.find(did) == dist_collectables.end());
-#endif
-      dist_collectables[did] = dc;
-      // See if this was a pending collectable
-      std::map<DistributedID,std::pair<DistributedCollectable*,RtUserEvent> >::
-        iterator finder = pending_collectables.find(did);
-      if (finder != pending_collectables.end())
-      {
-#ifdef DEBUG_LEGION
-        assert(finder->second.first == dc);
-#endif
-        to_trigger = finder->second.second;
-        pending_collectables.erase(finder);
-      }
-      Runtime::release_reservation(distributed_collectable_lock);
       if (to_trigger.exists())
         Runtime::trigger_event(to_trigger);
     }
@@ -15875,7 +15693,7 @@ namespace Legion {
       }
       IndexSpace result(get_unique_index_space_id(),
                         get_unique_index_tree_id(), type_tag);
-      DistributedID did = get_available_distributed_id(true/*continuation*/);
+      DistributedID did = get_available_distributed_id();
       forest->create_index_space(result, realm_is, did);
       if (Runtime::legion_spy_enabled)
         LegionSpy::log_top_index_space(result.id);
@@ -16161,713 +15979,295 @@ namespace Legion {
 #endif
 
     //--------------------------------------------------------------------------
-    IndividualTask* Runtime::get_available_individual_task(bool need_cont,
-                                                           bool has_lock)
+    IndividualTask* Runtime::get_available_individual_task(void)
     //--------------------------------------------------------------------------
     {
-      if (need_cont)
-      {
-#ifdef DEBUG_LEGION
-        assert(!has_lock);
-#endif
-        GetAvailableContinuation<IndividualTask*,
-                     &Runtime::get_available_individual_task> 
-                       continuation(this, individual_task_lock);
-        return continuation.get_result();
-      }
       IndividualTask *result = get_available(individual_task_lock, 
-                                         available_individual_tasks, has_lock);
+                                         available_individual_tasks);
 #ifdef DEBUG_LEGION
-      if (!has_lock)
-      {
-        AutoLock i_lock(individual_task_lock);
-        out_individual_tasks.insert(result);
-      }
-      else
-        out_individual_tasks.insert(result);
+      AutoLock i_lock(individual_task_lock);
+      out_individual_tasks.insert(result);
 #endif
       return result;
     }
 
     //--------------------------------------------------------------------------
-    PointTask* Runtime::get_available_point_task(bool need_cont, bool has_lock)
+    PointTask* Runtime::get_available_point_task(void)
     //--------------------------------------------------------------------------
     {
-      if (need_cont)
-      {
-#ifdef DEBUG_LEGION
-        assert(!has_lock);
-#endif
-        GetAvailableContinuation<PointTask*,
-                     &Runtime::get_available_point_task> 
-                       continuation(this, point_task_lock);
-        return continuation.get_result();
-      }
       PointTask *result = get_available(point_task_lock, 
-                                        available_point_tasks, has_lock);
+                                        available_point_tasks);
 #ifdef DEBUG_LEGION
-      if (!has_lock)
-      {
-        AutoLock p_lock(point_task_lock);
-        out_point_tasks.insert(result);
-      }
-      else
-        out_point_tasks.insert(result);
+      AutoLock p_lock(point_task_lock);
+      out_point_tasks.insert(result);
 #endif
       return result;
     }
 
     //--------------------------------------------------------------------------
-    IndexTask* Runtime::get_available_index_task(bool need_cont, bool has_lock)
+    IndexTask* Runtime::get_available_index_task(void)
     //--------------------------------------------------------------------------
     {
-      if (need_cont)
-      {
-#ifdef DEBUG_LEGION
-        assert(!has_lock);
-#endif
-        GetAvailableContinuation<IndexTask*,
-                     &Runtime::get_available_index_task> 
-                       continuation(this, index_task_lock);
-        return continuation.get_result();
-      }
       IndexTask *result = get_available(index_task_lock, 
-                                       available_index_tasks, has_lock);
+                                       available_index_tasks);
 #ifdef DEBUG_LEGION
-      if (!has_lock)
-      {
-        AutoLock i_lock(index_task_lock);
-        out_index_tasks.insert(result);
-      }
-      else
-        out_index_tasks.insert(result);
+      AutoLock i_lock(index_task_lock);
+      out_index_tasks.insert(result);
 #endif
       return result;
     }
 
     //--------------------------------------------------------------------------
-    SliceTask* Runtime::get_available_slice_task(bool need_cont, bool has_lock)
+    SliceTask* Runtime::get_available_slice_task(void)
     //--------------------------------------------------------------------------
     {
-      if (need_cont)
-      {
+      SliceTask *result = get_available(slice_task_lock,
+                                       available_slice_tasks);
 #ifdef DEBUG_LEGION
-        assert(!has_lock);
-#endif
-        GetAvailableContinuation<SliceTask*,
-                     &Runtime::get_available_slice_task> 
-                       continuation(this, slice_task_lock);
-        return continuation.get_result();
-      }
-      SliceTask *result = get_available(slice_task_lock, 
-                                       available_slice_tasks, has_lock);
-#ifdef DEBUG_LEGION
-      if (!has_lock)
-      {
-        AutoLock s_lock(slice_task_lock);
-        out_slice_tasks.insert(result);
-      }
-      else
-        out_slice_tasks.insert(result);
+      AutoLock s_lock(slice_task_lock);
+      out_slice_tasks.insert(result);
 #endif
       return result;
     }
 
     //--------------------------------------------------------------------------
-    MapOp* Runtime::get_available_map_op(bool need_cont, bool has_lock)
+    MapOp* Runtime::get_available_map_op(void)
     //--------------------------------------------------------------------------
     {
-      if (need_cont)
-      {
-#ifdef DEBUG_LEGION
-        assert(!has_lock);
-#endif
-        GetAvailableContinuation<MapOp*,
-                     &Runtime::get_available_map_op> 
-                       continuation(this, map_op_lock);
-        return continuation.get_result();
-      }
-      return get_available(map_op_lock, available_map_ops, has_lock);
+      return get_available(map_op_lock, available_map_ops);
     }
 
     //--------------------------------------------------------------------------
-    CopyOp* Runtime::get_available_copy_op(bool need_cont, bool has_lock)
+    CopyOp* Runtime::get_available_copy_op(void)
     //--------------------------------------------------------------------------
     {
-      if (need_cont)
-      {
-#ifdef DEBUG_LEGION
-        assert(!has_lock);
-#endif
-        GetAvailableContinuation<CopyOp*,
-                     &Runtime::get_available_copy_op> 
-                       continuation(this, copy_op_lock);
-        return continuation.get_result();
-      }
-      return get_available(copy_op_lock, available_copy_ops, has_lock);
+      return get_available(copy_op_lock, available_copy_ops);
     }
 
     //--------------------------------------------------------------------------
-    IndexCopyOp* Runtime::get_available_index_copy_op(bool need_cont, 
-                                                      bool has_lock)
+    IndexCopyOp* Runtime::get_available_index_copy_op(void)
     //--------------------------------------------------------------------------
     {
-      if (need_cont)
-      {
-#ifdef DEBUG_LEGION
-        assert(!has_lock);
-#endif
-        GetAvailableContinuation<IndexCopyOp*,
-                     &Runtime::get_available_index_copy_op> 
-                       continuation(this, copy_op_lock);
-        return continuation.get_result();
-      }
-      return get_available(copy_op_lock, available_index_copy_ops, has_lock);
+      return get_available(copy_op_lock, available_index_copy_ops);
     }
 
     //--------------------------------------------------------------------------
-    PointCopyOp* Runtime::get_available_point_copy_op(bool need_cont, 
-                                                      bool has_lock)
+    PointCopyOp* Runtime::get_available_point_copy_op(void)
     //--------------------------------------------------------------------------
     {
-      if (need_cont)
-      {
-#ifdef DEBUG_LEGION
-        assert(!has_lock);
-#endif
-        GetAvailableContinuation<PointCopyOp*,
-                     &Runtime::get_available_point_copy_op> 
-                       continuation(this, copy_op_lock);
-        return continuation.get_result();
-      }
-      return get_available(copy_op_lock, available_point_copy_ops, has_lock);
+      return get_available(copy_op_lock, available_point_copy_ops);
     }
 
     //--------------------------------------------------------------------------
-    FenceOp* Runtime::get_available_fence_op(bool need_cont, bool has_lock)
+    FenceOp* Runtime::get_available_fence_op(void)
     //--------------------------------------------------------------------------
     {
-      if (need_cont)
-      {
-#ifdef DEBUG_LEGION
-        assert(!has_lock);
-#endif
-        GetAvailableContinuation<FenceOp*,
-                     &Runtime::get_available_fence_op> 
-                       continuation(this, fence_op_lock);
-        return continuation.get_result();
-      }
-      return get_available(fence_op_lock, available_fence_ops, has_lock);
+      return get_available(fence_op_lock, available_fence_ops);
     }
 
     //--------------------------------------------------------------------------
-    FrameOp* Runtime::get_available_frame_op(bool need_cont, bool has_lock)
+    FrameOp* Runtime::get_available_frame_op(void)
     //--------------------------------------------------------------------------
     {
-      if (need_cont)
-      {
-#ifdef DEBUG_LEGION
-        assert(!has_lock);
-#endif
-        GetAvailableContinuation<FrameOp*,
-                     &Runtime::get_available_frame_op> 
-                       continuation(this, frame_op_lock);
-        return continuation.get_result();
-      }
-      return get_available(frame_op_lock, available_frame_ops, has_lock);
+      return get_available(frame_op_lock, available_frame_ops);
     }
 
     //--------------------------------------------------------------------------
-    DeletionOp* Runtime::get_available_deletion_op(bool need_cont, 
-                                                   bool has_lock)
+    DeletionOp* Runtime::get_available_deletion_op(void)
     //--------------------------------------------------------------------------
     {
-      if (need_cont)
-      {
-#ifdef DEBUG_LEGION
-        assert(!has_lock);
-#endif
-        GetAvailableContinuation<DeletionOp*,
-                     &Runtime::get_available_deletion_op> 
-                       continuation(this, deletion_op_lock);
-        return continuation.get_result();
-      }
-      return get_available(deletion_op_lock, available_deletion_ops, has_lock);
+      return get_available(deletion_op_lock, available_deletion_ops);
     }
 
     //--------------------------------------------------------------------------
-    OpenOp* Runtime::get_available_open_op(bool need_cont, bool has_lock)
+    OpenOp* Runtime::get_available_open_op(void)
     //--------------------------------------------------------------------------
     {
-      if (need_cont)
-      {
-#ifdef DEBUG_LEGION
-        assert(!has_lock);
-#endif
-        GetAvailableContinuation<OpenOp*, &Runtime::get_available_open_op>
-          continuation(this, open_op_lock);
-        return continuation.get_result();
-      }
-      return get_available(open_op_lock, available_open_ops, has_lock);
+      return get_available(open_op_lock, available_open_ops);
     }
 
     //--------------------------------------------------------------------------
-    AdvanceOp* Runtime::get_available_advance_op(bool need_cont, bool has_lock)
+    AdvanceOp* Runtime::get_available_advance_op(void)
     //--------------------------------------------------------------------------
     {
-      if (need_cont)
-      {
-#ifdef DEBUG_LEGION
-        assert(!has_lock);
-#endif
-        GetAvailableContinuation<AdvanceOp*, 
-                      &Runtime::get_available_advance_op>
-                        continuation(this, advance_op_lock);
-        return continuation.get_result();
-      }
-      return get_available(advance_op_lock, available_advance_ops, has_lock);
+      return get_available(advance_op_lock, available_advance_ops);
     }
 
     //--------------------------------------------------------------------------
-    InterCloseOp* Runtime::get_available_inter_close_op(bool need_cont,
-                                                        bool has_lock)
+    InterCloseOp* Runtime::get_available_inter_close_op(void)
     //--------------------------------------------------------------------------
     {
-      if (need_cont)
-      {
-#ifdef DEBUG_LEGION
-        assert(!has_lock);
-#endif
-        GetAvailableContinuation<InterCloseOp*,
-                     &Runtime::get_available_inter_close_op> 
-                       continuation(this, inter_close_op_lock);
-        return continuation.get_result();
-      }
-      return get_available(inter_close_op_lock, 
-                           available_inter_close_ops, has_lock);
+      return get_available(inter_close_op_lock, available_inter_close_ops);
     }
 
     //--------------------------------------------------------------------------
-    ReadCloseOp* Runtime::get_available_read_close_op(bool need_cont,
-                                                       bool has_lock)
+    ReadCloseOp* Runtime::get_available_read_close_op(void)
     //--------------------------------------------------------------------------
     {
-      if (need_cont)
-      {
-#ifdef DEBUG_LEGION
-        assert(!has_lock);
-#endif
-        GetAvailableContinuation<ReadCloseOp*,
-                     &Runtime::get_available_read_close_op> 
-                       continuation(this, read_close_op_lock);
-        return continuation.get_result();
-      }
-      return get_available(read_close_op_lock, 
-                           available_read_close_ops, has_lock);
+      return get_available(read_close_op_lock, available_read_close_ops);
     }
 
     //--------------------------------------------------------------------------
-    PostCloseOp* Runtime::get_available_post_close_op(bool need_cont,
-                                                      bool has_lock)
+    PostCloseOp* Runtime::get_available_post_close_op(void)
     //--------------------------------------------------------------------------
     {
-      if (need_cont)
-      {
-#ifdef DEBUG_LEGION
-        assert(!has_lock);
-#endif
-        GetAvailableContinuation<PostCloseOp*,
-                     &Runtime::get_available_post_close_op> 
-                       continuation(this, post_close_op_lock);
-        return continuation.get_result();
-      }
-      return get_available(post_close_op_lock, 
-                           available_post_close_ops, has_lock);
+      return get_available(post_close_op_lock, available_post_close_ops);
     }
 
     //--------------------------------------------------------------------------
-    VirtualCloseOp* Runtime::get_available_virtual_close_op(bool need_cont,
-                                                            bool has_lock)
+    VirtualCloseOp* Runtime::get_available_virtual_close_op(void)
     //--------------------------------------------------------------------------
     {
-      if (need_cont)
-      {
-#ifdef DEBUG_LEGION
-        assert(!has_lock);
-#endif
-        GetAvailableContinuation<VirtualCloseOp*,
-                     &Runtime::get_available_virtual_close_op> 
-                       continuation(this, virtual_close_op_lock);
-        return continuation.get_result();
-      }
-      return get_available(virtual_close_op_lock,
-                           available_virtual_close_ops, has_lock);
+      return get_available(virtual_close_op_lock, available_virtual_close_ops);
     }
 
     //--------------------------------------------------------------------------
-    DynamicCollectiveOp* Runtime::get_available_dynamic_collective_op(
-                                                  bool need_cont, bool has_lock)
+    DynamicCollectiveOp* Runtime::get_available_dynamic_collective_op(void)
     //--------------------------------------------------------------------------
     {
-      if (need_cont)
-      {
-#ifdef DEBUG_LEGION
-        assert(!has_lock);
-#endif
-        GetAvailableContinuation<DynamicCollectiveOp*,
-                     &Runtime::get_available_dynamic_collective_op> 
-                       continuation(this, dynamic_collective_op_lock);
-        return continuation.get_result();
-      }
       return get_available(dynamic_collective_op_lock, 
-                           available_dynamic_collective_ops, has_lock);
+                           available_dynamic_collective_ops);
     }
 
     //--------------------------------------------------------------------------
-    FuturePredOp* Runtime::get_available_future_pred_op(bool need_cont,
-                                                        bool has_lock)
+    FuturePredOp* Runtime::get_available_future_pred_op(void)
     //--------------------------------------------------------------------------
     {
-      if (need_cont)
-      {
-#ifdef DEBUG_LEGION
-        assert(!has_lock);
-#endif
-        GetAvailableContinuation<FuturePredOp*,
-                     &Runtime::get_available_future_pred_op> 
-                       continuation(this, future_pred_op_lock);
-        return continuation.get_result();
-      }
-      return get_available(future_pred_op_lock, 
-                           available_future_pred_ops, has_lock);
+      return get_available(future_pred_op_lock, available_future_pred_ops);
     }
 
     //--------------------------------------------------------------------------
-    NotPredOp* Runtime::get_available_not_pred_op(bool need_cont,bool has_lock)
+    NotPredOp* Runtime::get_available_not_pred_op(void)
     //--------------------------------------------------------------------------
     {
-      if (need_cont)
-      {
-#ifdef DEBUG_LEGION
-        assert(!has_lock);
-#endif
-        GetAvailableContinuation<NotPredOp*,
-                     &Runtime::get_available_not_pred_op> 
-                       continuation(this, not_pred_op_lock);
-        return continuation.get_result();
-      }
-      return get_available(not_pred_op_lock, available_not_pred_ops, has_lock);
+      return get_available(not_pred_op_lock, available_not_pred_ops);
     }
 
     //--------------------------------------------------------------------------
-    AndPredOp* Runtime::get_available_and_pred_op(bool need_cont,bool has_lock)
+    AndPredOp* Runtime::get_available_and_pred_op(void)
     //--------------------------------------------------------------------------
     {
-      if (need_cont)
-      {
-#ifdef DEBUG_LEGION
-        assert(!has_lock);
-#endif
-        GetAvailableContinuation<AndPredOp*,
-                     &Runtime::get_available_and_pred_op> 
-                       continuation(this, and_pred_op_lock);
-        return continuation.get_result();
-      }
-      return get_available(and_pred_op_lock, available_and_pred_ops, has_lock);
+      return get_available(and_pred_op_lock, available_and_pred_ops);
     }
 
     //--------------------------------------------------------------------------
-    OrPredOp* Runtime::get_available_or_pred_op(bool need_cont, bool has_lock)
+    OrPredOp* Runtime::get_available_or_pred_op(void)
     //--------------------------------------------------------------------------
     {
-      if (need_cont)
-      {
-#ifdef DEBUG_LEGION
-        assert(!has_lock);
-#endif
-        GetAvailableContinuation<OrPredOp*,
-                     &Runtime::get_available_or_pred_op> 
-                       continuation(this, or_pred_op_lock);
-        return continuation.get_result();
-      }
-      return get_available(or_pred_op_lock, available_or_pred_ops, has_lock);
+      return get_available(or_pred_op_lock, available_or_pred_ops);
     }
 
     //--------------------------------------------------------------------------
-    AcquireOp* Runtime::get_available_acquire_op(bool need_cont, bool has_lock)
+    AcquireOp* Runtime::get_available_acquire_op(void)
     //--------------------------------------------------------------------------
     {
-      if (need_cont)
-      {
-#ifdef DEBUG_LEGION
-        assert(!has_lock);
-#endif
-        GetAvailableContinuation<AcquireOp*,
-                     &Runtime::get_available_acquire_op> 
-                       continuation(this, acquire_op_lock);
-        return continuation.get_result();
-      }
-      return get_available(acquire_op_lock, available_acquire_ops, has_lock);
+      return get_available(acquire_op_lock, available_acquire_ops);
     }
 
     //--------------------------------------------------------------------------
-    ReleaseOp* Runtime::get_available_release_op(bool need_cont, bool has_lock)
+    ReleaseOp* Runtime::get_available_release_op(void)
     //--------------------------------------------------------------------------
     {
-      if (need_cont)
-      {
-#ifdef DEBUG_LEGION
-        assert(!has_lock);
-#endif
-        GetAvailableContinuation<ReleaseOp*,
-                     &Runtime::get_available_release_op> 
-                       continuation(this, release_op_lock);
-        return continuation.get_result();
-      }
-      return get_available(release_op_lock, available_release_ops, has_lock);
+      return get_available(release_op_lock, available_release_ops);
     }
 
     //--------------------------------------------------------------------------
-    TraceCaptureOp* Runtime::get_available_capture_op(bool need_cont, 
-                                                      bool has_lock)
+    TraceCaptureOp* Runtime::get_available_capture_op(void)
     //--------------------------------------------------------------------------
     {
-      if (need_cont)
-      {
-#ifdef DEBUG_LEGION
-        assert(!has_lock);
-#endif
-        GetAvailableContinuation<TraceCaptureOp*,
-                     &Runtime::get_available_capture_op> 
-                       continuation(this, capture_op_lock);
-        return continuation.get_result();
-      }
-      return get_available(capture_op_lock, available_capture_ops, has_lock);
+      return get_available(capture_op_lock, available_capture_ops);
     }
 
     //--------------------------------------------------------------------------
-    TraceCompleteOp* Runtime::get_available_trace_op(bool need_cont, 
-                                                     bool has_lock)
+    TraceCompleteOp* Runtime::get_available_trace_op(void)
     //--------------------------------------------------------------------------
     {
-      if (need_cont)
-      {
-#ifdef DEBUG_LEGION
-        assert(!has_lock);
-#endif
-        GetAvailableContinuation<TraceCompleteOp*,
-                     &Runtime::get_available_trace_op> 
-                       continuation(this, trace_op_lock);
-        return continuation.get_result();
-      }
-      return get_available(trace_op_lock, available_trace_ops, has_lock);
+      return get_available(trace_op_lock, available_trace_ops);
     }
 
     //--------------------------------------------------------------------------
-    TraceReplayOp* Runtime::get_available_replay_op(bool need_cont,
-                                                    bool has_lock)
+    TraceReplayOp* Runtime::get_available_replay_op(void)
     //--------------------------------------------------------------------------
     {
-      if (need_cont)
-      {
-#ifdef DEBUG_LEGION
-        assert(!has_lock);
-#endif
-        GetAvailableContinuation<TraceReplayOp*,
-        &Runtime::get_available_replay_op>
-        continuation(this, replay_op_lock);
-        return continuation.get_result();
-      }
-      return get_available(replay_op_lock, available_replay_ops, has_lock);
+      return get_available(replay_op_lock, available_replay_ops);
     }
     
     //--------------------------------------------------------------------------
-    MustEpochOp* Runtime::get_available_epoch_op(bool need_cont, bool has_lock)
+    MustEpochOp* Runtime::get_available_epoch_op(void)
     //--------------------------------------------------------------------------
     {
-      if (need_cont)
-      {
+      MustEpochOp *result = get_available(epoch_op_lock, available_epoch_ops);
 #ifdef DEBUG_LEGION
-        assert(!has_lock);
-#endif
-        GetAvailableContinuation<MustEpochOp*,
-                     &Runtime::get_available_epoch_op> 
-                       continuation(this, epoch_op_lock);
-        return continuation.get_result();
-      }
-      MustEpochOp *result = 
-        get_available(epoch_op_lock, available_epoch_ops, has_lock);
-#ifdef DEBUG_LEGION
-      if (!has_lock)
-      {
-        AutoLock e_lock(epoch_op_lock);
-        out_must_epoch.insert(result);
-      }
-      else
-        out_must_epoch.insert(result);
+      AutoLock e_lock(epoch_op_lock);
+      out_must_epoch.insert(result);
 #endif
       return result;
     }
 
     //--------------------------------------------------------------------------
-    PendingPartitionOp* Runtime::get_available_pending_partition_op(
-                                                  bool need_cont, bool has_lock)
+    PendingPartitionOp* Runtime::get_available_pending_partition_op(void)
     //--------------------------------------------------------------------------
     {
-      if (need_cont)
-      {
-#ifdef DEBUG_LEGION
-        assert(!has_lock);
-#endif
-        GetAvailableContinuation<PendingPartitionOp*,
-                     &Runtime::get_available_pending_partition_op> 
-                       continuation(this, pending_partition_op_lock);
-        return continuation.get_result();
-      }
       return get_available(pending_partition_op_lock, 
-                           available_pending_partition_ops, has_lock);
+                           available_pending_partition_ops);
     }
 
     //--------------------------------------------------------------------------
-    DependentPartitionOp* Runtime::get_available_dependent_partition_op(
-                                                  bool need_cont, bool has_lock)
+    DependentPartitionOp* Runtime::get_available_dependent_partition_op(void)
     //--------------------------------------------------------------------------
     {
-      if (need_cont)
-      {
-#ifdef DEBUG_LEGION
-        assert(!has_lock);
-#endif
-        GetAvailableContinuation<DependentPartitionOp*,
-                     &Runtime::get_available_dependent_partition_op> 
-                       continuation(this, dependent_partition_op_lock);
-        return continuation.get_result();
-      }
       return get_available(dependent_partition_op_lock, 
-                           available_dependent_partition_ops, has_lock);
+                           available_dependent_partition_ops);
     }
 
     //--------------------------------------------------------------------------
-    PointDepPartOp* Runtime::get_available_point_dep_part_op(bool need_cont,
-                                                             bool has_lock)
+    PointDepPartOp* Runtime::get_available_point_dep_part_op(void)
     //--------------------------------------------------------------------------
     {
-      if (need_cont)
-      {
-#ifdef DEBUG_LEGION
-        assert(!has_lock);
-#endif
-        GetAvailableContinuation<PointDepPartOp*,
-                     &Runtime::get_available_point_dep_part_op>
-                       continuation(this, dependent_partition_op_lock);
-        return continuation.get_result();
-      }
       return get_available(dependent_partition_op_lock,
-                           available_point_dep_part_ops, has_lock);
+                           available_point_dep_part_ops);
     }
 
     //--------------------------------------------------------------------------
-    FillOp* Runtime::get_available_fill_op(bool need_cont, bool has_lock)
+    FillOp* Runtime::get_available_fill_op(void)
     //--------------------------------------------------------------------------
     {
-      if (need_cont)
-      {
-#ifdef DEBUG_LEGION
-        assert(!has_lock);
-#endif
-        GetAvailableContinuation<FillOp*,
-                     &Runtime::get_available_fill_op> 
-                       continuation(this, fill_op_lock);
-        return continuation.get_result();
-      }
-      return get_available(fill_op_lock, available_fill_ops, has_lock);
+      return get_available(fill_op_lock, available_fill_ops);
     }
 
     //--------------------------------------------------------------------------
-    IndexFillOp* Runtime::get_available_index_fill_op(bool need_cont, 
-                                                      bool has_lock)
+    IndexFillOp* Runtime::get_available_index_fill_op(void)
     //--------------------------------------------------------------------------
     {
-      if (need_cont)
-      {
-#ifdef DEBUG_LEGION
-        assert(!has_lock);
-#endif
-        GetAvailableContinuation<IndexFillOp*,
-                     &Runtime::get_available_index_fill_op> 
-                       continuation(this, fill_op_lock);
-        return continuation.get_result();
-      }
-      return get_available(fill_op_lock, available_index_fill_ops, has_lock);
+      return get_available(fill_op_lock, available_index_fill_ops);
     }
 
     //--------------------------------------------------------------------------
-    PointFillOp* Runtime::get_available_point_fill_op(bool need_cont, 
-                                                      bool has_lock)
+    PointFillOp* Runtime::get_available_point_fill_op(void)
     //--------------------------------------------------------------------------
     {
-      if (need_cont)
-      {
-#ifdef DEBUG_LEGION
-        assert(!has_lock);
-#endif
-        GetAvailableContinuation<PointFillOp*,
-                     &Runtime::get_available_point_fill_op> 
-                       continuation(this, fill_op_lock);
-        return continuation.get_result();
-      }
-      return get_available(fill_op_lock, available_point_fill_ops, has_lock);
+      return get_available(fill_op_lock, available_point_fill_ops);
     }
 
     //--------------------------------------------------------------------------
-    AttachOp* Runtime::get_available_attach_op(bool need_cont, bool has_lock)
+    AttachOp* Runtime::get_available_attach_op(void)
     //--------------------------------------------------------------------------
     {
-      if (need_cont)
-      {
-#ifdef DEBUG_LEGION
-        assert(!has_lock);
-#endif
-        GetAvailableContinuation<AttachOp*,
-                     &Runtime::get_available_attach_op> 
-                       continuation(this, attach_op_lock);
-        return continuation.get_result();
-      }
-      return get_available(attach_op_lock, available_attach_ops, has_lock);
+      return get_available(attach_op_lock, available_attach_ops);
     }
 
     //--------------------------------------------------------------------------
-    DetachOp* Runtime::get_available_detach_op(bool need_cont, bool has_lock)
+    DetachOp* Runtime::get_available_detach_op(void)
     //--------------------------------------------------------------------------
     {
-      if (need_cont)
-      {
-#ifdef DEBUG_LEGION
-        assert(!has_lock);
-#endif
-        GetAvailableContinuation<DetachOp*,
-                     &Runtime::get_available_detach_op> 
-                       continuation(this, detach_op_lock);
-        return continuation.get_result();
-      }
-      return get_available(detach_op_lock, available_detach_ops, has_lock);
+      return get_available(detach_op_lock, available_detach_ops);
     }
 
     //--------------------------------------------------------------------------
-    TimingOp* Runtime::get_available_timing_op(bool need_cont, bool has_lock)
+    TimingOp* Runtime::get_available_timing_op(void)
     //--------------------------------------------------------------------------
     {
-      if (need_cont)
-      {
-#ifdef DEBUG_LEGION
-        assert(!has_lock);
-#endif
-        GetAvailableContinuation<TimingOp*,
-                     &Runtime::get_available_timing_op> 
-                       continuation(this, timing_op_lock);
-        return continuation.get_result();
-      }
-      return get_available(timing_op_lock, available_timing_ops, has_lock);
+      return get_available(timing_op_lock, available_timing_ops);
     }
 
     //--------------------------------------------------------------------------
@@ -17627,7 +17027,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return Future(new FutureImpl(this, true/*register*/,
-                                   get_available_distributed_id(true),
+                                   get_available_distributed_id(),
                                    address_space, op));
     }
 
@@ -18132,19 +17532,7 @@ namespace Legion {
       // Now make our entry and then return the result
       LayoutConstraints *constraints = 
         new LayoutConstraints(layout_id, this, registrar);
-      RtEvent precondition = Runtime::acquire_rt_reservation(
-          layout_constraints_lock, true/*exclusive*/);
-      if (precondition.has_triggered())
-      {
-        register_layout(constraints, false/*need lock*/);
-        Runtime::release_reservation(layout_constraints_lock);
-        return layout_id;
-      }
-      RegisterConstraintsContinuation continuation(constraints, this);
-      RtEvent wait_on = continuation.defer(this, precondition);
-      Runtime::release_reservation(layout_constraints_lock, wait_on);
-      // Have to wait to be safe
-      wait_on.lg_wait();
+      register_layout(constraints);
       return layout_id;
     }
 
@@ -18155,35 +17543,22 @@ namespace Legion {
     {
       LayoutConstraints *constraints = new LayoutConstraints(
           get_unique_constraint_id(), this, cons, handle);
-      register_layout(constraints, true/*needs lock*/);
+      register_layout(constraints);
       return constraints;
     }
 
     //--------------------------------------------------------------------------
-    bool Runtime::register_layout(LayoutConstraints *new_constraints,
-                                  bool needs_lock)
+    bool Runtime::register_layout(LayoutConstraints *new_constraints)
     //--------------------------------------------------------------------------
     {
       new_constraints->add_reference();
-      if (needs_lock)
-      {
-        AutoLock l_lock(layout_constraints_lock);
-        std::map<LayoutConstraintID,LayoutConstraints*>::const_iterator finder =
-          layout_constraints_table.find(new_constraints->layout_id);
-        if (finder != layout_constraints_table.end())
-          return false;
-        layout_constraints_table[new_constraints->layout_id] = new_constraints;
-        return true;
-      }
-      else
-      {
-        std::map<LayoutConstraintID,LayoutConstraints*>::const_iterator finder =
-          layout_constraints_table.find(new_constraints->layout_id);
-        if (finder != layout_constraints_table.end())
-          return false;
-        layout_constraints_table[new_constraints->layout_id] = new_constraints;
-        return true;
-      }
+      AutoLock l_lock(layout_constraints_lock);
+      std::map<LayoutConstraintID,LayoutConstraints*>::const_iterator finder =
+        layout_constraints_table.find(new_constraints->layout_id);
+      if (finder != layout_constraints_table.end())
+        return false;
+      layout_constraints_table[new_constraints->layout_id] = new_constraints;
+      return true;
     }
 
     //--------------------------------------------------------------------------
@@ -20026,13 +19401,6 @@ namespace Legion {
             IndexPartNode::handle_pending_child_task(args);
             break;
           }
-        case LG_DECREMENT_PENDING_TASK_ID:
-          {
-            InnerContext::DecrementArgs *dargs = 
-              (InnerContext::DecrementArgs*)args;
-            dargs->parent_ctx->decrement_pending(false/*need deferral*/);
-            break;
-          }
         case LG_POST_DECREMENT_TASK_ID:
           {
             InnerContext::PostDecrementArgs *dargs = 
@@ -20052,21 +19420,6 @@ namespace Legion {
             delete (vargs->request_mask);
             break;
           }
-        case LG_ADD_TO_DEP_QUEUE_TASK_ID:
-          {
-            InnerContext::AddToDepQueueArgs *dargs = 
-              (InnerContext::AddToDepQueueArgs*)args;
-            dargs->proxy_this->add_to_dependence_queue(dargs->op,
-                                 false/*true*/, dargs->op_pre);
-            break;
-          }
-        case LG_WINDOW_WAIT_TASK_ID:
-          {
-            InnerContext::WindowWaitArgs *wargs = 
-              (InnerContext::WindowWaitArgs*)args;
-            wargs->parent_ctx->perform_window_wait();
-            break;
-          }
         case LG_ISSUE_FRAME_TASK_ID:
           {
             InnerContext::IssueFrameArgs *fargs = 
@@ -20075,21 +19428,9 @@ namespace Legion {
                                                    fargs->frame_termination);
             break;
           }
-        case LG_CONTINUATION_TASK_ID:
-          {
-            LegionContinuation::handle_continuation(args);
-            break;
-          }
         case LG_MAPPER_CONTINUATION_TASK_ID:
           {
             MapperContinuation::handle_continuation(args);
-            break;
-          }
-        case LG_FINISH_MAPPER_CONTINUATION_TASK_ID:
-          {
-            const MapperManager::FinishMapperCallContinuationArgs *finish_args =
-              (const MapperManager::FinishMapperCallContinuationArgs*)args;
-            MapperManager::finish_mapper_call(finish_args);
             break;
           }
         case LG_TASK_IMPL_SEMANTIC_INFO_REQ_TASK_ID:
@@ -20479,25 +19820,6 @@ namespace Legion {
       }
     }
 
-    //--------------------------------------------------------------------------
-    RtEvent LegionContinuation::defer(Runtime *runtime, RtEvent precondition)
-    //--------------------------------------------------------------------------
-    {
-      ContinuationArgs args;
-      args.continuation = this;
-      RtEvent done = runtime->issue_runtime_meta_task(args,LG_RESOURCE_PRIORITY,
-                                                      NULL, precondition);
-      return done;
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void LegionContinuation::handle_continuation(const void *args)
-    //--------------------------------------------------------------------------
-    {
-      ContinuationArgs *cargs = (ContinuationArgs*)args;
-      cargs->continuation->execute();
-    }
-
 #ifdef TRACE_ALLOCATION
     //--------------------------------------------------------------------------
     /*static*/ void LegionAllocation::trace_allocation(
@@ -20557,33 +19879,30 @@ namespace Legion {
     }
 #endif
 
-  }; // namespace Internal 
-
-  //--------------------------------------------------------------------------
-  /*static*/ char* BitMaskHelper::to_string(const uint64_t *bits, int count)
-  //--------------------------------------------------------------------------
-  {
-    char *result = (char*)malloc(((((count + 63) >> 6) << 4) + 1)*sizeof(char));
-    assert(result != 0);
-    char *p = result;
-    // special case for non-multiple-of-64
-    if((count & 63) != 0 && bits[count >> 6]) {
-      // each nibble (4 bits) takes one character
-      int nibbles = ((count & 63) + 3) >> 2;
-      sprintf(p, "%*.*" MASK_FMT, nibbles, nibbles, bits[count >> 6]);
-      p += nibbles;
-    }
-    // rest are whole words
-    int idx = (count >> 6);
-    while(idx > 0) {
-      if (bits[--idx] || idx == 0) {
-        sprintf(p, "%16.16" MASK_FMT, bits[idx]);
+    //--------------------------------------------------------------------------
+    /*static*/ char* BitMaskHelper::to_string(const uint64_t *bits, int count)
+    //--------------------------------------------------------------------------
+    {
+      char *result = (char*)malloc((((count + 7) >> 3) + 1)*sizeof(char));
+      assert(result != 0);
+      char *p = result;
+      // special case for non-multiple-of-64
+      if((count & 63) != 0) {
+        // each nibble (4 bits) takes one character
+        int nibbles = ((count & 63) + 3) >> 2;
+        sprintf(p, "%*.*" MASK_FMT, nibbles, nibbles, bits[count >> 6]);
+        p += nibbles;
+      }
+      // rest are whole words
+      int idx = (count >> 6);
+      while(idx >= 0) {
+        sprintf(p, "%16.16" MASK_FMT, bits[--idx]);
         p += 16;
       }
+      return result;
     }
-    return result;
-  }
 
+  }; // namespace Internal 
 }; // namespace Legion 
 
 // EOF

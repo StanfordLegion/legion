@@ -421,15 +421,7 @@ namespace Legion {
     };
 
     const LogicalRegion LogicalRegion::NO_REGION = LogicalRegion();
-    const LogicalPartition LogicalPartition::NO_PART = LogicalPartition(); 
-    const LgEvent LgEvent::NO_LG_EVENT = LgEvent();
-    const ApEvent ApEvent::NO_AP_EVENT = ApEvent();
-    const ApUserEvent ApUserEvent::NO_AP_USER_EVENT = ApUserEvent();
-    const ApBarrier ApBarrier::NO_AP_BARRIER = ApBarrier();
-    const RtEvent RtEvent::NO_RT_EVENT = RtEvent();
-    const RtUserEvent RtUserEvent::NO_RT_USER_EVENT = RtUserEvent();
-    const RtBarrier RtBarrier::NO_RT_BARRIER = RtBarrier();
-    const PredEvent PredEvent::NO_PRED_EVENT = PredEvent();
+    const LogicalPartition LogicalPartition::NO_PART = LogicalPartition();  
     const Domain Domain::NO_DOMAIN = Domain();
 
     // Cache static type tags so we don't need to recompute them all the time
@@ -965,7 +957,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(reservation_lock.exists());
 #endif
-      ApEvent lock_event(reservation_lock.acquire(mode,exclusive));
+      Internal::ApEvent lock_event(reservation_lock.acquire(mode,exclusive));
       lock_event.lg_wait();
     }
 
@@ -1041,13 +1033,13 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PhaseBarrier::PhaseBarrier(void)
-      : phase_barrier(ApBarrier::NO_AP_BARRIER)
+      : phase_barrier(Internal::ApBarrier::NO_AP_BARRIER)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
-    PhaseBarrier::PhaseBarrier(ApBarrier b)
+    PhaseBarrier::PhaseBarrier(Internal::ApBarrier b)
       : phase_barrier(b)
     //--------------------------------------------------------------------------
     {
@@ -1091,7 +1083,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(phase_barrier.exists());
 #endif
-      ApEvent e = Internal::Runtime::get_previous_phase(*this);
+      Internal::ApEvent e = Internal::Runtime::get_previous_phase(*this);
       e.lg_wait();
     }
 
@@ -1121,7 +1113,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    DynamicCollective::DynamicCollective(ApBarrier b, ReductionOpID r)
+    DynamicCollective::DynamicCollective(Internal::ApBarrier b, ReductionOpID r)
       : PhaseBarrier(b), redop(r)
     //--------------------------------------------------------------------------
     {
@@ -1133,7 +1125,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       Internal::Runtime::phase_barrier_arrive(*this, count, 
-                                            ApEvent::NO_AP_EVENT, value, size);
+                                  Internal::ApEvent::NO_AP_EVENT, value, size);
     }
 
     /////////////////////////////////////////////////////////////
@@ -4164,6 +4156,193 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    IndexPartition Runtime::create_partition_by_restriction(Context ctx,
+                                                        IndexSpace par,
+                                                        IndexSpace cs,
+                                                        DomainTransform tran,
+                                                        Domain ext,
+                                                        PartitionKind part_kind,
+                                                        Color color)
+    //--------------------------------------------------------------------------
+    {
+      switch (ext.get_dim())
+      {
+        case 1:
+          {
+            const IndexSpaceT<1,coord_t> parent(par);
+            const Rect<1,coord_t> extent(ext);
+            switch (tran.n)
+            {
+              case 1:
+                {
+                  const Transform<1,1> transform(tran);
+                  const IndexSpaceT<1,coord_t> color_space(cs);
+                  return create_partition_by_restriction<1,1,coord_t>(ctx, 
+                      parent, color_space, transform, extent, part_kind, color);
+                }
+              case 2:
+                {
+                  const Transform<1,2> transform(tran);
+                  const IndexSpaceT<2,coord_t> color_space(cs);
+                  return create_partition_by_restriction<1,2,coord_t>(ctx,
+                      parent, color_space, transform, extent, part_kind, color);
+                }
+              case 3:
+                {
+                  const Transform<1,3> transform(tran);
+                  const IndexSpaceT<3,coord_t> color_space(cs);
+                  return create_partition_by_restriction<1,3,coord_t>(ctx,
+                      parent, color_space, transform, extent, part_kind, color);
+                }
+              default:
+                assert(false);
+            }
+          }
+        case 2:
+          {
+            const IndexSpaceT<2,coord_t> parent(par);
+            const Rect<2,coord_t> extent(ext);
+            switch (tran.n)
+            {
+              case 1:
+                {
+                  const Transform<2,1> transform(tran);
+                  const IndexSpaceT<1,coord_t> color_space(cs);
+                  return create_partition_by_restriction<2,1,coord_t>(ctx, 
+                      parent, color_space, transform, extent, part_kind, color);
+                }
+              case 2:
+                {
+                  const Transform<2,2> transform(tran);
+                  const IndexSpaceT<2,coord_t> color_space(cs);
+                  return create_partition_by_restriction<2,2,coord_t>(ctx,
+                      parent, color_space, transform, extent, part_kind, color);
+                }
+              case 3:
+                {
+                  const Transform<2,3> transform(tran);
+                  const IndexSpaceT<3,coord_t> color_space(cs);
+                  return create_partition_by_restriction<2,3,coord_t>(ctx,
+                      parent, color_space, transform, extent, part_kind, color);
+                }
+              default:
+                assert(false);
+            }
+          }
+        case 3:
+          {
+            const IndexSpaceT<3,coord_t> parent(par);
+            const Rect<3,coord_t> extent(ext);
+            switch (tran.n)
+            {
+              case 1:
+                {
+                  const Transform<3,1> transform(tran);
+                  const IndexSpaceT<1,coord_t> color_space(cs);
+                  return create_partition_by_restriction<3,1,coord_t>(ctx, 
+                      parent, color_space, transform, extent, part_kind, color);
+                }
+              case 2:
+                {
+                  const Transform<3,2> transform(tran);
+                  const IndexSpaceT<2,coord_t> color_space(cs);
+                  return create_partition_by_restriction<3,2,coord_t>(ctx,
+                      parent, color_space, transform, extent, part_kind, color);
+                }
+              case 3:
+                {
+                  const Transform<3,3> transform(tran);
+                  const IndexSpaceT<3,coord_t> color_space(cs);
+                  return create_partition_by_restriction<3,3,coord_t>(ctx,
+                      parent, color_space, transform, extent, part_kind, color);
+                }
+              default:
+                assert(false);
+            }
+          }
+        default:
+          assert(false);
+      }
+      return IndexPartition::NO_PART;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition Runtime::create_partition_by_blockify(Context ctx,
+                                                         IndexSpace par,
+                                                         DomainPoint bf,
+                                                         Color color)
+    //--------------------------------------------------------------------------
+    {
+      switch (bf.get_dim())
+      {
+        case 1:
+          {
+            const IndexSpaceT<1,coord_t> parent(par);
+            const Point<1,coord_t> blocking_factor(bf);
+            return create_partition_by_blockify<1,coord_t>(ctx, parent, 
+                                                blocking_factor, color);
+          }
+        case 2:
+          {
+            const IndexSpaceT<2,coord_t> parent(par);
+            const Point<2,coord_t> blocking_factor(bf);
+            return create_partition_by_blockify<2,coord_t>(ctx, parent, 
+                                                blocking_factor, color);
+          }
+        case 3:
+          {
+            const IndexSpaceT<3,coord_t> parent(par);
+            const Point<3,coord_t> blocking_factor(bf);
+            return create_partition_by_blockify<3,coord_t>(ctx, parent, 
+                                                blocking_factor, color);
+          }
+        default:
+          assert(false);
+      }
+      return IndexPartition::NO_PART;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition Runtime::create_partition_by_blockify(Context ctx,
+                                                         IndexSpace par,
+                                                         DomainPoint bf,
+                                                         DomainPoint orig,
+                                                         Color color)
+    //--------------------------------------------------------------------------
+    {
+      switch (bf.get_dim())
+      {
+        case 1:
+          {
+            const IndexSpaceT<1,coord_t> parent(par);
+            const Point<1,coord_t> blocking_factor(bf);
+            const Point<1,coord_t> origin(orig);
+            return create_partition_by_blockify<1,coord_t>(ctx, parent, 
+                                        blocking_factor, origin, color);
+          }
+        case 2:
+          {
+            const IndexSpaceT<2,coord_t> parent(par);
+            const Point<2,coord_t> blocking_factor(bf);
+            const Point<2,coord_t> origin(orig);
+            return create_partition_by_blockify<2,coord_t>(ctx, parent, 
+                                        blocking_factor, origin, color);
+          }
+        case 3:
+          {
+            const IndexSpaceT<3,coord_t> parent(par);
+            const Point<3,coord_t> blocking_factor(bf);
+            const Point<3,coord_t> origin(orig);
+            return create_partition_by_blockify<3,coord_t>(ctx, parent, 
+                                        blocking_factor, origin, color);
+          }
+        default:
+          assert(false);
+      }
+      return IndexPartition::NO_PART;
+    }
+
+    //--------------------------------------------------------------------------
     IndexPartition Runtime::create_restricted_partition(Context ctx,
                                                         IndexSpace parent, 
                                                         IndexSpace color_space,
@@ -6720,14 +6899,12 @@ namespace Legion {
       return Internal::Runtime::get_runtime(p)->external;
     }
 
-#ifdef ENABLE_LEGION_TLS
     //--------------------------------------------------------------------------
     /*static*/ Context Runtime::get_context(void)
     //--------------------------------------------------------------------------
     {
       return Internal::implicit_context;
     }
-#endif
 
     //--------------------------------------------------------------------------
     /*static*/ ReductionOpTable& Runtime::get_reduction_table(void)
@@ -6793,6 +6970,36 @@ namespace Legion {
       return preregister_variant(registrar, user_data, user_len,
 				 realm_desc, has_return, task_name,
                                  AUTO_GENERATE_ID);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void Runtime::legion_task_preamble(
+                                       const void *data, size_t datalen,
+                                       Processor p, const Task *& task,
+                                       const std::vector<PhysicalRegion> *& reg,
+                                       Context& ctx, Runtime *& runtime)
+    //--------------------------------------------------------------------------
+    {
+      // Get the high level runtime
+      runtime = Runtime::get_runtime(p);
+
+      // Read the context out of the buffer
+#ifdef DEBUG_LEGION
+      assert(datalen == sizeof(Context));
+#endif
+      ctx = *((const Context*)data);
+      task = ctx->get_task();
+
+      reg = &ctx->begin_task();
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void Runtime::legion_task_postamble(Runtime *runtime,Context ctx,
+                                                   const void *retvalptr,
+                                                   size_t retvalsize)
+    //--------------------------------------------------------------------------
+    {
+      ctx->end_task(retvalptr, retvalsize, false/*owned*/);
     }
 
     //--------------------------------------------------------------------------
@@ -6881,44 +7088,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return runtime->get_layout_constraints_name(id);
-    }
-
-    /////////////////////////////////////////////////////////////
-    // LegionTaskWrapper
-    /////////////////////////////////////////////////////////////
-
-    //--------------------------------------------------------------------------
-    /*static*/ void LegionTaskWrapper::legion_task_preamble(
-                  const void *data,
-		  size_t datalen,
-		  Processor p,
-		  const Task *& task,
-		  const std::vector<PhysicalRegion> *& regionsptr,
-		  Context& ctx,
-		  Runtime *& runtime)
-    //--------------------------------------------------------------------------
-    {
-      // Get the high level runtime
-      runtime = Runtime::get_runtime(p);
-
-      // Read the context out of the buffer
-#ifdef DEBUG_LEGION
-      assert(datalen == sizeof(Context));
-#endif
-      ctx = *((const Context*)data);
-      task = ctx->get_task();
-
-      regionsptr = &ctx->begin_task();
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void LegionTaskWrapper::legion_task_postamble(
-                  Runtime *runtime, Context ctx,
-		  const void *retvalptr /*= NULL*/,
-		  size_t retvalsize /*= 0*/)
-    //--------------------------------------------------------------------------
-    {
-      ctx->end_task(retvalptr, retvalsize, false/*owned*/);
     }
 
 }; // namespace Legion

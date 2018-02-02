@@ -147,6 +147,7 @@ list(APPEND REALM_SRC
   realm/realm_config.h
   realm/redop.h
   realm/reservation.h
+  realm/reservation.inl
   realm/runtime.h
   realm/sampling.h
   realm/sampling.inl
