@@ -689,6 +689,22 @@ namespace Legion {
     };
 
     /**
+     * \class MemoizableOp
+     * A memoizable operation is an abstract class
+     * that serves as the basis for operation whose
+     * physical analysis can be memoized.  Memoizable
+     * operations go through an extra step in the mapper
+     * to determine whether to memoize their physical analysis.
+     */
+    template<typename OP>
+    class MemoizableOp : public OP
+    {
+    public:
+      MemoizableOp(Runtime *rt);
+      virtual void execute_dependence_analysis(void);
+    };
+
+    /**
      * \class MapOp
      * Mapping operations are used for computing inline mapping
      * operations.  Mapping operations will always update a
@@ -787,7 +803,7 @@ namespace Legion {
      * from different region trees in an efficient way by
      * using the low-level runtime copy facilities. 
      */
-    class CopyOp : public Copy, public SpeculativeOp,
+    class CopyOp : public Copy, public MemoizableOp<SpeculativeOp>,
                    public LegionHeapify<CopyOp> {
     public:
       static const AllocationType alloc_type = COPY_OP_ALLOC;
@@ -1650,7 +1666,7 @@ namespace Legion {
      * us the framework necessary to handle roll backs on 
      * collectives so we can memoize their results.
      */
-    class DynamicCollectiveOp : public Operation,
+    class DynamicCollectiveOp : public MemoizableOp<Operation>,
                                 public LegionHeapify<DynamicCollectiveOp> {
     public:
       static const AllocationType alloc_type = DYNAMIC_COLLECTIVE_OP_ALLOC;
@@ -2503,7 +2519,7 @@ namespace Legion {
      * Fill operations are used to initialize a field to a
      * specific value for a particular logical region.
      */
-    class FillOp : public SpeculativeOp, public Fill,
+    class FillOp : public MemoizableOp<SpeculativeOp>, public Fill,
                    public LegionHeapify<FillOp> {
     public:
       static const AllocationType alloc_type = FILL_OP_ALLOC;
@@ -2773,5 +2789,7 @@ namespace Legion {
 
   }; //namespace Internal 
 }; // namespace Legion 
+
+#include "legion/legion_ops.inl"
 
 #endif // __LEGION_OPERATIONS_H__
