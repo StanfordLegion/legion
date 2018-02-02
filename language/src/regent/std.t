@@ -3233,7 +3233,7 @@ local function make_reduction_layout(dim, op_id)
   end
 end
 
-function std.setup(main_task, extra_setup_thunk, registration_name)
+function std.setup(main_task, extra_setup_thunk, task_wrappers, registration_name)
   assert(not main_task or std.is_task(main_task))
 
   if not registration_name then
@@ -3321,8 +3321,6 @@ function std.setup(main_task, extra_setup_thunk, registration_name)
         proc_types[#proc_types + 1] = c.TOC_PROC
       end
 
-      local wrapped_task = variant:get_wrapper()
-
       local layout_constraints = terralib.newsymbol(
         c.legion_task_layout_constraint_set_t, "layout_constraints")
       local layout_constraint_actions = terralib.newlist()
@@ -3376,7 +3374,7 @@ function std.setup(main_task, extra_setup_thunk, registration_name)
             [task:get_task_id()],
             [task:get_name():concat(".")],
             execution_constraints, layout_constraints, options,
-            [wrapped_task], nil, 0)
+            [task_wrappers[variant:wrapper_name()]], nil, 0)
           c.legion_execution_constraint_set_destroy(execution_constraints)
           c.legion_task_layout_constraint_set_destroy(layout_constraints)
         end)
@@ -3435,11 +3433,72 @@ function std.setup(main_task, extra_setup_thunk, registration_name)
   return main, names
 end
 
+-- Generate every n-th task wrapper in this process (all of them if n == 1),
+-- the compiler will pick them up automatically.
+local function make_task_wrappers(n, i)
+  n = n or 1
+  i = i or 1
+  local task_wrappers = {}
+  for j,variant in ipairs(variants) do
+    if (j-1) % n == (i-1) then
+      task_wrappers[variant:wrapper_name()] = variant:make_wrapper()
+    end
+  end
+  return task_wrappers
+end
+
+local function compile_tasks_in_parallel()
+  -- Force codegen; the main process will need to codegen later anyway, so we
+  -- might as well do it now and not duplicate the work on the children.
+  for _,variant in ipairs(variants) do
+    variant.task:complete()
+  end
+
+  -- Spawn children processes, assign a subset of tasks to each to compile.
+  -- HACK: Terra functions used by more than one task may get compiled
+  -- multiple times, and included in multiple object files by different
+  -- children. They should all be exactly the same, so the linker may choose
+  -- to keep any one of them.
+  local flags = terralib.newlist({'-Wl,--allow-multiple-definition'})
+  local child_pids = terralib.newlist()
+  local n = math.max(tonumber(std.config["jobs"]) or 1, 1)
+  for i = 1,n do
+    local objfile = os.tmpname()
+    flags:insert(objfile)
+    local pid = c.fork()
+    if pid == 0 then
+      local exports = make_task_wrappers(n, i)
+      terralib.saveobj(objfile, 'object', exports)
+      os.exit(0)
+    else
+      child_pids:insert(pid)
+    end
+  end
+  for _,pid in ipairs(child_pids) do
+    c.waitpid(pid, nil, 0)
+  end
+
+  -- Declare all task wrappers using a (fake) header file, so the compiler will
+  -- expect them to be linked-in later.
+  local header = [[
+#include "legion.h"
+#include "legion_terra.h"
+#include "legion_terra_partitions.h"
+]] ..
+  table.concat(
+    variants:map(function(variant) return variant:wrapper_sig() .. '\n' end)
+  )
+  local task_wrappers = terralib.includecstring(header)
+
+  return flags,task_wrappers
+end
+
 function std.start(main_task, extra_setup_thunk)
   if std.config["pretty"] then os.exit() end
 
   assert(std.is_task(main_task))
-  local main = std.setup(main_task, extra_setup_thunk)
+  local task_wrappers = make_task_wrappers()
+  local main = std.setup(main_task, extra_setup_thunk, task_wrappers)
 
   local args = std.args
   local argc = #args
@@ -3461,14 +3520,13 @@ end
 
 function std.saveobj(main_task, filename, filetype, extra_setup_thunk, link_flags)
   assert(std.is_task(main_task))
-  local main, names = std.setup(main_task, extra_setup_thunk)
+  local flags,task_wrappers = compile_tasks_in_parallel()
+  local main, names = std.setup(main_task, extra_setup_thunk, task_wrappers)
   local use_cmake = os.getenv("USE_CMAKE") == "1"
   local lib_dir = os.getenv("LG_RT_DIR") .. "/../bindings/regent"
   if use_cmake then
     lib_dir = os.getenv("CMAKE_BUILD_DIR") .. "/lib"
   end
-
-  local flags = terralib.newlist()
   if os.getenv('CRAYPE_VERSION') then
     flags:insert("-Wl,-Bdynamic")
   end
@@ -3579,8 +3637,9 @@ end
 function std.save_tasks(header_filename, filename, filetype,
                        extra_setup_thunk, link_flags)
   assert(header_filename and filename)
+  local task_wrappers = make_task_wrappers()
   local registration_name, task_impl = write_header(header_filename)
-  local _, names = std.setup(nil, extra_setup_thunk, registration_name)
+  local _, names = std.setup(nil, extra_setup_thunk, task_wrappers, registration_name)
   local use_cmake = os.getenv("USE_CMAKE") == "1"
   local lib_dir = os.getenv("LG_RT_DIR") .. "/../bindings/regent"
   if use_cmake then
