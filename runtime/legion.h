@@ -1939,17 +1939,15 @@ namespace Legion {
      * describing a task variant including the logical task ID, the execution
      * constraints, the layout constraints, and any properties of the task.
      * This structure is used for registering task variants and is also
-     * the output type for variants created by task variant generators.
+     * the output type for variants created by generator tasks.
      */
     struct TaskVariantRegistrar {
     public:
       TaskVariantRegistrar(void);
       TaskVariantRegistrar(TaskID task_id, bool global = true,
-                           GeneratorContext ctx = NULL,
                            const char *variant_name = NULL);
       TaskVariantRegistrar(TaskID task_id, const char *variant_name,
-			   bool global = true,
-                           GeneratorContext ctx = NULL);
+			   bool global = true);
     public: // Add execution constraints
       inline TaskVariantRegistrar& 
         add_constraint(const ISAConstraint &constraint);
@@ -1969,91 +1967,23 @@ namespace Legion {
       inline void set_inner(bool is_inner = true);
       inline void set_idempotent(bool is_idempotent = true);
       inline void set_replicable(bool is_replicable = true);
+    public: // Generator Task IDs
+      inline void add_generator_task(TaskID tid);
     public:
       TaskID                            task_id;
-      GeneratorContext                  generator;
       bool                              global_registration;
       const char*                       task_variant_name;
     public: // constraints
       ExecutionConstraintSet            execution_constraints; 
       TaskLayoutConstraintSet           layout_constraints;
+    public:
+      // TaskIDs for which this variant can serve as a generator
+      std::set<TaskID>                  generator_tasks;
     public: // properties
       bool                              leaf_variant;
       bool                              inner_variant;
       bool                              idempotent_variant;
       bool                              replicable_variant;
-    };
-
-    //==========================================================================
-    //                          Task Generators 
-    //==========================================================================
-
-    /**
-     * \struct TaskGeneratorArguments
-     * This structure defines the arguments that will be passed to a 
-     * task generator function. The task generator function will then
-     * be expected to generate one or more variants and register them
-     * with the runtime.
-     */
-    struct TaskGeneratorArguments {
-    public:
-      TaskID                            task_id;
-    public:
-      const void*                       user_data;
-      size_t                            user_data_size;
-    public:
-      MapperID                          mapper_id;
-      const void*                       mapper_args;
-      size_t                            mapper_args_size;
-    public:
-      std::vector<Processor>            target_procs;
-      // TODO: std::vector<PhysicalInstance> valid_instances;
-    };
-
-    /**
-     * \struct TaskGeneratorRegistrar
-     * The TaskGeneratorRegistrar records the arguments for registering
-     * a new task generator function for a specific task_id with the runtime. 
-     * The application must specify a unique generator ID to associate with 
-     * the generator function pointer for the particular task ID, but the
-     * same generator function pointer can be registered for multiple
-     * task IDs as long as the generator IDs are all different. The 
-     * application can also provide optional constraints on the kinds of
-     * task variants the generator can emit. All other arguments are optional 
-     * and can be filled in at the application's discretion.
-     */
-    struct TaskGeneratorRegistrar {
-    public:
-      TaskGeneratorRegistrar(void);
-      TaskGeneratorRegistrar(GeneratorID id, TaskID task_id, GeneratorFnptr fn,
-                             const void *udata = NULL, size_t udata_size = 0,
-                             const char *name = NULL);
-    public: // Add execution constraints
-      inline TaskGeneratorRegistrar& 
-        add_constraint(const ISAConstraint &constraint);
-      inline TaskGeneratorRegistrar&
-        add_constraint(const ProcessorConstraint &constraint);
-      inline TaskGeneratorRegistrar& 
-        add_constraint(const ResourceConstraint &constraint);
-      inline TaskGeneratorRegistrar&
-        add_constraint(const LaunchConstraint &constraint);
-      inline TaskGeneratorRegistrar&
-        add_constraint(const ColocationConstraint &constraint);
-    public: // Add layout constraint sets
-      inline TaskGeneratorRegistrar&
-        add_layout_constraint_set(unsigned index, LayoutConstraintID desc);
-    public:
-      GeneratorID                       generator_id;
-      TaskID                            task_id;
-      GeneratorFnptr                    generator;
-    public: // constraints
-      ExecutionConstraintSet            execution_constraints;
-      TaskLayoutConstraintSet           layout_constraints;
-    public:
-      const void*                       user_data;
-      size_t                            user_data_size;
-    public:
-      const char*                       name;
     };
 
     //==========================================================================
@@ -6752,40 +6682,6 @@ namespace Legion {
       static void legion_task_postamble(Runtime *runtime, Context ctx,
                                         const void *retvalptr = NULL,
                                         size_t retvalsize = 0);
-    public:
-      //------------------------------------------------------------------------
-      // Task Generator Registration Operations
-      //------------------------------------------------------------------------
-     
-      /**
-       * Dynamically generate a unique generator ID for use across the machine.
-       * @return a Generator ID that is globally unique across the machine
-       */
-      GeneratorID generate_dynamic_generator_id(void);
-
-      /**
-       * Statically generate a unique Generator ID for use across the machine.
-       * This can only be called prior to the runtime starting. It must be 
-       * invoked symmetrically across all nodes in the machine prior to 
-       * starting the runtime.
-       * @return a Generator ID that is globally unique across the machine
-       */
-      static GeneratorID generate_static_generator_id(void);
-
-      /**
-       * Dynamically register a new task generator function with the runtime
-       * @param registrar the task generator registrar
-       */
-      void register_task_generator(const TaskGeneratorRegistrar &registrar);
-
-      /**
-       * Statically register a new task generator function with the runtime.
-       * This call must be made on all nodes and it will fail if done after
-       * the runtime has been started.
-       * @param registrar the task generator registrar
-       */
-      static void preregister_task_generator(
-                                   const TaskGeneratorRegistrar &registrar);
     public:
       // ------------------ Deprecated task registration -----------------------
       /**
