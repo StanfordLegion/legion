@@ -4629,17 +4629,18 @@ namespace Legion {
     }
     
     //--------------------------------------------------------------------------
-    IndexSpaceExpression* RegionTreeForest::diff_index_spaces(Operation *op,
+    IndexSpaceExpression* RegionTreeForest::subtract_index_spaces(Operation *op,
                            IndexSpaceExpression *lhs, IndexSpaceExpression *rhs)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(lhs->type_tag != rhs->type_tag);
 #endif
+      const std::pair<TypeTag,IndexSpaceExprID> key(lhs->type_tag,lhs->expr_id);
       {
         AutoLock l_lock(lookup_is_op_lock,1,false/*exclusive*/);
         const std::deque<IndexSpaceOperation*> &differences = 
-          difference_ops[lhs->type_tag];
+          difference_ops[key];
         for (std::deque<IndexSpaceOperation*>::const_iterator it = 
               differences.begin(); it != differences.end(); it++)
         {
@@ -4650,8 +4651,7 @@ namespace Legion {
       // Didn't find, retake the lock, see if we lost the race
       // and if not make the actual operation node
       AutoLock l_lock(lookup_is_op_lock);
-      std::deque<IndexSpaceOperation*> &differences = 
-        difference_ops[lhs->type_tag];
+      std::deque<IndexSpaceOperation*> &differences = difference_ops[key]; 
       for (std::deque<IndexSpaceOperation*>::const_iterator it = 
             differences.begin(); it != differences.end(); it++)
       {
@@ -4664,6 +4664,256 @@ namespace Legion {
       IndexSpaceOperation *result = creator.result;
       differences.push_back(result);
       return result;
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeForest::invalidate_index_space_expression(
+                                  const std::set<IndexSpaceOperation*> &parents)
+    //--------------------------------------------------------------------------
+    {
+      // Two phases here: in read-only made figure out the set of operations
+      // we are going to invalidate but don't remove them yet
+      std::deque<IndexSpaceOperation*> to_remove;
+      {
+        AutoLock l_lock(lookup_is_op_lock,1,false/*exclusive*/);
+        for (std::set<IndexSpaceOperation*>::const_iterator it = 
+              parents.begin(); it != parents.end(); it++)
+          (*it)->invalidate_operation(to_remove);
+      }
+      if (to_remove.empty())
+        return;
+      // Now retake the lock and do the removal
+      std::deque<IndexSpaceOperation*> to_delete;
+      {
+        AutoLock l_lock(lookup_is_op_lock);
+        for (std::deque<IndexSpaceOperation*>::const_iterator it = 
+              to_remove.begin(); it != to_remove.end(); it++)
+          if ((*it)->remove_operation(this))
+            to_delete.push_back(*it);
+      }
+      if (to_delete.empty())
+        return;
+      for (std::deque<IndexSpaceOperation*>::const_iterator it = 
+            to_delete.begin(); it != to_delete.end(); it++)
+        delete (*it);
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeForest::remove_union_operation(IndexSpaceOperation *op,
+                                                  size_t sub_expression_count)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(op->op_kind == IndexSpaceOperation::UNION_OP_KIND);
+#endif
+      // No need for the lock, we're holding it above
+      // from invalidate_index_space_expression
+      const std::pair<TypeTag,size_t> key(op->type_tag, sub_expression_count);
+      std::map<std::pair<TypeTag,size_t>,std::deque<IndexSpaceOperation*> >::
+        iterator finder = union_ops.find(key);
+#ifdef DEBUG_LEGION
+      assert(finder != union_ops.end());
+#endif
+      for (std::deque<IndexSpaceOperation*>::iterator it = 
+            finder->second.begin(); it != finder->second.end(); it++)
+      {
+        if ((*it) != op)
+          continue;
+        finder->second.erase(it);
+        break;
+      }
+      if (finder->second.empty())
+        union_ops.erase(finder);
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeForest::remove_intersection_operation(
+                           IndexSpaceOperation *op, size_t sub_expression_count)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(op->op_kind == IndexSpaceOperation::INTERSECT_OP_KIND);
+#endif
+      // No need for the lock, we're holding it above
+      // from invalidate_index_space_expression
+      const std::pair<TypeTag,size_t> key(op->type_tag, sub_expression_count);
+      std::map<std::pair<TypeTag,size_t>,std::deque<IndexSpaceOperation*> >::
+        iterator finder = intersection_ops.find(key);
+#ifdef DEBUG_LEGION
+      assert(finder != intersection_ops.end());
+#endif
+      for (std::deque<IndexSpaceOperation*>::iterator it = 
+            finder->second.begin(); it != finder->second.end(); it++)
+      {
+        if ((*it) != op)
+          continue;
+        finder->second.erase(it);
+        break;
+      }
+      if (finder->second.empty())
+        intersection_ops.erase(finder);
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeForest::remove_subtraction_operation(IndexSpaceOperation *op,
+                                                      IndexSpaceExpression *lhs)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(op->op_kind == IndexSpaceOperation::DIFFERENCE_OP_KIND);
+#endif
+      // No need for the lock, we're holding it above
+      // from invalidate_index_space_expression
+      const std::pair<TypeTag,IndexSpaceExprID> key(op->type_tag, lhs->expr_id);
+      std::map<std::pair<TypeTag,IndexSpaceExprID>,
+        std::deque<IndexSpaceOperation*> >::iterator finder = 
+          difference_ops.find(key);
+#ifdef DEBUG_LEGION
+      assert(finder != difference_ops.end());
+#endif
+      for (std::deque<IndexSpaceOperation*>::iterator it = 
+            finder->second.begin(); it != finder->second.end(); it++)
+      {
+        if ((*it) != op)
+          continue;
+        finder->second.erase(it);
+        break;
+      }
+      if (finder->second.empty())
+        difference_ops.erase(finder);
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Index Space Expression 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    IndexSpaceExpression::IndexSpaceExpression(void)
+      : type_tag(0), expr_id(0)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpaceExpression::IndexSpaceExpression(TypeTag tag)
+      : type_tag(tag), expr_id(next_expr_id())
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpaceExpression::~IndexSpaceExpression(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void IndexSpaceExpression::handle_tighten_index_space(
+                                                               const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const TightenIndexSpaceArgs *targs = (const TightenIndexSpaceArgs*)args;
+      targs->proxy_this->tighten_index_space();
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ IndexSpaceExprID IndexSpaceExpression::next_expr_id(void)
+    //--------------------------------------------------------------------------
+    {
+      // Monotonically increasing counter of expression IDs for uniqueness
+      static IndexSpaceExprID next_id = 1;
+      IndexSpaceExprID result = __sync_fetch_and_add(&next_id, 1);
+#ifdef DEBUG_LEGION
+      assert(result <= next_id); // check for overflow
+#endif
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexSpaceExpression::add_parent_operation(IndexSpaceOperation *op)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(parent_operations.find(op) == parent_operations.end());
+#endif
+      parent_operations.insert(op);
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexSpaceExpression::remove_parent_operation(IndexSpaceOperation *op)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(parent_operations.find(op) != parent_operations.end());
+#endif
+      parent_operations.erase(op);
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Index Space Operation 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    IndexSpaceOperation::IndexSpaceOperation(TypeTag tag, OperationKind kind,
+                                             RegionTreeForest *ctx)
+      : IndexSpaceExpression(tag), op_kind(kind), context(ctx), invalidated(0)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpaceOperation::~IndexSpaceOperation(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexSpaceOperation::add_expression_reference(void)
+    //--------------------------------------------------------------------------
+    {
+      add_reference();
+    }
+
+    //--------------------------------------------------------------------------
+    bool IndexSpaceOperation::remove_expression_reference(void)
+    //--------------------------------------------------------------------------
+    {
+      return remove_reference();
+    }
+    
+    //--------------------------------------------------------------------------
+    bool IndexSpaceOperation::matches(
+                             const std::set<IndexSpaceExpression*> &exprs) const
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
+    bool IndexSpaceOperation::matches(IndexSpaceExpression *lhs,
+                                      IndexSpaceExpression *rhs) const
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexSpaceOperation::invalidate_operation(
+                                    std::deque<IndexSpaceOperation*> &to_remove)
+    //--------------------------------------------------------------------------
+    {
+      // See if we're the first one here, there can be a race with
+      // multiple invalidations occurring at the same time
+      if (__sync_fetch_and_add(&invalidated, 1) > 0)
+        return;
+      // Add ourselves to the list if we're here first
+      to_remove.push_back(this);
+      // Then continue up the expression tree
+      for (std::set<IndexSpaceOperation*>::const_iterator it = 
+            parent_operations.begin(); it != parent_operations.end(); it++)
+        (*it)->invalidate_operation(to_remove);
     }
 
     /////////////////////////////////////////////////////////////
@@ -5774,6 +6024,20 @@ namespace Legion {
       derez.deserialize(handle);
       IndexSpaceNode *node = forest->get_node(handle);
       node->unpack_index_space(derez, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexSpaceNode::add_expression_reference(void)
+    //--------------------------------------------------------------------------
+    {
+      add_base_resource_ref(IS_EXPR_REF);
+    }
+
+    //--------------------------------------------------------------------------
+    bool IndexSpaceNode::remove_expression_reference(void)
+    //--------------------------------------------------------------------------
+    {
+      return remove_base_resource_ref(IS_EXPR_REF);
     }
 
     /////////////////////////////////////////////////////////////

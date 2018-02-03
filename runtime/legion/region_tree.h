@@ -638,9 +638,19 @@ namespace Legion {
                                  const std::set<IndexSpaceExpression*> &exprs);
       IndexSpaceExpression* intersect_index_spaces(Operation *op,
                                  const std::set<IndexSpaceExpression*> &exprs);
-      IndexSpaceExpression* diff_index_spaces(Operation *op,
-                                              IndexSpaceExpression *lhs, 
-                                              IndexSpaceExpression *rhs);
+      IndexSpaceExpression* subtract_index_spaces(Operation *op,
+                                                  IndexSpaceExpression *lhs, 
+                                                  IndexSpaceExpression *rhs);
+    public:
+      // Methods for removing index space expression when they are done
+      void invalidate_index_space_expression(
+                            const std::set<IndexSpaceOperation*> &parents);
+      void remove_union_operation(IndexSpaceOperation *expr, 
+                                  size_t sub_expression_count);
+      void remove_intersection_operation(IndexSpaceOperation *expr, 
+                                         size_t sub_expression_count);
+      void remove_subtraction_operation(IndexSpaceOperation *expr,
+                                        IndexSpaceExpression *lhs);
     public:
       Runtime *const runtime;
     protected:
@@ -667,7 +677,7 @@ namespace Legion {
                std::deque<IndexSpaceOperation*> > union_ops;
       std::map<std::pair<TypeTag,size_t/*sub expression count*/>,
                std::deque<IndexSpaceOperation*> > intersection_ops;
-      std::map<TypeTag,
+      std::map<std::pair<TypeTag,IndexSpaceExprID/*lhs*/>,
                std::deque<IndexSpaceOperation*> > difference_ops;
     };
 
@@ -689,36 +699,30 @@ namespace Legion {
         IndexSpaceExpression *proxy_this;
       };
     public:
-      IndexSpaceExpression(void) : type_tag(0), expr_id(0) { }
-      IndexSpaceExpression(TypeTag tag) : type_tag(tag),
-        expr_id(next_expr_id()) { }
-      virtual ~IndexSpaceExpression(void) { }
+      IndexSpaceExpression(void);
+      IndexSpaceExpression(TypeTag tag); 
+      virtual ~IndexSpaceExpression(void);
     public:
       virtual ApEvent get_expr_index_space(void *result, TypeTag tag, 
                                            bool need_tight_result) = 0;
       virtual void tighten_index_space(void) = 0;
+      virtual void add_expression_reference(void) = 0;
+      virtual bool remove_expression_reference(void) = 0;
     public:
-      static void handle_tighten_index_space(const void *args)
-      {
-        const TightenIndexSpaceArgs *targs = (const TightenIndexSpaceArgs*)args;
-        targs->proxy_this->tighten_index_space();
-      }
-      static IndexSpaceExprID next_expr_id(void)
-      {
-        // Monotonically increasing counter of expression IDs for uniqueness
-        static IndexSpaceExprID next_id = 1;
-        IndexSpaceExprID result = __sync_fetch_and_add(&next_id, 1);
-#ifdef DEBUG_LEGION
-        assert(result <= next_id); // check for overflow
-#endif
-        return result;
-      }
+      static void handle_tighten_index_space(const void *args);
+      static IndexSpaceExprID next_expr_id(void);
+    public:
+      void add_parent_operation(IndexSpaceOperation *op);
+      void remove_parent_operation(IndexSpaceOperation *op);
     public:
       const TypeTag type_tag;
       const IndexSpaceExprID expr_id;
+    protected:
+      std::set<IndexSpaceOperation*> parent_operations;
     };
 
-    class IndexSpaceOperation : public IndexSpaceExpression {
+    class IndexSpaceOperation : 
+      public IndexSpaceExpression, public Collectable {
     public:
       enum OperationKind {
         UNION_OP_KIND,
@@ -727,22 +731,26 @@ namespace Legion {
       };
     public:
       IndexSpaceOperation(TypeTag tag, OperationKind kind,
-                          RegionTreeForest *ctx)
-        : IndexSpaceExpression(tag), op_kind(kind), context(ctx) { }
-      virtual ~IndexSpaceOperation(void) { }
+                          RegionTreeForest *ctx);
+      virtual ~IndexSpaceOperation(void);
     public:
       virtual ApEvent get_expr_index_space(void *result, TypeTag tag, 
                                            bool need_tight_result) = 0;
       virtual void tighten_index_space(void) = 0;
+      virtual bool remove_operation(RegionTreeForest *forest) = 0;
+      virtual void add_expression_reference(void);
+      virtual bool remove_expression_reference(void);
     public:
-      virtual bool matches(const std::set<IndexSpaceExpression*> &exprs) const
-        { assert(false); return false; }
+      virtual bool matches(const std::set<IndexSpaceExpression*> &exprs) const;
       virtual bool matches(IndexSpaceExpression *lhs, 
-                           IndexSpaceExpression *rhs) const
-        { assert(false); return false; }
+                           IndexSpaceExpression *rhs) const;
+    public:
+      void invalidate_operation(std::deque<IndexSpaceOperation*> &to_remove);
     public:
       const OperationKind op_kind;
       RegionTreeForest *const context;
+    private:
+      int invalidated;
     };
 
     template<int DIM, typename T>
@@ -754,6 +762,7 @@ namespace Legion {
       virtual ApEvent get_expr_index_space(void *result, TypeTag tag,
                                            bool need_tight_result);
       virtual void tighten_index_space(void);
+      virtual bool remove_operation(RegionTreeForest *forest) = 0;
     public:
       ApEvent get_realm_index_space(Realm::IndexSpace<DIM,T> &space,
                                     bool need_tight_result);
@@ -775,6 +784,7 @@ namespace Legion {
       IndexSpaceUnion& operator=(const IndexSpaceUnion &rhs);
     public:
       virtual bool matches(const std::set<IndexSpaceExpression*> &exprs) const;
+      virtual bool remove_operation(RegionTreeForest *forest);
     protected:
       const std::vector<IndexSpaceExpression*> sub_expressions;
     };
@@ -809,6 +819,7 @@ namespace Legion {
       IndexSpaceIntersection& operator=(const IndexSpaceIntersection &rhs);
     public:
       virtual bool matches(const std::set<IndexSpaceExpression*> &exprs) const;
+      virtual bool remove_operation(RegionTreeForest *forest);
     protected:
       const std::vector<IndexSpaceExpression*> sub_expressions;
     };
@@ -844,6 +855,7 @@ namespace Legion {
     public:
       virtual bool matches(IndexSpaceExpression *lhs, 
                            IndexSpaceExpression *rhs) const;
+      virtual bool remove_operation(RegionTreeForest *forest);
     protected:
       IndexSpaceExpression *const lhs;
       IndexSpaceExpression *const rhs;
@@ -1059,6 +1071,8 @@ namespace Legion {
       virtual ApEvent get_expr_index_space(void *result, TypeTag tag,
                                            bool need_tight_result) = 0;
       virtual void tighten_index_space(void) = 0;
+      virtual void add_expression_reference(void);
+      virtual bool remove_expression_reference(void);
     public:
       virtual void initialize_union_space(ApUserEvent to_trigger,
               TaskOp *op, const std::vector<IndexSpace> &handles) = 0;

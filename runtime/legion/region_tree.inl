@@ -106,12 +106,15 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       std::set<ApEvent> preconditions;
-      std::vector<Realm::IndexSpace<DIM,T> > spaces(to_union.size());
-      unsigned idx = 0;
-      for (std::set<IndexSpaceExpression*>::const_iterator it = 
-            to_union.begin(); it != to_union.end(); it++, idx++)
+      std::vector<Realm::IndexSpace<DIM,T> > spaces(sub_expressions.size());
+      for (unsigned idx = 0; idx < sub_expressions.size(); idx++)
       {
-        ApEvent precondition = (*it)->get_expr_index_space(
+        IndexSpaceExpression *sub = sub_expressions[idx];
+        // Add the parent and the reference
+        sub->add_parent_operation(this);
+        sub->add_expression_reference();
+        // Then get the realm index space expression
+        ApEvent precondition = sub->get_expr_index_space(
             &spaces[idx], this->type_tag, false/*need tight result*/);
         if (precondition.exists())
           preconditions.insert(precondition);
@@ -149,6 +152,10 @@ namespace Legion {
     IndexSpaceUnion<DIM,T>::~IndexSpaceUnion(void)
     //--------------------------------------------------------------------------
     {
+      // Remove references from our sub expressions
+      for (unsigned idx = 0; idx < sub_expressions.size(); idx++)
+        if (sub_expressions[idx]->remove_expression_reference())
+          delete sub_expressions[idx];
     }
 
     //--------------------------------------------------------------------------
@@ -178,6 +185,20 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
+    bool IndexSpaceUnion<DIM,T>::remove_operation(RegionTreeForest *forest)
+    //--------------------------------------------------------------------------
+    {
+      // Remove the parent operation from all the sub expressions
+      for (unsigned idx = 0; idx < sub_expressions.size(); idx++)
+        sub_expressions[idx]->remove_parent_operation(this);
+      // Then remove ourselves from the tree
+      forest->remove_union_operation(this, sub_expressions.size());
+      // Return true if we should be deleted
+      return (this->references == 0); 
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
     IndexSpaceIntersection<DIM,T>::IndexSpaceIntersection(
                                 const std::set<IndexSpaceExpression*> &to_inter,
                                 RegionTreeForest *ctx, Operation *op)
@@ -187,12 +208,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       std::set<ApEvent> preconditions;
-      std::vector<Realm::IndexSpace<DIM,T> > spaces(to_inter.size());
-      unsigned idx = 0;
-      for (std::set<IndexSpaceExpression*>::const_iterator it = 
-            to_inter.begin(); it != to_inter.end(); it++, idx++)
+      std::vector<Realm::IndexSpace<DIM,T> > spaces(sub_expressions.size());
+      for (unsigned idx = 0; idx < sub_expressions.size(); idx++)
       {
-        ApEvent precondition = (*it)->get_expr_index_space(
+        IndexSpaceExpression *sub = sub_expressions[idx];
+        // Add the parent and the reference
+        sub->add_parent_operation(this);
+        sub->add_expression_reference();
+        ApEvent precondition = sub->get_expr_index_space(
             &spaces[idx], this->type_tag, false/*need tight result*/);
         if (precondition.exists())
           preconditions.insert(precondition);
@@ -231,6 +254,10 @@ namespace Legion {
     IndexSpaceIntersection<DIM,T>::~IndexSpaceIntersection(void)
     //--------------------------------------------------------------------------
     {
+      // Remove references from our sub expressions
+      for (unsigned idx = 0; idx < sub_expressions.size(); idx++)
+        if (sub_expressions[idx]->remove_expression_reference())
+          delete sub_expressions[idx];
     }
 
     //--------------------------------------------------------------------------
@@ -260,6 +287,21 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
+    bool IndexSpaceIntersection<DIM,T>::remove_operation(
+                                                       RegionTreeForest *forest)
+    //--------------------------------------------------------------------------
+    {
+      // Remove the parent operation from all the sub expressions
+      for (unsigned idx = 0; idx < sub_expressions.size(); idx++)
+        sub_expressions[idx]->remove_parent_operation(this);
+      // Then remove ourselves from the tree
+      forest->remove_intersection_operation(this, sub_expressions.size());
+      // Return true if we should be deleted
+      return (this->references == 0); 
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
     IndexSpaceDifference<DIM,T>::IndexSpaceDifference(IndexSpaceExpression *l,
                 IndexSpaceExpression *r, RegionTreeForest *ctx, Operation *op) 
       : IndexSpaceOperationT<DIM,T>(IndexSpaceOperation::DIFFERENCE_OP_KIND,ctx)
@@ -267,6 +309,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       Realm::IndexSpace<DIM,T> lhs_space, rhs_space;
+      // Add the parent and the references
+      lhs->add_parent_operation(this);
+      rhs->add_parent_operation(this);
+      lhs->add_expression_reference();
+      rhs->add_expression_reference();
       ApEvent left_ready = 
         lhs->get_expr_index_space(&lhs_space, this->type_tag, false/*tight*/);
       ApEvent right_ready = 
@@ -304,6 +351,10 @@ namespace Legion {
     IndexSpaceDifference<DIM,T>::~IndexSpaceDifference(void)
     //--------------------------------------------------------------------------
     {
+      if (lhs->remove_expression_reference())
+        delete lhs;
+      if (rhs->remove_expression_reference())
+        delete rhs;
     }
 
     //--------------------------------------------------------------------------
@@ -328,6 +379,20 @@ namespace Legion {
       if (right->expr_id != rhs->expr_id)
         return false;
       return true;
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    bool IndexSpaceDifference<DIM,T>::remove_operation(RegionTreeForest *forest)
+    //--------------------------------------------------------------------------
+    {
+      // Remove the parent operation from all the sub expressions
+      lhs->remove_parent_operation(this);
+      rhs->remove_parent_operation(this);
+      // Then remove ourselves from the tree
+      forest->remove_subtraction_operation(this, lhs);
+      // Return true if we should be deleted
+      return (this->references == 0);
     }
 
     /////////////////////////////////////////////////////////////
@@ -929,6 +994,8 @@ namespace Legion {
         REPORT_LEGION_ERROR(ERROR_ILLEGAL_INDEX_SPACE_DELETION,
             "Duplicate deletion of Index Space %d", handle.get_id())
       destroyed = true;
+      if (!parent_operations.empty())
+        context->invalidate_index_space_expression(parent_operations);
       // If we're not the owner, send a message that we're removing
       // the application reference
       if (!is_owner())
