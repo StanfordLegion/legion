@@ -1702,8 +1702,8 @@ namespace Legion {
       VariantID find_or_create_variant(MapperContext ctx, TaskID task_id,
                              const ExecutionConstraintSet &execution_constrains,
                              const TaskLayoutConstraintSet &layout_constraints,
-                             TaskID generator_tid, VariantID generator_viid, 
-                             Processor generator_processor) const;
+                             TaskID generator_tid, VariantID generator_vid, 
+                             Processor generator_processor, bool &created) const;
       bool is_leaf_variant(MapperContext ctx, TaskID task_id,
                                      VariantID variant_id) const;
       bool is_inner_variant(MapperContext ctx, TaskID task_id,

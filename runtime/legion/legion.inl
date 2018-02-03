@@ -5831,6 +5831,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    inline void TaskVariantRegistrar::add_generator_task(TaskID tid)
+    //--------------------------------------------------------------------------
+    {
+      generator_tasks.insert(tid); 
+    }
+
+    //--------------------------------------------------------------------------
     template<typename T>
     inline T Future::get_result(bool silence_warnings) const
     //--------------------------------------------------------------------------
