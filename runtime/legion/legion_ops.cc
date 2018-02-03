@@ -38,8 +38,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     Operation::Operation(Runtime *rt)
-      : runtime(rt), op_lock(Reservation::create_reservation()), 
-        gen(0), unique_op_id(0), context_index(0), 
+      : runtime(rt), gen(0), unique_op_id(0), context_index(0), 
         outstanding_mapping_references(0),
         hardened(false), parent_ctx(NULL)
     //--------------------------------------------------------------------------
@@ -53,8 +52,6 @@ namespace Legion {
     Operation::~Operation(void)
     //--------------------------------------------------------------------------
     {
-      op_lock.destroy_reservation();
-      op_lock = Reservation::NO_RESERVATION;
     }
 
     //--------------------------------------------------------------------------
@@ -1705,7 +1702,7 @@ namespace Legion {
       {
         Future temp = Future(
               new FutureImpl(runtime, true/*register*/,
-                runtime->get_available_distributed_id(true),
+                runtime->get_available_distributed_id(),
                 runtime->address_space, this));
         AutoLock o_lock(op_lock);
         // See if we lost the race
@@ -4875,7 +4872,7 @@ namespace Legion {
       for (Domain::DomainPointIterator itr(launch_domain); 
             itr; itr++, point_idx++)
       {
-        PointCopyOp *point = runtime->get_available_point_copy_op(false);
+        PointCopyOp *point = runtime->get_available_point_copy_op();
         point->initialize(this, itr.p);
         points[point_idx] = point;
       }
@@ -7246,7 +7243,7 @@ namespace Legion {
       for (Domain::DomainPointIterator itr(point_domain); 
             itr; itr++, point_idx++)
       {
-        PointCloseOp *point = runtime->get_available_point_close_op(false);
+        PointCloseOp *point = runtime->get_available_point_close_op();
         point->initialize(this, itr.p);
         points[point_idx] = point;
       }
@@ -9303,7 +9300,7 @@ namespace Legion {
     {
       initialize_operation(ctx, true/*track*/);
       future = Future(new FutureImpl(runtime, true/*register*/,
-            runtime->get_available_distributed_id(true), 
+            runtime->get_available_distributed_id(), 
             runtime->address_space, this));
       collective = dc;
       if (Runtime::legion_spy_enabled)
@@ -10151,8 +10148,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return new FutureMapImpl(ctx, this, runtime,
-            runtime->get_available_distributed_id(true/*need continuation*/),
-            runtime->address_space);
+            runtime->get_available_distributed_id(), runtime->address_space);
     }
 
     //--------------------------------------------------------------------------
@@ -10167,7 +10163,7 @@ namespace Legion {
       indiv_tasks.resize(launcher.single_tasks.size());
       for (unsigned idx = 0; idx < launcher.single_tasks.size(); idx++)
       {
-        indiv_tasks[idx] = runtime->get_available_individual_task(true);
+        indiv_tasks[idx] = runtime->get_available_individual_task();
         indiv_tasks[idx]->initialize_task(ctx, launcher.single_tasks[idx],
                                           check_privileges, false/*track*/);
         indiv_tasks[idx]->set_must_epoch(this, idx, true/*register*/);
@@ -10184,7 +10180,7 @@ namespace Legion {
         if (!launch_space.exists())
           launch_space = runtime->find_or_create_index_launch_space(
                       launcher.index_tasks[idx].launch_domain);
-        index_tasks[idx] = runtime->get_available_index_task(true);
+        index_tasks[idx] = runtime->get_available_index_task();
         index_tasks[idx]->initialize_task(ctx, launcher.index_tasks[idx],
                           launch_space, check_privileges, false/*track*/);
         index_tasks[idx]->set_must_epoch(this, indiv_tasks.size()+idx, 
@@ -11857,7 +11853,7 @@ namespace Legion {
               itr; itr++, point_idx++)
         {
           PointDepPartOp *point = 
-            runtime->get_available_point_dep_part_op(false);
+            runtime->get_available_point_dep_part_op();
           point->initialize(this, itr.p);
           points[point_idx] = point;
         }
@@ -13583,7 +13579,7 @@ namespace Legion {
       for (Domain::DomainPointIterator itr(launch_domain); 
             itr; itr++, point_idx++)
       {
-        PointFillOp *point = runtime->get_available_point_fill_op(false);
+        PointFillOp *point = runtime->get_available_point_fill_op();
         point->initialize(this, itr.p);
         points[point_idx] = point;
       }
@@ -14763,7 +14759,7 @@ namespace Legion {
       measurement = launcher.measurement;
       preconditions = launcher.preconditions;
       result = Future(new FutureImpl(runtime, true/*register*/,
-                  runtime->get_available_distributed_id(true),
+                  runtime->get_available_distributed_id(),
                   runtime->address_space, this));
       if (Runtime::legion_spy_enabled)
       {

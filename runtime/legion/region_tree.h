@@ -657,7 +657,7 @@ namespace Legion {
     public:
       Runtime *const runtime;
     protected:
-      Reservation lookup_lock;
+      mutable LocalLock lookup_lock;
     private:
       // The lookup lock must be held when accessing these
       // data structures
@@ -725,7 +725,7 @@ namespace Legion {
       NodeSet child_creation;
       bool destroyed;
     protected:
-      Reservation node_lock;
+      LocalLock &node_lock;
     protected:
       std::map<IndexTreeNode*,bool> dominators;
     protected:
@@ -2020,7 +2020,7 @@ namespace Legion {
       const FieldSpace handle;
       RegionTreeForest *const context;
     private:
-      Reservation node_lock;
+      LocalLock &node_lock;
       // Top nodes in the trees for which this field space is used
       std::set<LogicalRegion> logical_trees;
       std::set<RegionNode*> local_trees;
@@ -2470,7 +2470,11 @@ namespace Legion {
       DynamicTable<LogicalStateAllocator> logical_states;
       DynamicTable<VersionManagerAllocator> current_versions;
     protected:
-      Reservation node_lock;
+#ifdef LEGION_GC
+      LocalLock &node_lock;
+#else
+      mutable LocalLock node_lock;
+#endif
       // While logical states and version managers have dense keys
       // within a node, distributed IDs don't so we use a map that
       // should rarely need to be accessed for tracking views

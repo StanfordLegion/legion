@@ -119,7 +119,6 @@ namespace Legion {
                                                    bool do_registration)
       : runtime(rt), did(id), owner_space(own_space), 
         local_space(rt->address_space), 
-        gc_lock(Reservation::create_reservation()),
         current_state(INACTIVE_STATE), has_gc_references(false),
         has_valid_references(false), has_resource_references(false), 
         gc_references(0), valid_references(0), resource_references(0), 
@@ -142,6 +141,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    DistributedCollectable::DistributedCollectable(
+                                              const DistributedCollectable &rhs)
+      : runtime(NULL), did(0), owner_space(0), local_space(0)
+    //--------------------------------------------------------------------------
+    {
+      // Should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
     DistributedCollectable::~DistributedCollectable(void)
     //--------------------------------------------------------------------------
     {
@@ -152,8 +161,6 @@ namespace Legion {
 #endif
       if (is_owner() && registered_with_runtime)
         unregister_with_runtime();
-      gc_lock.destroy_reservation();
-      gc_lock = Reservation::NO_RESERVATION;
 #ifdef LEGION_GC
       log_garbage.info("GC Deletion %lld %d", 
           LEGION_DISTRIBUTED_ID_FILTER(did), local_space);

@@ -95,7 +95,7 @@ namespace Legion {
       // A mapping from FieldIDs to indexes into our field_infos
       std::map<FieldID,unsigned/*index*/> field_indexes;
     protected:
-      Reservation layout_lock; 
+      mutable LocalLock layout_lock; 
       std::map<LEGION_FIELD_MASK_FIELD_TYPE,
                LegionList<std::pair<FieldMask,FieldMask> >::aligned> comp_cache;
     }; 
@@ -354,7 +354,7 @@ namespace Legion {
       const ReductionOpID redop;
       const ApEvent use_event;
     protected:
-      Reservation manager_lock;
+      mutable LocalLock manager_lock;
 #if 0
     protected:
       // Need to deduplicate reductions to target instances

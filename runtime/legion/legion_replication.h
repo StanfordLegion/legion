@@ -97,7 +97,7 @@ namespace Legion {
       const ShardID local_shard;
       const CollectiveID collective_index;
     protected:
-      Reservation collective_lock;
+      mutable LocalLock collective_lock;
     };
 
     /**
@@ -1283,7 +1283,7 @@ namespace Legion {
       const bool control_replicated;
       const bool top_level_task;
     protected:
-      Reservation                      manager_lock;
+      mutable LocalLock                manager_lock;
       // Inheritted from Mapper::SelectShardingFunctorInput
       // std::vector<Processor>        shard_mapping;
       ShardMapping*                    address_spaces;

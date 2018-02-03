@@ -70,7 +70,6 @@ namespace Legion {
 
       NEW_OPAQUE_WRAPPER(legion_runtime_t, Runtime *);
       NEW_OPAQUE_WRAPPER(legion_context_t, CContext *);
-      NEW_OPAQUE_WRAPPER(legion_generator_context_t, GeneratorContext);
       NEW_OPAQUE_WRAPPER(legion_domain_point_iterator_t, Domain::DomainPointIterator *);
       NEW_OPAQUE_WRAPPER(legion_coloring_t, Coloring *);
       NEW_OPAQUE_WRAPPER(legion_domain_coloring_t, DomainColoring *);
@@ -91,7 +90,6 @@ namespace Legion {
       NEW_OPAQUE_WRAPPER(legion_release_launcher_t, ReleaseLauncher *);
       NEW_OPAQUE_WRAPPER(legion_attach_launcher_t, AttachLauncher *);
       NEW_OPAQUE_WRAPPER(legion_must_epoch_launcher_t, MustEpochLauncher *);
-      NEW_OPAQUE_WRAPPER(legion_task_generator_arguments_t, TaskGeneratorArguments *);
       NEW_OPAQUE_WRAPPER(legion_physical_region_t, PhysicalRegion *);
       NEW_OPAQUE_WRAPPER(legion_accessor_array_1d_t, ArrayAccessor1D *);
       NEW_OPAQUE_WRAPPER(legion_accessor_array_2d_t, ArrayAccessor2D *);

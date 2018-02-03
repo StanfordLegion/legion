@@ -48,6 +48,10 @@ namespace Realm {
     };
 #endif
 
+    namespace Config {
+      extern bool use_fast_reservation_fallback;
+    };
+
     class ReservationImpl {
     public:
       ReservationImpl(void);

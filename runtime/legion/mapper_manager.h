@@ -47,14 +47,6 @@ namespace Legion {
      */
     class MapperManager {
     public:
-      struct FinishMapperCallContinuationArgs : 
-        public LgTaskArgs<FinishMapperCallContinuationArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_FINISH_MAPPER_CONTINUATION_TASK_ID;
-      public:
-        MapperManager *manager;
-        MappingCallInfo *info;
-      };
       struct AcquireStatus {
       public:
         std::set<PhysicalManager*> instances;
@@ -79,257 +71,203 @@ namespace Legion {
       const char* get_mapper_name(void);
     public: // Task mapper calls
       void invoke_select_task_options(TaskOp *task, Mapper::TaskOptions *output,
-                                      bool first_invocation = true,
                                       MappingCallInfo *info = NULL);
       void invoke_premap_task(TaskOp *task, Mapper::PremapTaskInput *input,
                               Mapper::PremapTaskOutput *output, 
-                              bool first_invocation = true,
                               MappingCallInfo *info = NULL);
       void invoke_slice_task(TaskOp *task, Mapper::SliceTaskInput *input,
                                Mapper::SliceTaskOutput *output, 
-                               bool first_invocation = true,
                                MappingCallInfo *info = NULL);
       void invoke_map_task(TaskOp *task, Mapper::MapTaskInput *input,
                            Mapper::MapTaskOutput *output, 
-                           bool first_invocation = true,
                            MappingCallInfo *info = NULL);
       void invoke_map_replicate_task(TaskOp *task, Mapper::MapTaskInput *input,
                                      Mapper::MapTaskOutput *default_output,
                                      Mapper::MapReplicateTaskOutput *output,
-                                     bool first_invocation = true,
                                      MappingCallInfo *info = NULL);
       void invoke_select_task_variant(TaskOp *task, 
                                       Mapper::SelectVariantInput *input,
                                       Mapper::SelectVariantOutput *output,
-                                      bool first_invocation = true,
                                       MappingCallInfo *info = NULL);
       void invoke_post_map_task(TaskOp *task, Mapper::PostMapInput *input,
                                 Mapper::PostMapOutput *output,
-                                bool first_invocation = true,
                                 MappingCallInfo *info = NULL);
       void invoke_select_task_sources(TaskOp *task, 
                                       Mapper::SelectTaskSrcInput *input,
                                       Mapper::SelectTaskSrcOutput *output,
-                                      bool first_invocation = true,
                                       MappingCallInfo *info = NULL);
       void invoke_task_create_temporary(TaskOp *task,
                                       Mapper::CreateTaskTemporaryInput *input,
                                       Mapper::CreateTaskTemporaryOutput *output,
-                                      bool first_invocation = true,
                                       MappingCallInfo *info = NULL);
       void invoke_task_speculate(TaskOp *task, 
                                  Mapper::SpeculativeOutput *output,
-                                 bool first_invocation = true,
                                  MappingCallInfo *info = NULL);
       void invoke_task_report_profiling(TaskOp *task, 
                                         Mapper::TaskProfilingInfo *input,
-                                        bool first_invocation = true,
                                         MappingCallInfo *info = NULL);
       void invoke_task_select_sharding_functor(TaskOp *task,
                               Mapper::SelectShardingFunctorInput *input,
                               Mapper::SelectShardingFunctorOutput *output,
-                              bool first_invocation = true,
                               MappingCallInfo *info = NULL);
     public: // Inline mapper calls
       void invoke_map_inline(MapOp *op, Mapper::MapInlineInput *input,
                              Mapper::MapInlineOutput *output, 
-                             bool first_invocation = true,
                              MappingCallInfo *info = NULL);
       void invoke_select_inline_sources(MapOp *op, 
                                         Mapper::SelectInlineSrcInput *input,
                                         Mapper::SelectInlineSrcOutput *output,
-                                        bool first_invocation = true,
                                         MappingCallInfo *info = NULL);
       void invoke_inline_create_temporary(MapOp *op,
                                     Mapper::CreateInlineTemporaryInput *input,
                                     Mapper::CreateInlineTemporaryOutput *output,
-                                    bool first_invocation = true,
                                     MappingCallInfo *info = NULL);
       void invoke_inline_report_profiling(MapOp *op, 
                                           Mapper::InlineProfilingInfo *input,
-                                          bool first_invocation = true,
                                           MappingCallInfo *info = NULL);
     public: // Copy mapper calls
       void invoke_map_copy(CopyOp *op,
                            Mapper::MapCopyInput *input,
                            Mapper::MapCopyOutput *output,
-                           bool first_invocation = true,
                            MappingCallInfo *info = NULL);
       void invoke_select_copy_sources(CopyOp *op,
                                       Mapper::SelectCopySrcInput *input,
                                       Mapper::SelectCopySrcOutput *output,
-                                      bool first_invocation = true,
                                       MappingCallInfo *info = NULL);
       void invoke_copy_create_temporary(CopyOp *op,
                                   Mapper::CreateCopyTemporaryInput *input,
                                   Mapper::CreateCopyTemporaryOutput *output,
-                                  bool first_invocation = true,
                                   MappingCallInfo *info = NULL);
       void invoke_copy_speculate(CopyOp *op, Mapper::SpeculativeOutput *output,
-                                 bool first_invocation = true,
                                  MappingCallInfo *info = NULL);
       void invoke_copy_report_profiling(CopyOp *op,
                                         Mapper::CopyProfilingInfo *input,
-                                        bool first_invocation = true,
                                         MappingCallInfo *info = NULL);
       void invoke_copy_select_sharding_functor(CopyOp *op,
                               Mapper::SelectShardingFunctorInput *input,
                               Mapper::SelectShardingFunctorOutput *output,
-                              bool first_invocation = true,
                               MappingCallInfo *info = NULL);
     public: // Close mapper calls
       void invoke_map_close(CloseOp *op,
                             Mapper::MapCloseInput *input,
                             Mapper::MapCloseOutput *output,
-                            bool first_invocation = true,
                             MappingCallInfo *info = NULL);
       void invoke_select_close_sources(CloseOp *op,
                                        Mapper::SelectCloseSrcInput *input,
                                        Mapper::SelectCloseSrcOutput *output,
-                                       bool first_invocation = true,
                                        MappingCallInfo *info = NULL);
       void invoke_close_create_temporary(CloseOp *op,
                                      Mapper::CreateCloseTemporaryInput *input,
                                      Mapper::CreateCloseTemporaryOutput *output,
-                                     bool first_invocation = true,
                                      MappingCallInfo *info = NULL);
       void invoke_close_report_profiling(CloseOp *op,
                                          Mapper::CloseProfilingInfo *input,
-                                         bool first_invocation = true,
                                          MappingCallInfo *info = NULL);
       void invoke_close_select_sharding_functor(CloseOp *op,
                               Mapper::SelectShardingFunctorInput *input,
                               Mapper::SelectShardingFunctorOutput *output,
-                              bool first_invocation = true,
                               MappingCallInfo *info = NULL);
     public: // Acquire mapper calls
       void invoke_map_acquire(AcquireOp *op,
                               Mapper::MapAcquireInput *input,
                               Mapper::MapAcquireOutput *output,
-                              bool first_invocation = true,
                               MappingCallInfo *info = NULL);
       void invoke_acquire_speculate(AcquireOp *op,
                                     Mapper::SpeculativeOutput *output,
-                                    bool first_invocation = true,
                                     MappingCallInfo *info = NULL);
       void invoke_acquire_report_profiling(AcquireOp *op,
                                            Mapper::AcquireProfilingInfo *input,
-                                           bool first_invocation = true,
                                            MappingCallInfo *info = NULL);
       void invoke_acquire_select_sharding_functor(AcquireOp *op,
                               Mapper::SelectShardingFunctorInput *input,
                               Mapper::SelectShardingFunctorOutput *output,
-                              bool first_invocation = true,
                               MappingCallInfo *info = NULL);
     public: // Release mapper calls
       void invoke_map_release(ReleaseOp *op,
                               Mapper::MapReleaseInput *input,
                               Mapper::MapReleaseOutput *output,
-                              bool first_invocation = true,
                               MappingCallInfo *info = NULL);
       void invoke_select_release_sources(ReleaseOp *op,
                                          Mapper::SelectReleaseSrcInput *input,
                                          Mapper::SelectReleaseSrcOutput *output,
-                                         bool first_invocation = true,
                                          MappingCallInfo *info = NULL);
       void invoke_release_create_temporary(ReleaseOp *op,
                                   Mapper::CreateReleaseTemporaryInput *input,
                                   Mapper::CreateReleaseTemporaryOutput *output,
-                                  bool first_invocation = true,
                                   MappingCallInfo *info = NULL);
       void invoke_release_speculate(ReleaseOp *op,
                                     Mapper::SpeculativeOutput *output,
-                                    bool first_invocation = true,
                                     MappingCallInfo *info = NULL);
       void invoke_release_report_profiling(ReleaseOp *op,
                                            Mapper::ReleaseProfilingInfo *input,
-                                           bool first_invocation = true,
                                            MappingCallInfo *info = NULL);
       void invoke_release_select_sharding_functor(ReleaseOp *op,
                               Mapper::SelectShardingFunctorInput *input,
                               Mapper::SelectShardingFunctorOutput *output,
-                              bool first_invocation = true,
                               MappingCallInfo *info = NULL);
     public: // Partition mapper calls
       void invoke_select_partition_projection(DependentPartitionOp *op,
                           Mapper::SelectPartitionProjectionInput *input,
                           Mapper::SelectPartitionProjectionOutput *output,
-                          bool first_invocation = true,
                           MappingCallInfo *info = NULL);
       void invoke_map_partition(DependentPartitionOp *op,
                           Mapper::MapPartitionInput *input,
                           Mapper::MapPartitionOutput *output,
-                          bool first_invocation = true,
                           MappingCallInfo *info = NULL);
       void invoke_select_partition_sources(DependentPartitionOp *op,
                           Mapper::SelectPartitionSrcInput *input,
                           Mapper::SelectPartitionSrcOutput *output,
-                          bool first_invocation = true,
                           MappingCallInfo *info = NULL);
       void invoke_partition_create_temporary(DependentPartitionOp *op,
                           Mapper::CreatePartitionTemporaryInput *input,
                           Mapper::CreatePartitionTemporaryOutput *output,
-                          bool first_invocation = true,
                           MappingCallInfo *info = NULL);
       void invoke_partition_report_profiling(DependentPartitionOp *op,
                           Mapper::PartitionProfilingInfo *input,
-                          bool first_invocation = true,
                           MappingCallInfo *info = NULL);
       void invoke_partition_select_sharding_functor(DependentPartitionOp *op,
                               Mapper::SelectShardingFunctorInput *input,
                               Mapper::SelectShardingFunctorOutput *output,
-                              bool first_invocation = true,
                               MappingCallInfo *info = NULL);
     public: // Fill mapper calls
       void invoke_fill_select_sharding_functor(FillOp *op,
                               Mapper::SelectShardingFunctorInput *input,
                               Mapper::SelectShardingFunctorOutput *output,
-                              bool first_invocation = true,
                               MappingCallInfo *info = NULL);
     public: // Task execution mapper calls
       void invoke_configure_context(TaskOp *task,
                                     Mapper::ContextConfigOutput *output,
-                                    bool first_invocation = true,
                                     MappingCallInfo *info = NULL);
       void invoke_select_tunable_value(TaskOp *task,
                                        Mapper::SelectTunableInput *input,
                                        Mapper::SelectTunableOutput *output,
-                                       bool first_invocation = true,
                                        MappingCallInfo *info = NULL);
     public: // must epoch and graph mapper calls
       void invoke_must_epoch_select_sharding_functor(MustEpochOp *op,
                               Mapper::SelectShardingFunctorInput *input,
                               Mapper::MustEpochShardingFunctorOutput *output,
-                              bool first_invocation = true,
                               MappingCallInfo *info = NULL);                           
       void invoke_map_must_epoch(MustEpochOp *op,
                                  Mapper::MapMustEpochInput *input,
                                  Mapper::MapMustEpochOutput *output,
-                                 bool first_invocation = true,
                                  MappingCallInfo *info = NULL);
       void invoke_map_dataflow_graph(Mapper::MapDataflowGraphInput *input,
                                      Mapper::MapDataflowGraphOutput *output,
-                                     bool first_invocation = true,
                                      MappingCallInfo *info = NULL);
     public: // scheduling and stealing mapper calls
       void invoke_select_tasks_to_map(Mapper::SelectMappingInput *input,
                                       Mapper::SelectMappingOutput *output,
-                                      bool first_invocation = true,
                                       MappingCallInfo *info = NULL);
       void invoke_select_steal_targets(Mapper::SelectStealingInput *input,
                                        Mapper::SelectStealingOutput *output,
-                                       bool first_invocation = true,
                                        MappingCallInfo *info = NULL);
       void invoke_permit_steal_request(Mapper::StealRequestInput *input,
                                        Mapper::StealRequestOutput *output,
-                                       bool first_invocation = true,
                                        MappingCallInfo *info = NULL);
     public: // handling mapper calls
       void invoke_handle_message(Mapper::MapperMessage *message,
-                                 bool first_invocation = true,
                                  MappingCallInfo *info = NULL);
       void invoke_handle_task_result(Mapper::MapperTaskResult *result,
-                                     bool first_invocation = true,
                                      MappingCallInfo *info = NULL);
     public:
       virtual bool is_locked(MappingCallInfo *info) = 0;
@@ -341,15 +279,10 @@ namespace Legion {
       virtual void disable_reentrant(MappingCallInfo *info) = 0;
     protected:
       virtual MappingCallInfo* begin_mapper_call(MappingCallKind kind,
-                                 Operation *op, bool first_invocation, 
-                                 RtEvent &precondition) = 0;
+                                 Operation *op, RtEvent &precondition) = 0;
       virtual void pause_mapper_call(MappingCallInfo *info) = 0;
       virtual void resume_mapper_call(MappingCallInfo *info) = 0;
-      virtual void finish_mapper_call(MappingCallInfo *info,
-                                      bool first_invocation = true) = 0;
-    public:
-      static void finish_mapper_call(
-                          const FinishMapperCallContinuationArgs *args);
+      virtual void finish_mapper_call(MappingCallInfo *info) = 0;
     public:
       void send_message(MappingCallInfo *info, Processor target, 
                         const void *message, size_t message_size, 
@@ -622,7 +555,7 @@ namespace Legion {
       const Processor processor;
       const bool profile_mapper;
     protected:
-      Reservation mapper_lock;
+      mutable LocalLock mapper_lock;
     protected:
       std::vector<MappingCallInfo*> available_infos;
     protected: // Steal request information
@@ -658,12 +591,10 @@ namespace Legion {
       virtual void disable_reentrant(MappingCallInfo *info);
     protected:
       virtual MappingCallInfo* begin_mapper_call(MappingCallKind kind,
-                                 Operation *op, bool first_invocation, 
-                                 RtEvent &precondition);
+                                 Operation *op, RtEvent &precondition);
       virtual void pause_mapper_call(MappingCallInfo *info);
       virtual void resume_mapper_call(MappingCallInfo *info);
-      virtual void finish_mapper_call(MappingCallInfo *info,
-                                      bool first_invocation = true);
+      virtual void finish_mapper_call(MappingCallInfo *info);
     protected:
       // Must be called while holding the mapper reservation
       RtUserEvent complete_pending_pause_mapper_call(void);
@@ -718,12 +649,10 @@ namespace Legion {
       virtual void disable_reentrant(MappingCallInfo *info);
     protected:
       virtual MappingCallInfo* begin_mapper_call(MappingCallKind kind,
-                                 Operation *op, bool first_invocation, 
-                                 RtEvent &precondition);
+                                 Operation *op, RtEvent &precondition);
       virtual void pause_mapper_call(MappingCallInfo *info);
       virtual void resume_mapper_call(MappingCallInfo *info);
-      virtual void finish_mapper_call(MappingCallInfo *info,
-                                      bool first_invocation = true);
+      virtual void finish_mapper_call(MappingCallInfo *info);
     protected:
       // Must be called while holding the lock
       void release_lock(std::vector<RtUserEvent> &to_trigger); 
@@ -761,7 +690,7 @@ namespace Legion {
     };
 
     template<typename T1,
-             void (MapperManager::*CALL)(T1*, bool, MappingCallInfo*)>
+             void (MapperManager::*CALL)(T1*, MappingCallInfo*)>
     class MapperContinuation1 : public MapperContinuation {
     public:
       MapperContinuation1(MapperManager *man, T1 *a1, 
@@ -769,13 +698,13 @@ namespace Legion {
         : MapperContinuation(man, info), arg1(a1) { }
     public:
       virtual void execute(void)
-      { (manager->*CALL)(arg1, false/*first*/, info); }
+      { (manager->*CALL)(arg1, info); }
     public:
       T1 *const arg1;
     };
 
     template<typename T1, typename T2, 
-             void (MapperManager::*CALL)(T1*, T2*, bool, MappingCallInfo*)>
+             void (MapperManager::*CALL)(T1*, T2*, MappingCallInfo*)>
     class MapperContinuation2 : public MapperContinuation {
     public:
       MapperContinuation2(MapperManager *man, T1 *a1, T2 *a2,
@@ -783,14 +712,14 @@ namespace Legion {
         : MapperContinuation(man, info), arg1(a1), arg2(a2) { }
     public:
       virtual void execute(void)
-      { (manager->*CALL)(arg1, arg2, false/*first*/, info); }
+      { (manager->*CALL)(arg1, arg2, info); }
     public:
       T1 *const arg1;
       T2 *const arg2;
     };
 
     template<typename T1, typename T2, typename T3,
-             void (MapperManager::*CALL)(T1*, T2*, T3*, bool, MappingCallInfo*)>
+             void (MapperManager::*CALL)(T1*, T2*, T3*, MappingCallInfo*)>
     class MapperContinuation3 : public MapperContinuation {
     public:
       MapperContinuation3(MapperManager *man, T1 *a1, T2 *a2, T3 *a3,
@@ -798,7 +727,7 @@ namespace Legion {
         : MapperContinuation(man, info), arg1(a1), arg2(a2), arg3(a3) { }
     public:
       virtual void execute(void)
-      { (manager->*CALL)(arg1, arg2, arg3, false/*first*/, info); }
+      { (manager->*CALL)(arg1, arg2, arg3, info); }
     public:
       T1 *const arg1;
       T2 *const arg2;
@@ -807,7 +736,7 @@ namespace Legion {
 
     template<typename T1, typename T2, typename T3, typename T4,
              void (MapperManager::*CALL)(T1*, T2*, T3*, T4*, 
-                                         bool, MappingCallInfo*)>
+                                         MappingCallInfo*)>
     class MapperContinuation4 : public MapperContinuation {
     public:
       MapperContinuation4(MapperManager *man, T1 *a1, T2 *a2, T3 *a3, T4 *a4,
@@ -816,7 +745,7 @@ namespace Legion {
           arg1(a1), arg2(a2), arg3(a3), arg4(a4) { }
     public:
       virtual void execute(void)
-      { (manager->*CALL)(arg1, arg2, arg3, arg4, false/*first*/, info); }
+      { (manager->*CALL)(arg1, arg2, arg3, arg4, info); }
     public:
       T1 *const arg1;
       T2 *const arg2;

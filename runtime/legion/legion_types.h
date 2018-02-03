@@ -107,7 +107,6 @@ namespace Legion {
   struct FillLauncher;
   struct LayoutConstraintRegistrar;
   struct TaskVariantRegistrar;
-  struct TaskGeneratorArguments;
   class Future;
   class FutureMap;
   class Predicate;
@@ -162,40 +161,11 @@ namespace Legion {
   // legion_domain.h
   class DomainPoint;
   class Domain;
-  class IndexSpaceAllocator;
+  class IndexSpaceAllocator; 
 
   // legion_utilities.h
-  struct RegionUsage;
-  class AutoLock;
-  class ImmovableAutoLock;
   class Serializer;
   class Deserializer;
-  class LgEvent; // base event type for legion
-  class ApEvent; // application event
-  class ApUserEvent; // application user event
-  class ApBarrier; // application barrier
-  class RtEvent; // runtime event
-  class RtUserEvent; // runtime user event
-  class RtBarrier;
-  template<typename T> class Fraction;
-  template<typename T, unsigned int MAX, 
-           unsigned SHIFT, unsigned MASK> class BitMask;
-  template<typename T, unsigned int MAX,
-           unsigned SHIFT, unsigned MASK> class TLBitMask;
-#ifdef __SSE2__
-  template<unsigned int MAX> class SSEBitMask;
-  template<unsigned int MAX> class SSETLBitMask;
-#endif
-#ifdef __AVX__
-  template<unsigned int MAX> class AVXBitMask;
-  template<unsigned int MAX> class AVXTLBitMask;
-#endif
-#ifdef __ALTIVEC__
-  template<unsigned int MAX> class PPCBitMask;
-  template<unsigned int MAX> class PPCTLBitMask;
-#endif
-  template<typename T, unsigned LOG2MAX> class BitPermutation;
-  template<typename IT, typename DT, bool BIDIR = false> class IntegerSet;
 
   // legion_constraint.h
   class ISAConstraint;
@@ -324,16 +294,11 @@ namespace Legion {
       LG_DISJOINTNESS_TASK_ID,
       LG_PART_INDEPENDENCE_TASK_ID,
       LG_SPACE_INDEPENDENCE_TASK_ID,
-      LG_DECREMENT_PENDING_TASK_ID,
       LG_POST_DECREMENT_TASK_ID,
       LG_SEND_VERSION_STATE_UPDATE_TASK_ID,
       LG_UPDATE_VERSION_STATE_REDUCE_TASK_ID,
-      LG_ADD_TO_DEP_QUEUE_TASK_ID,
-      LG_WINDOW_WAIT_TASK_ID,
       LG_ISSUE_FRAME_TASK_ID,
-      LG_CONTINUATION_TASK_ID,
       LG_MAPPER_CONTINUATION_TASK_ID,
-      LG_FINISH_MAPPER_CONTINUATION_TASK_ID,
       LG_TASK_IMPL_SEMANTIC_INFO_REQ_TASK_ID,
       LG_INDEX_SPACE_SEMANTIC_INFO_REQ_TASK_ID,
       LG_INDEX_PART_SEMANTIC_INFO_REQ_TASK_ID,
@@ -429,16 +394,11 @@ namespace Legion {
         "Disjointness Test",                                      \
         "Partition Independence Test",                            \
         "Index Space Independence Test",                          \
-        "Decrement Pending Task",                                 \
         "Post Decrement Task",                                    \
         "Send Version State Update",                              \
         "Update Version State Reduce",                            \
-        "Add to Dependence Queue",                                \
-        "Window Wait",                                            \
         "Issue Frame",                                            \
-        "Legion Continuation",                                    \
         "Mapper Continuation",                                    \
-        "Finish Mapper Continuation",                             \
         "Task Impl Semantic Request",                             \
         "Index Space Semantic Request",                           \
         "Index Partition Semantic Request",                       \
@@ -1377,6 +1337,39 @@ namespace Legion {
       COLLECTIVE_LOC_73 = 73,
     };
 
+    // legion_types.h
+    class LocalLock;
+    class AutoLock;
+    class LgEvent; // base event type for legion
+    class ApEvent; // application event
+    class ApUserEvent; // application user event
+    class ApBarrier; // application barrier
+    class RtEvent; // runtime event
+    class RtUserEvent; // runtime user event
+    class RtBarrier;
+
+    // legion_utilities.h
+    struct RegionUsage; 
+    template<typename T> class Fraction;
+    template<typename T, unsigned int MAX, 
+             unsigned SHIFT, unsigned MASK> class BitMask;
+    template<typename T, unsigned int MAX,
+             unsigned SHIFT, unsigned MASK> class TLBitMask;
+#ifdef __SSE2__
+    template<unsigned int MAX> class SSEBitMask;
+    template<unsigned int MAX> class SSETLBitMask;
+#endif
+#ifdef __AVX__
+    template<unsigned int MAX> class AVXBitMask;
+    template<unsigned int MAX> class AVXTLBitMask;
+#endif
+#ifdef __ALTIVEC__
+    template<unsigned int MAX> class PPCBitMask;
+    template<unsigned int MAX> class PPCTLBitMask;
+#endif
+    template<typename T, unsigned LOG2MAX> class BitPermutation;
+    template<typename IT, typename DT, bool BIDIR = false> class IntegerSet;
+
     // Forward declarations for runtime level objects
     // runtime.h
     class Collectable;
@@ -1397,7 +1390,6 @@ namespace Legion {
     class TaskImpl;
     class VariantImpl;
     class LayoutConstraints;
-    class GeneratorImpl;
     class ProjectionFunction;
     class ShardingFunction;
     class Runtime;
@@ -1493,11 +1485,13 @@ namespace Legion {
       inline TaskContext* as_context(void) 
         { return reinterpret_cast<TaskContext*>(this); }
     };
+
     // Nasty global variable for TLS support of figuring out
-    // our context implicitly, this is experimental only
-#ifdef ENABLE_LEGION_TLS
+    // our context implicitly
     extern __thread TaskContext *implicit_context;
-#endif
+    // Another nasty global variable for tracking the fast
+    // reservations that we are holding
+    extern __thread AutoLock *local_lock_list;
 #ifdef DEBUG_LEGION_WAITS
     extern __thread int meta_task_id;
 #endif
@@ -1798,7 +1792,6 @@ namespace Legion {
   typedef ::legion_address_space_id_t AddressSpaceID;
   typedef ::legion_tunable_id_t TunableID;
   typedef ::legion_local_variable_id_t LocalVariableID;
-  typedef ::legion_generator_id_t GeneratorID;
   typedef ::legion_mapping_tag_id_t MappingTagID;
   typedef ::legion_semantic_tag_t SemanticTag;
   typedef ::legion_variant_id_t VariantID;
@@ -1825,9 +1818,6 @@ namespace Legion {
   // (don't forget to update ones in old HighLevel namespace in legion.inl)
   typedef Internal::TaskContext* Context;
   typedef Internal::ContextInterface* InternalContext;
-  typedef Internal::GeneratorImpl* GeneratorContext;
-  typedef void (*GeneratorFnptr)(GeneratorContext,
-                                 const TaskGeneratorArguments&, Runtime*);
   // Anothing magical typedef
   namespace Mapping {
     typedef Internal::MappingCallInfo* MapperContext;
@@ -2041,173 +2031,326 @@ namespace Legion {
 #endif
 
 #undef PROC_SHIFT
-#undef PROC_MASK
-  }; // namespace Internal 
+#undef PROC_MASK 
 
-  // Legion derived event types
-  class LgEvent : public Realm::Event {
-  public:
-    static const LgEvent NO_LG_EVENT;
-  public:
-    LgEvent(void) { id = 0; }
-    LgEvent(const LgEvent &rhs) { id = rhs.id; }
-    explicit LgEvent(const Realm::Event e) { id = e.id; }
-  public:
-    inline LgEvent& operator=(const LgEvent &rhs)
-      { id = rhs.id; return *this; }
-  public:
-    inline void lg_wait(void) const
+    // Legion derived event types
+    class LgEvent : public Realm::Event {
+    public:
+      static const LgEvent NO_LG_EVENT;
+    public:
+      LgEvent(void) { id = 0; }
+      LgEvent(const LgEvent &rhs) { id = rhs.id; }
+      explicit LgEvent(const Realm::Event e) { id = e.id; }
+    public:
+      inline LgEvent& operator=(const LgEvent &rhs)
+        { id = rhs.id; return *this; }
+    public:
+      inline void lg_wait(void) const;
+    };
+
+    class PredEvent : public LgEvent {
+    public:
+      static const PredEvent NO_PRED_EVENT;
+    public:
+      PredEvent(void) : LgEvent() { } 
+      PredEvent(const PredEvent &rhs) { id = rhs.id; }
+      explicit PredEvent(const Realm::UserEvent &e) : LgEvent(e) { }
+    public:
+      inline PredEvent& operator=(const PredEvent &rhs)
+        { id = rhs.id; return *this; }
+      inline operator Realm::UserEvent() const
+        { Realm::UserEvent e; e.id = id; return e; }
+    };
+
+    class ApEvent : public LgEvent {
+    public:
+      static const ApEvent NO_AP_EVENT;
+    public:
+      ApEvent(void) : LgEvent() { }
+      ApEvent(const ApEvent &rhs) { id = rhs.id; }
+      explicit ApEvent(const Realm::Event &e) : LgEvent(e) { }
+      explicit ApEvent(const PredEvent &e) { id = e.id; }
+    public:
+      inline ApEvent& operator=(const ApEvent &rhs)
+        { id = rhs.id; return *this; }
+      inline bool has_triggered_faultignorant(void) const
+        { bool poisoned; return has_triggered_faultaware(poisoned); }
+    };
+
+    class ApUserEvent : public ApEvent {
+    public:
+      static const ApUserEvent NO_AP_USER_EVENT;
+    public:
+      ApUserEvent(void) : ApEvent() { }
+      ApUserEvent(const ApUserEvent &rhs) : ApEvent(rhs) { }
+      explicit ApUserEvent(const Realm::UserEvent &e) : ApEvent(e) { }
+    public:
+      inline ApUserEvent& operator=(const ApUserEvent &rhs)
+        { id = rhs.id; return *this; }
+      inline operator Realm::UserEvent() const
+        { Realm::UserEvent e; e.id = id; return e; }
+    };
+
+    class ApBarrier : public ApEvent {
+    public:
+      static const ApBarrier NO_AP_BARRIER;
+    public:
+      ApBarrier(void) : ApEvent(), timestamp(0) { }
+      ApBarrier(const ApBarrier &rhs) 
+        : ApEvent(rhs), timestamp(rhs.timestamp) { }
+      explicit ApBarrier(const Realm::Barrier &b) 
+        : ApEvent(b), timestamp(b.timestamp) { }
+    public:
+      inline ApBarrier& operator=(const ApBarrier &rhs)
+        { id = rhs.id; timestamp = rhs.timestamp; return *this; }
+      inline operator Realm::Barrier() const
+        { Realm::Barrier b; b.id = id; 
+          b.timestamp = timestamp; return b; }
+    public:
+      inline bool get_result(void *value, size_t value_size) const
+        { Realm::Barrier b; b.id = id;
+          b.timestamp = timestamp; return b.get_result(value, value_size); }
+      inline void destroy_barrier(void)
+        { Realm::Barrier b; b.id = id;
+          b.timestamp = timestamp; b.destroy_barrier(); }
+    public:
+      Realm::Barrier::timestamp_t timestamp;
+    };
+
+    class RtEvent : public LgEvent {
+    public:
+      static const RtEvent NO_RT_EVENT;
+    public:
+      RtEvent(void) : LgEvent() { }
+      RtEvent(const RtEvent &rhs) { id = rhs.id; }
+      explicit RtEvent(const Realm::Event &e) : LgEvent(e) { }
+      explicit RtEvent(const PredEvent &e) { id = e.id; }
+    public:
+      inline RtEvent& operator=(const RtEvent &rhs)
+        { id = rhs.id; return *this; }
+    };
+
+    class RtUserEvent : public RtEvent {
+    public:
+      static const RtUserEvent NO_RT_USER_EVENT;
+    public:
+      RtUserEvent(void) : RtEvent() { }
+      RtUserEvent(const RtUserEvent &rhs) : RtEvent(rhs) { }
+      explicit RtUserEvent(const Realm::UserEvent &e) : RtEvent(e) { }
+    public:
+      inline RtUserEvent& operator=(const RtUserEvent &rhs)
+        { id = rhs.id; return *this; }
+      inline operator Realm::UserEvent() const
+        { Realm::UserEvent e; e.id = id; return e; }
+    };
+
+    class RtBarrier : public RtEvent {
+    public:
+      static const RtBarrier NO_RT_BARRIER;
+    public:
+      RtBarrier(void) : RtEvent(), timestamp(0) { }
+      RtBarrier(const RtBarrier &rhs)
+        : RtEvent(rhs), timestamp(rhs.timestamp) { }
+      explicit RtBarrier(const Realm::Barrier &b)
+        : RtEvent(b), timestamp(b.timestamp) { }
+    public:
+      inline RtBarrier& operator=(const RtBarrier &rhs)
+        { id = rhs.id; timestamp = rhs.timestamp; return *this; }
+      inline operator Realm::Barrier() const
+        { Realm::Barrier b; b.id = id; 
+          b.timestamp = timestamp; return b; } 
+    public:
+      inline bool get_result(void *value, size_t value_size) const
+        { Realm::Barrier b; b.id = id;
+          b.timestamp = timestamp; return b.get_result(value, value_size); }
+      inline RtBarrier get_previous_phase(void)
+        { Realm::Barrier b; b.id = id;
+          return RtBarrier(b.get_previous_phase()); }
+      inline void destroy_barrier(void)
+        { Realm::Barrier b; b.id = id;
+          b.timestamp = timestamp; b.destroy_barrier(); }
+    public:
+      Realm::Barrier::timestamp_t timestamp;
+    }; 
+
+    // Local lock for accelerating lock taking
+    class LocalLock {
+    public:
+      inline LocalLock(void) { } 
+    public:
+      inline LocalLock(const LocalLock &rhs)
       {
-#ifdef DEBUG_LEGION_WAITS
-        const int local_meta_task_id = Internal::meta_task_id;
-        const long long start = Realm::Clock::current_time_in_microseconds();
-#endif
-#ifdef ENABLE_LEGION_TLS
-        // Save the context locally
-        Internal::TaskContext *local_ctx = Internal::implicit_context; 
-        // Do the wait
-        wait();
-        // Write the context back
-        Internal::implicit_context = local_ctx;
-#else
-        // Just do the normal wait call
-        wait(); 
-#endif
-#ifdef DEBUG_LEGION_WAITS
-        Internal::meta_task_id = local_meta_task_id;
-        const long long stop = Realm::Clock::current_time_in_microseconds();
-        if (((stop - start) >= LIMIT) && (local_meta_task_id == BAD_TASK_ID))
-          assert(false);
-#endif
+        // should never be called
+        assert(false);
       }
-  };
+      inline ~LocalLock(void) { }
+    public:
+      inline LocalLock& operator=(const LocalLock &rhs)
+      {
+        // should never be called
+        assert(false);
+        return *this;
+      }
+    private:
+      // These are only accessible via AutoLock
+      friend class AutoLock;
+      inline RtEvent lock(void)   { return RtEvent(wrlock()); }
+      inline RtEvent wrlock(void) { return RtEvent(reservation.wrlock()); }
+      inline RtEvent rdlock(void) { return RtEvent(reservation.rdlock()); }
+      inline void unlock(void) { reservation.unlock(); }
+    private:
+      inline void advise_sleep_entry(Realm::UserEvent guard)
+        { reservation.advise_sleep_entry(guard); }
+      inline void advise_sleep_exit(void)
+        { reservation.advise_sleep_exit(); }
+    protected:
+      Realm::FastReservation reservation;
+    };
 
-  class PredEvent : public LgEvent {
-  public:
-    static const PredEvent NO_PRED_EVENT;
-  public:
-    PredEvent(void) : LgEvent() { } 
-    PredEvent(const PredEvent &rhs) { id = rhs.id; }
-    explicit PredEvent(const Realm::UserEvent &e) : LgEvent(e) { }
-  public:
-    inline PredEvent& operator=(const PredEvent &rhs)
-      { id = rhs.id; return *this; }
-    inline operator Realm::UserEvent() const
-      { Realm::UserEvent e; e.id = id; return e; }
-  };
+    /////////////////////////////////////////////////////////////
+    // AutoLock 
+    /////////////////////////////////////////////////////////////
+    // An auto locking class for taking a lock and releasing it when
+    // the object goes out of scope
+    class AutoLock { 
+    public:
+      inline AutoLock(LocalLock &r, int mode = 0, bool excl = true)
+        : local_lock(r), previous(Internal::local_lock_list), 
+          exclusive(excl), held(true)
+      {
+        if (exclusive)
+        {
+          RtEvent ready = local_lock.wrlock();
+          while (ready.exists())
+          {
+            ready.lg_wait();
+            ready = local_lock.wrlock();
+          }
+        }
+        else
+        {
+          RtEvent ready = local_lock.rdlock();
+          while (ready.exists())
+          {
+            ready.lg_wait();
+            ready = local_lock.rdlock();
+          }
+        }
+        Internal::local_lock_list = this;
+      }
+    public:
+      inline AutoLock(const AutoLock &rhs)
+        : local_lock(rhs.local_lock), previous(NULL), exclusive(false)
+      {
+        // should never be called
+        assert(false);
+      }
+      inline ~AutoLock(void)
+      {
+#ifdef DEBUG_LEGION
+        assert(Internal::local_lock_list == this);
+#endif
+        Internal::local_lock_list = previous;
+#ifdef DEBUG_LEGION
+        assert(held);
+#endif
+        local_lock.unlock();
+      }
+    public:
+      inline AutoLock& operator=(const AutoLock &rhs)
+      {
+        // should never be called
+        assert(false);
+        return *this;
+      }
+    public:
+      inline void release(void) 
+      { 
+#ifdef DEBUG_LEGION
+        assert(held);
+#endif
+        local_lock.unlock(); 
+        held = false; 
+      }
+      inline void reacquire(void)
+      {
+#ifdef DEBUG_LEGION
+        assert(!held);
+#endif
+        if (exclusive)
+          local_lock.wrlock();
+        else
+          local_lock.rdlock();
+        held = true;
+      }
+    public:
+      inline void advise_sleep_entry(Realm::UserEvent guard) const
+      {
+        if (held)
+          local_lock.advise_sleep_entry(guard);
+        if (previous != NULL)
+          previous->advise_sleep_entry(guard);
+      }
+      inline void advise_sleep_exit(void) const
+      {
+        if (held)
+          local_lock.advise_sleep_exit();
+        if (previous != NULL)
+          previous->advise_sleep_exit();
+      }
+    private:
+      LocalLock &local_lock;
+      AutoLock *const previous;
+      const bool exclusive;
+      bool held;
+    };
+    
+    // Special method that we need here for waiting on events
 
-  class ApEvent : public LgEvent {
-  public:
-    static const ApEvent NO_AP_EVENT;
-  public:
-    ApEvent(void) : LgEvent() { }
-    ApEvent(const ApEvent &rhs) { id = rhs.id; }
-    explicit ApEvent(const Realm::Event &e) : LgEvent(e) { }
-    explicit ApEvent(const PredEvent &e) { id = e.id; }
-  public:
-    inline ApEvent& operator=(const ApEvent &rhs)
-      { id = rhs.id; return *this; }
-    inline bool has_triggered_faultignorant(void) const
-      { bool poisoned; return has_triggered_faultaware(poisoned); }
-  };
+    //--------------------------------------------------------------------------
+    inline void LgEvent::lg_wait(void) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION_WAITS
+      const int local_meta_task_id = Internal::meta_task_id;
+      const long long start = Realm::Clock::current_time_in_microseconds();
+#endif
+      // Save the context locally
+      Internal::TaskContext *local_ctx = Internal::implicit_context; 
+      // Check to see if we have any local locks to notify
+      if (Internal::local_lock_list != NULL)
+      {
+        // Make a copy of the local locks here
+        AutoLock *local_lock_list_copy = Internal::local_lock_list;
+        // Set this back to NULL until we are done waiting
+        Internal::local_lock_list = NULL;
+        // Make a user event and notify all the thread locks
+        const Realm::UserEvent done = Realm::UserEvent::create_user_event();
+        local_lock_list_copy->advise_sleep_entry(done);
+        // Now we can do the wait
+        wait();
+        // When we wake up, notify that we are done and exited the wait
+        local_lock_list_copy->advise_sleep_exit();
+        // Trigger the user-event
+        done.trigger();
+        // Restore our local lock list
+#ifdef DEBUG_LEGION
+        assert(Internal::local_lock_list == NULL); 
+#endif
+        Internal::local_lock_list = local_lock_list_copy; 
+      }
+      else // Just do the normal wait
+        wait();
+      // Write the context back
+      Internal::implicit_context = local_ctx;
+#ifdef DEBUG_LEGION_WAITS
+      Internal::meta_task_id = local_meta_task_id;
+      const long long stop = Realm::Clock::current_time_in_microseconds();
+      if (((stop - start) >= LIMIT) && (local_meta_task_id == BAD_TASK_ID))
+        assert(false);
+#endif
+    }
 
-  class ApUserEvent : public ApEvent {
-  public:
-    static const ApUserEvent NO_AP_USER_EVENT;
-  public:
-    ApUserEvent(void) : ApEvent() { }
-    ApUserEvent(const ApUserEvent &rhs) : ApEvent(rhs) { }
-    explicit ApUserEvent(const Realm::UserEvent &e) : ApEvent(e) { }
-  public:
-    inline ApUserEvent& operator=(const ApUserEvent &rhs)
-      { id = rhs.id; return *this; }
-    inline operator Realm::UserEvent() const
-      { Realm::UserEvent e; e.id = id; return e; }
-  };
-
-  class ApBarrier : public ApEvent {
-  public:
-    static const ApBarrier NO_AP_BARRIER;
-  public:
-    ApBarrier(void) : ApEvent(), timestamp(0) { }
-    ApBarrier(const ApBarrier &rhs) 
-      : ApEvent(rhs), timestamp(rhs.timestamp) { }
-    explicit ApBarrier(const Realm::Barrier &b) 
-      : ApEvent(b), timestamp(b.timestamp) { }
-  public:
-    inline ApBarrier& operator=(const ApBarrier &rhs)
-      { id = rhs.id; timestamp = rhs.timestamp; return *this; }
-    inline operator Realm::Barrier() const
-      { Realm::Barrier b; b.id = id; 
-        b.timestamp = timestamp; return b; }
-  public:
-    inline bool get_result(void *value, size_t value_size) const
-      { Realm::Barrier b; b.id = id;
-        b.timestamp = timestamp; return b.get_result(value, value_size); }
-    inline void destroy_barrier(void)
-      { Realm::Barrier b; b.id = id;
-        b.timestamp = timestamp; b.destroy_barrier(); }
-  public:
-    Realm::Barrier::timestamp_t timestamp;
-  };
-
-  class RtEvent : public LgEvent {
-  public:
-    static const RtEvent NO_RT_EVENT;
-  public:
-    RtEvent(void) : LgEvent() { }
-    RtEvent(const RtEvent &rhs) { id = rhs.id; }
-    explicit RtEvent(const Realm::Event &e) : LgEvent(e) { }
-    explicit RtEvent(const PredEvent &e) { id = e.id; }
-  public:
-    inline RtEvent& operator=(const RtEvent &rhs)
-      { id = rhs.id; return *this; }
-  };
-
-  class RtUserEvent : public RtEvent {
-  public:
-    static const RtUserEvent NO_RT_USER_EVENT;
-  public:
-    RtUserEvent(void) : RtEvent() { }
-    RtUserEvent(const RtUserEvent &rhs) : RtEvent(rhs) { }
-    explicit RtUserEvent(const Realm::UserEvent &e) : RtEvent(e) { }
-  public:
-    inline RtUserEvent& operator=(const RtUserEvent &rhs)
-      { id = rhs.id; return *this; }
-    inline operator Realm::UserEvent() const
-      { Realm::UserEvent e; e.id = id; return e; }
-  };
-
-  class RtBarrier : public RtEvent {
-  public:
-    static const RtBarrier NO_RT_BARRIER;
-  public:
-    RtBarrier(void) : RtEvent(), timestamp(0) { }
-    RtBarrier(const RtBarrier &rhs)
-      : RtEvent(rhs), timestamp(rhs.timestamp) { }
-    explicit RtBarrier(const Realm::Barrier &b)
-      : RtEvent(b), timestamp(b.timestamp) { }
-  public:
-    inline RtBarrier& operator=(const RtBarrier &rhs)
-      { id = rhs.id; timestamp = rhs.timestamp; return *this; }
-    inline operator Realm::Barrier() const
-      { Realm::Barrier b; b.id = id; 
-        b.timestamp = timestamp; return b; } 
-  public:
-    inline bool get_result(void *value, size_t value_size) const
-      { Realm::Barrier b; b.id = id;
-        b.timestamp = timestamp; return b.get_result(value, value_size); }
-    inline RtBarrier get_previous_phase(void)
-      { Realm::Barrier b; b.id = id;
-        return RtBarrier(b.get_previous_phase()); }
-    inline void destroy_barrier(void)
-      { Realm::Barrier b; b.id = id;
-        b.timestamp = timestamp; b.destroy_barrier(); }
-  public:
-    Realm::Barrier::timestamp_t timestamp;
-  }; 
-
-  namespace Internal {
 #ifdef LEGION_SPY
     // Need a custom version of these for Legion Spy to track instance events
     struct CopySrcDstField : public Realm::CopySrcDstField {
@@ -2217,7 +2360,8 @@ namespace Legion {
 #else
     typedef Realm::CopySrcDstField CopySrcDstField;
 #endif
-  }; // Internal namespace
+
+  }; // namespace Internal 
   
   // A class for preventing serialization of Legion objects
   // which cannot be serialized

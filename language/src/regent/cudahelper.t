@@ -12,13 +12,13 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
-local config = require("regent/config")
+local config = require("regent/config").args()
 local report = require("common/report")
 
 local cudahelper = {}
 cudahelper.check_cuda_available = function() return false end
 
-if not config.args()["cuda"] or not terralib.cudacompile then
+if not config["cuda"] or not terralib.cudacompile then
   return cudahelper
 end
 
@@ -83,10 +83,16 @@ end
 
 do
   if has_symbol("cuInit") then
-    local r = DriverAPI.cuInit(0)
-    assert(r == 0)
-    terra cudahelper.check_cuda_available()
-      return [r] == 0;
+    if not config["cuda-offline"]  then
+      local r = DriverAPI.cuInit(0)
+      assert(r == 0)
+      terra cudahelper.check_cuda_available()
+        return [r] == 0;
+      end
+    else
+      terra cudahelper.check_cuda_available()
+        return true
+      end
     end
   else
     terra cudahelper.check_cuda_available()
@@ -174,12 +180,41 @@ local function find_device_library(target)
   return libdevice
 end
 
+local supported_archs = {
+  ["fermi"]   = 20,
+  ["kepler"]  = 30,
+  ["k20"]     = 35,
+  ["maxwell"] = 52,
+  ["pascal"]  = 60,
+  ["volta"]   = 70,
+}
+
+local function parse_cuda_arch(arch)
+  arch = string.lower(arch)
+  local sm = supported_archs[arch]
+  if sm == nil then
+    local archs
+    for k, v in pairs(supported_archs) do
+      archs = (not archs and k) or (archs and archs .. ", " .. k)
+    end
+    print("Error: Unsupported GPU architecture " .. arch ..
+          ". Supported architectures: " .. archs)
+    os.exit(1)
+  end
+  return sm
+end
+
 function cudahelper.jit_compile_kernels_and_register(kernels)
   local module = {}
   for k, v in pairs(kernels) do
     module[v.name] = v.kernel
   end
-  local version = get_cuda_version()
+  local version
+  if not config["cuda-offline"] then
+    version = get_cuda_version()
+  else
+    version = parse_cuda_arch(config["cuda-arch"])
+  end
   local libdevice = find_device_library(tonumber(version))
   local llvmbc = terralib.linkllvm(libdevice)
   externcall_builtin = function(name, ftype)

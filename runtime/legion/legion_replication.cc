@@ -864,8 +864,7 @@ namespace Legion {
 #endif
       // Make a replicate future map 
       return new ReplFutureMapImpl(repl_ctx, this, index_domain,runtime,
-          runtime->get_available_distributed_id(true/*need continuation*/),
-          runtime->address_space);
+          runtime->get_available_distributed_id(), runtime->address_space);
     }
 
     /////////////////////////////////////////////////////////////
@@ -2492,7 +2491,7 @@ namespace Legion {
       for (unsigned idx = 0; idx < launcher.single_tasks.size(); idx++)
       {
         ReplIndividualTask *task = 
-          runtime->get_available_repl_individual_task(true);
+          runtime->get_available_repl_individual_task();
         task->initialize_task(ctx, launcher.single_tasks[idx],
                               check_privileges, false/*track*/);
         task->set_must_epoch(this, idx, true/*register*/);
@@ -2515,7 +2514,7 @@ namespace Legion {
         if (!launch_space.exists())
           launch_space = runtime->find_or_create_index_launch_space(
                       launcher.index_tasks[idx].launch_domain);
-        ReplIndexTask *task = runtime->get_available_repl_index_task(true);
+        ReplIndexTask *task = runtime->get_available_repl_index_task();
         task->initialize_task(ctx, launcher.index_tasks[idx],
                           launch_space, check_privileges, false/*track*/);
         task->set_must_epoch(this, indiv_tasks.size()+idx, 
@@ -2547,8 +2546,7 @@ namespace Legion {
 #endif
       runtime->forest->find_launch_space_domain(launch_space, index_domain);
       return new ReplFutureMapImpl(repl_ctx, this, index_domain,runtime,
-          runtime->get_available_distributed_id(true/*need continuation*/),
-          runtime->address_space);
+          runtime->get_available_distributed_id(), runtime->address_space);
     }
 
     //--------------------------------------------------------------------------
@@ -3479,8 +3477,8 @@ namespace Legion {
                                bool top, size_t total, AddressSpaceID owner, 
                                SingleTask *original/*= NULL*/, RtBarrier bar)
       : runtime(rt), repl_id(id), owner_space(owner), total_shards(total),
-        original_task(original),control_replicated(control),top_level_task(top),
-        manager_lock(Reservation::create_reservation()), address_spaces(NULL),
+        original_task(original),control_replicated(control),
+        top_level_task(top), address_spaces(NULL), 
         local_mapping_complete(0), remote_mapping_complete(0),
         trigger_local_complete(0), trigger_remote_complete(0),
         trigger_local_commit(0), trigger_remote_commit(0), 
@@ -3555,8 +3553,6 @@ namespace Legion {
       // Finally unregister ourselves with the runtime
       const bool owner_manager = (owner_space == runtime->address_space);
       runtime->unregister_shard_manager(repl_id, owner_manager);
-      manager_lock.destroy_reservation();
-      manager_lock = Reservation::NO_RESERVATION;
       if (owner_manager)
       {
         if (control_replicated)
@@ -4399,8 +4395,7 @@ namespace Legion {
                                      ReplicateContext *ctx)
       : manager(ctx->shard_manager), context(ctx), 
         local_shard(ctx->owner_shard->shard_id), 
-        collective_index(ctx->get_next_collective_index(loc)),
-        collective_lock(Reservation::create_reservation())
+        collective_index(ctx->get_next_collective_index(loc))
     //--------------------------------------------------------------------------
     {
     }
@@ -4408,8 +4403,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     ShardCollective::ShardCollective(ReplicateContext *ctx, CollectiveID id)
       : manager(ctx->shard_manager), context(ctx), 
-        local_shard(ctx->owner_shard->shard_id), collective_index(id),
-        collective_lock(Reservation::create_reservation())
+        local_shard(ctx->owner_shard->shard_id), collective_index(id)
     //--------------------------------------------------------------------------
     { 
     }
@@ -4420,8 +4414,6 @@ namespace Legion {
     {
       // Unregister this with the context 
       context->unregister_collective(this);
-      collective_lock.destroy_reservation();
-      collective_lock = Reservation::NO_RESERVATION;
     }
 
     //--------------------------------------------------------------------------

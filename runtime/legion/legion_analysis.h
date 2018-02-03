@@ -1114,7 +1114,7 @@ namespace Legion {
       const unsigned depth;
       Runtime *const runtime;
     protected:
-      Reservation manager_lock;
+      mutable LocalLock manager_lock;
     protected:
       InnerContext *current_context;
     protected:
@@ -1187,7 +1187,6 @@ namespace Legion {
         VersionState *proxy_this;
         LegionColor child_color;
         VersioningSet<> *children;
-        Reservation state_lock;
       };
       struct ConvertViewArgs : public LgTaskArgs<ConvertViewArgs> {
       public:
@@ -1366,7 +1365,7 @@ namespace Legion {
       const VersionID version_number;
       RegionTreeNode *const logical_node;
     protected:
-      Reservation state_lock;
+      mutable LocalLock state_lock;
       // Fields which have been directly written to
       FieldMask dirty_mask;
       // Fields which have reductions
