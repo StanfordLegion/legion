@@ -1121,6 +1121,7 @@ namespace Realm {
 
       cp.add_option_int("-realm:eventloopcheck", Config::event_loop_detection_limit);
       cp.add_option_bool("-ll:force_kthreads", Config::force_kernel_threads);
+      cp.add_option_bool("-ll:frsrv_fallback", Config::use_fast_reservation_fallback);
 
       // these are actually parsed in activemsg.cc, but consume them here for now
       size_t dummy = 0;

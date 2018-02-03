@@ -1076,7 +1076,7 @@ namespace Legion {
           DomainT<1,coord_t> is1 = *this;
           DomainT<1,coord_t> is2 = other;
           DomainT<1,coord_t> temp;
-          LgEvent wait_on( 
+          Internal::LgEvent wait_on( 
             DomainT<1,coord_t>::compute_intersection(is1,is2,
                                                   temp,dummy_requests));
           if (wait_on.exists())
@@ -1090,7 +1090,7 @@ namespace Legion {
           DomainT<2,coord_t> is1 = *this;
           DomainT<2,coord_t> is2 = other;
           DomainT<2,coord_t> temp;
-          LgEvent wait_on(
+          Internal::LgEvent wait_on(
             DomainT<2,coord_t>::compute_intersection(is1,is2,
                                                   temp,dummy_requests));
           if (wait_on.exists())
@@ -1104,7 +1104,7 @@ namespace Legion {
           DomainT<3,coord_t> is1 = *this;
           DomainT<3,coord_t> is2 = other;
           DomainT<3,coord_t> temp;
-          LgEvent wait_on(
+          Internal::LgEvent wait_on(
             DomainT<3,coord_t>::compute_intersection(is1,is2,
                                                   temp,dummy_requests));
           if (wait_on.exists())

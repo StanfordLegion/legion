@@ -39,8 +39,7 @@ namespace Legion {
                              AddressSpaceID own_addr,
                              RegionTreeNode *node, bool register_now)
       : DistributedCollectable(ctx->runtime, did, own_addr, register_now), 
-        context(ctx), logical_node(node), 
-        view_lock(Reservation::create_reservation()) 
+        context(ctx), logical_node(node)
     //--------------------------------------------------------------------------
     {
 #ifdef LEGION_GC
@@ -60,8 +59,6 @@ namespace Legion {
       if (logical_node->remove_reference())
 #endif
         delete logical_node;
-      view_lock.destroy_reservation();
-      view_lock = Reservation::NO_RESERVATION;
     }
 
     //--------------------------------------------------------------------------
@@ -364,7 +361,7 @@ namespace Legion {
         RegionTreeNode *child_node = logical_node->get_tree_child(c);
         // Allocate the DID eagerly
         DistributedID child_did = 
-          context->runtime->get_available_distributed_id(false);
+          context->runtime->get_available_distributed_id();
         bool free_child_did = false;
         MaterializedView *child_view = NULL;
         {
@@ -4607,7 +4604,7 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    CompositeBase::CompositeBase(Reservation &r)
+    CompositeBase::CompositeBase(LocalLock &r)
       : base_lock(r)
     //--------------------------------------------------------------------------
     {
@@ -5061,7 +5058,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       Runtime *runtime = context->runtime; 
-      DistributedID result_did = runtime->get_available_distributed_id(false);
+      DistributedID result_did = runtime->get_available_distributed_id();
       CompositeView *result = new CompositeView(context, result_did,
           runtime->address_space, logical_node, version_info, closed_tree, 
           owner_context, true/*register now*/);
@@ -5948,8 +5945,7 @@ namespace Legion {
     CompositeNode::CompositeNode(RegionTreeNode* node, CompositeBase *p,
                                  DistributedID own_did)
       : CompositeBase(node_lock), logical_node(node), parent(p), 
-        owner_did(own_did), node_lock(Reservation::create_reservation()),
-        currently_valid(false)
+        owner_did(own_did), currently_valid(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -5967,8 +5963,6 @@ namespace Legion {
     CompositeNode::~CompositeNode(void)
     //--------------------------------------------------------------------------
     {
-      node_lock.destroy_reservation();
-      node_lock = Reservation::NO_RESERVATION;
       for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it = 
             version_states.begin(); it != version_states.end(); it++)
       {

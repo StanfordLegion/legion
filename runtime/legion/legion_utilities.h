@@ -23,7 +23,6 @@
 
 #include "legion/legion_types.h"
 #include "legion.h"
-#include "legion/legion_profiling.h"
 #include "legion/legion_allocation.h"
 
 // Apple can go screw itself
@@ -61,6 +60,157 @@
 
 namespace Legion {
 
+    /////////////////////////////////////////////////////////////
+    // Serializer 
+    /////////////////////////////////////////////////////////////
+    class Serializer {
+    public:
+      Serializer(size_t base_bytes = 4096)
+        : total_bytes(base_bytes), buffer((char*)malloc(base_bytes)), 
+          index(0) 
+#ifdef DEBUG_LEGION
+          , context_bytes(0)
+#endif
+      { }
+      Serializer(const Serializer &rhs)
+      {
+        // should never be called
+        assert(false);
+      }
+    public:
+      ~Serializer(void)
+      {
+        free(buffer);
+      }
+    public:
+      inline Serializer& operator=(const Serializer &rhs);
+    public:
+      template<typename T>
+      inline void serialize(const T &element);
+      // we need special serializers for bit masks
+      template<typename T, unsigned int MAX, unsigned SHIFT, unsigned MASK>
+      inline void serialize(const Internal::BitMask<T,MAX,SHIFT,MASK> &mask);
+      template<typename T, unsigned int MAX, unsigned SHIFT, unsigned MASK>
+      inline void serialize(const Internal::TLBitMask<T,MAX,SHIFT,MASK> &mask);
+#ifdef __SSE2__
+      template<unsigned int MAX>
+      inline void serialize(const Internal::SSEBitMask<MAX> &mask);
+      template<unsigned int MAX>
+      inline void serialize(const Internal::SSETLBitMask<MAX> &mask);
+#endif
+#ifdef __AVX__
+      template<unsigned int MAX>
+      inline void serialize(const Internal::AVXBitMask<MAX> &mask);
+      template<unsigned int MAX>
+      inline void serialize(const Internal::AVXTLBitMask<MAX> &mask);
+#endif
+#ifdef __ALTIVEC__
+      template<unsigned int MAX>
+      inline void serialize(const PPCBitMask<MAX> &mask);
+      template<unsigned int MAX>
+      inline void serialize(const PPCTLBitMask<MAX> &mask);
+#endif
+      template<typename IT, typename DT, bool BIDIR>
+      inline void serialize(
+          const Internal::IntegerSet<IT,DT,BIDIR> &index_set);
+      inline void serialize(const Domain &domain);
+      inline void serialize(const DomainPoint &dp);
+      inline void serialize(const void *src, size_t bytes);
+    public:
+      inline void begin_context(void);
+      inline void end_context(void);
+    public:
+      inline size_t get_index(void) const { return index; }
+      inline const void* get_buffer(void) const { return buffer; }
+      inline size_t get_buffer_size(void) const { return total_bytes; }
+      inline size_t get_used_bytes(void) const { return index; }
+      inline void* reserve_bytes(size_t size);
+    private:
+      inline void resize(void);
+    private:
+      size_t total_bytes;
+      char *buffer;
+      size_t index;
+#ifdef DEBUG_LEGION
+      size_t context_bytes;
+#endif
+    };
+
+    /////////////////////////////////////////////////////////////
+    // Deserializer 
+    /////////////////////////////////////////////////////////////
+    class Deserializer {
+    public:
+      Deserializer(const void *buf, size_t buffer_size)
+        : total_bytes(buffer_size), buffer((const char*)buf), index(0)
+#ifdef DEBUG_LEGION
+          , context_bytes(0)
+#endif
+      { }
+      Deserializer(const Deserializer &rhs)
+        : total_bytes(0)
+      {
+        // should never be called
+        assert(false);
+      }
+    public:
+      ~Deserializer(void)
+      {
+#ifdef DEBUG_LEGION
+        // should have used the whole buffer
+        assert(index == total_bytes); 
+#endif
+      }
+    public:
+      inline Deserializer& operator=(const Deserializer &rhs);
+    public:
+      template<typename T>
+      inline void deserialize(T &element);
+      // We need specialized deserializers for bit masks
+      template<typename T, unsigned int MAX, unsigned SHIFT, unsigned MASK>
+      inline void deserialize(Internal::BitMask<T,MAX,SHIFT,MASK> &mask);
+      template<typename T, unsigned int MAX, unsigned SHIFT, unsigned MASK>
+      inline void deserialize(Internal::TLBitMask<T,MAX,SHIFT,MASK> &mask);
+#ifdef __SSE2__
+      template<unsigned int MAX>
+      inline void deserialize(Internal::SSEBitMask<MAX> &mask);
+      template<unsigned int MAX>
+      inline void deserialize(Internal::SSETLBitMask<MAX> &mask);
+#endif
+#ifdef __AVX__
+      template<unsigned int MAX>
+      inline void deserialize(Internal::AVXBitMask<MAX> &mask);
+      template<unsigned int MAX>
+      inline void deserialize(Internal::AVXTLBitMask<MAX> &mask);
+#endif
+#ifdef __ALTIVEC__
+      template<unsigned int MAX>
+      inline void deserialize(PPCBitMask<MAX> &mask);
+      template<unsigned int MAX>
+      inline void deserialize(PPCTLBitMask<MAX> &mask);
+#endif
+      template<typename IT, typename DT, bool BIDIR>
+      inline void deserialize(Internal::IntegerSet<IT,DT,BIDIR> &index_set);
+      inline void deserialize(Domain &domain);
+      inline void deserialize(DomainPoint &dp);
+      inline void deserialize(void *dst, size_t bytes);
+    public:
+      inline void begin_context(void);
+      inline void end_context(void);
+    public:
+      inline size_t get_remaining_bytes(void) const;
+      inline const void* get_current_pointer(void) const;
+      inline void advance_pointer(size_t bytes);
+    private:
+      const size_t total_bytes;
+      const char *buffer;
+      size_t index;
+#ifdef DEBUG_LEGION
+      size_t context_bytes;
+#endif
+    };
+
+  namespace Internal {
     /**
      * \struct RegionUsage
      * A minimal structure for performing dependence analysis.
@@ -192,53 +342,6 @@ namespace Legion {
     } 
 
     /////////////////////////////////////////////////////////////
-    // AutoLock 
-    /////////////////////////////////////////////////////////////
-    // An auto locking class for taking a lock and releasing it when
-    // the object goes out of scope
-    class AutoLock { 
-    public:
-      AutoLock(Reservation r, unsigned mode = 0, bool exclusive = true, 
-               RtEvent wait_on = RtEvent::NO_RT_EVENT) 
-        : low_lock(r)
-      {
-#define AUTOLOCK_USE_TRY_ACQUIRE
-#ifdef AUTOLOCK_USE_TRY_ACQUIRE
-	RtEvent retry_event(r.try_acquire(false /*!retry*/,
-	                                  mode, exclusive, wait_on));
-	while(retry_event.exists()) {
- 	  retry_event.lg_wait();
-	  retry_event = RtEvent(r.try_acquire(true /*retry*/,
-                                              mode, exclusive, wait_on));
-	}
-#else
-        RtEvent lock_event(r.acquire(mode,exclusive,wait_on));
-        if (lock_event.exists())
-          lock_event.lg_wait();
-#endif
-      }
-    public:
-      AutoLock(const AutoLock &rhs)
-      {
-        // should never be called
-        assert(false);
-      }
-      ~AutoLock(void)
-      {
-        low_lock.release();
-      }
-    public:
-      AutoLock& operator=(const AutoLock &rhs)
-      {
-        // should never be called
-        assert(false);
-        return *this;
-      }
-    private:
-      Reservation low_lock;
-    };
-
-    /////////////////////////////////////////////////////////////
     // Semantic Info 
     /////////////////////////////////////////////////////////////
 
@@ -261,156 +364,7 @@ namespace Legion {
       size_t size;
       RtUserEvent ready_event;
       bool is_mutable;
-    };
-
-    /////////////////////////////////////////////////////////////
-    // Serializer 
-    /////////////////////////////////////////////////////////////
-    class Serializer {
-    public:
-      Serializer(size_t base_bytes = 4096)
-        : total_bytes(base_bytes), buffer((char*)malloc(base_bytes)), 
-          index(0) 
-#ifdef DEBUG_LEGION
-          , context_bytes(0)
-#endif
-      { }
-      Serializer(const Serializer &rhs)
-      {
-        // should never be called
-        assert(false);
-      }
-    public:
-      ~Serializer(void)
-      {
-        free(buffer);
-      }
-    public:
-      inline Serializer& operator=(const Serializer &rhs);
-    public:
-      template<typename T>
-      inline void serialize(const T &element);
-      // we need special serializers for bit masks
-      template<typename T, unsigned int MAX, unsigned SHIFT, unsigned MASK>
-      inline void serialize(const BitMask<T,MAX,SHIFT,MASK> &mask);
-      template<typename T, unsigned int MAX, unsigned SHIFT, unsigned MASK>
-      inline void serialize(const TLBitMask<T,MAX,SHIFT,MASK> &mask);
-#ifdef __SSE2__
-      template<unsigned int MAX>
-      inline void serialize(const SSEBitMask<MAX> &mask);
-      template<unsigned int MAX>
-      inline void serialize(const SSETLBitMask<MAX> &mask);
-#endif
-#ifdef __AVX__
-      template<unsigned int MAX>
-      inline void serialize(const AVXBitMask<MAX> &mask);
-      template<unsigned int MAX>
-      inline void serialize(const AVXTLBitMask<MAX> &mask);
-#endif
-#ifdef __ALTIVEC__
-      template<unsigned int MAX>
-      inline void serialize(const PPCBitMask<MAX> &mask);
-      template<unsigned int MAX>
-      inline void serialize(const PPCTLBitMask<MAX> &mask);
-#endif
-      template<typename IT, typename DT, bool BIDIR>
-      inline void serialize(const IntegerSet<IT,DT,BIDIR> &index_set);
-      inline void serialize(const Domain &domain);
-      inline void serialize(const DomainPoint &dp);
-      inline void serialize(const void *src, size_t bytes);
-    public:
-      inline void begin_context(void);
-      inline void end_context(void);
-    public:
-      inline size_t get_index(void) const { return index; }
-      inline const void* get_buffer(void) const { return buffer; }
-      inline size_t get_buffer_size(void) const { return total_bytes; }
-      inline size_t get_used_bytes(void) const { return index; }
-      inline void* reserve_bytes(size_t size);
-    private:
-      inline void resize(void);
-    private:
-      size_t total_bytes;
-      char *buffer;
-      size_t index;
-#ifdef DEBUG_LEGION
-      size_t context_bytes;
-#endif
-    };
-
-    /////////////////////////////////////////////////////////////
-    // Deserializer 
-    /////////////////////////////////////////////////////////////
-    class Deserializer {
-    public:
-      Deserializer(const void *buf, size_t buffer_size)
-        : total_bytes(buffer_size), buffer((const char*)buf), index(0)
-#ifdef DEBUG_LEGION
-          , context_bytes(0)
-#endif
-      { }
-      Deserializer(const Deserializer &rhs)
-        : total_bytes(0)
-      {
-        // should never be called
-        assert(false);
-      }
-    public:
-      ~Deserializer(void)
-      {
-#ifdef DEBUG_LEGION
-        // should have used the whole buffer
-        assert(index == total_bytes); 
-#endif
-      }
-    public:
-      inline Deserializer& operator=(const Deserializer &rhs);
-    public:
-      template<typename T>
-      inline void deserialize(T &element);
-      // We need specialized deserializers for bit masks
-      template<typename T, unsigned int MAX, unsigned SHIFT, unsigned MASK>
-      inline void deserialize(BitMask<T,MAX,SHIFT,MASK> &mask);
-      template<typename T, unsigned int MAX, unsigned SHIFT, unsigned MASK>
-      inline void deserialize(TLBitMask<T,MAX,SHIFT,MASK> &mask);
-#ifdef __SSE2__
-      template<unsigned int MAX>
-      inline void deserialize(SSEBitMask<MAX> &mask);
-      template<unsigned int MAX>
-      inline void deserialize(SSETLBitMask<MAX> &mask);
-#endif
-#ifdef __AVX__
-      template<unsigned int MAX>
-      inline void deserialize(AVXBitMask<MAX> &mask);
-      template<unsigned int MAX>
-      inline void deserialize(AVXTLBitMask<MAX> &mask);
-#endif
-#ifdef __ALTIVEC__
-      template<unsigned int MAX>
-      inline void deserialize(PPCBitMask<MAX> &mask);
-      template<unsigned int MAX>
-      inline void deserialize(PPCTLBitMask<MAX> &mask);
-#endif
-      template<typename IT, typename DT, bool BIDIR>
-      inline void deserialize(IntegerSet<IT,DT,BIDIR> &index_set);
-      inline void deserialize(Domain &domain);
-      inline void deserialize(DomainPoint &dp);
-      inline void deserialize(void *dst, size_t bytes);
-    public:
-      inline void begin_context(void);
-      inline void end_context(void);
-    public:
-      inline size_t get_remaining_bytes(void) const;
-      inline const void* get_current_pointer(void) const;
-      inline void advance_pointer(size_t bytes);
-    private:
-      const size_t total_bytes;
-      const char *buffer;
-      size_t index;
-#ifdef DEBUG_LEGION
-      size_t context_bytes;
-#endif
-    };
+    }; 
 
     /////////////////////////////////////////////////////////////
     // Rez Checker 
@@ -1364,12 +1318,12 @@ namespace Legion {
     public:
       DynamicTableNodeBase(int _level, IT _first_index, IT _last_index)
         : level(_level), first_index(_first_index), 
-          last_index(_last_index), lock(Reservation::create_reservation()) { }
-      virtual ~DynamicTableNodeBase(void) { lock.destroy_reservation(); }
+          last_index(_last_index) { }
+      virtual ~DynamicTableNodeBase(void) { }
     public:
       const int level;
       const IT first_index, last_index;
-      Reservation lock;
+      mutable LocalLock lock;
     };
 
     template<typename ET, size_t _SIZE, typename IT>
@@ -1453,7 +1407,7 @@ namespace Legion {
       NodeBase* lookup_leaf(IT index);
     protected:
       NodeBase *volatile root;
-      Reservation lock; 
+      mutable LocalLock lock; 
     };
 
     template<typename _ET, size_t _INNER_BITS, size_t _LEAF_BITS>
@@ -1463,7 +1417,7 @@ namespace Legion {
       static const size_t INNER_BITS = _INNER_BITS;
       static const size_t LEAF_BITS = _LEAF_BITS;
 
-      typedef Reservation LT;
+      typedef LocalLock LT;
       typedef int IT;
       typedef DynamicTableNode<DynamicTableNodeBase<IT>,
                                1 << INNER_BITS, IT> INNER_TYPE;
@@ -1474,6 +1428,7 @@ namespace Legion {
         return new LEAF_TYPE(0/*level*/, first_index, last_index);
       }
     };
+  }; // namspace Internal
 
     //--------------------------------------------------------------------------
     // Give the implementations here so the templates get instantiated
@@ -1518,7 +1473,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<typename T, unsigned int MAX, unsigned SHIFT, unsigned MASK>
-    inline void Serializer::serialize(const BitMask<T,MAX,SHIFT,MASK> &mask)
+    inline void Serializer::serialize(
+                                const Internal::BitMask<T,MAX,SHIFT,MASK> &mask)
     //--------------------------------------------------------------------------
     {
       mask.serialize(*this);
@@ -1526,7 +1482,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<typename T, unsigned int MAX, unsigned SHIFT, unsigned MASK>
-    inline void Serializer::serialize(const TLBitMask<T,MAX,SHIFT,MASK> &mask)
+    inline void Serializer::serialize(
+                              const Internal::TLBitMask<T,MAX,SHIFT,MASK> &mask)
     //--------------------------------------------------------------------------
     {
       mask.serialize(*this);
@@ -1535,7 +1492,7 @@ namespace Legion {
 #ifdef __SSE2__
     //--------------------------------------------------------------------------
     template<unsigned int MAX>
-    inline void Serializer::serialize(const SSEBitMask<MAX> &mask)
+    inline void Serializer::serialize(const Internal::SSEBitMask<MAX> &mask)
     //--------------------------------------------------------------------------
     {
       mask.serialize(*this);
@@ -1543,7 +1500,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<unsigned int MAX>
-    inline void Serializer::serialize(const SSETLBitMask<MAX> &mask)
+    inline void Serializer::serialize(const Internal::SSETLBitMask<MAX> &mask)
     //--------------------------------------------------------------------------
     {
       mask.serialize(*this);
@@ -1553,7 +1510,7 @@ namespace Legion {
 #ifdef __AVX__
     //--------------------------------------------------------------------------
     template<unsigned int MAX>
-    inline void Serializer::serialize(const AVXBitMask<MAX> &mask)
+    inline void Serializer::serialize(const Internal::AVXBitMask<MAX> &mask)
     //--------------------------------------------------------------------------
     {
       mask.serialize(*this);
@@ -1561,7 +1518,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<unsigned int MAX>
-    inline void Serializer::serialize(const AVXTLBitMask<MAX> &mask)
+    inline void Serializer::serialize(const Internal::AVXTLBitMask<MAX> &mask)
     //--------------------------------------------------------------------------
     {
       mask.serialize(*this);
@@ -1588,7 +1545,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<typename IT, typename DT, bool BIDIR>
-    inline void Serializer::serialize(const IntegerSet<IT,DT,BIDIR> &int_set)
+    inline void Serializer::serialize(
+                               const Internal::IntegerSet<IT,DT,BIDIR> &int_set)
     //--------------------------------------------------------------------------
     {
       int_set.serialize(*this);
@@ -1735,7 +1693,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<typename T, unsigned int MAX, unsigned SHIFT, unsigned MASK>
-    inline void Deserializer::deserialize(BitMask<T,MAX,SHIFT,MASK> &mask)
+    inline void Deserializer::deserialize(
+                                      Internal::BitMask<T,MAX,SHIFT,MASK> &mask)
     //--------------------------------------------------------------------------
     {
       mask.deserialize(*this);
@@ -1743,7 +1702,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<typename T, unsigned int MAX, unsigned SHIFT, unsigned MASK>
-    inline void Deserializer::deserialize(TLBitMask<T,MAX,SHIFT,MASK> &mask)
+    inline void Deserializer::deserialize(
+                                    Internal::TLBitMask<T,MAX,SHIFT,MASK> &mask)
     //--------------------------------------------------------------------------
     {
       mask.deserialize(*this);
@@ -1752,7 +1712,7 @@ namespace Legion {
 #ifdef __SSE2__
     //--------------------------------------------------------------------------
     template<unsigned int MAX>
-    inline void Deserializer::deserialize(SSEBitMask<MAX> &mask)
+    inline void Deserializer::deserialize(Internal::SSEBitMask<MAX> &mask)
     //--------------------------------------------------------------------------
     {
       mask.deserialize(*this);
@@ -1760,7 +1720,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<unsigned int MAX>
-    inline void Deserializer::deserialize(SSETLBitMask<MAX> &mask)
+    inline void Deserializer::deserialize(Internal::SSETLBitMask<MAX> &mask)
     //--------------------------------------------------------------------------
     {
       mask.deserialize(*this);
@@ -1770,7 +1730,7 @@ namespace Legion {
 #ifdef __AVX__
     //--------------------------------------------------------------------------
     template<unsigned int MAX>
-    inline void Deserializer::deserialize(AVXBitMask<MAX> &mask)
+    inline void Deserializer::deserialize(Internal::AVXBitMask<MAX> &mask)
     //--------------------------------------------------------------------------
     {
       mask.deserialize(*this);
@@ -1778,7 +1738,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<unsigned int MAX>
-    inline void Deserializer::deserialize(AVXTLBitMask<MAX> &mask)
+    inline void Deserializer::deserialize(Internal::AVXTLBitMask<MAX> &mask)
     //--------------------------------------------------------------------------
     {
       mask.deserialize(*this);
@@ -1805,7 +1765,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<typename IT, typename DT, bool BIDIR>
-    inline void Deserializer::deserialize(IntegerSet<IT,DT,BIDIR> &int_set)
+    inline void Deserializer::deserialize(
+                                     Internal::IntegerSet<IT,DT,BIDIR> &int_set)
     //--------------------------------------------------------------------------
     {
       int_set.deserialize(*this);
@@ -1916,6 +1877,7 @@ namespace Legion {
       index += bytes;
     }
 
+  namespace Internal {
     // There is an interesting design decision about how to break up the 32 bit
     // address space for fractions.  We'll assume that there will be some
     // balance between the depth and breadth of the task tree so we can split up
@@ -10147,7 +10109,7 @@ namespace Legion {
     //-------------------------------------------------------------------------
     template<typename ALLOCATOR>
     DynamicTable<ALLOCATOR>::DynamicTable(void)
-      : root(0), lock(Reservation::create_reservation())
+      : root(0)
     //-------------------------------------------------------------------------
     {
     }
@@ -10166,8 +10128,6 @@ namespace Legion {
     DynamicTable<ALLOCATOR>::~DynamicTable(void)
     //-------------------------------------------------------------------------
     {
-      lock.destroy_reservation();
-      lock = Reservation::NO_RESERVATION;
       if (root != 0)
       {
         delete root;
@@ -10435,6 +10395,7 @@ namespace Legion {
       return n;
     }
 
+  }; // namespace Internal
 }; // namespace Legion 
 
 #endif // __LEGION_UTILITIES_H__

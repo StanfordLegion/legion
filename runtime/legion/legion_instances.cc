@@ -115,7 +115,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       constraints->add_reference();
-      layout_lock = Reservation::create_reservation();
       field_infos.resize(field_sizes.size());
       // Switch data structures from layout by field order to order
       // of field locations in the bit mask
@@ -143,7 +142,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       constraints->add_reference();
-      layout_lock = Reservation::NO_RESERVATION;
     }
 
     //--------------------------------------------------------------------------
@@ -161,11 +159,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       comp_cache.clear();
-      if (layout_lock.exists())
-      {
-        layout_lock.destroy_reservation();
-        layout_lock = Reservation::NO_RESERVATION;
-      }
       if (constraints->remove_reference())
         delete (constraints);
     }
@@ -1078,7 +1071,7 @@ namespace Legion {
       assert(is_owner());
 #endif
       DistributedID view_did = 
-        context->runtime->get_available_distributed_id(false);
+        context->runtime->get_available_distributed_id();
       UniqueID context_uid = own_ctx->get_context_uid();
       InstanceView* result = 
               new MaterializedView(context, view_did, owner_space, 
@@ -1263,8 +1256,7 @@ namespace Legion {
                                        bool register_now)
       : PhysicalManager(ctx, mem, desc, constraint, did, owner_space, 
                         node, inst, inst_domain, own_dom, register_now),
-        op(o), redop(red), use_event(u_event),
-        manager_lock(Reservation::create_reservation())
+        op(o), redop(red), use_event(u_event)
     //--------------------------------------------------------------------------
     {  
       if (Runtime::legion_spy_enabled)
@@ -1283,8 +1275,6 @@ namespace Legion {
     ReductionManager::~ReductionManager(void)
     //--------------------------------------------------------------------------
     {
-      manager_lock.destroy_reservation();
-      manager_lock = Reservation::NO_RESERVATION;
 #if 0
       if (!created_index_spaces.empty())
       {
@@ -1410,7 +1400,7 @@ namespace Legion {
       assert(is_owner());
 #endif
       DistributedID view_did = 
-        context->runtime->get_available_distributed_id(false);
+        context->runtime->get_available_distributed_id();
       UniqueID context_uid = own_ctx->get_context_uid();
       InstanceView *result = 
              new ReductionView(context, view_did, owner_space, 
@@ -2035,7 +2025,7 @@ namespace Legion {
       // took over ownership of the layout
       own_realm_layout = false;
       PhysicalManager *result = NULL;
-      DistributedID did = forest->runtime->get_available_distributed_id(false);
+      DistributedID did = forest->runtime->get_available_distributed_id();
       AddressSpaceID local_space = forest->runtime->address_space;
       FieldSpaceNode *field_node = ancestor->column_source;
       // Important implementation detail here: we pull the pointer constraint
@@ -2249,7 +2239,7 @@ namespace Legion {
                                ancestor->handle.index_space.get_tree_id(),
                                ancestor->handle.get_type_tag());
         DistributedID did = 
-          forest->runtime->get_available_distributed_id(false/*continuation*/);
+          forest->runtime->get_available_distributed_id();
         forest->create_union_space(union_space, NULL/*task op*/,
                                    union_spaces, did);
         instance_domain = forest->get_node(union_space);

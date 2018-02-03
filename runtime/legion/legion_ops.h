@@ -478,7 +478,7 @@ namespace Legion {
     public:
       Runtime *const runtime;
     protected:
-      Reservation op_lock;
+      mutable LocalLock op_lock;
       GenerationID gen;
       UniqueID unique_op_id;
       // The issue index of this operation in the context

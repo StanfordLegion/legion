@@ -851,7 +851,7 @@ namespace Legion {
     protected:
       // Only the runtime is allowed to make non-empty phase barriers
       FRIEND_ALL_RUNTIME_CLASSES
-      PhaseBarrier(ApBarrier b);
+      PhaseBarrier(Internal::ApBarrier b);
     public:
       bool operator<(const PhaseBarrier &rhs) const;
       bool operator==(const PhaseBarrier &rhs) const;
@@ -863,7 +863,7 @@ namespace Legion {
       Realm::Barrier get_barrier(void) const { return phase_barrier; }
       bool exists(void) const;
     protected:
-      ApBarrier phase_barrier;
+      Internal::ApBarrier phase_barrier;
       friend std::ostream& operator<<(std::ostream& os, const PhaseBarrier& pb);
     };
 
@@ -887,7 +887,7 @@ namespace Legion {
     protected:
       // Only the runtime is allowed to make non-empty dynamic collectives
       FRIEND_ALL_RUNTIME_CLASSES
-      DynamicCollective(ApBarrier b, ReductionOpID redop);
+      DynamicCollective(Internal::ApBarrier b, ReductionOpID redop);
     public:
       // All the same operations as a phase barrier
       void arrive(const void *value, size_t size, unsigned count = 1);
@@ -1939,17 +1939,15 @@ namespace Legion {
      * describing a task variant including the logical task ID, the execution
      * constraints, the layout constraints, and any properties of the task.
      * This structure is used for registering task variants and is also
-     * the output type for variants created by task variant generators.
+     * the output type for variants created by generator tasks.
      */
     struct TaskVariantRegistrar {
     public:
       TaskVariantRegistrar(void);
       TaskVariantRegistrar(TaskID task_id, bool global = true,
-                           GeneratorContext ctx = NULL,
                            const char *variant_name = NULL);
       TaskVariantRegistrar(TaskID task_id, const char *variant_name,
-			   bool global = true,
-                           GeneratorContext ctx = NULL);
+			   bool global = true);
     public: // Add execution constraints
       inline TaskVariantRegistrar& 
         add_constraint(const ISAConstraint &constraint);
@@ -1969,91 +1967,23 @@ namespace Legion {
       inline void set_inner(bool is_inner = true);
       inline void set_idempotent(bool is_idempotent = true);
       inline void set_replicable(bool is_replicable = true);
+    public: // Generator Task IDs
+      inline void add_generator_task(TaskID tid);
     public:
       TaskID                            task_id;
-      GeneratorContext                  generator;
       bool                              global_registration;
       const char*                       task_variant_name;
     public: // constraints
       ExecutionConstraintSet            execution_constraints; 
       TaskLayoutConstraintSet           layout_constraints;
+    public:
+      // TaskIDs for which this variant can serve as a generator
+      std::set<TaskID>                  generator_tasks;
     public: // properties
       bool                              leaf_variant;
       bool                              inner_variant;
       bool                              idempotent_variant;
       bool                              replicable_variant;
-    };
-
-    //==========================================================================
-    //                          Task Generators 
-    //==========================================================================
-
-    /**
-     * \struct TaskGeneratorArguments
-     * This structure defines the arguments that will be passed to a 
-     * task generator function. The task generator function will then
-     * be expected to generate one or more variants and register them
-     * with the runtime.
-     */
-    struct TaskGeneratorArguments {
-    public:
-      TaskID                            task_id;
-    public:
-      const void*                       user_data;
-      size_t                            user_data_size;
-    public:
-      MapperID                          mapper_id;
-      const void*                       mapper_args;
-      size_t                            mapper_args_size;
-    public:
-      std::vector<Processor>            target_procs;
-      // TODO: std::vector<PhysicalInstance> valid_instances;
-    };
-
-    /**
-     * \struct TaskGeneratorRegistrar
-     * The TaskGeneratorRegistrar records the arguments for registering
-     * a new task generator function for a specific task_id with the runtime. 
-     * The application must specify a unique generator ID to associate with 
-     * the generator function pointer for the particular task ID, but the
-     * same generator function pointer can be registered for multiple
-     * task IDs as long as the generator IDs are all different. The 
-     * application can also provide optional constraints on the kinds of
-     * task variants the generator can emit. All other arguments are optional 
-     * and can be filled in at the application's discretion.
-     */
-    struct TaskGeneratorRegistrar {
-    public:
-      TaskGeneratorRegistrar(void);
-      TaskGeneratorRegistrar(GeneratorID id, TaskID task_id, GeneratorFnptr fn,
-                             const void *udata = NULL, size_t udata_size = 0,
-                             const char *name = NULL);
-    public: // Add execution constraints
-      inline TaskGeneratorRegistrar& 
-        add_constraint(const ISAConstraint &constraint);
-      inline TaskGeneratorRegistrar&
-        add_constraint(const ProcessorConstraint &constraint);
-      inline TaskGeneratorRegistrar& 
-        add_constraint(const ResourceConstraint &constraint);
-      inline TaskGeneratorRegistrar&
-        add_constraint(const LaunchConstraint &constraint);
-      inline TaskGeneratorRegistrar&
-        add_constraint(const ColocationConstraint &constraint);
-    public: // Add layout constraint sets
-      inline TaskGeneratorRegistrar&
-        add_layout_constraint_set(unsigned index, LayoutConstraintID desc);
-    public:
-      GeneratorID                       generator_id;
-      TaskID                            task_id;
-      GeneratorFnptr                    generator;
-    public: // constraints
-      ExecutionConstraintSet            execution_constraints;
-      TaskLayoutConstraintSet           layout_constraints;
-    public:
-      const void*                       user_data;
-      size_t                            user_data_size;
-    public:
-      const char*                       name;
     };
 
     //==========================================================================
@@ -6753,40 +6683,6 @@ namespace Legion {
                                         const void *retvalptr = NULL,
                                         size_t retvalsize = 0);
     public:
-      //------------------------------------------------------------------------
-      // Task Generator Registration Operations
-      //------------------------------------------------------------------------
-     
-      /**
-       * Dynamically generate a unique generator ID for use across the machine.
-       * @return a Generator ID that is globally unique across the machine
-       */
-      GeneratorID generate_dynamic_generator_id(void);
-
-      /**
-       * Statically generate a unique Generator ID for use across the machine.
-       * This can only be called prior to the runtime starting. It must be 
-       * invoked symmetrically across all nodes in the machine prior to 
-       * starting the runtime.
-       * @return a Generator ID that is globally unique across the machine
-       */
-      static GeneratorID generate_static_generator_id(void);
-
-      /**
-       * Dynamically register a new task generator function with the runtime
-       * @param registrar the task generator registrar
-       */
-      void register_task_generator(const TaskGeneratorRegistrar &registrar);
-
-      /**
-       * Statically register a new task generator function with the runtime.
-       * This call must be made on all nodes and it will fail if done after
-       * the runtime has been started.
-       * @param registrar the task generator registrar
-       */
-      static void preregister_task_generator(
-                                   const TaskGeneratorRegistrar &registrar);
-    public:
       // ------------------ Deprecated task registration -----------------------
       /**
        * @deprecated
@@ -6895,17 +6791,14 @@ namespace Legion {
        * @return the Legion runtime pointer for the specified processor
        */
       static Runtime* get_runtime(Processor p = Processor::NO_PROC);
-#ifdef ENABLE_LEGION_TLS
+
       /**
-       * Provisional support for a way to implicitly find the context
-       * of the task in which we are running. This is only supported
-       * if the runtime is built with the ENABLE_LEGION_TLS macro.
-       * This macro has not been performance tested and may cause 
-       * performance degradation in the runtime. Use at your own risk.
+       * Get the context for the currently executing task this must
+       * be called inside of an actual Legion task. Calling it outside
+       * of a Legion task will result in undefined behavior
        * @return the context for the enclosing task in which we are executing
        */
       static Context get_context(void);
-#endif
     private:
       // Helper methods for templates
       IndexSpace create_index_space_internal(Context ctx, const void *realm_is,

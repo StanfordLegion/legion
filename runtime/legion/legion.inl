@@ -5831,6 +5831,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    inline void TaskVariantRegistrar::add_generator_task(TaskID tid)
+    //--------------------------------------------------------------------------
+    {
+      generator_tasks.insert(tid); 
+    }
+
+    //--------------------------------------------------------------------------
     template<typename T>
     inline T Future::get_result(bool silence_warnings) const
     //--------------------------------------------------------------------------
@@ -7782,8 +7789,6 @@ namespace LegionRuntime {
     typedef Legion::TaskResult TaskResult;
     LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Legion::CObjectWrapper CObjectWrapper;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef Legion::ImmovableAutoLock AutoLock;
     LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Legion::ISAConstraint ISAConstraint;
     LEGION_DEPRECATED("Use the Legion namespace instance instead.")
