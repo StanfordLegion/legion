@@ -843,6 +843,8 @@ namespace Legion {
       virtual bool is_stealable(void) const;
       virtual bool has_restrictions(unsigned idx, LogicalRegion handle);
       virtual bool can_early_complete(ApUserEvent &chain_event);
+      virtual std::map<PhysicalManager*,std::pair<unsigned,bool> >*
+                                       get_acquired_instances_ref(void);
     public:
       virtual ApEvent get_task_completion(void) const;
       virtual TaskKind get_task_kind(void) const;

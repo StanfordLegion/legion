@@ -6908,6 +6908,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    std::map<PhysicalManager*,std::pair<unsigned,bool> >*
+                                     ShardTask::get_acquired_instances_ref(void)
+    //--------------------------------------------------------------------------
+    {
+      // We shouldn't actually have any references for this kind of task
+      return NULL;
+    }
+
+    //--------------------------------------------------------------------------
     ApEvent ShardTask::get_task_completion(void) const
     //--------------------------------------------------------------------------
     {
