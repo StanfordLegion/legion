@@ -124,7 +124,7 @@ To get started with Legion, you'll need:
   * *Optional*: CUDA 5.0 or newer (for NVIDIA GPUs)
   * *Optional*: [GASNet](https://gasnet.lbl.gov/) (for networking, see
      [installation instructions](http://legion.stanford.edu/gasnet/))
-  * *Optional*: LLVM 3.5 (for dynamic code generation)
+  * *Optional*: LLVM 3.5-3.9 (for dynamic code generation)
   * *Optional*: HDF5 (for file I/O)
 
 ## Installing
