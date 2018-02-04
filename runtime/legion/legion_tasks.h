@@ -131,7 +131,7 @@ namespace Legion {
      * This is the base task operation class for all
      * kinds of tasks in the system.  
      */
-    class TaskOp : public ExternalTask, public SpeculativeOp {
+    class TaskOp : public ExternalTask, public MemoizableOp<SpeculativeOp> {
     public:
       enum TaskKind {
         INDIVIDUAL_TASK_KIND,
@@ -521,7 +521,6 @@ namespace Legion {
     public:
       bool is_sliced(void) const;
       void slice_index_space(void);
-      void slice_index_space_for_replay(LegionTrace *trace);
       void trigger_slices(void);
       void clone_multi_from(MultiTask *task, IndexSpace is, Processor p,
                             bool recurse, bool stealable);
@@ -682,6 +681,9 @@ namespace Legion {
       void unpack_remote_complete(Deserializer &derez);
       void unpack_remote_commit(Deserializer &derez);
     public:
+      // From MemoizableOp
+      virtual void replay_analysis(void);
+    public:
       static void process_unpack_remote_mapped(Deserializer &derez);
       static void process_unpack_remote_complete(Deserializer &derez);
       static void process_unpack_remote_commit(Deserializer &derez);
@@ -793,6 +795,9 @@ namespace Legion {
       void send_back_created_state(AddressSpaceID target);
     public:
       virtual void record_reference_mutation_effect(RtEvent event);
+    public:
+      // From MemoizableOp
+      virtual void replay_analysis(void);
     protected:
       friend class SliceTask;
       SliceTask                   *slice_owner;
@@ -895,6 +900,9 @@ namespace Legion {
       void unpack_slice_complete(Deserializer &derez);
       void unpack_slice_commit(Deserializer &derez); 
     public:
+      // From MemoizableOp
+      virtual void replay_analysis(void);
+    public:
       static void process_slice_mapped(Deserializer &derez, 
                                        AddressSpaceID source);
       static void process_slice_complete(Deserializer &derez);
@@ -986,7 +994,6 @@ namespace Legion {
       virtual void register_must_epoch(void);
       PointTask* clone_as_point_task(const DomainPoint &point);
       void enumerate_points(void);
-      void register_points_for_replay(LegionTrace *trace);
       const void* get_predicate_false_result(size_t &result_size);
     public:
       RtEvent perform_versioning_analysis(void);
@@ -1044,6 +1051,9 @@ namespace Legion {
                           const std::set<IndexPartition> &parts);
       virtual void register_index_partition_deletions(
                           const std::set<IndexPartition> &parts);
+    public:
+      // From MemoizableOp
+      virtual void replay_analysis(void);
     protected:
       friend class IndexTask;
       friend class PointTask;

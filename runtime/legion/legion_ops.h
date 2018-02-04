@@ -702,6 +702,7 @@ namespace Legion {
     public:
       MemoizableOp(Runtime *rt);
       virtual void execute_dependence_analysis(void);
+      virtual void replay_analysis(void) = 0;
     };
 
     /**
@@ -864,6 +865,9 @@ namespace Legion {
                                 unsigned idx, bool src,
                                 bool permit_projection = false);
       void compute_parent_indexes(void);
+    public:
+      // From MemoizableOp
+      virtual void replay_analysis(void);
     public:
       ApEvent compute_sync_precondition(void) const;
       void complete_copy_execution(ApEvent copy_complete_event);
@@ -1678,6 +1682,9 @@ namespace Legion {
       DynamicCollectiveOp& operator=(const DynamicCollectiveOp &rhs);
     public:
       Future initialize(TaskContext *ctx, const DynamicCollective &dc);
+    public:
+      // From MemoizableOp
+      virtual void replay_analysis(void);
     protected:
       void invoke_memoize_operation(MapperID map_id);
     public:
@@ -2569,6 +2576,9 @@ namespace Legion {
       void compute_parent_index(void);
       ApEvent compute_sync_precondition(void) const;
       void log_fill_requirement(void) const;
+    public:
+      // From MemoizableOp
+      virtual void replay_analysis(void);
     public:
       RegionTreePath privilege_path;
       VersionInfo version_info;

@@ -638,7 +638,7 @@ namespace Legion {
   
     //--------------------------------------------------------------------------
     TaskOp::TaskOp(Runtime *rt)
-      : ExternalTask(), SpeculativeOp(rt)
+      : ExternalTask(), MemoizableOp<SpeculativeOp>(rt)
     //--------------------------------------------------------------------------
     {
     }
@@ -4306,22 +4306,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MultiTask::slice_index_space_for_replay(LegionTrace *trace)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(memoizing);
-#endif
-      SliceTask *new_slice = this->clone_as_slice_task(internal_space,
-                                                       target_proc,
-                                                       false,
-                                                       false, 1LL);
-      slices.push_back(new_slice);
-      new_slice->enumerate_points();
-      new_slice->register_points_for_replay(trace);
-    }
-
-    //--------------------------------------------------------------------------
     void MultiTask::trigger_slices(void)
     //--------------------------------------------------------------------------
     {
@@ -5800,7 +5784,18 @@ namespace Legion {
     {
       trigger_children_committed();
     }
-    
+
+    //--------------------------------------------------------------------------
+    void IndividualTask::replay_analysis(void)
+    //--------------------------------------------------------------------------
+    {
+      add_mapping_reference(gen);
+      PhysicalTemplate *tpl =
+        trace->get_physical_trace()->get_current_template();
+      tpl->register_operation(this);
+      complete_mapping();
+    }
+
     //--------------------------------------------------------------------------
     /*static*/ void IndividualTask::process_unpack_remote_mapped(
                                                             Deserializer &derez)
@@ -6594,6 +6589,17 @@ namespace Legion {
       if (execution_context->has_created_requirements())
         execution_context->send_back_created_state(target);
     } 
+
+    //--------------------------------------------------------------------------
+    void PointTask::replay_analysis(void)
+    //--------------------------------------------------------------------------
+    {
+      add_mapping_reference(gen);
+      PhysicalTemplate *tpl =
+        trace->get_physical_trace()->get_current_template();
+      tpl->register_operation(this, get_domain_point());
+      complete_mapping();
+    }
 
     /////////////////////////////////////////////////////////////
     // Index Task 
@@ -7728,6 +7734,22 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void IndexTask::replay_analysis(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(memoizing);
+#endif
+      SliceTask *new_slice = this->clone_as_slice_task(internal_space,
+                                                       target_proc,
+                                                       false,
+                                                       false, 1LL);
+      slices.push_back(new_slice);
+      new_slice->enumerate_points();
+      new_slice->replay_analysis();
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ void IndexTask::process_slice_mapped(Deserializer &derez,
                                                     AddressSpaceID source)
     //--------------------------------------------------------------------------
@@ -8557,21 +8579,6 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
-    void SliceTask::register_points_for_replay(LegionTrace *trace)
-    //--------------------------------------------------------------------------
-    {
-      for (unsigned idx = 0; idx < points.size(); idx++)
-      {
-        Operation *op = static_cast<Operation*>(points[idx]);
-        op->add_mapping_reference(op->get_generation());
-        trace->get_physical_trace()->get_current_template()->register_operation(
-            op, points[idx]->get_domain_point());
-        points[idx]->complete_mapping();
-        record_child_mapped(RtEvent::NO_RT_EVENT, ApEvent::NO_AP_EVENT);
-      }
-    }
-
-    //--------------------------------------------------------------------------
     const void* SliceTask::get_predicate_false_result(size_t &result_size)
     //--------------------------------------------------------------------------
     {
@@ -9074,6 +9081,18 @@ namespace Legion {
       for (std::set<IndexPartition>::const_iterator it = parts.begin();
             it != parts.end(); it++)
         deleted_index_partitions.insert(*it);
+    }
+
+    //--------------------------------------------------------------------------
+    void SliceTask::replay_analysis(void)
+    //--------------------------------------------------------------------------
+    {
+      for (unsigned idx = 0; idx < points.size(); idx++)
+      {
+        PointTask *point = points[idx];
+        point->replay_analysis();
+        record_child_mapped(RtEvent::NO_RT_EVENT, ApEvent::NO_AP_EVENT);
+      }
     }
 
   }; // namespace Internal 

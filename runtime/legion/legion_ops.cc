@@ -300,20 +300,6 @@ namespace Legion {
     void Operation::execute_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(!memoizing || trace != NULL);
-#endif
-      if (memoizing)
-      {
-        PhysicalTraceInfo trace_info;
-        trace->get_physical_trace()->get_current_template(trace_info, false);
-        if (!trace_info.tracing && trace->get_physical_trace()->is_recurrent())
-        {
-          trace->register_physical_only(this, gen);
-          return;
-        }
-      }
-
       // Always wrap this call with calls to begin/end dependence analysis
       begin_dependence_analysis();
       trigger_dependence_analysis();
@@ -4399,6 +4385,17 @@ namespace Legion {
         else
           dst_parent_indexes[idx] = unsigned(parent_index);
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void CopyOp::replay_analysis(void)
+    //--------------------------------------------------------------------------
+    {
+      add_mapping_reference(gen);
+      PhysicalTemplate *tpl =
+        trace->get_physical_trace()->get_current_template();
+      tpl->register_operation(this);
+      complete_mapping();
     }
 
     //--------------------------------------------------------------------------
@@ -9287,6 +9284,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void DynamicCollectiveOp::replay_analysis(void)
+    //--------------------------------------------------------------------------
+    {
+      trigger_mapping();
+    }
+
+    //--------------------------------------------------------------------------
     void DynamicCollectiveOp::invoke_memoize_operation(MapperID mapper_id)
     //--------------------------------------------------------------------------
     {
@@ -13417,6 +13421,14 @@ namespace Legion {
         }
       }
       return Runtime::merge_events(sync_preconditions);
+    }
+
+    //--------------------------------------------------------------------------
+    void FillOp::replay_analysis(void)
+    //--------------------------------------------------------------------------
+    {
+      complete_mapping();
+      complete_execution();
     }
 
     ///////////////////////////////////////////////////////////// 

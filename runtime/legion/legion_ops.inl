@@ -32,6 +32,21 @@ namespace Legion {
     void MemoizableOp<OP>::execute_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(!OP::memoizing || OP::trace != NULL);
+#endif
+      if (OP::memoizing)
+      {
+        PhysicalTraceInfo trace_info;
+        OP::trace->get_physical_trace()->get_current_template(trace_info, false);
+        if (!trace_info.tracing && OP::trace->get_physical_trace()->is_recurrent())
+        {
+          OP::trace->register_physical_only(this, OP::gen);
+          OP::resolve_speculation();
+          replay_analysis();
+          return;
+        }
+      }
       OP::execute_dependence_analysis();
     };
   }; // namespace Internal
