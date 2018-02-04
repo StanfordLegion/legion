@@ -152,7 +152,16 @@ extern "C" {
    */
   typedef struct legion_domain_transform_t {
     int m, n;
-    coord_t matrix[MAX_POINT_DIM * MAX_POINT_DIM];
+// Hack: Python CFFI isn't smart enough to do constant folding so we
+// have to do this by hand here. To avoid this bitrotting, at least
+// make the preprocessor check that the value is equal to what we
+// expect.
+#define MAX_MATRIX_DIM 9
+#if MAX_MATRIX_DIM != LEGION_MAX_POINT_DIM * LEGION_MAX_POINT_DIM // sanity check
+#error Mismatch in MAX_MATRIX_DIM
+#endif
+    coord_t matrix[MAX_MATRIX_DIM];
+#undef MAX_MATRIX_DIM
   } legion_domain_transform_t;
 
   /**
