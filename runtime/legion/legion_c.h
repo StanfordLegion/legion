@@ -148,6 +148,22 @@ extern "C" {
   } legion_domain_point_t;
 
   /**
+   * @see Legion::Transform
+   */
+  typedef struct legion_domain_transform_t {
+    int m, n;
+    coord_t matrix[MAX_POINT_DIM * MAX_POINT_DIM];
+  } legion_domain_transform_t;
+
+  /**
+   * @see Legion::DomainAffineTransform
+   */
+  typedef struct legion_domain_affine_transform_t {
+    legion_domain_transform_t transform;
+    legion_domain_point_t offset;
+  } legion_domain_affine_transform_t;
+
+  /**
    * @see Legion::IndexSpace
    */
   typedef struct legion_index_space_t {
@@ -1066,6 +1082,22 @@ extern "C" {
     legion_logical_region_t parent,
     legion_field_id_t fid,
     legion_index_space_t color_space,
+    legion_partition_kind_t part_kind /* = COMPUTE_KIND */,
+    int color /* = AUTO_GENERATE_ID */);
+
+  /**
+   * @return Caller takes ownership of return value.
+   *
+   * @see Legion::Runtime::create_partition_by_restriction()
+   */
+  legion_index_partition_t
+  legion_index_partition_create_by_restriction(
+    legion_runtime_t runtime,
+    legion_context_t ctx,
+    legion_index_space_t parent,
+    legion_index_space_t color_space,
+    legion_domain_transform_t transform,
+    legion_domain_t extent,
     legion_partition_kind_t part_kind /* = COMPUTE_KIND */,
     int color /* = AUTO_GENERATE_ID */);
 
