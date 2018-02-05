@@ -503,7 +503,6 @@ namespace Legion {
       void find_last_users(const PhysicalInstance &inst, unsigned field,
                            std::set<unsigned> &users);
     private:
-      PhysicalTrace *trace;
       bool recording;
       bool replayable;
       mutable LocalLock template_lock;
