@@ -18,6 +18,8 @@ variables:
   CXX: "g++-5"
 .gcc6: &gcc6
   CXX: "g++-6"
+.gcc7: &gcc7
+  CXX: "g++-7"
 
 .clang35: &clang35
   CXX: "clang++-3.5"
@@ -429,7 +431,7 @@ clang38_cxx98_debug_external:
 
 # Run minimal tests on other compilers.
 
-# Linux with GCC 4.8, 5, 6
+# Linux with GCC 4.8, 5, 6, 7
 gcc48_cxx98_debug_legion:
   <<: [*linux, *image, *tests]
   variables:
@@ -462,6 +464,14 @@ gcc6_cxx14_debug_regent:
   <<: [*linux_compute, *image, *tests]
   variables:
     <<: [*gcc6, *terra38, *debug, *cxx14_normal, *regent]
+gcc7_cxx14_debug_legion:
+  <<: [*linux, *image, *tests]
+  variables:
+    <<: [*gcc7, *terra38, *debug, *cxx14_checks, *legion]
+gcc7_cxx14_debug_regent:
+  <<: [*linux_compute, *image, *tests]
+  variables:
+    <<: [*gcc7, *terra38, *debug, *cxx14_normal, *regent]
 
 # Linux with Clang 3.5
 clang35_cxx98_debug_legion:
