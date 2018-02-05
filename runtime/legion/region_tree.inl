@@ -2501,13 +2501,13 @@ namespace Legion {
         ApEvent old_precondition = precondition;
         precondition = Runtime::merge_events(precondition,
                         op->get_execution_fence_event());
-        if (trace_info.tracing)
+        if (trace_info.recording)
         {
 #ifdef DEBUG_LEGION
-          assert(trace_info.tpl != NULL && trace_info.tpl->is_tracing());
+          assert(trace_info.tpl != NULL && trace_info.tpl->is_recording());
 #endif
-          trace_info.tpl->record_merge_events(trace_info, precondition,
-              old_precondition, op->get_execution_fence_event());
+          trace_info.tpl->record_merge_events(precondition, old_precondition,
+              op->get_execution_fence_event());
         }
       }
       ApEvent result;
@@ -2520,9 +2520,9 @@ namespace Legion {
         {
           ApEvent old_precondition = precondition;
           precondition = Runtime::merge_events(precondition, index_space_ready);
-          if (trace_info.tracing)
-            trace_info.tpl->record_merge_events(trace_info, precondition,
-                old_precondition, index_space_ready);
+          if (trace_info.recording)
+            trace_info.tpl->record_merge_events(precondition, old_precondition,
+                index_space_ready);
         }
         Realm::IndexSpace<DIM,T> local_space;
         get_realm_index_space(local_space, true/*tight*/);
@@ -2531,9 +2531,9 @@ namespace Legion {
         {
           ApEvent pred_pre = Runtime::merge_events(precondition,
                                                    ApEvent(predicate_guard));
-          if (trace_info.tracing)
-            trace_info.tpl->record_merge_events(trace_info, pred_pre,
-                precondition, ApEvent(predicate_guard));
+          if (trace_info.recording)
+            trace_info.tpl->record_merge_events(pred_pre, precondition,
+                ApEvent(predicate_guard));
           result = Runtime::ignorefaults(local_space.copy(src_fields, 
                 dst_fields, requests, pred_pre, redop, reduction_fold));
         }
@@ -2600,9 +2600,9 @@ namespace Legion {
         {
           ApEvent pred_pre = Runtime::merge_events(precondition,
                                                    ApEvent(predicate_guard));
-          if (trace_info.tracing)
-            trace_info.tpl->record_merge_events(trace_info, pred_pre,
-                precondition, ApEvent(predicate_guard));
+          if (trace_info.recording)
+            trace_info.tpl->record_merge_events(pred_pre, precondition,
+                ApEvent(predicate_guard));
           result = Runtime::ignorefaults(intersection.copy(src_fields, 
                 dst_fields, requests, pred_pre, redop, reduction_fold));
         }
@@ -2644,13 +2644,13 @@ namespace Legion {
         ApEvent old_precondition = precondition;
         precondition = Runtime::merge_events(precondition,
                         op->get_execution_fence_event());
-        if (trace_info.tracing)
+        if (trace_info.recording)
         {
 #ifdef DEBUG_LEGION
-          assert(trace_info.tpl != NULL && trace_info.tpl->is_tracing());
+          assert(trace_info.tpl != NULL && trace_info.tpl->is_recording());
 #endif
-          trace_info.tpl->record_merge_events(trace_info, precondition,
-              old_precondition, op->get_execution_fence_event());
+          trace_info.tpl->record_merge_events(precondition, old_precondition,
+              op->get_execution_fence_event());
         }
       }
       ApEvent result;
@@ -2663,9 +2663,9 @@ namespace Legion {
         {
           ApEvent old_precondition = precondition;
           precondition = Runtime::merge_events(precondition, index_space_ready);
-          if (trace_info.tracing)
-            trace_info.tpl->record_merge_events(trace_info, precondition,
-                old_precondition, index_space_ready);
+          if (trace_info.recording)
+            trace_info.tpl->record_merge_events(precondition, old_precondition,
+                index_space_ready);
         }
         Realm::IndexSpace<DIM,T> local_space;
         get_realm_index_space(local_space, true/*tight*/);
@@ -2674,9 +2674,9 @@ namespace Legion {
         {
           ApEvent pred_pre = Runtime::merge_events(precondition,
                                                    ApEvent(predicate_guard));
-          if (trace_info.tracing)
-            trace_info.tpl->record_merge_events(trace_info, pred_pre,
-                precondition, ApEvent(predicate_guard));
+          if (trace_info.recording)
+            trace_info.tpl->record_merge_events(pred_pre, precondition,
+                ApEvent(predicate_guard));
           result = Runtime::ignorefaults(local_space.fill(dst_fields, 
                 requests, fill_value, fill_size, pred_pre));
         }
@@ -2731,9 +2731,9 @@ namespace Legion {
         {
           ApEvent pred_pre = Runtime::merge_events(precondition,
                                                    ApEvent(predicate_guard));
-          if (trace_info.tracing)
-            trace_info.tpl->record_merge_events(trace_info, pred_pre,
-                precondition, ApEvent(predicate_guard));
+          if (trace_info.recording)
+            trace_info.tpl->record_merge_events(pred_pre, precondition,
+                ApEvent(predicate_guard));
           result = Runtime::ignorefaults(intersection.fill(dst_fields, 
                 requests, fill_value, fill_size, pred_pre));
         }

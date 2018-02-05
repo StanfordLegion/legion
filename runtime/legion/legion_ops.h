@@ -205,6 +205,7 @@ namespace Legion {
       virtual OpKind get_operation_kind(void) const  = 0;
       virtual size_t get_region_count(void) const;
       virtual Mappable* get_mappable(void);
+      virtual Memoizable* get_memoizable(void) { return NULL; }
     protected:
       // Base call
       void activate_operation(void);
@@ -221,14 +222,12 @@ namespace Legion {
         { return execution_fence_event.exists(); }
       inline TaskContext* get_context(void) const { return parent_ctx; }
       inline UniqueID get_unique_op_id(void) const { return unique_op_id; } 
+      virtual bool is_memoizing(void) const { return false; }
       inline bool is_tracing(void) const { return tracing; }
-      inline bool is_memoizing(void) const { return memoizing; }
-      inline void set_memoizing(void) { memoizing = true; }
       inline bool is_tracking_parent(void) const { return track_parent; } 
       inline bool already_traced(void) const 
         { return ((trace != NULL) && !tracing); }
       inline LegionTrace* get_trace(void) const { return trace; }
-      inline unsigned get_trace_local_id() const { return trace_local_id; }
       inline unsigned get_ctx_index(void) const { return context_index; }
     public:
       // Be careful using this call as it is only valid when the operation
@@ -552,12 +551,8 @@ namespace Legion {
       ApEvent execution_fence_event;
       // The trace for this operation if any
       LegionTrace *trace;
-      // The physical trace for this operation if any
-      PhysicalTrace *physical_trace;
       // Track whether we are tracing this operation
       bool tracing;
-      // Track whether we are memoizing physical analysis for this operation
-      bool memoizing;
       // The id local to a trace
       unsigned trace_local_id;
       // Our must epoch if we have one
@@ -689,6 +684,15 @@ namespace Legion {
     };
 
     /**
+     * \class Memoizable
+     */
+    class Memoizable
+    {
+    public:
+      virtual std::pair<unsigned, DomainPoint> get_trace_local_id() const = 0;
+    };
+
+    /**
      * \class MemoizableOp
      * A memoizable operation is an abstract class
      * that serves as the basis for operation whose
@@ -697,12 +701,37 @@ namespace Legion {
      * to determine whether to memoize their physical analysis.
      */
     template<typename OP>
-    class MemoizableOp : public OP
+    class MemoizableOp : public OP, public Memoizable
     {
     public:
+      enum MemoizableState {
+        NO_MEMO,   // The operation is not subject to memoization
+        MEMO_REQ,  // The mapper requested memoization on this operation
+        RECORD,    // The runtime is recording analysis for this operation
+        REPLAY,    // The runtime is replaying analysis for this opeartion
+      };
+    public:
       MemoizableOp(Runtime *rt);
+      void initialize_memoizable();
+      virtual Memoizable* get_memoizable(void) { return this; }
+    public:
       virtual void execute_dependence_analysis(void);
       virtual void replay_analysis(void) = 0;
+    public:
+      // From Memoizable
+      virtual std::pair<unsigned,DomainPoint> get_trace_local_id() const;
+    protected:
+      void invoke_memoize_operation(MapperID mapper_id);
+      void set_memoize(bool memoize);
+    public:
+      virtual bool is_memoizing(void) const { return memo_state != NO_MEMO; }
+      bool is_replaying() const { return memo_state == REPLAY; }
+      bool is_recording() const { return memo_state == RECORD; }
+    protected:
+      // The physical trace for this operation if any
+      PhysicalTemplate *tpl;
+      // Track whether we are memoizing physical analysis for this operation
+      MemoizableState memo_state;
     };
 
     /**
@@ -821,8 +850,6 @@ namespace Legion {
       void activate_copy(void);
       void deactivate_copy(void);
       void log_copy_requirements(void) const;
-    protected:
-      void invoke_memoize_operation(void);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -1685,8 +1712,6 @@ namespace Legion {
     public:
       // From MemoizableOp
       virtual void replay_analysis(void);
-    protected:
-      void invoke_memoize_operation(MapperID map_id);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -2543,8 +2568,6 @@ namespace Legion {
         { return requirement; }
       void activate_fill(void);
       void deactivate_fill(void);
-    protected:
-      void invoke_memoize_operation(void);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -2799,7 +2822,5 @@ namespace Legion {
 
   }; //namespace Internal 
 }; // namespace Legion 
-
-#include "legion/legion_ops.inl"
 
 #endif // __LEGION_OPERATIONS_H__

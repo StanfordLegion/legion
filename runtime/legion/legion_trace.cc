@@ -985,7 +985,7 @@ namespace Legion {
       if (local_trace->has_physical_trace())
       {
         PhysicalTrace *physical_trace = local_trace->get_physical_trace();
-        if (physical_trace->is_tracing())
+        if (physical_trace->is_recording())
           physical_trace->fix_trace();
       }
       FenceOp::trigger_mapping();
@@ -1079,7 +1079,7 @@ namespace Legion {
       if (local_trace->has_physical_trace())
       {
         PhysicalTrace *physical_trace = local_trace->get_physical_trace();
-        if (!physical_trace->is_tracing() && physical_trace->is_recurrent())
+        if (!physical_trace->is_recording() && physical_trace->is_recurrent())
         {
           physical_trace->get_current_template()->execute_all();
           template_completion = physical_trace->get_template_completion();
@@ -1121,7 +1121,7 @@ namespace Legion {
       if (local_trace->has_physical_trace())
       {
         PhysicalTrace *physical_trace = local_trace->get_physical_trace();
-        if (physical_trace->is_tracing())
+        if (physical_trace->is_recording())
           physical_trace->fix_trace();
         else
         {
@@ -1261,8 +1261,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PhysicalTrace::PhysicalTrace(Runtime *rt)
-      : runtime(rt), tracing(false),
-        current_template(NULL), previous_template(NULL)
+      : runtime(rt), current_template(NULL), previous_template(NULL)
     //--------------------------------------------------------------------------
     {
     }
@@ -1298,13 +1297,19 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(tracing);
+      assert(is_recording());
 #endif
       current_template->finalize();
       if (current_template->is_replayable())
         previous_template = current_template;
       current_template = NULL;
-      tracing = false;
+    }
+
+    //--------------------------------------------------------------------------
+    bool PhysicalTrace::is_recording(void) const
+    //--------------------------------------------------------------------------
+    {
+      return current_template != NULL && current_template->is_recording();
     }
 
     //--------------------------------------------------------------------------
@@ -1317,53 +1322,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTrace::get_current_template(PhysicalTraceInfo &trace_info,
-                                             bool allow_create /*true*/)
-    //--------------------------------------------------------------------------
-    {
-      {
-        AutoLock t_lock(trace_lock, 1, false/*exclusive*/);
-
-        if (current_template != NULL)
-        {
-          trace_info.tpl = current_template;
-          trace_info.tracing = tracing;
-          return;
-        }
-        else if (!allow_create)
-        {
-          trace_info.tracing = true;
-          trace_info.tpl = NULL;
-          return;
-        }
-      }
-      AutoLock t_lock(trace_lock);
-      if (current_template == NULL)
-        start_new_template();
-#ifdef DEBUG_LEGION
-      assert(current_template != NULL);
-#endif
-      trace_info.tpl = current_template;
-      trace_info.tracing = tracing;
-    }
-
-    //--------------------------------------------------------------------------
     void PhysicalTrace::check_template_preconditions()
     //--------------------------------------------------------------------------
     {
       if (previous_template != NULL && previous_template->is_replayable())
       {
         current_template = previous_template;
-        tracing = false;
         return;
       }
       for (std::vector<PhysicalTemplate*>::reverse_iterator it =
-           templates.rbegin(); it !=
-           templates.rend(); ++it)
+           templates.rbegin(); it != templates.rend(); ++it)
         if ((*it)->is_replayable() && (*it)->check_preconditions())
         {
           current_template = *it;
-          tracing = false;
           return;
         }
       start_new_template();
@@ -1375,7 +1346,6 @@ namespace Legion {
     {
       templates.push_back(new PhysicalTemplate(this));
       current_template = templates.back();
-      tracing = true;
     }
 
     void PhysicalTrace::initialize_template(ApEvent fence_completion)
@@ -1403,7 +1373,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PhysicalTemplate::PhysicalTemplate(PhysicalTrace *pt)
-      : trace(pt), tracing(true), replayable(true), fence_completion_id(0)
+      : trace(pt), recording(true), replayable(true), fence_completion_id(0)
     //--------------------------------------------------------------------------
     {
       events.push_back(ApEvent());
@@ -1449,7 +1419,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       fence_completion = completion;
-      if (tracing)
+      if (recording)
       {
         events.resize(fence_completion_id + 1);
         events[fence_completion_id] = fence_completion;
@@ -1663,26 +1633,17 @@ namespace Legion {
     void PhysicalTemplate::register_operation(Operation *op)
     //--------------------------------------------------------------------------
     {
-      DomainPoint color;
-      register_operation(op, color);
-    }
-
-    //--------------------------------------------------------------------------
-    void PhysicalTemplate::register_operation(
-                                        Operation *op, const DomainPoint &color)
-    //--------------------------------------------------------------------------
-    {
-      TraceLocalId key(op->get_trace_local_id(), color);
-      {
-        // TODO: Index operations should be sliced here.
-        std::map<TraceLocalId, Operation*>::iterator op_finder =
-          operations.find(key);
+      Memoizable *memoizable = op->get_memoizable();
 #ifdef DEBUG_LEGION
-        assert(op_finder != operations.end());
-        assert(op_finder->second == NULL);
+      assert(memoizable != NULL);
 #endif
-        op_finder->second = op;
-      }
+      std::map<TraceLocalId, Operation*>::iterator op_finder =
+        operations.find(memoizable->get_trace_local_id());
+#ifdef DEBUG_LEGION
+      assert(op_finder != operations.end());
+      assert(op_finder->second == NULL);
+#endif
+      op_finder->second = op;
     }
 
     //--------------------------------------------------------------------------
@@ -1699,7 +1660,7 @@ namespace Legion {
     void PhysicalTemplate::finalize()
     //--------------------------------------------------------------------------
     {
-      tracing = false;
+      recording = false;
       optimize();
       replayable = check_preconditions();
       if (Runtime::dump_physical_traces) dump_template();
@@ -2193,14 +2154,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::record_mapper_output(PhysicalTraceInfo &trace_info,
+    void PhysicalTemplate::record_mapper_output(SingleTask *task,
                                             const Mapper::MapTaskOutput &output,
                               const std::deque<InstanceSet> &physical_instances)
     //--------------------------------------------------------------------------
     {
       AutoLock t_lock(template_lock);
 
-      TraceLocalId op_key(trace_info.trace_local_id, trace_info.color);
+      TraceLocalId op_key = task->get_trace_local_id();
 #ifdef DEBUG_LEGION
       assert(cached_mappings.find(op_key) == cached_mappings.end());
 #endif
@@ -2219,7 +2180,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::get_mapper_output(PhysicalTraceInfo &trace_info,
+    void PhysicalTemplate::get_mapper_output(SingleTask *task,
                                              VariantID &chosen_variant,
                                              TaskPriority &task_priority,
                                              bool &postmap_task,
@@ -2229,7 +2190,7 @@ namespace Legion {
     {
       AutoLock t_lock(template_lock, 1, false/*exclusive*/);
 
-      TraceLocalId op_key(trace_info.trace_local_id, trace_info.color);
+      TraceLocalId op_key = task->get_trace_local_id();
       CachedMappings::const_iterator finder = cached_mappings.find(op_key);
 #ifdef DEBUG_LEGION
       assert(finder != cached_mappings.end());
@@ -2242,9 +2203,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::record_get_term_event(PhysicalTraceInfo &trace_info,
-                                                 ApEvent lhs,
-                                                 SingleTask* task)
+    void PhysicalTemplate::record_get_term_event(ApEvent lhs, SingleTask* task)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -2259,7 +2218,7 @@ namespace Legion {
 #endif
       event_map[lhs] = lhs_;
 
-      TraceLocalId key(task->get_trace_local_id(), trace_info.color);
+      TraceLocalId key = task->get_trace_local_id();
 #ifdef DEBUG_LEGION
       assert(operations.find(key) == operations.end());
       assert(task_entries.find(key) == task_entries.end());
@@ -2275,9 +2234,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::record_create_ap_user_event(
-                                                  PhysicalTraceInfo &trace_info,
-                                                  ApUserEvent lhs)
+    void PhysicalTemplate::record_create_ap_user_event(ApUserEvent lhs)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -2300,8 +2257,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::record_trigger_event(PhysicalTraceInfo &trace_info,
-                                                ApUserEvent lhs, ApEvent rhs)
+    void PhysicalTemplate::record_trigger_event(ApUserEvent lhs, ApEvent rhs)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -2326,30 +2282,27 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::record_merge_events(PhysicalTraceInfo &trace_info,
-                                               ApEvent &lhs, ApEvent rhs_)
+    void PhysicalTemplate::record_merge_events(ApEvent &lhs, ApEvent rhs_)
     //--------------------------------------------------------------------------
     {
       std::set<ApEvent> rhs;
       rhs.insert(rhs_);
-      record_merge_events(trace_info, lhs, rhs);
+      record_merge_events(lhs, rhs);
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::record_merge_events(PhysicalTraceInfo &trace_info,
-                                               ApEvent &lhs,
-                                               ApEvent e1, ApEvent e2)
+    void PhysicalTemplate::record_merge_events(ApEvent &lhs, ApEvent e1,
+                                               ApEvent e2)
     //--------------------------------------------------------------------------
     {
       std::set<ApEvent> rhs;
       rhs.insert(e1);
       rhs.insert(e2);
-      record_merge_events(trace_info, lhs, rhs);
+      record_merge_events(lhs, rhs);
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::record_merge_events(PhysicalTraceInfo &trace_info,
-                                               ApEvent &lhs, ApEvent e1,
+    void PhysicalTemplate::record_merge_events(ApEvent &lhs, ApEvent e1,
                                                ApEvent e2, ApEvent e3)
     //--------------------------------------------------------------------------
     {
@@ -2357,12 +2310,11 @@ namespace Legion {
       rhs.insert(e1);
       rhs.insert(e2);
       rhs.insert(e3);
-      record_merge_events(trace_info, lhs, rhs);
+      record_merge_events(lhs, rhs);
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::record_merge_events(PhysicalTraceInfo &trace_info,
-                                               ApEvent &lhs,
+    void PhysicalTemplate::record_merge_events(ApEvent &lhs,
                                                const std::set<ApEvent>& rhs)
     //--------------------------------------------------------------------------
     {
@@ -2407,8 +2359,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::record_copy_views(PhysicalTraceInfo &trace_info,
-                                             InstanceView *src,
+    void PhysicalTemplate::record_copy_views(InstanceView *src,
                                              const FieldMask &src_mask,
                                              ContextID src_logical_ctx,
                                              ContextID src_physical_ctx,
@@ -2486,8 +2437,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::record_issue_copy(PhysicalTraceInfo &trace_info,
-                                             Operation* op, ApEvent &lhs,
+    void PhysicalTemplate::record_issue_copy(Operation* op, ApEvent &lhs,
                                              RegionNode *node,
                                  const std::vector<CopySrcDstField>& src_fields,
                                  const std::vector<CopySrcDstField>& dst_fields,
@@ -2513,7 +2463,11 @@ namespace Legion {
 #endif
       event_map[lhs] = lhs_;
 
-      TraceLocalId op_key(op->get_trace_local_id(), trace_info.color);
+      Memoizable *memoizable = op->get_memoizable();
+#ifdef DEBUG_LEGION
+      assert(memoizable != NULL);
+#endif
+      TraceLocalId op_key = memoizable->get_trace_local_id();
 #ifdef DEBUG_LEGION
       assert(operations.find(op_key) != operations.end());
 #endif
@@ -2575,8 +2529,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    inline void PhysicalTemplate::record_ready_view(PhysicalTraceInfo &trace_info,
-                                                    const RegionRequirement &req,
+    inline void PhysicalTemplate::record_ready_view(const RegionRequirement &req,
                                                     InstanceView *view,
                                                     const FieldMask &fields,
                                                     ContextID logical_ctx,
@@ -2624,8 +2577,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::record_set_ready_event(PhysicalTraceInfo &trace_info,
-                                                  Operation *op,
+    void PhysicalTemplate::record_set_ready_event(Operation *op,
                                                   unsigned region_idx,
                                                   unsigned inst_idx,
                                                   ApEvent ready_event,
@@ -2640,7 +2592,11 @@ namespace Legion {
 
       AutoLock tpl_lock(template_lock);
 
-      TraceLocalId op_key(op->get_trace_local_id(), trace_info.color);
+      Memoizable *memoizable = op->get_memoizable();
+#ifdef DEBUG_LEGION
+      assert(memoizable != NULL);
+#endif
+      TraceLocalId op_key = memoizable->get_trace_local_id();
 #ifdef DEBUG_LEGION
       assert(operations.find(op_key) != operations.end());
 #endif
@@ -2700,8 +2656,7 @@ namespace Legion {
       assert(instructions.size() == events.size());
 #endif
 
-      record_ready_view(trace_info, req, view, fields, logical_ctx,
-          physical_ctx);
+      record_ready_view(req, view, fields, logical_ctx, physical_ctx);
 
       std::map<TraceLocalId, unsigned>::iterator finder =
         task_entries.find(op_key);
@@ -2717,8 +2672,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::record_get_copy_term_event(
-                       PhysicalTraceInfo &trace_info, ApEvent lhs, CopyOp* copy)
+    void PhysicalTemplate::record_get_copy_term_event(ApEvent lhs, CopyOp* copy)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -2733,7 +2687,7 @@ namespace Legion {
 #endif
       event_map[lhs] = lhs_;
 
-      TraceLocalId key(copy->get_trace_local_id(), trace_info.color);
+      TraceLocalId key = copy->get_trace_local_id();
 #ifdef DEBUG_LEGION
       assert(operations.find(key) == operations.end());
       assert(task_entries.find(key) == task_entries.end());
@@ -2750,7 +2704,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void PhysicalTemplate::record_set_copy_sync_event(
-                      PhysicalTraceInfo &trace_info, ApEvent &lhs, CopyOp* copy)
+                                                     ApEvent &lhs, CopyOp* copy)
     //--------------------------------------------------------------------------
     {
       if (!lhs.exists())
@@ -2771,7 +2725,7 @@ namespace Legion {
 #endif
       event_map[lhs] = lhs_;
 
-      TraceLocalId key(copy->get_trace_local_id(), trace_info.color);
+      TraceLocalId key = copy->get_trace_local_id();
 #ifdef DEBUG_LEGION
       assert(operations.find(key) != operations.end());
       assert(task_entries.find(key) != task_entries.end());
@@ -2784,7 +2738,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void PhysicalTemplate::record_trigger_copy_completion(
-                       PhysicalTraceInfo &trace_info, CopyOp* copy, ApEvent rhs)
+                                                      CopyOp* copy, ApEvent rhs)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -2793,7 +2747,7 @@ namespace Legion {
       AutoLock tpl_lock(template_lock);
 
       events.push_back(ApEvent());
-      TraceLocalId lhs_(copy->get_trace_local_id(), trace_info.color);
+      TraceLocalId lhs_ = copy->get_trace_local_id();
 #ifdef DEBUG_LEGION
       assert(event_map.find(rhs) != event_map.end());
 #endif
@@ -2811,8 +2765,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::record_issue_fill(PhysicalTraceInfo &trace_info,
-                                             Operation *op, ApEvent &lhs,
+    void PhysicalTemplate::record_issue_fill(Operation *op, ApEvent &lhs,
                                              RegionNode *node,
                                      const std::vector<CopySrcDstField> &fields,
                                              const void *fill_buffer,
@@ -2843,7 +2796,11 @@ namespace Legion {
 #endif
       event_map[lhs] = lhs_;
 
-      TraceLocalId key(op->get_trace_local_id(), trace_info.color);
+      Memoizable *memoizable = op->get_memoizable();
+#ifdef DEBUG_LEGION
+      assert(memoizable != NULL);
+#endif
+      TraceLocalId key = memoizable->get_trace_local_id();
 #ifdef DEBUG_LEGION
       assert(operations.find(key) != operations.end());
       assert(task_entries.find(key) != task_entries.end());
@@ -2959,9 +2916,7 @@ namespace Legion {
 #endif
       ApEvent completion_event = task->get_task_completion();
       events[lhs] = completion_event;
-      PhysicalTraceInfo trace_info;
-      task->get_physical_trace_info(trace_info);
-      task->replay_map_task_output(trace_info);
+      task->replay_map_task_output();
     }
 
     //--------------------------------------------------------------------------
@@ -3733,7 +3688,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     PhysicalTraceInfo::PhysicalTraceInfo()
     //--------------------------------------------------------------------------
-      : memoizing(false), tracing(false), trace_local_id(0), color(), tpl(NULL)
+      : recording(false), op(NULL), tpl(NULL)
     {
     }
 

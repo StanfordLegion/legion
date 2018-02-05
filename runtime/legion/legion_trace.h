@@ -366,19 +366,15 @@ namespace Legion {
       PhysicalTrace& operator=(const PhysicalTrace &rhs);
     public:
       void check_template_preconditions();
-      void get_current_template(PhysicalTraceInfo &trace_info,
-                                bool allow_create = true);
       PhysicalTemplate* get_current_template() { return current_template; }
     private:
       void start_new_template();
-    private:
-      PhysicalTemplate* get_template(PhysicalTraceInfo &trace_info);
     public:
       void initialize_template(ApEvent fence_completion);
       ApEvent get_template_completion(void) const;
     public:
       void fix_trace(void);
-      inline bool is_tracing(void) const { return tracing; }
+      bool is_recording(void) const;
       inline bool is_recurrent(void) const
         { return current_template != NULL &&
                  current_template == previous_template; }
@@ -387,7 +383,6 @@ namespace Legion {
     public:
       Runtime *runtime;
     private:
-      bool tracing;
       mutable LocalLock trace_lock;
       PhysicalTemplate* current_template;
       PhysicalTemplate* previous_template;
@@ -422,46 +417,37 @@ namespace Legion {
     public:
       bool check_preconditions();
       void register_operation(Operation *op);
-      void register_operation(Operation *op, const DomainPoint &color);
       void execute_all();
       void finalize();
       void optimize();
       void dump_template();
     public:
-      inline bool is_tracing() const { return tracing; }
-      inline bool is_replaying() const { return !tracing; }
+      inline bool is_recording() const { return recording; }
+      inline bool is_replaying() const { return !recording; }
       inline bool is_replayable() const { return replayable; }
     protected:
       static std::string view_to_string(const InstanceView *view);
       void sanity_check();
     public:
-      void record_mapper_output(PhysicalTraceInfo &trace_info,
+      void record_mapper_output(SingleTask *task,
                                 const Mapper::MapTaskOutput &output,
                              const std::deque<InstanceSet> &physical_instances);
-      void get_mapper_output(PhysicalTraceInfo &trace_info,
+      void get_mapper_output(SingleTask *task,
                              VariantID &chosen_variant,
                              TaskPriority &task_priority,
                              bool &postmap_task,
                              std::vector<Processor> &target_proc,
                              std::deque<InstanceSet> &physical_instances) const;
     public:
-      void record_get_term_event(PhysicalTraceInfo &trace_info,
-                                 ApEvent lhs, SingleTask* task);
-      void record_create_ap_user_event(PhysicalTraceInfo &trace_info,
-                                       ApUserEvent lhs);
-      void record_trigger_event(PhysicalTraceInfo &trace_info,
-                                ApUserEvent lhs, ApEvent rhs);
-      void record_merge_events(PhysicalTraceInfo &trace_info, ApEvent &lhs,
-                               ApEvent rhs);
-      void record_merge_events(PhysicalTraceInfo &trace_info, ApEvent &lhs,
-                               ApEvent e1, ApEvent e2);
-      void record_merge_events(PhysicalTraceInfo &trace_info, ApEvent &lhs,
-                               ApEvent e1, ApEvent e2, ApEvent e3);
-      void record_merge_events(PhysicalTraceInfo &trace_info,
-                               ApEvent &lhs,
-                               const std::set<ApEvent>& rhs);
-      void record_copy_views(PhysicalTraceInfo &trace_info,
-                             InstanceView *src,
+      void record_get_term_event(ApEvent lhs, SingleTask* task);
+      void record_create_ap_user_event(ApUserEvent lhs);
+      void record_trigger_event(ApUserEvent lhs, ApEvent rhs);
+      void record_merge_events(ApEvent &lhs, ApEvent rhs);
+      void record_merge_events(ApEvent &lhs, ApEvent e1, ApEvent e2);
+      void record_merge_events(ApEvent &lhs, ApEvent e1, ApEvent e2,
+                               ApEvent e3);
+      void record_merge_events(ApEvent &lhs, const std::set<ApEvent>& rhs);
+      void record_copy_views(InstanceView *src,
                              const FieldMask &src_mask,
                              ContextID src_logical_ctx,
                              ContextID src_physucal_ctx,
@@ -469,8 +455,7 @@ namespace Legion {
                              const FieldMask &dst_mask,
                              ContextID dst_logical_ctx,
                              ContextID dst_physical_ctx);
-      void record_issue_copy(PhysicalTraceInfo &trace_info,
-                             Operation* op, ApEvent &lhs,
+      void record_issue_copy(Operation* op, ApEvent &lhs,
                              RegionNode *node,
                              const std::vector<CopySrcDstField>& src_fields,
                              const std::vector<CopySrcDstField>& dst_fields,
@@ -484,8 +469,7 @@ namespace Legion {
                              MaterializedView *dst,
                              const FieldMask &dst_mask,
                              ContextID logical_ctx);
-      void record_set_ready_event(PhysicalTraceInfo &trace_info,
-                                  Operation *op,
+      void record_set_ready_event(Operation *op,
                                   unsigned region_idx,
                                   unsigned inst_idx,
                                   ApEvent ready_event,
@@ -494,14 +478,10 @@ namespace Legion {
                                   const FieldMask &fields,
                                   ContextID logical_ctx,
                                   ContextID physical_ctx);
-      void record_get_copy_term_event(PhysicalTraceInfo &trace_info,
-                                      ApEvent lhs, CopyOp *copy);
-      void record_set_copy_sync_event(PhysicalTraceInfo &trace_info,
-                                      ApEvent &lhs, CopyOp *copy);
-      void record_trigger_copy_completion(PhysicalTraceInfo &trace_info,
-                                          CopyOp *copy, ApEvent rhs);
-      void record_issue_fill(PhysicalTraceInfo &trace_info,
-                             Operation *op, ApEvent &lhs,
+      void record_get_copy_term_event(ApEvent lhs, CopyOp *copy);
+      void record_set_copy_sync_event(ApEvent &lhs, CopyOp *copy);
+      void record_trigger_copy_completion(CopyOp *copy, ApEvent rhs);
+      void record_issue_fill(Operation *op, ApEvent &lhs,
                              RegionNode *node,
                              const std::vector<CopySrcDstField> &fields,
                              const void *fill_buffer, size_t fill_size,
@@ -513,8 +493,7 @@ namespace Legion {
                              RegionTreeNode *intersect);
 
     private:
-      void record_ready_view(PhysicalTraceInfo &trace_info,
-                             const RegionRequirement &req,
+      void record_ready_view(const RegionRequirement &req,
                              InstanceView *view,
                              const FieldMask &fields,
                              ContextID logical_ctx,
@@ -525,7 +504,7 @@ namespace Legion {
                            std::set<unsigned> &users);
     private:
       PhysicalTrace *trace;
-      bool tracing;
+      bool recording;
       bool replayable;
       mutable LocalLock template_lock;
       unsigned fence_completion_id;

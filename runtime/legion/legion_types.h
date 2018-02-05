@@ -1302,6 +1302,7 @@ namespace Legion {
     class DetachOp;
     class TimingOp;
     class TaskOp;
+    class Memoizable;
 
     // legion_tasks.h
     class ExternalTask;

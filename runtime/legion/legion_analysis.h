@@ -474,10 +474,8 @@ namespace Legion {
     public:
       PhysicalTraceInfo();
     public:
-      bool memoizing;
-      bool tracing;
-      unsigned trace_local_id;
-      DomainPoint color;
+      bool recording;
+      Operation *op;
       PhysicalTemplate *tpl;
     };
 

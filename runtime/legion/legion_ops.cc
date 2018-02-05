@@ -90,7 +90,6 @@ namespace Legion {
       execution_fence_event = ApEvent::NO_AP_EVENT;
       trace = NULL;
       tracing = false;
-      memoizing = false;
       trace_local_id = (unsigned)-1;
       must_epoch = NULL;
 #ifdef DEBUG_LEGION
@@ -221,9 +220,6 @@ namespace Legion {
     void Operation::set_trace_local_id(unsigned id)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(memoizing);
-#endif
       trace_local_id = id;
     }
 
@@ -679,7 +675,6 @@ namespace Legion {
       // Tell our parent context that we are done mapping
       // It's important that this is done before we mark that we
       // are executed to avoid race conditions
-      //fprintf(stderr, "track_parent: %d, %p\n", track_parent, this);
       if (track_parent)
         parent_ctx->register_child_executed(this);
 #ifdef DEBUG_LEGION
@@ -2159,6 +2154,95 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
+    // Memoizable Operation 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    MemoizableOp<OP>::MemoizableOp(Runtime *rt)
+      : OP(rt)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    void MemoizableOp<OP>::initialize_memoizable()
+    //--------------------------------------------------------------------------
+    {
+      tpl = NULL;
+      memo_state = NO_MEMO;
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    void MemoizableOp<OP>::execute_dependence_analysis(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(memo_state == NO_MEMO || memo_state == MEMO_REQ);
+#endif
+      if (memo_state == MEMO_REQ)
+      {
+#ifdef DEBUG_LEGION
+        assert(OP::trace != NULL);
+        assert(OP::trace->get_physical_trace() != NULL);
+#endif
+        tpl = OP::trace->get_physical_trace()->get_current_template();
+        if (tpl->is_replaying())
+        {
+          memo_state = REPLAY;
+          OP::trace->register_physical_only(this, OP::gen);
+          OP::resolve_speculation();
+          replay_analysis();
+          return;
+        }
+        else
+          memo_state = RECORD;
+      }
+      OP::execute_dependence_analysis();
+    };
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    std::pair<unsigned,DomainPoint> MemoizableOp<OP>::get_trace_local_id() const
+    //--------------------------------------------------------------------------
+    {
+      return std::pair<unsigned,DomainPoint>(OP::trace_local_id, DomainPoint());
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    void MemoizableOp<OP>::invoke_memoize_operation(MapperID mapper_id)
+    //--------------------------------------------------------------------------
+    {
+      Mapper::MemoizeInput  input;
+      Mapper::MemoizeOutput output;
+      input.traced = OP::trace != NULL;
+      output.memoize = false;
+      Processor mapper_proc = OP::parent_ctx->get_executing_processor();
+      MapperManager *mapper = OP::runtime->find_mapper(mapper_proc, mapper_id);
+      mapper->invoke_memoize_operation(&input, &output);
+      if (OP::trace == NULL && output.memoize)
+        REPORT_LEGION_ERROR(ERROR_INVALID_PHYSICAL_TRACING,
+            "Invalid mapper output from 'memoize_operation'. Mapper requested"
+            " memoization of an operation that is not being traced.");
+      set_memoize(output.memoize);
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    void MemoizableOp<OP>::set_memoize(bool memoize)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(memo_state == NO_MEMO);
+#endif
+      if (memoize && !Runtime::no_tracing && !Runtime::no_physical_tracing)
+        memo_state = MEMO_REQ;
+    }
+
+    /////////////////////////////////////////////////////////////
     // Map Operation 
     /////////////////////////////////////////////////////////////
 
@@ -3199,7 +3283,8 @@ namespace Legion {
                                launcher.dst_requirements.size(), 
                              launcher.static_dependences,
                              launcher.predicate);
-      invoke_memoize_operation();
+      initialize_memoizable();
+      invoke_memoize_operation(map_id);
       src_requirements.resize(launcher.src_requirements.size());
       dst_requirements.resize(launcher.dst_requirements.size());
       src_versions.resize(launcher.src_requirements.size());
@@ -3355,21 +3440,6 @@ namespace Legion {
       if (Runtime::legion_spy_enabled)
         LegionSpy::log_copy_operation(parent_ctx->get_unique_id(),
                                       unique_op_id);
-    }
-
-    //--------------------------------------------------------------------------
-    void CopyOp::invoke_memoize_operation(void)
-    //--------------------------------------------------------------------------
-    {
-      Mapper::MemoizeInput  input;
-      Mapper::MemoizeOutput output;
-      input.traced = trace != NULL;
-      output.memoize = false;
-      Processor mapper_proc = parent_ctx->get_executing_processor();
-      MapperManager *mapper = runtime->find_mapper(mapper_proc, map_id);
-      mapper->invoke_memoize_operation(&input, &output);
-      memoizing = output.memoize && !Runtime::no_tracing &&
-        !Runtime::no_physical_tracing;
     }
 
     //--------------------------------------------------------------------------
@@ -3618,15 +3688,10 @@ namespace Legion {
     void CopyOp::trigger_ready(void)
     //--------------------------------------------------------------------------
     {
-      if (memoizing)
+      if (is_replaying())
       {
-        PhysicalTraceInfo trace_info;
-        trace->get_physical_trace()->get_current_template(trace_info);
-        if (trace_info.tpl->is_replaying())
-        {
-          enqueue_ready_operation();
-          return;
-        }
+        enqueue_ready_operation();
+        return;
       }
 
       // Do our versioning analysis and then add it to the ready queue
@@ -3666,16 +3731,15 @@ namespace Legion {
     {
       // TODO: Implement physical tracing for copy across operation
       PhysicalTraceInfo trace_info;
-      if (memoizing)
+      if (is_recording())
       {
-        trace_info.memoizing = memoizing;
-        trace_info.trace_local_id = trace_local_id;
-        trace->get_physical_trace()->get_current_template(trace_info);
 #ifdef DEBUG_LEGION
-        assert(trace_info.tpl != NULL && trace_info.tpl->is_tracing());
+        assert(tpl != NULL && tpl->is_recording());
 #endif
-        trace_info.tpl->record_get_copy_term_event(trace_info,
-            completion_event, this);
+        tpl->record_get_copy_term_event(completion_event, this);
+        trace_info.recording = true;
+        trace_info.op = this;
+        trace_info.tpl = tpl;
       }
 
       std::vector<InstanceSet> valid_src_instances(src_requirements.size());
@@ -3738,13 +3802,12 @@ namespace Legion {
       // and issue the across copies, first set up the sync precondition
       ApEvent sync_precondition = compute_sync_precondition();
 
-      if (memoizing)
+      if (is_recording())
       {
 #ifdef DEBUG_LEGION
-        assert(trace_info.tpl != NULL && trace_info.tpl->is_tracing());
+        assert(tpl != NULL && tpl->is_recording());
 #endif
-        trace_info.tpl->record_set_copy_sync_event(trace_info,
-            sync_precondition, this);
+        tpl->record_set_copy_sync_event(sync_precondition, this);
       }
 
       // Register the source and destination regions
@@ -3758,13 +3821,12 @@ namespace Legion {
         // and add it to the set of copy complete events
         ApUserEvent local_completion = Runtime::create_ap_user_event();
         copy_complete_events.insert(local_completion);
-        if (memoizing)
+        if (is_recording())
         {
 #ifdef DEBUG_LEGION
-          assert(trace_info.tpl != NULL && trace_info.tpl->is_tracing());
+          assert(tpl != NULL && tpl->is_recording());
 #endif
-          trace_info.tpl->record_create_ap_user_event(trace_info,
-              local_completion);
+          tpl->record_create_ap_user_event(local_completion);
         }
 
         // Do the conversion and check for errors
@@ -3872,13 +3934,12 @@ namespace Legion {
                                   local_sync_precondition, predication_guard, 
                                   map_applied_conditions, trace_info);
           Runtime::trigger_event(local_completion, across_done);
-          if (memoizing)
+          if (is_recording())
           {
 #ifdef DEBUG_LEGION
-            assert(trace_info.tpl != NULL && trace_info.tpl->is_tracing());
+            assert(tpl != NULL && tpl->is_recording());
 #endif
-            trace_info.tpl->record_trigger_event(trace_info, local_completion,
-                                                 across_done);
+            tpl->record_trigger_event(local_completion, across_done);
           }
         }
         else
@@ -3894,13 +3955,12 @@ namespace Legion {
                                   local_sync_precondition, predication_guard,
                                   trace_info);
           Runtime::trigger_event(local_completion, across_done);
-          if (memoizing)
+          if (is_recording())
           {
 #ifdef DEBUG_LEGION
-            assert(trace_info.tpl != NULL && trace_info.tpl->is_tracing());
+            assert(tpl != NULL && tpl->is_recording());
 #endif
-            trace_info.tpl->record_trigger_event(trace_info, local_completion,
-                                                 across_done);
+            tpl->record_trigger_event(local_completion, across_done);
           }
         }
         // Apply our changes to the version states
@@ -3915,21 +3975,20 @@ namespace Legion {
 #endif
       }
       ApEvent copy_complete_event = Runtime::merge_events(copy_complete_events);
-      if (memoizing)
+      if (is_recording())
       {
 #ifdef DEBUG_LEGION
-        assert(trace_info.tpl != NULL && trace_info.tpl->is_tracing());
+        assert(tpl != NULL && tpl->is_recording());
 #endif
-        trace_info.tpl->record_merge_events(trace_info, copy_complete_event,
-            copy_complete_events);
+        tpl->record_merge_events(copy_complete_event, copy_complete_events);
       }
 
       if (!restrict_postconditions.empty())
       {
         restrict_postconditions.insert(copy_complete_event);
         copy_complete_event = Runtime::merge_events(restrict_postconditions);
-        if (memoizing)
-          trace_info.tpl->record_merge_events(trace_info, copy_complete_event,
+        if (is_recording())
+          tpl->record_merge_events(copy_complete_event,
               restrict_postconditions);
       }
 #ifdef LEGION_SPY
@@ -3962,9 +4021,8 @@ namespace Legion {
         complete_mapping();
       if (!acquired_instances.empty())
         release_acquired_instances(acquired_instances);
-      if (memoizing)
-        trace_info.tpl->record_trigger_copy_completion(trace_info, this,
-            copy_complete_event);
+      if (is_recording())
+        tpl->record_trigger_copy_completion(this, copy_complete_event);
       // Handle the case for marking when the copy completes
       Runtime::trigger_event(completion_event, copy_complete_event);
       need_completion_trigger = false;
@@ -4392,8 +4450,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       add_mapping_reference(gen);
-      PhysicalTemplate *tpl =
-        trace->get_physical_trace()->get_current_template();
       tpl->register_operation(this);
       complete_mapping();
     }
@@ -9268,6 +9324,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       initialize_operation(ctx, true/*track*/);
+      initialize_memoizable();
       invoke_memoize_operation(ctx->owner_task->map_id);
       future = Future(new FutureImpl(runtime, true/*register*/,
             runtime->get_available_distributed_id(), 
@@ -9288,21 +9345,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       trigger_mapping();
-    }
-
-    //--------------------------------------------------------------------------
-    void DynamicCollectiveOp::invoke_memoize_operation(MapperID mapper_id)
-    //--------------------------------------------------------------------------
-    {
-      Mapper::MemoizeInput  input;
-      Mapper::MemoizeOutput output;
-      input.traced = trace != NULL;
-      output.memoize = false;
-      Processor mapper_proc = parent_ctx->get_executing_processor();
-      MapperManager *mapper = runtime->find_mapper(mapper_proc, mapper_id);
-      mapper->invoke_memoize_operation(&input, &output);
-      memoizing = output.memoize && !Runtime::no_tracing &&
-        !Runtime::no_physical_tracing;
     }
 
     //--------------------------------------------------------------------------
@@ -12743,7 +12785,8 @@ namespace Legion {
       parent_task = ctx->get_task();
       initialize_speculation(ctx, true/*track*/, 1, 
                              launcher.static_dependences, launcher.predicate);
-      invoke_memoize_operation();
+      initialize_memoizable();
+      invoke_memoize_operation(map_id);
       requirement = RegionRequirement(launcher.handle, WRITE_DISCARD,
                                       EXCLUSIVE, launcher.parent);
       requirement.privilege_fields = launcher.fields;
@@ -12771,21 +12814,6 @@ namespace Legion {
           LegionSpy::log_future_use(unique_op_id, 
                                     future.impl->get_ready_event());
       }
-    }
-
-    //--------------------------------------------------------------------------
-    void FillOp::invoke_memoize_operation(void)
-    //--------------------------------------------------------------------------
-    {
-      Mapper::MemoizeInput  input;
-      Mapper::MemoizeOutput output;
-      input.traced = trace != NULL;
-      output.memoize = false;
-      Processor mapper_proc = parent_ctx->get_executing_processor();
-      MapperManager *mapper = runtime->find_mapper(mapper_proc, map_id);
-      mapper->invoke_memoize_operation(&input, &output);
-      memoizing = output.memoize && !Runtime::no_tracing &&
-        !Runtime::no_physical_tracing;
     }
 
     //--------------------------------------------------------------------------
@@ -12980,15 +13008,10 @@ namespace Legion {
     void FillOp::trigger_ready(void)
     //--------------------------------------------------------------------------
     {
-      if (memoizing)
+      if (is_replaying())
       {
-        PhysicalTraceInfo trace_info;
-        trace->get_physical_trace()->get_current_template(trace_info);
-        if (trace_info.tpl->is_replaying())
-        {
-          enqueue_ready_operation();
-          return;
-        }
+        enqueue_ready_operation();
+        return;
       }
 
       std::set<RtEvent> preconditions;
@@ -13008,29 +13031,30 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       PhysicalTraceInfo trace_info;
-      if (memoizing)
+      //if (is_replaying())
+      //{
+      //  complete_mapping();
+      //  // See if we have any arrivals to trigger
+      //  if (!arrive_barriers.empty())
+      //  {
+      //    for (std::vector<PhaseBarrier>::const_iterator it = 
+      //        arrive_barriers.begin(); it != arrive_barriers.end(); it++)
+      //    {
+      //      if (Runtime::legion_spy_enabled)
+      //        LegionSpy::log_phase_barrier_arrival(unique_op_id, 
+      //            it->phase_barrier);
+      //      Runtime::phase_barrier_arrive(it->phase_barrier, 1/*count*/,
+      //          completion_event);
+      //    }
+      //  }
+      //  complete_execution();
+      //  return;
+      //}
+      if (is_recording())
       {
-        PhysicalTraceInfo trace_info;
-        trace->get_physical_trace()->get_current_template(trace_info);
-        if (trace_info.tpl->is_replaying())
-        {
-          complete_mapping();
-          // See if we have any arrivals to trigger
-          if (!arrive_barriers.empty())
-          {
-            for (std::vector<PhaseBarrier>::const_iterator it = 
-                  arrive_barriers.begin(); it != arrive_barriers.end(); it++)
-            {
-              if (Runtime::legion_spy_enabled)
-                LegionSpy::log_phase_barrier_arrival(unique_op_id, 
-                                                     it->phase_barrier);
-              Runtime::phase_barrier_arrive(it->phase_barrier, 1/*count*/,
-                                            completion_event);
-            }
-          }
-          complete_execution();
-          return;
-        }
+        trace_info.recording = true;
+        trace_info.op = this;
+        trace_info.tpl = tpl;
       }
 
       // Tell the region tree forest to fill in this field

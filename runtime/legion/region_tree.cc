@@ -1944,7 +1944,7 @@ namespace Legion {
         // Construct the traversal info
         TraversalInfo info(ctx.get_id(), op, index, req, version_info, 
                            user_mask, local_applied);
-        if (trace_info.tracing)
+        if (trace_info.recording)
         {
           TaskContext *context = op->find_logical_context(index);
           info.logical_ctx = context->get_context().get_id();
@@ -1978,7 +1978,7 @@ namespace Legion {
         // Construct the traversal info
         TraversalInfo info(ctx.get_id(), op, index, req, version_info, 
                            user_mask, map_applied);
-        if (trace_info.tracing)
+        if (trace_info.recording)
         {
           TaskContext *context = op->find_logical_context(index);
           info.logical_ctx = context->get_context().get_id();
@@ -2035,7 +2035,7 @@ namespace Legion {
         RegionUsage usage(req);
 
         ContextID logical_ctx = -1U;
-        if (trace_info.tracing)
+        if (trace_info.recording)
         {
           TaskContext *context = op->find_logical_context(idx1);
           logical_ctx = context->get_context().get_id();
@@ -2050,15 +2050,14 @@ namespace Legion {
                             term_event, ref.get_valid_fields(), op, idx1, 
                             &info, map_applied_events, trace_info);
           ref.set_ready_event(ready);
-          if (trace_info.tracing)
+          if (trace_info.recording)
           {
 #ifdef DEBUG_LEGION
-            assert(trace_info.tpl != NULL && trace_info.tpl->is_tracing());
+            assert(trace_info.tpl != NULL && trace_info.tpl->is_recording());
             assert(logical_ctx != -1U);
 #endif
             ContextID physical_ctx = context->get_context().get_id();
-            trace_info.tpl->record_set_ready_event(trace_info, op, idx1,
-                                                   idx2, ready, req,
+            trace_info.tpl->record_set_ready_event(op, idx1, idx2, ready, req,
                                                    target_views[idx2],
                                                    ref.get_valid_fields(),
                                                    logical_ctx, physical_ctx);
@@ -2089,7 +2088,7 @@ namespace Legion {
                                        ref.get_valid_fields(), 
                                        op, idx1, runtime->address_space,
                                        &info, map_applied_events,
-                                       trace_info.tracing);
+                                       trace_info.recording);
           if (restricted_out)
           {
             FieldMask restricted = ref.get_valid_fields() & restricted_fields;
@@ -2514,13 +2513,13 @@ namespace Legion {
             ApEvent copy_pre = Runtime::merge_events(src_precondition,
                                                      dst_precondition,
                                                      precondition);
-            if (trace_info.tracing)
+            if (trace_info.recording)
             {
 #ifdef DEBUG_LEGION
-              assert(trace_info.tpl != NULL && trace_info.tpl->is_tracing());
+              assert(trace_info.tpl != NULL && trace_info.tpl->is_recording());
 #endif
-              trace_info.tpl->record_merge_events(trace_info, copy_pre,
-                  src_precondition, dst_precondition, precondition);
+              trace_info.tpl->record_merge_events(copy_pre, src_precondition,
+                  dst_precondition, precondition);
             }
             ApEvent copy_post = dst_node->issue_copy(op, src_it->second,
                                        dst_it->second, copy_pre, guard,
@@ -2532,12 +2531,12 @@ namespace Legion {
       }
 
       ApEvent result = Runtime::merge_events(result_events);
-      if (trace_info.tracing)
+      if (trace_info.recording)
       {
 #ifdef DEBUG_LEGION
-        assert(trace_info.tpl != NULL && trace_info.tpl->is_tracing());
+        assert(trace_info.tpl != NULL && trace_info.tpl->is_recording());
 #endif
-        trace_info.tpl->record_merge_events(trace_info, result, result_events);
+        trace_info.tpl->record_merge_events(result, result_events);
       }
       // Return the merge of all the result events
       return result;
@@ -2652,12 +2651,12 @@ namespace Legion {
       if (!dst_fields_fold.empty())
       {
         ApEvent copy_pre = Runtime::merge_events(fold_copy_preconditions);
-        if (trace_info.tracing)
+        if (trace_info.recording)
         {
 #ifdef DEBUG_LEGION
-          assert(trace_info.tpl != NULL && trace_info.tpl->is_tracing());
+          assert(trace_info.tpl != NULL && trace_info.tpl->is_recording());
 #endif
-          trace_info.tpl->record_merge_events(trace_info, copy_pre,
+          trace_info.tpl->record_merge_events(copy_pre,
               fold_copy_preconditions);
         }
         ApEvent copy_post = dst_node->issue_copy(op, 
@@ -2671,12 +2670,12 @@ namespace Legion {
       if (!dst_fields_list.empty())
       {
         ApEvent copy_pre = Runtime::merge_events(list_copy_preconditions);
-        if (trace_info.tracing)
+        if (trace_info.recording)
         {
 #ifdef DEBUG_LEGION
-          assert(trace_info.tpl != NULL && trace_info.tpl->is_tracing());
+          assert(trace_info.tpl != NULL && trace_info.tpl->is_recording());
 #endif
-          trace_info.tpl->record_merge_events(trace_info, copy_pre,
+          trace_info.tpl->record_merge_events(copy_pre,
               list_copy_preconditions);
         }
         ApEvent copy_post = dst_node->issue_copy(op, 
@@ -2687,12 +2686,12 @@ namespace Legion {
           result_events.insert(copy_post);
       }
       ApEvent result = Runtime::merge_events(result_events);
-      if (trace_info.tracing)
+      if (trace_info.recording)
       {
 #ifdef DEBUG_LEGION
-        assert(trace_info.tpl != NULL && trace_info.tpl->is_tracing());
+        assert(trace_info.tpl != NULL && trace_info.tpl->is_recording());
 #endif
-        trace_info.tpl->record_merge_events(trace_info, result, result_events);
+        trace_info.tpl->record_merge_events(result, result_events);
       }
       return result;
     }
@@ -12291,7 +12290,7 @@ namespace Legion {
                                              info.index, local_space, 
                                              preconditions,
                                              info.map_applied_events,
-                                             trace_info.tracing);
+                                             trace_info.recording);
           update_mask |= it->second;
         }
         // Now do the destination
@@ -12301,7 +12300,7 @@ namespace Legion {
                                      info.op->get_unique_op_id(),
                                      info.index, local_space, preconditions,
                                      info.map_applied_events,
-                                     trace_info.tracing);
+                                     trace_info.recording);
         // If we're restricted, get our restrict precondition
         if (restrict_info.has_restrictions())
         {
@@ -12327,7 +12326,7 @@ namespace Legion {
                              info.op->get_unique_op_id(), info.index,
                              it->second, false/*reading*/, restrict_out,
                              local_space, info.map_applied_events,
-                             trace_info.tracing);
+                             trace_info.recording);
         }
         if (restrict_out && restrict_info.has_restrictions())
         {
@@ -12616,13 +12615,13 @@ namespace Legion {
             it->first->copy_from(op_mask, src_fields);
             dst->copy_to(op_mask, dst_fields, helper);
             update_views[it->first] = op_mask;
-            if (trace_info.tracing)
+            if (trace_info.recording)
             {
 #ifdef DEBUG_LEGION
-              assert(trace_info.tpl != NULL && trace_info.tpl->is_tracing());
+              assert(trace_info.tpl != NULL && trace_info.tpl->is_recording());
               assert(info.logical_ctx != -1U);
 #endif
-              trace_info.tpl->record_copy_views(trace_info,
+              trace_info.tpl->record_copy_views(
                   it->first, op_mask, info.logical_ctx, info.ctx,
                   dst, op_mask, info.logical_ctx, info.ctx);
             }
@@ -12636,13 +12635,12 @@ namespace Legion {
         // Now that we've got our offsets ready, we
         // can now issue the copy to the low-level runtime
         ApEvent copy_pre = Runtime::merge_events(pre_set.preconditions);
-        if (trace_info.tracing)
+        if (trace_info.recording)
         {
 #ifdef DEBUG_LEGION
-          assert(trace_info.tpl != NULL && trace_info.tpl->is_tracing());
+          assert(trace_info.tpl != NULL && trace_info.tpl->is_recording());
 #endif
-          trace_info.tpl->record_merge_events(trace_info, copy_pre,
-              pre_set.preconditions);
+          trace_info.tpl->record_merge_events(copy_pre, pre_set.preconditions);
         }
         ApEvent copy_post = issue_copy(info.op, src_fields, dst_fields, 
                                        copy_pre, predicate_guard, trace_info,
@@ -12660,7 +12658,7 @@ namespace Legion {
                                      info.op->get_unique_op_id(), info.index,
                                      it->second, true/*reading*/, restrict_out,
                                      local_space, info.map_applied_events,
-                                     trace_info.tracing);
+                                     trace_info.recording);
           }
           postconditions[copy_post] = pre_set.set_mask;
         }
@@ -14126,14 +14124,14 @@ namespace Legion {
           (intersect == NULL) ? NULL : intersect->get_row_source(),
           redop, reduction_fold);
 #endif
-      if (trace_info.tracing)
+      if (trace_info.recording)
       {
 #ifdef DEBUG_LEGION
         assert(!predicate_guard.exists());
 #endif
-        trace_info.tpl->record_issue_copy(trace_info, op, result, this,
-            src_fields, dst_fields, precondition, predicate_guard, intersect,
-            redop, reduction_fold);
+        trace_info.tpl->record_issue_copy(op, result, this, src_fields,
+            dst_fields, precondition, predicate_guard, intersect, redop,
+            reduction_fold);
       }
       return result;
     }
@@ -14185,13 +14183,13 @@ namespace Legion {
           fill_value, fill_size, precondition, predicate_guard, trace_info,
           (intersect == NULL) ? NULL : intersect->get_row_source());
 #endif
-      if (trace_info.tracing)
+      if (trace_info.recording)
       {
 #ifdef DEBUG_LEGION
         assert(!predicate_guard.exists());
 #endif
-        trace_info.tpl->record_issue_fill(trace_info, op, result, this,
-            dst_fields, fill_value, fill_size, precondition, predicate_guard,
+        trace_info.tpl->record_issue_fill(op, result, this, dst_fields,
+            fill_value, fill_size, precondition, predicate_guard,
 #ifdef LEGION_SPY
             fill_uid,
 #endif
@@ -14600,9 +14598,6 @@ namespace Legion {
         }
         std::vector<InstanceView*> new_views;
         new_views.resize(targets.size());
-#ifdef DEBUG_LEGION
-        assert(!trace_info.memoizing || trace_info.tpl != NULL);
-#endif
 
         for (unsigned idx = 0; idx < targets.size(); idx++)
         {
@@ -14635,8 +14630,6 @@ namespace Legion {
           // Skip adding the user if requested
           if (defer_add_users)
             continue;
-          if (trace_info.memoizing && !trace_info.tracing)
-            continue;
           if (targets.size() > 1)
           {
             // Only find the preconditions now 
@@ -14645,15 +14638,14 @@ namespace Legion {
                                    &info.version_info, info.map_applied_events,
                                    trace_info);
             ref.set_ready_event(ready);
-            if (trace_info.tracing)
+            if (trace_info.recording)
             {
 #ifdef DEBUG_LEGION
-              assert(trace_info.tpl != NULL && trace_info.tpl->is_tracing());
+              assert(trace_info.tpl != NULL && trace_info.tpl->is_recording());
               assert(info.logical_ctx != -1U);
 #endif
-              trace_info.tpl->record_set_ready_event(trace_info, info.op,
-                                                     info.index, idx, ready,
-                                                     info.req, new_view,
+              trace_info.tpl->record_set_ready_event(info.op, info.index, idx,
+                                                     ready, info.req, new_view,
                                                      user_mask,
                                                      info.logical_ctx,
                                                      info.ctx);
@@ -14668,15 +14660,14 @@ namespace Legion {
                                          local_space, info.map_applied_events,
                                          trace_info);
             ref.set_ready_event(ready);
-            if (trace_info.tracing)
+            if (trace_info.recording)
             {
 #ifdef DEBUG_LEGION
-              assert(trace_info.tpl != NULL && trace_info.tpl->is_tracing());
+              assert(trace_info.tpl != NULL && trace_info.tpl->is_recording());
               assert(info.logical_ctx != -1U);
 #endif
-              trace_info.tpl->record_set_ready_event(trace_info, info.op,
-                                                     info.index, idx, ready,
-                                                     info.req, new_view,
+              trace_info.tpl->record_set_ready_event(info.op, info.index, idx,
+                                                     ready, info.req, new_view,
                                                      user_mask,
                                                      info.logical_ctx,
                                                      info.ctx);
@@ -14700,7 +14691,7 @@ namespace Legion {
                                      info.op, info.index, local_space,
                                      &info.version_info,
                                      info.map_applied_events,
-                                     trace_info.tracing);
+                                     trace_info.recording);
           }
         }
         if (!reduce_out_views.empty())
@@ -14870,13 +14861,13 @@ namespace Legion {
                 &info.version_info, local_space, info.map_applied_events,
                 trace_info);
             ref.set_ready_event(ready);
-            if (trace_info.tracing)
+            if (trace_info.recording)
             {
 #ifdef DEBUG_LEGION
-              assert(trace_info.tpl != NULL && trace_info.tpl->is_tracing());
+              assert(trace_info.tpl != NULL && trace_info.tpl->is_recording());
               assert(info.logical_ctx != -1U);
 #endif
-              trace_info.tpl->record_set_ready_event(trace_info, info.op,
+              trace_info.tpl->record_set_ready_event(info.op,
                                                      info.index, 0, ready,
                                                      info.req, new_views[0],
                                                      ref.get_valid_fields(),
@@ -14906,14 +14897,13 @@ namespace Legion {
                     info.index, &info.version_info, info.map_applied_events,
                     trace_info);
               ref.set_ready_event(ready);
-              if (trace_info.tracing)
+              if (trace_info.recording)
               {
 #ifdef DEBUG_LEGION
-                assert(trace_info.tpl != NULL && trace_info.tpl->is_tracing());
+                assert(trace_info.tpl != NULL && trace_info.tpl->is_recording());
                 assert(info.logical_ctx != -1U);
 #endif
-                trace_info.tpl->record_set_ready_event(trace_info, info.op,
-                                                       info.index, idx,
+                trace_info.tpl->record_set_ready_event(info.op, info.index, idx,
                                                        ready, info.req,
                                                        new_views[idx],
                                                        ref.get_valid_fields(),
@@ -14929,7 +14919,7 @@ namespace Legion {
               new_views[idx]->as_instance_view()->add_user(usage, term_event,
                        ref.get_valid_fields(), info.op, info.index, 
                        local_space, &info.version_info,info.map_applied_events,
-                       trace_info.tracing);
+                       trace_info.recording);
               if (restricted_out)
               {
                 FieldMask restricted = 
@@ -15105,7 +15095,7 @@ namespace Legion {
                           true/*single copy*/, true/*restrict out*/, fill_mask,
                           &version_info, op->get_unique_op_id(), index,
                           local_space, preconditions, map_applied_events,
-                          trace_info.tracing);
+                          trace_info.recording);
         if (sync_precondition.exists())
           preconditions[sync_precondition] = fill_mask;
         // Sort the preconditions into event sets
@@ -15134,7 +15124,7 @@ namespace Legion {
                               &version_info, op->get_unique_op_id(), 
                               index, fill_mask, false/*reading*/,
                               true/*restrict out*/, local_space, 
-                              map_applied_events, trace_info.tracing);
+                              map_applied_events, trace_info.recording);
       }
       // Finally do the update to the physical state like a normal fill
       PhysicalState *state = get_physical_state(version_info);

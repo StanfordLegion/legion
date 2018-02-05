@@ -409,14 +409,13 @@ namespace Legion {
                                     Mapper::MapTaskOutput &output,
                                     MustEpochOp *must_epoch_owner,
                                     std::vector<InstanceSet> &valid_instances); 
-      void replay_map_task_output(PhysicalTraceInfo &trace_info); 
+      void replay_map_task_output();
     protected: // mapper helper calls
       void validate_target_processors(const std::vector<Processor> &prcs) const;
       void validate_variant_selection(MapperManager *local_mapper,
                     VariantImpl *impl, const char *call_name) const;
     protected:
-      void invoke_mapper(MustEpochOp *must_epoch_owner,
-                         PhysicalTraceInfo &trace_info);
+      void invoke_mapper(MustEpochOp *must_epoch_owner);
       void map_all_regions(ApEvent user_event,
                            MustEpochOp *must_epoch_owner = NULL); 
       void perform_post_mapping(void);
@@ -467,8 +466,6 @@ namespace Legion {
                                  size_t res_size, bool owned) = 0; 
       virtual void handle_post_mapped(RtEvent pre = RtEvent::NO_RT_EVENT) = 0;
       virtual void handle_misspeculation(void) = 0;
-    public:
-      virtual void get_physical_trace_info(PhysicalTraceInfo& trace_info) = 0;
     protected:
       // Boolean for each region saying if it is virtual mapped
       std::vector<bool> virtual_mapped;
@@ -661,8 +658,6 @@ namespace Legion {
       virtual void handle_post_mapped(RtEvent pre = RtEvent::NO_RT_EVENT);
       virtual void handle_misspeculation(void);
     public:
-      virtual void get_physical_trace_info(PhysicalTraceInfo& trace_info);
-    public:
       virtual void record_reference_mutation_effect(RtEvent event);
     public:
       virtual void perform_physical_traversal(unsigned idx,
@@ -784,8 +779,6 @@ namespace Legion {
       virtual void handle_post_mapped(RtEvent pre = RtEvent::NO_RT_EVENT);
       virtual void handle_misspeculation(void);
     public:
-      virtual void get_physical_trace_info(PhysicalTraceInfo& trace_info);
-    public:
       // ProjectionPoint methods
       virtual const DomainPoint& get_domain_point(void) const;
       virtual void set_projection_result(unsigned idx, LogicalRegion result);
@@ -798,6 +791,9 @@ namespace Legion {
     public:
       // From MemoizableOp
       virtual void replay_analysis(void);
+    public:
+      // From Memoizable
+      virtual std::pair<unsigned, DomainPoint> get_trace_local_id() const;
     protected:
       friend class SliceTask;
       SliceTask                   *slice_owner;
