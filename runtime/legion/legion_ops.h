@@ -2823,4 +2823,6 @@ namespace Legion {
   }; //namespace Internal 
 }; // namespace Legion 
 
+#include "legion_ops.inl"
+
 #endif // __LEGION_OPERATIONS_H__
