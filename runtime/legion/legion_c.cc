@@ -1109,6 +1109,31 @@ legion_index_partition_create_by_preimage_range(
   return CObjectWrapper::wrap(ip);
 }
 
+legion_index_partition_t
+legion_index_partition_create_by_restriction(
+    legion_runtime_t runtime_,
+    legion_context_t ctx_,
+    legion_index_space_t parent_,
+    legion_index_space_t color_space_,
+    legion_domain_transform_t transform_,
+    legion_domain_t extent_,
+    legion_partition_kind_t part_kind /* = COMPUTE_KIND */,
+    int color /* = AUTO_GENERATE_ID */)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+  IndexSpace parent = CObjectWrapper::unwrap(parent_);
+  IndexSpace color_space = CObjectWrapper::unwrap(color_space_);
+  DomainTransform transform = CObjectWrapper::unwrap(transform_);
+  Domain extent = CObjectWrapper::unwrap(extent_);
+
+  IndexPartition ip = 
+    runtime->create_partition_by_restriction(
+        ctx, parent, color_space, transform, extent, part_kind, color);
+
+  return CObjectWrapper::wrap(ip);
+}
+
 bool
 legion_index_partition_is_disjoint(legion_runtime_t runtime_,
                                    legion_index_partition_t handle_)
@@ -4474,122 +4499,6 @@ legion_task_postamble(
 				 ctx,
 				 retval,
 				 retsize);
-}
-
-// FIXME: do this once it's actually implemented
-#ifdef GENERATOR_REGISTRATION_IMPLEMENTED
-static void
-generator_wrapper(GeneratorContext ctx,
-                  const TaskGeneratorArguments &args, Runtime *runtime)
-{
-  legion_generator_context_t ctx_ = CObjectWrapper::wrap(ctx);
-  TaskGeneratorArguments args_copy = args; // FIXME: Copy to strip const-ness
-  legion_task_generator_arguments_t args_ = CObjectWrapper::wrap(&args_copy);
-  legion_runtime_t runtime_ = CObjectWrapper::wrap(runtime);
-
-  assert(args.user_data_size == sizeof(legion_generator_pointer_t));
-  legion_generator_pointer_t generator =
-    *reinterpret_cast<const legion_generator_pointer_t *>(args.user_data);
-
-  generator(ctx_, args_, runtime_);
-}
-#endif
-
-legion_task_id_t
-legion_runtime_register_task_generator_fnptr(
-  legion_runtime_t runtime_,
-  legion_generator_id_t id /* = AUTO_GENERATE_ID */,
-  legion_task_id_t task_id /* = AUTO_GENERATE_ID */,
-  const char *task_name /* = NULL*/,
-  bool global,
-  legion_execution_constraint_set_t execution_constraints_,
-  legion_task_layout_constraint_set_t layout_constraints_,
-  legion_task_config_options_t options,
-  legion_generator_pointer_t generator_pointer,
-  const void *userdata,
-  size_t userlen)
-{
-  // FIXME: do this once it's actually implemented
-#ifdef GENERATOR_REGISTRATION_IMPLEMENTED
-  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
-  ExecutionConstraintSet *execution_constraints =
-    CObjectWrapper::unwrap(execution_constraints_);
-  TaskLayoutConstraintSet *layout_constraints =
-    CObjectWrapper::unwrap(layout_constraints_);
-
-  if (id == AUTO_GENERATE_ID)
-    id = runtime->generate_dynamic_generator_id();
-
-  if (task_id == AUTO_GENERATE_ID)
-    task_id = runtime->generate_dynamic_task_id();
-
-  assert(userlen == 0); // FIXME: Need to repack userdata to include pointer to generator
-
-  TaskGeneratorRegistrar registrar(
-    id, task_id, generator_wrapper,
-    reinterpret_cast<void *>(&generator_pointer), sizeof(generator_pointer),
-    task_name);
-  // FIXME: Add support for task config options
-  // registrar.set_leaf(options.leaf);
-  // registrar.set_inner(options.inner);
-  // registrar.set_idempotent(options.idempotent);
-  if (layout_constraints)
-    registrar.layout_constraints = *layout_constraints;
-  if (execution_constraints)
-    registrar.execution_constraints = *execution_constraints;
-
-  runtime->register_task_generator(registrar);
-#endif
-  assert(0);
-
-  return task_id;
-}
-
-legion_task_id_t
-legion_runtime_preregister_task_generator_fnptr(
-  legion_generator_id_t id /* = AUTO_GENERATE_ID */,
-  legion_task_id_t task_id /* = AUTO_GENERATE_ID */,
-  const char *task_name /* = NULL*/,
-  legion_execution_constraint_set_t execution_constraints_,
-  legion_task_layout_constraint_set_t layout_constraints_,
-  legion_task_config_options_t options,
-  legion_generator_pointer_t generator_pointer,
-  const void *userdata,
-  size_t userlen)
-{
-  // FIXME: do this once it's actually implemented
-#ifdef GENERATOR_REGISTRATION_IMPLEMENTED
-  ExecutionConstraintSet *execution_constraints =
-    CObjectWrapper::unwrap(execution_constraints_);
-  TaskLayoutConstraintSet *layout_constraints =
-    CObjectWrapper::unwrap(layout_constraints_);
-
-  if (id == AUTO_GENERATE_ID)
-    id = Runtime::generate_static_generator_id();
-
-  if (task_id == AUTO_GENERATE_ID)
-    task_id = Runtime::generate_static_task_id();
-
-  assert(userlen == 0); // FIXME: Need to repack userdata to include pointer to generator
-
-  TaskGeneratorRegistrar registrar(
-    id, task_id, generator_wrapper,
-    reinterpret_cast<void *>(&generator_pointer), sizeof(generator_pointer),
-    task_name);
-  // FIXME: Add support for task config options
-  // registrar.set_leaf(options.leaf);
-  // registrar.set_inner(options.inner);
-  // registrar.set_idempotent(options.idempotent);
-  if (layout_constraints)
-    registrar.layout_constraints = *layout_constraints;
-  if (execution_constraints)
-    registrar.execution_constraints = *execution_constraints;
-
-  Runtime::preregister_task_generator(registrar);
-#endif
-  assert(0);
-
-  return task_id;
 }
 
 // -----------------------------------------------------------------------

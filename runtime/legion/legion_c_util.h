@@ -70,7 +70,6 @@ namespace Legion {
 
       NEW_OPAQUE_WRAPPER(legion_runtime_t, Runtime *);
       NEW_OPAQUE_WRAPPER(legion_context_t, CContext *);
-      NEW_OPAQUE_WRAPPER(legion_generator_context_t, GeneratorContext);
       NEW_OPAQUE_WRAPPER(legion_domain_point_iterator_t, Domain::DomainPointIterator *);
       NEW_OPAQUE_WRAPPER(legion_coloring_t, Coloring *);
       NEW_OPAQUE_WRAPPER(legion_domain_coloring_t, DomainColoring *);
@@ -91,7 +90,6 @@ namespace Legion {
       NEW_OPAQUE_WRAPPER(legion_release_launcher_t, ReleaseLauncher *);
       NEW_OPAQUE_WRAPPER(legion_attach_launcher_t, AttachLauncher *);
       NEW_OPAQUE_WRAPPER(legion_must_epoch_launcher_t, MustEpochLauncher *);
-      NEW_OPAQUE_WRAPPER(legion_task_generator_arguments_t, TaskGeneratorArguments *);
       NEW_OPAQUE_WRAPPER(legion_physical_region_t, PhysicalRegion *);
       NEW_OPAQUE_WRAPPER(legion_accessor_array_1d_t, ArrayAccessor1D *);
       NEW_OPAQUE_WRAPPER(legion_accessor_array_2d_t, ArrayAccessor2D *);
@@ -249,6 +247,40 @@ namespace Legion {
         dp.dim = dp_.dim;
         std::copy(dp_.point_data, dp_.point_data + MAX_POINT_DIM, dp.point_data);
         return dp;
+      }
+
+      static legion_domain_transform_t
+      wrap(DomainTransform transform) {
+        legion_domain_transform_t transform_;
+        transform_.m = transform.m;
+        transform_.n = transform.n;
+        std::copy(transform.matrix, transform.matrix + MAX_POINT_DIM * MAX_POINT_DIM, transform_.matrix);
+        return transform_;
+      }
+
+      static DomainTransform
+      unwrap(legion_domain_transform_t transform_) {
+        DomainTransform transform;
+        transform.m = transform_.m;
+        transform.n = transform_.n;
+        std::copy(transform_.matrix, transform_.matrix + MAX_POINT_DIM * MAX_POINT_DIM, transform.matrix);
+        return transform;
+      }
+
+      static legion_domain_affine_transform_t
+      wrap(DomainAffineTransform transform) {
+        legion_domain_affine_transform_t transform_;
+        transform_.transform = wrap(transform.transform);
+        transform_.offset = wrap(transform.offset);
+        return transform_;
+      }
+
+      static DomainAffineTransform
+      unwrap(legion_domain_affine_transform_t transform_) {
+        DomainAffineTransform transform;
+        transform.transform = unwrap(transform_.transform);
+        transform.offset = unwrap(transform_.offset);
+        return transform;
       }
 
       static legion_index_space_t
