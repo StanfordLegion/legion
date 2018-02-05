@@ -161,8 +161,10 @@ namespace Realm {
   {
     info->gauge_id = _sampler_id;
     info->gauge_type = T::GAUGE_TYPE;
-    strncpy(info->gauge_dtype, typeid(typename T::DATA_TYPE).name(), 8);
-    strncpy(info->name, gauge->name.c_str(), 48);
+    strncpy(info->gauge_dtype, typeid(typename T::DATA_TYPE).name(), 7);
+    info->gauge_dtype[7] = 0;
+    strncpy(info->name, gauge->name.c_str(), 47);
+    info->name[47] = 0;
   }
 
   template <typename T>
