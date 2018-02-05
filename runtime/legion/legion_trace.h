@@ -401,7 +401,7 @@ namespace Legion {
      */
     struct PhysicalTemplate {
     public:
-      PhysicalTemplate(PhysicalTrace *runtime);
+      PhysicalTemplate();
       PhysicalTemplate(const PhysicalTemplate &rhs);
     private:
       friend class PhysicalTrace;

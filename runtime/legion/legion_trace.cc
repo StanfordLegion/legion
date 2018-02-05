@@ -1344,7 +1344,7 @@ namespace Legion {
     inline void PhysicalTrace::start_new_template()
     //--------------------------------------------------------------------------
     {
-      templates.push_back(new PhysicalTemplate(this));
+      templates.push_back(new PhysicalTemplate());
       current_template = templates.back();
     }
 
@@ -1372,8 +1372,8 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    PhysicalTemplate::PhysicalTemplate(PhysicalTrace *pt)
-      : trace(pt), recording(true), replayable(true), fence_completion_id(0)
+    PhysicalTemplate::PhysicalTemplate()
+      : recording(true), replayable(true), fence_completion_id(0)
     //--------------------------------------------------------------------------
     {
       events.push_back(ApEvent());
