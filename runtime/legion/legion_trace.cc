@@ -113,6 +113,20 @@ namespace Legion {
 #endif
     }
 
+#ifdef LEGION_SPY
+    //--------------------------------------------------------------------------
+    UniqueID LegionTrace::get_current_uid_by_index(unsigned op_idx) const
+    //--------------------------------------------------------------------------
+    {
+      assert(op_idx < operations.size());
+      const std::pair<Operation*,GenerationID> &key = operations[op_idx];
+      std::map<std::pair<Operation*,GenerationID>,UniqueID>::const_iterator
+        finder = current_uids.find(key);
+      assert(finder != current_uids.end());
+      return finder->second;
+    }
+#endif
+
     /////////////////////////////////////////////////////////////
     // StaticTrace
     /////////////////////////////////////////////////////////////
@@ -243,7 +257,7 @@ namespace Legion {
 #ifdef LEGION_SPY
             LegionSpy::log_mapping_dependence(
                 op->get_context()->get_unique_id(),
-                current_uids[key],
+                get_current_uid_by_index(it->operation_idx),
                 (it->prev_idx == -1) ? 0 : it->prev_idx,
                 op->get_unique_op_id(), 
                 (it->next_idx == -1) ? 0 : it->next_idx, TRUE_DEPENDENCE);
@@ -258,7 +272,7 @@ namespace Legion {
 #ifdef LEGION_SPY
             LegionSpy::log_mapping_dependence(
                 op->get_context()->get_unique_id(),
-                current_uids[key], it->prev_idx,
+                get_current_uid_by_index(it->operation_idx), it->prev_idx,
                 op->get_unique_op_id(), it->next_idx, it->dtype);
 #endif
           }
@@ -304,7 +318,7 @@ namespace Legion {
 #ifdef LEGION_SPY
             LegionSpy::log_mapping_dependence(
                 op->get_context()->get_unique_id(),
-                current_uids[key],
+                get_current_uid_by_index(it->operation_idx),
                 (it->prev_idx == -1) ? 0 : it->prev_idx,
                 op->get_unique_op_id(), 
                 (it->next_idx == -1) ? 0 : it->next_idx, TRUE_DEPENDENCE);
@@ -318,7 +332,7 @@ namespace Legion {
 #ifdef LEGION_SPY
             LegionSpy::log_mapping_dependence(
                 internal_op->get_context()->get_unique_id(),
-                current_uids[key], it->prev_idx,
+                get_current_uid_by_index(it->operation_idx), it->prev_idx,
                 internal_op->get_unique_op_id(), 0, it->dtype);
 #endif
           }
@@ -584,7 +598,7 @@ namespace Legion {
 #ifdef LEGION_SPY
               LegionSpy::log_mapping_dependence(
                   op->get_context()->get_unique_id(),
-                  current_uids[key],
+                  get_current_uid_by_index(it->operation_idx),
                   (it->prev_idx == -1) ? 0 : it->prev_idx,
                   op->get_unique_op_id(), 
                   (it->next_idx == -1) ? 0 : it->next_idx, TRUE_DEPENDENCE);
@@ -599,7 +613,7 @@ namespace Legion {
 #ifdef LEGION_SPY
               LegionSpy::log_mapping_dependence(
                   op->get_context()->get_unique_id(),
-                  current_uids[key], it->prev_idx,
+                  get_current_uid_by_index(it->operation_idx), it->prev_idx,
                   op->get_unique_op_id(), it->next_idx, it->dtype);
 #endif
             }
@@ -646,7 +660,7 @@ namespace Legion {
 #ifdef LEGION_SPY
               LegionSpy::log_mapping_dependence(
                   op->get_context()->get_unique_id(),
-                  current_uids[key],
+                  get_current_uid_by_index(it->operation_idx),
                   (it->prev_idx == -1) ? 0 : it->prev_idx,
                   op->get_unique_op_id(), 
                   (it->next_idx == -1) ? 0 : it->next_idx, TRUE_DEPENDENCE);
@@ -660,7 +674,7 @@ namespace Legion {
 #ifdef LEGION_SPY
               LegionSpy::log_mapping_dependence(
                   internal_op->get_context()->get_unique_id(),
-                  current_uids[key], it->prev_idx,
+                  get_current_uid_by_index(it->operation_idx), it->prev_idx,
                   internal_op->get_unique_op_id(), 0, it->dtype);
 #endif
             }

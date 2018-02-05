@@ -102,6 +102,10 @@ namespace Legion {
     public:
       void replay_aliased_children(std::vector<RegionTreePath> &paths) const;
       void end_trace_execution(FenceOp *fence_op);
+#ifdef LEGION_SPY
+    public:
+      UniqueID get_current_uid_by_index(unsigned op_idx) const;
+#endif
     public:
       TaskContext *const ctx;
     protected:
