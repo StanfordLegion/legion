@@ -1419,6 +1419,11 @@ namespace Legion {
                                         bool before, bool closing)
     //--------------------------------------------------------------------------
     {
+      if ((req->handle_type == PART_PROJECTION &&
+           req->partition == LogicalPartition::NO_PART) ||
+          (req->handle_type != PART_PROJECTION &&
+           req->region == LogicalRegion::NO_REGION))
+        return;
       InnerContext *context = find_physical_context(idx);
       RegionTreeContext ctx = context->get_context();
       RegionTreeNode *child_node = req->handle_type == PART_PROJECTION ? 
