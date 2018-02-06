@@ -497,11 +497,17 @@ namespace Legion {
       derez.deserialize(mapper_data_size);
       if (mapper_data_size > 0)
       {
-#ifdef DEBUG_LEGION
-        assert(mapper_data == NULL);
-#endif
+        // If we already have mapper data, then we are going to replace it
+        if (mapper_data != NULL)
+          free(mapper_data);
         mapper_data = malloc(mapper_data_size);
         derez.deserialize(mapper_data, mapper_data_size);
+      }
+      else if (mapper_data != NULL)
+      {
+        // If we freed it remotely then we can free it here too
+        free(mapper_data);
+        mapper_data = NULL;
       }
       derez.deserialize(is_index_space);
       derez.deserialize(must_epoch_task);
