@@ -22,7 +22,6 @@ mapper
 
 $GPUs = processors[isa=cuda]
 $CPUs = processors[isa=x86]
-$HAS_ZCMEM = memories[kind=zcmem].size > 0
 $HAS_GPUS = $GPUs.size > 0
 
 task#pagerank[index=$i] {
@@ -38,8 +37,8 @@ task#init_partition[index=$i] {
 task#pagerank[target=$proc] region#ws,
 task#pagerank[target=$proc] region#nodes,
 task#pagerank[target=$proc] region#edges {
-  target : $HAS_ZCMEM ? $proc.memories[kind=fbmem]
-                      : $proc.memories[kind=sysmem];
+  target : $HAS_GPUS ? $proc.memories[kind=fbmem]
+                     : $proc.memories[kind=sysmem];
 }
 
 task#pagerank[target=$proc] region#pr_old,
@@ -50,8 +49,8 @@ task#init_graph[target=$proc] region#edges,
 task#init_partition[target=$proc] region#node_range,
 task#init_partition[target=$proc] region#edge_range,
 task#init_partition[target=$proc] region#nodes {
-  target : $HAS_ZCMEM ? $proc.memories[kind=zcmem]
-                      : $proc.memories[kind=sysmem];
+  target : $HAS_GPUS ? $proc.memories[kind=zcmem]
+                     : $proc.memories[kind=sysmem];
 }
 
 end
@@ -61,7 +60,6 @@ local std = terralib.includec("stdlib.h")
 local cstring = terralib.includec("string.h")
 local V_ID = int32
 local E_ID = int64
-rawset(_G, "rand", std.rand)
 
 struct Config {
   num_nodes : V_ID,
@@ -87,10 +85,10 @@ terra parse_input_args(conf : Config)
   for i = 0, args.argc do
     if cstring.strcmp(args.argv[i], "-ni") == 0 then
       i = i + 1
-      conf.num_iterations = std.atoll(args.argv[i])
+      conf.num_iterations = std.atoi(args.argv[i])
     elseif cstring.strcmp(args.argv[i], "-nw") == 0 then
       i = i + 1
-      conf.num_workers = std.atoll(args.argv[i])
+      conf.num_workers = std.atoi(args.argv[i])
     elseif cstring.strcmp(args.argv[i], "-graph") == 0 then
       i = i + 1
       input_file = rawstring(args.argv[i])
@@ -108,7 +106,7 @@ task init_graph(nodes : region(ispace(int1d), NodeStruct),
                 edges : region(ispace(int1d), EdgeStruct),
                 num_nodes : V_ID,
                 num_edges : E_ID,
-                graph : &int8)
+                graph : int8[128])
 where
   reads(nodes, edges), writes(nodes, edges)
 do
@@ -149,7 +147,7 @@ where
 do
   var init_score = 1.0f / num_nodes
   c.printf("init_score = %.8lf\n", init_score)
-  for n = 0, num_nodes do
+  for n in pr do
     pr[n] = init_score
   end
   return 1
@@ -178,7 +176,7 @@ do
       p = p + 1
     end
   end
-  regentlib.assert(p == range_is.volume, "Number of partitions don't match")
+  regentlib.assert(p == range_is.volume, "Number of partitions does not match number of subregions")
   return nodes[node_is.bounds.hi].index
 end
 
@@ -253,8 +251,7 @@ task main()
   var total_num_edges = init_partition(node_range, edge_range, all_nodes,
                                        conf.num_edges/ conf.num_workers+1,
                                        conf.num_workers) 
-  regentlib.assert(total_num_edges == conf.num_edges, "Edge number not match")
-  __fence(__execution, __block)
+  regentlib.assert(total_num_edges == conf.num_edges, "Edge numbers do not match")
   var part_nodes = image(all_nodes, part_node_range, node_range)
   var part_aliased0 = image(pr_score0, part_node_range, node_range)
   var cs0 = part_aliased0.colors
@@ -264,7 +261,6 @@ task main()
   var part_score1 = dynamic_cast(partition(disjoint, pr_score1, cs1), part_aliased1)
   var part_edges = image(all_edges, part_edge_range, edge_range)
 
-  __fence(__execution, __block)
   c.printf("Start PageRank computation...\n")
   var ts_start : int64
   for iter = 0, conf.num_iterations+2 do 
@@ -293,13 +289,5 @@ task main()
   c.printf("Iterations = %d, elapsed time = %lldus\n", conf.num_iterations, ts_end - ts_start)
 end
 
-if os.getenv('SAVEOBJ') == '1' then
-  local root_dir = arg[0]:match(".*/") or "./"
-  local out_dir = (os.getenv('OBJNAME') and os.getenv('OBJNAME'):match('.*/')) or root_dir
-  local link_flags = terralib.newlist({"-L" .. out_dir, "-lmpi", "-lm"})
-  local exe = os.getenv('OBJNAME') or "pagerank"
-  regentlib.saveobj(main, exe, "executable", bishoplib.make_entry(), link_flags)
-else
-  regentlib.start(main, bishoplib.make_entry())
-end
+regentlib.start(main, bishoplib.make_entry())
 
