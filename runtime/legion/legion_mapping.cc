@@ -349,6 +349,22 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void MapperRuntime::update_mappable_tag(MapperContext ctx,
+                               const Mappable &mappable, MappingTagID tag) const
+    //--------------------------------------------------------------------------
+    {
+      ctx->manager->update_mappable_tag(ctx, mappable, tag);
+    }
+
+    //--------------------------------------------------------------------------
+    void MapperRuntime::update_mappable_data(MapperContext ctx,
+      const Mappable &mappable, const void *mapper_data, size_t data_size) const
+    //--------------------------------------------------------------------------
+    {
+      ctx->manager->update_mappable_data(ctx, mappable, mapper_data, data_size);
+    }
+
+    //--------------------------------------------------------------------------
     void MapperRuntime::send_message(MapperContext ctx, Processor target,
           const void *message, size_t message_size, unsigned message_kind) const
     //--------------------------------------------------------------------------
@@ -367,7 +383,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void MapperRuntime::pack_physical_instance(MapperContext ctx, 
-                               Serializer &rez, PhysicalInstance instance) const 
+                               Serializer &rez, PhysicalInstance instance) const
     //--------------------------------------------------------------------------
     {
       ctx->manager->pack_physical_instance(ctx, rez, instance);
