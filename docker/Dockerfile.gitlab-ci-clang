@@ -1,0 +1,39 @@
+# Build Image for Gitlab CI
+
+FROM ubuntu:14.04
+
+MAINTAINER Elliott Slaughter <slaughter@cs.stanford.edu>
+
+ENV DEBIAN_FRONTEND noninteractive
+
+RUN dpkg --add-architecture i386 && \
+    apt-get update -qq && \
+    apt-get install -qq software-properties-common && \
+    add-apt-repository ppa:pypy/ppa -y && \
+    apt-get update -qq && \
+    apt-get install -qq \
+      build-essential git time wget \
+      libpython-dev python-pip libpython3-dev python3-pip pypy \
+      clang-3.5 libclang-3.5-dev llvm-3.5-dev \
+      clang-3.8 libclang-3.8-dev llvm-3.8-dev \
+      libncurses5-dev \
+      zlib1g-dev zlib1g-dev:i386 \
+      mpich2 libmpich-dev \
+      mesa-common-dev \
+      libblas-dev liblapack-dev libhdf5-dev \
+      gdb vim && \
+    apt-get clean && \
+    pip install cffi github3.py numpy && \
+    pip3 install cffi github3.py numpy
+
+RUN wget https://cmake.org/files/v3.6/cmake-3.6.2-Linux-x86_64.tar.gz && \
+    echo "dd9d8d57b66109d4bac6eef9209beb94608a185c  cmake-3.6.2-Linux-x86_64.tar.gz" | shasum --check && \
+    tar xfzC cmake-3.6.2-Linux-x86_64.tar.gz /usr/local --strip-components=1 && \
+    rm cmake-3.6.2-Linux-x86_64.tar.gz
+
+RUN git clone https://github.com/streichler/terra.git -b regent-tmp && \
+    cp -r terra /usr/local/terra35 && \
+    LLVM_CONFIG=llvm-config-3.5 make -C /usr/local/terra35 REEXPORT_LLVM_COMPONENTS="irreader jit mcjit x86" && \
+    cp -r terra /usr/local/terra38 && \
+    LLVM_CONFIG=llvm-config-3.8 make -C /usr/local/terra38 REEXPORT_LLVM_COMPONENTS="irreader mcjit x86" && \
+    rm -rf terra
