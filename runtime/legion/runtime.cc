@@ -18484,6 +18484,7 @@ namespace Legion {
       return serdez_table[serdez_id];
     }
 
+    //--------------------------------------------------------------------------
     /*static*/ const SerdezRedopFns* Runtime::get_serdez_redop_fns(
                                                          ReductionOpID redop_id)
     //--------------------------------------------------------------------------
