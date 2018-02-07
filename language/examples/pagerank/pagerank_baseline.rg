@@ -45,9 +45,8 @@ task#pagerank[target=$proc] region#edges {
 task#init_pr_score[target=$proc] region#pr,
 task#init_graph[target=$proc] region#nodes,
 task#init_graph[target=$proc] region#edges,
-task#init_partition[target=$proc] region#node_range,
 task#init_partition[target=$proc] region#edge_range,
-task#init_partition[target=$proc] region#nodes {
+task#init_partition[target=$proc] region#edges {
   target : $HAS_GPUS ? $proc.memories[kind=zcmem]
                      : $proc.memories[kind=sysmem];
 }
@@ -68,14 +67,14 @@ struct Config {
   graph : int8[128]
 }
 
-struct NodeStruct {
+fspace NodeStruct {
   index : E_ID,
   degree : V_ID
 }
 
-struct EdgeStruct {
+fspace EdgeStruct (r : region(ispace(int1d), NodeStruct)) {
   src : V_ID,
-  dst : V_ID
+  dst : int1d(NodeStruct, r)
 }
 
 terra parse_input_args(conf : Config)
@@ -102,7 +101,7 @@ terra parse_input_args(conf : Config)
 end
 
 task init_graph(nodes : region(ispace(int1d), NodeStruct),
-                edges : region(ispace(int1d), EdgeStruct),
+                edges : region(ispace(int1d), EdgeStruct(wild)),
                 num_nodes : V_ID,
                 num_edges : E_ID,
                 graph : int8[128])
@@ -129,7 +128,7 @@ do
       dst = dst + 1;
     end
     edges[e].src = srcs[e]
-    edges[e].dst = dst
+    edges[e].dst = dynamic_cast(int1d(NodeStruct, nodes), dst)
   end
   c.fclose(file)
   c.free(indices)
@@ -152,36 +151,37 @@ do
   return 1
 end
 
-task init_partition(node_range : region(ispace(int1d), regentlib.rect1d),
-                    edge_range : region(ispace(int1d), regentlib.rect1d),
-                    nodes : region(ispace(int1d), NodeStruct),
+task init_partition(edge_range : region(ispace(int1d), regentlib.rect1d),
+                    edges : region(ispace(int1d), EdgeStruct(wild)),
                     avg_num_edges : E_ID,
                     num_parts : int)
 where
-  writes(node_range, edge_range), reads(nodes)
+  writes(edge_range), reads(edges)
 do
-  var range_is = node_range.ispace
-  var node_is = nodes.ispace
-  var total_num_edges : E_ID = 0
-  var start_idx : E_ID = 0
-  var start_node : V_ID = 0
-  var p : int = 0
-  for n in node_is do
-    if ((nodes[n].index - start_idx > avg_num_edges) or (n == node_is.bounds.hi)) then
-      node_range[p] = {start_node, n}
-      edge_range[p] = {start_idx, nodes[n].index - 1}
-      start_idx = nodes[n].index
-      start_node = n + 1
-      p = p + 1
+  var left_bound : E_ID = 0
+  var right_bound : E_ID = 0
+  var total_num_edges : E_ID = edges.ispace.bounds.hi
+  for p = 0, num_parts do
+    right_bound = min(avg_num_edges * (p + 1), total_num_edges)
+    var my_dst   : V_ID = edges[right_bound].dst
+    -- extend the right bound of this subregion until we find
+    -- the last edge of the current node
+    while (right_bound < total_num_edges) do
+      var next_dst : V_ID = edges[right_bound+1].dst
+      if (my_dst < next_dst) then
+        break
+      end
+      right_bound = right_bound + 1
     end
+    edge_range[p] = {left_bound, right_bound}
+    left_bound = right_bound + 1
   end
-  regentlib.assert(p == range_is.volume, "Number of partitions does not match number of subregions")
-  return nodes[node_is.bounds.hi].index
+  return left_bound
 end
 
 __demand(__cuda)
 task pagerank(nodes : region(ispace(int1d), NodeStruct),
-              edges : region(ispace(int1d), EdgeStruct),
+              edges : region(ispace(int1d), EdgeStruct(wild)),
               pr_old : region(ispace(int1d), float),
               pr_new : region(ispace(int1d), float),
               alpha : float, num_nodes : V_ID)
@@ -225,7 +225,7 @@ task main()
   var is_edges = ispace(int1d, conf.num_edges)
 
   var all_nodes = region(is_nodes, NodeStruct)
-  var all_edges = region(is_edges, EdgeStruct)
+  var all_edges = region(is_edges, EdgeStruct(wild))
 
   var pr_score0 = region(is_nodes, float)
   var pr_score1 = region(is_nodes, float)
@@ -234,25 +234,25 @@ task main()
   init_graph(all_nodes, all_edges, conf.num_nodes, conf.num_edges, conf.graph)
   init_pr_score(pr_score0, conf.num_nodes)
 
-  var part = ispace(int1d, conf.num_workers)
+  var num_pieces = ispace(int1d, conf.num_workers)
   -- compute node and edge partition
-  var node_range = region(part, regentlib.rect1d)
-  var edge_range = region(part, regentlib.rect1d)   
-  var part_node_range = partition(equal, node_range, part)
-  var part_edge_range = partition(equal, edge_range, part)
-  var total_num_edges = init_partition(node_range, edge_range, all_nodes,
+  var edge_range = region(num_pieces, regentlib.rect1d)   
+  var edge_range_part = partition(equal, edge_range, num_pieces)
+  var total_num_edges = init_partition(edge_range, all_edges,
                                        conf.num_edges/ conf.num_workers+1,
                                        conf.num_workers) 
   regentlib.assert(total_num_edges == conf.num_edges, "Edge numbers do not match")
 
-  var part_nodes = image(all_nodes, part_node_range, node_range)
-  var part_aliased0 = image(pr_score0, part_node_range, node_range)
-  var cs0 = part_aliased0.colors
-  var part_score0 = dynamic_cast(partition(disjoint, pr_score0, cs0), part_aliased0)
-  var part_aliased1 = image(pr_score1, part_node_range, node_range)
-  var cs1 = part_aliased1.colors
-  var part_score1 = dynamic_cast(partition(disjoint, pr_score1, cs1), part_aliased1)
-  var part_edges = image(all_edges, part_edge_range, edge_range)
+  var part_edges = image(all_edges, edge_range_part, edge_range)
+  var part_nodes = image(all_nodes, part_edges, all_edges.dst)
+  -- image may not output a disjoint partition
+  var part_score0_aliased = image(pr_score0, part_edges, all_edges.dst)
+  var cs0 = part_score0_aliased.colors
+  -- dynamically cast part_score0_aliased to a disjoint partition part_score0
+  var part_score0 = dynamic_cast(partition(disjoint, pr_score0, cs0), part_score0_aliased)
+  var part_score1_aliased = image(pr_score1, part_edges, all_edges.dst)
+  var cs1 = part_score1_aliased.colors
+  var part_score1 = dynamic_cast(partition(disjoint, pr_score1, cs1), part_score1_aliased)
 
   c.printf("Start PageRank computation...\n")
   var ts_start : int64
@@ -264,13 +264,13 @@ task main()
     end
     if iter % 2 == 0 then
       __demand(__parallel)
-      for p in part do
+      for p in num_pieces do
         pagerank(part_nodes[p], part_edges[p],
                  pr_score0, part_score1[p], 0.9f, conf.num_nodes)
       end
     else
       __demand(__parallel)
-      for p in part do
+      for p in num_pieces do
         pagerank(part_nodes[p], part_edges[p],
                  pr_score1, part_score0[p], 0.9f, conf.num_nodes)
       end
