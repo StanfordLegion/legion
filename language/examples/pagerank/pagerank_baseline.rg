@@ -74,7 +74,7 @@ fspace NodeStruct {
 
 fspace EdgeStruct (r : region(ispace(int1d), NodeStruct)) {
   src : V_ID,
-  dst : int1d(NodeStruct, r)
+  dst : int1d
 }
 
 terra parse_input_args(conf : Config)
@@ -128,6 +128,8 @@ do
       dst = dst + 1;
     end
     edges[e].src = srcs[e]
+    -- The dst field holds an index to node region, which is
+    -- used for dependent partitioning
     edges[e].dst = dynamic_cast(int1d(NodeStruct, nodes), dst)
   end
   c.fclose(file)
