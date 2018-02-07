@@ -72,7 +72,7 @@ fspace NodeStruct {
   degree : V_ID
 }
 
-fspace EdgeStruct (r : region(ispace(int1d), NodeStruct)) {
+fspace EdgeStruct {
   src : V_ID,
   dst : int1d
 }
@@ -101,7 +101,7 @@ terra parse_input_args(conf : Config)
 end
 
 task init_graph(nodes : region(ispace(int1d), NodeStruct),
-                edges : region(ispace(int1d), EdgeStruct(wild)),
+                edges : region(ispace(int1d), EdgeStruct),
                 num_nodes : V_ID,
                 num_edges : E_ID,
                 graph : int8[128])
@@ -154,7 +154,7 @@ do
 end
 
 task init_partition(edge_range : region(ispace(int1d), regentlib.rect1d),
-                    edges : region(ispace(int1d), EdgeStruct(wild)),
+                    edges : region(ispace(int1d), EdgeStruct),
                     avg_num_edges : E_ID,
                     num_parts : int)
 where
@@ -183,7 +183,7 @@ end
 
 __demand(__cuda)
 task pagerank(nodes : region(ispace(int1d), NodeStruct),
-              edges : region(ispace(int1d), EdgeStruct(wild)),
+              edges : region(ispace(int1d), EdgeStruct),
               pr_old : region(ispace(int1d), float),
               pr_new : region(ispace(int1d), float),
               alpha : float, num_nodes : V_ID)
@@ -227,7 +227,7 @@ task main()
   var is_edges = ispace(int1d, conf.num_edges)
 
   var all_nodes = region(is_nodes, NodeStruct)
-  var all_edges = region(is_edges, EdgeStruct(wild))
+  var all_edges = region(is_edges, EdgeStruct)
 
   var pr_score0 = region(is_nodes, float)
   var pr_score1 = region(is_nodes, float)
