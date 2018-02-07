@@ -635,7 +635,13 @@ namespace Legion {
       // return the common sub-expression, if not we will actually do 
       // the computation and memoize it for the future
       IndexSpaceExpression* union_index_spaces(Operation *op,
+                                               IndexSpaceExpression *lhs,
+                                               IndexSpaceExpression *rhs);
+      IndexSpaceExpression* union_index_spaces(Operation *op,
                                  const std::set<IndexSpaceExpression*> &exprs);
+      IndexSpaceExpression* intersect_index_spaces(Operation *op,
+                                               IndexSpaceExpression *lhs,
+                                               IndexSpaceExpression *rhs);
       IndexSpaceExpression* intersect_index_spaces(Operation *op,
                                  const std::set<IndexSpaceExpression*> &exprs);
       IndexSpaceExpression* subtract_index_spaces(Operation *op,
@@ -706,6 +712,7 @@ namespace Legion {
       virtual ApEvent get_expr_index_space(void *result, TypeTag tag, 
                                            bool need_tight_result) = 0;
       virtual void tighten_index_space(void) = 0;
+      virtual bool check_empty(void) = 0;
       virtual void add_expression_reference(void) = 0;
       virtual bool remove_expression_reference(void) = 0;
     public:
@@ -715,10 +722,22 @@ namespace Legion {
       void add_parent_operation(IndexSpaceOperation *op);
       void remove_parent_operation(IndexSpaceOperation *op);
     public:
+      inline bool is_empty(void)
+      {
+        if (!has_empty)
+        {
+          empty = check_empty();
+          __sync_synchronize();
+          has_empty = true;
+        }
+        return empty;
+      }
+    public:
       const TypeTag type_tag;
       const IndexSpaceExprID expr_id;
     protected:
       std::set<IndexSpaceOperation*> parent_operations;
+      bool empty, has_empty;
     };
 
     class IndexSpaceOperation : 
@@ -737,6 +756,7 @@ namespace Legion {
       virtual ApEvent get_expr_index_space(void *result, TypeTag tag, 
                                            bool need_tight_result) = 0;
       virtual void tighten_index_space(void) = 0;
+      virtual bool check_empty(void) = 0;
       virtual bool remove_operation(RegionTreeForest *forest) = 0;
       virtual void add_expression_reference(void);
       virtual bool remove_expression_reference(void);
@@ -762,6 +782,7 @@ namespace Legion {
       virtual ApEvent get_expr_index_space(void *result, TypeTag tag,
                                            bool need_tight_result);
       virtual void tighten_index_space(void);
+      virtual bool check_empty(void);
       virtual bool remove_operation(RegionTreeForest *forest) = 0;
     public:
       ApEvent get_realm_index_space(Realm::IndexSpace<DIM,T> &space,
@@ -942,7 +963,8 @@ namespace Legion {
      * \class IndexSpaceNode
      * A class for representing a generic index space node.
      */
-    class IndexSpaceNode : public IndexTreeNode, public IndexSpaceExpression {
+    class IndexSpaceNode : 
+      public IndexTreeNode, public IndexSpaceExpression {
     public:
       struct DynamicIndependenceArgs : 
         public LgTaskArgs<DynamicIndependenceArgs> {
@@ -1071,6 +1093,7 @@ namespace Legion {
       virtual ApEvent get_expr_index_space(void *result, TypeTag tag,
                                            bool need_tight_result) = 0;
       virtual void tighten_index_space(void) = 0;
+      virtual bool check_empty(void) = 0;
       virtual void add_expression_reference(void);
       virtual bool remove_expression_reference(void);
     public:
@@ -1106,10 +1129,10 @@ namespace Legion {
       virtual DomainPoint get_domain_point_color(void) const = 0;
       virtual DomainPoint delinearize_color_to_point(LegionColor c) = 0;
     public:
-      virtual bool intersects_with(IndexSpaceNode *rhs,bool compute = true) = 0;
-      virtual bool intersects_with(IndexPartNode *rhs, bool compute = true) = 0;
-      virtual bool dominates(IndexSpaceNode *rhs) = 0;
-      virtual bool dominates(IndexPartNode *rhs) = 0;
+      bool intersects_with(IndexSpaceNode *rhs,bool compute = true);
+      bool intersects_with(IndexPartNode *rhs, bool compute = true);
+      bool dominates(IndexSpaceNode *rhs);
+      bool dominates(IndexPartNode *rhs);
     public:
       virtual void pack_index_space(Serializer &rez) const = 0;
       virtual void unpack_index_space(Deserializer &derez,
@@ -1178,7 +1201,7 @@ namespace Legion {
                   const std::vector<CopySrcDstField> &dst_fields,
 #endif
                   ApEvent precondition, PredEvent predicate_guard,
-                  IndexTreeNode *intersect = NULL,
+                  IndexTreeNode *intersect, IndexSpaceExpression *mask,
                   ReductionOpID redop = 0, bool reduction_fold = true) = 0;
       virtual ApEvent issue_fill(Operation *op,
 #ifdef LEGION_SPY
@@ -1239,21 +1262,6 @@ namespace Legion {
     class IndexSpaceNodeT : public IndexSpaceNode,
                             public LegionHeapify<IndexSpaceNodeT<DIM,T> > {
     public:
-      struct IntersectInfo {
-      public:
-        IntersectInfo(void)
-          : has_intersection(false), intersection_valid(false) { }
-        IntersectInfo(bool has)
-          : has_intersection(has), intersection_valid(!has) { }
-        IntersectInfo(const Realm::IndexSpace<DIM,T> &is)
-          : intersection(is), has_intersection(true), 
-            intersection_valid(true) { }
-      public:
-        Realm::IndexSpace<DIM,T> intersection;
-        bool has_intersection;
-        bool intersection_valid;
-      };
-    public:
       IndexSpaceNodeT(RegionTreeForest *ctx, IndexSpace handle,
                       IndexPartNode *parent, LegionColor color, 
                       const Realm::IndexSpace<DIM,T> *realm_is,
@@ -1272,6 +1280,7 @@ namespace Legion {
       virtual ApEvent get_expr_index_space(void *result, TypeTag tag,
                                            bool need_tight_result);
       virtual void tighten_index_space(void);
+      virtual bool check_empty(void);
     public:
       virtual void initialize_union_space(ApUserEvent to_trigger,
               TaskOp *op, const std::vector<IndexSpace> &handles);
@@ -1306,11 +1315,6 @@ namespace Legion {
       virtual Domain get_color_space_domain(void);
       virtual DomainPoint get_domain_point_color(void) const;
       virtual DomainPoint delinearize_color_to_point(LegionColor c);
-    public:
-      virtual bool intersects_with(IndexSpaceNode *rhs, bool compute = true);
-      virtual bool intersects_with(IndexPartNode *rhs, bool compute = true);
-      virtual bool dominates(IndexSpaceNode *rhs);
-      virtual bool dominates(IndexPartNode *rhs);
     public:
       virtual void pack_index_space(Serializer &rez) const;
       virtual void unpack_index_space(Deserializer &derez,
@@ -1417,7 +1421,7 @@ namespace Legion {
                   const std::vector<CopySrcDstField> &dst_fields,
 #endif
                   ApEvent precondition, PredEvent predicate_guard,
-                  IndexTreeNode *intersect = NULL,
+                  IndexTreeNode *intersect, IndexSpaceExpression *mask,
                   ReductionOpID redop = 0, bool reduction_fold = true);
       virtual ApEvent issue_fill(Operation *op,
 #ifdef LEGION_SPY
@@ -1456,8 +1460,6 @@ namespace Legion {
       void compute_linearization_metadata(void);
     protected:
       Realm::IndexSpace<DIM,T> realm_index_space;
-    protected:
-      std::map<IndexTreeNode*,IntersectInfo> intersections;
     protected: // linearization meta-data, computed on demand
       Realm::Point<DIM,long long> strides;
       Realm::Point<DIM,long long> offset;
@@ -1743,6 +1745,7 @@ namespace Legion {
       void record_disjointness(bool disjoint,
                                const LegionColor c1, const LegionColor c2);
       bool is_complete(bool from_app = false);
+      IndexSpaceExpression* get_union_expression(void);
     public:
       void add_instance(PartitionNode *inst);
       bool has_instance(RegionTreeID tid);
@@ -1764,13 +1767,11 @@ namespace Legion {
                               IndexPartNode *left, IndexPartNode *right);
       ApEvent create_by_restriction(const void *transform, const void *extent);
     public:
-      virtual bool compute_complete(void) = 0;
-      virtual bool intersects_with(IndexSpaceNode *other, 
-                                   bool compute = true) = 0;
-      virtual bool intersects_with(IndexPartNode *other,
-                                   bool compute = true) = 0; 
-      virtual bool dominates(IndexSpaceNode *other) = 0;
-      virtual bool dominates(IndexPartNode *other) = 0;
+      bool compute_complete(void);
+      bool intersects_with(IndexSpaceNode *other, bool compute = true);
+      bool intersects_with(IndexPartNode *other, bool compute = true); 
+      bool dominates(IndexSpaceNode *other);
+      bool dominates(IndexPartNode *other);
       virtual bool destroy_node(AddressSpaceID source) = 0;
     public:
       static void handle_disjointness_test(IndexPartNode *parent,
@@ -1805,6 +1806,7 @@ namespace Legion {
       bool disjoint;
     protected:
       bool has_complete, complete;
+      volatile IndexSpaceExpression *union_expr;
     protected:
       // Must hold the node lock when accessing
       // the remaining data structures
@@ -1827,21 +1829,6 @@ namespace Legion {
     class IndexPartNodeT : public IndexPartNode,
                            public LegionHeapify<IndexPartNodeT<DIM,T> > {
     public:
-      struct IntersectInfo {
-      public:
-        IntersectInfo(void)
-          : has_intersection(false), intersection_valid(false) { }
-        IntersectInfo(bool has)
-          : has_intersection(has), intersection_valid(!has) { }
-        IntersectInfo(const Realm::IndexSpace<DIM,T> &is)
-          : intersection(is), has_intersection(true), 
-            intersection_valid(true) { }
-      public:
-        Realm::IndexSpace<DIM,T> intersection;
-        bool has_intersection;
-        bool intersection_valid;
-      };
-    public:
       IndexPartNodeT(RegionTreeForest *ctx, IndexPartition p,
                      IndexSpaceNode *par, IndexSpaceNode *color_space,
                      LegionColor c, bool disjoint, DistributedID did,
@@ -1856,21 +1843,7 @@ namespace Legion {
     public:
       IndexPartNodeT& operator=(const IndexPartNodeT &rhs);
     public:
-      virtual bool compute_complete(void);
-      virtual bool intersects_with(IndexSpaceNode *other, bool compute = true);
-      virtual bool intersects_with(IndexPartNode *other, bool compute = true);
-      virtual bool dominates(IndexSpaceNode *other);
-      virtual bool dominates(IndexPartNode *other);
-      virtual bool destroy_node(AddressSpaceID source);
-    public:
-      ApEvent get_union_index_space(Realm::IndexSpace<DIM,T> &space,
-                                    bool need_tight_result);
-    protected:
-      Realm::IndexSpace<DIM,T> partition_union_space;
-      ApEvent partition_union_ready;
-      bool has_union_space, union_space_tight;
-    protected:
-      std::map<IndexTreeNode*,IntersectInfo> intersections;
+      virtual bool destroy_node(AddressSpaceID source); 
     };
 
     /**
@@ -2429,7 +2402,7 @@ namespace Legion {
                const LegionMap<LogicalView*,FieldMask>::aligned &copy_instances,
                  LegionMap<MaterializedView*,FieldMask>::aligned &src_instances,
                LegionMap<DeferredView*,FieldMask>::aligned &deferred_instances);
-      // Issue copies for fields with the same event preconditions
+      // Issue copies for fields with the same event preconditions and masks
       void issue_grouped_copies(const TraversalInfo &info,
                                 MaterializedView *dst, bool restrict_out,
                                 PredEvent predicate_guard,
@@ -2439,10 +2412,18 @@ namespace Legion {
                                 VersionTracker *version_tracker,
                       LegionMap<ApEvent,FieldMask>::aligned &postconditions,
                                 CopyAcrossHelper *across_helper = NULL,
-                                RegionTreeNode *intersect = NULL);
-      static void compute_event_sets(FieldMask update_mask,
-          const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
-          LegionList<EventSet>::aligned &event_sets);
+                                RegionTreeNode *intersect = NULL,
+       const LegionMap<IndexSpaceExpression*,FieldMask>::aligned *masks = NULL);
+      void issue_single_copy(const TraversalInfo &info, 
+                             const FieldMask &copy_mask,
+                             MaterializedView *dst, bool restrict_out,
+                             PredEvent predicate_guard, ApEvent copy_pre,
+            const LegionMap<MaterializedView*,FieldMask>::aligned &src_instances,
+                             VersionTracker *version_tracker,
+                      LegionMap<ApEvent,FieldMask>::aligned &postconditions,
+                             CopyAcrossHelper *across_helper,
+                             RegionTreeNode *intersect,
+                             IndexSpaceExpression* mask);
       void issue_update_reductions(LogicalView *target,
                                    const FieldMask &update_mask,
                                    VersionInfo &version_info,
@@ -2532,7 +2513,7 @@ namespace Legion {
                   const std::vector<CopySrcDstField> &src_fields,
                   const std::vector<CopySrcDstField> &dst_fields,
                   ApEvent precondition, PredEvent predicate_guard,
-                  RegionTreeNode *intersect = NULL,
+                  RegionTreeNode *intersect, IndexSpaceExpression *mask,
                   ReductionOpID redop = 0, bool reduction_fold = true) = 0;
       virtual ApEvent issue_fill(Operation *op,
                   const std::vector<CopySrcDstField> &dst_fields,
@@ -2674,7 +2655,7 @@ namespace Legion {
                   const std::vector<CopySrcDstField> &src_fields,
                   const std::vector<CopySrcDstField> &dst_fields,
                   ApEvent precondition, PredEvent predicate_guard,
-                  RegionTreeNode *intersect = NULL,
+                  RegionTreeNode *intersect, IndexSpaceExpression *mask,
                   ReductionOpID redop = 0, bool reduction_fold = true);
       virtual ApEvent issue_fill(Operation *op,
                   const std::vector<CopySrcDstField> &dst_fields,
@@ -2868,7 +2849,7 @@ namespace Legion {
                   const std::vector<CopySrcDstField> &src_fields,
                   const std::vector<CopySrcDstField> &dst_fields,
                   ApEvent precondition, PredEvent predicate_guard,
-                  RegionTreeNode *intersect = NULL,
+                  RegionTreeNode *intersect, IndexSpaceExpression *mask,
                   ReductionOpID redop = 0, bool reduction_fold = true);
       virtual ApEvent issue_fill(Operation *op,
                   const std::vector<CopySrcDstField> &dst_fields,

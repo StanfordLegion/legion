@@ -1096,6 +1096,10 @@ namespace Legion {
       CompositeBase(LocalLock &base_lock);
       virtual ~CompositeBase(void);
     protected:
+      typedef LegionMap<IndexSpaceExpression*,FieldMask>::aligned WriteMasks;
+      typedef LegionMap<std::pair<ReductionView*,IndexSpaceExpression*>,
+                        FieldMask>::aligned PendingReductions;
+    protected:
       CompositeCopyNode* construct_copy_tree(MaterializedView *dst,
                                              RegionTreeNode *logical_node,
                                              FieldMask &copy_mask,
@@ -1112,6 +1116,35 @@ namespace Legion {
                                          CompositeCopier &copier,
                                          CompositeCopyNode *result,
            LegionMap<CompositeNode*,FieldMask>::aligned &children_to_traverse);
+    protected:
+      void issue_composite_updates(const TraversalInfo &info,
+                                   MaterializedView *dst, 
+                                   // Fields we can remove if we finish writing
+                                   FieldMask &global_copy_mask,
+                                   // Fields we are trying to copy to
+                                   const FieldMask &local_copy_mask,
+                                   const WriteMasks &write_masks,
+                                   WriteMasks &performed_writes/*write-only*/,
+                                   PendingReductions &pending_reductions);
+      void issue_write_copies(FieldMask copy_mask, FieldMask &global_copy_mask,
+                              MaterializedView *dst, const TraversalInfo &info,
+                const LegionMap<LogicalView*,FieldMask>::aligned &source_views,
+                              // previous_writes Should be field unique
+                              const WriteMasks &previous_writes,
+                                    WriteMasks &performed_writes,
+                              PendingReductions &pending_reductions) const;
+      void issue_or_buffer_reductions(const FieldMask &global_copy_mask,
+          const LegionMap<ReductionView*,FieldMask>::aligned &source_reductions,
+                                      PendingReductions &pending_reductions);
+    protected:
+      // Merge two write sets into one and deduplicate where necessary
+      static void merge_write_sets(WriteMasks &dst_writes, 
+                                   const WriteMasks &src_writes);
+      // Write combining unions together all index space expressions for
+      // the same field so that we get one index expression for each field
+      static void combine_writes(WriteMasks &write_masks,
+                                 FieldMask &global_copy_mask,
+                                 MaterializedView *dst, Operation *op);
     public:
       virtual InnerContext* get_owner_context(void) const = 0;
       virtual void perform_ready_check(FieldMask mask) = 0;
@@ -1119,6 +1152,8 @@ namespace Legion {
                                     const FieldMask &up_mask,
                   LegionMap<LogicalView*,FieldMask>::aligned &valid_views,
                                     bool needs_lock = true) = 0;
+    public:
+      virtual IndexSpaceExpression* get_index_space_expression(void) const = 0;
     public:
       CompositeNode* find_child_node(RegionTreeNode *child);
     private:
@@ -1230,6 +1265,8 @@ namespace Legion {
                   LegionMap<LogicalView*,FieldMask>::aligned &valid_views,
                                     bool need_lock = true);
     public:
+      virtual IndexSpaceExpression* get_index_space_expression(void) const;
+    public:
       static void handle_send_composite_view(Runtime *runtime, 
                               Deserializer &derez, AddressSpaceID source);
       static void handle_deferred_view_registration(const void *args);
@@ -1305,6 +1342,9 @@ namespace Legion {
                                     const FieldMask &up_mask,
                   LegionMap<LogicalView*,FieldMask>::aligned &valid_views,
                                     bool needs_lock = true);
+    public:
+      virtual IndexSpaceExpression* get_index_space_expression(void) const;
+    public:
       void capture(RtUserEvent capture_event, ReferenceMutator *mutator);
       static void handle_deferred_capture(const void *args);
     public:

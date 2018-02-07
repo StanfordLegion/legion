@@ -2482,7 +2482,8 @@ namespace Legion {
                                                      dst_precondition,
                                                      precondition);
             ApEvent copy_post = dst_node->issue_copy(op, src_it->second,
-                                       dst_it->second, copy_pre, guard);
+                                       dst_it->second, copy_pre, guard,
+                                       NULL/*intersect*/, NULL/*mask*/);
             if (copy_post.exists())
               result_events.insert(copy_post);
           }
@@ -2602,7 +2603,7 @@ namespace Legion {
         ApEvent copy_pre = Runtime::merge_events(fold_copy_preconditions);
         ApEvent copy_post = dst_node->issue_copy(op, 
                             src_fields_fold, dst_fields_fold, copy_pre, 
-                            predicate_guard, NULL/*intersect*/, 
+                            predicate_guard, NULL/*intersect*/, NULL/*mask*/,
                             dst_req.redop, true/*fold*/);
         if (copy_post.exists())
           result_events.insert(copy_post);
@@ -2613,7 +2614,7 @@ namespace Legion {
         ApEvent copy_pre = Runtime::merge_events(list_copy_preconditions);
         ApEvent copy_post = dst_node->issue_copy(op, 
                             src_fields_list, dst_fields_list, copy_pre, 
-                            predicate_guard, NULL/*intersect*/, 
+                            predicate_guard, NULL/*intersect*/, NULL/*mask*/, 
                             dst_req.redop, false/*fold*/);
         if (copy_post.exists())
           result_events.insert(copy_post);
@@ -4547,6 +4548,20 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexSpaceExpression* RegionTreeForest::union_index_spaces(Operation *op,
+                           IndexSpaceExpression *lhs, IndexSpaceExpression *rhs)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(lhs->type_tag == rhs->type_tag);
+#endif
+      std::set<IndexSpaceExpression*> exprs;
+      exprs.insert(lhs);
+      exprs.insert(rhs);
+      return union_index_spaces(op, exprs);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpaceExpression* RegionTreeForest::union_index_spaces(Operation *op,
                                    const std::set<IndexSpaceExpression*> &exprs)
     //--------------------------------------------------------------------------
     {
@@ -4584,6 +4599,20 @@ namespace Legion {
       IndexSpaceOperation *result = creator.result;
       unions.push_back(result);
       return result;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpaceExpression* RegionTreeForest::intersect_index_spaces(
+            Operation *op, IndexSpaceExpression *lhs, IndexSpaceExpression *rhs)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(lhs->type_tag == rhs->type_tag);
+#endif
+      std::set<IndexSpaceExpression*> exprs;
+      exprs.insert(lhs);
+      exprs.insert(rhs);
+      return intersect_index_spaces(op, exprs);
     }
 
     //--------------------------------------------------------------------------
@@ -4634,7 +4663,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(lhs->type_tag != rhs->type_tag);
+      assert(lhs->type_tag == rhs->type_tag);
 #endif
       const std::pair<TypeTag,IndexSpaceExprID> key(lhs->type_tag,lhs->expr_id);
       {
@@ -4688,8 +4717,11 @@ namespace Legion {
         AutoLock l_lock(lookup_is_op_lock);
         for (std::deque<IndexSpaceOperation*>::const_iterator it = 
               to_remove.begin(); it != to_remove.end(); it++)
-          if ((*it)->remove_operation(this))
+        {
+          IndexSpaceOperation *op = *it;
+          if (op->remove_operation(this))
             to_delete.push_back(*it);
+        }
       }
       if (to_delete.empty())
         return;
@@ -4789,14 +4821,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexSpaceExpression::IndexSpaceExpression(void)
-      : type_tag(0), expr_id(0)
+      : type_tag(0), expr_id(0), has_empty(false)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     IndexSpaceExpression::IndexSpaceExpression(TypeTag tag)
-      : type_tag(tag), expr_id(next_expr_id())
+      : type_tag(tag), expr_id(next_expr_id()), has_empty(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -4805,6 +4837,9 @@ namespace Legion {
     IndexSpaceExpression::~IndexSpaceExpression(void)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(parent_operations.empty());
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -4878,7 +4913,10 @@ namespace Legion {
     bool IndexSpaceOperation::remove_expression_reference(void)
     //--------------------------------------------------------------------------
     {
-      return remove_reference();
+      // Only delete this if we have no references and we've been invalidated
+      if (remove_reference())
+        return (__sync_fetch_and_add(&invalidated, 0) > 0);
+      return false;
     }
     
     //--------------------------------------------------------------------------
@@ -4944,7 +4982,7 @@ namespace Legion {
       {
         legion_free(SEMANTIC_INFO_ALLOC, it->second.buffer, it->second.size);
       }
-    }
+    } 
 
     //--------------------------------------------------------------------------
     void IndexTreeNode::attach_semantic_information(SemanticTag tag,
@@ -5133,6 +5171,7 @@ namespace Legion {
                                    DistributedID did, ApEvent ready)
       : IndexTreeNode(ctx, (par == NULL) ? 0 : par->depth + 1, c,
                       did, get_owner_space(h, ctx->runtime)),
+        IndexSpaceExpression(h.type_tag),
         handle(h), parent(par), index_space_ready(ready), 
         realm_index_space_set(Runtime::create_rt_user_event()), 
         tight_index_space_set(Runtime::create_rt_user_event()),
@@ -6024,7 +6063,7 @@ namespace Legion {
       derez.deserialize(handle);
       IndexSpaceNode *node = forest->get_node(handle);
       node->unpack_index_space(derez, source);
-    }
+    } 
 
     //--------------------------------------------------------------------------
     void IndexSpaceNode::add_expression_reference(void)
@@ -6038,6 +6077,58 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return remove_base_resource_ref(IS_EXPR_REF);
+    }
+
+    //--------------------------------------------------------------------------
+    bool IndexSpaceNode::intersects_with(IndexSpaceNode *rhs, bool compute)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(rhs->handle.get_type_tag() == handle.get_type_tag());
+#endif
+      if (rhs == this)
+        return true;
+      IndexSpaceExpression *intersect = 
+        context->intersect_index_spaces(NULL, this, rhs);
+      return !intersect->is_empty();
+    }
+
+    //--------------------------------------------------------------------------
+    bool IndexSpaceNode::intersects_with(IndexPartNode *rhs, bool compute)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(rhs->handle.get_type_tag() == handle.get_type_tag());
+#endif
+      IndexSpaceExpression *intersect = 
+        context->intersect_index_spaces(NULL, this,rhs->get_union_expression());
+      return !intersect->is_empty();
+    }
+
+    //--------------------------------------------------------------------------
+    bool IndexSpaceNode::dominates(IndexSpaceNode *rhs)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(rhs->handle.get_type_tag() == handle.get_type_tag());
+#endif
+      if (rhs == this)
+        return true;
+      IndexSpaceExpression *diff = 
+        context->subtract_index_spaces(NULL, rhs, this);
+      return diff->is_empty();
+    }
+
+    //--------------------------------------------------------------------------
+    bool IndexSpaceNode::dominates(IndexPartNode *rhs)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(rhs->handle.get_type_tag() == handle.get_type_tag());
+#endif
+      IndexSpaceExpression *diff = 
+        context->subtract_index_spaces(NULL, rhs->get_union_expression(), this);
+      return diff->is_empty();
     }
 
     /////////////////////////////////////////////////////////////
@@ -6055,7 +6146,7 @@ namespace Legion {
         total_children(color_sp->get_volume()), 
         max_linearized_color(color_sp->get_max_linearized_color()),
         partition_ready(part_ready), partial_pending(partial),
-        disjoint(dis), has_complete(false)
+        disjoint(dis), has_complete(false), union_expr(NULL)
     //--------------------------------------------------------------------------
     { 
       parent->add_nested_resource_ref(did);
@@ -6081,7 +6172,8 @@ namespace Legion {
         color_space(color_sp), total_children(color_sp->get_volume()),
         max_linearized_color(color_sp->get_max_linearized_color()),
         partition_ready(part_ready), partial_pending(part), 
-        disjoint_ready(dis_ready), disjoint(false), has_complete(false)
+        disjoint_ready(dis_ready), disjoint(false), 
+        has_complete(false), union_expr(NULL)
     //--------------------------------------------------------------------------
     {
       parent->add_nested_resource_ref(did);
@@ -6750,6 +6842,35 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    IndexSpaceExpression* IndexPartNode::get_union_expression(void)
+    //--------------------------------------------------------------------------
+    {
+      if (union_expr == NULL)
+      {
+        std::set<IndexSpaceExpression*> child_spaces;
+        if (total_children == max_linearized_color)
+        {
+          for (LegionColor color = 0; color < total_children; color++)
+            child_spaces.insert(get_child(color));
+        }
+        else
+        {
+          for (LegionColor color = 0; color < total_children; color++)
+          {
+            if (!color_space->contains_color(color))
+              continue;
+            child_spaces.insert(get_child(color));
+          }
+        }
+        // We can always write the result immediately since we know
+        // that the common sub-expression code will give the same
+        // result if there is a race
+        union_expr = context->union_index_spaces(NULL, child_spaces);
+      }
+      return const_cast<IndexSpaceExpression*>(union_expr);
+    }
+
+    //--------------------------------------------------------------------------
     void IndexPartNode::get_colors(std::vector<LegionColor> &colors)
     //--------------------------------------------------------------------------
     {
@@ -6895,6 +7016,72 @@ namespace Legion {
     {
       return color_space->create_by_restriction(this, transform, extent,
                      NT_TemplateHelper::get_dim(handle.get_type_tag()));
+    }
+
+    //--------------------------------------------------------------------------
+    bool IndexPartNode::compute_complete(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!is_disjoint());
+#endif
+      IndexSpaceExpression *diff = 
+        context->subtract_index_spaces(NULL, parent, get_union_expression());
+      return diff->is_empty();
+    }
+
+    //--------------------------------------------------------------------------
+    bool IndexPartNode::intersects_with(IndexSpaceNode *rhs, bool compute)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(rhs->handle.get_type_tag() == handle.get_type_tag());
+#endif
+      IndexSpaceExpression *intersect = 
+        context->intersect_index_spaces(NULL, get_union_expression(), rhs);
+      return !intersect->is_empty();
+    }
+
+    //--------------------------------------------------------------------------
+    bool IndexPartNode::intersects_with(IndexPartNode *rhs, bool compute)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(rhs->handle.get_type_tag() == handle.get_type_tag());
+#endif
+      if (rhs == this)
+        return true;
+      IndexSpaceExpression *intersect = 
+        context->intersect_index_spaces(NULL, get_union_expression(),
+                                        rhs->get_union_expression());
+      return !intersect->is_empty();
+    }
+
+    //--------------------------------------------------------------------------
+    bool IndexPartNode::dominates(IndexSpaceNode *rhs)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(rhs->handle.get_type_tag() == handle.get_type_tag());
+#endif
+      IndexSpaceExpression *diff = 
+        context->subtract_index_spaces(NULL, rhs, get_union_expression());
+      return diff->is_empty();
+    }
+    
+    //--------------------------------------------------------------------------
+    bool IndexPartNode::dominates(IndexPartNode *rhs)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(rhs->handle.get_type_tag() == handle.get_type_tag());
+#endif
+      if (rhs == this)
+        return true;
+      IndexSpaceExpression *diff = 
+        context->subtract_index_spaces(NULL, rhs->get_union_expression(),
+                                       get_union_expression());
+      return diff->is_empty();
     }
 
     //--------------------------------------------------------------------------
@@ -12872,148 +13059,117 @@ namespace Legion {
                            LegionMap<ApEvent,FieldMask>::aligned &preconditions,
                                        const FieldMask &update_mask,
            const LegionMap<MaterializedView*,FieldMask>::aligned &src_instances,
-                                             VersionTracker *src_versions,
+                                              VersionTracker *src_versions,
                           LegionMap<ApEvent,FieldMask>::aligned &postconditions,
                                              CopyAcrossHelper *helper/*= NULL*/,
-                                             RegionTreeNode *intersect/*=NULL*/)
+                                             RegionTreeNode *intersect/*=NULL*/,
+      const LegionMap<IndexSpaceExpression*,FieldMask>::aligned *masks/*=NULL*/)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(context->runtime,REGION_NODE_ISSUE_GROUPED_COPIES_CALL);
       // Now let's build maximal sets of fields which have
-      // identical event preconditions. Use a list so our
-      // iterators remain valid under insertion and push back
-      LegionList<EventSet>::aligned precondition_sets;
-      compute_event_sets(update_mask, preconditions, precondition_sets);
+      // identical event preconditions. 
+      LegionList<FieldSet<ApEvent> >::aligned precondition_sets;
+      compute_field_sets<ApEvent>(update_mask, preconditions,precondition_sets);
       // Now that we have our precondition sets, it's time
       // to issue the distinct copies to the low-level runtime
       // Issue a copy for each of the different precondition sets
-      const AddressSpaceID local_space = context->runtime->address_space;
-      for (LegionList<EventSet>::aligned::iterator pit = 
+      for (LegionList<FieldSet<ApEvent> >::aligned::iterator pit = 
             precondition_sets.begin(); pit != 
             precondition_sets.end(); pit++)
       {
-        EventSet &pre_set = *pit;
-        // Build the src and dst fields vectors
-        std::vector<CopySrcDstField> src_fields;
-        std::vector<CopySrcDstField> dst_fields;
-        LegionMap<MaterializedView*,FieldMask>::aligned update_views;
-        for (LegionMap<MaterializedView*,FieldMask>::aligned::const_iterator 
-              it = src_instances.begin(); it != src_instances.end(); it++)
+        FieldSet<ApEvent> &pre_set = *pit;
+        const ApEvent copy_pre = Runtime::merge_events(pre_set.elements);
+        // If we have different write masks then we have to issue
+        // different copies for each of the different masks
+        if (masks != NULL)
         {
-          FieldMask op_mask = pre_set.set_mask & it->second;
-          if (!!op_mask)
+          // Find any write masks that we overlap with 
+          // and issue copies for them specifically
+          for (LegionMap<IndexSpaceExpression*,FieldMask>::aligned::
+                const_iterator it = masks->begin(); it != masks->end(); it++)
           {
-            it->first->copy_from(op_mask, src_fields);
-            dst->copy_to(op_mask, dst_fields, helper);
-            update_views[it->first] = op_mask;
+            const FieldMask overlap = pre_set.set_mask & it->second;
+            if (!overlap)
+              continue;
+            issue_single_copy(info, overlap, dst, restrict_out,
+                predicate_guard, copy_pre, src_instances, src_versions,
+                postconditions, helper, intersect, it->first);
+            pre_set.set_mask -= overlap;
+            if (!pre_set.set_mask)
+              break;
           }
+          // If we don't have any remaining fields then we're done
+          // otherwise we fall through and issue an unmasked copy
+          // for all the remaining fields
+          if (!pre_set.set_mask)
+            continue;
         }
-#ifdef DEBUG_LEGION
-        assert(!src_fields.empty());
-        assert(!dst_fields.empty());
-        assert(src_fields.size() == dst_fields.size());
-#endif
-        // Now that we've got our offsets ready, we
-        // can now issue the copy to the low-level runtime
-        ApEvent copy_pre = Runtime::merge_events(pre_set.preconditions);
-        ApEvent copy_post = issue_copy(info.op, src_fields, dst_fields, 
-                                       copy_pre, predicate_guard, intersect);
-        // Save the copy post in the post conditions
-        if (copy_post.exists())
-        {
-          // Register copy post with the source views
-          // Note it is up to the caller to make sure the event
-          // gets registered with the destination
-          for (LegionMap<MaterializedView*,FieldMask>::aligned::const_iterator 
-                it = update_views.begin(); it != update_views.end(); it++)
-          {
-            it->first->add_copy_user(0/*redop*/, copy_post, src_versions,
-                                     info.op->get_unique_op_id(), info.index,
-                                     it->second, true/*reading*/, restrict_out,
-                                     local_space, info.map_applied_events);
-          }
-          postconditions[copy_post] = pre_set.set_mask;
-        }
+        issue_single_copy(info, pre_set.set_mask, dst, restrict_out,
+            predicate_guard, copy_pre, src_instances, src_versions,
+            postconditions, helper, intersect, NULL/*mask*/);
       }
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void RegionTreeNode::compute_event_sets(FieldMask update_mask, 
-                    const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
-                    LegionList<EventSet>::aligned &precondition_sets)
+    void RegionTreeNode::issue_single_copy(const TraversalInfo &info, 
+                                           const FieldMask &copy_mask,
+                                           MaterializedView *dst, 
+                                           bool restrict_out,
+                                           PredEvent predicate_guard, 
+                                           ApEvent copy_pre,
+           const LegionMap<MaterializedView*,FieldMask>::aligned &src_instances,
+                                           VersionTracker *src_versions,
+                          LegionMap<ApEvent,FieldMask>::aligned &postconditions,
+                                           CopyAcrossHelper *helper,
+                                           RegionTreeNode *intersect,
+                                           IndexSpaceExpression* mask)
     //--------------------------------------------------------------------------
     {
-      for (LegionMap<ApEvent,FieldMask>::aligned::const_iterator pit = 
-            preconditions.begin(); pit != preconditions.end(); pit++)
+      // Build the src and dst fields vectors
+      std::vector<CopySrcDstField> src_fields;
+      std::vector<CopySrcDstField> dst_fields;
+      LegionMap<MaterializedView*,FieldMask>::aligned update_views;
+      FieldMask op_mask;
+      for (LegionMap<MaterializedView*,FieldMask>::aligned::const_iterator 
+            it = src_instances.begin(); it != src_instances.end(); it++)
       {
-        bool inserted = false;
-        // Also keep track of which fields have updates
-        // but don't have any preconditions
-        update_mask -= pit->second;
-        FieldMask remaining = pit->second;
-        // Insert this event into the precondition sets 
-        for (LegionList<EventSet>::aligned::iterator it = 
-              precondition_sets.begin(); it != precondition_sets.end(); it++)
-        {
-          // Easy case, check for equality
-          if (remaining == it->set_mask)
-          {
-            it->preconditions.insert(pit->first);
-            inserted = true;
-            break;
-          }
-          FieldMask overlap = remaining & it->set_mask;
-          // Easy case, they are disjoint so keep going
-          if (!overlap)
-            continue;
-          // Moderate case, we are dominated, split into two sets
-          // reusing existing set and making a new set
-          if (overlap == remaining)
-          {
-            // Leave the existing set and make it the difference 
-            it->set_mask -= overlap;
-            precondition_sets.push_back(EventSet(overlap));
-            EventSet &last = precondition_sets.back();
-            last.preconditions = it->preconditions;
-            last.preconditions.insert(pit->first);
-            inserted = true;
-            break;
-          }
-          // Moderate case, we dominate the existing set
-          if (overlap == it->set_mask)
-          {
-            // Add ourselves to the existing set and then
-            // keep going for the remaining fields
-            it->preconditions.insert(pit->first);
-            remaining -= overlap;
-            // Can't consider ourselves added yet
-            continue;
-          }
-          // Hard case, neither dominates, compute three
-          // distinct sets of fields, keep left one in
-          // place and reduce scope, add new one at the
-          // end for overlap, continue iterating for right one
-          it->set_mask -= overlap;
-          const std::set<ApEvent> &temp_preconditions = it->preconditions;
-          it = precondition_sets.insert(it, EventSet(overlap));
-          it->preconditions = temp_preconditions;
-          it->preconditions.insert(pit->first);
-          remaining -= overlap;
+        const FieldMask overlap= copy_mask & it->second;
+        if (!overlap)
           continue;
-        }
-        if (!inserted)
-        {
-          precondition_sets.push_back(EventSet(remaining));
-          EventSet &last = precondition_sets.back();
-          last.preconditions.insert(pit->first);
-        }
+        it->first->copy_from(overlap, src_fields);
+        dst->copy_to(overlap, dst_fields, helper);
+        update_views[it->first] = overlap;
+        op_mask |= overlap;
+        if (op_mask == copy_mask)
+          break;
       }
-      // For any fields which need copies but don't have
-      // any preconditions, but them in their own set.
-      // Put it on the front because it is the copy with
-      // no preconditions so it can start right away!
-      if (!!update_mask)
-        precondition_sets.push_front(EventSet(update_mask));
+#ifdef DEBUG_LEGION
+      assert(!src_fields.empty());
+      assert(!dst_fields.empty());
+      assert(src_fields.size() == dst_fields.size());
+#endif
+      // Now that we've got our offsets ready, we
+      // can now issue the copy to the low-level runtime
+      ApEvent copy_post = issue_copy(info.op, src_fields, dst_fields, 
+                           copy_pre, predicate_guard, intersect, mask);
+      // Save the copy post in the post conditions
+      if (copy_post.exists())
+      {
+        const AddressSpaceID local_space = context->runtime->address_space;
+        // Register copy post with the source views
+        // Note it is up to the caller to make sure the event
+        // gets registered with the destination
+        for (LegionMap<MaterializedView*,FieldMask>::aligned::const_iterator 
+              it = update_views.begin(); it != update_views.end(); it++)
+        {
+          it->first->add_copy_user(0/*redop*/, copy_post, src_versions,
+                                   info.op->get_unique_op_id(), info.index,
+                                   it->second, true/*reading*/, restrict_out,
+                                   local_space, info.map_applied_events);
+        }
+        postconditions[copy_post] = copy_mask;
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -14343,7 +14499,7 @@ namespace Legion {
                         const std::vector<CopySrcDstField> &src_fields,
                         const std::vector<CopySrcDstField> &dst_fields,
                         ApEvent precondition, PredEvent predicate_guard,
-                        RegionTreeNode *intersect/*=NULL*/,
+                        RegionTreeNode *intersect, IndexSpaceExpression *mask,
                         ReductionOpID redop /*=0*/,bool reduction_fold/*=true*/)
     //--------------------------------------------------------------------------
     {
@@ -14358,7 +14514,7 @@ namespace Legion {
       ApEvent result = row_source->issue_copy(op, realm_src_fields, 
           realm_dst_fields, precondition, predicate_guard, 
           (intersect == NULL) ? NULL : intersect->get_row_source(),
-          redop, reduction_fold);
+          mask, redop, reduction_fold);
       LegionSpy::log_copy_events(op->get_unique_op_id(), handle, 
                                  precondition, result);
       for (unsigned idx = 0; idx < src_fields.size(); idx++)
@@ -14387,7 +14543,7 @@ namespace Legion {
       return row_source->issue_copy(op, src_fields, dst_fields,
           precondition, predicate_guard, 
           (intersect == NULL) ? NULL : intersect->get_row_source(),
-          redop, reduction_fold);
+          mask, redop, reduction_fold);
 #endif
     }
 
@@ -15268,15 +15424,15 @@ namespace Legion {
         if (sync_precondition.exists())
           preconditions[sync_precondition] = fill_mask;
         // Sort the preconditions into event sets
-        LegionList<EventSet>::aligned event_sets;
-        compute_event_sets(fill_mask, preconditions, event_sets);
+        LegionList<FieldSet<ApEvent> >::aligned event_sets;
+        compute_field_sets<ApEvent>(fill_mask, preconditions, event_sets);
         // Iterate over the event sets and issue the fill operations on 
         // the different fields
-        for (LegionList<EventSet>::aligned::iterator pit = 
+        for (LegionList<FieldSet<ApEvent> >::aligned::iterator pit = 
               event_sets.begin(); pit != event_sets.end(); pit++)
         {
           // If we have a predicate guard we add that to the set now
-          ApEvent precondition = Runtime::merge_events(pit->preconditions);
+          ApEvent precondition = Runtime::merge_events(pit->elements);
           std::vector<CopySrcDstField> dst_fields;
           target->copy_to(pit->set_mask, dst_fields);
           ApEvent fill_event = issue_fill(op, dst_fields, value, 
@@ -16159,12 +16315,12 @@ namespace Legion {
                         const std::vector<CopySrcDstField> &src_fields,
                         const std::vector<CopySrcDstField> &dst_fields,
                         ApEvent precondition, PredEvent predicate_guard,
-                        RegionTreeNode *intersect/*=NULL*/,
+                        RegionTreeNode *intersect, IndexSpaceExpression *mask,
                         ReductionOpID redop /*=0*/,bool reduction_fold/*=true*/)
     //--------------------------------------------------------------------------
     {
       return parent->issue_copy(op, src_fields, dst_fields, precondition,
-                      predicate_guard, intersect, redop, reduction_fold);
+                predicate_guard, intersect, mask, redop, reduction_fold);
     }
 
     //--------------------------------------------------------------------------
