@@ -9029,6 +9029,9 @@ function codegen.top_task(cx, node)
     [guard]
   end
   proto:setname(tostring(task:get_name()))
+  if node.annotations.optimize:is(ast.annotation.Forbid) then
+    proto:setoptimized(false)
+  end
   variant:set_definition(proto)
 
   if emergency then proto:compile() end
