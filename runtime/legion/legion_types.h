@@ -1392,6 +1392,7 @@ namespace Legion {
     class InstanceView;
     class DeferredView;
     class MaterializedView;
+    struct CompositeCopyHelper;
     class CompositeBase;
     class CompositeView;
     class CompositeVersionInfo;

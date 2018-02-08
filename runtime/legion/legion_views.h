@@ -949,6 +949,11 @@ namespace Legion {
                           LegionMap<ApEvent,FieldMask>::aligned &postconditions,
                                          PredEvent pred_guard,
                                          CopyAcrossHelper *helper = NULL) = 0; 
+      virtual void issue_deferred_copies(CompositeCopyHelper &helper,
+                                         const FieldMask &local_copy_mask,
+         const LegionMap<IndexSpaceExpression*,FieldMask>::aligned &write_masks,
+               LegionMap<IndexSpaceExpression*,FieldMask>::aligned &perf_writes,
+                                         PredEvent pred_guard) = 0;
     };
 
     /**
@@ -1087,6 +1092,47 @@ namespace Legion {
     };
 
     /**
+     * \class CompositeCopyHelper
+     * This is a helper class for performing copies from a composite
+     * instance. It stores all of the arguments that need to be passed 
+     * through to all of the methods that are used to issue copies
+     * and reductions from a composite view.
+     */
+    struct CompositeCopyHelper {
+    public:
+      typedef LegionMap<std::pair<ReductionView*,/*mask*/IndexSpaceExpression*>,
+                        FieldMask>::aligned PendingReductions;
+    public:
+      CompositeCopyHelper(const TraversalInfo &info, 
+                          MaterializedView *dst, 
+                          const FieldMask &copy_mask, 
+                          bool restrict_out,
+                          CopyAcrossHelper *helper = NULL);
+      CompositeCopyHelper(const CompositeCopyHelper &rhs);
+      ~CompositeCopyHelper(void);
+    public:
+      CompositeCopyHelper& operator=(const CompositeCopyHelper &rhs);
+    public:
+      void merge_destination_preconditions(const FieldMask &copy_mask,
+                LegionMap<ApEvent,FieldMask>::aligned &preconditions);
+      void buffer_reductions(
+         const LegionMap<IndexSpaceExpression*,FieldMask>::aligned &write_masks,
+               LegionMap<ReductionView*,FieldMask>::aligned &source_reductions);
+    public: // const fields
+      const TraversalInfo &info;
+      MaterializedView *const dst;
+      CopyAcrossHelper *const across_helper;
+      const bool restrict_out;
+    public: // visible mutable fields
+      FieldMask composite_copy_mask;
+      LegionMap<ApEvent,FieldMask>::aligned copy_postconditions;
+      PendingReductions pending_reductions;
+    protected: // internal members
+      LegionMap<ApEvent,FieldMask>::aligned dst_preconditions;
+      bool has_dst_preconditions;
+    };
+
+    /**
      * \class CompositeBase
      * A small helper class that provides some base functionality
      * for both the CompositeView and CompositeNode classes
@@ -1097,8 +1143,7 @@ namespace Legion {
       virtual ~CompositeBase(void);
     protected:
       typedef LegionMap<IndexSpaceExpression*,FieldMask>::aligned WriteMasks;
-      typedef LegionMap<std::pair<ReductionView*,IndexSpaceExpression*>,
-                        FieldMask>::aligned PendingReductions;
+      
     protected:
       CompositeCopyNode* construct_copy_tree(MaterializedView *dst,
                                              RegionTreeNode *logical_node,
@@ -1117,25 +1162,21 @@ namespace Legion {
                                          CompositeCopyNode *result,
            LegionMap<CompositeNode*,FieldMask>::aligned &children_to_traverse);
     protected:
-      void issue_composite_updates(const TraversalInfo &info,
-                                   MaterializedView *dst, 
-                                   // Fields we can remove if we finish writing
-                                   FieldMask &global_copy_mask,
-                                   // Fields we are trying to copy to
-                                   const FieldMask &local_copy_mask,
+      void issue_composite_updates(CompositeCopyHelper &helper,
+                                   RegionTreeNode *logical_node,
+                                   const FieldMask &copy_mask,
+                                   VersionTracker *src_version_tracker,
+                                   PredEvent pred_guard, 
                                    const WriteMasks &write_masks,
-                                   WriteMasks &performed_writes/*write-only*/,
-                                   PendingReductions &pending_reductions);
-      void issue_write_copies(FieldMask copy_mask, FieldMask &global_copy_mask,
-                              MaterializedView *dst, const TraversalInfo &info,
-                const LegionMap<LogicalView*,FieldMask>::aligned &source_views,
-                              // previous_writes Should be field unique
-                              const WriteMasks &previous_writes,
-                                    WriteMasks &performed_writes,
-                              PendingReductions &pending_reductions) const;
-      void issue_or_buffer_reductions(const FieldMask &global_copy_mask,
-          const LegionMap<ReductionView*,FieldMask>::aligned &source_reductions,
-                                      PendingReductions &pending_reductions);
+                                   WriteMasks &performed_writes/*write-only*/);
+      void issue_update_copies(CompositeCopyHelper &helper, 
+                               RegionTreeNode *logical_node,FieldMask copy_mask,
+                               VersionTracker *src_version_tracker,
+                               PredEvent pred_guard,
+               const LegionMap<LogicalView*,FieldMask>::aligned &source_views,
+                               // previous_writes Should be field unique
+                               const WriteMasks &previous_writes,
+                                     WriteMasks &performed_writes) const;
     protected:
       // Merge two write sets into one and deduplicate where necessary
       static void merge_write_sets(WriteMasks &dst_writes, 
@@ -1143,8 +1184,7 @@ namespace Legion {
       // Write combining unions together all index space expressions for
       // the same field so that we get one index expression for each field
       static void combine_writes(WriteMasks &write_masks,
-                                 FieldMask &global_copy_mask,
-                                 MaterializedView *dst, Operation *op);
+                                 CompositeCopyHelper &helper);
     public:
       virtual InnerContext* get_owner_context(void) const = 0;
       virtual void perform_ready_check(FieldMask mask) = 0;
@@ -1241,6 +1281,11 @@ namespace Legion {
                           LegionMap<ApEvent,FieldMask>::aligned &postconditions,
                                          PredEvent pred_guard,
                                          CopyAcrossHelper *helper = NULL);
+      virtual void issue_deferred_copies(CompositeCopyHelper &helper,
+                                         const FieldMask &local_copy_mask,
+         const LegionMap<IndexSpaceExpression*,FieldMask>::aligned &write_masks,
+               LegionMap<IndexSpaceExpression*,FieldMask>::aligned &perf_writes,
+                                         PredEvent pred_guard);
     public:
       // From VersionTracker
       virtual bool is_upper_bound_node(RegionTreeNode *node) const;
@@ -1453,6 +1498,17 @@ namespace Legion {
                           LegionMap<ApEvent,FieldMask>::aligned &postconditions,
                                          PredEvent pred_guard,
                                          CopyAcrossHelper *helper = NULL);
+      virtual void issue_deferred_copies(CompositeCopyHelper &helper,
+                                         const FieldMask &local_copy_mask,
+         const LegionMap<IndexSpaceExpression*,FieldMask>::aligned &write_masks,
+               LegionMap<IndexSpaceExpression*,FieldMask>::aligned &perf_writes,
+                                         PredEvent pred_guard);
+    protected:
+      void issue_update_fills(CompositeCopyHelper &helper,
+                              const FieldMask &fill_mask,
+                              IndexSpaceExpression *mask,
+               LegionMap<IndexSpaceExpression*,FieldMask>::aligned &perf_writes,
+                              PredEvent pred_guard) const;
     public:
       static void handle_send_fill_view(Runtime *runtime, Deserializer &derez,
                                         AddressSpaceID source);
@@ -1543,6 +1599,11 @@ namespace Legion {
                           LegionMap<ApEvent,FieldMask>::aligned &postconditions,
                                          PredEvent pred_guard,
                                          CopyAcrossHelper *helper = NULL);
+      virtual void issue_deferred_copies(CompositeCopyHelper &helper,
+                                         const FieldMask &local_copy_mask,
+         const LegionMap<IndexSpaceExpression*,FieldMask>::aligned &write_masks,
+               LegionMap<IndexSpaceExpression*,FieldMask>::aligned &perf_writes,
+                                         PredEvent pred_guard);
     protected:
       void issue_guarded_update_copies(const TraversalInfo &info,
                                        MaterializedView *dst,

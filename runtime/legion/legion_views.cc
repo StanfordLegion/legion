@@ -4599,6 +4599,136 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
+    // CompositeCopier 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    CompositeCopyHelper::CompositeCopyHelper(const TraversalInfo &in,
+        MaterializedView *d, const FieldMask &m, bool r, CopyAcrossHelper *h)
+      : info(in), dst(d), across_helper(h), restrict_out(r), 
+        composite_copy_mask(m), has_dst_preconditions(false)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    CompositeCopyHelper::CompositeCopyHelper(const CompositeCopyHelper &rhs)
+      : info(rhs.info), dst(rhs.dst), across_helper(rhs.across_helper), 
+        restrict_out(rhs.restrict_out)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    CompositeCopyHelper::~CompositeCopyHelper(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    CompositeCopyHelper& CompositeCopyHelper::operator=(
+                                                 const CompositeCopyHelper &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void CompositeCopyHelper::merge_destination_preconditions(
+     const FieldMask &mask,LegionMap<ApEvent,FieldMask>::aligned &preconditions)
+    //--------------------------------------------------------------------------
+    {
+      if (!has_dst_preconditions)
+      {
+        // Compute the destination preconditions only once on demand
+        // Event though the composite copy mask is mutable, it represents
+        // all the fields which may still be copied, which is exactly
+        // the mask for the preconditions we need to compute, if fields
+        // were already pruned out of it then we won't be copying to 
+        // them anyway so no need to get their preconditions
+#ifdef DEBUG_LEGION
+        assert(!!composite_copy_mask);
+#endif
+        const AddressSpaceID local_space = dst->context->runtime->address_space;
+        dst->find_copy_preconditions(0/*redop*/, false/*reading*/,
+                                     false/*single copy*/, restrict_out,
+                                     composite_copy_mask, &info.version_info,
+                                     info.op->get_unique_op_id(), info.index,
+                                     local_space, dst_preconditions,
+                                     info.map_applied_events);
+        has_dst_preconditions = true;
+      }
+      for (LegionMap<ApEvent,FieldMask>::aligned::const_iterator it = 
+            dst_preconditions.begin(); it != dst_preconditions.end(); it++)
+      {
+        const FieldMask overlap = it->second & mask;
+        if (!overlap)
+          continue;
+        LegionMap<ApEvent,FieldMask>::aligned::iterator finder = 
+          preconditions.find(it->first);
+        if (finder == preconditions.end())
+          preconditions[it->first] = overlap;
+        else
+          finder->second |= overlap;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void CompositeCopyHelper::buffer_reductions(
+        const LegionMap<IndexSpaceExpression*,FieldMask>::aligned &write_masks,
+              LegionMap<ReductionView*,FieldMask>::aligned &source_reductions)
+    //--------------------------------------------------------------------------
+    {
+      bool has_prev_write_mask = (source_reductions.size() == 1);
+      FieldMask prev_write_mask;
+      for (LegionMap<ReductionView*,FieldMask>::aligned::iterator rit = 
+            source_reductions.begin(); rit != source_reductions.end(); rit++)
+      {
+        // First look for any write masks that we need to filter by
+        if (!has_prev_write_mask || !(prev_write_mask * rit->second))
+        {
+          for (LegionMap<IndexSpaceExpression*,FieldMask>::aligned::
+                const_iterator it = write_masks.begin(); 
+                it != write_masks.end(); it++)
+          {
+            // If this is the first time through we're computing the summary
+            if (!has_prev_write_mask)
+              prev_write_mask |= it->second;
+            const FieldMask overlap = rit->second & it->second;
+            if (!overlap)
+              continue;
+            // Save the pending reduction with the write mask
+            const std::pair<ReductionView*,IndexSpaceExpression*> 
+              key(rit->first, it->first); 
+            // This shouldn't already be in the set
+#ifdef DEBUG_LEGION
+            assert(pending_reductions.find(key) == pending_reductions.end());
+#endif
+            pending_reductions[key] = overlap;
+            rit->second -= overlap;
+            // Can break out if we're done and we already have a summary mask
+            if (!rit->second && has_prev_write_mask)
+              break;
+          }
+          if (!rit->second)
+            continue;
+        }
+        // If we get here then we have no write masks
+        const std::pair<ReductionView*,IndexSpaceExpression*> 
+          key(rit->first, NULL);
+        // This shouldn't already be in the set
+#ifdef DEBUG_LEGION
+        assert(pending_reductions.find(key) == pending_reductions.end());
+#endif
+        pending_reductions[key] = rit->second;
+      }
+    }
+
+    /////////////////////////////////////////////////////////////
     // CompositeBase 
     /////////////////////////////////////////////////////////////
 
@@ -4946,17 +5076,17 @@ namespace Legion {
       return tested_all_children;
     }
 
-#if 0
     //--------------------------------------------------------------------------
-    void CompositeBase::issue_composite_updates(const TraversalInfo &info,
-                                               MaterializedView *dst,
-                                               FieldMask &global_copy_mask,
-                                               const FieldMask &local_copy_mask,
-                                               const WriteMasks &write_masks,
-                                               WriteMasks &performed_writes,
-                                          PendingReductions &pending_reductions)
+    void CompositeBase::issue_composite_updates(CompositeCopyHelper &helper,
+                                                RegionTreeNode *logical_node,
+                                          const FieldMask &local_copy_mask,
+                                          VersionTracker *src_version_tracker,
+                                          PredEvent pred_guard, 
+                                          const WriteMasks &write_masks,
+                                                WriteMasks &performed_writes)
     //--------------------------------------------------------------------------
     {
+      FieldMask &global_copy_mask = helper.composite_copy_mask;
 #ifdef DEBUG_LEGION
       assert(!(local_copy_mask - global_copy_mask)); // only true at beginning
 #endif
@@ -4976,8 +5106,8 @@ namespace Legion {
           if (!child_mask)
             continue;
           // Skip any nodes that don't even intersect, they don't matter
-          if (!it->first->logical_node->intersects_with(dst->logical_node,
-                                                        false/*computes*/))
+          if (!it->first->logical_node->intersects_with(
+                helper.dst->logical_node, false/*computes*/))
             continue;
           children_to_traverse[it->first] = child_mask;
         }
@@ -4997,7 +5127,7 @@ namespace Legion {
           for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it =
                 reduction_views.begin(); it != reduction_views.end(); it++)
           {
-            const FieldMask overlap = it->second & reduction_mask;
+            const FieldMask overlap = it->second & local_copy_mask;
             if (!overlap)
               continue;
             source_reductions[it->first] = overlap;
@@ -5016,8 +5146,9 @@ namespace Legion {
           it->second &= global_copy_mask;
           if (!it->second)
             continue;
-          it->first->issue_composite_updates(info, dst, global_copy_mask, 
-              it->second, write_masks, child_writes, pending_reductions);
+          it->first->issue_composite_updates(helper, it->first->logical_node,
+                                it->second, src_version_tracker, pred_guard,
+                                write_masks, child_writes);
           // Special case if it any point our global copy mask becomes empty
           // then we can break out because we've issue all our writes, still
           // need to check for any reductions though
@@ -5042,7 +5173,7 @@ namespace Legion {
             all_previous_writes = &write_masks;
           else if (write_masks.empty())
           {
-            combine_writes(child_writes, global_copy_mask, dst, info.op);
+            combine_writes(child_writes, helper);
             all_previous_writes = &child_writes;
           }
           else
@@ -5050,7 +5181,7 @@ namespace Legion {
             previous_writes = child_writes;
             merge_write_sets(previous_writes, write_masks);
             // Do write combining which can reduce the global copy mask
-            combine_writes(previous_writes, global_copy_mask, dst, info.op);
+            combine_writes(previous_writes, helper);
             all_previous_writes = &previous_writes;
           }
           // Issue our writes from our physical instances
@@ -5058,10 +5189,9 @@ namespace Legion {
           // do this as we've already done all the writes
           WriteMasks local_writes;
           if (!!global_copy_mask)
-            issue_write_copies(global_copy_mask & local_copy_mask, 
-                               global_copy_mask, dst, info, source_views, 
-                               *all_previous_writes, local_writes,
-                               pending_reductions);
+            issue_update_copies(helper, logical_node, 
+                global_copy_mask & local_copy_mask, src_version_tracker,
+                pred_guard, source_views, *all_previous_writes, local_writes);
           // Finally merge our write updates with our child writes
           // if necessary and propagate them back up the tree
           // and propagate up the tree
@@ -5077,7 +5207,7 @@ namespace Legion {
             {
               // Need to merge everything together and write combine them
               merge_write_sets(local_writes, child_writes);
-              combine_writes(local_writes, global_copy_mask, dst, info.op);
+              combine_writes(local_writes, helper);
               merge_write_sets(performed_writes, local_writes);
             }
             else // children are already write combined, no need to do it again
@@ -5093,34 +5223,32 @@ namespace Legion {
         // We didn't do any child traversals so things are a little easier
         // Issue our writes from our physical instances
         WriteMasks local_writes;
-        issue_write_copies(local_copy_mask, global_copy_mask,dst, info,
-           source_views, write_masks, local_writes, pending_reductions);
+        issue_update_copies(helper, logical_node, local_copy_mask, 
+                           src_version_tracker, pred_guard, source_views, 
+                           write_masks, local_writes);
         // Finally merge our write updates into the performed set
         if (!local_writes.empty())
           merge_write_sets(performed_writes, local_writes);
       }
       // Lastly no matter what we do, we have to record our reductions
-      // if we have any, if the global copy mask doesn't contain our 
-      // reduction field then that is an easy way to know that all the
-      // writes are done for that field. Otherwise we need to record the
-      // reduction so we can perform it later once all the writes are done
+      // to be performed after all the updates to the instance
       if (!source_reductions.empty())
-        issue_or_buffer_reductions(global_copy_mask, 
-                                   source_reductions, pending_reductions);
+        helper.buffer_reductions(write_masks, source_reductions);
     }
 
     //--------------------------------------------------------------------------
-    void CompositeBase::issue_write_copies(FieldMask copy_mask,
-                                           FieldMask &global_copy_mask,
-                                           MaterializedView *dst,
-                                           const TraversalInfo &info,
+    void CompositeBase::issue_update_copies(CompositeCopyHelper &helper,
+                                            RegionTreeNode *logical_node,
+                                            FieldMask copy_mask,
+                                            VersionTracker *src_version_tracker,
+                                            PredEvent predicate_guard,
               const LegionMap<LogicalView*,FieldMask>::aligned &source_views,
-                                           const WriteMasks &previous_writes,
-                                           WriteMasks &performed_writes,
-                                    PendingReductions &pending_reductions) const
+                                            const WriteMasks &previous_writes,
+                                            WriteMasks &performed_writes) const
     //--------------------------------------------------------------------------
     {
-
+      MaterializedView *dst = helper.dst;
+      const TraversalInfo &info = helper.info;
 #ifdef DEBUG_LEGION
       // The previous writes data structure should be field unique,
       // if it's not then we are going to have big problems
@@ -5201,7 +5329,32 @@ namespace Legion {
                     source_views, src_instances, deferred_instances);
       if (!src_instances.empty())
       {
-
+        // This has all our destination preconditions
+        // Only issue copies from fields which have values
+        FieldMask actual_copy_mask;
+        LegionMap<ApEvent,FieldMask>::aligned copy_preconditions;
+        const AddressSpaceID local_space = context->runtime->address_space;
+        for (LegionMap<MaterializedView*,FieldMask>::aligned::const_iterator 
+              it = src_instances.begin(); it != src_instances.end(); it++)
+        {
+          it->first->find_copy_preconditions(0/*redop*/, true/*reading*/,
+                                             true/*single copy*/,
+                                             false/*restrict out*/,
+                                             it->second, src_version_tracker,
+                                             info.op->get_unique_op_id(),
+                                             info.index, local_space, 
+                                             copy_preconditions,
+                                             info.map_applied_events);
+          actual_copy_mask |= it->second;
+        }
+        helper.merge_destination_preconditions(actual_copy_mask, 
+                                               copy_preconditions);
+        // Issue the grouped copies and put the results in the postconditions
+        dst->logical_node->issue_grouped_copies(helper.info, dst,
+            false/*restrict out*/, predicate_guard, copy_preconditions, 
+            actual_copy_mask, src_instances, src_version_tracker,
+            helper.copy_postconditions, helper.across_helper, 
+            logical_node, &previous_writes, &performed_writes);
       }
       if (!deferred_instances.empty())
       {
@@ -5209,15 +5362,12 @@ namespace Legion {
         // write combining since we know that we didn't actually do any
         // writes for these fields locally or we wouldn't even be traversing
         // the composite views in the first place
-#if 0
         for (LegionMap<DeferredView*,FieldMask>::aligned::const_iterator it =
               deferred_instances.begin(); it != deferred_instances.end(); it++)
-          it->first->issue_composite_updates(info, dst, global_copy_mask,
-            it->second, previous_writes, performed_writes, pending_reductions);
-#endif
+          it->first->issue_deferred_copies(helper, it->second, 
+                previous_writes, performed_writes, predicate_guard);
       }
     }
-#endif
 
     //--------------------------------------------------------------------------
     /*static*/ void CompositeBase::merge_write_sets(WriteMasks &dst_writes,
@@ -5237,9 +5387,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ void CompositeBase::combine_writes(WriteMasks &write_masks,
-              FieldMask &global_copy_mask, MaterializedView *dst, Operation *op)
+                                                  CompositeCopyHelper &helper)
     //--------------------------------------------------------------------------
     {
+      Operation *op = helper.info.op;
+      MaterializedView *dst = helper.dst;
+      FieldMask &global_copy_mask = helper.composite_copy_mask;
       LegionList<FieldSet<IndexSpaceExpression*> >::aligned write_sets;
       // Compute the write sets for different fields
       // We use an empty universe mask since we don't care about fields
@@ -5738,6 +5891,18 @@ namespace Legion {
           postconditions.insert(*it);
       }
     } 
+
+    //--------------------------------------------------------------------------
+    void CompositeView::issue_deferred_copies(CompositeCopyHelper &helper,
+                                              const FieldMask &local_copy_mask,
+         const LegionMap<IndexSpaceExpression*,FieldMask>::aligned &write_masks,
+               LegionMap<IndexSpaceExpression*,FieldMask>::aligned &perf_writes,
+                                              PredEvent pred_guard)
+    //--------------------------------------------------------------------------
+    {
+      issue_composite_updates(helper, logical_node, local_copy_mask,
+                              this, pred_guard, write_masks, perf_writes);
+    }
 
     //--------------------------------------------------------------------------
     bool CompositeView::is_upper_bound_node(RegionTreeNode *node) const
@@ -7013,6 +7178,88 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void FillView::issue_deferred_copies(CompositeCopyHelper &helper,
+                                         const FieldMask &local_copy_mask,
+         const LegionMap<IndexSpaceExpression*,FieldMask>::aligned &write_masks,
+               LegionMap<IndexSpaceExpression*,FieldMask>::aligned &perf_writes,
+                                         PredEvent pred_guard)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      // The previous writes data structure should be field unique,
+      // if it's not then we are going to have big problems
+      FieldMask previous_writes_mask;
+#endif
+      FieldMask remaining_fill_mask = local_copy_mask;
+      // First issue any masked fills for things that have been written before
+      for (LegionMap<IndexSpaceExpression*,FieldMask>::aligned::const_iterator
+            it = write_masks.begin(); it != write_masks.end(); it++)
+      {
+#ifdef DEBUG_LEGION
+        assert(previous_writes_mask * it->second);
+        previous_writes_mask |= it->second;
+#endif
+        const FieldMask overlap = it->second & remaining_fill_mask;
+        if (!overlap)
+          continue;
+        // Issue our update fills
+        issue_update_fills(helper, overlap, it->first, perf_writes, pred_guard);
+        remaining_fill_mask -= overlap;
+        if (!remaining_fill_mask)
+          return;
+      }
+#ifdef DEBUG_LEGION
+      assert(!!remaining_fill_mask);
+#endif
+      // Then issue a remaining fill for any remainder events
+      issue_update_fills(helper, remaining_fill_mask, 
+                         NULL/*mask*/, perf_writes, pred_guard);
+    }
+
+    //--------------------------------------------------------------------------
+    void FillView::issue_update_fills(CompositeCopyHelper &helper,
+                                      const FieldMask &fill_mask,
+                                      IndexSpaceExpression *mask,
+               LegionMap<IndexSpaceExpression*,FieldMask>::aligned &perf_writes,
+                                      PredEvent pred_guard) const
+    //--------------------------------------------------------------------------
+    {
+      // Get the common set of events for these fields and issue the fills 
+      LegionMap<ApEvent,FieldMask>::aligned preconditions;
+      helper.merge_destination_preconditions(fill_mask, preconditions);
+      LegionList<FieldSet<ApEvent> >::aligned precondition_sets;
+      compute_field_sets<ApEvent>(fill_mask, preconditions, precondition_sets);
+      MaterializedView *dst = helper.dst;
+      // Iterate over the precondition sets
+      for (LegionList<FieldSet<ApEvent> >::aligned::iterator pit = 
+            precondition_sets.begin(); pit !=
+            precondition_sets.end(); pit++)
+      {
+        FieldSet<ApEvent> &pre_set = *pit;
+        // Build the dst fields vector
+        std::vector<CopySrcDstField> dst_fields;
+        dst->copy_to(pre_set.set_mask, dst_fields, helper.across_helper);
+        ApEvent fill_pre = Runtime::merge_events(pre_set.elements);
+        // Issue the fill command
+        // Only apply an intersection if the destination logical node
+        // is different than our logical node
+        // If the intersection is empty we can skip the fill all together
+        if ((logical_node != dst->logical_node) && 
+            (!logical_node->intersects_with(dst->logical_node)))
+          continue;
+        ApEvent fill_post = dst->logical_node->issue_fill(helper.info.op, 
+            dst_fields, value->value, value->value_size, fill_pre, pred_guard,
+#ifdef LEGION_SPY
+                        fill_op_uid,
+#endif
+                    (logical_node == dst->logical_node) ? NULL : logical_node,
+                    mask, &perf_writes, &pre_set.set_mask);
+        if (fill_post.exists())
+          helper.copy_postconditions[fill_post] = pre_set.set_mask;
+      }
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ void FillView::handle_send_fill_view(Runtime *runtime,
                                      Deserializer &derez, AddressSpaceID source)
     //--------------------------------------------------------------------------
@@ -7263,6 +7510,18 @@ namespace Legion {
             finder->second |= it->set_mask;
         }
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void PhiView::issue_deferred_copies(CompositeCopyHelper &helper,
+                                         const FieldMask &local_copy_mask,
+         const LegionMap<IndexSpaceExpression*,FieldMask>::aligned &write_masks,
+               LegionMap<IndexSpaceExpression*,FieldMask>::aligned &perf_writes,
+                                         PredEvent pred_guard)
+    //--------------------------------------------------------------------------
+    {
+      // TODO:
+      assert(false);
     }
 
     //--------------------------------------------------------------------------

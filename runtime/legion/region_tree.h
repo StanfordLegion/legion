@@ -1194,24 +1194,29 @@ namespace Legion {
     public:
       virtual ApEvent issue_copy(Operation *op, 
 #ifdef LEGION_SPY
-                  const std::vector<Realm::CopySrcDstField> &src_fields,
-                  const std::vector<Realm::CopySrcDstField> &dst_fields,
+              const std::vector<Realm::CopySrcDstField> &src_fields,
+              const std::vector<Realm::CopySrcDstField> &dst_fields,
 #else
-                  const std::vector<CopySrcDstField> &src_fields,
-                  const std::vector<CopySrcDstField> &dst_fields,
+              const std::vector<CopySrcDstField> &src_fields,
+              const std::vector<CopySrcDstField> &dst_fields,
 #endif
-                  ApEvent precondition, PredEvent predicate_guard,
-                  IndexTreeNode *intersect, IndexSpaceExpression *mask,
-                  ReductionOpID redop = 0, bool reduction_fold = true) = 0;
+              ApEvent precondition, PredEvent predicate_guard,
+              IndexTreeNode *intersect, IndexSpaceExpression *mask,
+              ReductionOpID redop = 0, bool reduction_fold = true,
+              LegionMap<IndexSpaceExpression*,FieldMask>::aligned *perf = NULL,
+              const FieldMask *performed_mask = NULL) = 0;
       virtual ApEvent issue_fill(Operation *op,
 #ifdef LEGION_SPY
-                  const std::vector<Realm::CopySrcDstField> &dst_fields,
+              const std::vector<Realm::CopySrcDstField> &dst_fields,
 #else
-                  const std::vector<CopySrcDstField> &dst_fields,
+              const std::vector<CopySrcDstField> &dst_fields,
 #endif
-                  const void *fill_value, size_t fill_size,
-                  ApEvent precondition, PredEvent predicate_guard,
-                  IndexTreeNode *intersect = NULL) = 0;
+              const void *fill_value, size_t fill_size,
+              ApEvent precondition, PredEvent predicate_guard,
+              IndexTreeNode *intersect = NULL,
+              IndexSpaceExpression *mask = NULL,
+              LegionMap<IndexSpaceExpression*,FieldMask>::aligned *perf = NULL,
+              const FieldMask *performed_mask = NULL) = 0;
     public:
       virtual Realm::InstanceLayoutGeneric* create_layout(
                            const Realm::InstanceLayoutConstraints &ilc,
@@ -1414,24 +1419,29 @@ namespace Legion {
     public:
       virtual ApEvent issue_copy(Operation *op, 
 #ifdef LEGION_SPY
-                  const std::vector<Realm::CopySrcDstField> &src_fields,
-                  const std::vector<Realm::CopySrcDstField> &dst_fields,
+              const std::vector<Realm::CopySrcDstField> &src_fields,
+              const std::vector<Realm::CopySrcDstField> &dst_fields,
 #else
-                  const std::vector<CopySrcDstField> &src_fields,
-                  const std::vector<CopySrcDstField> &dst_fields,
+              const std::vector<CopySrcDstField> &src_fields,
+              const std::vector<CopySrcDstField> &dst_fields,
 #endif
-                  ApEvent precondition, PredEvent predicate_guard,
-                  IndexTreeNode *intersect, IndexSpaceExpression *mask,
-                  ReductionOpID redop = 0, bool reduction_fold = true);
+              ApEvent precondition, PredEvent predicate_guard,
+              IndexTreeNode *intersect, IndexSpaceExpression *mask,
+              ReductionOpID redop = 0, bool reduction_fold = true,
+              LegionMap<IndexSpaceExpression*,FieldMask>::aligned *perf = NULL,
+              const FieldMask *performed_mask = NULL);
       virtual ApEvent issue_fill(Operation *op,
 #ifdef LEGION_SPY
-                  const std::vector<Realm::CopySrcDstField> &dst_fields,
+              const std::vector<Realm::CopySrcDstField> &dst_fields,
 #else
-                  const std::vector<CopySrcDstField> &dst_fields,
+              const std::vector<CopySrcDstField> &dst_fields,
 #endif
-                  const void *fill_value, size_t fill_size,
-                  ApEvent precondition, PredEvent predicate_guard,
-                  IndexTreeNode *intersect = NULL);
+              const void *fill_value, size_t fill_size,
+              ApEvent precondition, PredEvent predicate_guard,
+              IndexTreeNode *intersect = NULL,
+              IndexSpaceExpression *mask = NULL,
+              LegionMap<IndexSpaceExpression*,FieldMask>::aligned *perf = NULL,
+              const FieldMask *performed_mask = NULL);
     public:
       virtual Realm::InstanceLayoutGeneric* create_layout(
                            const Realm::InstanceLayoutConstraints &ilc,
@@ -2413,17 +2423,20 @@ namespace Legion {
                       LegionMap<ApEvent,FieldMask>::aligned &postconditions,
                                 CopyAcrossHelper *across_helper = NULL,
                                 RegionTreeNode *intersect = NULL,
-       const LegionMap<IndexSpaceExpression*,FieldMask>::aligned *masks = NULL);
-      void issue_single_copy(const TraversalInfo &info, 
+       const LegionMap<IndexSpaceExpression*,FieldMask>::aligned *masks = NULL,
+             LegionMap<IndexSpaceExpression*,FieldMask>::aligned *perf = NULL);
+      // Helper method for the above to issue copies with a mask
+      void issue_masked_copy(const TraversalInfo &info, 
                              const FieldMask &copy_mask,
                              MaterializedView *dst, bool restrict_out,
                              PredEvent predicate_guard, ApEvent copy_pre,
             const LegionMap<MaterializedView*,FieldMask>::aligned &src_instances,
                              VersionTracker *version_tracker,
-                      LegionMap<ApEvent,FieldMask>::aligned &postconditions,
+                  LegionMap<ApEvent,FieldMask>::aligned &postconditions,
                              CopyAcrossHelper *across_helper,
                              RegionTreeNode *intersect,
-                             IndexSpaceExpression* mask);
+                             IndexSpaceExpression* mask,
+                  LegionMap<IndexSpaceExpression*,FieldMask>::aligned *perf);
       void issue_update_reductions(LogicalView *target,
                                    const FieldMask &update_mask,
                                    VersionInfo &version_info,
@@ -2514,7 +2527,10 @@ namespace Legion {
                   const std::vector<CopySrcDstField> &dst_fields,
                   ApEvent precondition, PredEvent predicate_guard,
                   RegionTreeNode *intersect, IndexSpaceExpression *mask,
-                  ReductionOpID redop = 0, bool reduction_fold = true) = 0;
+                  ReductionOpID redop = 0, bool reduction_fold = true,
+                  LegionMap<IndexSpaceExpression*,
+                            FieldMask>::aligned *perf = NULL,
+                  const FieldMask *performed_mask = NULL) = 0;
       virtual ApEvent issue_fill(Operation *op,
                   const std::vector<CopySrcDstField> &dst_fields,
                   const void *fill_value, size_t fill_size,
@@ -2522,7 +2538,11 @@ namespace Legion {
 #ifdef LEGION_SPY
                   UniqueID fill_uid,
 #endif
-                  RegionTreeNode *intersect = NULL) = 0;
+                  RegionTreeNode *intersect = NULL,
+                  IndexSpaceExpression *mask = NULL,
+                  LegionMap<IndexSpaceExpression*,
+                            FieldMask>::aligned *perf = NULL,
+                  const FieldMask *performed_mask = NULL) = 0;
     public:
       virtual bool are_children_disjoint(const LegionColor c1, 
                                          const LegionColor c2) = 0;
@@ -2656,7 +2676,10 @@ namespace Legion {
                   const std::vector<CopySrcDstField> &dst_fields,
                   ApEvent precondition, PredEvent predicate_guard,
                   RegionTreeNode *intersect, IndexSpaceExpression *mask,
-                  ReductionOpID redop = 0, bool reduction_fold = true);
+                  ReductionOpID redop = 0, bool reduction_fold = true,
+                  LegionMap<IndexSpaceExpression*,
+                            FieldMask>::aligned *perf = NULL,
+                  const FieldMask *performed_mask = NULL);
       virtual ApEvent issue_fill(Operation *op,
                   const std::vector<CopySrcDstField> &dst_fields,
                   const void *fill_value, size_t fill_size,
@@ -2664,7 +2687,11 @@ namespace Legion {
 #ifdef LEGION_SPY
                   UniqueID fill_uid,
 #endif
-                  RegionTreeNode *intersect = NULL);
+                  RegionTreeNode *intersect = NULL,
+                  IndexSpaceExpression *mask = NULL,
+                  LegionMap<IndexSpaceExpression*,
+                            FieldMask>::aligned *perf = NULL,
+                  const FieldMask *performed_mask = NULL);
     public:
       virtual bool are_children_disjoint(const LegionColor c1, 
                                          const LegionColor c2);
@@ -2850,7 +2877,10 @@ namespace Legion {
                   const std::vector<CopySrcDstField> &dst_fields,
                   ApEvent precondition, PredEvent predicate_guard,
                   RegionTreeNode *intersect, IndexSpaceExpression *mask,
-                  ReductionOpID redop = 0, bool reduction_fold = true);
+                  ReductionOpID redop = 0, bool reduction_fold = true,
+                  LegionMap<IndexSpaceExpression*,
+                            FieldMask>::aligned *perf = NULL,
+                  const FieldMask *performed_mask = NULL);
       virtual ApEvent issue_fill(Operation *op,
                   const std::vector<CopySrcDstField> &dst_fields,
                   const void *fill_value, size_t fill_size,
@@ -2858,7 +2888,11 @@ namespace Legion {
 #ifdef LEGION_SPY
                   UniqueID fill_uid,
 #endif
-                  RegionTreeNode *intersect = NULL);
+                  RegionTreeNode *intersect = NULL,
+                  IndexSpaceExpression *mask = NULL,
+                  LegionMap<IndexSpaceExpression*,
+                            FieldMask>::aligned *perf = NULL,
+                  const FieldMask *performed_mask = NULL);
     public:
       virtual bool are_children_disjoint(const LegionColor c1, 
                                          const LegionColor c2);

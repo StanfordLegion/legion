@@ -2621,15 +2621,17 @@ namespace Legion {
     template<int DIM, typename T>
     ApEvent IndexSpaceNodeT<DIM,T>::issue_copy(Operation *op,
 #ifdef LEGION_SPY
-                        const std::vector<Realm::CopySrcDstField> &src_fields,
-                        const std::vector<Realm::CopySrcDstField> &dst_fields,
+                      const std::vector<Realm::CopySrcDstField> &src_fields,
+                      const std::vector<Realm::CopySrcDstField> &dst_fields,
 #else
-                        const std::vector<CopySrcDstField> &src_fields,
-                        const std::vector<CopySrcDstField> &dst_fields,
+                      const std::vector<CopySrcDstField> &src_fields,
+                      const std::vector<CopySrcDstField> &dst_fields,
 #endif
-                        ApEvent precondition, PredEvent predicate_guard,
-                        IndexTreeNode *intersect, IndexSpaceExpression *mask,
-                        ReductionOpID redop /*=0*/,bool reduction_fold/*=true*/)
+                      ApEvent precondition, PredEvent predicate_guard,
+                      IndexTreeNode *intersect, IndexSpaceExpression *mask,
+                      ReductionOpID redop /*=0*/,bool reduction_fold/*=true*/,
+                      LegionMap<IndexSpaceExpression*,FieldMask>::aligned *perf,
+                      const FieldMask *performed_mask/*=NULL*/)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(context->runtime, REALM_ISSUE_COPY_CALL);
@@ -2672,6 +2674,19 @@ namespace Legion {
         return ApEvent::NO_AP_EVENT;
 #endif
       }
+      // If we make it here then record our performed write
+      if (perf != NULL)
+      {
+#ifdef DEBUG_LEGION
+        assert(performed_mask != NULL);
+#endif
+        LegionMap<IndexSpaceExpression*,FieldMask>::aligned::iterator
+          finder = perf->find(copy_expr);
+        if (finder == perf->end())
+          (*perf)[copy_expr] = *performed_mask;
+        else
+          finder->second |= *performed_mask;
+      }
       ApEvent result;
       // Have to protect against misspeculation
       if (predicate_guard.exists())
@@ -2699,13 +2714,15 @@ namespace Legion {
     template<int DIM, typename T>
     ApEvent IndexSpaceNodeT<DIM,T>::issue_fill(Operation *op,
 #ifdef LEGION_SPY
-                        const std::vector<Realm::CopySrcDstField> &dst_fields,
+                      const std::vector<Realm::CopySrcDstField> &dst_fields,
 #else
-                        const std::vector<CopySrcDstField> &dst_fields,
+                      const std::vector<CopySrcDstField> &dst_fields,
 #endif
-                        const void *fill_value, size_t fill_size,
-                        ApEvent precondition, PredEvent predicate_guard,
-                        IndexTreeNode *intersect)
+                      const void *fill_value, size_t fill_size,
+                      ApEvent precondition, PredEvent predicate_guard,
+                      IndexTreeNode *intersect, IndexSpaceExpression *mask,
+                      LegionMap<IndexSpaceExpression*,FieldMask>::aligned *perf,
+                      const FieldMask *performed_mask/*=NULL*/)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(context->runtime, REALM_ISSUE_FILL_CALL);
@@ -2727,6 +2744,9 @@ namespace Legion {
           fill_expr = context->intersect_index_spaces(op, fill_expr,
               intersect->as_index_part_node()->get_union_expression());
       }
+      // Then remove any mask from the fill 
+      if (mask != NULL)
+        fill_expr = context->subtract_index_spaces(op, fill_expr, mask);
       if (context->runtime->profiler != NULL)
         context->runtime->profiler->add_fill_request(requests, op);
       Realm::IndexSpace<DIM,T> local_space;
@@ -2744,6 +2764,19 @@ namespace Legion {
 #else
         return ApEvent::NO_AP_EVENT;
 #endif
+      }
+      // If we make it here then record our performed write
+      if (perf != NULL)
+      {
+#ifdef DEBUG_LEGION
+        assert(performed_mask != NULL);
+#endif
+        LegionMap<IndexSpaceExpression*,FieldMask>::aligned::iterator
+          finder = perf->find(fill_expr);
+        if (finder == perf->end())
+          (*perf)[fill_expr] = *performed_mask;
+        else
+          finder->second |= *performed_mask;
       }
       ApEvent result;
       // Have to protect against misspeculation
