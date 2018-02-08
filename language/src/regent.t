@@ -64,6 +64,7 @@ local language = {
     "__leaf",
     "__mapping",
     "__openmp",
+    "__optimize",
     "__parallel",
     "__parallelize_with",
     "__physical",

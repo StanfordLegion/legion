@@ -227,7 +227,7 @@ namespace Realm {
 	  continue;
 	// find the node symlink to determine the node
 	char path2[256];
-	sprintf(path2, "/sys/devices/system/cpu/%s", de->d_name);
+	sprintf(path2, "/sys/devices/system/cpu/%.16s", de->d_name);
 	DIR *d2 = opendir(path2);
 	if(!d2) {
 	  fprintf(stderr, "couldn't read '%s': %s\n", path2, strerror(errno));

@@ -247,6 +247,11 @@ namespace Legion {
       virtual void resume_mapper_call(MappingCallInfo *info) = 0;
       virtual void finish_mapper_call(MappingCallInfo *info) = 0;
     public:
+      void update_mappable_tag(MappingCallInfo *info,
+                               const Mappable &mappable, MappingTagID tag);
+      void update_mappable_data(MappingCallInfo *info, const Mappable &mappable,
+                                const void *mapper_data, size_t data_size);
+    public:
       void send_message(MappingCallInfo *info, Processor target, 
                         const void *message, size_t message_size, 
                         unsigned message_kind);
