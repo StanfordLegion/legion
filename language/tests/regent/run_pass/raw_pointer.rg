@@ -15,10 +15,10 @@
 import "regent"
 
 task main()
-  var x : &int = [&int](regentlib.c.malloc(terralib.sizeof(int)))
-  regentlib.assert(x ~= nil)
-  @x = 123
-  regentlib.c.printf("x: %d\n", @x)
+  var x : &int = [&int](regentlib.c.malloc([terralib.sizeof(int)]))
+  regentlib.assert(x ~= [&int](0), "malloc failed")
+  x[0] = 123
+  regentlib.c.printf("x: %d\n", x[0])
   regentlib.c.free(x)
 end
 regentlib.start(main)
