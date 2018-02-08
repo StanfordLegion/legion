@@ -205,8 +205,9 @@ namespace Legion {
         sub_expressions[idx]->remove_parent_operation(this);
       // Then remove ourselves from the tree
       forest->remove_union_operation(this, sub_expressions.size());
-      // Return true if we should be deleted
-      return (this->references == 0); 
+      // Remove our expression reference added by invalidate_operation
+      // and return true if we should be deleted
+      return this->remove_expression_reference();
     }
 
     //--------------------------------------------------------------------------
@@ -308,8 +309,9 @@ namespace Legion {
         sub_expressions[idx]->remove_parent_operation(this);
       // Then remove ourselves from the tree
       forest->remove_intersection_operation(this, sub_expressions.size());
-      // Return true if we should be deleted
-      return (this->references == 0); 
+      // Remove our expression reference added by invalidate_operation
+      // and return true if we should be deleted
+      return this->remove_expression_reference();
     }
 
     //--------------------------------------------------------------------------
@@ -403,8 +405,9 @@ namespace Legion {
       rhs->remove_parent_operation(this);
       // Then remove ourselves from the tree
       forest->remove_subtraction_operation(this, lhs);
-      // Return true if we should be deleted
-      return (this->references == 0);
+      // Remove our expression reference added by invalidate_operation
+      // and return true if we should be deleted
+      return this->remove_expression_reference();
     }
 
     /////////////////////////////////////////////////////////////

@@ -4718,8 +4718,7 @@ namespace Legion {
         for (std::deque<IndexSpaceOperation*>::const_iterator it = 
               to_remove.begin(); it != to_remove.end(); it++)
         {
-          IndexSpaceOperation *op = *it;
-          if (op->remove_operation(this))
+          if ((*it)->remove_operation(this))
             to_delete.push_back(*it);
         }
       }
@@ -4900,6 +4899,9 @@ namespace Legion {
     IndexSpaceOperation::~IndexSpaceOperation(void)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(invalidated > 0);
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -4948,6 +4950,8 @@ namespace Legion {
         return;
       // Add ourselves to the list if we're here first
       to_remove.push_back(this);
+      // Add an expression reference to prevent us being collected early
+      add_expression_reference();
       // Then continue up the expression tree
       for (std::set<IndexSpaceOperation*>::const_iterator it = 
             parent_operations.begin(); it != parent_operations.end(); it++)
