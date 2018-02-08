@@ -2928,7 +2928,7 @@ function type_check.expr_deref(cx, node)
   local value = type_check.expr(cx, node.value)
   local value_type = std.check_read(cx, value)
 
-  if not std.is_bounded_type(value_type) then
+  if not (value_type:ispointer() or std.is_bounded_type(value_type)) then
     report.error(node, "dereference of non-pointer type " .. tostring(value_type))
   end
 
