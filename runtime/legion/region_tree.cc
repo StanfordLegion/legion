@@ -4574,12 +4574,17 @@ namespace Legion {
       const std::pair<TypeTag,size_t> key(first->type_tag, exprs.size());
       {
         AutoLock l_lock(lookup_is_op_lock,1,false/*exclusive*/);
-        const std::deque<IndexSpaceOperation*> &unions = union_ops[key];
-        for (std::deque<IndexSpaceOperation*>::const_iterator it = 
-              unions.begin(); it != unions.end(); it++)
+        std::map<std::pair<TypeTag,size_t>,
+                 std::deque<IndexSpaceOperation*> >::const_iterator finder =
+          union_ops.find(key);
+        if (finder != union_ops.end())
         {
-          if ((*it)->matches(exprs))
-            return (*it);
+          for (std::deque<IndexSpaceOperation*>::const_iterator it = 
+                finder->second.begin(); it != finder->second.end(); it++)
+          {
+            if ((*it)->matches(exprs))
+              return (*it);
+          }
         }
       }
       // Didn't find it, retake the lock, see if we lost the race
@@ -4629,13 +4634,17 @@ namespace Legion {
       const std::pair<TypeTag,size_t> key(first->type_tag, exprs.size());
       {
         AutoLock l_lock(lookup_is_op_lock,1,false/*exclusive*/);
-        const std::deque<IndexSpaceOperation*> &intersections = 
-          intersection_ops[key];
-        for (std::deque<IndexSpaceOperation*>::const_iterator it = 
-              intersections.begin(); it != intersections.end(); it++)
+        std::map<std::pair<TypeTag,size_t>,
+                 std::deque<IndexSpaceOperation*> >::const_iterator finder = 
+          intersection_ops.find(key);
+        if (finder != intersection_ops.end())
         {
-          if ((*it)->matches(exprs))
-            return (*it);
+          for (std::deque<IndexSpaceOperation*>::const_iterator it = 
+                finder->second.begin(); it != finder->second.end(); it++)
+          {
+            if ((*it)->matches(exprs))
+              return (*it);
+          }
         }
       }
       // Didn't find it, retake the lock, see if we lost the race
@@ -4668,13 +4677,17 @@ namespace Legion {
       const std::pair<TypeTag,IndexSpaceExprID> key(lhs->type_tag,lhs->expr_id);
       {
         AutoLock l_lock(lookup_is_op_lock,1,false/*exclusive*/);
-        const std::deque<IndexSpaceOperation*> &differences = 
-          difference_ops[key];
-        for (std::deque<IndexSpaceOperation*>::const_iterator it = 
-              differences.begin(); it != differences.end(); it++)
+        std::map<std::pair<TypeTag,IndexSpaceExprID>,
+                 std::deque<IndexSpaceOperation*> >::const_iterator finder = 
+          difference_ops.find(key);
+        if (finder != difference_ops.end())
         {
-          if ((*it)->matches(lhs, rhs))
-            return (*it);
+          for (std::deque<IndexSpaceOperation*>::const_iterator it = 
+                finder->second.begin(); it != finder->second.end(); it++)
+          {
+            if ((*it)->matches(lhs, rhs))
+              return (*it);
+          }
         }
       }
       // Didn't find, retake the lock, see if we lost the race
