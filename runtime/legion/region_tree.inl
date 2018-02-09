@@ -329,31 +329,41 @@ namespace Legion {
         , lhs(l), rhs(r)
     //--------------------------------------------------------------------------
     {
-      Realm::IndexSpace<DIM,T> lhs_space, rhs_space;
-      // Add the parent and the references
-      lhs->add_parent_operation(this);
-      rhs->add_parent_operation(this);
-      lhs->add_expression_reference();
-      rhs->add_expression_reference();
-      ApEvent left_ready = 
-        lhs->get_expr_index_space(&lhs_space, this->type_tag, false/*tight*/);
-      ApEvent right_ready = 
-        rhs->get_expr_index_space(&rhs_space, this->type_tag, false/*tight*/);
-      ApEvent precondition = Runtime::merge_events(left_ready, right_ready);
-      Realm::ProfilingRequestSet requests;
-      if (ctx->runtime->profiler != NULL)
-        ctx->runtime->profiler->add_partition_request(requests,
-                                          op, DEP_PART_DIFFERENCE);
-      this->realm_index_space_ready = ApEvent(
-          Realm::IndexSpace<DIM,T>::compute_difference(lhs_space, rhs_space, 
-                            this->realm_index_space, requests, precondition));
-      // Then launch the tighten call for it too since we know we're
-      // going to want this eventually
-      IndexSpaceExpression::TightenIndexSpaceArgs args;
-      args.proxy_this = this;
-      this->tight_index_space_ready = 
-        ctx->runtime->issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY,
-                  op, Runtime::protect_event(this->realm_index_space_ready));
+      if (lhs == rhs)
+      {
+        // Special case for when the expressions are the same
+        lhs->add_parent_operation(this);
+        lhs->add_expression_reference();
+        // Everything was already default constructed as empty and no events
+      }
+      else
+      {
+        Realm::IndexSpace<DIM,T> lhs_space, rhs_space;
+        // Add the parent and the references
+        lhs->add_parent_operation(this);
+        rhs->add_parent_operation(this);
+        lhs->add_expression_reference();
+        rhs->add_expression_reference();
+        ApEvent left_ready = 
+          lhs->get_expr_index_space(&lhs_space, this->type_tag, false/*tight*/);
+        ApEvent right_ready = 
+          rhs->get_expr_index_space(&rhs_space, this->type_tag, false/*tight*/);
+        ApEvent precondition = Runtime::merge_events(left_ready, right_ready);
+        Realm::ProfilingRequestSet requests;
+        if (ctx->runtime->profiler != NULL)
+          ctx->runtime->profiler->add_partition_request(requests,
+                                            op, DEP_PART_DIFFERENCE);
+        this->realm_index_space_ready = ApEvent(
+            Realm::IndexSpace<DIM,T>::compute_difference(lhs_space, rhs_space, 
+                              this->realm_index_space, requests, precondition));
+        // Then launch the tighten call for it too since we know we're
+        // going to want this eventually
+        IndexSpaceExpression::TightenIndexSpaceArgs args;
+        args.proxy_this = this;
+        this->tight_index_space_ready = 
+          ctx->runtime->issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY,
+                    op, Runtime::protect_event(this->realm_index_space_ready));
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -374,7 +384,7 @@ namespace Legion {
     {
       if (lhs->remove_expression_reference())
         delete lhs;
-      if (rhs->remove_expression_reference())
+      if ((lhs != rhs) && rhs->remove_expression_reference())
         delete rhs;
     }
 
@@ -409,7 +419,8 @@ namespace Legion {
     {
       // Remove the parent operation from all the sub expressions
       lhs->remove_parent_operation(this);
-      rhs->remove_parent_operation(this);
+      if (lhs != rhs)
+        rhs->remove_parent_operation(this);
       // Then remove ourselves from the tree
       forest->remove_subtraction_operation(this, lhs);
       // Remove our expression reference added by invalidate_operation
