@@ -239,9 +239,16 @@ namespace Legion {
       if (ctx->runtime->profiler != NULL)
         ctx->runtime->profiler->add_partition_request(requests,
                                       op, DEP_PART_INTERSECTION_REDUCTION);
-      this->realm_index_space_ready = ApEvent(
-          Realm::IndexSpace<DIM,T>::compute_intersection(
-              spaces, this->realm_index_space, requests, precondition));
+      // TODO: remove this with realm bug fix
+      if (spaces.size() == 2)
+        this->realm_index_space_ready = ApEvent(
+            Realm::IndexSpace<DIM,T>::compute_intersection(
+              spaces[0], spaces[1], this->realm_index_space, 
+              requests, precondition));
+      else
+        this->realm_index_space_ready = ApEvent(
+            Realm::IndexSpace<DIM,T>::compute_intersection(
+                spaces, this->realm_index_space, requests, precondition));
       // Then launch the tighten call for it too since we know we're
       // going to want this eventually
       IndexSpaceExpression::TightenIndexSpaceArgs args;
