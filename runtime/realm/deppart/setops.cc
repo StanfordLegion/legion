@@ -106,10 +106,11 @@ namespace Realm {
       assert(0);
     }
 
-    // similar to union, we need N-1 dims to match exactly and one to be like 1-D
+    // we need N-1 dims to match (or be subsets), and exactly one to stick out
+    //  (and only on one side)
     int i = 0;
     out = lhs;
-    while((i < N) && (lhs.lo[i] == rhs.lo[i]) && (lhs.hi[i] == rhs.hi[i]))
+    while((i < N) && (lhs.lo[i] >= rhs.lo[i]) && (lhs.hi[i] <= rhs.hi[i]))
       i++;
     assert(i < N); // containment test above should eliminate i==N case
 
@@ -137,9 +138,9 @@ namespace Realm {
       }
     }
 
-    // remaining dimensions must match
+    // remaining dimensions must match (or be subsets)
     while(++i < N)
-      if((lhs.lo[i] != rhs.lo[i]) || (lhs.hi[i] != rhs.hi[i]))
+      if((lhs.lo[i] < rhs.lo[i]) || (lhs.hi[i] > rhs.hi[i]))
 	return false;
 
     return true;
@@ -474,6 +475,12 @@ namespace Realm {
 
 	// empty rhs - result is empty
 	if(subspaces[i].empty()) {
+	  result = IndexSpace<N,T>::make_empty();
+	  break;
+	}
+
+	// disjointness of lhs and rhs bounds - result is empty
+	if(!result.bounds.overlaps(subspaces[i].bounds)) {
 	  result = IndexSpace<N,T>::make_empty();
 	  break;
 	}
