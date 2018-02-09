@@ -330,7 +330,7 @@ namespace Legion {
         this->realm_index_space = Realm::IndexSpace<DIM,T>::make_empty();
         this->tight_index_space = Realm::IndexSpace<DIM,T>::make_empty();
         this->realm_index_space_ready = ApEvent::NO_AP_EVENT;
-        this->right_index_space_ready = RtEvent::NO_RT_EVENT;
+        this->tight_index_space_ready = RtEvent::NO_RT_EVENT;
       }
       else
       {
