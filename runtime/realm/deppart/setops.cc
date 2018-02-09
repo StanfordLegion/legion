@@ -109,7 +109,7 @@ namespace Realm {
     // similar to union, we need N-1 dims to match exactly and one to be like 1-D
     int i = 0;
     out = lhs;
-    while((i < N) && (lhs.lo[i] >= rhs.lo[i]) && (lhs.hi[i] <= rhs.hi[i]))
+    while((i < N) && (lhs.lo[i] == rhs.lo[i]) && (lhs.hi[i] == rhs.hi[i]))
       i++;
     assert(i < N); // containment test above should eliminate i==N case
 
@@ -139,7 +139,7 @@ namespace Realm {
 
     // remaining dimensions must match
     while(++i < N)
-      if((lhs.lo[i] < rhs.lo[i]) || (lhs.hi[i] > rhs.hi[i]))
+      if((lhs.lo[i] != rhs.lo[i]) || (lhs.hi[i] != rhs.hi[i]))
 	return false;
 
     return true;
