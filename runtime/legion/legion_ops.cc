@@ -535,6 +535,7 @@ namespace Legion {
       }
     }
 
+#ifndef PRUNE_OLD_COMPOSITE
     //--------------------------------------------------------------------------
     MaterializedView* Operation::create_temporary_instance(PhysicalManager *dst,
                                  unsigned index, const FieldMask &needed_fields)
@@ -625,6 +626,7 @@ namespace Legion {
                                           *it, result->get_use_event());
       }
     }
+#endif
 
     //--------------------------------------------------------------------------
     void Operation::enqueue_ready_operation(RtEvent wait_on/*=Event::NO_EVENT*/,
@@ -2610,6 +2612,7 @@ namespace Legion {
       map_applied_conditions.insert(event);
     }
 
+#ifndef PRUNE_OLD_COMPOSITE
     //--------------------------------------------------------------------------
     PhysicalManager* MapOp::select_temporary_instance(PhysicalManager *dst,
                                  unsigned index, const FieldMask &needed_fields)
@@ -2647,6 +2650,7 @@ namespace Legion {
                                index, needed_fields);
       return output.temporary_instance.impl;
     }
+#endif
 
     //--------------------------------------------------------------------------
     void MapOp::record_restrict_postcondition(ApEvent restrict_postcondition)
@@ -3975,6 +3979,7 @@ namespace Legion {
       map_applied_conditions.insert(event);
     }
 
+#ifndef PRUNE_OLD_COMPOSITE
     //--------------------------------------------------------------------------
     PhysicalManager* CopyOp::select_temporary_instance(PhysicalManager *dst,
                                  unsigned index, const FieldMask &needed_fields)
@@ -4015,6 +4020,7 @@ namespace Legion {
                                index, needed_fields);
       return output.temporary_instance.impl;
     }
+#endif
 
     //--------------------------------------------------------------------------
     ApEvent CopyOp::get_restrict_precondition(void) const
@@ -7011,6 +7017,7 @@ namespace Legion {
       map_applied_conditions.insert(event);
     }
 
+#ifndef PRUNE_OLD_COMPOSITE
     //--------------------------------------------------------------------------
     PhysicalManager* InterCloseOp::select_temporary_instance(
            PhysicalManager *dst, unsigned index, const FieldMask &needed_fields)
@@ -7047,6 +7054,7 @@ namespace Legion {
                                index, needed_fields);
       return output.temporary_instance.impl;
     }
+#endif
 
     //--------------------------------------------------------------------------
     void InterCloseOp::invoke_mapper(const InstanceSet &valid_instances)
@@ -7569,6 +7577,7 @@ namespace Legion {
       map_applied_conditions.insert(event);
     }
 
+#ifndef PRUNE_OLD_COMPOSITE
     //--------------------------------------------------------------------------
     PhysicalManager* PostCloseOp::select_temporary_instance(
            PhysicalManager *dst, unsigned index, const FieldMask &needed_fields)
@@ -7605,6 +7614,7 @@ namespace Legion {
                                index, needed_fields);
       return output.temporary_instance.impl;
     }
+#endif
 
     //--------------------------------------------------------------------------
     void PostCloseOp::add_copy_profiling_request(
@@ -8778,6 +8788,7 @@ namespace Legion {
       map_applied_conditions.insert(event);
     }
 
+#ifndef PRUNE_OLD_COMPOSITE
     //--------------------------------------------------------------------------
     PhysicalManager* ReleaseOp::select_temporary_instance(PhysicalManager *dst,
                                  unsigned index, const FieldMask &needed_fields)
@@ -8814,6 +8825,7 @@ namespace Legion {
                                index, needed_fields);
       return output.temporary_instance.impl;
     }
+#endif
 
     //--------------------------------------------------------------------------
     ApEvent ReleaseOp::get_restrict_precondition(void) const
@@ -12253,6 +12265,7 @@ namespace Legion {
       map_applied_conditions.insert(event);
     }
 
+#ifndef PRUNE_OLD_COMPOSITE
     //--------------------------------------------------------------------------
     PhysicalManager* DependentPartitionOp::select_temporary_instance(
            PhysicalManager *dst, unsigned index, const FieldMask &needed_fields)
@@ -12290,6 +12303,7 @@ namespace Legion {
                                index, needed_fields);
       return output.temporary_instance.impl;
     }
+#endif
 
     //--------------------------------------------------------------------------
     void DependentPartitionOp::record_restrict_postcondition(

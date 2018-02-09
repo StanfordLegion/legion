@@ -254,6 +254,7 @@ namespace Legion {
       finish_mapper_call(info);
     }
 
+#ifndef PRUNE_OLD_COMPOSITE
     //--------------------------------------------------------------------------
     void MapperManager::invoke_task_create_temporary(TaskOp *task,
                                       Mapper::CreateTaskTemporaryInput *input,
@@ -279,6 +280,7 @@ namespace Legion {
       mapper->create_task_temporary_instance(info, *task, *input, *output);
       finish_mapper_call(info);
     }
+#endif
 
     //--------------------------------------------------------------------------
     void MapperManager::invoke_task_speculate(TaskOp *task,
@@ -380,6 +382,7 @@ namespace Legion {
       finish_mapper_call(info);
     }
 
+#ifndef PRUNE_OLD_COMPOSITE
     //--------------------------------------------------------------------------
     void MapperManager::invoke_inline_create_temporary(MapOp *op,
                                     Mapper::CreateInlineTemporaryInput *input,
@@ -405,6 +408,7 @@ namespace Legion {
       mapper->create_inline_temporary_instance(info, *op, *input, *output);
       finish_mapper_call(info);
     }
+#endif
 
     //--------------------------------------------------------------------------
     void MapperManager::invoke_inline_report_profiling(MapOp *op, 
@@ -481,6 +485,7 @@ namespace Legion {
       finish_mapper_call(info);
     }
 
+#ifndef PRUNE_OLD_COMPOSITE
     //--------------------------------------------------------------------------
     void MapperManager::invoke_copy_create_temporary(CopyOp *op,
                                     Mapper::CreateCopyTemporaryInput *input,
@@ -506,6 +511,7 @@ namespace Legion {
       mapper->create_copy_temporary_instance(info, *op, *input, *output);
       finish_mapper_call(info);
     }
+#endif
 
     //--------------------------------------------------------------------------
     void MapperManager::invoke_copy_speculate(CopyOp *op, 
@@ -606,6 +612,7 @@ namespace Legion {
       finish_mapper_call(info);
     }
 
+#ifndef PRUNE_OLD_COMPOSITE
     //--------------------------------------------------------------------------
     void MapperManager::invoke_close_create_temporary(CloseOp *op,
                                     Mapper::CreateCloseTemporaryInput *input,
@@ -631,6 +638,7 @@ namespace Legion {
       mapper->create_close_temporary_instance(info, *op, *input, *output);
       finish_mapper_call(info);
     }
+#endif
 
     //--------------------------------------------------------------------------
     void MapperManager::invoke_close_report_profiling(CloseOp *op,
@@ -780,6 +788,7 @@ namespace Legion {
       finish_mapper_call(info);
     }
 
+#ifndef PRUNE_OLD_COMPOSITE
     //--------------------------------------------------------------------------
     void MapperManager::invoke_release_create_temporary(ReleaseOp *op,
                                   Mapper::CreateReleaseTemporaryInput *input,
@@ -805,6 +814,7 @@ namespace Legion {
       mapper->create_release_temporary_instance(info, *op, *input, *output);
       finish_mapper_call(info);
     }
+#endif
 
     //--------------------------------------------------------------------------
     void MapperManager::invoke_release_speculate(ReleaseOp *op,
@@ -937,6 +947,7 @@ namespace Legion {
       finish_mapper_call(info);
     }
 
+#ifndef PRUNE_OLD_COMPOSITE
     //--------------------------------------------------------------------------
     void MapperManager::invoke_partition_create_temporary(
                                 DependentPartitionOp *op,
@@ -964,6 +975,7 @@ namespace Legion {
       mapper->create_partition_temporary_instance(info, *op, *input, *output);
       finish_mapper_call(info);
     }
+#endif
 
     //--------------------------------------------------------------------------
     void MapperManager::invoke_partition_report_profiling(

@@ -343,6 +343,7 @@ namespace Legion {
       void filter_copy_request_kinds(MapperManager *mapper,
           const std::set<ProfilingMeasurementID> &requests,
           std::vector<ProfilingMeasurementID> &results, bool warn_if_not_copy);
+#ifndef PRUNE_OLD_COMPOSITE
     public:
       // Help for creating temporary instances
       MaterializedView* create_temporary_instance(PhysicalManager *dst,
@@ -358,6 +359,7 @@ namespace Legion {
                               const char *mapper_call_name) const;
       void log_temporary_instance(PhysicalManager *result, unsigned index,
                                   const FieldMask &needed_fields) const;
+#endif
     public:
       // The following are sets of calls that we can use to 
       // indicate mapping, execution, resolution, completion, and commit
@@ -725,8 +727,10 @@ namespace Legion {
                    get_acquired_instances_ref(void);
       virtual void update_atomic_locks(Reservation lock, bool exclusive);
       virtual void record_reference_mutation_effect(RtEvent event);
+#ifndef PRUNE_OLD_COMPOSITE
       virtual PhysicalManager* select_temporary_instance(PhysicalManager *dst,
                               unsigned index, const FieldMask &needed_fields);
+#endif
       virtual void record_restrict_postcondition(ApEvent postcondition);
     public:
       virtual UniqueID get_unique_id(void) const;
@@ -814,8 +818,10 @@ namespace Legion {
                    get_acquired_instances_ref(void);
       virtual void update_atomic_locks(Reservation lock, bool exclusive);
       virtual void record_reference_mutation_effect(RtEvent event);
+#ifndef PRUNE_OLD_COMPOSITE
       virtual PhysicalManager* select_temporary_instance(PhysicalManager *dst,
                               unsigned index, const FieldMask &needed_fields);
+#endif
       virtual ApEvent get_restrict_precondition(void) const;
       virtual void record_restrict_postcondition(ApEvent postcondition);
     public:
@@ -1314,8 +1320,10 @@ namespace Legion {
       virtual std::map<PhysicalManager*,std::pair<unsigned,bool> >*
                    get_acquired_instances_ref(void);
       virtual void record_reference_mutation_effect(RtEvent event);
+#ifndef PRUNE_OLD_COMPOSITE
       virtual PhysicalManager* select_temporary_instance(PhysicalManager *dst,
                               unsigned index, const FieldMask &needed_fields);
+#endif
     protected:
       void invoke_mapper(const InstanceSet &valid_instances);
       virtual void add_copy_profiling_request(
@@ -1416,8 +1424,10 @@ namespace Legion {
       virtual std::map<PhysicalManager*,std::pair<unsigned,bool> >*
                    get_acquired_instances_ref(void);
       virtual void record_reference_mutation_effect(RtEvent event);
+#ifndef PRUNE_OLD_COMPOSITE
       virtual PhysicalManager* select_temporary_instance(PhysicalManager *dst,
                               unsigned index, const FieldMask &needed_fields);
+#endif
     protected:
       virtual void add_copy_profiling_request(
                                           Realm::ProfilingRequestSet &reqeusts);
@@ -1585,8 +1595,10 @@ namespace Legion {
       virtual std::map<PhysicalManager*,std::pair<unsigned,bool> >*
                    get_acquired_instances_ref(void);
       virtual void record_reference_mutation_effect(RtEvent event);
+#ifndef PRUNE_OLD_COMPOSITE
       virtual PhysicalManager* select_temporary_instance(PhysicalManager *dst,
                               unsigned index, const FieldMask &needed_fields);
+#endif
       virtual ApEvent get_restrict_precondition(void) const;
     public:
       virtual UniqueID get_unique_id(void) const;
@@ -2392,8 +2404,10 @@ namespace Legion {
       virtual std::map<PhysicalManager*,std::pair<unsigned,bool> >*
                    get_acquired_instances_ref(void);
       virtual void record_reference_mutation_effect(RtEvent event);
+#ifndef PRUNE_OLD_COMPOSITE
       virtual PhysicalManager* select_temporary_instance(PhysicalManager *dst,
                               unsigned index, const FieldMask &needed_fields);
+#endif
       virtual void record_restrict_postcondition(ApEvent postcondition);
       virtual void add_copy_profiling_request(
                                         Realm::ProfilingRequestSet &reqeusts);

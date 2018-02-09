@@ -436,6 +436,7 @@ namespace Legion {
         "Retry Shutdown",                                         \
       };
 
+#ifndef PRUNE_OLD_COMPOSITE
     enum MappingCallKind {
       GET_MAPPER_NAME_CALL,
       GET_MAPER_SYNC_MODEL_CALL,
@@ -537,6 +538,97 @@ namespace Legion {
       "handle_message",                             \
       "handle_task_result",                         \
     }
+#else
+    enum MappingCallKind {
+      GET_MAPPER_NAME_CALL,
+      GET_MAPER_SYNC_MODEL_CALL,
+      SELECT_TASK_OPTIONS_CALL,
+      PREMAP_TASK_CALL,
+      SLICE_TASK_CALL,
+      MAP_TASK_CALL,
+      SELECT_VARIANT_CALL,
+      POSTMAP_TASK_CALL,
+      TASK_SELECT_SOURCES_CALL,
+      TASK_SPECULATE_CALL,
+      TASK_REPORT_PROFILING_CALL,
+      MAP_INLINE_CALL,
+      INLINE_SELECT_SOURCES_CALL,
+      INLINE_REPORT_PROFILING_CALL,
+      MAP_COPY_CALL,
+      COPY_SELECT_SOURCES_CALL,
+      COPY_SPECULATE_CALL,
+      COPY_REPORT_PROFILING_CALL,
+      MAP_CLOSE_CALL,
+      CLOSE_SELECT_SOURCES_CALL,
+      CLOSE_REPORT_PROFILING_CALL,
+      MAP_ACQUIRE_CALL,
+      ACQUIRE_SPECULATE_CALL,
+      ACQUIRE_REPORT_PROFILING_CALL,
+      MAP_RELEASE_CALL,
+      RELEASE_SELECT_SOURCES_CALL,
+      RELEASE_SPECULATE_CALL,
+      RELEASE_REPORT_PROFILING_CALL,
+      SELECT_PARTITION_PROJECTION_CALL,
+      MAP_PARTITION_CALL,
+      PARTITION_SELECT_SOURCES_CALL,
+      PARTITION_REPORT_PROFILING_CALL,
+      CONFIGURE_CONTEXT_CALL,
+      SELECT_TUNABLE_VALUE_CALL,
+      MAP_MUST_EPOCH_CALL,
+      MAP_DATAFLOW_GRAPH_CALL,
+      SELECT_TASKS_TO_MAP_CALL,
+      SELECT_STEAL_TARGETS_CALL,
+      PERMIT_STEAL_REQUEST_CALL,
+      HANDLE_MESSAGE_CALL,
+      HANDLE_TASK_RESULT_CALL,
+      LAST_MAPPER_CALL,
+    };
+
+#define MAPPER_CALL_NAMES(name)                     \
+    const char *name[LAST_MAPPER_CALL] = {          \
+      "get_mapper_name",                            \
+      "get_mapper_sync_model",                      \
+      "select_task_options",                        \
+      "premap_task",                                \
+      "slice_task",                                 \
+      "map_task",                                   \
+      "select_task_variant",                        \
+      "postmap_task",                               \
+      "select_task_sources",                        \
+      "speculate (for task)",                       \
+      "report profiling (for task)",                \
+      "map_inline",                                 \
+      "select_inline_sources",                      \
+      "report profiling (for inline)",              \
+      "map_copy",                                   \
+      "select_copy_sources",                        \
+      "speculate (for copy)",                       \
+      "report_profiling (for copy)",                \
+      "map_close",                                  \
+      "select_close_sources",                       \
+      "report_profiling (for close)",               \
+      "map_acquire",                                \
+      "speculate (for acquire)",                    \
+      "report_profiling (for acquire)",             \
+      "map_release",                                \
+      "select_release_sources",                     \
+      "speculate (for release)",                    \
+      "report_profiling (for release)",             \
+      "select partition projection",                \
+      "map_partition",                              \
+      "select_partition_sources",                   \
+      "report_profiling (for partition)",           \
+      "configure_context",                          \
+      "select_tunable_value",                       \
+      "map_must_epoch",                             \
+      "map_dataflow_graph",                         \
+      "select_tasks_to_map",                        \
+      "select_steal_targets",                       \
+      "permit_steal_request",                       \
+      "handle_message",                             \
+      "handle_task_result",                         \
+    }
+#endif
 
     // Methodology for assigning priorities to meta-tasks:
     // Minimum and low priority are for things like profiling

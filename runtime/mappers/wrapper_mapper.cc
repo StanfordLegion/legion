@@ -1361,6 +1361,7 @@ namespace Legion {
       dmapper->select_task_sources(ctx, task, input, output);
     }
 
+#ifndef PRUNE_OLD_COMPOSITE
     void WrapperMapper::create_task_temporary_instance(
 	const MapperContext              ctx,
 	const Task&                      task,
@@ -1368,6 +1369,7 @@ namespace Legion {
 	CreateTaskTemporaryOutput& output){
       dmapper->create_task_temporary_instance(ctx, task, input, output);
     }
+#endif
 
     void WrapperMapper::speculate(const MapperContext      ctx,
 	const Task&              task,
@@ -1395,6 +1397,7 @@ namespace Legion {
       dmapper->select_inline_sources(ctx, inline_op, input, output);
     }
 
+#ifndef PRUNE_OLD_COMPOSITE
     void WrapperMapper::create_inline_temporary_instance(
 	const MapperContext                ctx,
 	const InlineMapping&               inline_op,
@@ -1402,6 +1405,7 @@ namespace Legion {
 	CreateInlineTemporaryOutput& output){
       dmapper->create_inline_temporary_instance(ctx, inline_op, input, output);
     }
+#endif
 
     void WrapperMapper::report_profiling(const MapperContext         ctx,
 	const InlineMapping&        inline_op,
@@ -1423,6 +1427,7 @@ namespace Legion {
       dmapper->select_copy_sources(ctx, copy, input, output);
     }
 
+#ifndef PRUNE_OLD_COMPOSITE
     void WrapperMapper::create_copy_temporary_instance(
 	const MapperContext              ctx,
 	const Copy&                      copy,
@@ -1430,6 +1435,7 @@ namespace Legion {
 	CreateCopyTemporaryOutput& output){
       dmapper->create_copy_temporary_instance(ctx, copy, input, output);
     }
+#endif
 
     void WrapperMapper::speculate(const MapperContext      ctx,
 	const Copy& copy,
@@ -1457,6 +1463,7 @@ namespace Legion {
       dmapper->select_close_sources(ctx, close, input, output);
     }
 
+#ifndef PRUNE_OLD_COMPOSITE
     void WrapperMapper::create_close_temporary_instance(
 	const MapperContext               ctx,
 	const Close&                      close,
@@ -1464,6 +1471,7 @@ namespace Legion {
 	CreateCloseTemporaryOutput& output){
       dmapper->create_close_temporary_instance(ctx, close, input, output);
     }
+#endif
 
     void WrapperMapper::report_profiling(const MapperContext       ctx,
 	const Close&              close,
@@ -1504,6 +1512,7 @@ namespace Legion {
       dmapper->select_release_sources(ctx, release, input, output);
     }
 
+#ifndef PRUNE_OLD_COMPOSITE
     void WrapperMapper::create_release_temporary_instance(
 	const MapperContext                 ctx,
 	const Release&                      release,
@@ -1511,6 +1520,7 @@ namespace Legion {
 	CreateReleaseTemporaryOutput& output){
       dmapper->create_release_temporary_instance(ctx, release, input, output);
     }
+#endif
 
     void WrapperMapper::speculate(const MapperContext         ctx,
 	const Release&              release,
