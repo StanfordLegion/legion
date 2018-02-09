@@ -327,7 +327,10 @@ namespace Legion {
         // Special case for when the expressions are the same
         lhs->add_parent_operation(this);
         lhs->add_expression_reference();
-        // Everything was already default constructed as empty and no events
+        this->realm_index_space = Realm::IndexSpace<DIM,T>::make_empty();
+        this->tight_index_space = Realm::IndexSpace<DIM,T>::make_empty();
+        this->realm_index_space_ready = ApEvent::NO_AP_EVENT;
+        this->right_index_space_ready = RtEvent::NO_RT_EVENT;
       }
       else
       {
