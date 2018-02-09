@@ -4526,7 +4526,7 @@ namespace Legion {
         // We are the intersect
         dst->logical_node->issue_grouped_copies(info, dst,false/*restrict out*/,
                                  guard, src_preconditions, actual_copy_mask, 
-                                 src_instances, &info.version_info,
+                                 src_instances, src_version_tracker,
                                  postconditions, across_helper, logical_node);
       }
       if (!deferred_instances.empty())
