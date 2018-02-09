@@ -2936,7 +2936,14 @@ function type_check.expr_deref(cx, node)
     report.error(node, "dereference in an external task")
   end
 
-  local expr_type = std.ref(value_type)
+  local expr_type
+  if value_type:ispointer() then
+    expr_type = std.rawref(value_type)
+  elseif std.is_bounded_type(value_type) then
+    expr_type = std.ref(value_type)
+  else
+    assert(false)
+  end
 
   return ast.typed.expr.Deref {
     value = value,
