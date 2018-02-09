@@ -2506,6 +2506,7 @@ namespace Legion {
       virtual unsigned get_depth(void) const = 0;
       virtual LegionColor get_color(void) const = 0;
       virtual IndexTreeNode *get_row_source(void) const = 0;
+      virtual IndexSpaceExpression* get_index_space_expression(void) const = 0;
       virtual RegionTreeID get_tree_id(void) const = 0;
       virtual RegionTreeNode* get_parent(void) const = 0;
       virtual RegionTreeNode* get_tree_child(const LegionColor c) = 0; 
@@ -2667,6 +2668,7 @@ namespace Legion {
       virtual unsigned get_depth(void) const;
       virtual LegionColor get_color(void) const;
       virtual IndexTreeNode *get_row_source(void) const;
+      virtual IndexSpaceExpression* get_index_space_expression(void) const;
       virtual RegionTreeID get_tree_id(void) const;
       virtual RegionTreeNode* get_parent(void) const;
       virtual RegionTreeNode* get_tree_child(const LegionColor c);
@@ -2868,6 +2870,7 @@ namespace Legion {
       virtual unsigned get_depth(void) const;
       virtual LegionColor get_color(void) const;
       virtual IndexTreeNode *get_row_source(void) const;
+      virtual IndexSpaceExpression* get_index_space_expression(void) const;
       virtual RegionTreeID get_tree_id(void) const;
       virtual RegionTreeNode* get_parent(void) const;
       virtual RegionTreeNode* get_tree_child(const LegionColor c);

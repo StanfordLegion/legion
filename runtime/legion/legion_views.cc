@@ -3897,6 +3897,7 @@ namespace Legion {
                                          std::set<ApEvent> &postconditions)
     //--------------------------------------------------------------------------
     {
+#ifndef PRUNE_OLD_COMPOSITE
       bool perfect = true;
       FieldMask src_mask, dst_mask;
       for (unsigned idx = 0; idx < dst_indexes.size(); idx++)
@@ -3931,6 +3932,9 @@ namespace Legion {
             local_postconditions.begin(); it != 
             local_postconditions.end(); it++)
         postconditions.insert(it->first);
+#else
+      assert(false);
+#endif
     }
 
     /////////////////////////////////////////////////////////////
@@ -3967,6 +3971,7 @@ namespace Legion {
       return *this;
     }
 
+#ifndef PRUNE_OLD_COMPOSITE
     /////////////////////////////////////////////////////////////
     // CompositeCopyNode
     /////////////////////////////////////////////////////////////
@@ -4597,9 +4602,10 @@ namespace Legion {
       else
         finder->second |= mask;
     }
+#endif
 
     /////////////////////////////////////////////////////////////
-    // CompositeCopier 
+    // CompositeCopyHelper
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
@@ -4745,6 +4751,7 @@ namespace Legion {
     {
     }
 
+#ifndef PRUNE_OLD_COMPOSITE
     //--------------------------------------------------------------------------
     CompositeCopyNode* CompositeBase::construct_copy_tree(MaterializedView *dst,
                                                    RegionTreeNode *logical_node,
@@ -5075,6 +5082,7 @@ namespace Legion {
       }
       return tested_all_children;
     }
+#endif
 
     //--------------------------------------------------------------------------
     void CompositeBase::issue_composite_updates(CompositeCopyHelper &helper,
@@ -5237,14 +5245,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void CompositeBase::issue_update_copies(CompositeCopyHelper &helper,
+    /*static*/ void CompositeBase::issue_update_copies(
+                                            CompositeCopyHelper &helper,
                                             RegionTreeNode *logical_node,
                                             FieldMask copy_mask,
                                             VersionTracker *src_version_tracker,
                                             PredEvent predicate_guard,
               const LegionMap<LogicalView*,FieldMask>::aligned &source_views,
                                             const WriteMasks &previous_writes,
-                                            WriteMasks &performed_writes) const
+                                            WriteMasks &performed_writes)
     //--------------------------------------------------------------------------
     {
       MaterializedView *dst = helper.dst;
@@ -5266,8 +5275,9 @@ namespace Legion {
         return;
       RegionTreeForest *context = dst->logical_node->context;
       IndexSpaceExpression *dst_is = 
-        dst->logical_node->as_region_node()->row_source;
-      IndexSpaceExpression *local_is = get_index_space_expression(); 
+        dst->logical_node->get_index_space_expression();
+      IndexSpaceExpression *local_is = 
+        logical_node->get_index_space_expression(); 
       IndexSpaceExpression *intersect_is = 
         (dst_is->expr_id == local_is->expr_id) ? local_is : 
         context->intersect_index_spaces(info.op, dst_is, local_is);
@@ -5387,7 +5397,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ void CompositeBase::combine_writes(WriteMasks &write_masks,
-                                                  CompositeCopyHelper &helper)
+                                 CompositeCopyHelper &helper, bool prune_global)
     //--------------------------------------------------------------------------
     {
       Operation *op = helper.info.op;
@@ -5401,11 +5411,9 @@ namespace Legion {
                                                 write_masks, write_sets);
       // Clear out the write masks set since we're rebuilding it
       write_masks.clear();
-#ifdef DEBUG_LEGION
-      assert(dst->logical_node->is_region());
-#endif
-      IndexSpaceNode *dst_is = dst->logical_node->as_region_node()->row_source;
-      RegionTreeForest *context = dst_is->context;
+      IndexSpaceExpression *dst_is = 
+        dst->logical_node->get_index_space_expression();
+      RegionTreeForest *context = dst->logical_node->context;
       // Compute the unions of all the writes
       for (LegionList<FieldSet<IndexSpaceExpression*> >::aligned::const_iterator
             it = write_sets.begin(); it != write_sets.end(); it++)
@@ -5426,7 +5434,7 @@ namespace Legion {
           context->subtract_index_spaces(op, dst_is, union_is);
         if (!diff_is->is_empty())
           write_masks[union_is] = it->set_mask;
-        else
+        else if (prune_global)
           global_copy_mask -= it->set_mask;
       }
     }
@@ -5763,6 +5771,7 @@ namespace Legion {
                                               bool restrict_out)
     //--------------------------------------------------------------------------
     {
+#ifndef PRUNE_OLD_COMPOSITE
       CompositeCopier copier(copy_mask);
       FieldMask top_locally_complete;
       FieldMask dominate_capture(copy_mask);
@@ -5859,8 +5868,12 @@ namespace Legion {
           info.op->record_restrict_postcondition(it->first);
         }
       }
+#else
+      assert(false);
+#endif
     }
 
+#ifndef PRUNE_OLD_COMPOSITE
     //--------------------------------------------------------------------------
     void CompositeView::issue_deferred_copies(const TraversalInfo &info,
                                               MaterializedView *dst,
@@ -5891,6 +5904,7 @@ namespace Legion {
           postconditions.insert(*it);
       }
     } 
+#endif
 
     //--------------------------------------------------------------------------
     void CompositeView::issue_deferred_copies(CompositeCopyHelper &helper,
@@ -6015,6 +6029,7 @@ namespace Legion {
       // Nothing to do here
     }
 
+#ifndef PRUNE_OLD_COMPOSITE
     //--------------------------------------------------------------------------
     void CompositeView::find_valid_views(const FieldMask &update_mask,
                                          const FieldMask &up_mask,
@@ -6051,17 +6066,7 @@ namespace Legion {
           finder->second |= overlap;
       }
     }
-
-    //--------------------------------------------------------------------------
-    IndexSpaceExpression* CompositeView::get_index_space_expression(void) const
-    //--------------------------------------------------------------------------
-    {
-      if (logical_node->is_region())
-        return logical_node->as_region_node()->row_source;
-      else
-        return 
-          logical_node->as_partition_node()->row_source->get_union_expression();
-    }
+#endif
 
     //--------------------------------------------------------------------------
     /*static*/ void CompositeView::handle_send_composite_view(Runtime *runtime,
@@ -6597,6 +6602,7 @@ namespace Legion {
       }
     }
 
+#ifndef PRUNE_OLD_COMPOSITE
     //--------------------------------------------------------------------------
     void CompositeNode::find_valid_views(const FieldMask &update_mask,
                                          const FieldMask &up_mask,
@@ -6639,17 +6645,7 @@ namespace Legion {
           parent->find_valid_views(up_mask, up_mask, result_views);
       }
     }
-
-    //--------------------------------------------------------------------------
-    IndexSpaceExpression* CompositeNode::get_index_space_expression(void) const
-    //--------------------------------------------------------------------------
-    {
-      if (logical_node->is_region())
-        return logical_node->as_region_node()->row_source;
-      else
-        return 
-          logical_node->as_partition_node()->row_source->get_union_expression();
-    }
+#endif
 
     //--------------------------------------------------------------------------
     void CompositeNode::capture(RtUserEvent capture_event, 
@@ -7110,8 +7106,8 @@ namespace Legion {
         }
       }
       LegionMap<ApEvent,FieldMask>::aligned postconditions;
-      issue_deferred_copies(info, dst, copy_mask, preconditions,
-                            postconditions, PredEvent::NO_PRED_EVENT);
+      issue_internal_fills(info, dst, copy_mask, preconditions,
+                           postconditions, PredEvent::NO_PRED_EVENT);
       // We know there is at most one event per field so no need
       // to sort into event sets here
       // Register the resulting events as users of the destination
@@ -7137,6 +7133,7 @@ namespace Legion {
       }
     }
 
+#ifndef PRUNE_OLD_COMPOSITE
     //--------------------------------------------------------------------------
     void FillView::issue_deferred_copies(const TraversalInfo &info,
                                          MaterializedView *dst,
@@ -7176,6 +7173,7 @@ namespace Legion {
           postconditions[fill_post] = pre_set.set_mask;
       }
     }
+#endif
 
     //--------------------------------------------------------------------------
     void FillView::issue_deferred_copies(CompositeCopyHelper &helper,
@@ -7227,9 +7225,25 @@ namespace Legion {
       // Get the common set of events for these fields and issue the fills 
       LegionMap<ApEvent,FieldMask>::aligned preconditions;
       helper.merge_destination_preconditions(fill_mask, preconditions);
+      issue_internal_fills(helper.info, helper.dst, fill_mask, preconditions,
+                           helper.copy_postconditions, pred_guard, 
+                           helper.across_helper, mask, &perf_writes);
+    }
+
+    //--------------------------------------------------------------------------
+    void FillView::issue_internal_fills(const TraversalInfo &info,
+                                        MaterializedView *dst,
+                                        const FieldMask &fill_mask,
+            const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
+                  LegionMap<ApEvent,FieldMask>::aligned &postconditions,
+                                        PredEvent pred_guard,
+                                        CopyAcrossHelper *across_helper,
+                                        IndexSpaceExpression *mask,
+                LegionMap<IndexSpaceExpression*,FieldMask>::aligned *perf) const
+    //--------------------------------------------------------------------------
+    {
       LegionList<FieldSet<ApEvent> >::aligned precondition_sets;
       compute_field_sets<ApEvent>(fill_mask, preconditions, precondition_sets);
-      MaterializedView *dst = helper.dst;
       // Iterate over the precondition sets
       for (LegionList<FieldSet<ApEvent> >::aligned::iterator pit = 
             precondition_sets.begin(); pit !=
@@ -7238,7 +7252,7 @@ namespace Legion {
         FieldSet<ApEvent> &pre_set = *pit;
         // Build the dst fields vector
         std::vector<CopySrcDstField> dst_fields;
-        dst->copy_to(pre_set.set_mask, dst_fields, helper.across_helper);
+        dst->copy_to(pre_set.set_mask, dst_fields, across_helper);
         ApEvent fill_pre = Runtime::merge_events(pre_set.elements);
         // Issue the fill command
         // Only apply an intersection if the destination logical node
@@ -7247,15 +7261,15 @@ namespace Legion {
         if ((logical_node != dst->logical_node) && 
             (!logical_node->intersects_with(dst->logical_node)))
           continue;
-        ApEvent fill_post = dst->logical_node->issue_fill(helper.info.op, 
+        ApEvent fill_post = dst->logical_node->issue_fill(info.op, 
             dst_fields, value->value, value->value_size, fill_pre, pred_guard,
 #ifdef LEGION_SPY
                         fill_op_uid,
 #endif
                     (logical_node == dst->logical_node) ? NULL : logical_node,
-                    mask, &perf_writes, &pre_set.set_mask);
+                    mask, perf, &pre_set.set_mask);
         if (fill_post.exists())
-          helper.copy_postconditions[fill_post] = pre_set.set_mask;
+          postconditions[fill_post] = pre_set.set_mask;
       }
     }
 
@@ -7313,7 +7327,7 @@ namespace Legion {
                      DeferredVersionInfo *info, RegionTreeNode *node, 
                      PredEvent tguard, PredEvent fguard, bool register_now) 
       : DeferredView(ctx, encode_phi_did(did), owner_space, node, 
-                     register_now), 
+                     register_now), CompositeBase(view_lock),
         true_guard(tguard), false_guard(fguard), version_info(info)
     //--------------------------------------------------------------------------
     {
@@ -7326,7 +7340,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PhiView::PhiView(const PhiView &rhs)
-      : DeferredView(NULL, 0, 0, NULL, false),
+      : DeferredView(NULL, 0, 0, NULL, false), CompositeBase(view_lock),
         true_guard(PredEvent::NO_PRED_EVENT), 
         false_guard(PredEvent::NO_PRED_EVENT), version_info(NULL)
     //--------------------------------------------------------------------------
@@ -7422,6 +7436,7 @@ namespace Legion {
                                         bool restrict_out)
     //--------------------------------------------------------------------------
     {
+#ifndef PRUNE_OLD_COMPOSITE
       LegionMap<ApEvent,FieldMask>::aligned preconditions;
       // We know we're going to write all these fields so we can filter
       dst->find_copy_preconditions(0/*redop*/, false/*reading*/,
@@ -7467,8 +7482,12 @@ namespace Legion {
         if (restrict_out && !(it->set_mask * restrict_mask))
           info.op->record_restrict_postcondition(post);
       }
+#else
+      assert(false);
+#endif
     }
 
+#ifndef PRUNE_OLD_COMPOSITE
     //--------------------------------------------------------------------------
     void PhiView::issue_deferred_copies(const TraversalInfo &info,
                                         MaterializedView *dst,
@@ -7511,6 +7530,7 @@ namespace Legion {
         }
       }
     }
+#endif
 
     //--------------------------------------------------------------------------
     void PhiView::issue_deferred_copies(CompositeCopyHelper &helper,
@@ -7520,10 +7540,64 @@ namespace Legion {
                                          PredEvent pred_guard)
     //--------------------------------------------------------------------------
     {
-      // TODO:
-      assert(false);
+      LegionMap<IndexSpaceExpression*,FieldMask>::aligned true_writes;
+      issue_update_copies(helper, logical_node, local_copy_mask, this,
+                          true_guard, true_views, write_masks, true_writes);
+      LegionMap<IndexSpaceExpression*,FieldMask>::aligned false_writes; 
+      issue_update_copies(helper, logical_node, local_copy_mask, this,
+                          false_guard, false_views, write_masks, false_writes);
+      // Built write combined sets and merge them to update 
+      combine_writes(true_writes, helper, false/*prune*/);
+      combine_writes(false_writes, helper, false/*prune*/);
+      // Iterate over the two sets and check for equivalence of expressions 
+      for (LegionMap<IndexSpaceExpression*,FieldMask>::aligned::iterator
+            true_it = true_writes.begin(); 
+            true_it != true_writes.end(); true_it++)
+      {
+        for (LegionMap<IndexSpaceExpression*,FieldMask>::aligned::iterator
+              false_it = false_writes.begin(); 
+              false_it != false_writes.end(); false_it++)
+        {
+          const FieldMask overlap = true_it->second & false_it->second;
+          if (!overlap)
+            continue;
+          // Check to make sure that the sets are equal for now since
+          // we won't handle the case correctly if they aren't
+          IndexSpaceExpression *diff1 = context->subtract_index_spaces(
+              helper.info.op, true_it->first, false_it->first);
+          IndexSpaceExpression *diff2 = context->subtract_index_spaces(
+              helper.info.op, false_it->first, true_it->first);
+          if (!diff1->is_empty() || !diff2->is_empty())
+            REPORT_LEGION_FATAL(LEGION_FATAL_INCONSISTENT_PHI_VIEW,
+                "Legion Internal Fatal Error: Phi View has different "
+                "write sets for true and false cases. This is currently "
+                "unsupported. Please report this use case to the Legion "
+                "developers mailing list.")
+          // For now we'll add the true expression to the write set
+          LegionMap<IndexSpaceExpression*,FieldMask>::aligned::iterator 
+            finder = perf_writes.find(true_it->first);
+          if (finder == perf_writes.end())
+            perf_writes[true_it->first] = overlap;
+          else
+            finder->second |= overlap;
+          // Filter out anything we can
+          true_it->second -= overlap;
+          false_it->second -= overlap;
+          if (!true_it->second)
+          {
+            // Can prune in this case since we're about to break
+            if (!false_it->second)
+              false_writes.erase(false_it);
+            break;
+          }
+        }
+#ifdef DEBUG_LEGION
+        assert(!true_it->second); // should have no fields left
+#endif
+      }
     }
 
+#ifndef PRUNE_OLD_COMPOSITE
     //--------------------------------------------------------------------------
     void PhiView::issue_guarded_update_copies(const TraversalInfo &info,
                                        MaterializedView *dst,
@@ -7621,6 +7695,7 @@ namespace Legion {
         }
       }
     }
+#endif
 
     //--------------------------------------------------------------------------
     void PhiView::record_true_view(LogicalView *view, const FieldMask &mask)
