@@ -1960,6 +1960,8 @@ namespace Legion {
         { id = rhs.id; return *this; }
       inline bool has_triggered_faultignorant(void) const
         { bool poisoned; return has_triggered_faultaware(poisoned); }
+      inline ApEvent protect(void) const
+        { return ApEvent(Realm::Event::ignorefaults(*this)); }
     };
 
     class ApUserEvent : public ApEvent {
@@ -2006,6 +2008,8 @@ namespace Legion {
     public:
       inline RtEvent& operator=(const RtEvent &rhs)
         { id = rhs.id; return *this; }
+      inline RtEvent protect(void) const
+        { return RtEvent(Realm::Event::ignorefaults(*this)); }
     };
 
     class RtUserEvent : public RtEvent {
