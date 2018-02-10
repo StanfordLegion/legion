@@ -4036,7 +4036,28 @@ namespace Legion {
         const FieldMask needed_mask = 
           pending_reduction_mask - dst_precondition_mask;
         if (!!needed_mask)
+        {
+          // We're not going to use the existing destination preconditions
+          // for anything else, so go ahead and clear it
+          dst_preconditions.clear();
           compute_dst_preconditions(needed_mask);
+          if (!dst_preconditions.empty())
+          {
+            // Then merge the destination preconditions for these fields
+            // into the copy_postconditions, they'll be collapsed in the
+            // next stage of the computation
+            for (LegionMap<ApEvent,FieldMask>::aligned::const_iterator it = 
+                 dst_preconditions.begin(); it != dst_preconditions.end(); it++)
+            {
+              LegionMap<ApEvent,FieldMask>::aligned::iterator finder = 
+                copy_postconditions.find(it->first);
+              if (finder == copy_postconditions.end())
+                copy_postconditions.insert(*it);
+              else
+                finder->second |= it->second;
+            }
+          }
+        }
         // Uniquify our copy postconditions since they will be our 
         // preconditions to the reductions
         uniquify_copy_postconditions();
