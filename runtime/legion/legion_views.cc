@@ -3877,8 +3877,7 @@ namespace Legion {
     DeferredCopier::DeferredCopier(const TraversalInfo &in, MaterializedView *d, 
                             const FieldMask &m, const RestrictInfo &res, bool r)
       : info(in), dst(d), across_helper(NULL), restrict_info(&res), 
-        restrict_out(r), deferred_copy_mask(m), has_dst_preconditions(false),
-        finalized(false)
+        restrict_out(r), deferred_copy_mask(m), finalized(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -3887,8 +3886,7 @@ namespace Legion {
     DeferredCopier::DeferredCopier(const TraversalInfo &in, MaterializedView *d,
        const FieldMask &m, ApEvent p, CopyAcrossHelper *h)
       : info(in), dst(d), across_helper(h), restrict_info(NULL), 
-        restrict_out(false), deferred_copy_mask(m), 
-        has_dst_preconditions(true), finalized(false)
+        restrict_out(false), deferred_copy_mask(m), finalized(false)
     //--------------------------------------------------------------------------
     {
       dst_preconditions[p] = m;
@@ -3926,41 +3924,9 @@ namespace Legion {
      const FieldMask &mask,LegionMap<ApEvent,FieldMask>::aligned &preconditions)
     //--------------------------------------------------------------------------
     {
-      if (!has_dst_preconditions)
-      {
-        // Compute the destination preconditions only once on demand
-        // Event though the composite copy mask is mutable, it represents
-        // all the fields which may still be copied, which is exactly
-        // the mask for the preconditions we need to compute, if fields
-        // were already pruned out of it then we won't be copying to 
-        // them anyway so no need to get their preconditions
-#ifdef DEBUG_LEGION
-        assert(!!deferred_copy_mask);
-#endif
-        const AddressSpaceID local_space = dst->context->runtime->address_space;
-        dst->find_copy_preconditions(0/*redop*/, false/*reading*/,
-                                     false/*single copy*/, restrict_out,
-                                     deferred_copy_mask, &info.version_info,
-                                     info.op->get_unique_op_id(), info.index,
-                                     local_space, dst_preconditions,
-                                     info.map_applied_events);
-        if ((restrict_info != NULL) && restrict_info->has_restrictions())
-        {
-          FieldMask restrict_mask;
-          restrict_info->populate_restrict_fields(restrict_mask);
-          restrict_mask &= deferred_copy_mask;
-          if (!!restrict_mask)
-          {
-            ApEvent restrict_pre = info.op->get_restrict_precondition();
-#ifdef DEBUG_LEGION
-            assert(dst_preconditions.find(restrict_pre) == 
-                    dst_preconditions.end());
-#endif
-            dst_preconditions[restrict_pre] = restrict_mask;
-          }
-        }
-        has_dst_preconditions = true;
-      }
+      const FieldMask needed_mask = mask - dst_precondition_mask;
+      if (!!needed_mask)
+        compute_dst_preconditions(needed_mask);
       for (LegionMap<ApEvent,FieldMask>::aligned::const_iterator it = 
             dst_preconditions.begin(); it != dst_preconditions.end(); it++)
       {
@@ -4065,74 +4031,36 @@ namespace Legion {
       // Apply any pending reductions using the proper preconditions
       if (!pending_reductions.empty())
       {
+        // Check to see if we need any more preconditions
+        const FieldMask needed_mask = 
+          pending_reduction_mask - dst_precondition_mask;
+        if (!!needed_mask)
+          compute_dst_preconditions(needed_mask);
         // Uniquify our copy postconditions since they will be our 
         // preconditions to the reductions
         uniquify_copy_postconditions();
         LegionMap<ApEvent,FieldMask>::aligned reduction_postconditions;
         // Iterate over all the postconditions
-        for (LegionMap<ApEvent,FieldMask>::aligned::const_iterator cit = 
-              copy_postconditions.begin(); cit != 
-              copy_postconditions.end(); cit++)
+        for (LegionMap<ApEvent,FieldMask>::aligned::const_iterator it = 
+              copy_postconditions.begin(); it != 
+              copy_postconditions.end(); it++)
         {
           // See if we interfere with any reduction fields
-          const FieldMask overlap = cit->second & pending_reduction_mask;
+          const FieldMask overlap = it->second & pending_reduction_mask;
           if (!overlap)
             continue;
-          std::vector<ReductionView*> to_remove;
-          // Iterate over reduction views
-          for (PendingReductions::iterator pit = pending_reductions.begin();
-                pit != pending_reductions.end(); pit++)
-          {
-            // Iterate over the pending reductions for this reduction view
-            for (std::list<PendingReduction>::iterator it = 
-                  pit->second.begin(); it != pit->second.end(); /*nothing*/)
-            {
-              const FieldMask &pending_overlap = it->reduction_mask & overlap;
-              if (!pending_overlap)
-              {
-                it++;
-                continue;
-              }
-              // Issue the deferred reduction
-              ApEvent reduction_post = pit->first->perform_deferred_reduction(
-                  dst, pending_overlap, it->version_tracker, cit->first,
-                  info.op, info.index, it->pred_guard, across_helper,
-                  it->intersect, it->mask, info.map_applied_events);
-              if (reduction_post.exists())
-              {
-                LegionMap<ApEvent,FieldMask>::aligned::iterator finder =
-                  reduction_postconditions.find(reduction_post);
-                if (finder == reduction_postconditions.end())
-                  reduction_postconditions[reduction_post] = pending_overlap;
-                else
-                  finder->second |= pending_overlap;
-              }
-              // Remove these fields from the pending reduction record
-              it->reduction_mask -= pending_overlap;
-              if (!it->reduction_mask)
-                it = pit->second.erase(it);
-              else
-                it++;
-            }
-            // If we've don't have any more pending reductions this view is done
-            if (pit->second.empty())
-              to_remove.push_back(pit->first);
-          }
-          if (!to_remove.empty())
-          {
-            for (std::vector<ReductionView*>::const_iterator it = 
-                  to_remove.begin(); it != to_remove.end(); it++)
-              pending_reductions.erase(*it);
-            // Can break out if we don't have any more pending reductions
-            if (pending_reductions.empty())
-              break;
-          }
+          if (issue_reductions(it->first, overlap, reduction_postconditions))
+            break;
           // We've now done all these fields for a reduction
-          pending_reduction_mask -= cit->second;
+          pending_reduction_mask -= it->second;
           // Can break out if we have no more reduction fields
           if (!pending_reduction_mask)
             break;
         }
+        // Finally issue any copies for which we have no precondition
+        if (!!pending_reduction_mask)
+          issue_reductions(ApEvent::NO_AP_EVENT, pending_reduction_mask,
+                           reduction_postconditions); 
         // Merge our reduction postconditions wherever they are going
         if (postconditions == NULL)
         {
@@ -4212,6 +4140,97 @@ namespace Legion {
         else
           finder->second |= it->set_mask;
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void DeferredCopier::compute_dst_preconditions(const FieldMask &mask)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(mask * dst_precondition_mask);
+#endif
+      const AddressSpaceID local_space = dst->context->runtime->address_space;
+      dst->find_copy_preconditions(0/*redop*/, false/*reading*/,
+                                   false/*single copy*/, restrict_out,
+                                   mask, &info.version_info,
+                                   info.op->get_unique_op_id(), info.index,
+                                   local_space, dst_preconditions,
+                                   info.map_applied_events);
+      if ((restrict_info != NULL) && restrict_info->has_restrictions())
+      {
+        FieldMask restrict_mask;
+        restrict_info->populate_restrict_fields(restrict_mask);
+        restrict_mask &= mask;
+        if (!!restrict_mask)
+        {
+          ApEvent restrict_pre = info.op->get_restrict_precondition();
+          LegionMap<ApEvent,FieldMask>::aligned::iterator finder = 
+            dst_preconditions.find(restrict_pre);
+          if (finder == dst_preconditions.end())
+            dst_preconditions[restrict_pre] = restrict_mask;
+          else
+            finder->second |= restrict_mask;
+        }
+      }
+      dst_precondition_mask |= mask;
+    }
+
+    //--------------------------------------------------------------------------
+    bool DeferredCopier::issue_reductions(ApEvent reduction_pre, 
+                                          const FieldMask &reduction_mask,
+                LegionMap<ApEvent,FieldMask>::aligned &reduction_postconditions)
+    //--------------------------------------------------------------------------
+    {
+      std::vector<ReductionView*> to_remove;
+      // Iterate over reduction views
+      for (PendingReductions::iterator pit = pending_reductions.begin();
+            pit != pending_reductions.end(); pit++)
+      {
+        // Iterate over the pending reductions for this reduction view
+        for (std::list<PendingReduction>::iterator it = 
+              pit->second.begin(); it != pit->second.end(); /*nothing*/)
+        {
+          const FieldMask &overlap = it->reduction_mask & reduction_mask;
+          if (!overlap)
+          {
+            it++;
+            continue;
+          }
+          // Issue the deferred reduction
+          ApEvent reduction_post = pit->first->perform_deferred_reduction(
+              dst, overlap, it->version_tracker, reduction_pre,
+              info.op, info.index, it->pred_guard, across_helper,
+              it->intersect, it->mask, info.map_applied_events);
+          if (reduction_post.exists())
+          {
+            LegionMap<ApEvent,FieldMask>::aligned::iterator finder =
+              reduction_postconditions.find(reduction_post);
+            if (finder == reduction_postconditions.end())
+              reduction_postconditions[reduction_post] = overlap;
+            else
+              finder->second |= overlap;
+          }
+          // Remove these fields from the pending reduction record
+          it->reduction_mask -= overlap;
+          if (!it->reduction_mask)
+            it = pit->second.erase(it);
+          else
+            it++;
+        }
+        // If we've don't have any more pending reductions this view is done
+        if (pit->second.empty())
+          to_remove.push_back(pit->first);
+      }
+      if (!to_remove.empty())
+      {
+        for (std::vector<ReductionView*>::const_iterator it = 
+              to_remove.begin(); it != to_remove.end(); it++)
+          pending_reductions.erase(*it);
+        // Can break out if we don't have any more pending reductions
+        if (pending_reductions.empty())
+          return true;
+      }
+      return false;
     }
 
     /////////////////////////////////////////////////////////////

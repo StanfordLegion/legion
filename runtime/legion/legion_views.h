@@ -947,6 +947,9 @@ namespace Legion {
       void finalize(std::set<ApEvent> *postconditions = NULL);
     protected:
       void uniquify_copy_postconditions(void);
+      void compute_dst_preconditions(const FieldMask &mask);
+      bool issue_reductions(ApEvent reduction_pre, const FieldMask &mask,
+              LegionMap<ApEvent,FieldMask>::aligned &reduction_postconditions);
     public: // const fields
       const TraversalInfo &info;
       MaterializedView *const dst;
@@ -962,7 +965,7 @@ namespace Legion {
       LegionMap<ApEvent,FieldMask>::aligned dst_preconditions;
       // Handle protection of events for guarded operations
       std::vector<LegionMap<ApEvent,FieldMask>::aligned> protected_copy_posts;
-      bool has_dst_preconditions;
+      FieldMask dst_precondition_mask;
       bool finalized;
     };
 
