@@ -55,9 +55,19 @@ namespace Legion {
         assert(OP::trace != NULL);
         assert(OP::trace->get_physical_trace() != NULL);
 #endif
-        tpl = OP::trace->get_physical_trace()->get_current_template();
+        PhysicalTrace *physical_trace = OP::trace->get_physical_trace();
+        tpl = physical_trace->get_current_template();
+        if (tpl == NULL)
+        {
+          OP::trace->set_state_record();
+          tpl = physical_trace->start_new_template();
+        }
+
         if (tpl->is_replaying())
         {
+#ifdef DEBUG_LEGION
+          assert(OP::trace->is_replaying());
+#endif
           memo_state = REPLAY;
           OP::trace->register_physical_only(this, OP::gen);
           OP::resolve_speculation();
@@ -65,7 +75,12 @@ namespace Legion {
           return;
         }
         else
+        {
+#ifdef DEBUG_LEGION
+          assert(OP::trace->is_recording());
+#endif
           memo_state = RECORD;
+        }
       }
       OP::execute_dependence_analysis();
     };

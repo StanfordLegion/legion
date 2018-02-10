@@ -34,7 +34,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     LegionTrace::LegionTrace(TaskContext *c)
-      : ctx(c), last_memoized(0)
+      : ctx(c), state(LOGICAL_ONLY), last_memoized(0)
     //--------------------------------------------------------------------------
     {
       physical_trace = new PhysicalTrace(c->owner_task->runtime);
@@ -893,19 +893,71 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
-    // TraceCaptureOp 
+    // TraceOp 
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    TraceCaptureOp::TraceCaptureOp(Runtime *rt)
+    TraceOp::TraceOp(Runtime *rt)
       : FenceOp(rt)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
-    TraceCaptureOp::TraceCaptureOp(const TraceCaptureOp &rhs)
+    TraceOp::TraceOp(const TraceOp &rhs)
       : FenceOp(NULL)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    TraceOp::~TraceOp(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    TraceOp& TraceOp::operator=(const TraceOp &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void TraceOp::execute_dependence_analysis(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(dependence_tracker.mapping == NULL);
+#endif
+      // Make a dependence tracker
+      dependence_tracker.mapping = new MappingDependenceTracker();
+      // See if we have any fence dependences
+      execution_fence_event = parent_ctx->register_fence_dependence(this);
+      parent_ctx->invalidate_trace_cache(local_trace);
+
+      trigger_dependence_analysis();
+      end_dependence_analysis();
+    }
+
+    /////////////////////////////////////////////////////////////
+    // TraceCaptureOp 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    TraceCaptureOp::TraceCaptureOp(Runtime *rt)
+      : TraceOp(rt)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    TraceCaptureOp::TraceCaptureOp(const TraceCaptureOp &rhs)
+      : TraceOp(NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -936,10 +988,12 @@ namespace Legion {
       assert(trace != NULL);
       assert(trace->is_dynamic_trace());
 #endif
-      local_trace = trace->as_dynamic_trace();
+      dynamic_trace = trace->as_dynamic_trace();
+      local_trace = dynamic_trace;
       // Now mark our trace as NULL to avoid registering this operation
       trace = NULL;
       tracing = false;
+      current_template = NULL;
       if (Runtime::legion_spy_enabled)
         LegionSpy::log_trace_operation(ctx->get_unique_id(), unique_op_id);
     }
@@ -980,15 +1034,19 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(trace == NULL);
       assert(local_trace != NULL);
+      assert(local_trace == dynamic_trace);
 #endif
       // Indicate that we are done capturing this trace
-      local_trace->end_trace_capture();
+      dynamic_trace->end_trace_capture();
       // Register this fence with all previous users in the parent's context
       parent_ctx->perform_fence_analysis(this);
       // Now update the parent context with this fence before we can complete
       // the dependence analysis and possibly be deactivated
       parent_ctx->update_current_fence(this);
       parent_ctx->record_previous_trace(local_trace);
+      if (local_trace->is_recording())
+        current_template =
+          local_trace->get_physical_trace()->get_current_template();
     }
 
     //--------------------------------------------------------------------------
@@ -996,11 +1054,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Now finish capturing the physical trace
-      if (local_trace->has_physical_trace())
+      if (local_trace->is_recording())
       {
-        PhysicalTrace *physical_trace = local_trace->get_physical_trace();
-        if (physical_trace->is_recording())
-          physical_trace->fix_trace();
+#ifdef DEBUG_LEGION
+        assert(current_template != NULL);
+#endif
+        local_trace->get_physical_trace()->fix_trace(current_template);
+        local_trace->initialize_tracing_state();
       }
       FenceOp::trigger_mapping();
     }
@@ -1011,14 +1071,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     TraceCompleteOp::TraceCompleteOp(Runtime *rt)
-      : FenceOp(rt)
+      : TraceOp(rt)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     TraceCompleteOp::TraceCompleteOp(const TraceCompleteOp &rhs)
-      : FenceOp(NULL)
+      : TraceOp(NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -1051,6 +1111,9 @@ namespace Legion {
       local_trace = trace;
       // Now mark our trace as NULL to avoid registering this operation
       trace = NULL;
+      current_template = NULL;
+      template_completion = ApEvent::NO_AP_EVENT;
+      replayed = false;
     }
 
     //--------------------------------------------------------------------------
@@ -1090,21 +1153,22 @@ namespace Legion {
       assert(trace == NULL);
       assert(local_trace != NULL);
 #endif
-      if (local_trace->has_physical_trace())
+      if (local_trace->is_replaying())
       {
         PhysicalTrace *physical_trace = local_trace->get_physical_trace();
-        if (!physical_trace->is_recording() && physical_trace->is_recurrent())
-        {
-          physical_trace->get_current_template()->execute_all();
-          template_completion = physical_trace->get_template_completion();
-          Runtime::trigger_event(completion_event, template_completion);
-          physical_trace->finish_replay();
-          local_trace->end_trace_execution(this);
-          parent_ctx->update_current_fence(this);
-          parent_ctx->record_previous_trace(local_trace);
-          return;
-        }
+        physical_trace->get_current_template()->execute_all();
+        template_completion = physical_trace->get_template_completion();
+        Runtime::trigger_event(completion_event, template_completion);
+        local_trace->end_trace_execution(this);
+        parent_ctx->update_current_fence(this);
+        parent_ctx->record_previous_trace(local_trace);
+        local_trace->initialize_tracing_state();
+        replayed = true;
+        return;
       }
+      else if (local_trace->is_recording())
+        current_template =
+          local_trace->get_physical_trace()->get_current_template();
 
       // Indicate that this trace is done being captured
       // This also registers that we have dependences on all operations
@@ -1132,24 +1196,26 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Now finish capturing the physical trace
-      if (local_trace->has_physical_trace())
+      if (local_trace->is_recording())
       {
-        PhysicalTrace *physical_trace = local_trace->get_physical_trace();
-        if (physical_trace->is_recording())
-          physical_trace->fix_trace();
-        else
+#ifdef DEBUG_LEGION
+        assert(current_template != NULL);
+#endif
+        local_trace->get_physical_trace()->fix_trace(current_template);
+        local_trace->initialize_tracing_state();
+      }
+      else if (replayed)
+      {
+        complete_mapping();
+        need_completion_trigger = false;
+        if (!template_completion.has_triggered())
         {
-          complete_mapping();
-          need_completion_trigger = false;
-          if (!template_completion.has_triggered())
-          {
-            RtEvent wait_on = Runtime::protect_event(template_completion);
-            complete_execution(wait_on);
-          }
-          else
-            complete_execution();
-          return;
+          RtEvent wait_on = Runtime::protect_event(template_completion);
+          complete_execution(wait_on);
         }
+        else
+          complete_execution();
+        return;
       }
       FenceOp::trigger_mapping();
     }
@@ -1160,14 +1226,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     TraceReplayOp::TraceReplayOp(Runtime *rt)
-      : FenceOp(rt)
+      : TraceOp(rt)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     TraceReplayOp::TraceReplayOp(const TraceReplayOp &rhs)
-      : FenceOp(NULL)
+      : TraceOp(NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -1198,6 +1264,7 @@ namespace Legion {
       assert(trace != NULL);
 #endif
       local_trace = trace;
+      trace = NULL;
     }
 
     //--------------------------------------------------------------------------
@@ -1237,26 +1304,36 @@ namespace Legion {
       assert(trace == NULL);
       assert(local_trace != NULL);
 #endif
-      if (local_trace->has_physical_trace())
+      PhysicalTrace *physical_trace = local_trace->get_physical_trace();
+      PhysicalTemplate *current_template =
+        physical_trace->get_current_template();
+      bool recurrent = true;
+      bool is_recording = local_trace->is_recording();
+      if (current_template == NULL || is_recording)
       {
-        // Wait for the previous traces to be mapped before checking
-        // template preconditions because no template would exist
-        // until they are mapped.
-        FenceOp *fence_op = parent_ctx->get_current_fence();
-        if (fence_op != NULL)
-          fence_op->get_mapped_event().wait();
-        local_trace->get_physical_trace()->check_template_preconditions();
-        local_trace->get_physical_trace()->initialize_template(
-            get_completion_event());
-      }
+        recurrent = false;
+        if (physical_trace->has_any_templates() || is_recording)
+        {
+          // Wait for the previous recordings to be done before checking
+          // template preconditions, otherwise no template would exist.
+          FenceOp *fence_op = parent_ctx->get_current_fence();
+          if (fence_op != NULL)
+            fence_op->get_mapped_event().wait();
+        }
 
-      // If this trace is replayed just previously, we know there is a
-      // preceding fence and this is already registered to it.
-      if (!parent_ctx->check_trace_recurrent(local_trace))
-      {
+        if (current_template == NULL)
+          physical_trace->check_template_preconditions();
+
         // Register this fence with all previous users in the parent's context
         parent_ctx->perform_fence_analysis(this);
       }
+
+      if (physical_trace->get_current_template() != NULL)
+      {
+        physical_trace->initialize_template(get_completion_event(), recurrent);
+        local_trace->set_state_replay();
+      }
+
       // Now update the parent context with this fence before we can complete
       // the dependence analysis and possibly be deactivated
       parent_ctx->update_current_fence(this);
@@ -1275,7 +1352,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PhysicalTrace::PhysicalTrace(Runtime *rt)
-      : runtime(rt), current_template(NULL), previous_template(NULL)
+      : runtime(rt), current_template(NULL)
     //--------------------------------------------------------------------------
     {
     }
@@ -1307,68 +1384,60 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTrace::fix_trace()
+    void PhysicalTrace::fix_trace(PhysicalTemplate *tpl)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(is_recording());
+      assert(tpl->is_recording());
 #endif
-      current_template->finalize();
-      if (current_template->is_replayable())
-        previous_template = current_template;
-      current_template = NULL;
-    }
-
-    //--------------------------------------------------------------------------
-    bool PhysicalTrace::is_recording(void) const
-    //--------------------------------------------------------------------------
-    {
-      return current_template != NULL && current_template->is_recording();
-    }
-
-    //--------------------------------------------------------------------------
-    void PhysicalTrace::finish_replay()
-    //--------------------------------------------------------------------------
-    {
-      if (current_template->is_replayable())
-        previous_template = current_template;
-      current_template = NULL;
+      tpl->finalize();
+      if (!tpl->is_replayable())
+      {
+        delete tpl;
+        current_template = NULL;
+      }
+      else
+        templates.push_back(tpl);
     }
 
     //--------------------------------------------------------------------------
     void PhysicalTrace::check_template_preconditions()
     //--------------------------------------------------------------------------
     {
-      if (previous_template != NULL && previous_template->is_replayable())
-      {
-        current_template = previous_template;
-        return;
-      }
       for (std::vector<PhysicalTemplate*>::reverse_iterator it =
            templates.rbegin(); it != templates.rend(); ++it)
-        if ((*it)->is_replayable() && (*it)->check_preconditions())
+        if ((*it)->check_preconditions())
         {
+#ifdef DEBUG_LEGION
+          assert((*it)->is_replayable());
+#endif
           current_template = *it;
           return;
         }
-      start_new_template();
     }
 
     //--------------------------------------------------------------------------
-    inline void PhysicalTrace::start_new_template()
+    PhysicalTemplate* PhysicalTrace::start_new_template()
     //--------------------------------------------------------------------------
     {
-      templates.push_back(new PhysicalTemplate());
-      current_template = templates.back();
+      current_template = new PhysicalTemplate();
+      return current_template;
     }
 
-    void PhysicalTrace::initialize_template(ApEvent fence_completion)
+    //--------------------------------------------------------------------------
+    void PhysicalTrace::initialize_template(
+                                       ApEvent fence_completion, bool recurrent)
+    //--------------------------------------------------------------------------
     {
-      if (current_template != NULL)
-        current_template->initialize(fence_completion, is_recurrent());
+#ifdef DEBUG_LEGION
+      assert(current_template != NULL);
+#endif
+      current_template->initialize(fence_completion, recurrent);
     }
 
+    //--------------------------------------------------------------------------
     ApEvent PhysicalTrace::get_template_completion(void) const
+    //--------------------------------------------------------------------------
     {
       if (current_template != NULL)
         return current_template->get_completion();
@@ -1433,34 +1502,26 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       fence_completion = completion;
-      if (recording)
-      {
-        events.resize(fence_completion_id + 1);
-        events[fence_completion_id] = fence_completion;
-      }
-      else
-      {
-        if (recurrent)
-          for (std::map<unsigned, unsigned>::iterator it = frontiers.begin();
-              it != frontiers.end(); ++it)
-          {
-            if (events[it->first].exists())
-              events[it->second] = events[it->first];
-            else
-              events[it->second] = completion;
-          }
-        else
-          for (std::map<unsigned, unsigned>::iterator it = frontiers.begin();
-              it != frontiers.end(); ++it)
+      if (recurrent)
+        for (std::map<unsigned, unsigned>::iterator it = frontiers.begin();
+            it != frontiers.end(); ++it)
+        {
+          if (events[it->first].exists())
+            events[it->second] = events[it->first];
+          else
             events[it->second] = completion;
+        }
+      else
+        for (std::map<unsigned, unsigned>::iterator it = frontiers.begin();
+            it != frontiers.end(); ++it)
+          events[it->second] = completion;
 
-        events[fence_completion_id] = fence_completion;
+      events[fence_completion_id] = fence_completion;
 #ifdef DEBUG_LEGION
-        for (std::map<TraceLocalId, Operation*>::iterator it =
-             operations.begin(); it != operations.end(); ++it)
-          it->second = NULL;
+      for (std::map<TraceLocalId, Operation*>::iterator it =
+           operations.begin(); it != operations.end(); ++it)
+        it->second = NULL;
 #endif
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -1675,8 +1736,17 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       recording = false;
-      optimize();
       replayable = check_preconditions();
+      if (!replayable)
+      {
+        if (Runtime::dump_physical_traces)
+        {
+          optimize();
+          dump_template();
+        }
+        return;
+      }
+      optimize();
       if (Runtime::dump_physical_traces) dump_template();
       size_t num_events = events.size();
       events.clear();
@@ -2106,6 +2176,8 @@ namespace Legion {
     void PhysicalTemplate::dump_template()
     //--------------------------------------------------------------------------
     {
+      std::cerr << "#### " << (replayable ? "Replayable" : "Non-replayable")
+                << " Template " << this << " ####" << std::endl;
       std::cerr << "[Instructions]" << std::endl;
       for (std::vector<Instruction*>::iterator it = instructions.begin();
            it != instructions.end(); ++it)
@@ -2134,7 +2206,7 @@ namespace Legion {
            valid_views.begin(); it != valid_views.end(); ++it)
       {
         char *mask = it->second.to_string();
-        std::cerr << "  " << view_to_string(it->first) << " "
+        std::cerr << "  " << view_to_string(it->first) << " " << mask
                   << " logical ctx: " << logical_contexts[it->first]
                   << " physical ctx: " << physical_contexts[it->first]
                   << std::endl;

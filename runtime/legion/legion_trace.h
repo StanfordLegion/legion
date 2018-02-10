@@ -72,6 +72,12 @@ namespace Legion {
         FieldMask mask;
       };
     public:
+      enum TracingState {
+        LOGICAL_ONLY,
+        PHYSICAL_RECORD,
+        PHYSICAL_REPLAY,
+      };
+    public:
       LegionTrace(TaskContext *ctx);
       virtual ~LegionTrace(void);
     public:
@@ -102,6 +108,12 @@ namespace Legion {
     public:
       void replay_aliased_children(std::vector<RegionTreePath> &paths) const;
       void end_trace_execution(FenceOp *fence_op);
+    public:
+      void initialize_tracing_state(void) { state = LOGICAL_ONLY; }
+      void set_state_record(void) { state = PHYSICAL_RECORD; }
+      void set_state_replay(void) { state = PHYSICAL_REPLAY; }
+      bool is_recording(void) const { return state == PHYSICAL_RECORD; }
+      bool is_replaying(void) const { return state == PHYSICAL_REPLAY; }
 #ifdef LEGION_SPY
     public:
       UniqueID get_current_uid_by_index(unsigned op_idx) const;
@@ -114,6 +126,7 @@ namespace Legion {
       // aliased but non-interfering region requirements. This should
       // be pretty sparse so we'll make it a map
       std::map<unsigned,LegionVector<AliasChildren>::aligned> aliased_children;
+      TracingState state;
       // Pointer to a physical trace
       PhysicalTrace *physical_trace;
       unsigned last_memoized;
@@ -255,6 +268,19 @@ namespace Legion {
       bool tracing;
     };
 
+    class TraceOp : public FenceOp {
+    public:
+      TraceOp(Runtime *rt);
+      TraceOp(const TraceOp &rhs);
+      virtual ~TraceOp(void);
+    public:
+      TraceOp& operator=(const TraceOp &rhs);
+    public:
+      virtual void execute_dependence_analysis(void);
+    protected:
+      LegionTrace *local_trace;
+    };
+
     /**
      * \class TraceCaptureOp
      * This class represents trace operations which we inject
@@ -262,7 +288,7 @@ namespace Legion {
      * is finished so the DynamicTrace object can compute the
      * dependences data structure.
      */
-    class TraceCaptureOp : public FenceOp {
+    class TraceCaptureOp : public TraceOp {
     public:
       static const AllocationType alloc_type = TRACE_CAPTURE_OP_ALLOC;
     public:
@@ -281,7 +307,8 @@ namespace Legion {
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_mapping(void);
     protected:
-      DynamicTrace *local_trace;
+      DynamicTrace *dynamic_trace;
+      PhysicalTemplate *current_template;
     };
 
     /**
@@ -292,7 +319,7 @@ namespace Legion {
      * then registers dependences on all operations in the trace
      * and becomes the new current fence.
      */
-    class TraceCompleteOp : public FenceOp {
+    class TraceCompleteOp : public TraceOp {
     public:
       static const AllocationType alloc_type = TRACE_COMPLETE_OP_ALLOC;
     public:
@@ -311,8 +338,9 @@ namespace Legion {
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_mapping(void);
     protected:
-      LegionTrace *local_trace;
+      PhysicalTemplate *current_template;
       ApEvent template_completion;
+      bool replayed;
     };
 
     /**
@@ -321,7 +349,7 @@ namespace Legion {
      * into the operation stream to replay a physical trace
      * if there is one that satisfies its preconditions.
      */
-    class TraceReplayOp : public FenceOp {
+    class TraceReplayOp : public TraceOp {
     public:
       static const AllocationType alloc_type = TRACE_REPLAY_OP_ALLOC;
     public:
@@ -339,8 +367,6 @@ namespace Legion {
       virtual OpKind get_operation_kind(void) const;
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_mapping(void);
-    protected:
-      LegionTrace *local_trace;
     };
 
     struct CachedMapping
@@ -369,27 +395,22 @@ namespace Legion {
     public:
       PhysicalTrace& operator=(const PhysicalTrace &rhs);
     public:
+      void clear_cached_template(void) { current_template = NULL; }
       void check_template_preconditions();
+    public:
       PhysicalTemplate* get_current_template() { return current_template; }
-    private:
-      void start_new_template();
+      bool has_any_templates(void) const { return templates.size() > 0; }
     public:
-      void initialize_template(ApEvent fence_completion);
+      PhysicalTemplate* start_new_template(void);
+      void fix_trace(PhysicalTemplate *tpl);
+    public:
+      void initialize_template(ApEvent fence_completion, bool recurrent);
       ApEvent get_template_completion(void) const;
-    public:
-      void fix_trace(void);
-      bool is_recording(void) const;
-      inline bool is_recurrent(void) const
-        { return current_template != NULL &&
-                 current_template == previous_template; }
-      void finish_replay(void);
-      void clear_cached_template(void) { previous_template = NULL; }
     public:
       Runtime *runtime;
     private:
       mutable LocalLock trace_lock;
       PhysicalTemplate* current_template;
-      PhysicalTemplate* previous_template;
       std::vector<PhysicalTemplate*> templates;
     };
 

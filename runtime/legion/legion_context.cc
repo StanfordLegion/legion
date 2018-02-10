@@ -4974,21 +4974,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool InnerContext::check_trace_recurrent(LegionTrace *trace) const
+    void InnerContext::invalidate_trace_cache(LegionTrace *trace)
     //--------------------------------------------------------------------------
     {
-      return previous_trace == trace;
-    }
-
-    //--------------------------------------------------------------------------
-    void InnerContext::invalidate_trace_cache(void)
-    //--------------------------------------------------------------------------
-    {
-      if (previous_trace != NULL && previous_trace->has_physical_trace())
-      {
+      if (previous_trace != NULL && previous_trace != trace)
         previous_trace->get_physical_trace()->clear_cached_template();
-        previous_trace = NULL;
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -8175,17 +8165,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool LeafContext::check_trace_recurrent(LegionTrace *trace) const
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(false);
-#endif
-      exit(ERROR_LEAF_TASK_VIOLATION);
-    }
-
-    //--------------------------------------------------------------------------
-    void LeafContext::invalidate_trace_cache(void)
+    void LeafContext::invalidate_trace_cache(LegionTrace *trace)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -9342,17 +9322,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool InlineContext::check_trace_recurrent(LegionTrace *trace) const
+    void InlineContext::invalidate_trace_cache(LegionTrace *trace)
     //--------------------------------------------------------------------------
     {
-      return enclosing->check_trace_recurrent(trace);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::invalidate_trace_cache(void)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->invalidate_trace_cache();
+      enclosing->invalidate_trace_cache(trace);
     }
 
     //--------------------------------------------------------------------------
