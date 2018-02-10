@@ -4235,6 +4235,205 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
+    // DeferredSingleCopier
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    DeferredSingleCopier::DeferredSingleCopier(const TraversalInfo &in,
+        MaterializedView *d, const FieldMask &m, const RestrictInfo &res,bool r)
+      : field_index(m.find_first_set()), copy_mask(m), info(in), dst(d),
+        across_helper(NULL), restrict_info(&res), restrict_out(r),
+        has_dst_preconditions(false), finalized(false)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    DeferredSingleCopier::DeferredSingleCopier(const TraversalInfo &in, 
+        MaterializedView *d, const FieldMask &m, ApEvent p, CopyAcrossHelper *h)
+      : field_index(m.find_first_set()), copy_mask(m), info(in), dst(d),
+        across_helper(h), restrict_info(NULL), restrict_out(false),
+        has_dst_preconditions(true), finalized(false)
+    //--------------------------------------------------------------------------
+    {
+      dst_preconditions.insert(p);
+    }
+
+    //--------------------------------------------------------------------------
+    DeferredSingleCopier::DeferredSingleCopier(const DeferredSingleCopier &rhs)
+      : field_index(rhs.field_index), copy_mask(rhs.copy_mask), info(rhs.info),
+        dst(rhs.dst), across_helper(rhs.across_helper), 
+        restrict_info(rhs.restrict_info), restrict_out(rhs.restrict_out)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    DeferredSingleCopier::~DeferredSingleCopier(void)
+    //--------------------------------------------------------------------------
+    {
+      if (!finalized)
+        finalize();
+    }
+
+    //--------------------------------------------------------------------------
+    DeferredSingleCopier& DeferredSingleCopier::operator=(
+                                                const DeferredSingleCopier &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void DeferredSingleCopier::merge_destination_preconditions(
+                                               std::set<ApEvent> &preconditions)
+    //--------------------------------------------------------------------------
+    {
+      if (!has_dst_preconditions)
+        compute_dst_preconditions();
+      preconditions.insert(dst_preconditions.begin(), dst_preconditions.end());
+    }
+
+    //--------------------------------------------------------------------------
+    void DeferredSingleCopier::buffer_reductions(VersionTracker *tracker,
+        PredEvent pred_guard, RegionTreeNode *intersect, 
+        IndexSpaceExpression *mask, std::set<ReductionView*> &source_reductions)
+    //--------------------------------------------------------------------------
+    {
+      for (std::set<ReductionView*>::const_iterator it = 
+            source_reductions.begin(); it != source_reductions.end(); it++)
+      {
+#ifdef DEBUG_LEGION
+        assert(pending_reductions.find(*it) == pending_reductions.end());
+#endif
+        pending_reductions[*it] = 
+          PendingReduction(tracker, pred_guard, intersect, mask);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void DeferredSingleCopier::begin_guard_protection(void)
+    //--------------------------------------------------------------------------
+    {
+      protected_copy_posts.resize(protected_copy_posts.size() + 1);
+      copy_postconditions.swap(protected_copy_posts.back());
+    }
+
+    //--------------------------------------------------------------------------
+    void DeferredSingleCopier::end_guard_protection(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!protected_copy_posts.empty());
+#endif
+      std::set<ApEvent> &target = protected_copy_posts.back();
+      for (std::set<ApEvent>::const_iterator it = 
+            copy_postconditions.begin(); it != copy_postconditions.end(); it++)
+      {
+        ApEvent protect = it->protect();
+        if (!protect.exists())
+          continue;
+        target.insert(protect);
+      }
+      copy_postconditions.clear();
+      copy_postconditions.swap(target);
+      protected_copy_posts.pop_back();
+    }
+
+    //--------------------------------------------------------------------------
+    void DeferredSingleCopier::finalize(std::set<ApEvent> *postconditions)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!finalized);
+#endif
+      finalized = true;
+      // Apply any pending reductions using the proper preconditions
+      if (!pending_reductions.empty())
+      {
+        if (!has_dst_preconditions)
+          compute_dst_preconditions();
+        // We'll just use the destination preconditions here for accumulation
+        // We're not going to need it again later anyway
+        if (!copy_postconditions.empty())
+          dst_preconditions.insert(copy_postconditions.begin(),
+                                   copy_postconditions.end());
+        const ApEvent reduction_pre = Runtime::merge_events(dst_preconditions);
+        // Issue all the reductions
+        for (PendingReductions::const_iterator it = 
+              pending_reductions.begin(); it != pending_reductions.end(); it++)
+        {
+          ApEvent reduction_post = it->first->perform_deferred_reduction(
+              dst, copy_mask, it->second.version_tracker, reduction_pre,
+              info.op, info.index, it->second.pred_guard, across_helper,
+              it->second.intersect, it->second.mask, info.map_applied_events);
+          if (reduction_post.exists())
+            copy_postconditions.insert(reduction_post);
+        }
+      }
+      // If we have no copy post conditions at this point we're done
+      if (copy_postconditions.empty())
+        return;
+      // Either apply or record our postconditions
+      if (postconditions == NULL)
+      {
+        ApEvent copy_done = Runtime::merge_events(copy_postconditions);
+        if (copy_done.exists())
+        {
+          const AddressSpaceID local_space = 
+            dst->context->runtime->address_space;
+          dst->add_copy_user(0/*redop*/, copy_done, &info.version_info,
+                             info.op->get_unique_op_id(), info.index,
+                             copy_mask, false/*reading*/, restrict_out,
+                             local_space, info.map_applied_events);
+          // Handle any restriction cases
+          if (restrict_out && (restrict_info != NULL))
+          {
+            FieldMask restrict_mask;
+            restrict_info->populate_restrict_fields(restrict_mask);
+            if (restrict_mask.is_set(field_index))
+              info.op->record_restrict_postcondition(copy_done);
+          }
+        }
+      }
+      else
+        postconditions->insert(copy_postconditions.begin(),
+                               copy_postconditions.end());
+    }
+
+    //--------------------------------------------------------------------------
+    void DeferredSingleCopier::compute_dst_preconditions(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!has_dst_preconditions);
+#endif
+      has_dst_preconditions = true;
+      const AddressSpaceID local_space = dst->context->runtime->address_space;
+      LegionMap<ApEvent,FieldMask>::aligned temp_preconditions;
+      dst->find_copy_preconditions(0/*redop*/, false/*reading*/,
+                                   false/*single copy*/, restrict_out,
+                                   copy_mask, &info.version_info,
+                                   info.op->get_unique_op_id(), info.index,
+                                   local_space, temp_preconditions,
+                                   info.map_applied_events);
+      for (LegionMap<ApEvent,FieldMask>::aligned::const_iterator it = 
+            temp_preconditions.begin(); it != temp_preconditions.end(); it++)
+        dst_preconditions.insert(it->first);
+      if ((restrict_info != NULL) && restrict_info->has_restrictions())
+      {
+        FieldMask restrict_mask;
+        restrict_info->populate_restrict_fields(restrict_mask); 
+        if (restrict_mask.is_set(field_index))
+          dst_preconditions.insert(info.op->get_restrict_precondition());
+      }
+    }
+
+    /////////////////////////////////////////////////////////////
     // DeferredView 
     /////////////////////////////////////////////////////////////
 

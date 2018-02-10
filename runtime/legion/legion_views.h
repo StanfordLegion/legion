@@ -970,6 +970,71 @@ namespace Legion {
     };
 
     /**
+     * \struct DeferredSingleCopier
+     * This is a specialized class for doing deferred copies
+     * from a composite view for a single field.
+     */
+    struct DeferredSingleCopier {
+    public:
+      struct PendingReduction {
+      public:
+        PendingReduction(void)
+          : version_tracker(NULL), intersect(NULL), mask(NULL) { }
+        PendingReduction(VersionTracker *vt, PredEvent g, 
+                         RegionTreeNode *i, IndexSpaceExpression *e)
+          : version_tracker(vt), pred_guard(g), intersect(i), mask(e) { }
+      public:
+        VersionTracker *version_tracker;
+        PredEvent pred_guard;
+        RegionTreeNode *intersect;
+        IndexSpaceExpression *mask;
+      };
+      typedef std::map<ReductionView*,PendingReduction> PendingReductions;
+    public:
+      DeferredSingleCopier(const TraversalInfo &info, 
+                           MaterializedView *dst, 
+                           const FieldMask &copy_mask,
+                           const RestrictInfo &restrict_info,
+                           bool restrict_out);
+      // For handling deferred copies across
+      DeferredSingleCopier(const TraversalInfo &info, 
+                           MaterializedView *dst, 
+                           const FieldMask &copy_mask,
+                           ApEvent precondition,
+                           CopyAcrossHelper *helper = NULL);
+      DeferredSingleCopier(const DeferredSingleCopier &rhs);
+      ~DeferredSingleCopier(void);
+    public:
+      DeferredSingleCopier& operator=(const DeferredSingleCopier &rhs);
+    public:
+      void merge_destination_preconditions(std::set<ApEvent> &preconditions);
+      void buffer_reductions(VersionTracker *tracker, PredEvent pred_guard,
+                             RegionTreeNode *intersect, IndexSpaceExpression *mask,
+                             std::set<ReductionView*> &source_reductions);
+      void begin_guard_protection(void);
+      void end_guard_protection(void);
+      void finalize(std::set<ApEvent> *postconditions = NULL);
+    protected:
+      void compute_dst_preconditions(void);
+    public: // const fields
+      const unsigned field_index;
+      const FieldMask copy_mask;
+      const TraversalInfo &info;
+      MaterializedView *const dst;
+      CopyAcrossHelper *const across_helper;
+      const RestrictInfo *const restrict_info;
+      const bool restrict_out;
+    public:
+      std::set<ApEvent> copy_postconditions;
+    protected: // internal members
+      PendingReductions pending_reductions;
+      std::set<ApEvent> dst_preconditions;
+      std::vector<std::set<ApEvent> > protected_copy_posts;
+      bool has_dst_preconditions;
+      bool finalized;
+    };
+
+    /**
      * \class DeferredView
      * A DeferredView class is an abstract class the complements
      * the MaterializedView class. While materialized views are 
