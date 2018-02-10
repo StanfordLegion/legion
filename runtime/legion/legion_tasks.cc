@@ -7399,6 +7399,8 @@ namespace Legion {
       result->index_owner = this;
       result->remote_owner_uid = parent_ctx->get_unique_id();
       result->trace_local_id = trace_local_id;
+      result->tpl = tpl;
+      result->memo_state = memo_state;
       if (Runtime::legion_spy_enabled)
         LegionSpy::log_index_slice(get_unique_id(), 
                                    result->get_unique_id());
@@ -8370,6 +8372,8 @@ namespace Legion {
       result->index_owner = this->index_owner;
       result->remote_owner_uid = this->remote_owner_uid;
       result->trace_local_id = trace_local_id;
+      result->tpl = tpl;
+      result->memo_state = memo_state;
       if (Runtime::legion_spy_enabled)
         LegionSpy::log_slice_slice(get_unique_id(), 
                                    result->get_unique_id());
@@ -8450,6 +8454,8 @@ namespace Legion {
       result->must_epoch_task = this->must_epoch_task;
       result->index_domain = this->index_domain;
       result->trace_local_id = trace_local_id;
+      result->tpl = tpl;
+      result->memo_state = memo_state;
       // Now figure out our local point information
       result->initialize_point(this, point, point_arguments);
       if (Runtime::legion_spy_enabled)
