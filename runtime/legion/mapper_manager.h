@@ -92,7 +92,7 @@ namespace Legion {
                                       Mapper::SelectTaskSrcInput *input,
                                       Mapper::SelectTaskSrcOutput *output,
                                       MappingCallInfo *info = NULL);
-#ifndef PRUNE_OLD_COMPOSITE
+#ifdef USE_OLD_COMPOSITE
       void invoke_task_create_temporary(TaskOp *task,
                                       Mapper::CreateTaskTemporaryInput *input,
                                       Mapper::CreateTaskTemporaryOutput *output,
@@ -112,7 +112,7 @@ namespace Legion {
                                         Mapper::SelectInlineSrcInput *input,
                                         Mapper::SelectInlineSrcOutput *output,
                                         MappingCallInfo *info = NULL);
-#ifndef PRUNE_OLD_COMPOSITE
+#ifdef USE_OLD_COMPOSITE
       void invoke_inline_create_temporary(MapOp *op,
                                     Mapper::CreateInlineTemporaryInput *input,
                                     Mapper::CreateInlineTemporaryOutput *output,
@@ -130,7 +130,7 @@ namespace Legion {
                                       Mapper::SelectCopySrcInput *input,
                                       Mapper::SelectCopySrcOutput *output,
                                       MappingCallInfo *info = NULL);
-#ifndef PRUNE_OLD_COMPOSITE
+#ifdef USE_OLD_COMPOSITE
       void invoke_copy_create_temporary(CopyOp *op,
                                   Mapper::CreateCopyTemporaryInput *input,
                                   Mapper::CreateCopyTemporaryOutput *output,
@@ -150,7 +150,7 @@ namespace Legion {
                                        Mapper::SelectCloseSrcInput *input,
                                        Mapper::SelectCloseSrcOutput *output,
                                        MappingCallInfo *info = NULL);
-#ifndef PRUNE_OLD_COMPOSITE
+#ifdef USE_OLD_COMPOSITE
       void invoke_close_create_temporary(CloseOp *op,
                                      Mapper::CreateCloseTemporaryInput *input,
                                      Mapper::CreateCloseTemporaryOutput *output,
@@ -179,7 +179,7 @@ namespace Legion {
                                          Mapper::SelectReleaseSrcInput *input,
                                          Mapper::SelectReleaseSrcOutput *output,
                                          MappingCallInfo *info = NULL);
-#ifndef PRUNE_OLD_COMPOSITE
+#ifdef USE_OLD_COMPOSITE
       void invoke_release_create_temporary(ReleaseOp *op,
                                   Mapper::CreateReleaseTemporaryInput *input,
                                   Mapper::CreateReleaseTemporaryOutput *output,
@@ -204,7 +204,7 @@ namespace Legion {
                           Mapper::SelectPartitionSrcInput *input,
                           Mapper::SelectPartitionSrcOutput *output,
                           MappingCallInfo *info = NULL);
-#ifndef PRUNE_OLD_COMPOSITE
+#ifdef USE_OLD_COMPOSITE
       void invoke_partition_create_temporary(DependentPartitionOp *op,
                           Mapper::CreatePartitionTemporaryInput *input,
                           Mapper::CreatePartitionTemporaryOutput *output,

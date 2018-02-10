@@ -143,7 +143,7 @@ namespace Legion {
 	    const Task&                task,
 	    const SelectTaskSrcInput&  input,
 	    SelectTaskSrcOutput& output);
-#ifndef PRUNE_OLD_COMPOSITE
+#ifdef USE_OLD_COMPOSITE
 	void create_task_temporary_instance(
 	    const MapperContext              ctx,
 	    const Task&                      task,
@@ -165,7 +165,7 @@ namespace Legion {
 	    const InlineMapping&         inline_op,
 	    const SelectInlineSrcInput&  input,
 	    SelectInlineSrcOutput& output);
-#ifndef PRUNE_OLD_COMPOSITE
+#ifdef USE_OLD_COMPOSITE
 	void create_inline_temporary_instance(
 	    const MapperContext                ctx,
 	    const InlineMapping&               inline_op,
@@ -187,7 +187,7 @@ namespace Legion {
 	void speculate(const MapperContext      ctx,
 	    const Copy& copy,
 	    SpeculativeOutput& output);
-#ifndef PRUNE_OLD_COMPOSITE
+#ifdef USE_OLD_COMPOSITE
 	void create_copy_temporary_instance(
 	    const MapperContext              ctx,
 	    const Copy&                      copy,
@@ -206,7 +206,7 @@ namespace Legion {
 	    const Close&               close,
 	    const SelectCloseSrcInput&  input,
 	    SelectCloseSrcOutput& output);
-#ifndef PRUNE_OLD_COMPOSITE
+#ifdef USE_OLD_COMPOSITE
 	void create_close_temporary_instance(
 	    const MapperContext               ctx,
 	    const Close&                      close,
@@ -236,7 +236,7 @@ namespace Legion {
 	    const Release&                 release,
 	    const SelectReleaseSrcInput&   input,
 	    SelectReleaseSrcOutput&  output);
-#ifndef PRUNE_OLD_COMPOSITE
+#ifdef USE_OLD_COMPOSITE
 	void create_release_temporary_instance(
 	    const MapperContext                 ctx,
 	    const Release&                      release,

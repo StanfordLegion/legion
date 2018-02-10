@@ -70,6 +70,7 @@ namespace Legion {
       public:
         std::vector<InstanceInfo*> instances;
       };
+#ifdef USE_OLD_COMPOSITE
       struct TemporaryMapping {
       public:
         void map_temporary(MapperRuntime *runtime, MapperContext ctx,
@@ -78,6 +79,7 @@ namespace Legion {
       public:
         std::map<unsigned long/*original dst*/,InstanceInfo*> instances;
       };
+#endif
       struct TunableMapping {
       public:
         void set_tunable(void *&value, size_t &size);
@@ -98,7 +100,9 @@ namespace Legion {
         std::map<unsigned,RequirementMapping*> premappings;
         std::vector<RequirementMapping*> mappings;
         std::map<unsigned,RequirementMapping*> postmappings;
+#ifdef USE_OLD_COMPOSITE
         std::map<unsigned,TemporaryMapping*> temporaries;
+#endif
         std::vector<TunableMapping*> tunables;
         std::vector<UniqueID/*original*/> operation_ids;
         std::vector<UniqueID/*original*/> close_ids; 
@@ -106,23 +110,31 @@ namespace Legion {
       struct InlineMappingInfo {
       public:
         RequirementMapping *mapping;
+#ifdef USE_OLD_COMPOSITE
         TemporaryMapping *temporary;
+#endif
       };
       struct CopyMappingInfo {
       public:
         std::vector<RequirementMapping*> src_mappings;
         std::vector<RequirementMapping*> dst_mappings;
+#ifdef USE_OLD_COMPOSITE
         std::map<unsigned,TemporaryMapping*> src_temporaries;
         std::map<unsigned,TemporaryMapping*> dst_temporaries;
+#endif
       };
       struct CloseMappingInfo {
       public:
         RequirementMapping *mapping;
+#ifdef USE_OLD_COMPOSITE
         TemporaryMapping* temporary;
+#endif
       };
       struct ReleaseMappingInfo {
       public:
+#ifdef USE_OLD_COMPOSITE
         TemporaryMapping *temporary;
+#endif
       };
     public:
       enum ReplayMessageKind {
@@ -172,11 +184,13 @@ namespace Legion {
                                        const Task&                task,
                                        const SelectTaskSrcInput&  input,
                                              SelectTaskSrcOutput& output);
+#ifdef USE_OLD_COMPOSITE
       virtual void create_task_temporary_instance(
                                     const MapperContext              ctx,
                                     const Task&                      task,
                                     const CreateTaskTemporaryInput&  input,
                                           CreateTaskTemporaryOutput& output);
+#endif
       virtual void speculate(const MapperContext      ctx,
                              const Task&              task,
                                    SpeculativeOutput& output);
@@ -192,11 +206,13 @@ namespace Legion {
                                        const InlineMapping&         inline_op,
                                        const SelectInlineSrcInput&  input,
                                              SelectInlineSrcOutput& output);
+#ifdef USE_OLD_COMPOSITE
       virtual void create_inline_temporary_instance(
                                   const MapperContext                ctx,
                                   const InlineMapping&               inline_op,
                                   const CreateInlineTemporaryInput&  input,
                                         CreateInlineTemporaryOutput& output);
+#endif
       virtual void report_profiling(const MapperContext         ctx,
                                     const InlineMapping&        inline_op,
                                     const InlineProfilingInfo&  input);
@@ -209,11 +225,13 @@ namespace Legion {
                                        const Copy&                  copy,
                                        const SelectCopySrcInput&    input,
                                              SelectCopySrcOutput&   output);
+#ifdef USE_OLD_COMPOSITE
       virtual void create_copy_temporary_instance(
                                   const MapperContext              ctx,
                                   const Copy&                      copy,
                                   const CreateCopyTemporaryInput&  input,
                                         CreateCopyTemporaryOutput& output);
+#endif
       virtual void speculate(const MapperContext      ctx,
                              const Copy& copy,
                                    SpeculativeOutput& output);
@@ -229,11 +247,13 @@ namespace Legion {
                                         const Close&               close,
                                         const SelectCloseSrcInput&  input,
                                               SelectCloseSrcOutput& output);
+#ifdef USE_OLD_COMPOSITE
       virtual void create_close_temporary_instance(
                                   const MapperContext               ctx,
                                   const Close&                      close,
                                   const CreateCloseTemporaryInput&  input,
                                         CreateCloseTemporaryOutput& output);
+#endif
       virtual void report_profiling(const MapperContext       ctx,
                                     const Close&              close,
                                     const CloseProfilingInfo& input);
@@ -257,11 +277,13 @@ namespace Legion {
                                      const Release&                 release,
                                      const SelectReleaseSrcInput&   input,
                                            SelectReleaseSrcOutput&  output);
+#ifdef USE_OLD_COMPOSITE
       virtual void create_release_temporary_instance(
                                    const MapperContext                 ctx,
                                    const Release&                      release,
                                    const CreateReleaseTemporaryInput&  input,
                                          CreateReleaseTemporaryOutput& output);
+#endif
       virtual void speculate(const MapperContext         ctx,
                              const Release&              release,
                                    SpeculativeOutput&    output);
@@ -282,11 +304,13 @@ namespace Legion {
                                    const Partition&                partition,
                                    const SelectPartitionSrcInput&  input,
                                          SelectPartitionSrcOutput& output);
+#ifdef USE_OLD_COMPOSITE
       virtual void create_partition_temporary_instance(
                               const MapperContext                   ctx,
                               const Partition&                      partition,
                               const CreatePartitionTemporaryInput&  input,
                                     CreatePartitionTemporaryOutput& output);
+#endif
       virtual void report_profiling(const MapperContext              ctx,
                                     const Partition&                 partition,
                                     const PartitionProfilingInfo&    input);
@@ -334,7 +358,9 @@ namespace Legion {
       CloseMappingInfo* unpack_close_mapping(FILE *f) const;
       ReleaseMappingInfo* unpack_release_mapping(FILE *f) const;
       RequirementMapping* unpack_requirement(FILE *f) const;
+#ifdef USE_OLD_COMPOSITE
       TemporaryMapping* unpack_temporary(FILE *f) const;
+#endif
       TunableMapping* unpack_tunable(FILE *f) const;
     protected:
       TaskMappingInfo* find_task_mapping(MapperContext ctx, const Task &task,

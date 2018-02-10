@@ -343,7 +343,7 @@ namespace Legion {
       void filter_copy_request_kinds(MapperManager *mapper,
           const std::set<ProfilingMeasurementID> &requests,
           std::vector<ProfilingMeasurementID> &results, bool warn_if_not_copy);
-#ifndef PRUNE_OLD_COMPOSITE
+#ifdef USE_OLD_COMPOSITE
     public:
       // Help for creating temporary instances
       MaterializedView* create_temporary_instance(PhysicalManager *dst,
@@ -727,7 +727,7 @@ namespace Legion {
                    get_acquired_instances_ref(void);
       virtual void update_atomic_locks(Reservation lock, bool exclusive);
       virtual void record_reference_mutation_effect(RtEvent event);
-#ifndef PRUNE_OLD_COMPOSITE
+#ifdef USE_OLD_COMPOSITE
       virtual PhysicalManager* select_temporary_instance(PhysicalManager *dst,
                               unsigned index, const FieldMask &needed_fields);
 #endif
@@ -818,7 +818,7 @@ namespace Legion {
                    get_acquired_instances_ref(void);
       virtual void update_atomic_locks(Reservation lock, bool exclusive);
       virtual void record_reference_mutation_effect(RtEvent event);
-#ifndef PRUNE_OLD_COMPOSITE
+#ifdef USE_OLD_COMPOSITE
       virtual PhysicalManager* select_temporary_instance(PhysicalManager *dst,
                               unsigned index, const FieldMask &needed_fields);
 #endif
@@ -1320,7 +1320,7 @@ namespace Legion {
       virtual std::map<PhysicalManager*,std::pair<unsigned,bool> >*
                    get_acquired_instances_ref(void);
       virtual void record_reference_mutation_effect(RtEvent event);
-#ifndef PRUNE_OLD_COMPOSITE
+#ifdef USE_OLD_COMPOSITE
       virtual PhysicalManager* select_temporary_instance(PhysicalManager *dst,
                               unsigned index, const FieldMask &needed_fields);
 #endif
@@ -1424,7 +1424,7 @@ namespace Legion {
       virtual std::map<PhysicalManager*,std::pair<unsigned,bool> >*
                    get_acquired_instances_ref(void);
       virtual void record_reference_mutation_effect(RtEvent event);
-#ifndef PRUNE_OLD_COMPOSITE
+#ifdef USE_OLD_COMPOSITE
       virtual PhysicalManager* select_temporary_instance(PhysicalManager *dst,
                               unsigned index, const FieldMask &needed_fields);
 #endif
@@ -1595,7 +1595,7 @@ namespace Legion {
       virtual std::map<PhysicalManager*,std::pair<unsigned,bool> >*
                    get_acquired_instances_ref(void);
       virtual void record_reference_mutation_effect(RtEvent event);
-#ifndef PRUNE_OLD_COMPOSITE
+#ifdef USE_OLD_COMPOSITE
       virtual PhysicalManager* select_temporary_instance(PhysicalManager *dst,
                               unsigned index, const FieldMask &needed_fields);
 #endif
@@ -2404,7 +2404,7 @@ namespace Legion {
       virtual std::map<PhysicalManager*,std::pair<unsigned,bool> >*
                    get_acquired_instances_ref(void);
       virtual void record_reference_mutation_effect(RtEvent event);
-#ifndef PRUNE_OLD_COMPOSITE
+#ifdef USE_OLD_COMPOSITE
       virtual PhysicalManager* select_temporary_instance(PhysicalManager *dst,
                               unsigned index, const FieldMask &needed_fields);
 #endif

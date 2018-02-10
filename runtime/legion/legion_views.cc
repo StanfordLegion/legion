@@ -3954,7 +3954,8 @@ namespace Legion {
       for (LegionMap<ReductionView*,FieldMask>::aligned::iterator rit = 
             source_reductions.begin(); rit != source_reductions.end(); rit++)
       {
-        std::list<PendingReduction> &reds = pending_reductions[rit->first];
+        LegionList<PendingReduction>::aligned &pending_reduction_list = 
+          pending_reductions[rit->first];
         // First look for any write masks that we need to filter by
         if (!has_prev_write_mask || !(prev_write_mask * rit->second))
         {
@@ -3968,8 +3969,8 @@ namespace Legion {
             const FieldMask overlap = rit->second & it->second;
             if (!overlap)
               continue;
-            reds.push_back(PendingReduction(overlap, version_tracker,
-                  pred_guard, intersect, it->first));
+            pending_reduction_list.push_back(PendingReduction(overlap, 
+                  version_tracker, pred_guard, intersect, it->first));
             pending_reduction_mask |= overlap;
             rit->second -= overlap;
             // Can break out if we're done and we already have a summary mask
@@ -3979,8 +3980,8 @@ namespace Legion {
           if (!rit->second)
             continue;
         }
-        reds.push_back(PendingReduction(rit->second, version_tracker,
-            pred_guard, intersect, NULL/*mask*/));
+        pending_reduction_list.push_back(PendingReduction(rit->second, 
+              version_tracker, pred_guard, intersect, NULL/*mask*/));
         pending_reduction_mask |= rit->second;
       }
     }
@@ -4187,7 +4188,7 @@ namespace Legion {
             pit != pending_reductions.end(); pit++)
       {
         // Iterate over the pending reductions for this reduction view
-        for (std::list<PendingReduction>::iterator it = 
+        for (LegionList<PendingReduction>::aligned::iterator it = 
               pit->second.begin(); it != pit->second.end(); /*nothing*/)
         {
           const FieldMask &overlap = it->reduction_mask & reduction_mask;
@@ -4270,7 +4271,7 @@ namespace Legion {
         if (perfect && (src_indexes[idx] != dst_indexes[idx]))
           perfect = false;
       }
-#ifndef PRUNE_OLD_COMPOSITE
+#ifdef USE_OLD_COMPOSITE
       // Initialize the preconditions
       LegionMap<ApEvent,FieldMask>::aligned preconditions;
       preconditions[precondition] = src_mask;
@@ -4354,7 +4355,7 @@ namespace Legion {
       return *this;
     }
 
-#ifndef PRUNE_OLD_COMPOSITE
+#ifdef USE_OLD_COMPOSITE
     /////////////////////////////////////////////////////////////
     // CompositeCopyNode
     /////////////////////////////////////////////////////////////
@@ -5004,7 +5005,7 @@ namespace Legion {
     {
     }
 
-#ifndef PRUNE_OLD_COMPOSITE
+#ifdef USE_OLD_COMPOSITE
     //--------------------------------------------------------------------------
     CompositeCopyNode* CompositeBase::construct_copy_tree(MaterializedView *dst,
                                                    RegionTreeNode *logical_node,
@@ -5523,7 +5524,6 @@ namespace Legion {
         assert(previous_writes_mask * it->second);
         previous_writes_mask |= it->second;
       }
-      assert(dst->logical_node->is_region());
 #endif
       // In some cases we might already be done
       if (!copy_mask)
@@ -6026,7 +6026,7 @@ namespace Legion {
                                               bool restrict_out)
     //--------------------------------------------------------------------------
     {
-#ifndef PRUNE_OLD_COMPOSITE
+#ifdef USE_OLD_COMPOSITE
       CompositeCopier copier(copy_mask);
       FieldMask top_locally_complete;
       FieldMask dominate_capture(copy_mask);
@@ -6132,7 +6132,7 @@ namespace Legion {
 #endif
     }
 
-#ifndef PRUNE_OLD_COMPOSITE
+#ifdef USE_OLD_COMPOSITE
     //--------------------------------------------------------------------------
     void CompositeView::issue_deferred_copies(const TraversalInfo &info,
                                               MaterializedView *dst,
@@ -6288,7 +6288,7 @@ namespace Legion {
       // Nothing to do here
     }
 
-#ifndef PRUNE_OLD_COMPOSITE
+#ifdef USE_OLD_COMPOSITE
     //--------------------------------------------------------------------------
     void CompositeView::find_valid_views(const FieldMask &update_mask,
                                          const FieldMask &up_mask,
@@ -6861,7 +6861,7 @@ namespace Legion {
       }
     }
 
-#ifndef PRUNE_OLD_COMPOSITE
+#ifdef USE_OLD_COMPOSITE
     //--------------------------------------------------------------------------
     void CompositeNode::find_valid_views(const FieldMask &update_mask,
                                          const FieldMask &up_mask,
@@ -7392,7 +7392,7 @@ namespace Legion {
       }
     }
 
-#ifndef PRUNE_OLD_COMPOSITE
+#ifdef USE_OLD_COMPOSITE
     //--------------------------------------------------------------------------
     void FillView::issue_deferred_copies(const TraversalInfo &info,
                                          MaterializedView *dst,
@@ -7695,7 +7695,7 @@ namespace Legion {
                                         bool restrict_out)
     //--------------------------------------------------------------------------
     {
-#ifndef PRUNE_OLD_COMPOSITE
+#ifdef USE_OLD_COMPOSITE
       LegionMap<ApEvent,FieldMask>::aligned preconditions;
       // We know we're going to write all these fields so we can filter
       dst->find_copy_preconditions(0/*redop*/, false/*reading*/,
@@ -7750,7 +7750,7 @@ namespace Legion {
 #endif
     }
 
-#ifndef PRUNE_OLD_COMPOSITE
+#ifdef USE_OLD_COMPOSITE
     //--------------------------------------------------------------------------
     void PhiView::issue_deferred_copies(const TraversalInfo &info,
                                         MaterializedView *dst,
@@ -7862,7 +7862,7 @@ namespace Legion {
       }
     }
 
-#ifndef PRUNE_OLD_COMPOSITE
+#ifdef USE_OLD_COMPOSITE
     //--------------------------------------------------------------------------
     void PhiView::issue_guarded_update_copies(const TraversalInfo &info,
                                        MaterializedView *dst,
@@ -8326,7 +8326,7 @@ namespace Legion {
         op->record_restrict_postcondition(reduce_post);
     } 
 
-#ifndef PRUNE_OLD_COMPOSITE
+#ifdef USE_OLD_COMPOSITE
     //--------------------------------------------------------------------------
     ApEvent ReductionView::perform_deferred_reduction(MaterializedView *target,
                                                     const FieldMask &red_mask,

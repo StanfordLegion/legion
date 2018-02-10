@@ -1209,7 +1209,7 @@ namespace Legion {
       return merge_restrict_preconditions(grants, wait_barriers);
     }
 
-#ifndef PRUNE_OLD_COMPOSITE
+#ifdef USE_OLD_COMPOSITE
     //--------------------------------------------------------------------------
     PhysicalManager* TaskOp::select_temporary_instance(PhysicalManager *dst,
                                  unsigned index, const FieldMask &needed_fields)

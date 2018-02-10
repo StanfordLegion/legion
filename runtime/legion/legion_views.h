@@ -756,7 +756,7 @@ namespace Legion {
                              Operation *op, unsigned index,
                              std::set<RtEvent> &map_applied_events,
                              PredEvent pred_guard, bool restrict_out = false);
-#ifndef PRUNE_OLD_COMPOSITE
+#ifdef USE_OLD_COMPOSITE
       ApEvent perform_deferred_reduction(MaterializedView *target,
                                         const FieldMask &copy_mask,
                                         VersionTracker *version_tracker,
@@ -917,8 +917,8 @@ namespace Legion {
         RegionTreeNode *intersect;
         IndexSpaceExpression *mask;
       };
-      typedef LegionMap<ReductionView*,
-                  std::list<PendingReduction> >::aligned PendingReductions;
+      typedef std::map<ReductionView*,
+                       LegionList<PendingReduction>::aligned> PendingReductions;
     public:
       DeferredCopier(const TraversalInfo &info, 
                      MaterializedView *dst, 
@@ -1020,7 +1020,7 @@ namespace Legion {
                                          FieldMask copy_mask,
                                          const RestrictInfo &restrict_info,
                                          bool restrict_out) = 0;
-#ifndef PRUNE_OLD_COMPOSITE
+#ifdef USE_OLD_COMPOSITE
       virtual void issue_deferred_copies(const TraversalInfo &info,
                                          MaterializedView *dst,
                                          FieldMask copy_mask,
@@ -1052,7 +1052,7 @@ namespace Legion {
       DeferredVersionInfo& operator=(const DeferredVersionInfo &rhs);
     };
 
-#ifndef PRUNE_OLD_COMPOSITE
+#ifdef USE_OLD_COMPOSITE
     /**
      * \class CompositeCopyNode
      * A class for tracking what data has to be copied from a 
@@ -1185,7 +1185,7 @@ namespace Legion {
     protected:
       typedef LegionMap<IndexSpaceExpression*,FieldMask>::aligned WriteMasks;
       
-#ifndef PRUNE_OLD_COMPOSITE
+#ifdef USE_OLD_COMPOSITE
     protected:
       CompositeCopyNode* construct_copy_tree(MaterializedView *dst,
                                              RegionTreeNode *logical_node,
@@ -1232,7 +1232,7 @@ namespace Legion {
     public:
       virtual InnerContext* get_owner_context(void) const = 0;
       virtual void perform_ready_check(FieldMask mask) = 0;
-#ifndef PRUNE_OLD_COMPOSITE
+#ifdef USE_OLD_COMPOSITE
       virtual void find_valid_views(const FieldMask &update_mask,
                                     const FieldMask &up_mask,
                   LegionMap<LogicalView*,FieldMask>::aligned &valid_views,
@@ -1318,7 +1318,7 @@ namespace Legion {
                                          FieldMask copy_mask,
                                          const RestrictInfo &restrict_info,
                                          bool restrict_out);
-#ifndef PRUNE_OLD_COMPOSITE
+#ifdef USE_OLD_COMPOSITE
       virtual void issue_deferred_copies(const TraversalInfo &info,
                                          MaterializedView *dst,
                                          FieldMask copy_mask,
@@ -1351,7 +1351,7 @@ namespace Legion {
       // From CompositeBase
       virtual InnerContext* get_owner_context(void) const;
       virtual void perform_ready_check(FieldMask mask);
-#ifndef PRUNE_OLD_COMPOSITE
+#ifdef USE_OLD_COMPOSITE
       virtual void find_valid_views(const FieldMask &update_mask,
                                     const FieldMask &up_mask,
                   LegionMap<LogicalView*,FieldMask>::aligned &valid_views,
@@ -1429,7 +1429,7 @@ namespace Legion {
       // From CompositeBase
       virtual InnerContext* get_owner_context(void) const;
       virtual void perform_ready_check(FieldMask mask);
-#ifndef PRUNE_OLD_COMPOSITE
+#ifdef USE_OLD_COMPOSITE
       virtual void find_valid_views(const FieldMask &update_mask,
                                     const FieldMask &up_mask,
                   LegionMap<LogicalView*,FieldMask>::aligned &valid_views,
@@ -1537,7 +1537,7 @@ namespace Legion {
                                          FieldMask copy_mask,
                                          const RestrictInfo &restrict_info,
                                          bool restrict_out);
-#ifndef PRUNE_OLD_COMPOSITE
+#ifdef USE_OLD_COMPOSITE
       virtual void issue_deferred_copies(const TraversalInfo &info,
                                          MaterializedView *dst,
                                          FieldMask copy_mask,
@@ -1650,7 +1650,7 @@ namespace Legion {
                                          FieldMask copy_mask,
                                          const RestrictInfo &restrict_info,
                                          bool restrict_out);
-#ifndef PRUNE_OLD_COMPOSITE
+#ifdef USE_OLD_COMPOSITE
       virtual void issue_deferred_copies(const TraversalInfo &info,
                                          MaterializedView *dst,
                                          FieldMask copy_mask,
@@ -1669,7 +1669,7 @@ namespace Legion {
         { assert(false); return NULL; }
       virtual void perform_ready_check(FieldMask mask)
         { assert(false); }
-#ifndef PRUNE_OLD_COMPOSITE
+#ifdef USE_OLD_COMPOSITE
       virtual void find_valid_views(const FieldMask &update_mask,
                                     const FieldMask &up_mask,
                   LegionMap<LogicalView*,FieldMask>::aligned &valid_views,

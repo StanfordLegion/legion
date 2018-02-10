@@ -535,7 +535,7 @@ namespace Legion {
       }
     }
 
-#ifndef PRUNE_OLD_COMPOSITE
+#ifdef USE_OLD_COMPOSITE
     //--------------------------------------------------------------------------
     MaterializedView* Operation::create_temporary_instance(PhysicalManager *dst,
                                  unsigned index, const FieldMask &needed_fields)
@@ -2612,7 +2612,7 @@ namespace Legion {
       map_applied_conditions.insert(event);
     }
 
-#ifndef PRUNE_OLD_COMPOSITE
+#ifdef USE_OLD_COMPOSITE
     //--------------------------------------------------------------------------
     PhysicalManager* MapOp::select_temporary_instance(PhysicalManager *dst,
                                  unsigned index, const FieldMask &needed_fields)
@@ -3979,7 +3979,7 @@ namespace Legion {
       map_applied_conditions.insert(event);
     }
 
-#ifndef PRUNE_OLD_COMPOSITE
+#ifdef USE_OLD_COMPOSITE
     //--------------------------------------------------------------------------
     PhysicalManager* CopyOp::select_temporary_instance(PhysicalManager *dst,
                                  unsigned index, const FieldMask &needed_fields)
@@ -7017,7 +7017,7 @@ namespace Legion {
       map_applied_conditions.insert(event);
     }
 
-#ifndef PRUNE_OLD_COMPOSITE
+#ifdef USE_OLD_COMPOSITE
     //--------------------------------------------------------------------------
     PhysicalManager* InterCloseOp::select_temporary_instance(
            PhysicalManager *dst, unsigned index, const FieldMask &needed_fields)
@@ -7577,7 +7577,7 @@ namespace Legion {
       map_applied_conditions.insert(event);
     }
 
-#ifndef PRUNE_OLD_COMPOSITE
+#ifdef USE_OLD_COMPOSITE
     //--------------------------------------------------------------------------
     PhysicalManager* PostCloseOp::select_temporary_instance(
            PhysicalManager *dst, unsigned index, const FieldMask &needed_fields)
@@ -8788,7 +8788,7 @@ namespace Legion {
       map_applied_conditions.insert(event);
     }
 
-#ifndef PRUNE_OLD_COMPOSITE
+#ifdef USE_OLD_COMPOSITE
     //--------------------------------------------------------------------------
     PhysicalManager* ReleaseOp::select_temporary_instance(PhysicalManager *dst,
                                  unsigned index, const FieldMask &needed_fields)
@@ -12265,7 +12265,7 @@ namespace Legion {
       map_applied_conditions.insert(event);
     }
 
-#ifndef PRUNE_OLD_COMPOSITE
+#ifdef USE_OLD_COMPOSITE
     //--------------------------------------------------------------------------
     PhysicalManager* DependentPartitionOp::select_temporary_instance(
            PhysicalManager *dst, unsigned index, const FieldMask &needed_fields)

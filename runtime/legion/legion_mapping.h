@@ -618,7 +618,7 @@ namespace Legion {
       struct CreateTaskTemporaryOutput {
         PhysicalInstance                        temporary_instance;
       };
-#ifndef PRUNE_OLD_COMPOSITE
+#ifdef USE_OLD_COMPOSITE
       //------------------------------------------------------------------------
       virtual void create_task_temporary_instance(
                                    const MapperContext              ctx,
@@ -755,7 +755,7 @@ namespace Legion {
       struct CreateInlineTemporaryOutput {
         PhysicalInstance                        temporary_instance;
       };
-#ifndef PRUNE_OLD_COMPOSITE
+#ifdef USE_OLD_COMPOSITE
       //------------------------------------------------------------------------
       virtual void create_inline_temporary_instance(
                                  const MapperContext                ctx,
@@ -873,7 +873,7 @@ namespace Legion {
       struct CreateCopyTemporaryOutput {
         PhysicalInstance                        temporary_instance;
       };
-#ifndef PRUNE_OLD_COMPOSITE
+#ifdef USE_OLD_COMPOSITE
       //------------------------------------------------------------------------
       virtual void create_copy_temporary_instance(
                                    const MapperContext              ctx,
@@ -1001,7 +1001,7 @@ namespace Legion {
       struct CreateCloseTemporaryOutput {
         PhysicalInstance                        temporary_instance;
       };
-#ifndef PRUNE_OLD_COMPOSITE
+#ifdef USE_OLD_COMPOSITE
       //------------------------------------------------------------------------
       virtual void create_close_temporary_instance(
                                   const MapperContext               ctx,
@@ -1156,7 +1156,7 @@ namespace Legion {
       struct CreateReleaseTemporaryOutput {
         PhysicalInstance                        temporary_instance;
       };
-#ifndef PRUNE_OLD_COMPOSITE
+#ifdef USE_OLD_COMPOSITE
       //------------------------------------------------------------------------
       virtual void create_release_temporary_instance(
                                 const MapperContext                 ctx,
@@ -1313,7 +1313,7 @@ namespace Legion {
       struct CreatePartitionTemporaryOutput {
         PhysicalInstance                        temporary_instance;
       };
-#ifndef PRUNE_OLD_COMPOSITE
+#ifdef USE_OLD_COMPOSITE
       //------------------------------------------------------------------------
       virtual void create_partition_temporary_instance(
                               const MapperContext                   ctx,

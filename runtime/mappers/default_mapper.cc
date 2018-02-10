@@ -2455,6 +2455,7 @@ namespace Legion {
         ranking.push_back(it->first);
     }
 
+#ifdef USE_OLD_COMPOSITE
     //--------------------------------------------------------------------------
     void DefaultMapper::create_task_temporary_instance(
                                         const MapperContext       ctx,
@@ -2504,6 +2505,7 @@ namespace Legion {
       assert(false);
       return result;
     }
+#endif
 
     //--------------------------------------------------------------------------
     void DefaultMapper::speculate(const MapperContext      ctx,
@@ -2645,6 +2647,7 @@ namespace Legion {
                                     output.chosen_ranking);
     }
 
+#ifdef USE_OLD_COMPOSITE
     //--------------------------------------------------------------------------
     void DefaultMapper::create_inline_temporary_instance(
                                       const MapperContext         ctx,
@@ -2658,6 +2661,7 @@ namespace Legion {
       output.temporary_instance = default_policy_create_temporary(ctx,
             inline_op.requirement.region, input.destination_instance);
     }
+#endif
 
     //--------------------------------------------------------------------------
     void DefaultMapper::report_profiling(const MapperContext         ctx,
@@ -2733,6 +2737,7 @@ namespace Legion {
                                     output.chosen_ranking);
     }
 
+#ifdef USE_OLD_COMPOSITE
     //--------------------------------------------------------------------------
     void DefaultMapper::create_copy_temporary_instance(
                                     const MapperContext                 ctx,
@@ -2752,6 +2757,7 @@ namespace Legion {
             copy.dst_requirements[input.region_requirement_index].region,
             input.destination_instance);
     }
+#endif
 
     //--------------------------------------------------------------------------
     void DefaultMapper::speculate(const MapperContext      ctx,
@@ -2850,6 +2856,7 @@ namespace Legion {
                                     output.chosen_ranking);
     }
 
+#ifdef USE_OLD_COMPOSITE
     //--------------------------------------------------------------------------
     void DefaultMapper::create_close_temporary_instance(
                                       const MapperContext             ctx,
@@ -2863,6 +2870,7 @@ namespace Legion {
       output.temporary_instance = default_policy_create_temporary(ctx,
                 close.requirement.region, input.destination_instance);
     }
+#endif
 
     //--------------------------------------------------------------------------
     void DefaultMapper::report_profiling(const MapperContext       ctx,
@@ -2933,6 +2941,7 @@ namespace Legion {
                                     output.chosen_ranking);
     }
 
+#ifdef USE_OLD_COMPOSITE
     //--------------------------------------------------------------------------
     void DefaultMapper::create_release_temporary_instance(
                                     const MapperContext                 ctx,
@@ -2946,6 +2955,7 @@ namespace Legion {
       output.temporary_instance = default_policy_create_temporary(ctx,
                   release.logical_region, input.destination_instance);
     }
+#endif
 
     //--------------------------------------------------------------------------
     void DefaultMapper::speculate(const MapperContext         ctx,
@@ -3066,6 +3076,7 @@ namespace Legion {
                                     output.chosen_ranking);
     }
 
+#ifdef USE_OLD_COMPOSITE
     //--------------------------------------------------------------------------
     void DefaultMapper::create_partition_temporary_instance(
                             const MapperContext                   ctx,
@@ -3079,6 +3090,7 @@ namespace Legion {
       output.temporary_instance = default_policy_create_temporary(ctx,
             partition.requirement.region, input.destination_instance);
     }
+#endif
 
     //--------------------------------------------------------------------------
     void DefaultMapper::report_profiling(const MapperContext              ctx,

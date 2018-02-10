@@ -254,7 +254,7 @@ namespace Legion {
       finish_mapper_call(info);
     }
 
-#ifndef PRUNE_OLD_COMPOSITE
+#ifdef USE_OLD_COMPOSITE
     //--------------------------------------------------------------------------
     void MapperManager::invoke_task_create_temporary(TaskOp *task,
                                       Mapper::CreateTaskTemporaryInput *input,
@@ -382,7 +382,7 @@ namespace Legion {
       finish_mapper_call(info);
     }
 
-#ifndef PRUNE_OLD_COMPOSITE
+#ifdef USE_OLD_COMPOSITE
     //--------------------------------------------------------------------------
     void MapperManager::invoke_inline_create_temporary(MapOp *op,
                                     Mapper::CreateInlineTemporaryInput *input,
@@ -485,7 +485,7 @@ namespace Legion {
       finish_mapper_call(info);
     }
 
-#ifndef PRUNE_OLD_COMPOSITE
+#ifdef USE_OLD_COMPOSITE
     //--------------------------------------------------------------------------
     void MapperManager::invoke_copy_create_temporary(CopyOp *op,
                                     Mapper::CreateCopyTemporaryInput *input,
@@ -612,7 +612,7 @@ namespace Legion {
       finish_mapper_call(info);
     }
 
-#ifndef PRUNE_OLD_COMPOSITE
+#ifdef USE_OLD_COMPOSITE
     //--------------------------------------------------------------------------
     void MapperManager::invoke_close_create_temporary(CloseOp *op,
                                     Mapper::CreateCloseTemporaryInput *input,
@@ -788,7 +788,7 @@ namespace Legion {
       finish_mapper_call(info);
     }
 
-#ifndef PRUNE_OLD_COMPOSITE
+#ifdef USE_OLD_COMPOSITE
     //--------------------------------------------------------------------------
     void MapperManager::invoke_release_create_temporary(ReleaseOp *op,
                                   Mapper::CreateReleaseTemporaryInput *input,
@@ -947,7 +947,7 @@ namespace Legion {
       finish_mapper_call(info);
     }
 
-#ifndef PRUNE_OLD_COMPOSITE
+#ifdef USE_OLD_COMPOSITE
     //--------------------------------------------------------------------------
     void MapperManager::invoke_partition_create_temporary(
                                 DependentPartitionOp *op,

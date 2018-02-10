@@ -436,7 +436,7 @@ namespace Legion {
         "Retry Shutdown",                                         \
       };
 
-#ifndef PRUNE_OLD_COMPOSITE
+#ifdef USE_OLD_COMPOSITE
     enum MappingCallKind {
       GET_MAPPER_NAME_CALL,
       GET_MAPER_SYNC_MODEL_CALL,

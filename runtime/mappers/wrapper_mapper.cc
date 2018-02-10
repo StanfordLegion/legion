@@ -1361,7 +1361,7 @@ namespace Legion {
       dmapper->select_task_sources(ctx, task, input, output);
     }
 
-#ifndef PRUNE_OLD_COMPOSITE
+#ifdef USE_OLD_COMPOSITE
     void WrapperMapper::create_task_temporary_instance(
 	const MapperContext              ctx,
 	const Task&                      task,
@@ -1397,7 +1397,7 @@ namespace Legion {
       dmapper->select_inline_sources(ctx, inline_op, input, output);
     }
 
-#ifndef PRUNE_OLD_COMPOSITE
+#ifdef USE_OLD_COMPOSITE
     void WrapperMapper::create_inline_temporary_instance(
 	const MapperContext                ctx,
 	const InlineMapping&               inline_op,
@@ -1427,7 +1427,7 @@ namespace Legion {
       dmapper->select_copy_sources(ctx, copy, input, output);
     }
 
-#ifndef PRUNE_OLD_COMPOSITE
+#ifdef USE_OLD_COMPOSITE
     void WrapperMapper::create_copy_temporary_instance(
 	const MapperContext              ctx,
 	const Copy&                      copy,
@@ -1463,7 +1463,7 @@ namespace Legion {
       dmapper->select_close_sources(ctx, close, input, output);
     }
 
-#ifndef PRUNE_OLD_COMPOSITE
+#ifdef USE_OLD_COMPOSITE
     void WrapperMapper::create_close_temporary_instance(
 	const MapperContext               ctx,
 	const Close&                      close,
@@ -1512,7 +1512,7 @@ namespace Legion {
       dmapper->select_release_sources(ctx, release, input, output);
     }
 
-#ifndef PRUNE_OLD_COMPOSITE
+#ifdef USE_OLD_COMPOSITE
     void WrapperMapper::create_release_temporary_instance(
 	const MapperContext                 ctx,
 	const Release&                      release,
