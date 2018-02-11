@@ -3874,10 +3874,11 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    DeferredCopier::DeferredCopier(const TraversalInfo &in, MaterializedView *d, 
+    DeferredCopier::DeferredCopier(const TraversalInfo &in, MaterializedView *d,
                             const FieldMask &m, const RestrictInfo &res, bool r)
       : info(in), dst(d), across_helper(NULL), restrict_info(&res), 
-        restrict_out(r), deferred_copy_mask(m), finalized(false)
+        restrict_out(r), deferred_copy_mask(m), current_reduction_epoch(0), 
+        finalized(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -3886,7 +3887,8 @@ namespace Legion {
     DeferredCopier::DeferredCopier(const TraversalInfo &in, MaterializedView *d,
        const FieldMask &m, ApEvent p, CopyAcrossHelper *h)
       : info(in), dst(d), across_helper(h), restrict_info(NULL), 
-        restrict_out(false), deferred_copy_mask(m), finalized(false)
+        restrict_out(false), deferred_copy_mask(m), current_reduction_epoch(0),
+        finalized(false)
     //--------------------------------------------------------------------------
     {
       dst_preconditions[p] = m;
@@ -3949,8 +3951,19 @@ namespace Legion {
               LegionMap<ReductionView*,FieldMask>::aligned &source_reductions)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(reduction_epochs.size() == reduction_epoch_masks.size());
+#endif
+      if (current_reduction_epoch >= reduction_epochs.size())
+      {
+        reduction_epochs.resize(current_reduction_epoch + 1);
+        reduction_epoch_masks.resize(current_reduction_epoch + 1);
+      }
+      PendingReductions &pending_reductions = 
+        reduction_epochs[current_reduction_epoch];
       bool has_prev_write_mask = (source_reductions.size() == 1);
       FieldMask prev_write_mask;
+      FieldMask &epoch_mask = reduction_epoch_masks[current_reduction_epoch];
       for (LegionMap<ReductionView*,FieldMask>::aligned::iterator rit = 
             source_reductions.begin(); rit != source_reductions.end(); rit++)
       {
@@ -3971,7 +3984,7 @@ namespace Legion {
               continue;
             pending_reduction_list.push_back(PendingReduction(overlap, 
                   version_tracker, pred_guard, intersect, it->first));
-            pending_reduction_mask |= overlap;
+            epoch_mask |= overlap;
             rit->second -= overlap;
             // Can break out if we're done and we already have a summary mask
             if (!rit->second && has_prev_write_mask)
@@ -3982,7 +3995,7 @@ namespace Legion {
         }
         pending_reduction_list.push_back(PendingReduction(rit->second, 
               version_tracker, pred_guard, intersect, NULL/*mask*/));
-        pending_reduction_mask |= rit->second;
+        epoch_mask |= rit->second;
       }
     }
 
@@ -4022,19 +4035,43 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void DeferredCopier::begin_reduction_epoch(void)
+    //--------------------------------------------------------------------------
+    {
+      // Increase the depth
+      current_reduction_epoch++; 
+    }
+
+    //--------------------------------------------------------------------------
+    void DeferredCopier::end_reduction_epoch(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(current_reduction_epoch > 0);
+#endif
+      current_reduction_epoch--; 
+    }
+
+    //--------------------------------------------------------------------------
     void DeferredCopier::finalize(std::set<ApEvent> *postconditions/*=NULL*/)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(!finalized);
+      assert(current_reduction_epoch == 0);
 #endif
       finalized = true;
       // Apply any pending reductions using the proper preconditions
-      if (!pending_reductions.empty())
+      if (!reduction_epochs.empty())
       {
-        // Check to see if we need any more preconditions
-        const FieldMask needed_mask = 
-          pending_reduction_mask - dst_precondition_mask;
+#ifdef DEBUG_LEGION
+        assert(reduction_epochs.size() == reduction_epoch_masks.size());
+#endif
+        FieldMask summary_mask = reduction_epoch_masks.front();
+        for (unsigned idx = 1; idx < reduction_epoch_masks.size(); idx++)
+          summary_mask |= reduction_epoch_masks[idx];
+        // Check to see if we need any more destination preconditions
+        const FieldMask needed_mask = summary_mask - dst_precondition_mask;
         if (!!needed_mask)
         {
           // We're not going to use the existing destination preconditions
@@ -4061,31 +4098,38 @@ namespace Legion {
         // Uniquify our copy postconditions since they will be our 
         // preconditions to the reductions
         uniquify_copy_postconditions();
-        LegionMap<ApEvent,FieldMask>::aligned reduction_postconditions;
-        // Iterate over all the postconditions
-        for (LegionMap<ApEvent,FieldMask>::aligned::const_iterator it = 
-              copy_postconditions.begin(); it != 
-              copy_postconditions.end(); it++)
+        // Iterate over the reduction epochs from back to front since
+        // the ones in the back are the ones that should be applied first
+        for (int epoch = reduction_epochs.size()-1; epoch >= 0; epoch--)
         {
-          // See if we interfere with any reduction fields
-          const FieldMask overlap = it->second & pending_reduction_mask;
-          if (!overlap)
+          FieldMask &epoch_mask = reduction_epoch_masks[epoch];
+          // Some level might not have any reductions
+          if (!epoch_mask)
             continue;
-          if (issue_reductions(it->first, overlap, reduction_postconditions))
-            break;
-          // We've now done all these fields for a reduction
-          pending_reduction_mask -= it->second;
-          // Can break out if we have no more reduction fields
-          if (!pending_reduction_mask)
-            break;
-        }
-        // Finally issue any copies for which we have no precondition
-        if (!!pending_reduction_mask)
-          issue_reductions(ApEvent::NO_AP_EVENT, pending_reduction_mask,
-                           reduction_postconditions); 
-        // Merge our reduction postconditions wherever they are going
-        if (postconditions == NULL)
-        {
+          LegionMap<ApEvent,FieldMask>::aligned reduction_postconditions;
+          // Iterate over all the postconditions and issue reductions
+          for (LegionMap<ApEvent,FieldMask>::aligned::const_iterator it = 
+                copy_postconditions.begin(); it != 
+                copy_postconditions.end(); it++)
+          {
+            // See if we interfere with any reduction fields
+            const FieldMask overlap = it->second & epoch_mask;
+            if (!overlap)
+              continue;
+            if (issue_reductions(epoch, it->first, overlap, 
+                                 reduction_postconditions))
+              break;
+            // We've now done all these fields for a reduction
+            epoch_mask -= it->second;
+            // Can break out if we have no more reduction fields
+            if (!epoch_mask)
+              break;
+          }
+          // Issue any copies for which we have no precondition
+          if (!!epoch_mask)
+            issue_reductions(epoch, ApEvent::NO_AP_EVENT, epoch_mask,
+                             reduction_postconditions);
+          // Fold the reduction post conditions into the copy postconditions
           for (LegionMap<ApEvent,FieldMask>::aligned::const_iterator it = 
                 reduction_postconditions.begin(); it != 
                 reduction_postconditions.end(); it++)
@@ -4097,13 +4141,9 @@ namespace Legion {
             else
               finder->second |= it->second;
           }
-        }
-        else
-        {
-          for (LegionMap<ApEvent,FieldMask>::aligned::const_iterator it = 
-                reduction_postconditions.begin(); it != 
-                reduction_postconditions.end(); it++)
-            postconditions->insert(it->first);
+          // Only uniquify if we have to do more epochs
+          if (epoch > 0)
+            uniquify_copy_postconditions();
         }
       }
       // If we have no copy post conditions at this point we're done
@@ -4198,12 +4238,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool DeferredCopier::issue_reductions(ApEvent reduction_pre, 
+    bool DeferredCopier::issue_reductions(const int epoch,ApEvent reduction_pre,
                                           const FieldMask &reduction_mask,
                 LegionMap<ApEvent,FieldMask>::aligned &reduction_postconditions)
     //--------------------------------------------------------------------------
     {
       std::vector<ReductionView*> to_remove;
+      PendingReductions &pending_reductions = reduction_epochs[epoch];
       // Iterate over reduction views
       for (PendingReductions::iterator pit = pending_reductions.begin();
             pit != pending_reductions.end(); pit++)
@@ -5593,17 +5634,9 @@ namespace Legion {
             continue;
           children_to_traverse[it->first] = child_mask;
         }
-        if (!(dirty_mask * local_copy_mask))
-        {
-          for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it =
-                valid_views.begin(); it != valid_views.end(); it++)
-          {
-            const FieldMask overlap = it->second & local_copy_mask;
-            if (!overlap)
-              continue;
-            source_views[it->first] = overlap;
-          }
-        }
+        // Get any valid views that we need for this level
+        find_valid_views(local_copy_mask, source_views, false/*needs lock*/);
+        // Also get any reduction views that we need for this level
         if (!(reduction_mask * local_copy_mask))
         {
           for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it =
@@ -6344,7 +6377,7 @@ namespace Legion {
         }
       }
 #else
-      DeferredCopier copier(info, dst, copy_mask, restrict_info, restrict_out);  
+      DeferredCopier copier(info, dst, copy_mask, restrict_info, restrict_out);
       LegionMap<IndexSpaceExpression*,FieldMask>::aligned write_masks;
       LegionMap<IndexSpaceExpression*,FieldMask>::aligned performed_masks;
       issue_deferred_copies(copier, copy_mask, write_masks, 
@@ -6393,8 +6426,11 @@ namespace Legion {
                                               PredEvent pred_guard)
     //--------------------------------------------------------------------------
     {
+      // Each composite view depth is its own reduction epoch
+      copier.begin_reduction_epoch();
       issue_composite_updates(copier, logical_node, local_copy_mask,
                               this, pred_guard, write_masks, perf_writes);
+      copier.end_reduction_epoch();
     }
 
     //--------------------------------------------------------------------------
@@ -6506,6 +6542,42 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Nothing to do here
+    }
+
+    //--------------------------------------------------------------------------
+    void CompositeView::find_valid_views(const FieldMask &update_mask,
+                       LegionMap<LogicalView*,FieldMask>::aligned &result_views,
+                                         bool needs_lock)
+    //--------------------------------------------------------------------------
+    {
+      // Never need the lock here anyway
+      for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it =
+            valid_views.begin(); it != valid_views.end(); it++)
+      {
+        FieldMask overlap = update_mask & it->second;
+        if (!overlap)
+          continue;
+        LegionMap<LogicalView*,FieldMask>::aligned::iterator finder = 
+          result_views.find(it->first);
+        if (finder == result_views.end())
+          result_views[it->first] = overlap;
+        else
+          finder->second |= overlap;
+      }
+      for (LegionMap<CompositeView*,FieldMask>::aligned::const_iterator it = 
+            nested_composite_views.begin(); it != 
+            nested_composite_views.end(); it++)
+      {
+        FieldMask overlap = update_mask & it->second;
+        if (!overlap)
+          continue;
+        LegionMap<LogicalView*,FieldMask>::aligned::iterator finder = 
+          result_views.find(it->first);
+        if (finder == result_views.end())
+          result_views[it->first] = overlap;
+        else
+          finder->second |= overlap;
+      }
     }
 
 #ifdef USE_OLD_COMPOSITE
@@ -7080,6 +7152,37 @@ namespace Legion {
         wait_on.lg_wait();
       }
     }
+
+    //--------------------------------------------------------------------------
+    void CompositeNode::find_valid_views(const FieldMask &update_mask,
+                       LegionMap<LogicalView*,FieldMask>::aligned &result_views,
+                                         bool needs_lock)
+    //--------------------------------------------------------------------------
+    {
+      if (needs_lock)
+      {
+        AutoLock n_lock(node_lock,1,false/*exclusive*/);
+        find_valid_views(update_mask, result_views, false);
+        return;
+      }
+      if (dirty_mask * update_mask)
+        return;
+      // Insert anything we have here
+      for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it = 
+            valid_views.begin(); it != valid_views.end(); it++)
+      {
+        FieldMask overlap = it->second & update_mask;
+        if (!overlap)
+          continue;
+        LegionMap<LogicalView*,FieldMask>::aligned::iterator finder = 
+          result_views.find(it->first);
+        if (finder == result_views.end())
+          result_views[it->first] = overlap;
+        else
+          finder->second |= overlap;
+      }
+    }
+
 
 #ifdef USE_OLD_COMPOSITE
     //--------------------------------------------------------------------------
