@@ -1305,11 +1305,9 @@ namespace Legion {
       assert(local_trace != NULL);
 #endif
       PhysicalTrace *physical_trace = local_trace->get_physical_trace();
-      PhysicalTemplate *current_template =
-        physical_trace->get_current_template();
       bool recurrent = true;
       bool is_recording = local_trace->is_recording();
-      if (current_template == NULL || is_recording)
+      if (physical_trace->get_current_template() == NULL || is_recording)
       {
         recurrent = false;
         if (physical_trace->has_any_templates() || is_recording)
@@ -1321,7 +1319,7 @@ namespace Legion {
             fence_op->get_mapped_event().wait();
         }
 
-        if (current_template == NULL)
+        if (physical_trace->get_current_template() == NULL)
           physical_trace->check_template_preconditions();
 
         // Register this fence with all previous users in the parent's context
