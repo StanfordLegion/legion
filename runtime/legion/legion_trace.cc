@@ -1401,7 +1401,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTrace::check_template_preconditions()
+    void PhysicalTrace::check_template_preconditions(void)
     //--------------------------------------------------------------------------
     {
       for (std::vector<PhysicalTemplate*>::reverse_iterator it =
@@ -1455,7 +1455,7 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    PhysicalTemplate::PhysicalTemplate()
+    PhysicalTemplate::PhysicalTemplate(void)
       : recording(true), replayable(true), fence_completion_id(0)
     //--------------------------------------------------------------------------
     {
@@ -1465,7 +1465,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    PhysicalTemplate::~PhysicalTemplate()
+    PhysicalTemplate::~PhysicalTemplate(void)
     //--------------------------------------------------------------------------
     {
       {
@@ -1525,7 +1525,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ApEvent PhysicalTemplate::get_completion() const
+    ApEvent PhysicalTemplate::get_completion(void) const
     //--------------------------------------------------------------------------
     {
       std::set<ApEvent> to_merge;
@@ -1623,7 +1623,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool PhysicalTemplate::check_preconditions()
+    bool PhysicalTemplate::check_preconditions(void)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(trace->runtime, PHYSICAL_TRACE_PRECONDITION_CHECK_CALL);
@@ -1722,7 +1722,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::execute_all()
+    void PhysicalTemplate::execute_all(void)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(task->runtime, PHYSICAL_TRACE_EXECUTE_CALL);
@@ -1732,7 +1732,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::finalize()
+    void PhysicalTemplate::finalize(void)
     //--------------------------------------------------------------------------
     {
       recording = false;
@@ -1758,7 +1758,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::optimize()
+    void PhysicalTemplate::optimize(void)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(trace->runtime, PHYSICAL_TRACE_OPTIMIZE_CALL);
@@ -2173,7 +2173,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::dump_template()
+    void PhysicalTemplate::dump_template(void)
     //--------------------------------------------------------------------------
     {
       std::cerr << "#### " << (replayable ? "Replayable" : "Non-replayable")
@@ -2227,7 +2227,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::sanity_check()
+    void PhysicalTemplate::sanity_check(void)
     //--------------------------------------------------------------------------
     {
       // Reduction instances should not have been recycled in the trace
@@ -2988,7 +2988,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void GetTermEvent::execute()
+    void GetTermEvent::execute(void)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -3006,7 +3006,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    std::string GetTermEvent::to_string()
+    std::string GetTermEvent::to_string(void)
     //--------------------------------------------------------------------------
     {
       std::stringstream ss;
@@ -3050,7 +3050,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void CreateApUserEvent::execute()
+    void CreateApUserEvent::execute(void)
     //--------------------------------------------------------------------------
     {
       ApUserEvent ev = Runtime::create_ap_user_event();
@@ -3059,7 +3059,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    std::string CreateApUserEvent::to_string()
+    std::string CreateApUserEvent::to_string(void)
     //--------------------------------------------------------------------------
     {
       std::stringstream ss;
@@ -3097,7 +3097,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TriggerEvent::execute()
+    void TriggerEvent::execute(void)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -3110,7 +3110,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    std::string TriggerEvent::to_string()
+    std::string TriggerEvent::to_string(void)
     //--------------------------------------------------------------------------
     {
       std::stringstream ss;
@@ -3155,7 +3155,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MergeEvent::execute()
+    void MergeEvent::execute(void)
     //--------------------------------------------------------------------------
     {
       std::set<ApEvent> to_merge;
@@ -3172,7 +3172,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    std::string MergeEvent::to_string()
+    std::string MergeEvent::to_string(void)
     //--------------------------------------------------------------------------
     {
       std::stringstream ss;
@@ -3213,14 +3213,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void AssignFenceCompletion::execute()
+    void AssignFenceCompletion::execute(void)
     //--------------------------------------------------------------------------
     {
       events[lhs] = fence_completion;
     }
 
     //--------------------------------------------------------------------------
-    std::string AssignFenceCompletion::to_string()
+    std::string AssignFenceCompletion::to_string(void)
     //--------------------------------------------------------------------------
     {
       std::stringstream ss;
@@ -3267,7 +3267,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IssueCopy::execute()
+    void IssueCopy::execute(void)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -3282,7 +3282,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    std::string IssueCopy::to_string()
+    std::string IssueCopy::to_string(void)
     //--------------------------------------------------------------------------
     {
       std::stringstream ss;
@@ -3373,14 +3373,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IssueFill::~IssueFill()
+    IssueFill::~IssueFill(void)
     //--------------------------------------------------------------------------
     {
       free(fill_buffer);
     }
 
     //--------------------------------------------------------------------------
-    void IssueFill::execute()
+    void IssueFill::execute(void)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -3400,7 +3400,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    std::string IssueFill::to_string()
+    std::string IssueFill::to_string(void)
     //--------------------------------------------------------------------------
     {
       std::stringstream ss;
@@ -3458,7 +3458,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void SetReadyEvent::execute()
+    void SetReadyEvent::execute(void)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -3480,7 +3480,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    std::string SetReadyEvent::to_string()
+    std::string SetReadyEvent::to_string(void)
     //--------------------------------------------------------------------------
     {
       std::stringstream ss;
@@ -3532,7 +3532,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void GetCopyTermEvent::execute()
+    void GetCopyTermEvent::execute(void)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -3548,7 +3548,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    std::string GetCopyTermEvent::to_string()
+    std::string GetCopyTermEvent::to_string(void)
     //--------------------------------------------------------------------------
     {
       std::stringstream ss;
@@ -3593,7 +3593,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void SetCopySyncEvent::execute()
+    void SetCopySyncEvent::execute(void)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -3610,7 +3610,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    std::string SetCopySyncEvent::to_string()
+    std::string SetCopySyncEvent::to_string(void)
     //--------------------------------------------------------------------------
     {
       std::stringstream ss;
@@ -3655,7 +3655,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TriggerCopyCompletion::execute()
+    void TriggerCopyCompletion::execute(void)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -3672,7 +3672,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    std::string TriggerCopyCompletion::to_string()
+    std::string TriggerCopyCompletion::to_string(void)
     //--------------------------------------------------------------------------
     {
       std::stringstream ss;
@@ -3715,7 +3715,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LaunchTask::execute()
+    void LaunchTask::execute(void)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -3743,7 +3743,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    std::string LaunchTask::to_string()
+    std::string LaunchTask::to_string(void)
     //--------------------------------------------------------------------------
     {
       std::stringstream ss;
@@ -3772,7 +3772,7 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    PhysicalTraceInfo::PhysicalTraceInfo()
+    PhysicalTraceInfo::PhysicalTraceInfo(void)
     //--------------------------------------------------------------------------
       : recording(false), op(NULL), tpl(NULL)
     {

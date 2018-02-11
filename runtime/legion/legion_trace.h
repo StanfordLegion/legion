@@ -102,8 +102,8 @@ namespace Legion {
       virtual void record_aliased_children(unsigned req_index, unsigned depth,
                                            const FieldMask &aliased_mask) = 0;
     public:
-      bool has_physical_trace() { return physical_trace != NULL; }
-      PhysicalTrace* get_physical_trace() { return physical_trace; }
+      bool has_physical_trace(void) { return physical_trace != NULL; }
+      PhysicalTrace* get_physical_trace(void) { return physical_trace; }
       void register_physical_only(Operation *op, GenerationID gen);
     public:
       void replay_aliased_children(std::vector<RegionTreePath> &paths) const;
@@ -396,9 +396,9 @@ namespace Legion {
       PhysicalTrace& operator=(const PhysicalTrace &rhs);
     public:
       void clear_cached_template(void) { current_template = NULL; }
-      void check_template_preconditions();
+      void check_template_preconditions(void);
     public:
-      PhysicalTemplate* get_current_template() { return current_template; }
+      PhysicalTemplate* get_current_template(void) { return current_template; }
       bool has_any_templates(void) const { return templates.size() > 0; }
     public:
       PhysicalTemplate* start_new_template(void);
@@ -426,33 +426,33 @@ namespace Legion {
      */
     struct PhysicalTemplate {
     public:
-      PhysicalTemplate();
+      PhysicalTemplate(void);
       PhysicalTemplate(const PhysicalTemplate &rhs);
     private:
       friend class PhysicalTrace;
-      ~PhysicalTemplate();
+      ~PhysicalTemplate(void);
     public:
       void initialize(ApEvent fence_completion, bool recurrent);
-      ApEvent get_completion() const;
+      ApEvent get_completion(void) const;
     private:
       static bool check_logical_open(RegionTreeNode *node, ContextID ctx,
                                      FieldMask fields);
       static bool check_logical_open(RegionTreeNode *node, ContextID ctx,
                           LegionMap<IndexSpaceNode*, FieldMask>::aligned projs);
     public:
-      bool check_preconditions();
+      bool check_preconditions(void);
       void register_operation(Operation *op);
-      void execute_all();
-      void finalize();
-      void optimize();
-      void dump_template();
+      void execute_all(void);
+      void finalize(void);
+      void optimize(void);
+      void dump_template(void);
     public:
-      inline bool is_recording() const { return recording; }
-      inline bool is_replaying() const { return !recording; }
-      inline bool is_replayable() const { return replayable; }
+      inline bool is_recording(void) const { return recording; }
+      inline bool is_replaying(void) const { return !recording; }
+      inline bool is_replayable(void) const { return replayable; }
     protected:
       static std::string view_to_string(const InstanceView *view);
-      void sanity_check();
+      void sanity_check(void);
     public:
       void record_mapper_output(SingleTask *task,
                                 const Mapper::MapTaskOutput &output,
@@ -586,22 +586,22 @@ namespace Legion {
      */
     struct Instruction {
       Instruction(PhysicalTemplate& tpl);
-      virtual ~Instruction() {};
-      virtual void execute() = 0;
-      virtual std::string to_string() = 0;
+      virtual ~Instruction(void) {};
+      virtual void execute(void) = 0;
+      virtual std::string to_string(void) = 0;
 
-      virtual InstructionKind get_kind() = 0;
-      virtual GetTermEvent* as_get_term_event() = 0;
-      virtual CreateApUserEvent* as_create_ap_user_event() = 0;
-      virtual TriggerEvent* as_trigger_event() = 0;
-      virtual MergeEvent* as_merge_event() = 0;
-      virtual AssignFenceCompletion* as_assignment_fence_completion() = 0;
-      virtual IssueCopy* as_issue_copy() = 0;
-      virtual IssueFill* as_issue_fill() = 0;
-      virtual SetReadyEvent* as_set_ready_event() = 0;
-      virtual GetCopyTermEvent* as_get_copy_term_event() = 0;
-      virtual SetCopySyncEvent* as_set_copy_sync_event() = 0;
-      virtual TriggerCopyCompletion* as_triger_copy_completion() = 0;
+      virtual InstructionKind get_kind(void) = 0;
+      virtual GetTermEvent* as_get_term_event(void) = 0;
+      virtual CreateApUserEvent* as_create_ap_user_event(void) = 0;
+      virtual TriggerEvent* as_trigger_event(void) = 0;
+      virtual MergeEvent* as_merge_event(void) = 0;
+      virtual AssignFenceCompletion* as_assignment_fence_completion(void) = 0;
+      virtual IssueCopy* as_issue_copy(void) = 0;
+      virtual IssueFill* as_issue_fill(void) = 0;
+      virtual SetReadyEvent* as_set_ready_event(void) = 0;
+      virtual GetCopyTermEvent* as_get_copy_term_event(void) = 0;
+      virtual SetCopySyncEvent* as_set_copy_sync_event(void) = 0;
+      virtual TriggerCopyCompletion* as_triger_copy_completion(void) = 0;
 
       virtual Instruction* clone(PhysicalTemplate& tpl,
                                const std::map<unsigned, unsigned> &rewrite) = 0;
@@ -622,32 +622,32 @@ namespace Legion {
     struct GetTermEvent : public Instruction {
       GetTermEvent(PhysicalTemplate& tpl, unsigned lhs,
                    const TraceLocalId& rhs);
-      virtual void execute();
-      virtual std::string to_string();
+      virtual void execute(void);
+      virtual std::string to_string(void);
 
-      virtual InstructionKind get_kind()
+      virtual InstructionKind get_kind(void)
         { return GET_TERM_EVENT; }
-      virtual GetTermEvent* as_get_term_event()
+      virtual GetTermEvent* as_get_term_event(void)
         { return this; }
-      virtual CreateApUserEvent* as_create_ap_user_event()
+      virtual CreateApUserEvent* as_create_ap_user_event(void)
         { return NULL; }
-      virtual TriggerEvent* as_trigger_event()
+      virtual TriggerEvent* as_trigger_event(void)
         { return NULL; }
-      virtual MergeEvent* as_merge_event()
+      virtual MergeEvent* as_merge_event(void)
         { return NULL; }
-      virtual AssignFenceCompletion* as_assignment_fence_completion()
+      virtual AssignFenceCompletion* as_assignment_fence_completion(void)
         { return NULL; }
-      virtual IssueCopy* as_issue_copy()
+      virtual IssueCopy* as_issue_copy(void)
         { return NULL; }
-      virtual IssueFill* as_issue_fill()
+      virtual IssueFill* as_issue_fill(void)
         { return NULL; }
-      virtual SetReadyEvent* as_set_ready_event()
+      virtual SetReadyEvent* as_set_ready_event(void)
         { return NULL; }
-      virtual GetCopyTermEvent* as_get_copy_term_event()
+      virtual GetCopyTermEvent* as_get_copy_term_event(void)
         { return NULL; }
-      virtual SetCopySyncEvent* as_set_copy_sync_event()
+      virtual SetCopySyncEvent* as_set_copy_sync_event(void)
         { return NULL; }
-      virtual TriggerCopyCompletion* as_triger_copy_completion()
+      virtual TriggerCopyCompletion* as_triger_copy_completion(void)
         { return NULL; }
 
       virtual Instruction* clone(PhysicalTemplate& tpl,
@@ -668,32 +668,32 @@ namespace Legion {
      */
     struct CreateApUserEvent : public Instruction {
       CreateApUserEvent(PhysicalTemplate& tpl, unsigned lhs);
-      virtual void execute();
-      virtual std::string to_string();
+      virtual void execute(void);
+      virtual std::string to_string(void);
 
-      virtual InstructionKind get_kind()
+      virtual InstructionKind get_kind(void)
         { return CREATE_AP_USER_EVENT; }
-      virtual GetTermEvent* as_get_term_event()
+      virtual GetTermEvent* as_get_term_event(void)
         { return NULL; }
-      virtual CreateApUserEvent* as_create_ap_user_event()
+      virtual CreateApUserEvent* as_create_ap_user_event(void)
         { return this; }
-      virtual TriggerEvent* as_trigger_event()
+      virtual TriggerEvent* as_trigger_event(void)
         { return NULL; }
-      virtual MergeEvent* as_merge_event()
+      virtual MergeEvent* as_merge_event(void)
         { return NULL; }
-      virtual AssignFenceCompletion* as_assignment_fence_completion()
+      virtual AssignFenceCompletion* as_assignment_fence_completion(void)
         { return NULL; }
-      virtual IssueCopy* as_issue_copy()
+      virtual IssueCopy* as_issue_copy(void)
         { return NULL; }
-      virtual IssueFill* as_issue_fill()
+      virtual IssueFill* as_issue_fill(void)
         { return NULL; }
-      virtual SetReadyEvent* as_set_ready_event()
+      virtual SetReadyEvent* as_set_ready_event(void)
         { return NULL; }
-      virtual GetCopyTermEvent* as_get_copy_term_event()
+      virtual GetCopyTermEvent* as_get_copy_term_event(void)
         { return NULL; }
-      virtual SetCopySyncEvent* as_set_copy_sync_event()
+      virtual SetCopySyncEvent* as_set_copy_sync_event(void)
         { return NULL; }
-      virtual TriggerCopyCompletion* as_triger_copy_completion()
+      virtual TriggerCopyCompletion* as_triger_copy_completion(void)
         { return NULL; }
 
       virtual Instruction* clone(PhysicalTemplate& tpl,
@@ -713,32 +713,32 @@ namespace Legion {
      */
     struct TriggerEvent : public Instruction {
       TriggerEvent(PhysicalTemplate& tpl, unsigned lhs, unsigned rhs);
-      virtual void execute();
-      virtual std::string to_string();
+      virtual void execute(void);
+      virtual std::string to_string(void);
 
-      virtual InstructionKind get_kind()
+      virtual InstructionKind get_kind(void)
         { return TRIGGER_EVENT; }
-      virtual GetTermEvent* as_get_term_event()
+      virtual GetTermEvent* as_get_term_event(void)
         { return NULL; }
-      virtual CreateApUserEvent* as_create_ap_user_event()
+      virtual CreateApUserEvent* as_create_ap_user_event(void)
         { return NULL; }
-      virtual TriggerEvent* as_trigger_event()
+      virtual TriggerEvent* as_trigger_event(void)
         { return this; }
-      virtual MergeEvent* as_merge_event()
+      virtual MergeEvent* as_merge_event(void)
         { return NULL; }
-      virtual AssignFenceCompletion* as_assignment_fence_completion()
+      virtual AssignFenceCompletion* as_assignment_fence_completion(void)
         { return NULL; }
-      virtual IssueCopy* as_issue_copy()
+      virtual IssueCopy* as_issue_copy(void)
         { return NULL; }
-      virtual IssueFill* as_issue_fill()
+      virtual IssueFill* as_issue_fill(void)
         { return NULL; }
-      virtual SetReadyEvent* as_set_ready_event()
+      virtual SetReadyEvent* as_set_ready_event(void)
         { return NULL; }
-      virtual GetCopyTermEvent* as_get_copy_term_event()
+      virtual GetCopyTermEvent* as_get_copy_term_event(void)
         { return NULL; }
-      virtual SetCopySyncEvent* as_set_copy_sync_event()
+      virtual SetCopySyncEvent* as_set_copy_sync_event(void)
         { return NULL; }
-      virtual TriggerCopyCompletion* as_triger_copy_completion()
+      virtual TriggerCopyCompletion* as_triger_copy_completion(void)
         { return NULL; }
 
       virtual Instruction* clone(PhysicalTemplate& tpl,
@@ -760,32 +760,32 @@ namespace Legion {
     struct MergeEvent : public Instruction {
       MergeEvent(PhysicalTemplate& tpl, unsigned lhs,
                  const std::set<unsigned>& rhs);
-      virtual void execute();
-      virtual std::string to_string();
+      virtual void execute(void);
+      virtual std::string to_string(void);
 
-      virtual InstructionKind get_kind()
+      virtual InstructionKind get_kind(void)
         { return MERGE_EVENT; }
-      virtual GetTermEvent* as_get_term_event()
+      virtual GetTermEvent* as_get_term_event(void)
         { return NULL; }
-      virtual CreateApUserEvent* as_create_ap_user_event()
+      virtual CreateApUserEvent* as_create_ap_user_event(void)
         { return NULL; }
-      virtual TriggerEvent* as_trigger_event()
+      virtual TriggerEvent* as_trigger_event(void)
         { return NULL; }
-      virtual MergeEvent* as_merge_event()
+      virtual MergeEvent* as_merge_event(void)
         { return this; }
-      virtual AssignFenceCompletion* as_assignment_fence_completion()
+      virtual AssignFenceCompletion* as_assignment_fence_completion(void)
         { return NULL; }
-      virtual IssueCopy* as_issue_copy()
+      virtual IssueCopy* as_issue_copy(void)
         { return NULL; }
-      virtual IssueFill* as_issue_fill()
+      virtual IssueFill* as_issue_fill(void)
         { return NULL; }
-      virtual SetReadyEvent* as_set_ready_event()
+      virtual SetReadyEvent* as_set_ready_event(void)
         { return NULL; }
-      virtual GetCopyTermEvent* as_get_copy_term_event()
+      virtual GetCopyTermEvent* as_get_copy_term_event(void)
         { return NULL; }
-      virtual SetCopySyncEvent* as_set_copy_sync_event()
+      virtual SetCopySyncEvent* as_set_copy_sync_event(void)
         { return NULL; }
-      virtual TriggerCopyCompletion* as_triger_copy_completion()
+      virtual TriggerCopyCompletion* as_triger_copy_completion(void)
         { return NULL; }
 
       virtual Instruction* clone(PhysicalTemplate& tpl,
@@ -806,32 +806,32 @@ namespace Legion {
      */
     struct AssignFenceCompletion : public Instruction {
       AssignFenceCompletion(PhysicalTemplate& tpl, unsigned lhs);
-      virtual void execute();
-      virtual std::string to_string();
+      virtual void execute(void);
+      virtual std::string to_string(void);
 
-      virtual InstructionKind get_kind()
+      virtual InstructionKind get_kind(void)
         { return ASSIGN_FENCE_COMPLETION; }
-      virtual GetTermEvent* as_get_term_event()
+      virtual GetTermEvent* as_get_term_event(void)
         { return NULL; }
-      virtual CreateApUserEvent* as_create_ap_user_event()
+      virtual CreateApUserEvent* as_create_ap_user_event(void)
         { return NULL; }
-      virtual TriggerEvent* as_trigger_event()
+      virtual TriggerEvent* as_trigger_event(void)
         { return NULL; }
-      virtual MergeEvent* as_merge_event()
+      virtual MergeEvent* as_merge_event(void)
         { return NULL; }
-      virtual AssignFenceCompletion* as_assignment_fence_completion()
+      virtual AssignFenceCompletion* as_assignment_fence_completion(void)
         { return this; }
-      virtual IssueCopy* as_issue_copy()
+      virtual IssueCopy* as_issue_copy(void)
         { return NULL; }
-      virtual IssueFill* as_issue_fill()
+      virtual IssueFill* as_issue_fill(void)
         { return NULL; }
-      virtual SetReadyEvent* as_set_ready_event()
+      virtual SetReadyEvent* as_set_ready_event(void)
         { return NULL; }
-      virtual GetCopyTermEvent* as_get_copy_term_event()
+      virtual GetCopyTermEvent* as_get_copy_term_event(void)
         { return NULL; }
-      virtual SetCopySyncEvent* as_set_copy_sync_event()
+      virtual SetCopySyncEvent* as_set_copy_sync_event(void)
         { return NULL; }
-      virtual TriggerCopyCompletion* as_triger_copy_completion()
+      virtual TriggerCopyCompletion* as_triger_copy_completion(void)
         { return NULL; }
 
       virtual Instruction* clone(PhysicalTemplate& tpl,
@@ -865,33 +865,33 @@ namespace Legion {
                 UniqueID fill_uid,
 #endif
                 RegionTreeNode *intersect);
-      virtual ~IssueFill();
-      virtual void execute();
-      virtual std::string to_string();
+      virtual ~IssueFill(void);
+      virtual void execute(void);
+      virtual std::string to_string(void);
 
-      virtual InstructionKind get_kind()
+      virtual InstructionKind get_kind(void)
         { return ISSUE_FILL; }
-      virtual GetTermEvent* as_get_term_event()
+      virtual GetTermEvent* as_get_term_event(void)
         { return NULL; }
-      virtual CreateApUserEvent* as_create_ap_user_event()
+      virtual CreateApUserEvent* as_create_ap_user_event(void)
         { return NULL; }
-      virtual TriggerEvent* as_trigger_event()
+      virtual TriggerEvent* as_trigger_event(void)
         { return NULL; }
-      virtual MergeEvent* as_merge_event()
+      virtual MergeEvent* as_merge_event(void)
         { return NULL; }
-      virtual AssignFenceCompletion* as_assignment_fence_completion()
+      virtual AssignFenceCompletion* as_assignment_fence_completion(void)
         { return NULL; }
-      virtual IssueCopy* as_issue_copy()
+      virtual IssueCopy* as_issue_copy(void)
         { return NULL; }
-      virtual IssueFill* as_issue_fill()
+      virtual IssueFill* as_issue_fill(void)
         { return this; }
-      virtual SetReadyEvent* as_set_ready_event()
+      virtual SetReadyEvent* as_set_ready_event(void)
         { return NULL; }
-      virtual GetCopyTermEvent* as_get_copy_term_event()
+      virtual GetCopyTermEvent* as_get_copy_term_event(void)
         { return NULL; }
-      virtual SetCopySyncEvent* as_set_copy_sync_event()
+      virtual SetCopySyncEvent* as_set_copy_sync_event(void)
         { return NULL; }
-      virtual TriggerCopyCompletion* as_triger_copy_completion()
+      virtual TriggerCopyCompletion* as_triger_copy_completion(void)
         { return NULL; }
 
       virtual Instruction* clone(PhysicalTemplate& tpl,
@@ -933,32 +933,32 @@ namespace Legion {
                 unsigned precondition_idx, PredEvent predicate_guard,
                 RegionTreeNode *intersect,
                 ReductionOpID redop, bool reduction_fold);
-      virtual void execute();
-      virtual std::string to_string();
+      virtual void execute(void);
+      virtual std::string to_string(void);
 
-      virtual InstructionKind get_kind()
+      virtual InstructionKind get_kind(void)
         { return ISSUE_COPY; }
-      virtual GetTermEvent* as_get_term_event()
+      virtual GetTermEvent* as_get_term_event(void)
         { return NULL; }
-      virtual CreateApUserEvent* as_create_ap_user_event()
+      virtual CreateApUserEvent* as_create_ap_user_event(void)
         { return NULL; }
-      virtual TriggerEvent* as_trigger_event()
+      virtual TriggerEvent* as_trigger_event(void)
         { return NULL; }
-      virtual MergeEvent* as_merge_event()
+      virtual MergeEvent* as_merge_event(void)
         { return NULL; }
-      virtual AssignFenceCompletion* as_assignment_fence_completion()
+      virtual AssignFenceCompletion* as_assignment_fence_completion(void)
         { return NULL; }
-      virtual IssueCopy* as_issue_copy()
+      virtual IssueCopy* as_issue_copy(void)
         { return this; }
-      virtual IssueFill* as_issue_fill()
+      virtual IssueFill* as_issue_fill(void)
         { return NULL; }
-      virtual SetReadyEvent* as_set_ready_event()
+      virtual SetReadyEvent* as_set_ready_event(void)
         { return NULL; }
-      virtual GetCopyTermEvent* as_get_copy_term_event()
+      virtual GetCopyTermEvent* as_get_copy_term_event(void)
         { return NULL; }
-      virtual SetCopySyncEvent* as_set_copy_sync_event()
+      virtual SetCopySyncEvent* as_set_copy_sync_event(void)
         { return NULL; }
-      virtual TriggerCopyCompletion* as_triger_copy_completion()
+      virtual TriggerCopyCompletion* as_triger_copy_completion(void)
         { return NULL; }
 
       virtual Instruction* clone(PhysicalTemplate& tpl,
@@ -995,32 +995,32 @@ namespace Legion {
                     unsigned ready_event_idx,
                     InstanceView *view,
                     const FieldMask &fields);
-      virtual void execute();
-      virtual std::string to_string();
+      virtual void execute(void);
+      virtual std::string to_string(void);
 
-      virtual InstructionKind get_kind()
+      virtual InstructionKind get_kind(void)
         { return SET_READY_EVENT; }
-      virtual GetTermEvent* as_get_term_event()
+      virtual GetTermEvent* as_get_term_event(void)
         { return NULL; }
-      virtual CreateApUserEvent* as_create_ap_user_event()
+      virtual CreateApUserEvent* as_create_ap_user_event(void)
         { return NULL; }
-      virtual TriggerEvent* as_trigger_event()
+      virtual TriggerEvent* as_trigger_event(void)
         { return NULL; }
-      virtual MergeEvent* as_merge_event()
+      virtual MergeEvent* as_merge_event(void)
         { return NULL; }
-      virtual AssignFenceCompletion* as_assignment_fence_completion()
+      virtual AssignFenceCompletion* as_assignment_fence_completion(void)
         { return NULL; }
-      virtual IssueCopy* as_issue_copy()
+      virtual IssueCopy* as_issue_copy(void)
         { return NULL; }
-      virtual IssueFill* as_issue_fill()
+      virtual IssueFill* as_issue_fill(void)
         { return NULL; }
-      virtual SetReadyEvent* as_set_ready_event()
+      virtual SetReadyEvent* as_set_ready_event(void)
         { return this; }
-      virtual GetCopyTermEvent* as_get_copy_term_event()
+      virtual GetCopyTermEvent* as_get_copy_term_event(void)
         { return NULL; }
-      virtual SetCopySyncEvent* as_set_copy_sync_event()
+      virtual SetCopySyncEvent* as_set_copy_sync_event(void)
         { return NULL; }
-      virtual TriggerCopyCompletion* as_triger_copy_completion()
+      virtual TriggerCopyCompletion* as_triger_copy_completion(void)
         { return NULL; }
 
       virtual Instruction* clone(PhysicalTemplate& tpl,
@@ -1046,32 +1046,32 @@ namespace Legion {
     struct GetCopyTermEvent : public Instruction {
       GetCopyTermEvent(PhysicalTemplate& tpl, unsigned lhs,
                        const TraceLocalId& rhs);
-      virtual void execute();
-      virtual std::string to_string();
+      virtual void execute(void);
+      virtual std::string to_string(void);
 
-      virtual InstructionKind get_kind()
+      virtual InstructionKind get_kind(void)
         { return GET_COPY_TERM_EVENT; }
-      virtual GetTermEvent* as_get_term_event()
+      virtual GetTermEvent* as_get_term_event(void)
         { return NULL; }
-      virtual CreateApUserEvent* as_create_ap_user_event()
+      virtual CreateApUserEvent* as_create_ap_user_event(void)
         { return NULL; }
-      virtual TriggerEvent* as_trigger_event()
+      virtual TriggerEvent* as_trigger_event(void)
         { return NULL; }
-      virtual MergeEvent* as_merge_event()
+      virtual MergeEvent* as_merge_event(void)
         { return NULL; }
-      virtual AssignFenceCompletion* as_assignment_fence_completion()
+      virtual AssignFenceCompletion* as_assignment_fence_completion(void)
         { return NULL; }
-      virtual IssueCopy* as_issue_copy()
+      virtual IssueCopy* as_issue_copy(void)
         { return NULL; }
-      virtual IssueFill* as_issue_fill()
+      virtual IssueFill* as_issue_fill(void)
         { return NULL; }
-      virtual SetReadyEvent* as_set_ready_event()
+      virtual SetReadyEvent* as_set_ready_event(void)
         { return NULL; }
-      virtual GetCopyTermEvent* as_get_copy_term_event()
+      virtual GetCopyTermEvent* as_get_copy_term_event(void)
         { return this; }
-      virtual SetCopySyncEvent* as_set_copy_sync_event()
+      virtual SetCopySyncEvent* as_set_copy_sync_event(void)
         { return NULL; }
-      virtual TriggerCopyCompletion* as_triger_copy_completion()
+      virtual TriggerCopyCompletion* as_triger_copy_completion(void)
         { return NULL; }
 
       virtual Instruction* clone(PhysicalTemplate& tpl,
@@ -1093,32 +1093,32 @@ namespace Legion {
     struct SetCopySyncEvent : public Instruction {
       SetCopySyncEvent(PhysicalTemplate& tpl, unsigned lhs,
                        const TraceLocalId& rhs);
-      virtual void execute();
-      virtual std::string to_string();
+      virtual void execute(void);
+      virtual std::string to_string(void);
 
-      virtual InstructionKind get_kind()
+      virtual InstructionKind get_kind(void)
         { return SET_COPY_SYNC_EVENT; }
-      virtual GetTermEvent* as_get_term_event()
+      virtual GetTermEvent* as_get_term_event(void)
         { return NULL; }
-      virtual CreateApUserEvent* as_create_ap_user_event()
+      virtual CreateApUserEvent* as_create_ap_user_event(void)
         { return NULL; }
-      virtual TriggerEvent* as_trigger_event()
+      virtual TriggerEvent* as_trigger_event(void)
         { return NULL; }
-      virtual MergeEvent* as_merge_event()
+      virtual MergeEvent* as_merge_event(void)
         { return NULL; }
-      virtual AssignFenceCompletion* as_assignment_fence_completion()
+      virtual AssignFenceCompletion* as_assignment_fence_completion(void)
         { return NULL; }
-      virtual IssueCopy* as_issue_copy()
+      virtual IssueCopy* as_issue_copy(void)
         { return NULL; }
-      virtual IssueFill* as_issue_fill()
+      virtual IssueFill* as_issue_fill(void)
         { return NULL; }
-      virtual SetReadyEvent* as_set_ready_event()
+      virtual SetReadyEvent* as_set_ready_event(void)
         { return NULL; }
-      virtual GetCopyTermEvent* as_get_copy_term_event()
+      virtual GetCopyTermEvent* as_get_copy_term_event(void)
         { return NULL; }
-      virtual SetCopySyncEvent* as_set_copy_sync_event()
+      virtual SetCopySyncEvent* as_set_copy_sync_event(void)
         { return this; }
-      virtual TriggerCopyCompletion* as_triger_copy_completion()
+      virtual TriggerCopyCompletion* as_triger_copy_completion(void)
         { return NULL; }
 
       virtual Instruction* clone(PhysicalTemplate& tpl,
@@ -1140,32 +1140,32 @@ namespace Legion {
     struct TriggerCopyCompletion : public Instruction {
       TriggerCopyCompletion(PhysicalTemplate& tpl, const TraceLocalId& lhs,
                             unsigned rhs);
-      virtual void execute();
-      virtual std::string to_string();
+      virtual void execute(void);
+      virtual std::string to_string(void);
 
-      virtual InstructionKind get_kind()
+      virtual InstructionKind get_kind(void)
         { return TRIGGER_COPY_COMPLETION; }
-      virtual GetTermEvent* as_get_term_event()
+      virtual GetTermEvent* as_get_term_event(void)
         { return NULL; }
-      virtual CreateApUserEvent* as_create_ap_user_event()
+      virtual CreateApUserEvent* as_create_ap_user_event(void)
         { return NULL; }
-      virtual TriggerEvent* as_trigger_event()
+      virtual TriggerEvent* as_trigger_event(void)
         { return NULL; }
-      virtual MergeEvent* as_merge_event()
+      virtual MergeEvent* as_merge_event(void)
         { return NULL; }
-      virtual AssignFenceCompletion* as_assignment_fence_completion()
+      virtual AssignFenceCompletion* as_assignment_fence_completion(void)
         { return NULL; }
-      virtual IssueCopy* as_issue_copy()
+      virtual IssueCopy* as_issue_copy(void)
         { return NULL; }
-      virtual IssueFill* as_issue_fill()
+      virtual IssueFill* as_issue_fill(void)
         { return NULL; }
-      virtual SetReadyEvent* as_set_ready_event()
+      virtual SetReadyEvent* as_set_ready_event(void)
         { return NULL; }
-      virtual GetCopyTermEvent* as_get_copy_term_event()
+      virtual GetCopyTermEvent* as_get_copy_term_event(void)
         { return NULL; }
-      virtual SetCopySyncEvent* as_set_copy_sync_event()
+      virtual SetCopySyncEvent* as_set_copy_sync_event(void)
         { return NULL; }
-      virtual TriggerCopyCompletion* as_triger_copy_completion()
+      virtual TriggerCopyCompletion* as_triger_copy_completion(void)
         { return this; }
 
       virtual Instruction* clone(PhysicalTemplate& tpl,
@@ -1181,32 +1181,32 @@ namespace Legion {
 
     struct LaunchTask : public Instruction {
       LaunchTask(PhysicalTemplate& tpl, const TraceLocalId& lhs);
-      virtual void execute();
-      virtual std::string to_string();
+      virtual void execute(void);
+      virtual std::string to_string(void);
 
-      virtual InstructionKind get_kind()
+      virtual InstructionKind get_kind(void)
         { return LAUNCH_TASK; }
-      virtual GetTermEvent* as_get_term_event()
+      virtual GetTermEvent* as_get_term_event(void)
         { return NULL; }
-      virtual CreateApUserEvent* as_create_ap_user_event()
+      virtual CreateApUserEvent* as_create_ap_user_event(void)
         { return NULL; }
-      virtual TriggerEvent* as_trigger_event()
+      virtual TriggerEvent* as_trigger_event(void)
         { return NULL; }
-      virtual MergeEvent* as_merge_event()
+      virtual MergeEvent* as_merge_event(void)
         { return NULL; }
-      virtual AssignFenceCompletion* as_assignment_fence_completion()
+      virtual AssignFenceCompletion* as_assignment_fence_completion(void)
         { return NULL; }
-      virtual IssueCopy* as_issue_copy()
+      virtual IssueCopy* as_issue_copy(void)
         { return NULL; }
-      virtual IssueFill* as_issue_fill()
+      virtual IssueFill* as_issue_fill(void)
         { return NULL; }
-      virtual SetReadyEvent* as_set_ready_event()
+      virtual SetReadyEvent* as_set_ready_event(void)
         { return NULL; }
-      virtual GetCopyTermEvent* as_get_copy_term_event()
+      virtual GetCopyTermEvent* as_get_copy_term_event(void)
         { return NULL; }
-      virtual SetCopySyncEvent* as_set_copy_sync_event()
+      virtual SetCopySyncEvent* as_set_copy_sync_event(void)
         { return NULL; }
-      virtual TriggerCopyCompletion* as_triger_copy_completion()
+      virtual TriggerCopyCompletion* as_triger_copy_completion(void)
         { return NULL; }
 
       virtual Instruction* clone(PhysicalTemplate& tpl,
