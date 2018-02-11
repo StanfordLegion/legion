@@ -1251,6 +1251,34 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void MapperManager::update_mappable_tag(MappingCallInfo *ctx,
+                                 const Mappable &mappable, MappingTagID new_tag)
+    //--------------------------------------------------------------------------
+    {
+      Mappable *map = const_cast<Mappable*>(&mappable);
+      map->tag = new_tag;
+    }
+
+    //--------------------------------------------------------------------------
+    void MapperManager::update_mappable_data(MappingCallInfo *ctx,
+            const Mappable &mappable, const void *mapper_data, size_t data_size)
+    //--------------------------------------------------------------------------
+    {
+      Mappable *map = const_cast<Mappable*>(&mappable);
+      // Free the old buffer if there is one
+      if (map->mapper_data != NULL)
+        free(map->mapper_data);
+      map->mapper_data_size = data_size;
+      if (data_size > 0)
+      {
+        map->mapper_data = malloc(data_size);
+        memcpy(map->mapper_data, mapper_data, data_size);
+      }
+      else
+        map->mapper_data = NULL;
+    }
+
+    //--------------------------------------------------------------------------
     void MapperManager::send_message(MappingCallInfo *ctx, Processor target,
                 const void *message, size_t message_size, unsigned message_kind)
     //--------------------------------------------------------------------------

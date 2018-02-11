@@ -49,7 +49,7 @@ before_install:
   - |
     if [[ "$(uname)" = "Darwin" ]]; then
       brew update
-      brew install pypy llvm@3.9 homebrew/science/hdf5
+      brew install pypy llvm@3.9 hdf5
       export CLANG="$(brew --prefix)/opt/llvm@3.9/bin/clang"
       export LLVM_CONFIG="$(brew --prefix)/opt/llvm@3.9/bin/llvm-config"
       export CXX="$(brew --prefix)/opt/llvm@3.9/bin/clang++"

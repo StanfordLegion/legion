@@ -234,6 +234,7 @@ namespace Legion {
             assert(false);
           }
         }
+        if (total_nodes == 0) total_nodes = remote_gpus.size();
       }
       if (!local_ios.empty()) {
         for (unsigned idx = 0; idx < remote_ios.size(); idx++) {
@@ -246,6 +247,7 @@ namespace Legion {
             assert(false);
           }
         }
+        if (total_nodes == 0) total_nodes = remote_ios.size();
       }
       if (!local_omps.empty()) {
         for (unsigned idx = 0; idx < remote_omps.size(); idx++) {
@@ -258,6 +260,7 @@ namespace Legion {
             assert(false);
           }
         }
+        if (total_nodes == 0) total_nodes = remote_omps.size();
       } 
       if (!local_pys.empty()) {
         for (unsigned idx = 0; idx < remote_pys.size(); idx++) {
@@ -270,6 +273,7 @@ namespace Legion {
             assert(false);
           }
         }
+        if (total_nodes == 0) total_nodes = remote_pys.size();
       } 
       // Initialize our random number generator
       const size_t short_bits = 8*sizeof(unsigned short);

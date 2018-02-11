@@ -152,6 +152,8 @@ before_script:
 # Each job will run in a fresh container with this image.
 .image: &image
   image: stanfordlegion/gitlab-ci # i.e. https://hub.docker.com/r/stanfordlegion/gitlab-ci/
+.image_clang: &image_clang
+  image: stanfordlegion/gitlab-ci:clang # i.e. https://hub.docker.com/r/stanfordlegion/gitlab-ci/
 
 ###
 ### Tests
@@ -317,109 +319,109 @@ gcc49_cxx98_debug_external:
 # * Basic configurations
 #   * Release
 clang38_cxx98_release_legion:
-  <<: [*linux, *image, *tests]
+  <<: [*linux, *image_clang, *tests]
   variables:
     <<: [*clang38, *terra38, *release, *cxx98_normal, *legion]
 clang38_cxx98_release_cmake_regent:
-  <<: [*linux_compute, *image, *tests]
+  <<: [*linux_compute, *image_clang, *tests]
   variables:
     <<: [*clang38, *terra38, *release, *cxx98_normal, *cmake, *regent]
 #   * Debug (Privilege and Bounds Checks)
 clang38_cxx98_debug_checks_legion:
-  <<: [*linux, *image, *tests]
+  <<: [*linux, *image_clang, *tests]
   variables:
     <<: [*clang38, *terra38, *debug, *cxx98_checks, *legion]
 #   * Spy
 clang38_cxx98_debug_spy_legion:
-  <<: [*linux, *image, *tests]
+  <<: [*linux, *image_clang, *tests]
   variables:
     <<: [*clang38, *terra38, *debug, *cxx98_spy, *legion]
 clang38_cxx98_debug_spy_regent:
-  <<: [*linux_compute, *image, *tests]
+  <<: [*linux_compute, *image_clang, *tests]
   variables:
     <<: [*clang38, *terra38, *debug, *cxx98_spy, *regent]
 #   * C++11
 clang38_cxx11_release_legion:
-  <<: [*linux, *image, *tests]
+  <<: [*linux, *image_clang, *tests]
   variables:
     <<: [*clang38, *terra38, *release, *cxx11_normal, *legion]
 # * Features: one test per feature
 #   * OpenMP
 clang38_cxx98_debug_openmp_legion:
-  <<: [*linux, *image, *tests]
+  <<: [*linux, *image_clang, *tests]
   variables:
     <<: [*clang38, *terra38, *debug, *cxx98_normal, *openmp, *legion]
 clang38_cxx98_debug_openmp_regent:
-  <<: [*linux_compute, *image, *tests]
+  <<: [*linux_compute, *image_clang, *tests]
   variables:
     <<: [*clang38, *terra38, *debug, *cxx98_normal, *openmp, *regent]
 #   * Python
 clang38_cxx98_debug_python2_legion:
-  <<: [*linux, *image, *tests]
+  <<: [*linux, *image_clang, *tests]
   variables:
     <<: [*clang38, *terra38, *debug, *cxx98_normal, *python2, *legion]
 clang38_cxx98_debug_python3_legion:
-  <<: [*linux, *image, *tests]
+  <<: [*linux, *image_clang, *tests]
   variables:
     <<: [*clang38, *terra38, *debug, *cxx98_normal, *python3, *legion]
 #   * LLVM
 clang38_cxx98_debug_llvm_cmake_legion:
-  <<: [*linux, *image, *tests]
+  <<: [*linux, *image_clang, *tests]
   variables:
     <<: [*clang38, *terra38, *debug, *cxx98_normal, *llvm, *cmake, *legion, *ctest]
 clang38_cxx98_debug_llvm_regent:
-  <<: [*linux_compute, *image, *tests]
+  <<: [*linux_compute, *image_clang, *tests]
   variables:
     <<: [*clang38, *terra38, *debug, *cxx98_normal, *llvm, *regent]
 #   * HDF5
 clang38_cxx98_debug_hdf5_cmake_legion:
-  <<: [*linux, *image, *tests]
+  <<: [*linux, *image_clang, *tests]
   variables:
     <<: [*clang38, *terra38, *debug, *cxx98_normal, *hdf5, *cmake, *legion, *ctest]
 clang38_cxx98_debug_hdf5_regent:
-  <<: [*linux_compute, *image, *tests]
+  <<: [*linux_compute, *image_clang, *tests]
   variables:
     <<: [*clang38, *terra38, *debug, *cxx98_normal, *hdf5, *regent]
 #   * GASNet
 clang38_cxx98_debug_gasnet_cmake_legion:
-  <<: [*linux_compute, *image, *tests]
+  <<: [*linux_compute, *image_clang, *tests]
   variables:
     <<: [*clang38, *terra38, *debug, *cxx98_normal, *gasnet, *cmake, *legion, *ctest]
 clang38_cxx98_debug_gasnet_regent:
-  <<: [*linux_compute, *image, *tests]
+  <<: [*linux_compute, *image_clang, *tests]
   variables:
     <<: [*clang38, *terra38, *debug, *cxx98_normal, *gasnet, *regent]
 # * Integration: LLVM + GASNet
 clang38_cxx98_debug_llvm_gasnet_legion:
-  <<: [*linux_compute, *image, *tests]
+  <<: [*linux_compute, *image_clang, *tests]
   variables:
     <<: [*clang38, *terra38, *debug, *cxx98_normal, *llvm, *gasnet, *legion]
 clang38_cxx98_debug_llvm_gasnet_regent:
-  <<: [*linux_compute, *image, *tests]
+  <<: [*linux_compute, *image_clang, *tests]
   variables:
     <<: [*clang38, *terra38, *debug, *cxx98_normal, *llvm, *gasnet, *regent]
 # * Integration: HDF5 + GASNet
 clang38_cxx98_debug_hdf5_gasnet_legion:
-  <<: [*linux_compute, *image, *tests]
+  <<: [*linux_compute, *image_clang, *tests]
   variables:
     <<: [*clang38, *terra38, *debug, *cxx98_normal, *hdf5, *gasnet, *legion]
 clang38_cxx98_debug_hdf5_gasnet_regent:
-  <<: [*linux_compute, *image, *tests]
+  <<: [*linux_compute, *image_clang, *tests]
   variables:
     <<: [*clang38, *terra38, *debug, *cxx98_normal, *hdf5, *gasnet, *regent]
 # * Integration: HDF5 + GASNet
 # clang38_cxx98_debug_spy_gasnet_regent:
-#   <<: [*linux_compute, *image, *tests]
+#   <<: [*linux_compute, *image_clang, *tests]
 #   variables:
 #     <<: [*clang38, *terra38, *debug, *cxx98_spy, *gasnet, *regent]
 # * Different architectures
 clang38_cxx98_32bit_debug_legion:
-  <<: [*linux, *image, *tests]
+  <<: [*linux, *image_clang, *tests]
   variables:
     <<: [*clang38, *terra38, *debug, *cxx98_32bit_normal, *legion]
 # * External tests
 clang38_cxx98_debug_external:
-  <<: [*linux_compute, *image, *external_tests]
+  <<: [*linux_compute, *image_clang, *external_tests]
   variables:
     <<: [*clang38, *terra38, *debug, *cxx98_normal]
 
