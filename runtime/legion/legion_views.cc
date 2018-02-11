@@ -4322,11 +4322,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void DeferredSingleCopier::buffer_reductions(VersionTracker *tracker,
         PredEvent pred_guard, RegionTreeNode *intersect, 
-        IndexSpaceExpression *mask, std::set<ReductionView*> &source_reductions)
+        IndexSpaceExpression *mask, std::vector<ReductionView*> &src_reductions)
     //--------------------------------------------------------------------------
     {
-      for (std::set<ReductionView*>::const_iterator it = 
-            source_reductions.begin(); it != source_reductions.end(); it++)
+      for (std::vector<ReductionView*>::const_iterator it = 
+            src_reductions.begin(); it != src_reductions.end(); it++)
       {
 #ifdef DEBUG_LEGION
         assert(pending_reductions.find(*it) == pending_reductions.end());
@@ -5721,6 +5721,111 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void CompositeBase::issue_composite_updates_single(
+                                   DeferredSingleCopier &copier,
+                                   RegionTreeNode *logical_node,
+                                   VersionTracker *src_version_tracker,
+                                   PredEvent pred_guard,
+                                   IndexSpaceExpression *write_mask,
+                                   std::set<IndexSpaceExpression*> &perf_writes)
+    //--------------------------------------------------------------------------
+    {
+      // First check to see if we have all the valid meta-data
+      perform_ready_check(copier.copy_mask);
+      // Find any children that need to be traversed as well as any instances
+      // or reduction views that we may need to issue copies from
+      std::vector<CompositeNode*> children_to_traverse;
+      std::vector<LogicalView*> source_views;
+      std::vector<ReductionView*> source_reductions;
+      {
+        AutoLock b_lock(base_lock,1,false/*exclusive*/);
+        for (LegionMap<CompositeNode*,FieldMask>::aligned::const_iterator it = 
+              children.begin(); it != children.end(); it++)
+        {
+          if (!it->second.is_set(copier.field_index))
+            continue;
+          // Skip any nodes that don't even intersect, they don't matter
+          if (!it->first->logical_node->intersects_with(
+                copier.dst->logical_node, false/*computes*/))
+            continue;
+          children_to_traverse.push_back(it->first);
+        }
+        if (dirty_mask.is_set(copier.field_index))
+        {
+          for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it =
+                valid_views.begin(); it != valid_views.end(); it++)
+          {
+            if (!it->second.is_set(copier.field_index))
+              continue;
+            source_views.push_back(it->first);
+          }
+        }
+        if (reduction_mask.is_set(copier.field_index))
+        {
+          for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it =
+                reduction_views.begin(); it != reduction_views.end(); it++)
+          {
+            if (!it->second.is_set(copier.field_index))
+              continue;
+            source_reductions.push_back(it->first);
+          }
+        }
+      }
+      if (!children_to_traverse.empty())
+      {
+        // Do the child traversals and record any writes that we do
+        std::set<IndexSpaceExpression*> child_writes;
+        for (std::vector<CompositeNode*>::const_iterator it = 
+              children_to_traverse.begin(); it != 
+              children_to_traverse.end(); it++)
+          (*it)->issue_composite_updates_single(copier,
+              (*it)->logical_node, src_version_tracker,
+              pred_guard, write_mask, child_writes);
+        // Now we issue copies to instances
+        if (!source_views.empty())
+        {
+          // If we did child writes then update the write mask
+          if (!child_writes.empty())
+          {
+            if (write_mask != NULL)
+              child_writes.insert(write_mask);
+            if (child_writes.size() > 1)
+              write_mask = copier.dst->context->intersect_index_spaces(
+                  copier.info.op, child_writes);
+            else
+              write_mask = *child_writes.begin();
+          }
+          // Issue the writes from our instance
+          IndexSpaceExpression *our_write = 
+            issue_update_copies_single(copier, logical_node,
+              src_version_tracker, pred_guard, source_views, write_mask);
+          // Propagate our write up the tree
+          if (our_write != NULL)
+            perf_writes.insert(our_write);
+        }
+        else if (!child_writes.empty())
+          // Propagate child writes up the tree
+          perf_writes.insert(child_writes.begin(), child_writes.end());
+      }
+      else if (!source_views.empty())
+      {
+        // We didn't do any child traversals so things are a little easier
+        IndexSpaceExpression *our_write = 
+          issue_update_copies_single(copier, logical_node,
+              src_version_tracker, pred_guard, source_views, write_mask);
+        // Propagate our write up the tree
+        if (our_write != NULL)
+          perf_writes.insert(our_write);
+      }
+      // Lastly no matter what we do, we have to record our reductions
+      // to be performed after all the updates to the instance
+      if (!source_reductions.empty())
+        copier.buffer_reductions(src_version_tracker, pred_guard,
+            (copier.dst->logical_node == logical_node) ? NULL : logical_node,
+            write_mask, source_reductions);
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ void CompositeBase::issue_update_copies(
                                             DeferredCopier &copier,
                                             RegionTreeNode *logical_node,
@@ -5911,6 +6016,90 @@ namespace Legion {
           write_masks[union_is] = it->set_mask;
         else if (prune_global)
           global_copy_mask -= it->set_mask;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ IndexSpaceExpression* CompositeBase::issue_update_copies_single(
+                                      DeferredSingleCopier &copier,
+                                      RegionTreeNode *logical_node,
+                                      VersionTracker *src_version_tracker,
+                                      PredEvent pred_guard,
+                                      std::vector<LogicalView*> &source_views,
+                                      IndexSpaceExpression *write_mask)
+    //--------------------------------------------------------------------------
+    {
+      MaterializedView *dst = copier.dst;
+      const TraversalInfo &info = copier.info;
+      RegionTreeForest *context = dst->logical_node->context;
+      IndexSpaceExpression *dst_is = 
+        dst->logical_node->get_index_space_expression();
+      IndexSpaceExpression *local_is = 
+        logical_node->get_index_space_expression(); 
+      IndexSpaceExpression *intersect_is = 
+        (dst_is->expr_id == local_is->expr_id) ? local_is : 
+        context->intersect_index_spaces(info.op, dst_is, local_is);
+      MaterializedView *src_instance = NULL;
+      DeferredView *deferred_instance = NULL;
+      if (dst->logical_node->sort_copy_instances_single(info, dst,
+            copier.copy_mask, source_views, src_instance, deferred_instance))
+      {
+        // If we get here then the destination is already valid
+        // Construct the write expression, intersect then subtract
+        if (write_mask != NULL)
+          return context->subtract_index_spaces(info.op, 
+                              intersect_is, write_mask);
+        else
+          return intersect_is;
+      }
+      // Easy case if we are just copying from one or more instances
+      else if (src_instance != NULL)
+      {
+        LegionMap<ApEvent,FieldMask>::aligned temp_preconditions;
+        src_instance->find_copy_preconditions(0/*redop*/, true/*reading*/,
+                                              true/*single copy*/,
+                                              false/*restrict out*/,
+                                              copier.copy_mask, 
+                                              src_version_tracker,
+                                              info.op->get_unique_op_id(),
+                                              info.index,
+                                              context->runtime->address_space,
+                                              temp_preconditions,
+                                              info.map_applied_events);
+        std::set<ApEvent> copy_preconditions;
+        for (LegionMap<ApEvent,FieldMask>::aligned::const_iterator it =
+              temp_preconditions.begin(); it != temp_preconditions.end(); it++)
+          copy_preconditions.insert(it->first);
+        copier.merge_destination_preconditions(copy_preconditions);
+        // Issue the copy
+        ApEvent copy_pre = Runtime::merge_events(copy_preconditions);
+        ApEvent copy_post = dst->logical_node->issue_single_copy(copier.info, 
+            dst, false/*restrict out*/, pred_guard, copy_pre,
+            copier.copy_mask, src_instance, src_version_tracker,
+            copier.across_helper, logical_node, write_mask);
+        if (copy_post.exists())
+          copier.record_postcondition(copy_post);
+        // Construct the write expression, intersect then subtract
+        if (write_mask != NULL)
+          return context->subtract_index_spaces(info.op, 
+                              intersect_is, write_mask);
+        else
+          return intersect_is;
+      }
+      else
+      {
+#ifdef DEBUG_LEGION
+        assert(deferred_instance != NULL); // better have one of these
+#endif
+        std::set<IndexSpaceExpression*> performed_writes;
+        deferred_instance->issue_deferred_copies_single(copier, 
+            write_mask, performed_writes, pred_guard);
+        if (performed_writes.empty())
+          return NULL;
+        else if (performed_writes.size() == 1)
+          return *performed_writes.begin();
+        else
+          return context->union_index_spaces(info.op, performed_writes);
       }
     }
 
@@ -6395,6 +6584,18 @@ namespace Legion {
     {
       issue_composite_updates(copier, logical_node, local_copy_mask,
                               this, pred_guard, write_masks, perf_writes);
+    }
+
+    //--------------------------------------------------------------------------
+    void CompositeView::issue_deferred_copies_single(
+                                            DeferredSingleCopier &copier,
+                                            IndexSpaceExpression *write_mask,
+                                   std::set<IndexSpaceExpression*> &perf_writes,
+                                            PredEvent pred_guard)      
+    //--------------------------------------------------------------------------
+    {
+      issue_composite_updates_single(copier, logical_node, this,
+                                     pred_guard, write_mask, perf_writes);
     }
 
     //--------------------------------------------------------------------------
@@ -7694,6 +7895,46 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void FillView::issue_deferred_copies_single(DeferredSingleCopier &copier,
+                                         IndexSpaceExpression *write_mask,
+                                std::set<IndexSpaceExpression*> &perf_writes,
+                                         PredEvent pred_guard)
+    //--------------------------------------------------------------------------
+    {
+      MaterializedView *dst = copier.dst;
+      // Only apply an intersection if the destination logical node
+      // is different than our logical node
+      // If the intersection is empty we can skip the fill all together
+      if ((logical_node != dst->logical_node) && 
+          (!logical_node->intersects_with(dst->logical_node)))
+        return;
+      // Build the dst fields vector
+      std::vector<CopySrcDstField> dst_fields;
+      dst->copy_to(copier.copy_mask, dst_fields, copier.across_helper);
+      std::set<ApEvent> dst_preconditions;
+      copier.merge_destination_preconditions(dst_preconditions);
+      ApEvent fill_pre = Runtime::merge_events(dst_preconditions);
+      LegionMap<IndexSpaceExpression*,FieldMask>::aligned fill_writes;
+      // Issue the fill command
+      ApEvent fill_post = dst->logical_node->issue_fill(copier.info.op, 
+          dst_fields, value->value, value->value_size, fill_pre, pred_guard,
+#ifdef LEGION_SPY
+                      fill_op_uid,
+#endif
+              (logical_node == dst->logical_node) ? NULL : logical_node, 
+              write_mask, &fill_writes, &copier.copy_mask);
+      if (fill_post.exists())
+        copier.record_postcondition(fill_post);
+      if (!fill_writes.empty())
+      {
+#ifdef DEBUG_LEGION
+        assert(fill_writes.size() == 1);
+#endif
+        perf_writes.insert(fill_writes.begin()->first);
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void FillView::issue_update_fills(DeferredCopier &copier,
                                       const FieldMask &fill_mask,
                                       IndexSpaceExpression *mask,
@@ -8080,6 +8321,57 @@ namespace Legion {
         assert(!true_it->second); // should have no fields left
 #endif
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void PhiView::issue_deferred_copies_single(DeferredSingleCopier &copier,
+                                           IndexSpaceExpression *write_mask,
+                                  std::set<IndexSpaceExpression*> &perf_writes,
+                                           PredEvent pred_guard)
+    //--------------------------------------------------------------------------
+    {
+      copier.begin_guard_protection();
+      std::vector<LogicalView*> true_instances;
+      for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it = 
+            true_views.begin(); it != true_views.end(); it++)
+        if (it->second.is_set(copier.field_index))
+          true_instances.push_back(it->first);
+      IndexSpaceExpression *true_write = 
+        issue_update_copies_single(copier, logical_node, this, 
+                                   true_guard, true_instances, write_mask);
+      std::vector<LogicalView*> false_instances;
+      for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it = 
+            true_views.begin(); it != true_views.end(); it++)
+        if (it->second.is_set(copier.field_index))
+          false_instances.push_back(it->first);
+      IndexSpaceExpression *false_write = 
+        issue_update_copies_single(copier, logical_node, this,
+                                   false_guard, false_instances, write_mask);
+      copier.end_guard_protection();
+      if (true_write != false_write)
+      {
+        if ((true_write == NULL) || (false_write == NULL))
+          REPORT_LEGION_FATAL(LEGION_FATAL_INCONSISTENT_PHI_VIEW,
+                  "Legion Internal Fatal Error: Phi View has different "
+                  "write sets for true and false cases. This is currently "
+                  "unsupported. Please report this use case to the Legion "
+                  "developers mailing list.")
+        // Check to make sure that the sets are equal for now since
+        // we won't handle the case correctly if they aren't
+        IndexSpaceExpression *diff1 = context->subtract_index_spaces(
+            copier.info.op, true_write, false_write);
+        IndexSpaceExpression *diff2 = context->subtract_index_spaces(
+            copier.info.op, false_write, true_write);
+        if (!diff1->is_empty() || !diff2->is_empty())
+          REPORT_LEGION_FATAL(LEGION_FATAL_INCONSISTENT_PHI_VIEW,
+                  "Legion Internal Fatal Error: Phi View has different "
+                  "write sets for true and false cases. This is currently "
+                  "unsupported. Please report this use case to the Legion "
+                  "developers mailing list.")
+      }
+      // Just save the true write expression for right now
+      if (true_write != NULL)
+        perf_writes.insert(true_write);
     }
 
 #ifdef USE_OLD_COMPOSITE

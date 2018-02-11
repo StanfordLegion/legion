@@ -2412,6 +2412,12 @@ namespace Legion {
                const LegionMap<LogicalView*,FieldMask>::aligned &copy_instances,
                  LegionMap<MaterializedView*,FieldMask>::aligned &src_instances,
                LegionMap<DeferredView*,FieldMask>::aligned &deferred_instances);
+      bool sort_copy_instances_single(const TraversalInfo &info,
+                                      MaterializedView *target,
+                                      const FieldMask &copy_mask,
+                              const std::vector<LogicalView*> &copy_instances,
+                                      MaterializedView *&src_instance,
+                                      DeferredView *&deferred_instance);
       // Issue copies for fields with the same event preconditions and masks
       void issue_grouped_copies(const TraversalInfo &info,
                                 MaterializedView *dst, bool restrict_out,
@@ -2437,6 +2443,15 @@ namespace Legion {
                              RegionTreeNode *intersect,
                              IndexSpaceExpression* mask,
                   LegionMap<IndexSpaceExpression*,FieldMask>::aligned *perf);
+      ApEvent issue_single_copy(const TraversalInfo &info,
+                                MaterializedView *dst, bool restrict_out,
+                                PredEvent predicate_guard, ApEvent copy_pre,
+                                const FieldMask &copy_mask,
+                                MaterializedView *src,
+                                VersionTracker *version_tracker,
+                                CopyAcrossHelper *across_helper,
+                                RegionTreeNode *intersect,
+                                IndexSpaceExpression *mask);
       void issue_update_reductions(LogicalView *target,
                                    const FieldMask &update_mask,
                                    VersionInfo &version_info,

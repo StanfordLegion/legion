@@ -13069,6 +13069,90 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool RegionTreeNode::sort_copy_instances_single(const TraversalInfo &info,
+                                                    MaterializedView *dst,
+                                                    const FieldMask &copy_mask,
+                                const std::vector<LogicalView*> &copy_instances,
+                                                    MaterializedView *&instance,
+                                                    DeferredView *&deferred)
+    //--------------------------------------------------------------------------
+    {
+      DETAILED_PROFILER(context->runtime, REGION_NODE_SORT_COPY_INSTANCES_CALL);
+      // Initialize these in case they aren't already initialized
+      instance = NULL;
+      deferred = NULL;
+      // No need to call the mapper if there is only one valid instance
+      if (copy_instances.size() == 1)
+      {
+        LogicalView *src = copy_instances.front();
+        // No need to do anything if src and dst are the same
+        if (src != dst)
+        {
+          if (!src->is_deferred_view())
+          {
+#ifdef DEBUG_LEGION
+            assert(src->is_instance_view());
+            assert(src->as_instance_view()->is_materialized_view());
+#endif
+            instance = src->as_instance_view()->as_materialized_view(); 
+          }
+          else
+            deferred = src->as_deferred_view();
+        }
+        else
+          return true;
+      }
+      else if (!copy_instances.empty())
+      {
+        InstanceSet src_refs;
+        std::vector<MaterializedView*> src_views;
+        src_views.reserve(copy_instances.size());
+        for (std::vector<LogicalView*>::const_iterator it =
+              copy_instances.begin(); it != copy_instances.end(); it++)
+        {
+          // Easy out if we find what the desination
+          if ((*it) == dst)
+            return true;
+          if ((*it)->is_deferred_view())
+          {
+#ifdef DEBUG_LEGION
+            assert(deferred == NULL); // should only be one of these at most
+#endif
+            deferred = (*it)->as_deferred_view();
+          }
+          else
+          {
+#ifdef DEBUG_LEGION
+            assert((*it)->is_instance_view());
+            assert((*it)->as_instance_view()->is_materialized_view());
+#endif
+            MaterializedView *src_view = 
+              (*it)->as_instance_view()->as_materialized_view();
+            src_refs.add_instance(
+                InstanceRef(src_view->get_manager(), copy_mask));
+            src_views.push_back(src_view);
+          }
+        }
+        // See if we need to ask the mapper to pick an order
+        if (src_views.size() > 1)
+        {
+          std::vector<unsigned> ranking;
+          InstanceRef target(dst->get_manager(), copy_mask);
+          // Ask the mapper to pick the ranking
+          info.op->select_sources(target, src_refs, ranking);
+          // Just need to grab the first one
+          if (ranking.empty())
+            instance = src_views.front();
+          else
+            instance = src_views[ranking.front()];
+        }
+        else if (!src_views.empty())
+          instance = src_views.front();
+      }
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
     void RegionTreeNode::issue_grouped_copies(const TraversalInfo &info,
                                               MaterializedView *dst,
                                               bool restrict_out,
@@ -13190,6 +13274,44 @@ namespace Legion {
         }
         postconditions[copy_post] = copy_mask;
       }
+    }
+
+    //--------------------------------------------------------------------------
+    ApEvent RegionTreeNode::issue_single_copy(const TraversalInfo &info,
+                                MaterializedView *dst, bool restrict_out,
+                                PredEvent predicate_guard, ApEvent copy_pre,
+                                const FieldMask &copy_mask,
+                                MaterializedView *src,
+                                VersionTracker *src_version_tracker,
+                                CopyAcrossHelper *across_helper,
+                                RegionTreeNode *intersect,
+                                IndexSpaceExpression *mask)
+    //--------------------------------------------------------------------------
+    {
+      // Build the src and dst fields vectors
+      std::vector<CopySrcDstField> src_fields;
+      std::vector<CopySrcDstField> dst_fields;
+      src->copy_from(copy_mask, src_fields);
+      dst->copy_to(copy_mask, dst_fields, across_helper);
+#ifdef DEBUG_LEGION
+      assert(!src_fields.empty());
+      assert(!dst_fields.empty());
+      assert(src_fields.size() == dst_fields.size());
+#endif
+      // Now that we've got our offsets ready, we
+      // can now issue the copy to the low-level runtime
+      ApEvent copy_post = issue_copy(info.op, src_fields, dst_fields, 
+                           copy_pre, predicate_guard, intersect, mask,
+                           0/*redop*/, false/*fold*/);
+      if (copy_post.exists())
+      {
+        const AddressSpaceID local_space = context->runtime->address_space;
+        src->add_copy_user(0/*redop*/, copy_post, src_version_tracker,
+                           info.op->get_unique_op_id(), info.index,
+                           copy_mask, true/*reading*/, restrict_out,
+                           local_space, info.map_applied_events);
+      }
+      return copy_post;
     }
 
     //--------------------------------------------------------------------------
