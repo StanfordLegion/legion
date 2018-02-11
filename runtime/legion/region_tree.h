@@ -679,12 +679,9 @@ namespace Legion {
       std::map<RegionTreeID,RtEvent>     region_tree_requests;
     private:
       // Index space operations
-      std::map<std::pair<TypeTag,IndexSpaceExprID/*first*/>,
-               ExpressionTrieNode*> union_ops;
-      std::map<std::pair<TypeTag,IndexSpaceExprID/*first*/>,
-               ExpressionTrieNode*> intersection_ops;
-      std::map<std::pair<TypeTag,IndexSpaceExprID/*lhs*/>,
-               ExpressionTrieNode*> difference_ops;
+      std::map<IndexSpaceExprID/*first*/,ExpressionTrieNode*> union_ops;
+      std::map<IndexSpaceExprID/*first*/,ExpressionTrieNode*> intersection_ops;
+      std::map<IndexSpaceExprID/*lhs*/,ExpressionTrieNode*> difference_ops;
     };
 
     /**
