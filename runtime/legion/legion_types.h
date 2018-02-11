@@ -1445,6 +1445,7 @@ namespace Legion {
     template<int DIM, typename T> class IndexSpaceUnion;
     template<int DIM, typename T> class IndexSpaceIntersection;
     template<int DIM, typename T> class IndexSpaceDifference;
+    class ExpressionTrieNode;
     class IndexTreeNode;
     class IndexSpaceNode;
     template<int DIM, typename T> class IndexSpaceNodeT;

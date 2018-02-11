@@ -4571,39 +4571,43 @@ namespace Legion {
       IndexSpaceExpression *first = *(exprs.begin());
       if (exprs.size() == 1)
         return first;
-      const std::pair<TypeTag,size_t> key(first->type_tag, exprs.size());
+      const std::pair<TypeTag,IndexSpaceExprID> 
+        key(first->type_tag, first->expr_id);
+      std::vector<IndexSpaceExpression*> expressions(exprs.begin(),exprs.end());
+      // See if we can find it in read-only mode
       {
         AutoLock l_lock(lookup_is_op_lock,1,false/*exclusive*/);
-        std::map<std::pair<TypeTag,size_t>,
-                 std::deque<IndexSpaceOperation*> >::const_iterator finder =
-          union_ops.find(key);
+        std::map<std::pair<TypeTag,IndexSpaceExprID>,ExpressionTrieNode*>::
+          const_iterator finder = union_ops.find(key);
         if (finder != union_ops.end())
         {
-          for (std::deque<IndexSpaceOperation*>::const_iterator it = 
-                finder->second.begin(); it != finder->second.end(); it++)
-          {
-            if ((*it)->matches(exprs))
-              return (*it);
-          }
+          IndexSpaceOperation *result = NULL;
+          ExpressionTrieNode *next = NULL;
+          if (finder->second->find_operation(expressions, result, next))
+            return result;
+          UnionOpCreator creator(this, op, key.first, exprs);
+          return next->find_or_create_operation(expressions, creator);
         }
       }
+      ExpressionTrieNode *node = NULL;
+      UnionOpCreator creator(this, op, key.first, exprs);
       // Didn't find it, retake the lock, see if we lost the race
-      // and if not make the actual operation node
+      // and if no make the actual trie node
       AutoLock l_lock(lookup_is_op_lock);
-      std::deque<IndexSpaceOperation*> &unions = union_ops[key];
-      // Check to see if we lost the race
-      for (std::deque<IndexSpaceOperation*>::const_iterator it = 
-            unions.begin(); it != unions.end(); it++)
+      std::map<std::pair<TypeTag,IndexSpaceExprID>,ExpressionTrieNode*>::
+        const_iterator finder = union_ops.find(key);
+      if (finder == union_ops.end())
       {
-        if ((*it)->matches(exprs))
-          return (*it);
+        // Didn't lose the race, so make the node
+        node = new ExpressionTrieNode(0/*depth*/, first->expr_id);
+        union_ops[key] = node;
       }
-      // Didn't lose the race so go ahead and make it 
-      UnionOpCreator creator(this, op, exprs);
-      NT_TemplateHelper::demux<UnionOpCreator>(key.first, &creator);
-      IndexSpaceOperation *result = creator.result;
-      unions.push_back(result);
-      return result;
+      else
+        node = finder->second;
+#ifdef DEBUG_LEGION
+      assert(node != NULL);
+#endif
+      return node->find_or_create_operation(expressions, creator);
     }
 
     //--------------------------------------------------------------------------
@@ -4631,39 +4635,44 @@ namespace Legion {
       IndexSpaceExpression *first = *(exprs.begin());
       if (exprs.size() == 1)
         return first;
-      const std::pair<TypeTag,size_t> key(first->type_tag, exprs.size());
+      const std::pair<TypeTag,IndexSpaceExprID> 
+        key(first->type_tag, first->expr_id);
+      std::vector<IndexSpaceExpression*> expressions(exprs.begin(),exprs.end());
+      // See if we can find it in read-only mode
       {
         AutoLock l_lock(lookup_is_op_lock,1,false/*exclusive*/);
-        std::map<std::pair<TypeTag,size_t>,
-                 std::deque<IndexSpaceOperation*> >::const_iterator finder = 
-          intersection_ops.find(key);
+        std::map<std::pair<TypeTag,IndexSpaceExprID>,ExpressionTrieNode*>::
+          const_iterator finder = intersection_ops.find(key);
         if (finder != intersection_ops.end())
         {
-          for (std::deque<IndexSpaceOperation*>::const_iterator it = 
-                finder->second.begin(); it != finder->second.end(); it++)
-          {
-            if ((*it)->matches(exprs))
-              return (*it);
-          }
+          IndexSpaceOperation *result = NULL;
+          ExpressionTrieNode *next = NULL;
+          if (finder->second->find_operation(expressions, result, next))
+            return result;
+          IntersectionOpCreator creator(this, op, key.first, exprs);
+          return next->find_or_create_operation(expressions, creator);
         }
       }
+      ExpressionTrieNode *node = NULL;
+      IntersectionOpCreator creator(this, op, key.first, exprs);
       // Didn't find it, retake the lock, see if we lost the race
-      // and if not make the actual operation node
+      // and if not make the actual trie node
       AutoLock l_lock(lookup_is_op_lock);
-      std::deque<IndexSpaceOperation*> &intersections = intersection_ops[key];
-      // Check to see if we lost the race
-      for (std::deque<IndexSpaceOperation*>::const_iterator it = 
-            intersections.begin(); it != intersections.end(); it++)
+      // See if we lost the race
+      std::map<std::pair<TypeTag,IndexSpaceExprID>,ExpressionTrieNode*>::
+        const_iterator finder = intersection_ops.find(key);
+      if (finder == intersection_ops.end())
       {
-        if ((*it)->matches(exprs))
-          return (*it);
+        // Didn't lose the race so make the node
+        node = new ExpressionTrieNode(0/*depth*/, first->expr_id);
+        intersection_ops[key] = node;
       }
-      // Didn't lose the race so go ahead and make it 
-      IntersectionOpCreator creator(this, op, exprs);
-      NT_TemplateHelper::demux<IntersectionOpCreator>(key.first, &creator);
-      IndexSpaceOperation *result = creator.result;
-      intersections.push_back(result);
-      return result;
+      else
+        node = finder->second;
+#ifdef DEBUG_LEGION
+      assert(node != NULL); 
+#endif
+      return node->find_or_create_operation(expressions, creator);
     }
     
     //--------------------------------------------------------------------------
@@ -4675,37 +4684,44 @@ namespace Legion {
       assert(lhs->type_tag == rhs->type_tag);
 #endif
       const std::pair<TypeTag,IndexSpaceExprID> key(lhs->type_tag,lhs->expr_id);
+      std::vector<IndexSpaceExpression*> expressions(2);
+      expressions[0] = lhs;
+      expressions[1] = rhs;
+      // See if we can find it in read-only mode
       {
         AutoLock l_lock(lookup_is_op_lock,1,false/*exclusive*/);
-        std::map<std::pair<TypeTag,IndexSpaceExprID>,
-                 std::deque<IndexSpaceOperation*> >::const_iterator finder = 
-          difference_ops.find(key);
+        std::map<std::pair<TypeTag,IndexSpaceExprID>,ExpressionTrieNode*>::
+          const_iterator finder = difference_ops.find(key);
         if (finder != difference_ops.end())
         {
-          for (std::deque<IndexSpaceOperation*>::const_iterator it = 
-                finder->second.begin(); it != finder->second.end(); it++)
-          {
-            if ((*it)->matches(lhs, rhs))
-              return (*it);
-          }
+          IndexSpaceOperation *result = NULL;
+          ExpressionTrieNode *next = NULL;
+          if (finder->second->find_operation(expressions, result, next))
+            return result;
+          DifferenceOpCreator creator(this, op, key.first, lhs, rhs);
+          return next->find_or_create_operation(expressions, creator);
         }
       }
-      // Didn't find, retake the lock, see if we lost the race
-      // and if not make the actual operation node
+      ExpressionTrieNode *node = NULL;
+      DifferenceOpCreator creator(this, op, key.first, lhs, rhs);
+      // Didn't find it, retake the lock, see if we lost the race
+      // and if not make the actual trie node
       AutoLock l_lock(lookup_is_op_lock);
-      std::deque<IndexSpaceOperation*> &differences = difference_ops[key]; 
-      for (std::deque<IndexSpaceOperation*>::const_iterator it = 
-            differences.begin(); it != differences.end(); it++)
+      // See if we lost the race
+      std::map<std::pair<TypeTag,IndexSpaceExprID>,ExpressionTrieNode*>::
+        const_iterator finder = difference_ops.find(key);
+      if (finder == difference_ops.end())
       {
-        if ((*it)->matches(lhs, rhs))
-          return (*it);
+        // Didn't lose the race so make the node
+        node = new ExpressionTrieNode(0/*depth*/, lhs->expr_id);
+        difference_ops[key] = node;
       }
-      // Didn't lose the race so go ahead and make it
-      DifferenceOpCreator creator(this, op, lhs, rhs);
-      NT_TemplateHelper::demux<DifferenceOpCreator>(lhs->type_tag, &creator);
-      IndexSpaceOperation *result = creator.result;
-      differences.push_back(result);
-      return result;
+      else
+        node = finder->second;
+#ifdef DEBUG_LEGION
+      assert(node != NULL);
+#endif
+      return node->find_or_create_operation(expressions, creator);
     }
 
     //--------------------------------------------------------------------------
@@ -4744,7 +4760,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RegionTreeForest::remove_union_operation(IndexSpaceOperation *op,
-                                                  size_t sub_expression_count)
+                                const std::vector<IndexSpaceExpression*> &exprs)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -4752,27 +4768,23 @@ namespace Legion {
 #endif
       // No need for the lock, we're holding it above
       // from invalidate_index_space_expression
-      const std::pair<TypeTag,size_t> key(op->type_tag, sub_expression_count);
-      std::map<std::pair<TypeTag,size_t>,std::deque<IndexSpaceOperation*> >::
+      const std::pair<TypeTag,IndexSpaceExprID> 
+        key(op->type_tag, exprs[0]->expr_id);
+      std::map<std::pair<TypeTag,IndexSpaceExprID>,ExpressionTrieNode*>::
         iterator finder = union_ops.find(key);
 #ifdef DEBUG_LEGION
       assert(finder != union_ops.end());
 #endif
-      for (std::deque<IndexSpaceOperation*>::iterator it = 
-            finder->second.begin(); it != finder->second.end(); it++)
+      if (finder->second->remove_operation(exprs))
       {
-        if ((*it) != op)
-          continue;
-        finder->second.erase(it);
-        break;
-      }
-      if (finder->second.empty())
+        delete finder->second;
         union_ops.erase(finder);
+      }
     }
 
     //--------------------------------------------------------------------------
     void RegionTreeForest::remove_intersection_operation(
-                           IndexSpaceOperation *op, size_t sub_expression_count)
+       IndexSpaceOperation *op, const std::vector<IndexSpaceExpression*> &exprs)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -4780,27 +4792,23 @@ namespace Legion {
 #endif
       // No need for the lock, we're holding it above
       // from invalidate_index_space_expression
-      const std::pair<TypeTag,size_t> key(op->type_tag, sub_expression_count);
-      std::map<std::pair<TypeTag,size_t>,std::deque<IndexSpaceOperation*> >::
+      const std::pair<TypeTag,IndexSpaceExprID> 
+        key(op->type_tag, exprs[0]->expr_id);
+      std::map<std::pair<TypeTag,IndexSpaceExprID>,ExpressionTrieNode*>::
         iterator finder = intersection_ops.find(key);
 #ifdef DEBUG_LEGION
       assert(finder != intersection_ops.end());
 #endif
-      for (std::deque<IndexSpaceOperation*>::iterator it = 
-            finder->second.begin(); it != finder->second.end(); it++)
+      if (finder->second->remove_operation(exprs))
       {
-        if ((*it) != op)
-          continue;
-        finder->second.erase(it);
-        break;
-      }
-      if (finder->second.empty())
+        delete finder->second;
         intersection_ops.erase(finder);
+      }
     }
 
     //--------------------------------------------------------------------------
     void RegionTreeForest::remove_subtraction_operation(IndexSpaceOperation *op,
-                                                      IndexSpaceExpression *lhs)
+                           IndexSpaceExpression *lhs, IndexSpaceExpression *rhs)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -4809,22 +4817,19 @@ namespace Legion {
       // No need for the lock, we're holding it above
       // from invalidate_index_space_expression
       const std::pair<TypeTag,IndexSpaceExprID> key(op->type_tag, lhs->expr_id);
-      std::map<std::pair<TypeTag,IndexSpaceExprID>,
-        std::deque<IndexSpaceOperation*> >::iterator finder = 
-          difference_ops.find(key);
+      std::map<std::pair<TypeTag,IndexSpaceExprID>,ExpressionTrieNode*>::
+        iterator finder = difference_ops.find(key);
 #ifdef DEBUG_LEGION
       assert(finder != difference_ops.end());
 #endif
-      for (std::deque<IndexSpaceOperation*>::iterator it = 
-            finder->second.begin(); it != finder->second.end(); it++)
+      std::vector<IndexSpaceExpression*> exprs(2);
+      exprs[0] = lhs;
+      exprs[1] = rhs;
+      if (finder->second->remove_operation(exprs))
       {
-        if ((*it) != op)
-          continue;
-        finder->second.erase(it);
-        break;
-      }
-      if (finder->second.empty())
+        delete finder->second;
         difference_ops.erase(finder);
+      }
     }
 
     /////////////////////////////////////////////////////////////
@@ -4935,24 +4940,6 @@ namespace Legion {
     }
     
     //--------------------------------------------------------------------------
-    bool IndexSpaceOperation::matches(
-                             const std::set<IndexSpaceExpression*> &exprs) const
-    //--------------------------------------------------------------------------
-    {
-      assert(false);
-      return false;
-    }
-
-    //--------------------------------------------------------------------------
-    bool IndexSpaceOperation::matches(IndexSpaceExpression *lhs,
-                                      IndexSpaceExpression *rhs) const
-    //--------------------------------------------------------------------------
-    {
-      assert(false);
-      return false;
-    }
-
-    //--------------------------------------------------------------------------
     void IndexSpaceOperation::invalidate_operation(
                                     std::deque<IndexSpaceOperation*> &to_remove)
     //--------------------------------------------------------------------------
@@ -4969,6 +4956,331 @@ namespace Legion {
       for (std::set<IndexSpaceOperation*>::const_iterator it = 
             parent_operations.begin(); it != parent_operations.end(); it++)
         (*it)->invalidate_operation(to_remove);
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Expression Trie Node 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    ExpressionTrieNode::ExpressionTrieNode(unsigned d, IndexSpaceExprID id,
+                                           IndexSpaceOperation *op)
+      : depth(d), expr(id), local_operation(op)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    ExpressionTrieNode::ExpressionTrieNode(const ExpressionTrieNode &rhs)
+      : depth(rhs.depth), expr(rhs.expr)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    ExpressionTrieNode::~ExpressionTrieNode(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    ExpressionTrieNode& ExpressionTrieNode::operator=(
+                                                  const ExpressionTrieNode &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    bool ExpressionTrieNode::find_operation(
+                        const std::vector<IndexSpaceExpression*> &expressions,
+                        IndexSpaceOperation *&result, ExpressionTrieNode *&last)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(depth < expressions.size());
+      assert(expressions[depth]->expr_id == expr); // these should match
+#endif
+      // Three cases here
+      if (expressions.size() == (depth+1))
+      {
+        // We're the node that should have the operation
+        // Check to see if we've made the operation yet
+        if (local_operation != NULL)
+        {
+          result = local_operation;
+          return true;
+        }
+        last = this;
+        return false;
+      }
+      else if (expressions.size() == (depth+2))
+      {
+        // The next node should have the operation, but we might be
+        // storing it until it actually gets made
+        // See if we already have it or we have the next trie node
+        ExpressionTrieNode *next = NULL;
+        const IndexSpaceExprID target_expr = expressions.back()->expr_id;
+        {
+          AutoLock t_lock(trie_lock,1,false/*exclusive*/);
+          std::map<IndexSpaceExprID,IndexSpaceOperation*>::const_iterator
+            op_finder = operations.find(target_expr);
+          if (op_finder != operations.end())
+          {
+            result = op_finder->second;
+            return true;
+          }
+          std::map<IndexSpaceExprID,ExpressionTrieNode*>::const_iterator
+            node_finder = nodes.find(target_expr);
+          if (node_finder != nodes.end())
+            next = node_finder->second;
+        }
+        // Didn't find either, retake the lock in exclusive mode and then
+        // see if we lost the race, if not make the operation or
+        if (next == NULL)
+        {
+          AutoLock t_lock(trie_lock);
+          std::map<IndexSpaceExprID,IndexSpaceOperation*>::const_iterator
+            op_finder = operations.find(target_expr);
+          if (op_finder != operations.end())
+          {
+            result = op_finder->second;
+            return true;
+          }
+          // Still don't have the op
+          std::map<IndexSpaceExprID,ExpressionTrieNode*>::const_iterator
+            node_finder = nodes.find(target_expr);
+          if (node_finder == nodes.end())
+          {
+            last = this;
+            return false;
+          }
+          else
+            next = node_finder->second;
+        }
+#ifdef DEBUG_LEGION
+        assert(next != NULL);
+#endif
+        return next->find_operation(expressions, result, last);
+      }
+      else
+      {
+        // Intermediate case 
+        // See if we have the next node, or if we have to make it
+        ExpressionTrieNode *next = NULL;
+        const IndexSpaceExprID target_expr = expressions[depth+1]->expr_id;
+        {
+          AutoLock t_lock(trie_lock,1,false/*exclusive*/);
+          std::map<IndexSpaceExprID,ExpressionTrieNode*>::const_iterator
+            finder = nodes.find(target_expr);
+          if (finder != nodes.end())
+            next = finder->second;
+        }
+        // Still don't have it so we have to try and make it
+        if (next == NULL)
+        {
+          AutoLock t_lock(trie_lock);
+          // See if we lost the race
+          std::map<IndexSpaceExprID,ExpressionTrieNode*>::const_iterator
+            finder = nodes.find(target_expr);
+          if (finder == nodes.end())
+          {
+            // We have to make the next node, also check to see if we
+            // already made an operation expression for it or not
+            std::map<IndexSpaceExprID,IndexSpaceOperation*>::iterator
+              op_finder = operations.find(target_expr);
+            if (op_finder != operations.end())
+            {
+              next = new ExpressionTrieNode(depth+1, target_expr, 
+                                            op_finder->second);
+              operations.erase(op_finder);    
+            }
+            else
+              next = new ExpressionTrieNode(depth+1, target_expr);
+            nodes[target_expr] = next;
+          }
+          else // lost the race
+            next = finder->second;
+        }
+#ifdef DEBUG_LEGION
+        assert(next != NULL);
+#endif
+        return next->find_operation(expressions, result, last);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpaceOperation* ExpressionTrieNode::find_or_create_operation(
+                          const std::vector<IndexSpaceExpression*> &expressions,
+                          OperationCreator &creator)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(depth < expressions.size());
+      assert(expressions[depth]->expr_id == expr); // these should match
+#endif
+      // Three cases here
+      if (expressions.size() == (depth+1))
+      {
+        // We're the node that should have the operation
+        // Check to see if we've made the operation yet
+        if (local_operation != NULL)
+          return local_operation;
+        // Operation doesn't exist yet, retake the lock and try to make it
+        AutoLock t_lock(trie_lock);
+        if (local_operation != NULL)
+          return local_operation;
+        local_operation = creator.create();
+        return local_operation;
+      }
+      else if (expressions.size() == (depth+2))
+      {
+        // The next node should have the operation, but we might be
+        // storing it until it actually gets made
+        // See if we already have it or we have the next trie node
+        ExpressionTrieNode *next = NULL;
+        const IndexSpaceExprID target_expr = expressions.back()->expr_id;
+        {
+          AutoLock t_lock(trie_lock,1,false/*exclusive*/);
+          std::map<IndexSpaceExprID,IndexSpaceOperation*>::const_iterator
+            op_finder = operations.find(target_expr);
+          if (op_finder != operations.end())
+            return op_finder->second;
+          std::map<IndexSpaceExprID,ExpressionTrieNode*>::const_iterator
+            node_finder = nodes.find(target_expr);
+          if (node_finder != nodes.end())
+            next = node_finder->second;
+        }
+        // Didn't find either, retake the lock in exclusive mode and then
+        // see if we lost the race, if not make the operation or
+        if (next == NULL)
+        {
+          AutoLock t_lock(trie_lock);
+          std::map<IndexSpaceExprID,IndexSpaceOperation*>::const_iterator
+            op_finder = operations.find(target_expr);
+          if (op_finder != operations.end())
+            return op_finder->second;
+          // Still don't have the op
+          std::map<IndexSpaceExprID,ExpressionTrieNode*>::const_iterator
+            node_finder = nodes.find(target_expr);
+          if (node_finder == nodes.end())
+          {
+            // Didn't find the sub-node, so make the operation here
+            IndexSpaceOperation *result = creator.create();
+            operations[target_expr] = result;
+            return result;
+          }
+          else
+            next = node_finder->second;
+        }
+#ifdef DEBUG_LEGION
+        assert(next != NULL);
+#endif
+        return next->find_or_create_operation(expressions, creator);
+      }
+      else
+      {
+        // Intermediate case 
+        // See if we have the next node, or if we have to make it
+        ExpressionTrieNode *next = NULL;
+        const IndexSpaceExprID target_expr = expressions[depth+1]->expr_id;
+        {
+          AutoLock t_lock(trie_lock,1,false/*exclusive*/);
+          std::map<IndexSpaceExprID,ExpressionTrieNode*>::const_iterator
+            finder = nodes.find(target_expr);
+          if (finder != nodes.end())
+            next = finder->second;
+        }
+        // Still don't have it so we have to try and make it
+        if (next == NULL)
+        {
+          AutoLock t_lock(trie_lock);
+          // See if we lost the race
+          std::map<IndexSpaceExprID,ExpressionTrieNode*>::const_iterator
+            finder = nodes.find(target_expr);
+          if (finder == nodes.end())
+          {
+            // We have to make the next node, also check to see if we
+            // already made an operation expression for it or not
+            std::map<IndexSpaceExprID,IndexSpaceOperation*>::iterator
+              op_finder = operations.find(target_expr);
+            if (op_finder != operations.end())
+            {
+              next = new ExpressionTrieNode(depth+1, target_expr, 
+                                            op_finder->second);
+              operations.erase(op_finder);    
+            }
+            else
+              next = new ExpressionTrieNode(depth+1, target_expr);
+            nodes[target_expr] = next;
+          }
+          else // lost the race
+            next = finder->second;
+        }
+#ifdef DEBUG_LEGION
+        assert(next != NULL);
+#endif
+        return next->find_or_create_operation(expressions, creator);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    bool ExpressionTrieNode::remove_operation(
+                          const std::vector<IndexSpaceExpression*> &expressions)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(depth < expressions.size());
+      assert(expressions[depth]->expr_id == expr); // these should match
+#endif
+      // No need for locks here, we're protected by the big lock at the top
+      // Three cases here
+      if (expressions.size() == (depth+1))
+      {
+        // Simple case, clear our local operation
+        local_operation = NULL;
+      }
+      else if (expressions.size() == (depth+2))
+      {
+        // See if we should continue traversing or if we have the operation
+        const IndexSpaceExprID target_expr = expressions.back()->expr_id;
+        std::map<IndexSpaceExprID,IndexSpaceOperation*>::iterator op_finder =
+          operations.find(target_expr);
+        if (op_finder == operations.end())
+        {
+          std::map<IndexSpaceExprID,ExpressionTrieNode*>::iterator
+            node_finder = nodes.find(target_expr);
+#ifdef DEBUG_LEGION
+          assert(node_finder != nodes.end());
+#endif
+          if (node_finder->second->remove_operation(expressions))
+            nodes.erase(node_finder);
+        }
+        else
+          operations.erase(op_finder);
+      }
+      else
+      {
+        const IndexSpaceExprID target_expr = expressions[depth+1]->expr_id;
+        std::map<IndexSpaceExprID,ExpressionTrieNode*>::iterator finder =
+          nodes.find(target_expr);
+#ifdef DEBUG_LEGION
+        assert(finder != nodes.end());
+#endif
+        if (finder->second->remove_operation(expressions))
+          nodes.erase(finder);
+      }
+      if (local_operation != NULL)
+        return false;
+      if (!operations.empty())
+        return false;
+      if (!nodes.empty())
+        return false;
+      return true;
     }
 
     /////////////////////////////////////////////////////////////
