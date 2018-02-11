@@ -574,6 +574,7 @@ namespace Legion {
       // Allocates memory that becomes owned by the caller
       inline char* to_string(void) const;
     public:
+      inline int pop_count(void) const;
       static inline int pop_count(
             const TLBitMask<unsigned,MAX,SHIFT,MASK> &mask);
       static inline int pop_count(
@@ -654,6 +655,7 @@ namespace Legion {
       // Allocates memory that becomes owned by the caller
       inline char* to_string(void) const;
     public:
+      inline int pop_count(void) const;
       static inline int pop_count(const SSEBitMask<MAX> &mask);
     protected:
       union {
@@ -734,6 +736,7 @@ namespace Legion {
       // Allocates memory that becomes owned by the caller
       inline char* to_string(void) const;
     public:
+      inline int pop_count(void) const;
       static inline int pop_count(const SSETLBitMask<MAX> &mask);
       static inline uint64_t extract_mask(__m128i value);
     protected:
@@ -820,6 +823,7 @@ namespace Legion {
       // Allocates memory that becomes owned by the caller
       inline char* to_string(void) const;
     public:
+      inline int pop_count(void) const;
       static inline int pop_count(const AVXBitMask<MAX> &mask);
     protected:
       union {
@@ -903,6 +907,7 @@ namespace Legion {
       // Allocates memory that becomes owned by the caller
       inline char* to_string(void) const;
     public:
+      inline int pop_count(void) const;
       static inline int pop_count(const AVXTLBitMask<MAX> &mask);
       static inline uint64_t extract_mask(__m256i value);
       static inline uint64_t extract_mask(__m256d value);
@@ -988,6 +993,7 @@ namespace Legion {
       // Allocates memory that becomes owned by the caller
       inline char* to_string(void) const;
     public:
+      inline int pop_count(void) const;
       static inline int pop_count(const PPCBitMask<MAX> &mask);
     protected:
       union {
@@ -1064,6 +1070,7 @@ namespace Legion {
       // Allocates memory that becomes owned by the caller
       inline char* to_string(void) const;
     public:
+      inline int pop_count(void) const;
       static inline int pop_count(const PPCTLBitMask<MAX> &mask);
       static inline uint64_t extract_mask(__vector unsigned long long value);
     protected:
@@ -1167,6 +1174,7 @@ namespace Legion {
       // Allocates memory that becomes owned by the caller
       inline char* to_string(void) const;
     public:
+      inline int pop_count(void) const;
       static inline int pop_count(const 
                         CompoundBitMask<BITMASK,MAX,WORDS> &mask);
     protected:
@@ -3405,6 +3413,29 @@ namespace Legion {
 
     //-------------------------------------------------------------------------
     template<typename T, unsigned int MAX, unsigned SHIFT, unsigned MASK>
+    inline int TLBitMask<T,MAX,SHIFT,MASK>::pop_count(void) const
+    //-------------------------------------------------------------------------
+    {
+      if (!sum_mask)
+        return 0;
+      int result = 0;
+#ifndef VALGRIND
+      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+      {
+        result += __builtin_popcount(bit_vector[idx]);
+      }
+#else
+      for (unsigned idx = 0; idx < MAX; idx++)
+      {
+        if (is_set(idx))
+          result++;
+      }
+#endif
+      return result;
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename T, unsigned int MAX, unsigned SHIFT, unsigned MASK>
     /*static*/ inline int TLBitMask<T,MAX,SHIFT,MASK>::pop_count(
                                const TLBitMask<unsigned,MAX,SHIFT,MASK> &mask)
     //-------------------------------------------------------------------------
@@ -4073,6 +4104,27 @@ namespace Legion {
     //-------------------------------------------------------------------------
     {
       return BitMaskHelper::to_string(bits.bit_vector, MAX);
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline int SSEBitMask<MAX>::pop_count(void) const
+    //-------------------------------------------------------------------------
+    {
+      int result = 0;
+#ifndef VALGRIND
+      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+      {
+        result += __builtin_popcountl(bits.bit_vector[idx]);
+      }
+#else
+      for (unsigned idx = 0; idx < MAX; idx++)
+      {
+        if (is_set(idx))
+          result++;
+      }
+#endif
+      return result;
     }
 
     //-------------------------------------------------------------------------
@@ -4760,10 +4812,35 @@ namespace Legion {
 
     //-------------------------------------------------------------------------
     template<unsigned int MAX>
+    inline int SSETLBitMask<MAX>::pop_count(void) const
+    //-------------------------------------------------------------------------
+    {
+      if (!sum_mask)
+        return 0;
+      int result = 0;
+#ifndef VALGRIND
+      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+      {
+        result += __builtin_popcountl(bits.bit_vector[idx]);
+      }
+#else
+      for (unsigned idx = 0; idx < MAX; idx++)
+      {
+        if (is_set(idx))
+          result++;
+      }
+#endif
+      return result;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
     /*static*/ inline int SSETLBitMask<MAX>::pop_count(
                                                  const SSETLBitMask<MAX> &mask)
     //-------------------------------------------------------------------------
     {
+      if (!mask.sum_mask)
+        return 0;
       int result = 0;
 #ifndef VALGRIND
       for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
@@ -5489,6 +5566,27 @@ namespace Legion {
     //-------------------------------------------------------------------------
     {
       return BitMaskHelper::to_string(bits.bit_vector, MAX);
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline int AVXBitMask<MAX>::pop_count(void) const
+    //-------------------------------------------------------------------------
+    {
+      int result = 0;
+#ifndef VALGRIND
+      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+      {
+        result += __builtin_popcountl(bits.bit_vector[idx]);
+      }
+#else
+      for (unsigned idx = 0; idx < MAX; idx++)
+      {
+        if (is_set(idx))
+          result++;
+      }
+#endif
+      return result;
     }
 
     //-------------------------------------------------------------------------
@@ -6273,10 +6371,35 @@ namespace Legion {
 
     //-------------------------------------------------------------------------
     template<unsigned int MAX>
+    inline int AVXTLBitMask<MAX>::pop_count(void) const
+    //-------------------------------------------------------------------------
+    {
+      if (!sum_mask)
+        return 0;
+      int result = 0;
+#ifndef VALGRIND
+      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+      {
+        result += __builtin_popcountl(bits.bit_vector[idx]);
+      }
+#else
+      for (unsigned idx = 0; idx < MAX; idx++)
+      {
+        if (is_set(idx))
+          result++;
+      }
+#endif
+      return result;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
     /*static*/ inline int AVXTLBitMask<MAX>::pop_count(
                                                  const AVXTLBitMask<MAX> &mask)
     //-------------------------------------------------------------------------
     {
+      if (!mask.sum_mask)
+        return 0;
       int result = 0;
 #ifndef VALGRIND
       for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
@@ -6935,6 +7058,27 @@ namespace Legion {
     //-------------------------------------------------------------------------
     {
       return BitMaskHelper::to_string(bits.bit_vector, MAX);
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline int PPCBitMask<MAX>::pop_count(void) const
+    //-------------------------------------------------------------------------
+    {
+      int result = 0;
+#ifndef VALGRIND
+      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+      {
+        result += __builtin_popcountl(bits.bit_vector[idx]);
+      }
+#else
+      for (unsigned idx = 0; idx < MAX; idx++)
+      {
+        if (is_set(idx))
+          result++;
+      }
+#endif
+      return result;
     }
 
     //-------------------------------------------------------------------------
@@ -7628,10 +7772,35 @@ namespace Legion {
 
     //-------------------------------------------------------------------------
     template<unsigned int MAX>
+    inline int PPCTLBitMask<MAX>::pop_count(void) const
+    //-------------------------------------------------------------------------
+    {
+      if (!sum_mask)
+        return 0;
+      int result = 0;
+#ifndef VALGRIND
+      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+      {
+        result += __builtin_popcountl(bits.bit_vector[idx]);
+      }
+#else
+      for (unsigned idx = 0; idx < MAX; idx++)
+      {
+        if (is_set(idx))
+          result++;
+      }
+#endif
+      return result;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
     /*static*/ inline int PPCTLBitMask<MAX>::pop_count(
                                                  const PPCTLBitMask<MAX> &mask)
     //-------------------------------------------------------------------------
     {
+      if (!mask.sum_mask)
+        return 0;
       int result = 0;
 #ifndef VALGRIND
       for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
