@@ -1705,6 +1705,22 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool PhysicalTemplate::check_replayable(void)
+    //--------------------------------------------------------------------------
+    {
+      for (LegionMap<InstanceView*, FieldMask>::aligned::const_iterator it =
+           previous_valid_views.begin(); it !=
+           previous_valid_views.end(); ++it)
+      {
+        LegionMap<InstanceView*, FieldMask>::aligned::const_iterator finder =
+          valid_views.find(it->first);
+        if (finder == valid_views.end() || !!(it->second - finder->second))
+          return false;
+      }
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
     void PhysicalTemplate::register_operation(Operation *op)
     //--------------------------------------------------------------------------
     {
@@ -1736,7 +1752,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       recording = false;
-      replayable = check_preconditions();
+      replayable = check_replayable();
       if (!replayable)
       {
         if (Runtime::dump_physical_traces)

@@ -441,6 +441,7 @@ namespace Legion {
                           LegionMap<IndexSpaceNode*, FieldMask>::aligned projs);
     public:
       bool check_preconditions(void);
+      bool check_replayable(void);
       void register_operation(Operation *op);
       void execute_all(void);
       void finalize(void);
