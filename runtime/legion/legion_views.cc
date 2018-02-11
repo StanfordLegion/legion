@@ -4565,6 +4565,9 @@ namespace Legion {
                                          std::set<ApEvent> &postconditions)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(src_indexes.size() == dst_indexes.size());
+#endif
       bool perfect = true;
       FieldMask src_mask, dst_mask;
       for (unsigned idx = 0; idx < dst_indexes.size(); idx++)
@@ -4601,25 +4604,51 @@ namespace Legion {
             local_postconditions.end(); it++)
         postconditions.insert(it->first);
 #else
-      LegionMap<IndexSpaceExpression*,FieldMask>::aligned write_masks; 
-      LegionMap<IndexSpaceExpression*,FieldMask>::aligned performed_masks;
-      if (perfect)
+      if (src_indexes.size() == 1)
       {
-        DeferredCopier copier(info, dst, src_mask, precondition);
-        issue_deferred_copies(copier, src_mask, write_masks, 
-                              performed_masks, guard);
-        copier.finalize(&postconditions);
+        IndexSpaceExpression *write_performed = NULL;
+        if (perfect)
+        {
+          DeferredSingleCopier copier(info, dst, src_mask, precondition);
+          issue_deferred_copies_single(copier, NULL/*write mask*/,
+                                       write_performed, guard);
+          copier.finalize(&postconditions);
+        }
+        else
+        {
+          // Initialize the across copy helper
+          CopyAcrossHelper across_helper(src_mask);
+          dst->manager->initialize_across_helper(&across_helper, dst_mask, 
+                                                 src_indexes, dst_indexes);
+          DeferredSingleCopier copier(info, dst, src_mask, 
+                                      precondition, &across_helper);
+          issue_deferred_copies_single(copier, NULL/*write mask*/,
+                                       write_performed, guard);
+          copier.finalize(&postconditions);
+        }
       }
       else
       {
-        // Initialize the across copy helper
-        CopyAcrossHelper across_helper(src_mask);
-        dst->manager->initialize_across_helper(&across_helper, dst_mask, 
-                                               src_indexes, dst_indexes);
-        DeferredCopier copier(info, dst, src_mask, precondition,&across_helper);
-        issue_deferred_copies(copier, src_mask, write_masks,
-                              performed_masks, guard);
-        copier.finalize(&postconditions);
+        LegionMap<IndexSpaceExpression*,FieldMask>::aligned write_masks; 
+        LegionMap<IndexSpaceExpression*,FieldMask>::aligned performed_masks;
+        if (perfect)
+        {
+          DeferredCopier copier(info, dst, src_mask, precondition);
+          issue_deferred_copies(copier, src_mask, write_masks, 
+                                performed_masks, guard);
+          copier.finalize(&postconditions);
+        }
+        else
+        {
+          // Initialize the across copy helper
+          CopyAcrossHelper across_helper(src_mask);
+          dst->manager->initialize_across_helper(&across_helper, dst_mask, 
+                                                 src_indexes, dst_indexes);
+          DeferredCopier copier(info,dst,src_mask,precondition,&across_helper);
+          issue_deferred_copies(copier, src_mask, write_masks,
+                                performed_masks, guard);
+          copier.finalize(&postconditions);
+        }
       }
 #endif
     }
@@ -5796,21 +5825,24 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void CompositeBase::issue_composite_updates_single(
+    bool CompositeBase::issue_composite_updates_single(
                                    DeferredSingleCopier &copier,
                                    RegionTreeNode *logical_node,
                                    VersionTracker *src_version_tracker,
                                    PredEvent pred_guard,
                                    IndexSpaceExpression *write_mask,
-                                   std::set<IndexSpaceExpression*> &perf_writes)
+                                   IndexSpaceExpression *&performed_write)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(performed_write == NULL); // should be NULL on the way in
+#endif
       // First check to see if we have all the valid meta-data
       perform_ready_check(copier.copy_mask);
       // Find any children that need to be traversed as well as any instances
       // or reduction views that we may need to issue copies from
       std::vector<CompositeNode*> children_to_traverse;
-      std::vector<LogicalView*> source_views;
+      LegionMap<LogicalView*,FieldMask>::aligned temp_views;
       std::vector<ReductionView*> source_reductions;
       {
         AutoLock b_lock(base_lock,1,false/*exclusive*/);
@@ -5825,16 +5857,8 @@ namespace Legion {
             continue;
           children_to_traverse.push_back(it->first);
         }
-        if (dirty_mask.is_set(copier.field_index))
-        {
-          for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it =
-                valid_views.begin(); it != valid_views.end(); it++)
-          {
-            if (!it->second.is_set(copier.field_index))
-              continue;
-            source_views.push_back(it->first);
-          }
-        }
+        // Get any valid views that we need for this level
+        find_valid_views(copier.copy_mask, temp_views, false/*needs lock*/);
         if (reduction_mask.is_set(copier.field_index))
         {
           for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it =
@@ -5846,6 +5870,15 @@ namespace Legion {
           }
         }
       }
+      std::vector<LogicalView*> source_views;
+      if (!temp_views.empty())
+      {
+        for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it =
+              temp_views.begin(); it != temp_views.end(); it++)
+          source_views.push_back(it->first);
+      }
+      bool done = false;
+      RegionTreeForest *context = copier.dst->logical_node->context;
       if (!children_to_traverse.empty())
       {
         // Do the child traversals and record any writes that we do
@@ -5853,51 +5886,64 @@ namespace Legion {
         for (std::vector<CompositeNode*>::const_iterator it = 
               children_to_traverse.begin(); it != 
               children_to_traverse.end(); it++)
-          (*it)->issue_composite_updates_single(copier,
-              (*it)->logical_node, src_version_tracker,
-              pred_guard, write_mask, child_writes);
-        // Now we issue copies to instances
-        if (!source_views.empty())
         {
-          // If we did child writes then update the write mask
-          if (!child_writes.empty())
-          {
-            if (write_mask != NULL)
-              child_writes.insert(write_mask);
-            if (child_writes.size() > 1)
-              write_mask = copier.dst->context->intersect_index_spaces(
-                  copier.info.op, child_writes);
-            else
-              write_mask = *child_writes.begin();
-          }
-          // Issue the writes from our instance
-          IndexSpaceExpression *our_write = 
-            issue_update_copies_single(copier, logical_node,
-              src_version_tracker, pred_guard, source_views, write_mask);
-          // Propagate our write up the tree
-          if (our_write != NULL)
-            perf_writes.insert(our_write);
+          IndexSpaceExpression *child_write = NULL;
+          done = (*it)->issue_composite_updates_single(
+              copier, (*it)->logical_node, src_version_tracker,
+              pred_guard, write_mask, child_write);
+          if (child_write != NULL)
+            child_writes.insert(child_write);
+          if (done)
+            break;
         }
-        else if (!child_writes.empty())
-          // Propagate child writes up the tree
-          perf_writes.insert(child_writes.begin(), child_writes.end());
+        if (!child_writes.empty())
+        {
+          if (child_writes.size() == 1)
+            performed_write = *child_writes.begin();
+          else
+            performed_write = 
+              context->union_index_spaces(copier.info.op, child_writes);
+          done = test_done(copier, performed_write, write_mask);
+        }
+        if (!done && !source_views.empty())
+        {
+          if (performed_write != NULL)
+          {
+            IndexSpaceExpression *our_write = NULL;
+            if (write_mask != NULL)
+            {
+              // Compute a new write mask for the 
+              write_mask = context->union_index_spaces(copier.info.op,
+                  write_mask, performed_write);
+              our_write = issue_update_copies_single(copier, logical_node,
+                src_version_tracker, pred_guard, source_views, write_mask);
+            }
+            else
+              our_write = issue_update_copies_single(copier, logical_node,
+                src_version_tracker, pred_guard, source_views, performed_write);
+            if (our_write != NULL)
+              performed_write = context->union_index_spaces(copier.info.op,
+                  performed_write, our_write);
+          }
+          else
+            performed_write = issue_update_copies_single(
+                copier, logical_node, src_version_tracker,
+                pred_guard, source_views, write_mask);
+        }
       }
       else if (!source_views.empty())
-      {
         // We didn't do any child traversals so things are a little easier
-        IndexSpaceExpression *our_write = 
-          issue_update_copies_single(copier, logical_node,
+        performed_write = issue_update_copies_single(copier, logical_node,
               src_version_tracker, pred_guard, source_views, write_mask);
-        // Propagate our write up the tree
-        if (our_write != NULL)
-          perf_writes.insert(our_write);
-      }
       // Lastly no matter what we do, we have to record our reductions
       // to be performed after all the updates to the instance
       if (!source_reductions.empty())
         copier.buffer_reductions(src_version_tracker, pred_guard,
             (copier.dst->logical_node == logical_node) ? NULL : logical_node,
             write_mask, source_reductions);
+      if (!done && (performed_write != NULL))
+        done = test_done(copier, performed_write, write_mask);
+      return done;
     }
 
     //--------------------------------------------------------------------------
@@ -6166,16 +6212,27 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(deferred_instance != NULL); // better have one of these
 #endif
-        std::set<IndexSpaceExpression*> performed_writes;
+        IndexSpaceExpression *performed_write = NULL;
         deferred_instance->issue_deferred_copies_single(copier, 
-            write_mask, performed_writes, pred_guard);
-        if (performed_writes.empty())
-          return NULL;
-        else if (performed_writes.size() == 1)
-          return *performed_writes.begin();
-        else
-          return context->union_index_spaces(info.op, performed_writes);
+                              write_mask, performed_write, pred_guard);
+        return performed_write;
       }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ bool CompositeBase::test_done(DeferredSingleCopier &copier,
+                     IndexSpaceExpression *write1, IndexSpaceExpression *write2)
+    //--------------------------------------------------------------------------
+    {
+      Operation *op = copier.info.op;
+      MaterializedView *dst = copier.dst;
+      IndexSpaceExpression *dst_is = 
+        dst->logical_node->get_index_space_expression();
+      RegionTreeForest *context = dst->logical_node->context;
+      IndexSpaceExpression *diff = context->subtract_index_spaces(op,
+          dst_is, (write2 == NULL) ? write1 : 
+            context->union_index_spaces(op, write1, write2));
+      return diff->is_empty();
     }
 
     //--------------------------------------------------------------------------
@@ -6608,11 +6665,22 @@ namespace Legion {
         }
       }
 #else
-      DeferredCopier copier(info, dst, copy_mask, restrict_info, restrict_out);
-      LegionMap<IndexSpaceExpression*,FieldMask>::aligned write_masks;
-      LegionMap<IndexSpaceExpression*,FieldMask>::aligned performed_masks;
-      issue_deferred_copies(copier, copy_mask, write_masks, 
-                            performed_masks, PredEvent::NO_PRED_EVENT);
+      if (copy_mask.pop_count() == 1)
+      {
+        DeferredSingleCopier copier(info, dst, copy_mask, 
+                                    restrict_info, restrict_out);
+        IndexSpaceExpression *write_performed = NULL;
+        issue_deferred_copies_single(copier, NULL/*write mask*/,
+                                     write_performed, PredEvent::NO_PRED_EVENT);
+      }
+      else
+      {
+        DeferredCopier copier(info, dst, copy_mask, restrict_info,restrict_out);
+        LegionMap<IndexSpaceExpression*,FieldMask>::aligned write_masks;
+        LegionMap<IndexSpaceExpression*,FieldMask>::aligned performed_masks;
+        issue_deferred_copies(copier, copy_mask, write_masks, 
+                              performed_masks, PredEvent::NO_PRED_EVENT);
+      }
 #endif
     }
 
@@ -6665,17 +6733,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void CompositeView::issue_deferred_copies_single(
+    bool CompositeView::issue_deferred_copies_single(
                                             DeferredSingleCopier &copier,
                                             IndexSpaceExpression *write_mask,
-                                   std::set<IndexSpaceExpression*> &perf_writes,
+                                            IndexSpaceExpression *&write_perf,
                                             PredEvent pred_guard)      
     //--------------------------------------------------------------------------
     {
       copier.begin_reduction_epoch();
-      issue_composite_updates_single(copier, logical_node, this,
-                                     pred_guard, write_mask, perf_writes);
+      bool result = issue_composite_updates_single(copier, logical_node, this,
+                                         pred_guard, write_mask, write_perf);
       copier.end_reduction_epoch();
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -8042,9 +8111,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FillView::issue_deferred_copies_single(DeferredSingleCopier &copier,
+    bool FillView::issue_deferred_copies_single(DeferredSingleCopier &copier,
                                          IndexSpaceExpression *write_mask,
-                                std::set<IndexSpaceExpression*> &perf_writes,
+                                         IndexSpaceExpression *&write_perf,
                                          PredEvent pred_guard)
     //--------------------------------------------------------------------------
     {
@@ -8054,7 +8123,7 @@ namespace Legion {
       // If the intersection is empty we can skip the fill all together
       if ((logical_node != dst->logical_node) && 
           (!logical_node->intersects_with(dst->logical_node)))
-        return;
+        return false;
       // Build the dst fields vector
       std::vector<CopySrcDstField> dst_fields;
       dst->copy_to(copier.copy_mask, dst_fields, copier.across_helper);
@@ -8077,8 +8146,10 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(fill_writes.size() == 1);
 #endif
-        perf_writes.insert(fill_writes.begin()->first);
+        write_perf = fill_writes.begin()->first;
+        return CompositeBase::test_done(copier, write_perf, write_mask);
       }
+      return false;
     }
 
     //--------------------------------------------------------------------------
@@ -8350,11 +8421,22 @@ namespace Legion {
           info.op->record_restrict_postcondition(post);
       }
 #else
-      DeferredCopier copier(info, dst, copy_mask, restrict_info, restrict_out);  
-      LegionMap<IndexSpaceExpression*,FieldMask>::aligned write_masks;
-      LegionMap<IndexSpaceExpression*,FieldMask>::aligned performed_masks;
-      issue_deferred_copies(copier, copy_mask, write_masks, 
-                            performed_masks, PredEvent::NO_PRED_EVENT);
+      if (copy_mask.pop_count() == 1)
+      {
+        DeferredSingleCopier copier(info, dst, copy_mask, 
+                                    restrict_info, restrict_out);
+        IndexSpaceExpression *performed_write;
+        issue_deferred_copies_single(copier, NULL/*write mask*/,
+                                     performed_write, PredEvent::NO_PRED_EVENT);
+      }
+      else
+      {
+        DeferredCopier copier(info, dst, copy_mask, restrict_info,restrict_out);
+        LegionMap<IndexSpaceExpression*,FieldMask>::aligned write_masks;
+        LegionMap<IndexSpaceExpression*,FieldMask>::aligned performed_masks;
+        issue_deferred_copies(copier, copy_mask, write_masks, 
+                              performed_masks, PredEvent::NO_PRED_EVENT);
+      }
 #endif
     }
 
@@ -8471,9 +8553,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhiView::issue_deferred_copies_single(DeferredSingleCopier &copier,
+    bool PhiView::issue_deferred_copies_single(DeferredSingleCopier &copier,
                                            IndexSpaceExpression *write_mask,
-                                  std::set<IndexSpaceExpression*> &perf_writes,
+                                           IndexSpaceExpression *&write_perf,
                                            PredEvent pred_guard)
     //--------------------------------------------------------------------------
     {
@@ -8518,7 +8600,11 @@ namespace Legion {
       }
       // Just save the true write expression for right now
       if (true_write != NULL)
-        perf_writes.insert(true_write);
+      {
+        write_perf = true_write;
+        return test_done(copier, write_perf, write_mask); 
+      }
+      return false;
     }
 
 #ifdef USE_OLD_COMPOSITE

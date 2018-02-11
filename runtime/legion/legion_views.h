@@ -1112,9 +1112,9 @@ namespace Legion {
          const LegionMap<IndexSpaceExpression*,FieldMask>::aligned &write_masks,
                LegionMap<IndexSpaceExpression*,FieldMask>::aligned &perf_writes,
                                          PredEvent pred_guard) = 0;
-      virtual void issue_deferred_copies_single(DeferredSingleCopier &copier,
+      virtual bool issue_deferred_copies_single(DeferredSingleCopier &copier,
                                          IndexSpaceExpression *write_mask,
-                                std::set<IndexSpaceExpression*> &perf_writes,
+                                         IndexSpaceExpression *&write_performed,
                                          PredEvent pred_guard) = 0;
     };
 
@@ -1295,12 +1295,13 @@ namespace Legion {
                                    const WriteMasks &write_masks,
                                    WriteMasks &performed_writes/*write-only*/);
       // Single field version of the method above
-      void issue_composite_updates_single(DeferredSingleCopier &copier,
+      bool issue_composite_updates_single(DeferredSingleCopier &copier,
                                    RegionTreeNode *logical_node,
                                    VersionTracker *src_version_tracker,
                                    PredEvent pred_guard,
                                    IndexSpaceExpression *write_mask,
-                                   std::set<IndexSpaceExpression*> &perf);
+                                   // Only valid if !done
+                                   IndexSpaceExpression *&performed);
     public:
       static void issue_update_copies(DeferredCopier &copier, 
                                RegionTreeNode *logical_node,FieldMask copy_mask,
@@ -1326,6 +1327,10 @@ namespace Legion {
                                     PredEvent pred_guard,
                                     std::vector<LogicalView*> &source_views,
                                     IndexSpaceExpression *write_mask);
+    public:
+      static bool test_done(DeferredSingleCopier &copier,
+                            IndexSpaceExpression *write1,
+                            IndexSpaceExpression *write2 = NULL);
     public:
       virtual InnerContext* get_owner_context(void) const = 0;
       virtual void perform_ready_check(FieldMask mask) = 0;
@@ -1432,9 +1437,9 @@ namespace Legion {
          const LegionMap<IndexSpaceExpression*,FieldMask>::aligned &write_masks,
                LegionMap<IndexSpaceExpression*,FieldMask>::aligned &perf_writes,
                                          PredEvent pred_guard);
-      virtual void issue_deferred_copies_single(DeferredSingleCopier &copier,
+      virtual bool issue_deferred_copies_single(DeferredSingleCopier &copier,
                                          IndexSpaceExpression *write_mask,
-                                std::set<IndexSpaceExpression*> &perf_writes,
+                                         IndexSpaceExpression *&write_performed,
                                          PredEvent pred_guard);
     public:
       // From VersionTracker
@@ -1661,9 +1666,9 @@ namespace Legion {
          const LegionMap<IndexSpaceExpression*,FieldMask>::aligned &write_masks,
                LegionMap<IndexSpaceExpression*,FieldMask>::aligned &perf_writes,
                                          PredEvent pred_guard);
-      virtual void issue_deferred_copies_single(DeferredSingleCopier &copier,
+      virtual bool issue_deferred_copies_single(DeferredSingleCopier &copier,
                                          IndexSpaceExpression *write_mask,
-                                std::set<IndexSpaceExpression*> &perf_writes,
+                                         IndexSpaceExpression *&write_performed,
                                          PredEvent pred_guard);
     protected:
       void issue_update_fills(DeferredCopier &copier,
@@ -1778,9 +1783,9 @@ namespace Legion {
          const LegionMap<IndexSpaceExpression*,FieldMask>::aligned &write_masks,
                LegionMap<IndexSpaceExpression*,FieldMask>::aligned &perf_writes,
                                          PredEvent pred_guard);
-      virtual void issue_deferred_copies_single(DeferredSingleCopier &copier,
+      virtual bool issue_deferred_copies_single(DeferredSingleCopier &copier,
                                          IndexSpaceExpression *write_mask,
-                                std::set<IndexSpaceExpression*> &perf_writes,
+                                         IndexSpaceExpression *&write_performed,
                                          PredEvent pred_guard);
     public:
       virtual InnerContext* get_owner_context(void) const
