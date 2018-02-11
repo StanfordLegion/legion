@@ -652,11 +652,11 @@ namespace Legion {
       void invalidate_index_space_expression(
                             const std::set<IndexSpaceOperation*> &parents);
       void remove_union_operation(IndexSpaceOperation *expr, 
-                                  size_t sub_expression_count);
+                            const std::vector<IndexSpaceExpression*> &exprs);
       void remove_intersection_operation(IndexSpaceOperation *expr, 
-                                         size_t sub_expression_count);
+                            const std::vector<IndexSpaceExpression*> &exprs);
       void remove_subtraction_operation(IndexSpaceOperation *expr,
-                                        IndexSpaceExpression *lhs);
+                       IndexSpaceExpression *lhs, IndexSpaceExpression *rhs);
     public:
       Runtime *const runtime;
     protected:
@@ -679,12 +679,12 @@ namespace Legion {
       std::map<RegionTreeID,RtEvent>     region_tree_requests;
     private:
       // Index space operations
-      std::map<std::pair<TypeTag,size_t/*sub expression count*/>,
-               std::deque<IndexSpaceOperation*> > union_ops;
-      std::map<std::pair<TypeTag,size_t/*sub expression count*/>,
-               std::deque<IndexSpaceOperation*> > intersection_ops;
+      std::map<std::pair<TypeTag,IndexSpaceExprID/*first*/>,
+               ExpressionTrieNode*> union_ops;
+      std::map<std::pair<TypeTag,IndexSpaceExprID/*first*/>,
+               ExpressionTrieNode*> intersection_ops;
       std::map<std::pair<TypeTag,IndexSpaceExprID/*lhs*/>,
-               std::deque<IndexSpaceOperation*> > difference_ops;
+               ExpressionTrieNode*> difference_ops;
     };
 
     /**
@@ -761,10 +761,6 @@ namespace Legion {
       virtual void add_expression_reference(void);
       virtual bool remove_expression_reference(void);
     public:
-      virtual bool matches(const std::set<IndexSpaceExpression*> &exprs) const;
-      virtual bool matches(IndexSpaceExpression *lhs, 
-                           IndexSpaceExpression *rhs) const;
-    public:
       void invalidate_operation(std::deque<IndexSpaceOperation*> &to_remove);
     public:
       const OperationKind op_kind;
@@ -804,17 +800,29 @@ namespace Legion {
     public:
       IndexSpaceUnion& operator=(const IndexSpaceUnion &rhs);
     public:
-      virtual bool matches(const std::set<IndexSpaceExpression*> &exprs) const;
       virtual bool remove_operation(RegionTreeForest *forest);
     protected:
       const std::vector<IndexSpaceExpression*> sub_expressions;
     };
 
-    class UnionOpCreator {
+    class OperationCreator {
     public:
-      UnionOpCreator(RegionTreeForest *f, Operation *o,
+      virtual ~OperationCreator(void) { }
+    public:
+      virtual IndexSpaceOperation* create(void) = 0;
+    };
+
+    class UnionOpCreator : public OperationCreator {
+    public:
+      UnionOpCreator(RegionTreeForest *f, Operation *o, TypeTag t,
                      const std::set<IndexSpaceExpression*> &e)
-        : forest(f), op(o), exprs(e) { }
+        : forest(f), op(o), type_tag(t), exprs(e) { }
+    public:
+      virtual IndexSpaceOperation* create(void)
+      {
+        NT_TemplateHelper::demux<UnionOpCreator>(type_tag, this);
+        return result;
+      }
     public:
       template<typename N, typename T>
       static inline void demux(UnionOpCreator *creator)
@@ -825,6 +833,7 @@ namespace Legion {
     public:
       RegionTreeForest *const forest;
       Operation *const op;
+      const TypeTag type_tag;
       const std::set<IndexSpaceExpression*> &exprs;
       IndexSpaceOperation *result;
     };
@@ -839,17 +848,22 @@ namespace Legion {
     public:
       IndexSpaceIntersection& operator=(const IndexSpaceIntersection &rhs);
     public:
-      virtual bool matches(const std::set<IndexSpaceExpression*> &exprs) const;
       virtual bool remove_operation(RegionTreeForest *forest);
     protected:
       const std::vector<IndexSpaceExpression*> sub_expressions;
     };
 
-    class IntersectionOpCreator {
+    class IntersectionOpCreator : public OperationCreator {
     public:
-      IntersectionOpCreator(RegionTreeForest *f, Operation *o,
+      IntersectionOpCreator(RegionTreeForest *f, Operation *o, TypeTag t,
                             const std::set<IndexSpaceExpression*> &e)
-        : forest(f), op(o), exprs(e) { }
+        : forest(f), op(o), type_tag(t), exprs(e) { }
+    public:
+      virtual IndexSpaceOperation* create(void)
+      {
+        NT_TemplateHelper::demux<IntersectionOpCreator>(type_tag, this);
+        return result;
+      }
     public:
       template<typename N, typename T>
       static inline void demux(IntersectionOpCreator *creator)
@@ -860,6 +874,7 @@ namespace Legion {
     public:
       RegionTreeForest *const forest;
       Operation *const op;
+      const TypeTag type_tag;
       const std::set<IndexSpaceExpression*> &exprs;
       IndexSpaceOperation *result;
     };
@@ -874,19 +889,23 @@ namespace Legion {
     public:
       IndexSpaceDifference& operator=(const IndexSpaceDifference &rhs);
     public:
-      virtual bool matches(IndexSpaceExpression *lhs, 
-                           IndexSpaceExpression *rhs) const;
       virtual bool remove_operation(RegionTreeForest *forest);
     protected:
       IndexSpaceExpression *const lhs;
       IndexSpaceExpression *const rhs;
     };
 
-    class DifferenceOpCreator {
+    class DifferenceOpCreator : public OperationCreator {
     public:
-      DifferenceOpCreator(RegionTreeForest *f, Operation *o,
+      DifferenceOpCreator(RegionTreeForest *f, Operation *o, TypeTag t,
                           IndexSpaceExpression *l, IndexSpaceExpression *r)
-        : forest(f), op(o), lhs(l), rhs(r) { }
+        : forest(f), op(o), type_tag(t), lhs(l), rhs(r) { }
+    public:
+      virtual IndexSpaceOperation* create(void)
+      {
+        NT_TemplateHelper::demux<DifferenceOpCreator>(type_tag, this);
+        return result;
+      }
     public:
       template<typename N, typename T>
       static inline void demux(DifferenceOpCreator *creator)
@@ -897,9 +916,44 @@ namespace Legion {
     public:
       RegionTreeForest *const forest;
       Operation *const op;
+      const TypeTag type_tag;
       IndexSpaceExpression *const lhs;
       IndexSpaceExpression *const rhs;
       IndexSpaceOperation *result;
+    };
+
+    /**
+     * \class ExpressionTrieNode
+     * This is a class for constructing a trie for index space
+     * expressions so we can quickly detect commmon subexpression
+     * in O(log N)^M time where N is the number of expressions
+     * in total and M is the number of expression in the operation
+     */
+    class ExpressionTrieNode {
+    public:
+      ExpressionTrieNode(unsigned depth, IndexSpaceExprID expr_id, 
+                         IndexSpaceOperation *op = NULL);
+      ExpressionTrieNode(const ExpressionTrieNode &rhs);
+      ~ExpressionTrieNode(void);
+    public:
+      ExpressionTrieNode& operator=(const ExpressionTrieNode &rhs);
+    public:
+      bool find_operation(
+          const std::vector<IndexSpaceExpression*> &expressions,
+          IndexSpaceOperation *&result, ExpressionTrieNode *&last);
+      IndexSpaceOperation* find_or_create_operation( 
+          const std::vector<IndexSpaceExpression*> &expressions,
+          OperationCreator &creator);
+      bool remove_operation(const std::vector<IndexSpaceExpression*> &exprs);
+    public:
+      const unsigned depth;
+      const IndexSpaceExprID expr;
+    protected:
+      IndexSpaceOperation *local_operation;
+      std::map<IndexSpaceExprID,IndexSpaceOperation*> operations;
+      std::map<IndexSpaceExprID,ExpressionTrieNode*> nodes;
+    protected:
+      mutable LocalLock trie_lock;
     };
 
     /**

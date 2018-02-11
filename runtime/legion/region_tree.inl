@@ -183,20 +183,6 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    bool IndexSpaceUnion<DIM,T>::matches(
-                             const std::set<IndexSpaceExpression*> &exprs) const
-    //--------------------------------------------------------------------------
-    {
-      unsigned index = 0;
-      for (std::set<IndexSpaceExpression*>::const_iterator it =
-            exprs.begin(); it != exprs.end(); it++, index++)
-        if ((*it)->expr_id != sub_expressions[index]->expr_id)
-          return false;
-      return true;
-    }
-
-    //--------------------------------------------------------------------------
-    template<int DIM, typename T>
     bool IndexSpaceUnion<DIM,T>::remove_operation(RegionTreeForest *forest)
     //--------------------------------------------------------------------------
     {
@@ -204,7 +190,7 @@ namespace Legion {
       for (unsigned idx = 0; idx < sub_expressions.size(); idx++)
         sub_expressions[idx]->remove_parent_operation(this);
       // Then remove ourselves from the tree
-      forest->remove_union_operation(this, sub_expressions.size());
+      forest->remove_union_operation(this, sub_expressions);
       // Remove our expression reference added by invalidate_operation
       // and return true if we should be deleted
       return this->remove_expression_reference();
@@ -286,20 +272,6 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    bool IndexSpaceIntersection<DIM,T>::matches(
-                             const std::set<IndexSpaceExpression*> &exprs) const
-    //--------------------------------------------------------------------------
-    {
-      unsigned index = 0;
-      for (std::set<IndexSpaceExpression*>::const_iterator it =
-            exprs.begin(); it != exprs.end(); it++, index++)
-        if ((*it)->expr_id != sub_expressions[index]->expr_id)
-          return false;
-      return true;
-    }
-
-    //--------------------------------------------------------------------------
-    template<int DIM, typename T>
     bool IndexSpaceIntersection<DIM,T>::remove_operation(
                                                        RegionTreeForest *forest)
     //--------------------------------------------------------------------------
@@ -308,7 +280,7 @@ namespace Legion {
       for (unsigned idx = 0; idx < sub_expressions.size(); idx++)
         sub_expressions[idx]->remove_parent_operation(this);
       // Then remove ourselves from the tree
-      forest->remove_intersection_operation(this, sub_expressions.size());
+      forest->remove_intersection_operation(this, sub_expressions);
       // Remove our expression reference added by invalidate_operation
       // and return true if we should be deleted
       return this->remove_expression_reference();
@@ -397,19 +369,6 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    bool IndexSpaceDifference<DIM,T>::matches(IndexSpaceExpression *left,
-                                              IndexSpaceExpression *right) const
-    //--------------------------------------------------------------------------
-    {
-      if (left->expr_id != lhs->expr_id)
-        return false;
-      if (right->expr_id != rhs->expr_id)
-        return false;
-      return true;
-    }
-
-    //--------------------------------------------------------------------------
-    template<int DIM, typename T>
     bool IndexSpaceDifference<DIM,T>::remove_operation(RegionTreeForest *forest)
     //--------------------------------------------------------------------------
     {
@@ -418,7 +377,7 @@ namespace Legion {
       if (lhs != rhs)
         rhs->remove_parent_operation(this);
       // Then remove ourselves from the tree
-      forest->remove_subtraction_operation(this, lhs);
+      forest->remove_subtraction_operation(this, lhs, rhs);
       // Remove our expression reference added by invalidate_operation
       // and return true if we should be deleted
       return this->remove_expression_reference();

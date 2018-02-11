@@ -944,11 +944,14 @@ namespace Legion {
                LegionMap<ReductionView*,FieldMask>::aligned &source_reductions);
       void begin_guard_protection(void);
       void end_guard_protection(void);
+      void begin_reduction_epoch(void);
+      void end_reduction_epoch(void);
       void finalize(std::set<ApEvent> *postconditions = NULL);
     protected:
       void uniquify_copy_postconditions(void);
       void compute_dst_preconditions(const FieldMask &mask);
-      bool issue_reductions(ApEvent reduction_pre, const FieldMask &mask,
+      bool issue_reductions(const int epoch, ApEvent reduction_pre, 
+                            const FieldMask &mask,
               LegionMap<ApEvent,FieldMask>::aligned &reduction_postconditions);
     public: // const fields
       const TraversalInfo &info;
@@ -960,12 +963,16 @@ namespace Legion {
       FieldMask deferred_copy_mask;
       LegionMap<ApEvent,FieldMask>::aligned copy_postconditions;
     protected: // internal members
-      PendingReductions pending_reductions;
-      FieldMask pending_reduction_mask;
       LegionMap<ApEvent,FieldMask>::aligned dst_preconditions;
+      FieldMask dst_precondition_mask;
+    protected: 
+      // Reduction data 
+      unsigned current_reduction_epoch;
+      std::vector<PendingReductions> reduction_epochs;
+      LegionVector<FieldMask>::aligned reduction_epoch_masks;
+    protected:
       // Handle protection of events for guarded operations
       std::vector<LegionMap<ApEvent,FieldMask>::aligned> protected_copy_posts;
-      FieldMask dst_precondition_mask;
       bool finalized;
     };
 
@@ -1318,6 +1325,9 @@ namespace Legion {
     public:
       virtual InnerContext* get_owner_context(void) const = 0;
       virtual void perform_ready_check(FieldMask mask) = 0;
+      virtual void find_valid_views(const FieldMask &update_mask,
+                  LegionMap<LogicalView*,FieldMask>::aligned &valid_views, 
+                                    bool needs_lock = true) = 0;
 #ifdef USE_OLD_COMPOSITE
       virtual void find_valid_views(const FieldMask &update_mask,
                                     const FieldMask &up_mask,
@@ -1441,6 +1451,9 @@ namespace Legion {
       // From CompositeBase
       virtual InnerContext* get_owner_context(void) const;
       virtual void perform_ready_check(FieldMask mask);
+      virtual void find_valid_views(const FieldMask &update_mask,
+                  LegionMap<LogicalView*,FieldMask>::aligned &valid_views, 
+                                    bool needs_lock = true);
 #ifdef USE_OLD_COMPOSITE
       virtual void find_valid_views(const FieldMask &update_mask,
                                     const FieldMask &up_mask,
@@ -1519,6 +1532,9 @@ namespace Legion {
       // From CompositeBase
       virtual InnerContext* get_owner_context(void) const;
       virtual void perform_ready_check(FieldMask mask);
+      virtual void find_valid_views(const FieldMask &update_mask,
+                  LegionMap<LogicalView*,FieldMask>::aligned &valid_views, 
+                                    bool needs_lock = true);
 #ifdef USE_OLD_COMPOSITE
       virtual void find_valid_views(const FieldMask &update_mask,
                                     const FieldMask &up_mask,
@@ -1766,6 +1782,10 @@ namespace Legion {
       virtual InnerContext* get_owner_context(void) const
         { assert(false); return NULL; }
       virtual void perform_ready_check(FieldMask mask)
+        { assert(false); }
+      virtual void find_valid_views(const FieldMask &update_mask,
+                  LegionMap<LogicalView*,FieldMask>::aligned &valid_views, 
+                                    bool needs_lock = true)
         { assert(false); }
 #ifdef USE_OLD_COMPOSITE
       virtual void find_valid_views(const FieldMask &update_mask,
