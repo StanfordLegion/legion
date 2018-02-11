@@ -4305,7 +4305,7 @@ namespace Legion {
         MaterializedView *d, const FieldMask &m, const RestrictInfo &res,bool r)
       : field_index(m.find_first_set()), copy_mask(m), info(in), dst(d),
         across_helper(NULL), restrict_info(&res), restrict_out(r),
-        has_dst_preconditions(false), finalized(false)
+        current_reduction_epoch(0),has_dst_preconditions(false),finalized(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -4315,7 +4315,7 @@ namespace Legion {
         MaterializedView *d, const FieldMask &m, ApEvent p, CopyAcrossHelper *h)
       : field_index(m.find_first_set()), copy_mask(m), info(in), dst(d),
         across_helper(h), restrict_info(NULL), restrict_out(false),
-        has_dst_preconditions(true), finalized(false)
+        current_reduction_epoch(0), has_dst_preconditions(true),finalized(false)
     //--------------------------------------------------------------------------
     {
       dst_preconditions.insert(p);
@@ -4366,6 +4366,10 @@ namespace Legion {
         IndexSpaceExpression *mask, std::vector<ReductionView*> &src_reductions)
     //--------------------------------------------------------------------------
     {
+      if (current_reduction_epoch >= reduction_epochs.size())
+        reduction_epochs.resize(current_reduction_epoch + 1);
+      PendingReductions &pending_reductions = 
+        reduction_epochs[current_reduction_epoch];
       for (std::vector<ReductionView*>::const_iterator it = 
             src_reductions.begin(); it != src_reductions.end(); it++)
       {
@@ -4407,6 +4411,23 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void DeferredSingleCopier::begin_reduction_epoch(void)
+    //--------------------------------------------------------------------------
+    {
+      current_reduction_epoch++;
+    }
+
+    //--------------------------------------------------------------------------
+    void DeferredSingleCopier::end_reduction_epoch(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(current_reduction_epoch > 0);
+#endif
+      current_reduction_epoch--;
+    }
+
+    //--------------------------------------------------------------------------
     void DeferredSingleCopier::finalize(std::set<ApEvent> *postconditions)
     //--------------------------------------------------------------------------
     {
@@ -4415,7 +4436,7 @@ namespace Legion {
 #endif
       finalized = true;
       // Apply any pending reductions using the proper preconditions
-      if (!pending_reductions.empty())
+      if (!reduction_epochs.empty())
       {
         if (!has_dst_preconditions)
           compute_dst_preconditions();
@@ -4424,17 +4445,38 @@ namespace Legion {
         if (!copy_postconditions.empty())
           dst_preconditions.insert(copy_postconditions.begin(),
                                    copy_postconditions.end());
-        const ApEvent reduction_pre = Runtime::merge_events(dst_preconditions);
-        // Issue all the reductions
-        for (PendingReductions::const_iterator it = 
-              pending_reductions.begin(); it != pending_reductions.end(); it++)
+        ApEvent reduction_pre = Runtime::merge_events(dst_preconditions);
+        // Iterate epochs in reverse order as the deepest ones are the
+        // ones that should be issued first
+        for (int epoch = reduction_epochs.size()-1; epoch >= 0; epoch--)
         {
-          ApEvent reduction_post = it->first->perform_deferred_reduction(
-              dst, copy_mask, it->second.version_tracker, reduction_pre,
-              info.op, info.index, it->second.pred_guard, across_helper,
-              it->second.intersect, it->second.mask, info.map_applied_events);
-          if (reduction_post.exists())
-            copy_postconditions.insert(reduction_post);
+          PendingReductions &pending_reductions = reduction_epochs[epoch];
+          if (pending_reductions.empty())
+            continue;
+          std::set<ApEvent> reduction_postconditions;
+          // Issue all the reductions
+          for (PendingReductions::const_iterator it = 
+               pending_reductions.begin(); it != pending_reductions.end(); it++)
+          {
+            ApEvent reduction_post = it->first->perform_deferred_reduction(
+                dst, copy_mask, it->second.version_tracker, reduction_pre,
+                info.op, info.index, it->second.pred_guard, across_helper,
+                it->second.intersect, it->second.mask, info.map_applied_events);
+            if (reduction_post.exists())
+              reduction_postconditions.insert(reduction_post);
+          }
+          if (!reduction_postconditions.empty())
+          {
+            if (epoch > 0)
+            {
+              reduction_pre = Runtime::merge_events(reduction_postconditions);
+              // In case we don't end up using it later
+              copy_postconditions.insert(reduction_pre);
+            }
+            else
+              copy_postconditions.insert(reduction_postconditions.begin(),
+                                         reduction_postconditions.end());
+          }
         }
       }
       // If we have no copy post conditions at this point we're done
@@ -6630,8 +6672,10 @@ namespace Legion {
                                             PredEvent pred_guard)      
     //--------------------------------------------------------------------------
     {
+      copier.begin_reduction_epoch();
       issue_composite_updates_single(copier, logical_node, this,
                                      pred_guard, write_mask, perf_writes);
+      copier.end_reduction_epoch();
     }
 
     //--------------------------------------------------------------------------

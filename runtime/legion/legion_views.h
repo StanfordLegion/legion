@@ -1020,6 +1020,8 @@ namespace Legion {
                              std::vector<ReductionView*> &source_reductions);
       void begin_guard_protection(void);
       void end_guard_protection(void);
+      void begin_reduction_epoch(void);
+      void end_reduction_epoch(void);
       void finalize(std::set<ApEvent> *postconditions = NULL);
       inline void record_postcondition(ApEvent post)
         { copy_postconditions.insert(post); }
@@ -1036,7 +1038,9 @@ namespace Legion {
     public:
       std::set<ApEvent> copy_postconditions;
     protected: // internal members
-      PendingReductions pending_reductions;
+      unsigned current_reduction_epoch;
+      std::vector<PendingReductions> reduction_epochs;
+    protected:
       std::set<ApEvent> dst_preconditions;
       std::vector<std::set<ApEvent> > protected_copy_posts;
       bool has_dst_preconditions;
