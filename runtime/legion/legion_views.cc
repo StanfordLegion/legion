@@ -4019,7 +4019,7 @@ namespace Legion {
       for (LegionMap<ApEvent,FieldMask>::aligned::const_iterator it = 
             copy_postconditions.begin(); it != copy_postconditions.end(); it++)
       {
-        ApEvent protect = it->first.protect();
+        ApEvent protect = Runtime::ignorefaults(it->first);
         if (!protect.exists())
           continue;
         LegionMap<ApEvent,FieldMask>::aligned::iterator finder = 
@@ -4400,7 +4400,7 @@ namespace Legion {
       for (std::set<ApEvent>::const_iterator it = 
             copy_postconditions.begin(); it != copy_postconditions.end(); it++)
       {
-        ApEvent protect = it->protect();
+        ApEvent protect = Runtime::ignorefaults(*it);
         if (!protect.exists())
           continue;
         target.insert(protect);
