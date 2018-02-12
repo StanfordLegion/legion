@@ -15024,6 +15024,9 @@ namespace Legion {
                      , fill_op_uid
 #endif
                      );
+      if (trace_info.recording)
+        trace_info.tpl->record_fill_view(fill_view, fill_mask);
+
       // Now update the physical state
       PhysicalState *state = get_physical_state(version_info);
       if (true_guard.exists())

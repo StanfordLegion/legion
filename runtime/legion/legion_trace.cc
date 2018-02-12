@@ -1692,6 +1692,8 @@ namespace Legion {
     bool PhysicalTemplate::check_replayable(void)
     //--------------------------------------------------------------------------
     {
+      if (untracked_fill_views.size() > 0)
+        return false;
       for (LegionMap<InstanceView*, FieldMask>::aligned::const_iterator it =
            previous_valid_views.begin(); it !=
            previous_valid_views.end(); ++it)
@@ -2173,6 +2175,22 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    /*static*/ inline std::string PhysicalTemplate::view_to_string(
+                                                       const FillView *view)
+    //--------------------------------------------------------------------------
+    {
+      assert(view->logical_node->is_region());
+      std::stringstream ss;
+      LogicalRegion handle = view->logical_node->as_region_node()->handle;
+      ss << "pointer: " << std::hex << view
+         << ", region: " << "(" << handle.get_index_space().get_id()
+         << "," << handle.get_field_space().get_id()
+         << "," << handle.get_tree_id()
+         << ")";
+      return ss.str();
+    }
+
+    //--------------------------------------------------------------------------
     void PhysicalTemplate::dump_template(void)
     //--------------------------------------------------------------------------
     {
@@ -2201,6 +2219,16 @@ namespace Legion {
         free(mask);
       }
 
+      std::cerr << "[Previous Fill Views]" << std::endl;
+      for (LegionMap<FillView*, FieldMask>::aligned::iterator it =
+           untracked_fill_views.begin(); it != untracked_fill_views.end(); ++it)
+      {
+        char *mask = it->second.to_string();
+        std::cerr << "  " << view_to_string(it->first) << " " << mask
+                  << " " << std::endl;
+        free(mask);
+      }
+
       std::cerr << "[Valid Views]" << std::endl;
       for (LegionMap<InstanceView*, FieldMask>::aligned::iterator it =
            valid_views.begin(); it != valid_views.end(); ++it)
@@ -2222,6 +2250,16 @@ namespace Legion {
                   << " logical ctx: " << logical_contexts[it->first]
                   << " physical ctx: " << physical_contexts[it->first]
                   << " initialized: " << initialized[it->first] << std::endl;
+        free(mask);
+      }
+
+      std::cerr << "[Fill Views]" << std::endl;
+      for (LegionMap<FillView*, FieldMask>::aligned::iterator it =
+           fill_views.begin(); it != fill_views.end(); ++it)
+      {
+        char *mask = it->second.to_string();
+        std::cerr << "  " << view_to_string(it->first) << " " << mask
+                  << " " << std::endl;
         free(mask);
       }
     }
@@ -2908,6 +2946,40 @@ namespace Legion {
                              intersect));
 #ifdef DEBUG_LEGION
       assert(instructions.size() == events.size());
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTemplate::record_fill_view(
+                                FillView *fill_view, const FieldMask &fill_mask)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock tpl_lock(template_lock);
+#ifdef DEBUG_LEGION
+      assert(fill_views.find(fill_view) == fill_views.end());
+#endif
+      fill_views[fill_view] = fill_mask;
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTemplate::record_deferred_copy_from_fill_view(
+                                FillView *fill_view, const FieldMask &copy_mask)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock tpl_lock(template_lock);
+      LegionMap<FillView*, FieldMask>::aligned::iterator finder =
+        fill_views.find(fill_view);
+      if (finder == fill_views.end())
+      {
+        finder = untracked_fill_views.find(fill_view);
+        if (finder == untracked_fill_views.end())
+          untracked_fill_views[fill_view] = copy_mask;
+        else
+          finder->second |= copy_mask;
+      }
+#ifdef DEBUG_LEGION
+      else
+        assert(!!(copy_mask - finder->second));
 #endif
     }
 

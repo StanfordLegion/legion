@@ -452,6 +452,7 @@ namespace Legion {
       inline bool is_replayable(void) const { return replayable; }
     protected:
       static std::string view_to_string(const InstanceView *view);
+      static std::string view_to_string(const FillView *view);
       void sanity_check(void);
     public:
       void record_mapper_output(SingleTask *task,
@@ -517,6 +518,9 @@ namespace Legion {
 #endif
                              RegionTreeNode *intersect);
 
+      void record_fill_view(FillView *fill_view, const FieldMask &fill_mask);
+      void record_deferred_copy_from_fill_view(FillView *fill_view,
+                                               const FieldMask &copy_mask);
     private:
       void record_ready_view(const RegionRequirement &req,
                              InstanceView *view,
@@ -559,6 +563,7 @@ namespace Legion {
       LegionMap<InstanceView*, FieldMask>::aligned    valid_views;
       LegionMap<InstanceView*, FieldMask>::aligned    reduction_views;
       LegionMap<FillView*,     FieldMask>::aligned    fill_views;
+      LegionMap<FillView*,     FieldMask>::aligned    untracked_fill_views;
       LegionMap<InstanceView*, bool>::aligned         initialized;
       LegionMap<InstanceView*, ContextID>::aligned    logical_contexts;
       LegionMap<InstanceView*, ContextID>::aligned    physical_contexts;

@@ -7096,6 +7096,8 @@ namespace Legion {
         if (fill_post.exists())
           postconditions[fill_post] = pre_set.set_mask;
       }
+      if (trace_info.recording)
+        trace_info.tpl->record_deferred_copy_from_fill_view(this, copy_mask);
     }
 
     //--------------------------------------------------------------------------
