@@ -1173,14 +1173,21 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void MapperManager::invoke_handle_message(Mapper::MapperMessage *message,
-                                              MappingCallInfo *info)
+                                       void *check_defer, MappingCallInfo *info)
     //--------------------------------------------------------------------------
     {
       if (info == NULL)
       {
         // Special case for handle message, always defer it if we are also
-        // the sender in order to avoid deadlocks
-        if (message->sender == processor)
+        // the sender in order to avoid deadlocks, same thing for any
+        // local processor for non-reentrant mappers, have to use a test
+        // for NULL pointer here since mapper continuation want
+        // pointer arguments
+        if ((check_defer == NULL) && 
+            ((message->sender == processor) ||
+             ((mapper->get_mapper_sync_model() == 
+               Mapper::SERIALIZED_NON_REENTRANT_MAPPER_MODEL) && 
+              runtime->is_local(message->sender))))
         {
           defer_message(message);
           return;
@@ -1190,9 +1197,9 @@ namespace Legion {
                                  NULL, continuation_precondition);
         if (continuation_precondition.exists())
         {
-          MapperContinuation1<Mapper::MapperMessage,
+          MapperContinuation2<Mapper::MapperMessage, void,
                               &MapperManager::invoke_handle_message>
-                                continuation(this, message, info);
+                                continuation(this, message, info, info);
           continuation.defer(runtime, continuation_precondition);
           return;
         }
@@ -3107,7 +3114,7 @@ namespace Legion {
       message.message = margs->message;
       message.size = margs->size;
       message.broadcast = margs->broadcast;
-      margs->manager->invoke_handle_message(&message);
+      margs->manager->invoke_handle_message(&message, &message/*non-NULL*/);
       // Then free up the allocated memory
       free(margs->message);
     }
