@@ -1155,9 +1155,10 @@ namespace Legion {
 #endif
       if (local_trace->is_replaying())
       {
-        PhysicalTrace *physical_trace = local_trace->get_physical_trace();
-        physical_trace->get_current_template()->execute_all();
-        template_completion = physical_trace->get_template_completion();
+        PhysicalTemplate *current_template =
+          local_trace->get_physical_trace()->get_current_template();
+        current_template->execute_all();
+        template_completion = current_template->get_completion();
         Runtime::trigger_event(completion_event, template_completion);
         local_trace->end_trace_execution(this);
         parent_ctx->update_current_fence(this);
@@ -1431,21 +1432,6 @@ namespace Legion {
       assert(current_template != NULL);
 #endif
       current_template->initialize(fence_completion, recurrent);
-    }
-
-    //--------------------------------------------------------------------------
-    ApEvent PhysicalTrace::get_template_completion(void) const
-    //--------------------------------------------------------------------------
-    {
-      if (current_template != NULL)
-        return current_template->get_completion();
-      else
-      {
-#ifdef DEBUG_LEGION
-        assert(false);
-#endif
-        return ApEvent::NO_AP_EVENT;
-      }
     }
 
     /////////////////////////////////////////////////////////////

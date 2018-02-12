@@ -405,7 +405,6 @@ namespace Legion {
       void fix_trace(PhysicalTemplate *tpl);
     public:
       void initialize_template(ApEvent fence_completion, bool recurrent);
-      ApEvent get_template_completion(void) const;
     public:
       Runtime *runtime;
     private:
