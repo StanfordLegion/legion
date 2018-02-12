@@ -13982,8 +13982,12 @@ namespace Legion {
           realm_dst_fields, precondition, predicate_guard, 
           (intersect == NULL) ? NULL : intersect->get_row_source(),
           redop, reduction_fold);
-      LegionSpy::log_copy_events(op->get_unique_op_id(), handle, 
-                                 precondition, result);
+      ApEvent copy_pre = precondition;
+      if ((op != NULL) && op->has_execution_fence_event())
+        copy_pre = Runtime::merge_events(copy_pre,
+                                         op->get_execution_fence_event());
+      LegionSpy::log_copy_events(op->get_unique_op_id(), handle, copy_pre,
+                                 result);
       for (unsigned idx = 0; idx < src_fields.size(); idx++)
         LegionSpy::log_copy_field(result, src_fields[idx].field_id,
                                   src_fields[idx].inst_event,
@@ -14034,8 +14038,12 @@ namespace Legion {
       ApEvent result = row_source->issue_fill(op, realm_dst_fields,
           fill_value, fill_size, precondition, predicate_guard,
           (intersect == NULL) ? NULL : intersect->get_row_source());
-      LegionSpy::log_fill_events(op->get_unique_op_id(), handle, 
-                                 precondition, result, fill_uid);
+      ApEvent fill_pre = precondition;
+      if ((op != NULL) && op->has_execution_fence_event())
+        fill_pre = Runtime::merge_events(fill_pre,
+                                         op->get_execution_fence_event());
+      LegionSpy::log_fill_events(op->get_unique_op_id(), handle, fill_pre,
+                                 result, fill_uid);
       for (unsigned idx = 0; idx < dst_fields.size(); idx++)
         LegionSpy::log_fill_field(result, dst_fields[idx].field_id,
                                   dst_fields[idx].inst_event);
