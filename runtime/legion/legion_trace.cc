@@ -2979,7 +2979,7 @@ namespace Legion {
       }
 #ifdef DEBUG_LEGION
       else
-        assert(!!(copy_mask - finder->second));
+        assert(!(copy_mask - finder->second));
 #endif
     }
 
