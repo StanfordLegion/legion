@@ -2963,7 +2963,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void PhysicalTemplate::record_deferred_copy_from_fill_view(
-                                FillView *fill_view, const FieldMask &copy_mask)
+                                                            FillView *fill_view,
+                                                         InstanceView* dst_view,
+                                                     const FieldMask &copy_mask,
+                                                          ContextID logical_ctx,
+                                                         ContextID physical_ctx)
     //--------------------------------------------------------------------------
     {
       AutoLock tpl_lock(template_lock);
@@ -2977,10 +2981,53 @@ namespace Legion {
         else
           finder->second |= copy_mask;
       }
-#ifdef DEBUG_LEGION
       else
+      {
+#ifdef DEBUG_LEGION
         assert(!(copy_mask - finder->second));
 #endif
+        LegionMap<InstanceView*, FieldMask>::aligned::iterator finder =
+          valid_views.find(dst_view);
+        if (finder == valid_views.end())
+          valid_views[dst_view] = copy_mask;
+        else
+          finder->second |= copy_mask;
+
+#ifdef DEBUG_LEGION
+        assert(logical_contexts.find(dst_view) == logical_contexts.end() ||
+               logical_contexts[dst_view] == logical_ctx);
+        assert(physical_contexts.find(dst_view) == physical_contexts.end() ||
+               physical_contexts[dst_view] == physical_ctx);
+#endif
+        logical_contexts[dst_view] = logical_ctx;
+        physical_contexts[dst_view] = physical_ctx;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTemplate::record_empty_copy_from_fill_view(
+                                                         InstanceView* dst_view,
+                                                     const FieldMask &copy_mask,
+                                                          ContextID logical_ctx,
+                                                         ContextID physical_ctx)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock tpl_lock(template_lock);
+      LegionMap<InstanceView*, FieldMask>::aligned::iterator finder =
+        valid_views.find(dst_view);
+      if (finder == valid_views.end())
+        valid_views[dst_view] = copy_mask;
+      else
+        finder->second |= copy_mask;
+
+#ifdef DEBUG_LEGION
+      assert(logical_contexts.find(dst_view) == logical_contexts.end() ||
+          logical_contexts[dst_view] == logical_ctx);
+      assert(physical_contexts.find(dst_view) == physical_contexts.end() ||
+          physical_contexts[dst_view] == physical_ctx);
+#endif
+      logical_contexts[dst_view] = logical_ctx;
+      physical_contexts[dst_view] = physical_ctx;
     }
 
     //--------------------------------------------------------------------------

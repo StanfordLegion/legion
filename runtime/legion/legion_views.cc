@@ -7085,7 +7085,17 @@ namespace Legion {
         // If the intersection is empty we can skip the fill all together
         if ((logical_node != dst->logical_node) && 
             (!logical_node->intersects_with(dst->logical_node)))
+        {
+          if (trace_info.recording)
+          {
+#ifdef DEBUG_LEGION
+            assert(info.logical_ctx != -1U);
+#endif
+            trace_info.tpl->record_empty_copy_from_fill_view(
+                                    dst, copy_mask, info.logical_ctx, info.ctx);
+          }
           continue;
+        }
         ApEvent fill_post = dst->logical_node->issue_fill(info.op, dst_fields,
                         value->value, value->value_size, fill_pre, pred_guard, 
 #ifdef LEGION_SPY
@@ -7093,11 +7103,17 @@ namespace Legion {
 #endif
                         trace_info,
                   (logical_node == dst->logical_node) ? NULL : logical_node);
+        if (trace_info.recording)
+        {
+#ifdef DEBUG_LEGION
+          assert(info.logical_ctx != -1U);
+#endif
+          trace_info.tpl->record_deferred_copy_from_fill_view(
+                              this, dst, copy_mask, info.logical_ctx, info.ctx);
+        }
         if (fill_post.exists())
           postconditions[fill_post] = pre_set.set_mask;
       }
-      if (trace_info.recording)
-        trace_info.tpl->record_deferred_copy_from_fill_view(this, copy_mask);
     }
 
     //--------------------------------------------------------------------------

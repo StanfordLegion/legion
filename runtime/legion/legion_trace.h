@@ -520,7 +520,14 @@ namespace Legion {
 
       void record_fill_view(FillView *fill_view, const FieldMask &fill_mask);
       void record_deferred_copy_from_fill_view(FillView *fill_view,
-                                               const FieldMask &copy_mask);
+                                               InstanceView *dst_view,
+                                               const FieldMask &copy_mask,
+                                               ContextID logical_ctx,
+                                               ContextID physical_ctx);
+      void record_empty_copy_from_fill_view(InstanceView *dst_view,
+                                            const FieldMask &copy_mask,
+                                            ContextID logical_ctx,
+                                            ContextID physical_ctx);
     private:
       void record_ready_view(const RegionRequirement &req,
                              InstanceView *view,
