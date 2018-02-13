@@ -581,6 +581,9 @@ namespace Legion {
   {
     for (int i = 0; i < DIM; i++)
       point_data[i] = rhs[i];
+    // Zero out the rest of the buffer to avoid uninitialized warnings
+    for (int i = DIM; i < MAX_POINT_DIM; i++)
+      point_data[i] = 0;
   }
 
   //----------------------------------------------------------------------------
@@ -611,7 +614,7 @@ namespace Legion {
   //----------------------------------------------------------------------------
   {
     dim = rhs.dim;
-    for (int i = 0; i < MAX_POINT_DIM; i++)
+    for (int i = 0; i < dim; i++)
       point_data[i] = rhs.point_data[i];
     return *this;
   }
@@ -665,7 +668,7 @@ namespace Legion {
   //----------------------------------------------------------------------------
   template<int DIM>
   /*static*/ inline DomainPoint 
-                    DomainPoint::from_point(LegionRuntime::Arrays::Point<DIM> p) 
+                    DomainPoint::from_point(LegionRuntime::Arrays::Point<DIM> p)
   //----------------------------------------------------------------------------
   {
     DomainPoint dp;

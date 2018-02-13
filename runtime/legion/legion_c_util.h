@@ -249,6 +249,40 @@ namespace Legion {
         return dp;
       }
 
+      static legion_domain_transform_t
+      wrap(DomainTransform transform) {
+        legion_domain_transform_t transform_;
+        transform_.m = transform.m;
+        transform_.n = transform.n;
+        std::copy(transform.matrix, transform.matrix + MAX_POINT_DIM * MAX_POINT_DIM, transform_.matrix);
+        return transform_;
+      }
+
+      static DomainTransform
+      unwrap(legion_domain_transform_t transform_) {
+        DomainTransform transform;
+        transform.m = transform_.m;
+        transform.n = transform_.n;
+        std::copy(transform_.matrix, transform_.matrix + MAX_POINT_DIM * MAX_POINT_DIM, transform.matrix);
+        return transform;
+      }
+
+      static legion_domain_affine_transform_t
+      wrap(DomainAffineTransform transform) {
+        legion_domain_affine_transform_t transform_;
+        transform_.transform = wrap(transform.transform);
+        transform_.offset = wrap(transform.offset);
+        return transform_;
+      }
+
+      static DomainAffineTransform
+      unwrap(legion_domain_affine_transform_t transform_) {
+        DomainAffineTransform transform;
+        transform.transform = unwrap(transform_.transform);
+        transform.offset = unwrap(transform_.offset);
+        return transform;
+      }
+
       static legion_index_space_t
       wrap(IndexSpace is)
       {

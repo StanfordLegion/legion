@@ -80,8 +80,8 @@ ast.annotation:leaf("Unroll", {"value"}, true)
 
 -- Annotation: Sets
 ast.annotation:leaf("Set", {"cuda", "external", "idempotent", "inline",
-                            "inner", "leaf", "openmp", "parallel", "replicable",
-                            "spmd", "trace", "vectorize"},
+                            "inner", "leaf", "openmp", "optimize", "parallel", 
+                            "replicable", "spmd", "trace", "vectorize"},
                     false, true)
 
 function ast.default_annotations()
@@ -94,6 +94,7 @@ function ast.default_annotations()
     inner = allow,
     leaf = allow,
     openmp = allow,
+    optimize = allow,
     parallel = allow,
     replicable = allow,
     spmd = allow,

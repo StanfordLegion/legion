@@ -69,6 +69,8 @@ function parser.annotation_name(p, required)
     return "leaf"
   elseif p:nextif("__openmp") then
     return "openmp"
+  elseif p:nextif("__optimize") then
+    return "optimize"
   elseif p:nextif("__parallel") then
     return "parallel"
   elseif p:nextif("__replicable") then

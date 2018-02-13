@@ -5,6 +5,7 @@ Version 18.xx.0
   * Legion
     - Migrated all node-local Legion reservations to use Realm
       fast reservations and removed no longer necessary continuations
+    - Added support for mapper attached data to all Mappable types
 
   * Realm
     - Added support for "fast" reservations that have better

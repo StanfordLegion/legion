@@ -2268,6 +2268,12 @@ namespace Legion {
       map_applied_conditions.clear();
       mapped_preconditions.clear();
       profiling_requests.clear();
+      if (mapper_data != NULL)
+      {
+        free(mapper_data);
+        mapper_data = NULL;
+        mapper_data_size = 0;
+      }
       // Now return this operation to the queue
       runtime->free_map_op(this);
     } 
@@ -3352,6 +3358,12 @@ namespace Legion {
       map_applied_conditions.clear();
       restrict_postconditions.clear();
       profiling_requests.clear();
+      if (mapper_data != NULL)
+      {
+        free(mapper_data);
+        mapper_data = NULL;
+        mapper_data_size = 0;
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -6628,6 +6640,12 @@ namespace Legion {
       privilege_path.clear();
       version_info.clear();
       restrict_info.clear();
+      if (mapper_data != NULL)
+      {
+        free(mapper_data);
+        mapper_data = NULL;
+        mapper_data_size = 0;
+      }
     } 
 
     //--------------------------------------------------------------------------
@@ -8095,6 +8113,12 @@ namespace Legion {
       acquired_instances.clear();
       map_applied_conditions.clear();
       profiling_requests.clear();
+      if (mapper_data != NULL)
+      {
+        free(mapper_data);
+        mapper_data = NULL;
+        mapper_data_size = 0;
+      }
       // Return this operation to the runtime
       runtime->free_acquire_op(this);
     }
@@ -8707,6 +8731,12 @@ namespace Legion {
       acquired_instances.clear();
       map_applied_conditions.clear();
       profiling_requests.clear();
+      if (mapper_data != NULL)
+      {
+        free(mapper_data);
+        mapper_data = NULL;
+        mapper_data_size = 0;
+      }
       // Return this operation to the runtime
       runtime->free_release_op(this);
     }
@@ -12341,6 +12371,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       deactivate_dependent_op(); 
+      if (mapper_data != NULL)
+      {
+        free(mapper_data);
+        mapper_data = NULL;
+        mapper_data_size = 0;
+      }
       runtime->free_dependent_partition_op(this);
     }
 
@@ -12784,6 +12820,12 @@ namespace Legion {
       grants.clear();
       wait_barriers.clear();
       arrive_barriers.clear();
+      if (mapper_data != NULL)
+      {
+        free(mapper_data);
+        mapper_data = NULL;
+        mapper_data_size = 0;
+      }
     }
 
     //--------------------------------------------------------------------------

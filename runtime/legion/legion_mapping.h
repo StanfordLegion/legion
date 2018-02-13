@@ -1875,6 +1875,18 @@ namespace Legion {
       void disable_reentrant(MapperContext ctx) const;
     public:
       //------------------------------------------------------------------------
+      // Methods for updating mappable data 
+      // The mapper is responsible for atomicity of these calls 
+      // (usually through the choice of mapper synchronization model) 
+      //------------------------------------------------------------------------
+      void update_mappable_tag(MapperContext ctx, const Mappable &mappable, 
+                               MappingTagID new_tag) const;
+      // Runtime will make a copy of the data passed into this method
+      void update_mappable_data(MapperContext ctx, const Mappable &mappable,
+                                const void *mapper_data, 
+                                size_t mapper_data_size) const;
+    public:
+      //------------------------------------------------------------------------
       // Methods for communicating with other mappers of the same kind
       //------------------------------------------------------------------------
       void send_message(MapperContext ctx, Processor target,const void *message,

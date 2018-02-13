@@ -413,6 +413,9 @@ namespace Legion {
       rez.serialize(args,arglen);
       rez.serialize(map_id);
       rez.serialize(tag);
+      rez.serialize(mapper_data_size);
+      if (mapper_data_size > 0)
+        rez.serialize(mapper_data, mapper_data_size);
       rez.serialize(is_index_space);
       rez.serialize(must_epoch_task);
       rez.serialize(index_domain);
@@ -491,6 +494,21 @@ namespace Legion {
       }
       derez.deserialize(map_id);
       derez.deserialize(tag);
+      derez.deserialize(mapper_data_size);
+      if (mapper_data_size > 0)
+      {
+        // If we already have mapper data, then we are going to replace it
+        if (mapper_data != NULL)
+          free(mapper_data);
+        mapper_data = malloc(mapper_data_size);
+        derez.deserialize(mapper_data, mapper_data_size);
+      }
+      else if (mapper_data != NULL)
+      {
+        // If we freed it remotely then we can free it here too
+        free(mapper_data);
+        mapper_data = NULL;
+      }
       derez.deserialize(is_index_space);
       derez.deserialize(must_epoch_task);
       derez.deserialize(index_domain);
@@ -771,6 +789,12 @@ namespace Legion {
         free(local_args);
         local_args = NULL;
         local_arglen = 0;
+      }
+      if (mapper_data != NULL)
+      {
+        free(mapper_data);
+        mapper_data = NULL;
+        mapper_data_size = 0;
       }
       early_mapped_regions.clear();
       atomic_locks.clear(); 
@@ -1862,6 +1886,15 @@ namespace Legion {
       }
       this->map_id = rhs->map_id;
       this->tag = rhs->tag;
+      if (rhs->mapper_data_size > 0)
+      {
+#ifdef DEBUG_LEGION
+        assert(rhs->mapper_data != NULL);
+#endif
+        this->mapper_data_size = rhs->mapper_data_size;
+        this->mapper_data = malloc(this->mapper_data_size);
+        memcpy(this->mapper_data, rhs->mapper_data, this->mapper_data_size);
+      }
       this->is_index_space = rhs->is_index_space;
       this->orig_proc = rhs->orig_proc;
       this->current_proc = rhs->current_proc;

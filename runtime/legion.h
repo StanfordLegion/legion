@@ -2450,6 +2450,10 @@ namespace Legion {
     public:
       MapperID                                  map_id;
       MappingTagID                              tag;
+    public:
+      // Mapper annotated data 
+      void*                                     mapper_data;
+      size_t                                    mapper_data_size;
     };
 
     /**

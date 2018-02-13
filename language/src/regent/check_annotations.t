@@ -198,6 +198,7 @@ local function check_annotations_node(cx)
               "inline",
               "inner",
               "leaf",
+              "optimize",
               "parallel",
               "replicable",
             }))
