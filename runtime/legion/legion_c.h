@@ -3503,13 +3503,13 @@ extern "C" {
   // -----------------------------------------------------------------------
 
   /**
-   * @see LegionRuntime::TimeStamp::get_current_time_in_micros()
+   * @see Realm::Clock::get_current_time_in_micros()
    */
   unsigned long long
   legion_get_current_time_in_micros(void);
 
   /**
-   * @see LegionRuntime::TimeStamp::get_current_time_in_nanos()
+   * @see Realm::Clock::get_current_time_in_nanos()
    */
   unsigned long long
   legion_get_current_time_in_nanos(void);
