@@ -1112,14 +1112,14 @@ extern "C" {
     int color /* = AUTO_GENERATE_ID */);
 
   /**
-   * @see LegionRuntime::HighLevel::Runtime::is_index_partition_disjoint()
+   * @see Legion::Runtime::is_index_partition_disjoint()
    */
   bool
   legion_index_partition_is_disjoint(legion_runtime_t runtime,
                                      legion_index_partition_t handle);
 
   /**
-   * @see LegionRuntime::HighLevel::Runtime::is_index_partition_complete()
+   * @see Legion::Runtime::is_index_partition_complete()
    */
   bool
   legion_index_partition_is_complete(legion_runtime_t runtime,
@@ -1705,7 +1705,7 @@ extern "C" {
                                legion_phase_barrier_t handle);
 
   /**
-   * @see LegionRuntime::HighLevel::PhaseBarrier::alter_arrival_count()
+   * @see Legion::PhaseBarrier::alter_arrival_count()
    */
   legion_phase_barrier_t
   legion_phase_barrier_alter_arrival_count(legion_runtime_t runtime,
@@ -1714,7 +1714,7 @@ extern "C" {
                                            int delta);
 
   /**
-   * @see LegionRuntime::HighLevel::PhaseBarrier::arrive()
+   * @see Legion::PhaseBarrier::arrive()
    */
   void
   legion_phase_barrier_arrive(legion_runtime_t runtime,
@@ -1723,7 +1723,7 @@ extern "C" {
                               unsigned count /* = 1 */);
 
   /**
-   * @see LegionRuntime::HighLevel::PhaseBarrier::wait()
+   * @see Legion::PhaseBarrier::wait()
    */
   void
   legion_phase_barrier_wait(legion_runtime_t runtime,
@@ -1768,7 +1768,7 @@ extern "C" {
                                     legion_dynamic_collective_t handle);
 
   /**
-   * @see LegionRuntime::HighLevel::DynamicCollective::alter_arrival_count()
+   * @see Legion::DynamicCollective::alter_arrival_count()
    */
   legion_dynamic_collective_t
   legion_dynamic_collective_alter_arrival_count(
