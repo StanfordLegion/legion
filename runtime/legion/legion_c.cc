@@ -1853,7 +1853,7 @@ legion_phase_barrier_create(legion_runtime_t runtime_,
                             legion_context_t ctx_,
                             unsigned arrivals)
 {
-  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_)->context();
 
   PhaseBarrier result = runtime->create_phase_barrier(ctx, arrivals);
@@ -1865,7 +1865,7 @@ legion_phase_barrier_destroy(legion_runtime_t runtime_,
                              legion_context_t ctx_,
                              legion_phase_barrier_t handle_)
 {
-  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_)->context();
   PhaseBarrier handle = CObjectWrapper::unwrap(handle_);
 
@@ -1910,7 +1910,7 @@ legion_phase_barrier_advance(legion_runtime_t runtime_,
                              legion_context_t ctx_,
                              legion_phase_barrier_t handle_)
 {
-  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_)->context();
   PhaseBarrier handle = CObjectWrapper::unwrap(handle_);
 
@@ -1930,7 +1930,7 @@ legion_dynamic_collective_create(legion_runtime_t runtime_,
                                  const void *init_value,
                                  size_t init_size)
 {
-  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_)->context();
 
   DynamicCollective result =
@@ -1944,7 +1944,7 @@ legion_dynamic_collective_destroy(legion_runtime_t runtime_,
                                   legion_context_t ctx_,
                                   legion_dynamic_collective_t handle_)
 {
-  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_)->context();
   DynamicCollective handle = CObjectWrapper::unwrap(handle_);
 
@@ -1959,7 +1959,7 @@ legion_dynamic_collective_arrive(legion_runtime_t runtime_,
                                  size_t size,
                                  unsigned count /* = 1 */)
 {
-  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_)->context();
   DynamicCollective handle = CObjectWrapper::unwrap(handle_);
 
@@ -1986,7 +1986,7 @@ legion_dynamic_collective_defer_arrival(legion_runtime_t runtime_,
                                         legion_future_t f_,
                                         unsigned count /* = 1 */)
 {
-  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_)->context();
   DynamicCollective handle = CObjectWrapper::unwrap(handle_);
   Future *f = CObjectWrapper::unwrap(f_);
@@ -1999,7 +1999,7 @@ legion_dynamic_collective_get_result(legion_runtime_t runtime_,
                                      legion_context_t ctx_,
                                      legion_dynamic_collective_t handle_)
 {
-  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_)->context();
   DynamicCollective handle = CObjectWrapper::unwrap(handle_);
 
@@ -2012,7 +2012,7 @@ legion_dynamic_collective_advance(legion_runtime_t runtime_,
                                   legion_context_t ctx_,
                                   legion_dynamic_collective_t handle_)
 {
-  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_)->context();
   DynamicCollective handle = CObjectWrapper::unwrap(handle_);
 
@@ -3071,7 +3071,7 @@ legion_must_epoch_launcher_execute(legion_runtime_t runtime_,
                                    legion_context_t ctx_,
                                    legion_must_epoch_launcher_t launcher_)
 {
-  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_)->context();
   MustEpochLauncher *launcher = CObjectWrapper::unwrap(launcher_);
 
