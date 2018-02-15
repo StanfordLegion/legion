@@ -5759,6 +5759,13 @@ class Operation(object):
         for idx in range(0,len(self.reqs)):
             if not self.analyze_logical_requirement(idx, perform_checks):
                 return False
+        # Perform any updates to the restricted state for our context 
+        if not self.update_context_restrictions():
+            return False
+        return True
+
+    def update_context_restrictions(self):
+        assert self.context is not None
         # See if our operation had any bearing on the restricted
         # properties of the enclosing context
         if self.kind == ACQUIRE_OP_KIND:
@@ -6079,7 +6086,7 @@ class Operation(object):
                 return False
         return True
 
-    def perform_op_physical_verification(self, perform_checks):
+    def perform_op_physical_verification(self, perform_checks, need_restrict_analysis):
         # If we were predicated false, then there is nothing to do
         if not self.predicate_result:
             return True
@@ -6088,6 +6095,14 @@ class Operation(object):
             depth = self.context.get_depth()
             for idx in range(depth):
                 prefix += '  '
+            # Since we have a context, see if we have to do our restriction analysis
+            if need_restrict_analysis:
+                if self.reqs is not None:
+                    for idx in range(0,len(self.reqs)):
+                        self.context.check_restricted_coherence(self, self.reqs[idx])
+                # Do our updates to the restricted set
+                if not self.update_context_restrictions():
+                    return False
         # If we have any internal operations (e.g. close operations, then
         # see if they performed any physical analysis
         if self.inter_close_ops:
@@ -6096,17 +6111,20 @@ class Operation(object):
             for close in self.inter_close_ops:
                 if close.kind == READ_ONLY_CLOSE_OP_KIND:
                     continue
-                if not close.perform_op_physical_verification(perform_checks):
+                if not close.perform_op_physical_verification(perform_checks, 
+                                                              need_restrict_analysis):
                     return False
         # If we are an index space task, only do our points
         if self.kind == INDEX_TASK_KIND:
             for point in sorted(self.points.itervalues(), key=lambda x: x.op.uid):
-                if not point.op.perform_op_physical_verification(perform_checks):
+                if not point.op.perform_op_physical_verification(perform_checks,
+                                                                 need_restrict_analysis):
                     return False
             return True
         elif self.points: # Handle other index space operations too
             for point in sorted(self.points.itervalues(), key=lambda x: x.uid):
-                if not point.perform_op_physical_verification(perform_checks):
+                if not point.perform_op_physical_verification(perform_checks,
+                                                              need_restrict_analysis):
                     return False
             return True
         print((prefix+"Performing physical verification analysis "+
@@ -6121,7 +6139,8 @@ class Operation(object):
             # Check to see if this is an index copy
             if self.points:
                 for point in sorted(self.points.itervalues(), key=lambda x: x.uid):
-                    if not point.perform_op_physical_verification(perform_checks):
+                    if not point.perform_op_physical_verification(perform_checks, 
+                                                                  need_restrict_analysis):
                         return False
                 return True
             # Compute our version numbers first
@@ -6137,7 +6156,8 @@ class Operation(object):
             # Check to see if this is an index fill
             if self.points:
                 for point in sorted(self.points.itervalues(), key=lambda x: x.uid):
-                    if not point.perform_op_physical_verification(perform_checks):
+                    if not point.perform_op_physical_verification(perform_checks,
+                                                                  need_restrict_analysis):
                         return False
                 return True
             # Compute our version numbers first
@@ -6148,7 +6168,8 @@ class Operation(object):
         elif self.kind == DEP_PART_OP_KIND and self.points:
             # Index partition operation
             for point in sorted(self.points.itervalues(), key=lambda x: x.uid):
-                if not point.perform_op_physical_verification(perform_checks):
+                if not point.perform_op_physical_verification(perform_checks,
+                                                              need_restrict_analysis):
                     return False
             return True
         elif self.kind == DELETION_OP_KIND:
@@ -6172,7 +6193,8 @@ class Operation(object):
                             return False
                 # If we are not a leaf task, go down the task tree
                 if self.task is not None:
-                    if not self.task.perform_task_physical_verification(perform_checks):
+                    if not self.task.perform_task_physical_verification(perform_checks,
+                                                                need_restrict_analysis):
                         return False
         self.check_for_unanalyzed_realm_ops(perform_checks)
         # Clean up our reachable cache
@@ -6723,7 +6745,6 @@ class Task(object):
                     for field in req.fields:
                         assert field.fid in mapping 
                         inst = mapping[field.fid]
-                        # If they virtual mapped then there is no way
                         self.restrictions.append(
                             Restriction(req.logical_node, field, inst))
         # Iterate over all the operations in order and
@@ -6929,7 +6950,7 @@ class Task(object):
         # up the task tree so just give it depth zero
         return 0
 
-    def perform_task_physical_verification(self, perform_checks):
+    def perform_task_physical_verification(self, perform_checks, need_restrict_analysis):
         if not self.operations:
             return True
         # Depth is a proxy for context 
@@ -6944,15 +6965,26 @@ class Task(object):
                     continue
                 assert idx in self.op.mappings
                 mappings = self.op.mappings[idx]
+                # If we are doing restricted analysis then add any restrictions
+                add_restrictions = need_restrict_analysis and \
+                        (req.priv == READ_WRITE or req.priv == READ_ONLY) and \
+                        req.coher == SIMULTANEOUS
+                if add_restrictions and not self.restrictions:
+                    self.restrictions = list()
                 for field in req.fields:
                     assert field.fid in mappings
                     inst = mappings[field.fid]
                     if inst.is_virtual():
+                        assert not add_restrictions # Better not be virtual if restricted
                         continue
                     req.logical_node.initialize_verification_state(depth, field, inst)
+                    if add_restrictions:
+                        self.restrictions.append(
+                                Restriction(req.logical_node, field, inst))
         success = True
         for op in self.operations:
-            if not op.perform_op_physical_verification(perform_checks):
+            if not op.perform_op_physical_verification(perform_checks, 
+                                                       need_restrict_analysis):
                 success = False
                 break
         # Reset any physical user lists at our depth
@@ -10065,11 +10097,11 @@ class State(object):
                     return False 
         return True
 
-    def perform_physical_analysis(self, perform_checks, sanity_checks):
+    def perform_physical_analysis(self, perform_checks, sanity_checks, need_restrict_analysis):
         assert self.top_level_uid is not None
         top_task = self.get_task(self.top_level_uid)
         # Perform the physical analysis on all the operations in program order
-        if not top_task.perform_task_physical_verification(perform_checks):
+        if not top_task.perform_task_physical_verification(perform_checks, need_restrict_analysis):
             print("FAIL")
             return
         print("Pass")
@@ -10698,6 +10730,7 @@ def main(temp_dir):
     # If we are doing logical checks or the user asked for the dataflow
     # graph but we don't have any logical data then perform the logical analysis
     need_logical = dataflow_graphs and not state.detailed_logging 
+    need_restrict_analysis = True 
     if logical_checks or need_logical:
         if need_logical:
             print("INFO: No logical dependence data was found so we are running "+
@@ -10705,6 +10738,8 @@ def main(temp_dir):
                   "should compute. These are not the actual dataflow graphs computed.")
         print("Performing logical analysis...")
         state.perform_logical_analysis(logical_checks, sanity_checks)
+        # No longer need to do restriction analysis if we do it during logical
+        need_restrict_analysis = False
     # If we are doing physical checks or the user asked for the event
     # graph but we don't have any logical data then perform the physical analysis
     need_physical = event_graphs and not state.detailed_logging 
@@ -10714,7 +10749,7 @@ def main(temp_dir):
                   "physical analysis to show the event graph that the runtime "+
                   "should compute. This is not the actual event graph computed.")
         print("Performing physical analysis...")
-        state.perform_physical_analysis(physical_checks, sanity_checks)
+        state.perform_physical_analysis(physical_checks, sanity_checks, need_restrict_analysis)
         # If we generated the graph for printing, then simplify it 
         if need_physical:
             state.simplify_physical_graph(need_cycle_check=False)
