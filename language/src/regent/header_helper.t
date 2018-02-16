@@ -371,7 +371,7 @@ local function make_execute_launcher(launcher_name, wrapper_type, state_type, pa
          local param_name = param_list[1][4]
          return quote
            base.assert(
-               launcher_state.args_provided[i] == 1,
+               launcher_state.args_provided[i - 1] == 1,
                ["parameter " .. param_name .. " was not supplied in " .. launcher_name])
          end
        end,
@@ -525,11 +525,11 @@ local function make_add_argument(launcher_name, wrapper_type, state_type,
 
     if not overwrite then
       base.assert(
-        [launcher_state].args_provided[param_i] == 0,
+        [launcher_state].args_provided[param_i - 1] == 0,
         ["parameter " .. param_name .. " was already supplied in " .. launcher_name])
     end
 
-    [launcher_state].args_provided[param_i] = 1
+    [launcher_state].args_provided[param_i - 1] = 1
 
     [arg_setup]
   end
