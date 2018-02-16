@@ -4984,6 +4984,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void InnerContext::invalidate_current_template(void)
+    //--------------------------------------------------------------------------
+    {
+      if (current_trace != NULL && current_trace->get_physical_trace() != NULL)
+        current_trace->get_physical_trace()->invalidate_current_template();
+    }
+
+    //--------------------------------------------------------------------------
     void InnerContext::issue_frame(FrameOp *frame, ApEvent frame_termination)
     //--------------------------------------------------------------------------
     {
@@ -8177,6 +8185,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void LeafContext::invalidate_current_template(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
     void LeafContext::issue_frame(FrameOp *frame, ApEvent frame_termination)
     //--------------------------------------------------------------------------
     {
@@ -8380,8 +8394,6 @@ namespace Legion {
 #else
       SingleTask *single_task = static_cast<SingleTask*>(owner_task);
 #endif
-      //fprintf(stderr, "LeafContext::post_end_task: %p, %s\n",
-      //    dynamic_cast<Operation*>(single_task), single_task->get_task_name());
       // Handle the future result
       single_task->handle_future(res, res_size, owned);
       bool need_complete = false;
@@ -9328,6 +9340,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       enclosing->invalidate_trace_cache(trace);
+    }
+
+    //--------------------------------------------------------------------------
+    void InlineContext::invalidate_current_template(void)
+    //--------------------------------------------------------------------------
+    {
+      enclosing->invalidate_current_template();
     }
 
     //--------------------------------------------------------------------------

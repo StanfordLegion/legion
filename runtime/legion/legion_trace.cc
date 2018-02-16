@@ -1398,6 +1398,13 @@ namespace Legion {
       else
         templates.push_back(tpl);
     }
+    //--------------------------------------------------------------------------
+    void PhysicalTrace::invalidate_current_template(void)
+    //--------------------------------------------------------------------------
+    {
+      if (current_template != NULL && current_template->is_recording())
+        current_template->record_blocking_call();
+    }
 
     //--------------------------------------------------------------------------
     void PhysicalTrace::check_template_preconditions(void)
@@ -1440,7 +1447,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PhysicalTemplate::PhysicalTemplate(void)
-      : recording(true), replayable(true), fence_completion_id(0)
+      : recording(true), replayable(true), has_block(false),
+        fence_completion_id(0)
     //--------------------------------------------------------------------------
     {
       events.push_back(ApEvent());
@@ -1692,7 +1700,7 @@ namespace Legion {
     bool PhysicalTemplate::check_replayable(void)
     //--------------------------------------------------------------------------
     {
-      if (untracked_fill_views.size() > 0)
+      if (untracked_fill_views.size() > 0 || has_block)
         return false;
       for (LegionMap<InstanceView*, FieldMask>::aligned::const_iterator it =
            previous_valid_views.begin(); it !=
@@ -3028,6 +3036,14 @@ namespace Legion {
 #endif
       logical_contexts[dst_view] = logical_ctx;
       physical_contexts[dst_view] = physical_ctx;
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTemplate::record_blocking_call(void)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock tpl_lock(template_lock);
+      has_block = true;
     }
 
     //--------------------------------------------------------------------------

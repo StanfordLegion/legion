@@ -396,6 +396,7 @@ namespace Legion {
       PhysicalTrace& operator=(const PhysicalTrace &rhs);
     public:
       void clear_cached_template(void) { current_template = NULL; }
+      void invalidate_current_template(void);
       void check_template_preconditions(void);
     public:
       PhysicalTemplate* get_current_template(void) { return current_template; }
@@ -528,6 +529,7 @@ namespace Legion {
                                             const FieldMask &copy_mask,
                                             ContextID logical_ctx,
                                             ContextID physical_ctx);
+      void record_blocking_call(void);
     private:
       void record_ready_view(const RegionRequirement &req,
                              InstanceView *view,
@@ -541,6 +543,7 @@ namespace Legion {
     private:
       bool recording;
       bool replayable;
+      bool has_block;
       mutable LocalLock template_lock;
       unsigned fence_completion_id;
     private:
