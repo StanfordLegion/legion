@@ -18840,6 +18840,11 @@ namespace Legion {
                 LegionSpy::log_processor_kind(kind, "OpenMP");
                 break;
               }
+            case Processor::PY_PROC:
+              {
+                LegionSpy::log_processor_kind(kind, "Python");
+                break;
+              }
             default:
               assert(false); // unknown processor kind
           }
