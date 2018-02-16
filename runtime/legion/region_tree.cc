@@ -14974,6 +14974,9 @@ namespace Legion {
           realm_dst_fields, precondition, predicate_guard, 
           (intersect == NULL) ? NULL : intersect->get_row_source(),
           mask, redop, reduction_fold, perf, performed_mask);
+      if ((op != NULL) && op->has_execution_fence_event())
+        precondition= Runtime::merge_events(precondition,
+                                            op->get_execution_fence_event());
       LegionSpy::log_copy_events(op->get_unique_op_id(), handle, 
                                  precondition, result);
       for (unsigned idx = 0; idx < src_fields.size(); idx++)
@@ -15029,6 +15032,9 @@ namespace Legion {
           fill_value, fill_size, precondition, predicate_guard,
           (intersect == NULL) ? NULL : intersect->get_row_source(), 
           mask, perf, performed_mask);
+      if ((op != NULL) && op->has_execution_fence_event())
+        precondition = Runtime::merge_events(precondition,
+                                             op->get_execution_fence_event());
       LegionSpy::log_fill_events(op->get_unique_op_id(), handle, 
                                  precondition, result, fill_uid);
       for (unsigned idx = 0; idx < dst_fields.size(); idx++)

@@ -44,6 +44,24 @@ typedef Point<3,coord_t> Point3D;
 typedef Rect<1,coord_t> Rect1D;
 typedef Rect<2,coord_t> Rect2D;
 typedef Rect<3,coord_t> Rect3D;
+typedef Transform<1,1,coord_t> Transform1x1;
+typedef Transform<1,2,coord_t> Transform1x2;
+typedef Transform<1,3,coord_t> Transform1x3;
+typedef Transform<2,1,coord_t> Transform2x1;
+typedef Transform<2,2,coord_t> Transform2x2;
+typedef Transform<2,3,coord_t> Transform2x3;
+typedef Transform<3,1,coord_t> Transform3x1;
+typedef Transform<3,2,coord_t> Transform3x2;
+typedef Transform<3,3,coord_t> Transform3x3;
+typedef AffineTransform<1,1,coord_t> AffineTransform1x1;
+typedef AffineTransform<1,2,coord_t> AffineTransform1x2;
+typedef AffineTransform<1,3,coord_t> AffineTransform1x3;
+typedef AffineTransform<2,1,coord_t> AffineTransform2x1;
+typedef AffineTransform<2,2,coord_t> AffineTransform2x2;
+typedef AffineTransform<2,3,coord_t> AffineTransform2x3;
+typedef AffineTransform<3,1,coord_t> AffineTransform3x1;
+typedef AffineTransform<3,2,coord_t> AffineTransform3x2;
+typedef AffineTransform<3,3,coord_t> AffineTransform3x3;
 
 // -----------------------------------------------------------------------
 // Pointer Operations
@@ -184,6 +202,154 @@ legion_domain_get_volume(legion_domain_t d_)
   Domain d = CObjectWrapper::unwrap(d_);
 
   return d.get_volume();
+}
+
+// -----------------------------------------------------------------------
+// Domain Transform Operations
+// -----------------------------------------------------------------------
+
+legion_domain_transform_t
+legion_domain_transform_from_1x1(legion_transform_1x1_t t_)
+{
+  Transform1x1 t = CObjectWrapper::unwrap(t_);
+
+  return CObjectWrapper::wrap(DomainTransform(t));
+}
+
+legion_domain_transform_t
+legion_domain_transform_from_1x2(legion_transform_1x2_t t_)
+{
+  Transform1x2 t = CObjectWrapper::unwrap(t_);
+
+  return CObjectWrapper::wrap(DomainTransform(t));
+}
+
+legion_domain_transform_t
+legion_domain_transform_from_1x3(legion_transform_1x3_t t_)
+{
+  Transform1x3 t = CObjectWrapper::unwrap(t_);
+
+  return CObjectWrapper::wrap(DomainTransform(t));
+}
+
+legion_domain_transform_t
+legion_domain_transform_from_2x1(legion_transform_2x1_t t_)
+{
+  Transform2x1 t = CObjectWrapper::unwrap(t_);
+
+  return CObjectWrapper::wrap(DomainTransform(t));
+}
+
+legion_domain_transform_t
+legion_domain_transform_from_2x2(legion_transform_2x2_t t_)
+{
+  Transform2x2 t = CObjectWrapper::unwrap(t_);
+
+  return CObjectWrapper::wrap(DomainTransform(t));
+}
+
+legion_domain_transform_t
+legion_domain_transform_from_2x3(legion_transform_2x3_t t_)
+{
+  Transform2x3 t = CObjectWrapper::unwrap(t_);
+
+  return CObjectWrapper::wrap(DomainTransform(t));
+}
+
+legion_domain_transform_t
+legion_domain_transform_from_3x1(legion_transform_3x1_t t_)
+{
+  Transform3x1 t = CObjectWrapper::unwrap(t_);
+
+  return CObjectWrapper::wrap(DomainTransform(t));
+}
+
+legion_domain_transform_t
+legion_domain_transform_from_3x2(legion_transform_3x2_t t_)
+{
+  Transform3x2 t = CObjectWrapper::unwrap(t_);
+
+  return CObjectWrapper::wrap(DomainTransform(t));
+}
+
+legion_domain_transform_t
+legion_domain_transform_from_3x3(legion_transform_3x3_t t_)
+{
+  Transform3x3 t = CObjectWrapper::unwrap(t_);
+
+  return CObjectWrapper::wrap(DomainTransform(t));
+}
+
+legion_domain_affine_transform_t
+legion_domain_affine_transform_from_1x1(legion_affine_transform_1x1_t t_)
+{
+  AffineTransform1x1 t = CObjectWrapper::unwrap(t_);
+
+  return CObjectWrapper::wrap(DomainAffineTransform(t));
+}
+
+legion_domain_affine_transform_t
+legion_domain_affine_transform_from_1x2(legion_affine_transform_1x2_t t_)
+{
+  AffineTransform1x2 t = CObjectWrapper::unwrap(t_);
+
+  return CObjectWrapper::wrap(DomainAffineTransform(t));
+}
+
+legion_domain_affine_transform_t
+legion_domain_affine_transform_from_1x3(legion_affine_transform_1x3_t t_)
+{
+  AffineTransform1x3 t = CObjectWrapper::unwrap(t_);
+
+  return CObjectWrapper::wrap(DomainAffineTransform(t));
+}
+
+legion_domain_affine_transform_t
+legion_domain_affine_transform_from_2x1(legion_affine_transform_2x1_t t_)
+{
+  AffineTransform2x1 t = CObjectWrapper::unwrap(t_);
+
+  return CObjectWrapper::wrap(DomainAffineTransform(t));
+}
+
+legion_domain_affine_transform_t
+legion_domain_affine_transform_from_2x2(legion_affine_transform_2x2_t t_)
+{
+  AffineTransform2x2 t = CObjectWrapper::unwrap(t_);
+
+  return CObjectWrapper::wrap(DomainAffineTransform(t));
+}
+
+legion_domain_affine_transform_t
+legion_domain_affine_transform_from_2x3(legion_affine_transform_2x3_t t_)
+{
+  AffineTransform2x3 t = CObjectWrapper::unwrap(t_);
+
+  return CObjectWrapper::wrap(DomainAffineTransform(t));
+}
+
+legion_domain_affine_transform_t
+legion_domain_affine_transform_from_3x1(legion_affine_transform_3x1_t t_)
+{
+  AffineTransform3x1 t = CObjectWrapper::unwrap(t_);
+
+  return CObjectWrapper::wrap(DomainAffineTransform(t));
+}
+
+legion_domain_affine_transform_t
+legion_domain_affine_transform_from_3x2(legion_affine_transform_3x2_t t_)
+{
+  AffineTransform3x2 t = CObjectWrapper::unwrap(t_);
+
+  return CObjectWrapper::wrap(DomainAffineTransform(t));
+}
+
+legion_domain_affine_transform_t
+legion_domain_affine_transform_from_3x3(legion_affine_transform_3x3_t t_)
+{
+  AffineTransform3x3 t = CObjectWrapper::unwrap(t_);
+
+  return CObjectWrapper::wrap(DomainAffineTransform(t));
 }
 
 // -----------------------------------------------------------------------
@@ -1853,7 +2019,7 @@ legion_phase_barrier_create(legion_runtime_t runtime_,
                             legion_context_t ctx_,
                             unsigned arrivals)
 {
-  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_)->context();
 
   PhaseBarrier result = runtime->create_phase_barrier(ctx, arrivals);
@@ -1865,7 +2031,7 @@ legion_phase_barrier_destroy(legion_runtime_t runtime_,
                              legion_context_t ctx_,
                              legion_phase_barrier_t handle_)
 {
-  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_)->context();
   PhaseBarrier handle = CObjectWrapper::unwrap(handle_);
 
@@ -1910,7 +2076,7 @@ legion_phase_barrier_advance(legion_runtime_t runtime_,
                              legion_context_t ctx_,
                              legion_phase_barrier_t handle_)
 {
-  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_)->context();
   PhaseBarrier handle = CObjectWrapper::unwrap(handle_);
 
@@ -1930,7 +2096,7 @@ legion_dynamic_collective_create(legion_runtime_t runtime_,
                                  const void *init_value,
                                  size_t init_size)
 {
-  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_)->context();
 
   DynamicCollective result =
@@ -1944,7 +2110,7 @@ legion_dynamic_collective_destroy(legion_runtime_t runtime_,
                                   legion_context_t ctx_,
                                   legion_dynamic_collective_t handle_)
 {
-  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_)->context();
   DynamicCollective handle = CObjectWrapper::unwrap(handle_);
 
@@ -1959,7 +2125,7 @@ legion_dynamic_collective_arrive(legion_runtime_t runtime_,
                                  size_t size,
                                  unsigned count /* = 1 */)
 {
-  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_)->context();
   DynamicCollective handle = CObjectWrapper::unwrap(handle_);
 
@@ -1986,7 +2152,7 @@ legion_dynamic_collective_defer_arrival(legion_runtime_t runtime_,
                                         legion_future_t f_,
                                         unsigned count /* = 1 */)
 {
-  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_)->context();
   DynamicCollective handle = CObjectWrapper::unwrap(handle_);
   Future *f = CObjectWrapper::unwrap(f_);
@@ -1999,7 +2165,7 @@ legion_dynamic_collective_get_result(legion_runtime_t runtime_,
                                      legion_context_t ctx_,
                                      legion_dynamic_collective_t handle_)
 {
-  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_)->context();
   DynamicCollective handle = CObjectWrapper::unwrap(handle_);
 
@@ -2012,7 +2178,7 @@ legion_dynamic_collective_advance(legion_runtime_t runtime_,
                                   legion_context_t ctx_,
                                   legion_dynamic_collective_t handle_)
 {
-  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_)->context();
   DynamicCollective handle = CObjectWrapper::unwrap(handle_);
 
@@ -3071,7 +3237,7 @@ legion_must_epoch_launcher_execute(legion_runtime_t runtime_,
                                    legion_context_t ctx_,
                                    legion_must_epoch_launcher_t launcher_)
 {
-  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_)->context();
   MustEpochLauncher *launcher = CObjectWrapper::unwrap(launcher_);
 

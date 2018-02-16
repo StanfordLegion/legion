@@ -215,6 +215,76 @@ namespace Legion {
       NEW_BLOCKIFY_WRAPPER(legion_blockify_2d_t, Blockify<2>);
       NEW_BLOCKIFY_WRAPPER(legion_blockify_3d_t, Blockify<3>);
 #undef NEW_RECT_WRAPPER
+
+#define NEW_TRANSFORM_WRAPPER(T_, T, X, Y)              \
+      static T_ wrap(T t) {                             \
+        T_ t_;                                          \
+        for (int i = 0; i < X; i++)                     \
+          for (int j = 0; j < Y; j++)                   \
+            t_.trans[i][j] = t[i][j];                   \
+        return t_;                                      \
+      }                                                 \
+      static T unwrap(T_ t_) {                          \
+        T t;                                            \
+        for (int i = 0; i < X; i++)                     \
+          for (int j = 0; j < Y; j++)                   \
+            t[i][j] = t_.trans[i][j];                   \
+        return t;                                       \
+      }
+    typedef Transform<1,1,coord_t> Transform1x1;
+    typedef Transform<1,2,coord_t> Transform1x2;
+    typedef Transform<1,3,coord_t> Transform1x3;
+    typedef Transform<2,1,coord_t> Transform2x1;
+    typedef Transform<2,2,coord_t> Transform2x2;
+    typedef Transform<2,3,coord_t> Transform2x3;
+    typedef Transform<3,1,coord_t> Transform3x1;
+    typedef Transform<3,2,coord_t> Transform3x2;
+    typedef Transform<3,3,coord_t> Transform3x3;
+    NEW_TRANSFORM_WRAPPER(legion_transform_1x1_t, Transform1x1, 1, 1);
+    NEW_TRANSFORM_WRAPPER(legion_transform_1x2_t, Transform1x2, 1, 2);
+    NEW_TRANSFORM_WRAPPER(legion_transform_1x3_t, Transform1x3, 1, 3);
+    NEW_TRANSFORM_WRAPPER(legion_transform_2x1_t, Transform2x1, 2, 1);
+    NEW_TRANSFORM_WRAPPER(legion_transform_2x2_t, Transform2x2, 2, 2);
+    NEW_TRANSFORM_WRAPPER(legion_transform_2x3_t, Transform2x3, 2, 3);
+    NEW_TRANSFORM_WRAPPER(legion_transform_3x1_t, Transform3x1, 3, 1);
+    NEW_TRANSFORM_WRAPPER(legion_transform_3x2_t, Transform3x2, 3, 2);
+    NEW_TRANSFORM_WRAPPER(legion_transform_3x3_t, Transform3x3, 3, 3);
+#undef NEW_TRANSFORM_WRAPPER
+
+#define NEW_AFFINE_TRANSFORM_WRAPPER(T_, T)             \
+    static T_ wrap(T t) {                               \
+      T_ t_;                                            \
+      t_.transform = wrap(t.transform);                 \
+      t_.offset = wrap(t.offset);                       \
+      return t_;                                        \
+    }                                                   \
+    static T unwrap(T_ t_) {                            \
+      T t;                                              \
+      t.transform = unwrap(t_.transform);               \
+      t.offset = unwrap(t_.offset);                     \
+      return t;                                         \
+    }
+
+    typedef AffineTransform<1,1,coord_t> AffineTransform1x1;
+    typedef AffineTransform<1,2,coord_t> AffineTransform1x2;
+    typedef AffineTransform<1,3,coord_t> AffineTransform1x3;
+    typedef AffineTransform<2,1,coord_t> AffineTransform2x1;
+    typedef AffineTransform<2,2,coord_t> AffineTransform2x2;
+    typedef AffineTransform<2,3,coord_t> AffineTransform2x3;
+    typedef AffineTransform<3,1,coord_t> AffineTransform3x1;
+    typedef AffineTransform<3,2,coord_t> AffineTransform3x2;
+    typedef AffineTransform<3,3,coord_t> AffineTransform3x3;
+    NEW_AFFINE_TRANSFORM_WRAPPER(legion_affine_transform_1x1_t, AffineTransform1x1);
+    NEW_AFFINE_TRANSFORM_WRAPPER(legion_affine_transform_1x2_t, AffineTransform1x2);
+    NEW_AFFINE_TRANSFORM_WRAPPER(legion_affine_transform_1x3_t, AffineTransform1x3);
+    NEW_AFFINE_TRANSFORM_WRAPPER(legion_affine_transform_2x1_t, AffineTransform2x1);
+    NEW_AFFINE_TRANSFORM_WRAPPER(legion_affine_transform_2x2_t, AffineTransform2x2);
+    NEW_AFFINE_TRANSFORM_WRAPPER(legion_affine_transform_2x3_t, AffineTransform2x3);
+    NEW_AFFINE_TRANSFORM_WRAPPER(legion_affine_transform_3x1_t, AffineTransform3x1);
+    NEW_AFFINE_TRANSFORM_WRAPPER(legion_affine_transform_3x2_t, AffineTransform3x2);
+    NEW_AFFINE_TRANSFORM_WRAPPER(legion_affine_transform_3x3_t, AffineTransform3x3);
+#undef NEW_AFFINE_TRANSFORM_WRAPPER
+
       static legion_domain_t
       wrap(Domain domain) {
         legion_domain_t domain_;
