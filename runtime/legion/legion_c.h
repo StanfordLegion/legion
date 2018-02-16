@@ -121,6 +121,41 @@ extern "C" {
   NEW_BLOCKIFY_TYPE(legion_blockify_3d_t, legion_point_3d_t);
 #undef NEW_BLOCKIFY_TYPE
 
+#define NEW_TRANSFORM_TYPE(T, X, Y) \
+  typedef struct T { coord_t trans[X][Y]; } T
+  NEW_TRANSFORM_TYPE(legion_transform_1x1_t, 1, 1);
+  NEW_TRANSFORM_TYPE(legion_transform_1x2_t, 1, 2);
+  NEW_TRANSFORM_TYPE(legion_transform_1x3_t, 1, 3);
+  NEW_TRANSFORM_TYPE(legion_transform_2x1_t, 2, 1);
+  NEW_TRANSFORM_TYPE(legion_transform_2x2_t, 2, 2);
+  NEW_TRANSFORM_TYPE(legion_transform_2x3_t, 2, 3);
+  NEW_TRANSFORM_TYPE(legion_transform_3x1_t, 3, 1);
+  NEW_TRANSFORM_TYPE(legion_transform_3x2_t, 3, 2);
+  NEW_TRANSFORM_TYPE(legion_transform_3x3_t, 3, 3);
+#undef NEW_TRANSFORM_TYPE
+
+#define NEW_AFFINE_TRANSFORM_TYPE(T, TT, PT) \
+  typedef struct T { TT transform; PT offset; } T
+  NEW_AFFINE_TRANSFORM_TYPE(legion_affine_transform_1x1_t, 
+                            legion_transform_1x1_t, legion_point_1d_t);
+  NEW_AFFINE_TRANSFORM_TYPE(legion_affine_transform_1x2_t,
+                            legion_transform_1x2_t, legion_point_1d_t);
+  NEW_AFFINE_TRANSFORM_TYPE(legion_affine_transform_1x3_t,
+                            legion_transform_1x3_t, legion_point_1d_t);
+  NEW_AFFINE_TRANSFORM_TYPE(legion_affine_transform_2x1_t, 
+                            legion_transform_2x1_t, legion_point_2d_t);
+  NEW_AFFINE_TRANSFORM_TYPE(legion_affine_transform_2x2_t,
+                            legion_transform_2x2_t, legion_point_2d_t);
+  NEW_AFFINE_TRANSFORM_TYPE(legion_affine_transform_2x3_t,
+                            legion_transform_2x3_t, legion_point_2d_t);
+  NEW_AFFINE_TRANSFORM_TYPE(legion_affine_transform_3x1_t, 
+                            legion_transform_3x1_t, legion_point_3d_t);
+  NEW_AFFINE_TRANSFORM_TYPE(legion_affine_transform_3x2_t,
+                            legion_transform_3x2_t, legion_point_3d_t);
+  NEW_AFFINE_TRANSFORM_TYPE(legion_affine_transform_3x3_t,
+                            legion_transform_3x3_t, legion_point_3d_t);
+#undef NEW_AFFINE_TRANSFORM_TYPE
+
   /**
    * @see Legion::Domain
    */
@@ -441,6 +476,64 @@ extern "C" {
    */
   size_t
   legion_domain_get_volume(legion_domain_t d);
+
+  // -----------------------------------------------------------------------
+  // Domain Transform Operations
+  // -----------------------------------------------------------------------
+
+  legion_domain_transform_t
+  legion_domain_transform_from_1x1(legion_transform_1x1_t t);
+
+  legion_domain_transform_t
+  legion_domain_transform_from_1x2(legion_transform_1x2_t t);
+
+  legion_domain_transform_t
+  legion_domain_transform_from_1x3(legion_transform_1x3_t t);
+
+  legion_domain_transform_t
+  legion_domain_transform_from_2x1(legion_transform_2x1_t t);
+
+  legion_domain_transform_t
+  legion_domain_transform_from_2x2(legion_transform_2x2_t t);
+
+  legion_domain_transform_t
+  legion_domain_transform_from_2x3(legion_transform_2x3_t t);
+
+  legion_domain_transform_t
+  legion_domain_transform_from_3x1(legion_transform_3x1_t t);
+
+  legion_domain_transform_t
+  legion_domain_transform_from_3x2(legion_transform_3x2_t t);
+
+  legion_domain_transform_t
+  legion_domain_transform_from_3x3(legion_transform_3x3_t t);
+
+  legion_domain_affine_transform_t
+  legion_domain_affine_transform_from_1x1(legion_affine_transform_1x1_t t);
+
+  legion_domain_affine_transform_t
+  legion_domain_affine_transform_from_1x2(legion_affine_transform_1x2_t t);
+
+  legion_domain_affine_transform_t
+  legion_domain_affine_transform_from_1x3(legion_affine_transform_1x3_t t);
+
+  legion_domain_affine_transform_t
+  legion_domain_affine_transform_from_2x1(legion_affine_transform_2x1_t t);
+
+  legion_domain_affine_transform_t
+  legion_domain_affine_transform_from_2x2(legion_affine_transform_2x2_t t);
+
+  legion_domain_affine_transform_t
+  legion_domain_affine_transform_from_2x3(legion_affine_transform_2x3_t t);
+
+  legion_domain_affine_transform_t
+  legion_domain_affine_transform_from_3x1(legion_affine_transform_3x1_t t);
+
+  legion_domain_affine_transform_t
+  legion_domain_affine_transform_from_3x2(legion_affine_transform_3x2_t t);
+
+  legion_domain_affine_transform_t
+  legion_domain_affine_transform_from_3x3(legion_affine_transform_3x3_t t);
 
   // -----------------------------------------------------------------------
   // Domain Point Operations
