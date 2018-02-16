@@ -237,7 +237,7 @@ assign_list_list(legion_terra_index_space_list_list_t& ls,
 static bool
 is_structured(Runtime *runtime, Context ctx, IndexSpace is) {
   Domain is_domain = runtime->get_index_space_domain(ctx, is);
-  return is_domain.get_dim() > 0;
+  return is_domain.get_dim() > 1;
 }
 
 // Returns true if the index space `ip` belongs to is structured.
@@ -246,6 +246,8 @@ is_structured(Runtime *runtime, Context ctx, IndexPartition ip) {
   IndexSpace is = runtime->get_parent_index_space(ctx, ip);
   return is_structured(runtime, ctx, is);
 }
+
+#define OLD_SHALLOW_CROSS_PRODUCT
 
 #ifdef OLD_SHALLOW_CROSS_PRODUCT
 // Returns true if `lhs` and `rhs` should be switched when we take their

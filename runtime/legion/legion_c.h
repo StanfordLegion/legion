@@ -121,6 +121,41 @@ extern "C" {
   NEW_BLOCKIFY_TYPE(legion_blockify_3d_t, legion_point_3d_t);
 #undef NEW_BLOCKIFY_TYPE
 
+#define NEW_TRANSFORM_TYPE(T, X, Y) \
+  typedef struct T { coord_t trans[X][Y]; } T
+  NEW_TRANSFORM_TYPE(legion_transform_1x1_t, 1, 1);
+  NEW_TRANSFORM_TYPE(legion_transform_1x2_t, 1, 2);
+  NEW_TRANSFORM_TYPE(legion_transform_1x3_t, 1, 3);
+  NEW_TRANSFORM_TYPE(legion_transform_2x1_t, 2, 1);
+  NEW_TRANSFORM_TYPE(legion_transform_2x2_t, 2, 2);
+  NEW_TRANSFORM_TYPE(legion_transform_2x3_t, 2, 3);
+  NEW_TRANSFORM_TYPE(legion_transform_3x1_t, 3, 1);
+  NEW_TRANSFORM_TYPE(legion_transform_3x2_t, 3, 2);
+  NEW_TRANSFORM_TYPE(legion_transform_3x3_t, 3, 3);
+#undef NEW_TRANSFORM_TYPE
+
+#define NEW_AFFINE_TRANSFORM_TYPE(T, TT, PT) \
+  typedef struct T { TT transform; PT offset; } T
+  NEW_AFFINE_TRANSFORM_TYPE(legion_affine_transform_1x1_t, 
+                            legion_transform_1x1_t, legion_point_1d_t);
+  NEW_AFFINE_TRANSFORM_TYPE(legion_affine_transform_1x2_t,
+                            legion_transform_1x2_t, legion_point_1d_t);
+  NEW_AFFINE_TRANSFORM_TYPE(legion_affine_transform_1x3_t,
+                            legion_transform_1x3_t, legion_point_1d_t);
+  NEW_AFFINE_TRANSFORM_TYPE(legion_affine_transform_2x1_t, 
+                            legion_transform_2x1_t, legion_point_2d_t);
+  NEW_AFFINE_TRANSFORM_TYPE(legion_affine_transform_2x2_t,
+                            legion_transform_2x2_t, legion_point_2d_t);
+  NEW_AFFINE_TRANSFORM_TYPE(legion_affine_transform_2x3_t,
+                            legion_transform_2x3_t, legion_point_2d_t);
+  NEW_AFFINE_TRANSFORM_TYPE(legion_affine_transform_3x1_t, 
+                            legion_transform_3x1_t, legion_point_3d_t);
+  NEW_AFFINE_TRANSFORM_TYPE(legion_affine_transform_3x2_t,
+                            legion_transform_3x2_t, legion_point_3d_t);
+  NEW_AFFINE_TRANSFORM_TYPE(legion_affine_transform_3x3_t,
+                            legion_transform_3x3_t, legion_point_3d_t);
+#undef NEW_AFFINE_TRANSFORM_TYPE
+
   /**
    * @see Legion::Domain
    */
@@ -443,6 +478,64 @@ extern "C" {
    */
   size_t
   legion_domain_get_volume(legion_domain_t d);
+
+  // -----------------------------------------------------------------------
+  // Domain Transform Operations
+  // -----------------------------------------------------------------------
+
+  legion_domain_transform_t
+  legion_domain_transform_from_1x1(legion_transform_1x1_t t);
+
+  legion_domain_transform_t
+  legion_domain_transform_from_1x2(legion_transform_1x2_t t);
+
+  legion_domain_transform_t
+  legion_domain_transform_from_1x3(legion_transform_1x3_t t);
+
+  legion_domain_transform_t
+  legion_domain_transform_from_2x1(legion_transform_2x1_t t);
+
+  legion_domain_transform_t
+  legion_domain_transform_from_2x2(legion_transform_2x2_t t);
+
+  legion_domain_transform_t
+  legion_domain_transform_from_2x3(legion_transform_2x3_t t);
+
+  legion_domain_transform_t
+  legion_domain_transform_from_3x1(legion_transform_3x1_t t);
+
+  legion_domain_transform_t
+  legion_domain_transform_from_3x2(legion_transform_3x2_t t);
+
+  legion_domain_transform_t
+  legion_domain_transform_from_3x3(legion_transform_3x3_t t);
+
+  legion_domain_affine_transform_t
+  legion_domain_affine_transform_from_1x1(legion_affine_transform_1x1_t t);
+
+  legion_domain_affine_transform_t
+  legion_domain_affine_transform_from_1x2(legion_affine_transform_1x2_t t);
+
+  legion_domain_affine_transform_t
+  legion_domain_affine_transform_from_1x3(legion_affine_transform_1x3_t t);
+
+  legion_domain_affine_transform_t
+  legion_domain_affine_transform_from_2x1(legion_affine_transform_2x1_t t);
+
+  legion_domain_affine_transform_t
+  legion_domain_affine_transform_from_2x2(legion_affine_transform_2x2_t t);
+
+  legion_domain_affine_transform_t
+  legion_domain_affine_transform_from_2x3(legion_affine_transform_2x3_t t);
+
+  legion_domain_affine_transform_t
+  legion_domain_affine_transform_from_3x1(legion_affine_transform_3x1_t t);
+
+  legion_domain_affine_transform_t
+  legion_domain_affine_transform_from_3x2(legion_affine_transform_3x2_t t);
+
+  legion_domain_affine_transform_t
+  legion_domain_affine_transform_from_3x3(legion_affine_transform_3x3_t t);
 
   // -----------------------------------------------------------------------
   // Domain Point Operations
@@ -1113,14 +1206,14 @@ extern "C" {
     int color /* = AUTO_GENERATE_ID */);
 
   /**
-   * @see LegionRuntime::HighLevel::Runtime::is_index_partition_disjoint()
+   * @see Legion::Runtime::is_index_partition_disjoint()
    */
   bool
   legion_index_partition_is_disjoint(legion_runtime_t runtime,
                                      legion_index_partition_t handle);
 
   /**
-   * @see LegionRuntime::HighLevel::Runtime::is_index_partition_complete()
+   * @see Legion::Runtime::is_index_partition_complete()
    */
   bool
   legion_index_partition_is_complete(legion_runtime_t runtime,
@@ -1706,7 +1799,7 @@ extern "C" {
                                legion_phase_barrier_t handle);
 
   /**
-   * @see LegionRuntime::HighLevel::PhaseBarrier::alter_arrival_count()
+   * @see Legion::PhaseBarrier::alter_arrival_count()
    */
   legion_phase_barrier_t
   legion_phase_barrier_alter_arrival_count(legion_runtime_t runtime,
@@ -1715,7 +1808,7 @@ extern "C" {
                                            int delta);
 
   /**
-   * @see LegionRuntime::HighLevel::PhaseBarrier::arrive()
+   * @see Legion::PhaseBarrier::arrive()
    */
   void
   legion_phase_barrier_arrive(legion_runtime_t runtime,
@@ -1724,7 +1817,7 @@ extern "C" {
                               unsigned count /* = 1 */);
 
   /**
-   * @see LegionRuntime::HighLevel::PhaseBarrier::wait()
+   * @see Legion::PhaseBarrier::wait()
    */
   void
   legion_phase_barrier_wait(legion_runtime_t runtime,
@@ -1769,7 +1862,7 @@ extern "C" {
                                     legion_dynamic_collective_t handle);
 
   /**
-   * @see LegionRuntime::HighLevel::DynamicCollective::alter_arrival_count()
+   * @see Legion::DynamicCollective::alter_arrival_count()
    */
   legion_dynamic_collective_t
   legion_dynamic_collective_alter_arrival_count(
@@ -3515,13 +3608,13 @@ extern "C" {
   // -----------------------------------------------------------------------
 
   /**
-   * @see LegionRuntime::TimeStamp::get_current_time_in_micros()
+   * @see Realm::Clock::get_current_time_in_micros()
    */
   unsigned long long
   legion_get_current_time_in_micros(void);
 
   /**
-   * @see LegionRuntime::TimeStamp::get_current_time_in_nanos()
+   * @see Realm::Clock::get_current_time_in_nanos()
    */
   unsigned long long
   legion_get_current_time_in_nanos(void);
