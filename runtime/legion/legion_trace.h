@@ -366,7 +366,30 @@ namespace Legion {
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
       virtual void trigger_dependence_analysis(void);
-      virtual void trigger_mapping(void);
+    };
+
+    /**
+     * \class TraceBeginOp
+     * This class represents mapping fences which we inject
+     * into the operation stream to begin a trace.  This fence
+     * is by a TraceReplayOp if the trace allows physical tracing.
+     */
+    class TraceBeginOp : public TraceOp {
+    public:
+      static const AllocationType alloc_type = TRACE_BEGIN_OP_ALLOC;
+    public:
+      TraceBeginOp(Runtime *rt);
+      TraceBeginOp(const TraceBeginOp &rhs);
+      virtual ~TraceBeginOp(void);
+    public:
+      TraceBeginOp& operator=(const TraceBeginOp &rhs);
+    public:
+      void initialize_begin(TaskContext *ctx, LegionTrace *trace);
+    public:
+      virtual void activate(void);
+      virtual void deactivate(void);
+      virtual const char* get_logging_name(void) const;
+      virtual OpKind get_operation_kind(void) const;
     };
 
     struct CachedMapping

@@ -1054,7 +1054,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Now finish capturing the physical trace
-      if (local_trace->is_recording())
+      if (current_template != NULL && current_template->is_recording())
       {
 #ifdef DEBUG_LEGION
         assert(current_template != NULL);
@@ -1260,7 +1260,7 @@ namespace Legion {
     void TraceReplayOp::initialize_replay(TaskContext *ctx, LegionTrace *trace)
     //--------------------------------------------------------------------------
     {
-      initialize(ctx, MIXED_FENCE);
+      initialize(ctx, EXECUTION_FENCE);
 #ifdef DEBUG_LEGION
       assert(trace != NULL);
 #endif
@@ -1338,11 +1338,80 @@ namespace Legion {
       parent_ctx->update_current_fence(this);
     }
 
+    /////////////////////////////////////////////////////////////
+    // TraceBeginOp
+    /////////////////////////////////////////////////////////////
+
     //--------------------------------------------------------------------------
-    void TraceReplayOp::trigger_mapping(void)
+    TraceBeginOp::TraceBeginOp(Runtime *rt)
+      : TraceOp(rt)
     //--------------------------------------------------------------------------
     {
-      FenceOp::trigger_mapping();
+    }
+
+    //--------------------------------------------------------------------------
+    TraceBeginOp::TraceBeginOp(const TraceBeginOp &rhs)
+      : TraceOp(NULL)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    TraceBeginOp::~TraceBeginOp(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    TraceBeginOp& TraceBeginOp::operator=(const TraceBeginOp &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void TraceBeginOp::initialize_begin(TaskContext *ctx, LegionTrace *trace)
+    //--------------------------------------------------------------------------
+    {
+      initialize(ctx, MAPPING_FENCE);
+#ifdef DEBUG_LEGION
+      assert(trace != NULL);
+#endif
+      local_trace = trace;
+      trace = NULL;
+    }
+
+    //--------------------------------------------------------------------------
+    void TraceBeginOp::activate(void)
+    //--------------------------------------------------------------------------
+    {
+      activate_operation();
+    }
+
+    //--------------------------------------------------------------------------
+    void TraceBeginOp::deactivate(void)
+    //--------------------------------------------------------------------------
+    {
+      deactivate_operation();
+      runtime->free_begin_op(this);
+    }
+
+    //--------------------------------------------------------------------------
+    const char* TraceBeginOp::get_logging_name(void) const
+    //--------------------------------------------------------------------------
+    {
+      return op_names[TRACE_BEGIN_OP_KIND];
+    }
+
+    //--------------------------------------------------------------------------
+    Operation::OpKind TraceBeginOp::get_operation_kind(void) const
+    //--------------------------------------------------------------------------
+    {
+      return TRACE_BEGIN_OP_KIND;
     }
 
     /////////////////////////////////////////////////////////////

@@ -4864,14 +4864,18 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(dynamic_trace != NULL);
 #endif
-      runtime->issue_mapping_fence(this);
+      // Issue a begin op
+      TraceBeginOp *begin = runtime->get_available_begin_op();
+      begin->initialize_begin(this, dynamic_trace);
+      runtime->add_to_dependence_queue(this, executing_processor, begin);
 
       // Issue a replay op
       TraceReplayOp *replay = runtime->get_available_replay_op();
       replay->initialize_replay(this, dynamic_trace);
+      runtime->add_to_dependence_queue(this, executing_processor, replay);
+
       // Now mark that we are starting a trace
       current_trace = dynamic_trace;
-      runtime->add_to_dependence_queue(this, executing_processor, replay);
     }
 
     //--------------------------------------------------------------------------

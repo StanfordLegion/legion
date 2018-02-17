@@ -1354,6 +1354,7 @@ namespace Legion {
     class TraceCaptureOp;
     class TraceCompleteOp;
     class TraceReplayOp;
+    class TraceBeginOp;
     class PhysicalTrace;
     struct PhysicalTemplate;
     struct Instruction;

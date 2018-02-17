@@ -16201,7 +16201,14 @@ namespace Legion {
     {
       return get_available(replay_op_lock, available_replay_ops);
     }
-    
+
+    //--------------------------------------------------------------------------
+    TraceBeginOp* Runtime::get_available_begin_op(void)
+    //--------------------------------------------------------------------------
+    {
+      return get_available(begin_op_lock, available_begin_ops);
+    }
+
     //--------------------------------------------------------------------------
     MustEpochOp* Runtime::get_available_epoch_op(void)
     //--------------------------------------------------------------------------
@@ -16516,6 +16523,13 @@ namespace Legion {
       release_operation<false>(available_replay_ops, op);
     }
 
+    //--------------------------------------------------------------------------
+    void Runtime::free_begin_op(TraceBeginOp *op)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock t_lock(begin_op_lock);
+      release_operation<false>(available_begin_ops, op);
+    }
     //--------------------------------------------------------------------------
     void Runtime::free_epoch_op(MustEpochOp *op)
     //--------------------------------------------------------------------------
