@@ -1816,6 +1816,14 @@ namespace Legion {
     {
       recording = false;
       replayable = check_replayable();
+      if (outstanding_gc_events.size() > 0)
+        for (std::map<InstanceView*, std::set<ApEvent> >::iterator it =
+             outstanding_gc_events.begin(); it !=
+             outstanding_gc_events.end(); ++it)
+        {
+          it->first->update_gc_events(it->second);
+          it->first->collect_users(it->second);
+        }
       if (!replayable)
       {
         if (Runtime::dump_physical_traces)
@@ -3113,6 +3121,15 @@ namespace Legion {
     {
       AutoLock tpl_lock(template_lock);
       has_block = true;
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTemplate::record_outstanding_gc_event(
+                                         InstanceView *view, ApEvent term_event)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock tpl_lock(template_lock);
+      outstanding_gc_events[view].insert(term_event);
     }
 
     //--------------------------------------------------------------------------

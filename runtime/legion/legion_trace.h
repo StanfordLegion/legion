@@ -553,6 +553,7 @@ namespace Legion {
                                             ContextID logical_ctx,
                                             ContextID physical_ctx);
       void record_blocking_call(void);
+      void record_outstanding_gc_event(InstanceView *view, ApEvent term_event);
     private:
       void record_ready_view(const RegionRequirement &req,
                              InstanceView *view,
@@ -600,6 +601,7 @@ namespace Legion {
       LegionMap<InstanceView*, bool>::aligned         initialized;
       LegionMap<InstanceView*, ContextID>::aligned    logical_contexts;
       LegionMap<InstanceView*, ContextID>::aligned    physical_contexts;
+      std::map<InstanceView*, std::set<ApEvent> >     outstanding_gc_events;
     };
 
     enum InstructionKind

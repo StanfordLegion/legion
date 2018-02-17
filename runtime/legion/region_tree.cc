@@ -2088,7 +2088,7 @@ namespace Legion {
                                        ref.get_valid_fields(), 
                                        op, idx1, runtime->address_space,
                                        &info, map_applied_events,
-                                       trace_info.recording);
+                                       trace_info);
           if (restricted_out)
           {
             FieldMask restricted = ref.get_valid_fields() & restricted_fields;
@@ -12290,7 +12290,7 @@ namespace Legion {
                                              info.index, local_space, 
                                              preconditions,
                                              info.map_applied_events,
-                                             trace_info.recording);
+                                             trace_info);
           update_mask |= it->second;
         }
         // Now do the destination
@@ -12300,7 +12300,7 @@ namespace Legion {
                                      info.op->get_unique_op_id(),
                                      info.index, local_space, preconditions,
                                      info.map_applied_events,
-                                     trace_info.recording);
+                                     trace_info);
         // If we're restricted, get our restrict precondition
         if (restrict_info.has_restrictions())
         {
@@ -12326,7 +12326,7 @@ namespace Legion {
                              info.op->get_unique_op_id(), info.index,
                              it->second, false/*reading*/, restrict_out,
                              local_space, info.map_applied_events,
-                             trace_info.recording);
+                             trace_info);
         }
         if (restrict_out && restrict_info.has_restrictions())
         {
@@ -12658,7 +12658,7 @@ namespace Legion {
                                      info.op->get_unique_op_id(), info.index,
                                      it->second, true/*reading*/, restrict_out,
                                      local_space, info.map_applied_events,
-                                     trace_info.recording);
+                                     trace_info);
           }
           postconditions[copy_post] = pre_set.set_mask;
         }
@@ -14699,7 +14699,7 @@ namespace Legion {
                                      info.op, info.index, local_space,
                                      &info.version_info,
                                      info.map_applied_events,
-                                     trace_info.recording);
+                                     trace_info);
           }
         }
         if (!reduce_out_views.empty())
@@ -14927,7 +14927,7 @@ namespace Legion {
               new_views[idx]->as_instance_view()->add_user(usage, term_event,
                        ref.get_valid_fields(), info.op, info.index, 
                        local_space, &info.version_info,info.map_applied_events,
-                       trace_info.recording);
+                       trace_info);
               if (restricted_out)
               {
                 FieldMask restricted = 
@@ -15106,7 +15106,7 @@ namespace Legion {
                           true/*single copy*/, true/*restrict out*/, fill_mask,
                           &version_info, op->get_unique_op_id(), index,
                           local_space, preconditions, map_applied_events,
-                          trace_info.recording);
+                          trace_info);
         if (sync_precondition.exists())
           preconditions[sync_precondition] = fill_mask;
         // Sort the preconditions into event sets
@@ -15135,7 +15135,7 @@ namespace Legion {
                               &version_info, op->get_unique_op_id(), 
                               index, fill_mask, false/*reading*/,
                               true/*restrict out*/, local_space, 
-                              map_applied_events, trace_info.recording);
+                              map_applied_events, trace_info);
       }
       // Finally do the update to the physical state like a normal fill
       PhysicalState *state = get_physical_state(version_info);
