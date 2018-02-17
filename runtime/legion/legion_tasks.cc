@@ -707,13 +707,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool TaskOp::has_trace(void) const
-    //--------------------------------------------------------------------------
-    {
-      return trace != NULL;
-    }
-
-    //--------------------------------------------------------------------------
     bool TaskOp::is_remote(void) const
     //--------------------------------------------------------------------------
     {
@@ -752,6 +745,7 @@ namespace Legion {
       children_commit = false;
       stealable = false;
       options_selected = false;
+      memoize_selected = false;
       map_origin = false;
       true_guard = PredEvent::NO_PRED_EVENT;
       false_guard = PredEvent::NO_PRED_EVENT;
@@ -1036,7 +1030,6 @@ namespace Legion {
       options.inline_task = false;
       options.stealable = false;
       options.map_locally = false;
-      options.memoize = false;
       const TaskPriority parent_priority = parent_ctx->is_priority_mutable() ?
         parent_ctx->get_current_priority() : 0;
       options.parent_priority = parent_priority;
@@ -1044,11 +1037,6 @@ namespace Legion {
       options_selected = true;
       target_proc = options.initial_proc;
       stealable = options.stealable;
-      if (trace == NULL && options.memoize)
-        REPORT_LEGION_ERROR(ERROR_INVALID_PHYSICAL_TRACING,
-            "Invalid mapper output from 'select_task_options'. Mapper requested"
-            " memoization of a task that is not being traced.");
-      set_memoize(options.memoize);
       map_origin = options.map_locally;
       if (parent_priority != options.parent_priority)
       {
@@ -4887,6 +4875,11 @@ namespace Legion {
           perform_intra_task_alias_analysis(false/*tracing*/, NULL/*trace*/,
                                             privilege_paths);
       }
+      if (!memoize_selected)
+      {
+        invoke_memoize_operation(map_id);
+        memoize_selected = true;
+      }
       if (Runtime::legion_spy_enabled)
       {
         for (unsigned idx = 0; idx < regions.size(); idx++)
@@ -6903,6 +6896,11 @@ namespace Legion {
         if (local_trace == NULL)
           perform_intra_task_alias_analysis(false/*tracing*/, NULL/*trace*/,
                                             privilege_paths);
+      }
+      if (!memoize_selected)
+      {
+        invoke_memoize_operation(map_id);
+        memoize_selected = true;
       }
       if (Runtime::legion_spy_enabled)
       { 

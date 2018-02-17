@@ -168,7 +168,6 @@ namespace Legion {
       virtual void set_context_index(unsigned index);
       virtual int get_depth(void) const;
       virtual const char* get_task_name(void) const;
-      virtual bool has_trace(void) const;
     public:
       bool is_remote(void) const;
       inline bool is_stolen(void) const { return (steal_count > 0); }
@@ -321,6 +320,7 @@ namespace Legion {
       bool commit_received;
     protected:
       bool options_selected;
+      bool memoize_selected;
       bool map_origin;
     protected:
       // For managing predication

@@ -2458,7 +2458,6 @@ namespace Legion {
       Task(void);
     public:
       virtual const char* get_task_name(void) const = 0;
-      virtual bool has_trace(void) const = 0;
     public:
       virtual MappableType get_mappable_type(void) const 
         { return TASK_MAPPABLE; }

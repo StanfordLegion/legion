@@ -691,7 +691,7 @@ namespace Legion {
     class Memoizable
     {
     public:
-      virtual std::pair<unsigned, DomainPoint> get_trace_local_id() const = 0;
+      virtual std::pair<unsigned,DomainPoint> get_trace_local_id(void) const= 0;
     };
 
     /**
@@ -727,8 +727,8 @@ namespace Legion {
       void set_memoize(bool memoize);
     public:
       virtual bool is_memoizing(void) const { return memo_state != NO_MEMO; }
-      bool is_replaying() const { return memo_state == REPLAY; }
-      bool is_recording() const { return memo_state == RECORD; }
+      bool is_replaying(void) const { return memo_state == REPLAY; }
+      bool is_recording(void) const { return memo_state == RECORD; }
     protected:
       // The physical trace for this operation if any
       PhysicalTemplate *tpl;
