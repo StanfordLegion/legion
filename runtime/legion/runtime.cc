@@ -16512,7 +16512,7 @@ namespace Legion {
     void Runtime::free_replay_op(TraceReplayOp *op)
     //--------------------------------------------------------------------------
     {
-      AutoLock t_lock(trace_op_lock);
+      AutoLock t_lock(replay_op_lock);
       release_operation<false>(available_replay_ops, op);
     }
 
