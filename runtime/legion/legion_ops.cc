@@ -12991,25 +12991,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       PhysicalTraceInfo trace_info;
-      //if (is_replaying())
-      //{
-      //  complete_mapping();
-      //  // See if we have any arrivals to trigger
-      //  if (!arrive_barriers.empty())
-      //  {
-      //    for (std::vector<PhaseBarrier>::const_iterator it = 
-      //        arrive_barriers.begin(); it != arrive_barriers.end(); it++)
-      //    {
-      //      if (Runtime::legion_spy_enabled)
-      //        LegionSpy::log_phase_barrier_arrival(unique_op_id, 
-      //            it->phase_barrier);
-      //      Runtime::phase_barrier_arrive(it->phase_barrier, 1/*count*/,
-      //          completion_event);
-      //    }
-      //  }
-      //  complete_execution();
-      //  return;
-      //}
       if (is_recording())
       {
         trace_info.recording = true;
