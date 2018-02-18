@@ -78,7 +78,7 @@ namespace Legion {
         PHYSICAL_REPLAY,
       };
     public:
-      LegionTrace(TaskContext *ctx);
+      LegionTrace(TaskContext *ctx, bool memoize);
       virtual ~LegionTrace(void);
     public:
       virtual bool is_static_trace(void) const = 0;
@@ -204,7 +204,7 @@ namespace Legion {
         unsigned count;
       }; 
     public:
-      DynamicTrace(TraceID tid, TaskContext *ctx);
+      DynamicTrace(TraceID tid, TaskContext *ctx, bool memoize);
       DynamicTrace(const DynamicTrace &rhs);
       virtual ~DynamicTrace(void);
     public:

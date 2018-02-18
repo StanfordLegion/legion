@@ -33,11 +33,12 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    LegionTrace::LegionTrace(TaskContext *c)
+    LegionTrace::LegionTrace(TaskContext *c, bool memoize)
       : ctx(c), state(LOGICAL_ONLY), last_memoized(0)
     //--------------------------------------------------------------------------
     {
-      physical_trace = new PhysicalTrace(c->owner_task->runtime);
+      physical_trace = memoize ? new PhysicalTrace(c->owner_task->runtime)
+                               : NULL;
     }
 
     //--------------------------------------------------------------------------
@@ -133,7 +134,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     StaticTrace::StaticTrace(TaskContext *c,const std::set<RegionTreeID> *trees)
-      : LegionTrace(c)
+      : LegionTrace(c, false)
     //--------------------------------------------------------------------------
     {
       if (trees != NULL)
@@ -142,7 +143,7 @@ namespace Legion {
     
     //--------------------------------------------------------------------------
     StaticTrace::StaticTrace(const StaticTrace &rhs)
-      : LegionTrace(NULL)
+      : LegionTrace(NULL, false)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -416,15 +417,15 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    DynamicTrace::DynamicTrace(TraceID t, TaskContext *c)
-      : LegionTrace(c), tid(t), fixed(false), tracing(true)
+    DynamicTrace::DynamicTrace(TraceID t, TaskContext *c, bool memoize)
+      : LegionTrace(c, memoize), tid(t), fixed(false), tracing(true)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     DynamicTrace::DynamicTrace(const DynamicTrace &rhs)
-      : LegionTrace(NULL), tid(0)
+      : LegionTrace(NULL, false), tid(0)
     //--------------------------------------------------------------------------
     {
       // should never be called

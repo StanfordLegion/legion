@@ -6239,10 +6239,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::begin_trace(Context ctx, TraceID tid)
+    void Runtime::begin_trace(Context ctx, TraceID tid, bool memoize /*= true*/)
     //--------------------------------------------------------------------------
     {
-      runtime->begin_trace(ctx, tid);
+      runtime->begin_trace(ctx, tid, memoize);
     }
 
     //--------------------------------------------------------------------------

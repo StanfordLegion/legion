@@ -4832,7 +4832,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InnerContext::begin_trace(TraceID tid)
+    void InnerContext::begin_trace(TraceID tid, bool memoize)
     //--------------------------------------------------------------------------
     {
       if (Runtime::no_tracing) return;
@@ -4854,7 +4854,7 @@ namespace Legion {
       if (finder == traces.end())
       {
         // Trace does not exist yet, so make one and record it
-        dynamic_trace = new DynamicTrace(tid, this);
+        dynamic_trace = new DynamicTrace(tid, this, memoize);
         dynamic_trace->add_reference();
         traces[tid] = dynamic_trace;
       }
@@ -4869,10 +4869,13 @@ namespace Legion {
       begin->initialize_begin(this, dynamic_trace);
       runtime->add_to_dependence_queue(this, executing_processor, begin);
 
-      // Issue a replay op
-      TraceReplayOp *replay = runtime->get_available_replay_op();
-      replay->initialize_replay(this, dynamic_trace);
-      runtime->add_to_dependence_queue(this, executing_processor, replay);
+      if (memoize)
+      {
+        // Issue a replay op
+        TraceReplayOp *replay = runtime->get_available_replay_op();
+        replay->initialize_replay(this, dynamic_trace);
+        runtime->add_to_dependence_queue(this, executing_processor, replay);
+      }
 
       // Now mark that we are starting a trace
       current_trace = dynamic_trace;
@@ -8133,7 +8136,7 @@ namespace Legion {
 
 
     //--------------------------------------------------------------------------
-    void LeafContext::begin_trace(TraceID tid)
+    void LeafContext::begin_trace(TraceID tid, bool memoize)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_LEGION_BEGIN_TRACE,
@@ -9305,10 +9308,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InlineContext::begin_trace(TraceID tid)
+    void InlineContext::begin_trace(TraceID tid, bool memoize)
     //--------------------------------------------------------------------------
     {
-      enclosing->begin_trace(tid);
+      enclosing->begin_trace(tid, memoize);
     }
 
     //--------------------------------------------------------------------------
