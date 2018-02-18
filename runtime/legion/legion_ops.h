@@ -686,15 +686,6 @@ namespace Legion {
     };
 
     /**
-     * \class Memoizable
-     */
-    class Memoizable
-    {
-    public:
-      virtual std::pair<unsigned,DomainPoint> get_trace_local_id(void) const= 0;
-    };
-
-    /**
      * \class MemoizableOp
      * A memoizable operation is an abstract class
      * that serves as the basis for operation whose
@@ -721,7 +712,7 @@ namespace Legion {
       virtual void replay_analysis(void) = 0;
     public:
       // From Memoizable
-      virtual std::pair<unsigned,DomainPoint> get_trace_local_id() const;
+      virtual TraceLocalID get_trace_local_id() const;
     protected:
       void invoke_memoize_operation(MapperID mapper_id);
       void set_memoize(bool memoize);
@@ -894,6 +885,15 @@ namespace Legion {
                                 unsigned idx, bool src,
                                 bool permit_projection = false);
       void compute_parent_indexes(void);
+    public:
+      // From Memoizable
+      virtual MemoizableType get_memoizable_type(void) const
+        { return COPY_MEMOIZABLE; }
+      virtual const Task* as_task(void) const { return NULL; }
+      virtual const Copy* as_copy(void) const { return this; }
+      virtual const Fill* as_fill(void) const { return NULL; }
+      virtual const DynamicCollective* as_dynamic_collective(void) const
+        { return NULL; }
     public:
       // From MemoizableOp
       virtual void replay_analysis(void);
@@ -1711,6 +1711,16 @@ namespace Legion {
       DynamicCollectiveOp& operator=(const DynamicCollectiveOp &rhs);
     public:
       Future initialize(TaskContext *ctx, const DynamicCollective &dc);
+    public:
+      // From Memoizable
+      virtual UniqueID get_unique_id(void) const { return unique_op_id; }
+      virtual MemoizableType get_memoizable_type(void) const
+        { return DYNAMIC_COLLECTIVE_MEMOIZABLE; }
+      virtual const Task* as_task(void) const { return NULL; }
+      virtual const Copy* as_copy(void) const { return NULL; }
+      virtual const Fill* as_fill(void) const { return NULL; }
+      virtual const DynamicCollective* as_dynamic_collective(void) const
+        { return &collective; }
     public:
       // From MemoizableOp
       virtual void replay_analysis(void);
@@ -2601,6 +2611,15 @@ namespace Legion {
       void compute_parent_index(void);
       ApEvent compute_sync_precondition(void) const;
       void log_fill_requirement(void) const;
+    public:
+      // From Memoizable
+      virtual MemoizableType get_memoizable_type(void) const
+        { return FILL_MEMOIZABLE; }
+      virtual const Task* as_task(void) const { return NULL; }
+      virtual const Copy* as_copy(void) const { return NULL; }
+      virtual const Fill* as_fill(void) const { return this; }
+      virtual const DynamicCollective* as_dynamic_collective(void) const
+        { return NULL; }
     public:
       // From MemoizableOp
       virtual void replay_analysis(void);

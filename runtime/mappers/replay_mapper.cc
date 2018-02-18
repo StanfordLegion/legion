@@ -223,7 +223,6 @@ namespace Legion {
       output.inline_task = false;
       output.stealable = false;
       output.map_locally = true;
-      output.memoize = false;
     }
 
     //--------------------------------------------------------------------------
@@ -745,6 +744,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ReplayMapper::memoize_operation(const MapperContext  ctx,
+                                         const Memoizable&    memoizable,
                                          const MemoizeInput&  input,
                                                MemoizeOutput& output)
     //--------------------------------------------------------------------------

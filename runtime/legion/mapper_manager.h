@@ -218,7 +218,8 @@ namespace Legion {
                                      Mapper::MapDataflowGraphOutput *output,
                                      MappingCallInfo *info = NULL);
     public: // memoization mapper calls
-      void invoke_memoize_operation(Mapper::MemoizeInput *input,
+      void invoke_memoize_operation(Memoizable *memoizable,
+                                    Mapper::MemoizeInput *input,
                                     Mapper::MemoizeOutput *output,
                                     MappingCallInfo *info = NULL);
     public: // scheduling and stealing mapper calls

@@ -2445,6 +2445,36 @@ namespace Legion {
     };
 
     /**
+     * \class Memoizable
+     * The memoizable class provides a base class for all
+     * the operations whose physical analysis can be memoized.
+     */
+    class Memoizable
+    {
+    protected:
+      FRIEND_ALL_RUNTIME_CLASSES
+      Memoizable(void);
+    public:
+      // Return a globally unique ID for this operation
+      virtual UniqueID get_unique_id(void) const = 0;
+      typedef std::pair<unsigned, DomainPoint> TraceLocalID;
+      // Return a trace local unique ID for this operation
+      virtual TraceLocalID get_trace_local_id(void) const = 0;
+    public:
+      enum MemoizableType {
+        TASK_MEMOIZABLE,
+        COPY_MEMOIZABLE,
+        FILL_MEMOIZABLE,
+        DYNAMIC_COLLECTIVE_MEMOIZABLE,
+      };
+      virtual MemoizableType get_memoizable_type(void) const = 0;
+      virtual const Task* as_task(void) const = 0;
+      virtual const Copy* as_copy(void) const = 0;
+      virtual const Fill* as_fill(void) const = 0;
+      virtual const DynamicCollective* as_dynamic_collective(void) const = 0;
+    };
+
+    /**
      * \class Task
      * This class contains all the information from a task
      * launch for either an individual or an index space

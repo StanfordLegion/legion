@@ -297,6 +297,7 @@ namespace Legion {
                                             MapDataflowGraphOutput& output);
     public: // Memoization control
       virtual void memoize_operation(const MapperContext  ctx,
+                                     const Memoizable&    memoizable,
                                      const MemoizeInput&  input,
                                            MemoizeOutput& output);
     public: // Mapping control and stealing

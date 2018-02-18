@@ -1478,6 +1478,7 @@ namespace Legion {
       };
       //------------------------------------------------------------------------
       virtual void memoize_operation(const MapperContext  ctx,
+                                     const Memoizable&    memoizable,
                                      const MemoizeInput&  input,
                                            MemoizeOutput& output) = 0;
       //------------------------------------------------------------------------

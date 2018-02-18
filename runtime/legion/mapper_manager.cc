@@ -1094,7 +1094,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MapperManager::invoke_memoize_operation(Mapper::MemoizeInput *input,
+    void MapperManager::invoke_memoize_operation(Memoizable *memoizable,
+                                                 Mapper::MemoizeInput *input,
                                                  Mapper::MemoizeOutput *output,
                                                  MappingCallInfo *info)
     //--------------------------------------------------------------------------
@@ -1106,15 +1107,16 @@ namespace Legion {
                                  NULL, continuation_precondition);
         if (continuation_precondition.exists())
         {
-          MapperContinuation2<Mapper::MemoizeInput,
+          MapperContinuation3<Memoizable,
+                              Mapper::MemoizeInput,
                               Mapper::MemoizeOutput,
                               &MapperManager::invoke_memoize_operation>
-                                continuation(this, input, output, info);
+                            continuation(this, memoizable, input, output, info);
           continuation.defer(runtime, continuation_precondition);
           return;
         }
       }
-      mapper->memoize_operation(info, *input, *output);
+      mapper->memoize_operation(info, *memoizable, *input, *output);
       finish_mapper_call(info);
     }
 

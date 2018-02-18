@@ -3690,6 +3690,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void DefaultMapper::memoize_operation(const MapperContext  ctx,
+                                          const Memoizable&    memoizable,
                                           const MemoizeInput&  input,
                                                 MemoizeOutput& output)
     //--------------------------------------------------------------------------

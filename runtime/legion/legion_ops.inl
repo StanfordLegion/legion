@@ -27,7 +27,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<typename OP>
     MemoizableOp<OP>::MemoizableOp(Runtime *rt)
-      : OP(rt)
+      : OP(rt), Memoizable()
     //--------------------------------------------------------------------------
     {
     }
@@ -87,10 +87,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<typename OP>
-    std::pair<unsigned,DomainPoint> MemoizableOp<OP>::get_trace_local_id() const
+    TraceLocalID MemoizableOp<OP>::get_trace_local_id() const
     //--------------------------------------------------------------------------
     {
-      return std::pair<unsigned,DomainPoint>(OP::trace_local_id, DomainPoint());
+      return TraceLocalID(OP::trace_local_id, DomainPoint());
     }
 
     //--------------------------------------------------------------------------
@@ -104,7 +104,11 @@ namespace Legion {
       output.memoize = false;
       Processor mapper_proc = OP::parent_ctx->get_executing_processor();
       MapperManager *mapper = OP::runtime->find_mapper(mapper_proc, mapper_id);
-      mapper->invoke_memoize_operation(&input, &output);
+      Memoizable *memoizable = get_memoizable();
+#ifdef DEBUG_LEGION
+      assert(memoizable != NULL);
+#endif
+      mapper->invoke_memoize_operation(memoizable, &input, &output);
       if (OP::trace == NULL && output.memoize)
         REPORT_LEGION_ERROR(ERROR_INVALID_PHYSICAL_TRACING,
             "Invalid mapper output from 'memoize_operation'. Mapper requested"

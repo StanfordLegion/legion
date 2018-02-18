@@ -1579,7 +1579,7 @@ namespace Legion {
 
       events[fence_completion_id] = fence_completion;
 #ifdef DEBUG_LEGION
-      for (std::map<TraceLocalId, Operation*>::iterator it =
+      for (std::map<TraceLocalID, Operation*>::iterator it =
            operations.begin(); it != operations.end(); ++it)
         it->second = NULL;
 #endif
@@ -1791,7 +1791,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(memoizable != NULL);
 #endif
-      std::map<TraceLocalId, Operation*>::iterator op_finder =
+      std::map<TraceLocalID, Operation*>::iterator op_finder =
         operations.find(memoizable->get_trace_local_id());
 #ifdef DEBUG_LEGION
       assert(op_finder != operations.end());
@@ -1852,7 +1852,7 @@ namespace Legion {
       std::vector<unsigned> generate;
       std::vector<std::set<unsigned> > preconditions;
       std::vector<std::set<unsigned> > simplified;
-      std::map<TraceLocalId, std::set<unsigned> > ready_preconditions;
+      std::map<TraceLocalID, std::set<unsigned> > ready_preconditions;
       generate.resize(instructions.size());
       preconditions.resize(instructions.size());
       simplified.resize(instructions.size());
@@ -1942,7 +1942,7 @@ namespace Legion {
               SetReadyEvent *inst = instructions[idx]->as_set_ready_event();
               std::set<unsigned> &ready_pre = preconditions[inst->ready_event_idx];
               {
-                std::map<TraceLocalId, unsigned>::iterator finder =
+                std::map<TraceLocalID, unsigned>::iterator finder =
                   task_entries.find(inst->op_key);
 #ifdef DEBUG_LEGION
                 assert(finder != task_entries.end());
@@ -1952,7 +1952,7 @@ namespace Legion {
                 task_pre.insert(ready_pre.begin(), ready_pre.end());
               }
               {
-                std::map<TraceLocalId, std::set<unsigned> >::iterator finder =
+                std::map<TraceLocalID, std::set<unsigned> >::iterator finder =
                   ready_preconditions.find(inst->op_key);
                 if (finder == ready_preconditions.end())
                   ready_preconditions[inst->op_key] = ready_pre;
@@ -1973,7 +1973,7 @@ namespace Legion {
               TriggerCopyCompletion *inst =
                 instructions[idx]->as_triger_copy_completion();
               std::set<unsigned> &rhs_pre = preconditions[inst->rhs];
-              std::map<TraceLocalId, unsigned>::iterator finder =
+              std::map<TraceLocalID, unsigned>::iterator finder =
                 task_entries.find(inst->lhs);
 #ifdef DEBUG_LEGION
               assert(finder != task_entries.end());
@@ -2235,7 +2235,7 @@ namespace Legion {
       }
       instructions.swap(new_instructions);
 
-      for (std::map<TraceLocalId, Operation*>::iterator it =
+      for (std::map<TraceLocalID, Operation*>::iterator it =
            operations.begin(); it != operations.end(); ++it)
         if (it->second->get_operation_kind() == Operation::TASK_OP_KIND)
           instructions.push_back(new LaunchTask(*this, it->first));
@@ -2370,7 +2370,7 @@ namespace Legion {
     {
       AutoLock t_lock(template_lock);
 
-      TraceLocalId op_key = task->get_trace_local_id();
+      TraceLocalID op_key = task->get_trace_local_id();
 #ifdef DEBUG_LEGION
       assert(cached_mappings.find(op_key) == cached_mappings.end());
 #endif
@@ -2399,7 +2399,7 @@ namespace Legion {
     {
       AutoLock t_lock(template_lock, 1, false/*exclusive*/);
 
-      TraceLocalId op_key = task->get_trace_local_id();
+      TraceLocalID op_key = task->get_trace_local_id();
       CachedMappings::const_iterator finder = cached_mappings.find(op_key);
 #ifdef DEBUG_LEGION
       assert(finder != cached_mappings.end());
@@ -2427,7 +2427,7 @@ namespace Legion {
 #endif
       event_map[lhs] = lhs_;
 
-      TraceLocalId key = task->get_trace_local_id();
+      TraceLocalID key = task->get_trace_local_id();
 #ifdef DEBUG_LEGION
       assert(operations.find(key) == operations.end());
       assert(task_entries.find(key) == task_entries.end());
@@ -2676,7 +2676,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(memoizable != NULL);
 #endif
-      TraceLocalId op_key = memoizable->get_trace_local_id();
+      TraceLocalID op_key = memoizable->get_trace_local_id();
 #ifdef DEBUG_LEGION
       assert(operations.find(op_key) != operations.end());
 #endif
@@ -2805,7 +2805,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(memoizable != NULL);
 #endif
-      TraceLocalId op_key = memoizable->get_trace_local_id();
+      TraceLocalID op_key = memoizable->get_trace_local_id();
 #ifdef DEBUG_LEGION
       assert(operations.find(op_key) != operations.end());
 #endif
@@ -2867,7 +2867,7 @@ namespace Legion {
 
       record_ready_view(req, view, fields, logical_ctx, physical_ctx);
 
-      std::map<TraceLocalId, unsigned>::iterator finder =
+      std::map<TraceLocalID, unsigned>::iterator finder =
         task_entries.find(op_key);
 #ifdef DEBUG_LEGION
       assert(finder != task_entries.end());
@@ -2896,7 +2896,7 @@ namespace Legion {
 #endif
       event_map[lhs] = lhs_;
 
-      TraceLocalId key = copy->get_trace_local_id();
+      TraceLocalID key = copy->get_trace_local_id();
 #ifdef DEBUG_LEGION
       assert(operations.find(key) == operations.end());
       assert(task_entries.find(key) == task_entries.end());
@@ -2934,7 +2934,7 @@ namespace Legion {
 #endif
       event_map[lhs] = lhs_;
 
-      TraceLocalId key = copy->get_trace_local_id();
+      TraceLocalID key = copy->get_trace_local_id();
 #ifdef DEBUG_LEGION
       assert(operations.find(key) != operations.end());
       assert(task_entries.find(key) != task_entries.end());
@@ -2956,7 +2956,7 @@ namespace Legion {
       AutoLock tpl_lock(template_lock);
 
       events.push_back(ApEvent());
-      TraceLocalId lhs_ = copy->get_trace_local_id();
+      TraceLocalID lhs_ = copy->get_trace_local_id();
 #ifdef DEBUG_LEGION
       assert(event_map.find(rhs) != event_map.end());
 #endif
@@ -3009,7 +3009,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(memoizable != NULL);
 #endif
-      TraceLocalId key = memoizable->get_trace_local_id();
+      TraceLocalID key = memoizable->get_trace_local_id();
 #ifdef DEBUG_LEGION
       assert(operations.find(key) != operations.end());
       assert(task_entries.find(key) != task_entries.end());
@@ -3198,7 +3198,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     GetTermEvent::GetTermEvent(PhysicalTemplate& tpl, unsigned l,
-                               const TraceLocalId& r)
+                               const TraceLocalID& r)
       : Instruction(tpl), lhs(l), rhs(r)
     //--------------------------------------------------------------------------
     {
@@ -3468,7 +3468,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     IssueCopy::IssueCopy(PhysicalTemplate& tpl,
                          unsigned l, RegionNode *n,
-                         const TraceLocalId& key,
+                         const TraceLocalID& key,
                          const std::vector<CopySrcDstField>& s,
                          const std::vector<CopySrcDstField>& d,
                          unsigned pi, PredEvent pg, RegionTreeNode *i,
@@ -3566,7 +3566,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IssueFill::IssueFill(PhysicalTemplate& tpl, unsigned l, RegionNode *n,
-                         const TraceLocalId &key,
+                         const TraceLocalID &key,
                          const std::vector<CopySrcDstField> &f,
                          const void *fb, size_t fs, unsigned pi,
                          PredEvent pg,
@@ -3665,7 +3665,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     SetReadyEvent::SetReadyEvent(PhysicalTemplate& tpl,
-                                 const TraceLocalId& key, unsigned ri,
+                                 const TraceLocalID& key, unsigned ri,
                                  unsigned ii, unsigned rei, InstanceView *v,
                                  const FieldMask &f)
       : Instruction(tpl), op_key(key), region_idx(ri), inst_idx(ii),
@@ -3742,7 +3742,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     GetCopyTermEvent::GetCopyTermEvent(PhysicalTemplate& tpl, unsigned l,
-                                       const TraceLocalId& r)
+                                       const TraceLocalID& r)
       : Instruction(tpl), lhs(l), rhs(r)
     //--------------------------------------------------------------------------
     {
@@ -3803,7 +3803,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     SetCopySyncEvent::SetCopySyncEvent(PhysicalTemplate& tpl, unsigned l,
-                                       const TraceLocalId& r)
+                                       const TraceLocalID& r)
       : Instruction(tpl), lhs(l), rhs(r)
     //--------------------------------------------------------------------------
     {
@@ -3865,7 +3865,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     TriggerCopyCompletion::TriggerCopyCompletion(PhysicalTemplate& tpl,
-                                              const TraceLocalId& l, unsigned r)
+                                              const TraceLocalID& l, unsigned r)
       : Instruction(tpl), lhs(l), rhs(r)
     //--------------------------------------------------------------------------
     {
@@ -3926,7 +3926,7 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    LaunchTask::LaunchTask(PhysicalTemplate& tpl, const TraceLocalId& op)
+    LaunchTask::LaunchTask(PhysicalTemplate& tpl, const TraceLocalID& op)
       : Instruction(tpl), op_key(op)
     //--------------------------------------------------------------------------
     {
