@@ -179,6 +179,11 @@
 #define LEGION_PRUNE_DEPTH_WARNING        8
 #endif
 
+// Maximum number of non-replayable templates before warnings
+#ifndef LEGION_NON_REPLAYABLE_WARNING
+#define LEGION_NON_REPLAYABLE_WARNING     5
+#endif
+
 // Some helper macros
 
 // This statically computes an integer log base 2 for a number
@@ -602,6 +607,7 @@ typedef enum legion_error_t {
   LEGION_WARNING_UNUSED_PROFILING_FILE_NAME = 1092,
   LEGION_WARNING_INVALID_PRIORITY_CHANGE = 1093,
   LEGION_WARNING_EXTERNAL_ATTACH_OPERATION = 1094,
+  LEGION_WARNING_NON_REPLAYABLE_COUNT_EXCEEDED = 1095,
   
   
   LEGION_FATAL_MUST_EPOCH_NOADDRESS = 2000,

@@ -27,14 +27,14 @@ task toplevel()
   var r = region(ispace(int1d, 5), int)
 
   __demand(__trace)
-  for i = 0, 2 do
+  for i = 0, 10 do
     foo(r)
     bar(r)
     for e in r do r[e] = 1 end
   end
 
   __demand(__trace)
-  for i = 0, 2 do
+  for i = 0, 10 do
     var x = foo(r)
     if x == 1 then bar(r) end
   end

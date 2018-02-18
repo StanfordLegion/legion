@@ -438,6 +438,7 @@ namespace Legion {
       mutable LocalLock trace_lock;
       PhysicalTemplate* current_template;
       std::vector<PhysicalTemplate*> templates;
+      unsigned nonreplayable_count;
     };
 
     typedef Memoizable::TraceLocalID TraceLocalID;

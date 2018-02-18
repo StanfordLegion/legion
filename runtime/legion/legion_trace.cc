@@ -231,7 +231,7 @@ namespace Legion {
           REPORT_LEGION_ERROR(ERROR_INCOMPLETE_PHYSICAL_TRACING,
               "Invalid memoization request. A trace cannot be partially "
               "memoized. Please change the mapper to request memoization "
-              "for all the tasks in your trace");
+              "for all the operations in the trace");
         op->set_trace_local_id(index);
         last_memoized = index + 1;
       }
@@ -520,7 +520,7 @@ namespace Legion {
           REPORT_LEGION_ERROR(ERROR_INCOMPLETE_PHYSICAL_TRACING,
               "Invalid memoization request. A trace cannot be partially "
               "memoized. Please change the mapper to request memoization "
-              "for all the tasks in your trace");
+              "for all the operations in the trace");
         op->set_trace_local_id(index);
         last_memoized = index + 1;
       }
@@ -1076,7 +1076,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Now finish capturing the physical trace
-      if (current_template != NULL && current_template->is_recording())
+      if (local_trace->is_recording())
       {
 #ifdef DEBUG_LEGION
         assert(current_template != NULL);
@@ -1455,7 +1455,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PhysicalTrace::PhysicalTrace(Runtime *rt)
-      : runtime(rt), current_template(NULL)
+      : runtime(rt), current_template(NULL), nonreplayable_count(0)
     //--------------------------------------------------------------------------
     {
     }
@@ -1498,6 +1498,16 @@ namespace Legion {
       {
         delete tpl;
         current_template = NULL;
+        if (++nonreplayable_count > LEGION_NON_REPLAYABLE_WARNING)
+        {
+          REPORT_LEGION_WARNING(LEGION_WARNING_NON_REPLAYABLE_COUNT_EXCEEDED,
+              "WARNING: The runtime has failed to memoize the trace more than "
+              "%u times, due to the absence of a replayable template. It is "
+              "highly likely that your trace will not be memoized for the rest "
+              "of execution. Please change the mapper to stop making "
+              "memoization requests.", LEGION_NON_REPLAYABLE_WARNING)
+          nonreplayable_count = 0;
+        }
       }
       else
         templates.push_back(tpl);
