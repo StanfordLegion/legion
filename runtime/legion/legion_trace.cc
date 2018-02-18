@@ -128,6 +128,22 @@ namespace Legion {
     }
 #endif
 
+    //--------------------------------------------------------------------------
+    void LegionTrace::invalidate_trace_cache(void)
+    //--------------------------------------------------------------------------
+    {
+      if (physical_trace != NULL)
+        physical_trace->clear_cached_template();
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionTrace::invalidate_current_template(void)
+    //--------------------------------------------------------------------------
+    {
+      if (physical_trace != NULL)
+        physical_trace->invalidate_current_template();
+    }
+
     /////////////////////////////////////////////////////////////
     // StaticTrace
     /////////////////////////////////////////////////////////////
@@ -1046,8 +1062,13 @@ namespace Legion {
       parent_ctx->update_current_fence(this);
       parent_ctx->record_previous_trace(local_trace);
       if (local_trace->is_recording())
+      {
+#ifdef DEBUG_LEGION
+        assert(local_trace->get_physical_trace() != NULL);
+#endif
         current_template =
           local_trace->get_physical_trace()->get_current_template();
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -1059,6 +1080,7 @@ namespace Legion {
       {
 #ifdef DEBUG_LEGION
         assert(current_template != NULL);
+        assert(local_trace->get_physical_trace() != NULL);
 #endif
         local_trace->get_physical_trace()->fix_trace(current_template);
         local_trace->initialize_tracing_state();
@@ -1156,6 +1178,9 @@ namespace Legion {
 #endif
       if (local_trace->is_replaying())
       {
+#ifdef DEBUG_LEGION
+        assert(local_trace->get_physical_trace() != NULL);
+#endif
         PhysicalTemplate *current_template =
           local_trace->get_physical_trace()->get_current_template();
         current_template->execute_all();
@@ -1169,8 +1194,13 @@ namespace Legion {
         return;
       }
       else if (local_trace->is_recording())
+      {
+#ifdef DEBUG_LEGION
+        assert(local_trace->get_physical_trace() != NULL);
+#endif
         current_template =
           local_trace->get_physical_trace()->get_current_template();
+      }
 
       // Indicate that this trace is done being captured
       // This also registers that we have dependences on all operations
@@ -1202,6 +1232,7 @@ namespace Legion {
       {
 #ifdef DEBUG_LEGION
         assert(current_template != NULL);
+        assert(local_trace->get_physical_trace() != NULL);
 #endif
         local_trace->get_physical_trace()->fix_trace(current_template);
         local_trace->initialize_tracing_state();
@@ -1307,6 +1338,9 @@ namespace Legion {
       assert(local_trace != NULL);
 #endif
       PhysicalTrace *physical_trace = local_trace->get_physical_trace();
+#ifdef DEBUG_LEGION
+      assert(physical_trace != NULL);
+#endif
       bool recurrent = true;
       bool is_recording = local_trace->is_recording();
       if (physical_trace->get_current_template() == NULL || is_recording)

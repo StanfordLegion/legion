@@ -114,6 +114,9 @@ namespace Legion {
       void set_state_replay(void) { state = PHYSICAL_REPLAY; }
       bool is_recording(void) const { return state == PHYSICAL_RECORD; }
       bool is_replaying(void) const { return state == PHYSICAL_REPLAY; }
+    public:
+      void invalidate_trace_cache(void);
+      void invalidate_current_template(void);
 #ifdef LEGION_SPY
     public:
       UniqueID get_current_uid_by_index(unsigned op_idx) const;

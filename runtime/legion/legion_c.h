@@ -2667,7 +2667,8 @@ extern "C" {
   void
   legion_runtime_begin_trace(legion_runtime_t runtime,
                              legion_context_t ctx,
-                             legion_trace_id_t tid);
+                             legion_trace_id_t tid,
+                             bool memoize);
 
   /**
    * @see Legion::Runtime::end_trace()

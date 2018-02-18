@@ -53,9 +53,15 @@ namespace Legion {
       {
 #ifdef DEBUG_LEGION
         assert(OP::trace != NULL);
-        assert(OP::trace->get_physical_trace() != NULL);
 #endif
         PhysicalTrace *physical_trace = OP::trace->get_physical_trace();
+        if (physical_trace == NULL)
+        {
+          REPORT_LEGION_ERROR(ERROR_INVALID_PHYSICAL_TRACING,
+              "Invalid memoization request. An operation cannot be memoized "
+              "when it is in a logical-only trace. Please change the mapper "
+              "not to request memoization or allow memoization for the trace.");
+        }
         tpl = physical_trace->get_current_template();
         if (tpl == NULL)
         {

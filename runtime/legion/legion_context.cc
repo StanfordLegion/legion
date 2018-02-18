@@ -4987,15 +4987,15 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (previous_trace != NULL && previous_trace != trace)
-        previous_trace->get_physical_trace()->clear_cached_template();
+        previous_trace->invalidate_trace_cache();
     }
 
     //--------------------------------------------------------------------------
     void InnerContext::invalidate_current_template(void)
     //--------------------------------------------------------------------------
     {
-      if (current_trace != NULL && current_trace->get_physical_trace() != NULL)
-        current_trace->get_physical_trace()->invalidate_current_template();
+      if (current_trace != NULL)
+        current_trace->invalidate_current_template();
     }
 
     //--------------------------------------------------------------------------
