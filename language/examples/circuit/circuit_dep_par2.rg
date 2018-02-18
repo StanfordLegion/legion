@@ -183,7 +183,7 @@ task toplevel()
   var ts_start = c.legion_get_current_time_in_micros()
   var steps = conf.steps
   for j = 0, conf.num_loops do
-    c.legion_runtime_begin_trace(__runtime(), __context(), 0)
+    c.legion_runtime_begin_trace(__runtime(), __context(), 0, false)
 
     __demand(__parallel)
     for i = 0, conf.num_pieces do

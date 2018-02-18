@@ -876,7 +876,7 @@ task toplevel()
   var num_loops = conf.num_loops
   __demand(__spmd)
   for j = 0, num_loops do
-    -- c.legion_runtime_begin_trace(__runtime(), __context(), 0)
+    -- c.legion_runtime_begin_trace(__runtime(), __context(), 0, false)
 
     --__demand(__parallel)
     for i = 0, num_superpieces do

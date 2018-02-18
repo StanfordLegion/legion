@@ -642,7 +642,7 @@ task toplevel()
 
   __demand(__spmd)
   for j = 0, num_loops do
-    regentlib.c.legion_runtime_begin_trace(__runtime(), __context(), 0)
+    regentlib.c.legion_runtime_begin_trace(__runtime(), __context(), 0, false)
     for i = 0, num_pieces do
       calculate_new_currents(steps, rp_private[i], rp_shared[i], rp_ghost[i], rp_wires[i])
     end
