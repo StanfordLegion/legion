@@ -77,8 +77,7 @@ namespace Legion {
       PHYSICAL_MANAGER_REF = 20,
       LOGICAL_VIEW_REF = 21,
       REGION_TREE_REF = 22,
-      PHYSICAL_TRACE_REF = 23,
-      LAST_SOURCE_REF = 24,
+      LAST_SOURCE_REF = 23,
     };
 
     enum ReferenceKind {
