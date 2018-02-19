@@ -16,6 +16,10 @@
 -- [ [ "-dm:memoize" ] ]
 
 import "regent"
+import "bishop"
+
+mapper
+end
 
 fspace fs
 {
@@ -96,4 +100,4 @@ task main()
   end
   for color in cs do check(p[color], 0) end
 end
-regentlib.start(main)
+regentlib.start(main, bishoplib.make_entry())
