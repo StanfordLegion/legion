@@ -564,8 +564,8 @@ namespace Legion {
                              const FieldMask &fields,
                              ContextID logical_ctx,
                              ContextID physical_ctx);
-      void record_last_user(const PhysicalInstance &inst, unsigned field,
-                            unsigned user, bool read);
+      void record_last_user(const PhysicalInstance &inst, RegionNode *node,
+                            unsigned field, unsigned user, bool read);
       void find_last_users(const PhysicalInstance &inst, unsigned field,
                            std::set<unsigned> &users);
     private:
@@ -581,6 +581,7 @@ namespace Legion {
       typedef std::pair<PhysicalInstance, unsigned> InstanceAccess;
       struct UserInfo {
         std::set<unsigned> users;
+        std::set<RegionNode*> nodes;
         bool read;
       };
       std::map<InstanceAccess, UserInfo> last_users;

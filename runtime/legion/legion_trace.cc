@@ -1011,8 +1011,6 @@ namespace Legion {
       trace = NULL;
       tracing = false;
       current_template = NULL;
-      if (Runtime::legion_spy_enabled)
-        LegionSpy::log_trace_operation(ctx->get_unique_id(), unique_op_id);
     }
 
     //--------------------------------------------------------------------------
@@ -2726,12 +2724,12 @@ namespace Legion {
       for (unsigned idx = 0; idx < src_fields.size(); ++idx)
       {
         const CopySrcDstField &field = src_fields[idx];
-        record_last_user(field.inst, field.field_id, lhs_, true);
+        record_last_user(field.inst, node, field.field_id, lhs_, true);
       }
       for (unsigned idx = 0; idx < dst_fields.size(); ++idx)
       {
         const CopySrcDstField &field = dst_fields[idx];
-        record_last_user(field.inst, field.field_id, lhs_, false);
+        record_last_user(field.inst, node, field.field_id, lhs_, false);
       }
 
       unsigned precondition_idx = pre_finder->second;
@@ -2853,6 +2851,7 @@ namespace Legion {
 #endif
       unsigned ready_event_idx = ready_finder->second;
 
+      RegionNode *region_node = view->logical_node->as_region_node();
       if (view->is_reduction_view())
       {
         ReductionView *reduction_view = view->as_reduction_view();
@@ -2877,7 +2876,7 @@ namespace Legion {
         assert(view->logical_node->is_region());
 #endif
         instructions.push_back(
-            new IssueFill(*this, lhs_, view->logical_node->as_region_node(),
+            new IssueFill(*this, lhs_, region_node,
                           op_key, fields, fill_buffer, reduction_op->sizeof_rhs,
                           ready_event_idx, PredEvent::NO_PRED_EVENT,
 #ifdef LEGION_SPY
@@ -2887,7 +2886,7 @@ namespace Legion {
         for (unsigned idx = 0; idx < fields.size(); ++idx)
         {
           const CopySrcDstField &field = fields[idx];
-          record_last_user(field.inst, field.field_id, lhs_, true);
+          record_last_user(field.inst, region_node, field.field_id, lhs_, true);
         }
         free(fill_buffer);
         ready_event_idx = lhs_;
@@ -2909,11 +2908,12 @@ namespace Legion {
       assert(finder != task_entries.end());
 #endif
       std::vector<FieldID> field_ids;
-      view->logical_node->get_column_source()->get_field_set(fields, field_ids);
+      region_node->get_column_source()->get_field_set(fields, field_ids);
       const PhysicalInstance &inst = view->get_manager()->get_instance();
       for (std::vector<FieldID>::iterator it = field_ids.begin(); it !=
            field_ids.end(); ++it)
-        record_last_user(inst, *it, finder->second, IS_READ_ONLY(req));
+        record_last_user(inst, region_node, *it, finder->second,
+                         IS_READ_ONLY(req));
     }
 
     //--------------------------------------------------------------------------
@@ -3170,6 +3170,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     inline void PhysicalTemplate::record_last_user(const PhysicalInstance &inst,
+                                                   RegionNode *node,
                                                    unsigned field,
                                                    unsigned user, bool read)
     //--------------------------------------------------------------------------
@@ -3181,16 +3182,47 @@ namespace Legion {
       {
         UserInfo &info = last_users[key];
         info.users.insert(user);
+        info.nodes.insert(node);
         info.read = read;
       }
       else
       {
-        if (!finder->second.read || !read)
+        if (finder->second.read == read)
+        {
+          if (read)
+          {
+            finder->second.users.insert(user);
+            finder->second.nodes.insert(node);
+          }
+          else if (!finder->second.read && !read)
+          {
+            std::set<RegionNode*> &nodes = finder->second.nodes;
+
+            bool interfere_with_any = false;
+            for (std::set<RegionNode*>::iterator it = nodes.begin();
+                 it != nodes.end(); ++it)
+              if ((*it)->intersects_with(node, false))
+              {
+                interfere_with_any = true;
+                break;
+              }
+            if (interfere_with_any)
+            {
+              finder->second.users.clear();
+              finder->second.nodes.clear();
+            }
+            finder->second.users.insert(user);
+            finder->second.nodes.insert(node);
+          }
+        }
+        else
         {
           finder->second.users.clear();
+          finder->second.users.insert(user);
+          finder->second.nodes.clear();
+          finder->second.nodes.insert(node);
           finder->second.read = read;
         }
-        finder->second.users.insert(user);
       }
     }
 
