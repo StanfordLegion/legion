@@ -16,6 +16,19 @@
 -- [ [ "-dm:memoize" ] ]
 
 import "regent"
+import "bishop"
+
+mapper
+
+$PROCS = processors[isa=x86]
+
+task#foo, task#bar
+{
+  map_locally : true;
+  target : $PROCS[1 % $PROCS.size];
+}
+
+end
 
 task foo(r : region(ispace(int1d), int))
 where reads writes(r) do return 1 end
@@ -40,4 +53,4 @@ task toplevel()
   end
 end
 
-regentlib.start(toplevel)
+regentlib.start(toplevel, bishoplib.make_entry())
