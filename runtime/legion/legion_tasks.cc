@@ -739,6 +739,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       activate_speculative();
+      activate_memoizable();
       complete_received = false;
       commit_received = false;
       children_complete = false;
@@ -817,6 +818,7 @@ namespace Legion {
       DETAILED_PROFILER(runtime, PACK_BASE_TASK_CALL);
       // pack all the user facing data first
       pack_external_task(rez, target); 
+      pack_memoizable(rez);
       RezCheck z(rez);
 #ifdef DEBUG_LEGION
       assert(regions.size() == parent_req_indexes.size());
@@ -855,6 +857,7 @@ namespace Legion {
       DETAILED_PROFILER(runtime, UNPACK_BASE_TASK_CALL);
       // unpack all the user facing data
       unpack_external_task(derez, runtime, this); 
+      unpack_memoizable(derez);
       DerezCheck z(derez);
       parent_req_indexes.resize(regions.size());
       for (unsigned idx = 0; idx < parent_req_indexes.size(); idx++)

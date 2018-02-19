@@ -3371,6 +3371,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       activate_speculative();
+      activate_memoizable();
       mapper = NULL;
       outstanding_profiling_requests = 1; // start at 1 to guard
       profiling_reported = RtUserEvent::NO_RT_USER_EVENT;
@@ -12775,6 +12776,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       activate_speculative();
+      activate_memoizable();
       value = NULL;
       value_size = 0;
       true_guard = PredEvent::NO_PRED_EVENT;

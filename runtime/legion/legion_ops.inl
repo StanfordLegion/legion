@@ -34,7 +34,34 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<typename OP>
-    void MemoizableOp<OP>::initialize_memoizable()
+    void MemoizableOp<OP>::initialize_memoizable(void)
+    //--------------------------------------------------------------------------
+    {
+      tpl = NULL;
+      memo_state = NO_MEMO;
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    void MemoizableOp<OP>::pack_memoizable(Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      RezCheck z(rez);
+      rez.serialize(memo_state);
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    void MemoizableOp<OP>::unpack_memoizable(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      derez.deserialize(memo_state);
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    void MemoizableOp<OP>::activate_memoizable(void)
     //--------------------------------------------------------------------------
     {
       tpl = NULL;
@@ -93,7 +120,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<typename OP>
-    TraceLocalID MemoizableOp<OP>::get_trace_local_id() const
+    TraceLocalID MemoizableOp<OP>::get_trace_local_id(void) const
     //--------------------------------------------------------------------------
     {
       return TraceLocalID(OP::trace_local_id, DomainPoint());

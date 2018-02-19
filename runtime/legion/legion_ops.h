@@ -705,8 +705,13 @@ namespace Legion {
       };
     public:
       MemoizableOp(Runtime *rt);
-      void initialize_memoizable();
+      void initialize_memoizable(void);
       virtual Memoizable* get_memoizable(void) { return this; }
+    protected:
+      void pack_memoizable(Serializer &rez);
+      void unpack_memoizable(Deserializer &derez);
+    protected:
+      void activate_memoizable(void);
     public:
       virtual void execute_dependence_analysis(void);
       virtual void replay_analysis(void) = 0;
