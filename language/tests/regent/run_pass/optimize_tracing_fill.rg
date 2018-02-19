@@ -63,37 +63,19 @@ task main()
   var p = partition(equal, r, cs)
   var q = partition(equal, r, cs)
 
-  for color in cs do init(p[color]) end
-  for k = 0, 3 do
+  for k = 0, 10 do
     __demand(__trace)
     for i = 0, 3 do
-      for color in cs do inc(p[color]) end
-      for color in cs do step(p[color]) end
-    end
-    for color in cs do check(q[color], 0) end
-  end
-  for k = 0, 3 do
-    __demand(__trace)
-    for i = 0, 3 do
-      for color in cs do inc(p[color]) end
-      for color in cs do step(p[color]) end
+      fill(r.input, 0)
+      fill(r.output, 0)
+      for color in cs do inc(q[color]) end
+      for color in cs do step(q[color]) end
+      for color in cs do inc(q[color]) end
+      for color in cs do step(q[color]) end
       for color in cs do inc(q[color]) end
       for color in cs do step(q[color]) end
     end
     for color in cs do check(q[color], 0) end
   end
-  for k = 0, 3 do
-    __demand(__trace)
-    do
-      for color in cs do inc(p[color]) end
-      for color in cs do step(p[color]) end
-    end
-    __demand(__trace)
-    do
-      for color in cs do inc(q[color]) end
-      for color in cs do step(q[color]) end
-    end
-  end
-  for color in cs do check(p[color], 0) end
 end
 regentlib.start(main)
