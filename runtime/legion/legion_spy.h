@@ -851,6 +851,12 @@ namespace Legion {
         log_spy.print("Deppart Events %llu %d " IDFMT " " IDFMT,
                       op_unique_id, handle.get_id(), pre.id, post.id);
       }
+
+      static inline void log_replay_operation(UniqueID op_unique_id)
+      {
+        log_spy.print("Replay Operation %llu", op_unique_id);
+      }
+
 #endif
     }; // namespace LegionSpy
 

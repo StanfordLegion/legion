@@ -4860,7 +4860,7 @@ class Operation(object):
                  'internal_idx', 'disjoint_close_fields', 'partition_kind', 
                  'partition_node', 'node_name', 'cluster_name', 'generation', 
                  'reachable_cache', 'transitive_warning_issued', 'arrival_barriers', 
-                 'wait_barriers', 'created_futures', 'used_futures', 'merged']
+                 'wait_barriers', 'created_futures', 'used_futures', 'merged', "replayed"]
                   # If you add a field here, you must update the merge method
     def __init__(self, state, uid):
         self.state = state
@@ -4918,6 +4918,8 @@ class Operation(object):
         self.used_futures = None
         # Check if this operation was merged
         self.merged = False
+        # Check if this operation was physical replayed
+        self.replayed = False
 
     def is_close(self):
         return self.kind == INTER_CLOSE_OP_KIND or self.kind == POST_CLOSE_OP_KIND or \
@@ -5010,6 +5012,9 @@ class Operation(object):
         if pred.logical_outgoing is None:
             pred.logical_outgoing = set()
         pred.logical_outgoing.add(self)
+
+    def set_replayed(self):
+        self.replayed = True
 
     def get_index_launch_rect(self):
         assert self.launch_rect
@@ -5682,6 +5687,8 @@ class Operation(object):
         stop_index = self.context.operations.index(self)
         for index in range(start_index, stop_index):
             prev_op = self.context.operations[index]
+            if prev_op.replayed:
+                continue
             if perform_checks:
                 found = False
                 if self.incoming:
@@ -5723,6 +5730,8 @@ class Operation(object):
         return True
 
     def perform_logical_analysis(self, perform_checks):
+        if self.replayed:
+            return True
         # We need a context to do this
         assert self.context is not None
         # If this operation was predicated false, then there is nothing to do
@@ -8891,6 +8900,8 @@ barrier_arrive_pat      = re.compile(
     prefix+"Phase Barrier Arrive (?P<uid>[0-9]+) (?P<iid>[0-9a-f]+)")
 barrier_wait_pat        = re.compile(
     prefix+"Phase Barrier Wait (?P<uid>[0-9]+) (?P<iid>[0-9a-f]+)")
+replay_op_pat    = re.compile(
+    prefix+"Replay Operation (?P<uid>[0-9]+)")
 
 def parse_legion_spy_line(line, state):
     # Quick test to see if the line is even worth considering
@@ -9703,6 +9714,11 @@ def parse_legion_spy_line(line, state):
     m = detailed_config_pat.match(line)
     if m is not None:
         state.set_config(True)
+        return True
+    m = replay_op_pat.match(line)
+    if m is not None:
+        op = state.get_operation(int(m.group('uid')))
+        op.set_replayed()
         return True
     return False
 

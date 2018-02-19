@@ -5781,6 +5781,9 @@ namespace Legion {
     void IndividualTask::replay_analysis(void)
     //--------------------------------------------------------------------------
     {
+#ifdef LEGION_SPY
+      LegionSpy::log_replay_operation(unique_op_id);
+#endif
       add_mapping_reference(gen);
       tpl->register_operation(this);
       complete_mapping();
@@ -6550,6 +6553,9 @@ namespace Legion {
     void PointTask::replay_analysis(void)
     //--------------------------------------------------------------------------
     {
+#ifdef LEGION_SPY
+      LegionSpy::log_replay_operation(unique_op_id);
+#endif
       add_mapping_reference(gen);
       tpl->register_operation(this);
       complete_mapping();
@@ -7707,6 +7713,9 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(is_replaying());
+#endif
+#ifdef LEGION_SPY
+      LegionSpy::log_replay_operation(unique_op_id);
 #endif
       SliceTask *new_slice = this->clone_as_slice_task(internal_space,
                                                        target_proc,

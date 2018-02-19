@@ -4380,6 +4380,9 @@ namespace Legion {
     void CopyOp::replay_analysis(void)
     //--------------------------------------------------------------------------
     {
+#ifdef LEGION_SPY
+      LegionSpy::log_replay_operation(unique_op_id);
+#endif
       add_mapping_reference(gen);
       tpl->register_operation(this);
       complete_mapping();
@@ -9293,6 +9296,9 @@ namespace Legion {
     void DynamicCollectiveOp::replay_analysis(void)
     //--------------------------------------------------------------------------
     {
+#ifdef LEGION_SPY
+      LegionSpy::log_replay_operation(unique_op_id);
+#endif
       trigger_mapping();
     }
 
@@ -13394,6 +13400,9 @@ namespace Legion {
     void FillOp::replay_analysis(void)
     //--------------------------------------------------------------------------
     {
+#ifdef LEGION_SPY
+      LegionSpy::log_replay_operation(unique_op_id);
+#endif
       complete_mapping();
       complete_execution();
     }
