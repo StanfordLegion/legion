@@ -287,7 +287,7 @@ namespace Legion {
         DisjointnessArgs args;
         args.handle = pid;
         args.ready = disjointness_event;
-        runtime->issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY, NULL,
+        runtime->issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY,
                                      Runtime::protect_event(partition_ready));
       }
       return parent_notified;
@@ -4989,7 +4989,7 @@ namespace Legion {
           args.tag = tag;
           args.source = source;
           context->runtime->issue_runtime_meta_task(args, 
-              LG_LATENCY_WORK_PRIORITY, NULL/*op*/, precondition);
+              LG_LATENCY_WORK_PRIORITY, precondition);
         }
       }
       else
@@ -5210,7 +5210,7 @@ namespace Legion {
               Runtime::merge_events(left->partition_ready,
                                     right->partition_ready));
           ready = context->runtime->issue_runtime_meta_task(args,
-                                      LG_LATENCY_WORK_PRIORITY, NULL, pre);
+                                      LG_LATENCY_WORK_PRIORITY, pre);
           pending_tests[key] = ready;
           pending_tests[std::pair<LegionColor,LegionColor>(c2,c1)] = ready;
         }
@@ -5546,7 +5546,7 @@ namespace Legion {
         args.to_trigger = to_trigger;
         args.source = source;
         forest->runtime->issue_runtime_meta_task(args, 
-            LG_LATENCY_DEFERRED_PRIORITY, NULL/*op*/, defer);
+            LG_LATENCY_DEFERRED_PRIORITY, defer);
         return;
       }
       if (child != NULL)
@@ -5932,7 +5932,7 @@ namespace Legion {
           args.tag = tag;
           args.source = source;
           context->runtime->issue_runtime_meta_task(args, 
-              LG_LATENCY_WORK_PRIORITY, NULL/*op*/, precondition);
+              LG_LATENCY_WORK_PRIORITY, precondition);
         }
       }
       else
@@ -6279,7 +6279,7 @@ namespace Legion {
           args.right = right;
           ApEvent pre = Runtime::merge_events(left_pre, right_pre);
           ready_event = context->runtime->issue_runtime_meta_task(args, 
-                  LG_LATENCY_WORK_PRIORITY, NULL, Runtime::protect_event(pre));
+                  LG_LATENCY_WORK_PRIORITY, Runtime::protect_event(pre));
           pending_tests[key] = ready_event;
           pending_tests[std::pair<LegionColor,LegionColor>(c2,c1)] =ready_event;
         }
@@ -6440,7 +6440,7 @@ namespace Legion {
         args.pending_child = child_color;
         // Don't remove the pending child until the handle is ready
         context->runtime->issue_runtime_meta_task(args,
-          LG_LATENCY_WORK_PRIORITY, NULL, Runtime::protect_event(domain_ready));
+          LG_LATENCY_WORK_PRIORITY, Runtime::protect_event(domain_ready));
       }
     }
 
@@ -6694,7 +6694,7 @@ namespace Legion {
         args.to_trigger = to_trigger;
         args.source = source;
         forest->runtime->issue_runtime_meta_task(args, 
-            LG_LATENCY_DEFERRED_PRIORITY, NULL/*op*/, defer);
+            LG_LATENCY_DEFERRED_PRIORITY, defer);
       }
       else
       {
@@ -7398,7 +7398,7 @@ namespace Legion {
           args.tag = tag;
           args.source = source;
           context->runtime->issue_runtime_meta_task(args, 
-              LG_LATENCY_WORK_PRIORITY, NULL/*op*/, precondition);
+              LG_LATENCY_WORK_PRIORITY, precondition);
         }
       }
       else
@@ -7456,7 +7456,7 @@ namespace Legion {
           args.tag = tag;
           args.source = source;
           context->runtime->issue_runtime_meta_task(args, 
-              LG_LATENCY_WORK_PRIORITY, NULL/*op*/, precondition);
+              LG_LATENCY_WORK_PRIORITY, precondition);
         }
       }
       else
@@ -15167,7 +15167,7 @@ namespace Legion {
           args.tag = tag;
           args.source = source;
           context->runtime->issue_runtime_meta_task(args, 
-              LG_LATENCY_WORK_PRIORITY, NULL/*op*/, precondition);
+              LG_LATENCY_WORK_PRIORITY, precondition);
         }
       }
       else
@@ -16183,7 +16183,7 @@ namespace Legion {
           args.tag = tag;
           args.source = source;
           context->runtime->issue_runtime_meta_task(args, 
-              LG_LATENCY_WORK_PRIORITY, NULL/*op*/, precondition);
+              LG_LATENCY_WORK_PRIORITY, precondition);
         }
       }
       else

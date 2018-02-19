@@ -338,20 +338,7 @@ namespace Legion {
       LG_MESSAGE_ID, // These two must be the last two
       LG_RETRY_SHUTDOWN_TASK_ID,
       LG_LAST_TASK_ID, // This one should always be last
-    };
-
-    /**
-     * \class LgTaskArgs
-     * The base class for all Legion Task arguments
-     */
-    template<typename T>
-    struct LgTaskArgs {
-    public:
-      LgTaskArgs(void)
-        : lg_task_id(T::TASK_ID) { }
-    public:
-      const LgTaskID lg_task_id;
-    };
+    }; 
 
     // Make this a macro so we can keep it close to 
     // declaration of the task IDs themselves
@@ -1337,6 +1324,26 @@ namespace Legion {
     // Another nasty global variable for tracking the fast
     // reservations that we are holding
     extern __thread AutoLock *local_lock_list;
+    // One more nasty global variable that we use for tracking
+    // the provenance of meta-task operations for profiling
+    // purposes, this has no bearing on correctness
+    extern __thread ::legion_unique_id_t task_profiling_provenance;
+
+    /**
+     * \class LgTaskArgs
+     * The base class for all Legion Task arguments
+     */
+    template<typename T>
+    struct LgTaskArgs {
+    public:
+      LgTaskArgs(void)
+        : lg_task_id(T::TASK_ID), provenance(task_profiling_provenance) { }
+      LgTaskArgs(::legion_unique_id_t uid)
+        : lg_task_id(T::TASK_ID), provenance(uid) { }
+    public:
+      const LgTaskID lg_task_id;
+      const ::legion_unique_id_t provenance;
+    };
     
     // legion_trace.h
     class LegionTrace;
@@ -2082,6 +2089,8 @@ namespace Legion {
     {
       // Save the context locally
       Internal::TaskContext *local_ctx = Internal::implicit_context; 
+      // Save the task provenance information
+      UniqueID local_provenance = Internal::task_profiling_provenance;
       // Check to see if we have any local locks to notify
       if (Internal::local_lock_list != NULL)
       {
@@ -2108,6 +2117,8 @@ namespace Legion {
         wait();
       // Write the context back
       Internal::implicit_context = local_ctx;
+      // Write the provenance information back
+      Internal::task_profiling_provenance = local_provenance;
     }
 
 #ifdef LEGION_SPY

@@ -1736,6 +1736,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       implicit_context = this;
+      task_profiling_provenance = owner_task->get_unique_op_id();
       if (overhead_tracker != NULL)
         previous_profiling_time = Realm::Clock::current_time_in_nanoseconds();
       // Switch over the executing processor to the one
@@ -3626,11 +3627,10 @@ namespace Legion {
             result->add_base_gc_ref(DEFERRED_TASK_REF);
             launcher.predicate_false_future.impl->add_base_gc_ref(
                                                 FUTURE_HANDLE_REF);
-            Runtime::DeferredFutureMapSetArgs args;
-            args.future_map = result;
-            args.result = launcher.predicate_false_future.impl;
-            args.domain = launcher.launch_domain;
-            runtime->issue_runtime_meta_task(args,LG_LATENCY_WORK_PRIORITY,NULL,
+            TaskOp::DeferredFutureMapSetArgs args(result,
+                launcher.predicate_false_future.impl, 
+                launcher.launch_domain, owner_task);
+            runtime->issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY,
                                            Runtime::protect_event(ready_event));
           }
           return FutureMap(result);
@@ -4485,8 +4485,7 @@ namespace Legion {
         executing_children[op] = op->get_generation();
       }
       // Issue the next dependence analysis task
-      DeferredDependenceArgs args;
-      args.op = op;
+      DeferredDependenceArgs args(op);
       // If we're ahead we give extra priority to the logical analysis
       // since it is on the critical path, but if not we give it the 
       // normal priority so that we can balance doing logical analysis
@@ -4498,8 +4497,7 @@ namespace Legion {
         RtEvent next = runtime->issue_runtime_meta_task(args,
                                         currently_active_context ? 
                                           LG_THROUGHPUT_WORK_PRIORITY :
-                                          LG_THROUGHPUT_DEFERRED_PRIORITY,
-                                        op, pre);
+                                          LG_THROUGHPUT_DEFERRED_PRIORITY, pre);
         dependence_precondition = next;
       }
       else
@@ -4508,7 +4506,7 @@ namespace Legion {
                                         currently_active_context ? 
                                           LG_THROUGHPUT_WORK_PRIORITY :
                                           LG_THROUGHPUT_DEFERRED_PRIORITY,
-                                        op, dependence_precondition);
+                                        dependence_precondition);
         dependence_precondition = next;
       }
     }
@@ -4955,14 +4953,11 @@ namespace Legion {
       // a meta-task to see what we should do without holding the lock
       if (context_configuration.max_outstanding_frames > 0)
       {
-        IssueFrameArgs args;
-        args.parent_ctx = this;
-        args.frame = frame;
-        args.frame_termination = frame_termination;
+        IssueFrameArgs args(owner_task, this, frame, frame_termination);
         // We know that the issuing is done in order because we block after
         // we launch this meta-task which blocks the application task
         RtEvent wait_on = runtime->issue_runtime_meta_task(args,
-                                      LG_LATENCY_WORK_PRIORITY, owner_task);
+                                      LG_LATENCY_WORK_PRIORITY);
         wait_on.lg_wait();
       }
     }
@@ -5149,7 +5144,7 @@ namespace Legion {
           PostDecrementArgs post_decrement_args;
           post_decrement_args.parent_ctx = this;
           RtEvent done = runtime->issue_runtime_meta_task(post_decrement_args,
-              LG_LATENCY_WORK_PRIORITY, NULL, wait_on); 
+              LG_LATENCY_WORK_PRIORITY, wait_on); 
           Runtime::trigger_event(to_trigger, done);
           return to_trigger;
         }
@@ -5723,8 +5718,7 @@ namespace Legion {
       args.target = target;
       args.to_trigger = to_trigger;
       args.source = source;
-      runtime->issue_runtime_meta_task(args, LG_LATENCY_DEFERRED_PRIORITY,
-                                       context->get_owner_task());
+      runtime->issue_runtime_meta_task(args, LG_LATENCY_DEFERRED_PRIORITY);
     }
 
     //--------------------------------------------------------------------------
@@ -5924,8 +5918,7 @@ namespace Legion {
       if (runtime->has_explicit_utility_procs || 
           !last_registration.has_triggered())
       {
-        PostEndArgs post_end_args;
-        post_end_args.proxy_this = this;
+        PostEndArgs post_end_args(owner_task, this);
         post_end_args.result_size = res_size;
         // If it is not owned make a copy
         if (!owned)
@@ -5938,7 +5931,7 @@ namespace Legion {
         // Give these slightly higher priority too since they are cleaning up 
         // and will allow other tasks to run
         runtime->issue_runtime_meta_task(post_end_args,
-           LG_THROUGHPUT_DEFERRED_PRIORITY, owner_task, last_registration);
+           LG_THROUGHPUT_DEFERRED_PRIORITY, last_registration);
       }
       else
         post_end_task(res, res_size, owned);
@@ -8270,8 +8263,7 @@ namespace Legion {
       Runtime *runtime_ptr = runtime;
       if (runtime->has_explicit_utility_procs)
       {
-        PostEndArgs post_end_args;
-        post_end_args.proxy_this = this;
+        PostEndArgs post_end_args(owner_task, this);
         post_end_args.result_size = res_size;
         // If it is not owned make a copy
         if (!owned)
@@ -8284,7 +8276,7 @@ namespace Legion {
         // Give these slightly higher priority too since they are 
         // cleaning up and will allow other tasks to run
         runtime->issue_runtime_meta_task(post_end_args, 
-            LG_THROUGHPUT_DEFERRED_PRIORITY, owner_task);
+                      LG_THROUGHPUT_DEFERRED_PRIORITY);
       }
       else
         post_end_task(res, res_size, owned);

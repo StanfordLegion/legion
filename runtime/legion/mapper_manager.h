@@ -633,7 +633,10 @@ namespace Legion {
       public:
         static const LgTaskID TASK_ID = LG_MAPPER_CONTINUATION_TASK_ID;
       public:
-        MapperContinuation *continuation;
+        ContinuationArgs(UniqueID op_id, MapperContinuation *c)
+          : LgTaskArgs<ContinuationArgs>(op_id), continuation(c) { }
+      public:
+        MapperContinuation *const continuation;
       };
     public:
       MapperContinuation(MapperManager *manager,

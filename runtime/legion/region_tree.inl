@@ -172,7 +172,7 @@ namespace Legion {
         TightenIndexSpaceArgs args;
         args.proxy_this = this;
         context->runtime->issue_runtime_meta_task(args,LG_LATENCY_WORK_PRIORITY,
-                  NULL/*Operation*/, Runtime::protect_event(index_space_ready));
+                                     Runtime::protect_event(index_space_ready));
         return;
       }
       Realm::IndexSpace<DIM,T> tight_space = realm_index_space.tighten();
