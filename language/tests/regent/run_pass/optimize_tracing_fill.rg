@@ -13,7 +13,7 @@
 -- limitations under the License.
 
 -- runs-with:
--- [ [ "-dm:memoize" ] ]
+-- [ [ "-dm:memoize", "-ll:cpu", "2" ] ]
 
 import "regent"
 
