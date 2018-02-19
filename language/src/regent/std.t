@@ -3455,11 +3455,10 @@ local function compile_tasks_in_parallel()
   end
 
   -- Spawn children processes, assign a subset of tasks to each to compile.
-  -- HACK: Terra functions used by more than one task may get compiled
+  -- TODO: Terra functions used by more than one task may get compiled
   -- multiple times, and included in multiple object files by different
-  -- children. They should all be exactly the same, so the linker may choose
-  -- to keep any one of them.
-  local flags = terralib.newlist({'-Wl,--allow-multiple-definition'})
+  -- children. This will cause bloat in the final executable.
+  local flags = terralib.newlist()
   local child_pids = terralib.newlist()
   local n = math.max(tonumber(std.config["jobs"]) or 1, 1)
   for i = 1,n do
