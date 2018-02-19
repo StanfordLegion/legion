@@ -6413,6 +6413,33 @@ namespace Legion {
 #endif
       if (rhs == this)
         return true;
+      // We're about to do something expensive so if these are both 
+      // in the same index space tree then walk up to a common partition
+      // (if one exists) and see if it is disjoint
+      if (handle.get_tree_id() == rhs->handle.get_tree_id())
+      {
+        if (parent != rhs->parent)
+        {
+          IndexSpaceNode *one = this;
+          IndexSpaceNode *two = rhs;
+          // Get them at the same depth
+          while (one->depth > two->depth)
+            one = one->parent->parent;
+          while (one->depth < two->depth)
+            two = two->parent->parent;
+          // Now walk up until their parent is the same
+          while (one->parent != two->parent)
+          {
+            one = one->parent->parent;
+            two = two->parent->parent;
+          }
+          // If they have the same parent and it's not NULL and 
+          // it is disjoint then they 
+          if ((one->parent != NULL) && one->parent->is_disjoint())
+            return false;
+        }
+        // Otherwise fall through and do the expensive test
+      }
       IndexSpaceExpression *intersect = 
         context->intersect_index_spaces(NULL, this, rhs);
       return !intersect->is_empty();
@@ -6425,6 +6452,33 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(rhs->handle.get_type_tag() == handle.get_type_tag());
 #endif
+      // A very simple test but an obvious one
+      if ((rhs->parent == this) || (parent == rhs))
+          return true;
+      // We're about to do something expensive so if these are both
+      // in the same index space tree then walk up to a common partition
+      // if one exists and see if it is disjoint
+      if (handle.get_tree_id() == rhs->handle.get_tree_id())
+      {
+        IndexSpaceNode *one = this;
+        IndexSpaceNode *two = rhs->parent;
+        // Get them at the same depth
+        while (one->depth > two->depth)
+          one = one->parent->parent;
+        while (one->depth < two->depth)
+          two = two->parent->parent;
+        // Now walk up until their parent is the same
+        while (one->parent != two->parent)
+        {
+          one = one->parent->parent;
+          two = two->parent->parent;
+        }
+        // If they have the same parent and it's not NULL and 
+        // it is disjoint then they 
+        if ((one->parent != NULL) && one->parent->is_disjoint())
+          return false;
+        // Otherwise fall through and do the expensive test
+      }
       IndexSpaceExpression *intersect = 
         context->intersect_index_spaces(NULL, this,rhs->get_union_expression());
       return !intersect->is_empty();
@@ -6439,6 +6493,26 @@ namespace Legion {
 #endif
       if (rhs == this)
         return true;
+      // We're about to do something expensive, so use the region tree
+      // as an acceleration data structure to try to make our tests
+      // more efficient. If these are in the same tree, see if we can
+      // walk up the tree from rhs and find ourself
+      if (handle.get_tree_id() == rhs->handle.get_tree_id())
+      {
+        // If we're the root of the tree we also trivially dominate
+        if (depth == 0)
+          return true;
+        if (rhs->depth > depth)
+        {
+          IndexSpaceNode *temp = rhs;
+          while (depth < temp->depth)
+            temp = temp->parent->parent;
+          // If we find ourself at the same depth then we dominate
+          if (temp == this)
+            return true;
+        }
+        // Otherwise we fall through and do the expensive test
+      }
       IndexSpaceExpression *diff = 
         context->subtract_index_spaces(NULL, rhs, this);
       return diff->is_empty();
@@ -6451,6 +6525,29 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(rhs->handle.get_type_tag() == handle.get_type_tag());
 #endif
+      // A simple but common case
+      if (rhs->parent == this)
+        return true;
+      // We're about to do something expensive so use the region tree
+      // as an acceleration data structure to try to make our tests
+      // more efficient. If these are in the same tree, see if we can
+      // walk up the tree from rhs and find ourself
+      if (handle.get_tree_id() == rhs->handle.get_tree_id())
+      {
+        // If we're the root of the tree we also trivially domainate
+        if (depth == 0)
+          return true;
+        if (rhs->depth > depth)
+        {
+          IndexSpaceNode *temp = rhs->parent;
+          while (depth < temp->depth)
+            temp = temp->parent->parent;
+          // If we find ourself at the same depth then we dominate
+          if (temp == this)
+            return true;
+        }
+        // Otherwise we fall through and do the expensive test
+      }
       IndexSpaceExpression *diff = 
         context->subtract_index_spaces(NULL, rhs->get_union_expression(), this);
       return diff->is_empty();
@@ -7362,6 +7459,33 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(rhs->handle.get_type_tag() == handle.get_type_tag());
 #endif
+      // A very simple test but an obvious one
+      if ((rhs->parent == this) || (parent == rhs))
+        return true;
+      // We're about to do something expensive so if these are both
+      // in the same index space tree then walk up to a common partition
+      // if one exists and see if it is disjoint
+      if (handle.get_tree_id() == rhs->handle.get_tree_id())
+      {
+        IndexSpaceNode *one = parent;
+        IndexSpaceNode *two = rhs;
+        // Get them at the same depth
+        while (one->depth > two->depth)
+          one = one->parent->parent;
+        while (one->depth < two->depth)
+          two = two->parent->parent;
+        // Now walk up until their parent is the same
+        while (one->parent != two->parent)
+        {
+          one = one->parent->parent;
+          two = two->parent->parent;
+        }
+        // If they have the same parent and it's not NULL and 
+        // it is disjoint then they 
+        if ((one->parent != NULL) && one->parent->is_disjoint())
+          return false;
+        // Otherwise fall through and do the expensive test
+      }
       IndexSpaceExpression *intersect = 
         context->intersect_index_spaces(NULL, get_union_expression(), rhs);
       return !intersect->is_empty();
@@ -7374,8 +7498,35 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(rhs->handle.get_type_tag() == handle.get_type_tag());
 #endif
+      // A very simple but obvious test to do
       if (rhs == this)
         return true;
+      // We're about to do something expensive so see if we can use
+      // the region tree as an acceleration data structure first
+      if (handle.get_tree_id() == rhs->handle.get_tree_id())
+      {
+        if (parent != rhs->parent)
+        {
+          // Parent's are not the same, go up until we find 
+          // parents with a common partition
+          IndexSpaceNode *one = parent;
+          IndexSpaceNode *two = rhs->parent;
+          // Get them at the same depth
+          while (one->depth > two->depth)
+            one = one->parent->parent;
+          while (one->depth < two->depth)
+            two = two->parent->parent;
+          // Now walk up until their parent is the same
+          while (one->parent != two->parent)
+          {
+            one = one->parent->parent;
+            two = two->parent->parent;
+          }
+          if ((one->parent != NULL) && one->parent->is_disjoint())
+            return false;
+        }
+        // Otherwise we fall through and do the expensive test
+      }
       IndexSpaceExpression *intersect = 
         context->intersect_index_spaces(NULL, get_union_expression(),
                                         rhs->get_union_expression());
@@ -7389,6 +7540,23 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(rhs->handle.get_type_tag() == handle.get_type_tag());
 #endif
+      // A simple but common case
+      if (rhs->parent == this)
+        return true;
+      // We're about to do something expensive, so use the region tree
+      // as an acceleration data structure to try to make our tests
+      // more efficient
+      if ((handle.get_tree_id() == rhs->handle.get_tree_id()) && 
+          (rhs->depth > depth))
+      {
+        IndexPartNode *temp = rhs->parent;
+        while (depth < temp->depth)
+          temp = temp->parent->parent;
+        // If we find ourselves at the same depth then we dominate
+        if (temp == this)
+          return true;
+        // Otherwise we fall through and do the expensive test
+      }
       IndexSpaceExpression *diff = 
         context->subtract_index_spaces(NULL, rhs, get_union_expression());
       return diff->is_empty();
@@ -7403,6 +7571,20 @@ namespace Legion {
 #endif
       if (rhs == this)
         return true;
+      // We're about to do something expensive, so use the region tree
+      // as an acceleration data structure and try to make our tests
+      // more efficient
+      if ((handle.get_tree_id() == rhs->handle.get_tree_id()) &&
+          (rhs->depth > depth))
+      {
+        IndexPartNode *temp = rhs;
+        while (depth < temp->depth)
+          temp = temp->parent->parent;
+        // If we find ourselves at the same depth then we dominate
+        if (temp == this)
+          return true;
+        // Otherwise we fall through and do the expensive test
+      }
       IndexSpaceExpression *diff = 
         context->subtract_index_spaces(NULL, rhs->get_union_expression(),
                                        get_union_expression());
