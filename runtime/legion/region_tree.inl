@@ -66,7 +66,7 @@ namespace Legion {
         if (need_tight_result)
         {
           // Wait for the index space to be tight
-          tight_index_space_ready.lg_wait();
+          tight_index_space_ready.wait();
           space = tight_index_space;
           return ApEvent::NO_AP_EVENT;
         }
@@ -103,7 +103,7 @@ namespace Legion {
       Realm::IndexSpace<DIM,T> temp;
       ApEvent ready = get_realm_index_space(temp, true/*tight*/);
       if (ready.exists() && !ready.has_triggered())
-        ready.lg_wait();
+        ready.wait();
       return temp.empty();
     }
 
@@ -111,7 +111,7 @@ namespace Legion {
     template<int DIM, typename T>
     IndexSpaceUnion<DIM,T>::IndexSpaceUnion(
                                 const std::set<IndexSpaceExpression*> &to_union,
-                                RegionTreeForest *ctx, Operation *op)
+                                RegionTreeForest *ctx)
       : IndexSpaceOperationT<DIM,T>(IndexSpaceOperation::UNION_OP_KIND, ctx),
         sub_expressions(
            std::vector<IndexSpaceExpression*>(to_union.begin(), to_union.end()))
@@ -136,7 +136,7 @@ namespace Legion {
       Realm::ProfilingRequestSet requests;
       if (ctx->runtime->profiler != NULL)
         ctx->runtime->profiler->add_partition_request(requests,
-                                      op, DEP_PART_UNION_REDUCTION);
+                      task_profiling_provenance, DEP_PART_UNION_REDUCTION);
       this->realm_index_space_ready = ApEvent(
           Realm::IndexSpace<DIM,T>::compute_union(
               spaces, this->realm_index_space, requests, precondition));
@@ -146,7 +146,7 @@ namespace Legion {
       args.proxy_this = this;
       this->tight_index_space_ready = 
         ctx->runtime->issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY, 
-                  op, Runtime::protect_event(this->realm_index_space_ready));
+                      Runtime::protect_event(this->realm_index_space_ready));
     }
 
     //--------------------------------------------------------------------------
@@ -200,7 +200,7 @@ namespace Legion {
     template<int DIM, typename T>
     IndexSpaceIntersection<DIM,T>::IndexSpaceIntersection(
                                 const std::set<IndexSpaceExpression*> &to_inter,
-                                RegionTreeForest *ctx, Operation *op)
+                                RegionTreeForest *ctx)
       : IndexSpaceOperationT<DIM,T>(IndexSpaceOperation::INTERSECT_OP_KIND,ctx),
         sub_expressions(
            std::vector<IndexSpaceExpression*>(to_inter.begin(), to_inter.end()))
@@ -224,7 +224,7 @@ namespace Legion {
       Realm::ProfilingRequestSet requests;
       if (ctx->runtime->profiler != NULL)
         ctx->runtime->profiler->add_partition_request(requests,
-                                      op, DEP_PART_INTERSECTION_REDUCTION);
+                task_profiling_provenance, DEP_PART_INTERSECTION_REDUCTION);
       this->realm_index_space_ready = ApEvent(
           Realm::IndexSpace<DIM,T>::compute_intersection(
               spaces, this->realm_index_space, requests, precondition));
@@ -234,7 +234,7 @@ namespace Legion {
       args.proxy_this = this;
       this->tight_index_space_ready = 
         ctx->runtime->issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY,
-                  op, Runtime::protect_event(this->realm_index_space_ready));
+                      Runtime::protect_event(this->realm_index_space_ready));
     }
 
     //--------------------------------------------------------------------------
@@ -289,7 +289,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     IndexSpaceDifference<DIM,T>::IndexSpaceDifference(IndexSpaceExpression *l,
-                IndexSpaceExpression *r, RegionTreeForest *ctx, Operation *op) 
+                IndexSpaceExpression *r, RegionTreeForest *ctx) 
       : IndexSpaceOperationT<DIM,T>(IndexSpaceOperation::DIFFERENCE_OP_KIND,ctx)
         , lhs(l), rhs(r)
     //--------------------------------------------------------------------------
@@ -320,7 +320,7 @@ namespace Legion {
         Realm::ProfilingRequestSet requests;
         if (ctx->runtime->profiler != NULL)
           ctx->runtime->profiler->add_partition_request(requests,
-                                            op, DEP_PART_DIFFERENCE);
+                                task_profiling_provenance, DEP_PART_DIFFERENCE);
         this->realm_index_space_ready = ApEvent(
             Realm::IndexSpace<DIM,T>::compute_difference(lhs_space, rhs_space, 
                               this->realm_index_space, requests, precondition));
@@ -330,7 +330,7 @@ namespace Legion {
         args.proxy_this = this;
         this->tight_index_space_ready = 
           ctx->runtime->issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY,
-                    op, Runtime::protect_event(this->realm_index_space_ready));
+                        Runtime::protect_event(this->realm_index_space_ready));
       }
     }
 
@@ -446,13 +446,13 @@ namespace Legion {
         if (need_tight_result)
         {
           // Wait for the index space to be tight
-          tight_index_space_set.lg_wait();
+          tight_index_space_set.wait();
           // Fall through and get the result when we're done
         }
         else
         {
           if (!realm_index_space_set.has_triggered())
-            realm_index_space_set.lg_wait();
+            realm_index_space_set.wait();
           // Not tight yet so still subject to change so we need the lock
           AutoLock n_lock(node_lock,1,false/*exclusive*/);
           result = realm_index_space;
@@ -545,7 +545,7 @@ namespace Legion {
         TightenIndexSpaceArgs args;
         args.proxy_this = this;
         context->runtime->issue_runtime_meta_task(args,LG_LATENCY_WORK_PRIORITY,
-                  NULL/*Operation*/, Runtime::protect_event(index_space_ready));
+                                     Runtime::protect_event(index_space_ready));
         return;
       }
       Realm::IndexSpace<DIM,T> tight_space = realm_index_space.tighten();
@@ -570,7 +570,7 @@ namespace Legion {
       Realm::IndexSpace<DIM,T> temp;
       ApEvent ready = get_realm_index_space(temp, true/*tight*/);
       if (ready.exists() && !ready.has_triggered())
-        ready.lg_wait();
+        ready.wait();
       return temp.empty();
     }
 
@@ -2620,15 +2620,15 @@ namespace Legion {
       if ((intersect != NULL) && (intersect != this))
       {
         if (intersect->is_index_space_node())
-          copy_expr = context->intersect_index_spaces(op, copy_expr, 
+          copy_expr = context->intersect_index_spaces(copy_expr, 
                                     intersect->as_index_space_node());
         else
-          copy_expr = context->intersect_index_spaces(op, copy_expr,
+          copy_expr = context->intersect_index_spaces(copy_expr,
               intersect->as_index_part_node()->get_union_expression());
       }
       // Then remove any mask from the copy
       if (mask != NULL)
-        copy_expr = context->subtract_index_spaces(op, copy_expr, mask);
+        copy_expr = context->subtract_index_spaces(copy_expr, mask);
       if (context->runtime->profiler != NULL)
         context->runtime->profiler->add_copy_request(requests, op);
       Realm::IndexSpace<DIM,T> local_space;
@@ -2711,15 +2711,15 @@ namespace Legion {
       if ((intersect != NULL) && (intersect != this))
       {
         if (intersect->is_index_space_node())
-          fill_expr = context->intersect_index_spaces(op, fill_expr, 
+          fill_expr = context->intersect_index_spaces(fill_expr, 
                                     intersect->as_index_space_node());
         else
-          fill_expr = context->intersect_index_spaces(op, fill_expr,
+          fill_expr = context->intersect_index_spaces(fill_expr,
               intersect->as_index_part_node()->get_union_expression());
       }
       // Then remove any mask from the fill 
       if (mask != NULL)
-        fill_expr = context->subtract_index_spaces(op, fill_expr, mask);
+        fill_expr = context->subtract_index_spaces(fill_expr, mask);
       if (context->runtime->profiler != NULL)
         context->runtime->profiler->add_fill_request(requests, op);
       Realm::IndexSpace<DIM,T> local_space;

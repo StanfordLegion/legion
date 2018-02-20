@@ -1083,7 +1083,7 @@ namespace Legion {
             DomainT<1,coord_t>::compute_intersection(is1,is2,
                                                   temp,dummy_requests));
           if (wait_on.exists())
-            wait_on.lg_wait();
+            wait_on.wait();
           DomainT<1,coord_t> result = temp.tighten();
           temp.destroy();
           return Domain(result);
@@ -1097,7 +1097,7 @@ namespace Legion {
             DomainT<2,coord_t>::compute_intersection(is1,is2,
                                                   temp,dummy_requests));
           if (wait_on.exists())
-            wait_on.lg_wait();
+            wait_on.wait();
           DomainT<2,coord_t> result = temp.tighten();
           temp.destroy();
           return Domain(result);
@@ -1111,7 +1111,7 @@ namespace Legion {
             DomainT<3,coord_t>::compute_intersection(is1,is2,
                                                   temp,dummy_requests));
           if (wait_on.exists())
-            wait_on.lg_wait();
+            wait_on.wait();
           DomainT<3,coord_t> result = temp.tighten();
           temp.destroy();
           return Domain(result);

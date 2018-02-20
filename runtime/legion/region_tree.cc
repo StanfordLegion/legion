@@ -183,7 +183,7 @@ namespace Legion {
       if (Runtime::legion_spy_enabled)
       {
         if (!node->index_space_ready.has_triggered())
-          node->index_space_ready.lg_wait();
+          node->index_space_ready.wait();
         node->log_index_space_points();
       }
     }
@@ -200,7 +200,7 @@ namespace Legion {
       if (Runtime::legion_spy_enabled)
       {
         if (!node->index_space_ready.has_triggered())
-          node->index_space_ready.lg_wait();
+          node->index_space_ready.wait();
         node->log_index_space_points();
       }
     }
@@ -217,7 +217,7 @@ namespace Legion {
       if (Runtime::legion_spy_enabled)
       {
         if (!node->index_space_ready.has_triggered())
-          node->index_space_ready.lg_wait();
+          node->index_space_ready.wait();
         node->log_index_space_points();
       }
     }
@@ -287,7 +287,7 @@ namespace Legion {
         DisjointnessArgs args;
         args.handle = pid;
         args.ready = disjointness_event;
-        runtime->issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY, NULL,
+        runtime->issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY,
                                      Runtime::protect_event(partition_ready));
       }
       return parent_notified;
@@ -898,7 +898,7 @@ namespace Legion {
       FieldSpaceNode *node = get_node(handle);
       RtEvent ready = node->allocate_field(fid, field_size, serdez_id);
       if (ready.exists())
-        ready.lg_wait();
+        ready.wait();
       return false;
     }
 
@@ -925,7 +925,7 @@ namespace Legion {
       RtEvent ready = node->allocate_fields(sizes, fields, serdez_id);
       // Wait for this to exist
       if (ready.exists())
-        ready.lg_wait();
+        ready.wait();
     }
 
     //--------------------------------------------------------------------------
@@ -1936,7 +1936,7 @@ namespace Legion {
         }
         // Have to wait for all the locks to be acquired
         if (precondition.exists())
-          precondition.lg_wait();
+          precondition.wait();
         // Now do the mapping with our own applied event set
         std::set<RtEvent> local_applied;
         // Construct the traversal info
@@ -2838,7 +2838,7 @@ namespace Legion {
         if (!done_events.empty())
         {
           RtEvent ready = Runtime::merge_events(done_events);
-          ready.lg_wait();
+          ready.wait();
         }
         // Now figure out which ones we successfully acquired and which 
         // ones failed to be acquired
@@ -3511,7 +3511,7 @@ namespace Legion {
           wait_on = wait_finder->second;
       }
       // Wait on the event
-      wait_on.lg_wait();
+      wait_on.wait();
       AutoLock l_lock(lookup_lock,1,false/*exclusive*/);
       std::map<IndexSpace,IndexSpaceNode*>::const_iterator finder = 
           index_nodes.find(space);
@@ -3570,7 +3570,7 @@ namespace Legion {
       if (defer == NULL)
       {
         // Wait for the event
-        wait_on.lg_wait();
+        wait_on.wait();
         AutoLock l_lock(lookup_lock,1,false/*exclusive*/);
         std::map<IndexPartition,IndexPartNode*>::const_iterator finder = 
           index_parts.find(part);
@@ -3632,7 +3632,7 @@ namespace Legion {
           wait_on = wait_finder->second;
       }
       // Wait for the event to be ready
-      wait_on.lg_wait();
+      wait_on.wait();
       AutoLock l_lock(lookup_lock,1,false/*exclusive*/);
       std::map<FieldSpace,FieldSpaceNode*>::const_iterator finder = 
         field_nodes.find(space);
@@ -3713,7 +3713,7 @@ namespace Legion {
         // If we did find something to wait on, do that now
         if (wait_on.exists())
         {
-          wait_on.lg_wait();
+          wait_on.wait();
           // Retake the lock and see again if the handle we
           // were looking for was the top-level node or not
           AutoLock l_lock(lookup_lock,1,false/*exclusive*/);
@@ -3815,7 +3815,7 @@ namespace Legion {
         else
           wait_on = req_finder->second;
       }
-      wait_on.lg_wait();
+      wait_on.wait();
       AutoLock l_lock(lookup_lock,1,false/*exclusive*/);
       std::map<RegionTreeID,RegionNode*>::const_iterator finder = 
           tree_nodes.find(tid);
@@ -4547,7 +4547,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexSpaceExpression* RegionTreeForest::union_index_spaces(Operation *op,
+    IndexSpaceExpression* RegionTreeForest::union_index_spaces(
                            IndexSpaceExpression *lhs, IndexSpaceExpression *rhs)
     //--------------------------------------------------------------------------
     {
@@ -4557,11 +4557,11 @@ namespace Legion {
       std::set<IndexSpaceExpression*> exprs;
       exprs.insert(lhs);
       exprs.insert(rhs);
-      return union_index_spaces(op, exprs);
+      return union_index_spaces(exprs);
     }
 
     //--------------------------------------------------------------------------
-    IndexSpaceExpression* RegionTreeForest::union_index_spaces(Operation *op,
+    IndexSpaceExpression* RegionTreeForest::union_index_spaces(
                                    const std::set<IndexSpaceExpression*> &exprs)
     //--------------------------------------------------------------------------
     {
@@ -4584,12 +4584,12 @@ namespace Legion {
           ExpressionTrieNode *next = NULL;
           if (finder->second->find_operation(expressions, result, next))
             return result;
-          UnionOpCreator creator(this, op, first->type_tag, exprs);
+          UnionOpCreator creator(this, first->type_tag, exprs);
           return next->find_or_create_operation(expressions, creator);
         }
       }
       ExpressionTrieNode *node = NULL;
-      UnionOpCreator creator(this, op, first->type_tag, exprs);
+      UnionOpCreator creator(this, first->type_tag, exprs);
       // Didn't find it, retake the lock, see if we lost the race
       // and if no make the actual trie node
       AutoLock l_lock(lookup_is_op_lock);
@@ -4611,7 +4611,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexSpaceExpression* RegionTreeForest::intersect_index_spaces(
-            Operation *op, IndexSpaceExpression *lhs, IndexSpaceExpression *rhs)
+                           IndexSpaceExpression *lhs, IndexSpaceExpression *rhs)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -4620,12 +4620,12 @@ namespace Legion {
       std::set<IndexSpaceExpression*> exprs;
       exprs.insert(lhs);
       exprs.insert(rhs);
-      return intersect_index_spaces(op, exprs);
+      return intersect_index_spaces(exprs);
     }
 
     //--------------------------------------------------------------------------
     IndexSpaceExpression* RegionTreeForest::intersect_index_spaces(
-                    Operation *op, const std::set<IndexSpaceExpression*> &exprs)
+                                   const std::set<IndexSpaceExpression*> &exprs)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -4647,12 +4647,12 @@ namespace Legion {
           ExpressionTrieNode *next = NULL;
           if (finder->second->find_operation(expressions, result, next))
             return result;
-          IntersectionOpCreator creator(this, op, first->type_tag, exprs);
+          IntersectionOpCreator creator(this, first->type_tag, exprs);
           return next->find_or_create_operation(expressions, creator);
         }
       }
       ExpressionTrieNode *node = NULL;
-      IntersectionOpCreator creator(this, op, first->type_tag, exprs);
+      IntersectionOpCreator creator(this, first->type_tag, exprs);
       // Didn't find it, retake the lock, see if we lost the race
       // and if not make the actual trie node
       AutoLock l_lock(lookup_is_op_lock);
@@ -4674,7 +4674,7 @@ namespace Legion {
     }
     
     //--------------------------------------------------------------------------
-    IndexSpaceExpression* RegionTreeForest::subtract_index_spaces(Operation *op,
+    IndexSpaceExpression* RegionTreeForest::subtract_index_spaces(
                            IndexSpaceExpression *lhs, IndexSpaceExpression *rhs)
     //--------------------------------------------------------------------------
     {
@@ -4696,12 +4696,12 @@ namespace Legion {
           ExpressionTrieNode *next = NULL;
           if (finder->second->find_operation(expressions, result, next))
             return result;
-          DifferenceOpCreator creator(this, op, lhs->type_tag, lhs, rhs);
+          DifferenceOpCreator creator(this, lhs->type_tag, lhs, rhs);
           return next->find_or_create_operation(expressions, creator);
         }
       }
       ExpressionTrieNode *node = NULL;
-      DifferenceOpCreator creator(this, op, lhs->type_tag, lhs, rhs);
+      DifferenceOpCreator creator(this, lhs->type_tag, lhs, rhs);
       // Didn't find it, retake the lock, see if we lost the race
       // and if not make the actual trie node
       AutoLock l_lock(lookup_is_op_lock);
@@ -5467,7 +5467,7 @@ namespace Legion {
         // Send a request if necessary
         if (is_remote && request.exists())
           send_semantic_request(owner_space, tag, can_fail, wait_until,request);
-        wait_on.lg_wait();
+        wait_on.wait();
       }
       // When we wake up, we should be able to find everything
       AutoLock n_lock(node_lock,1,false/*exclusive*/);
@@ -5724,7 +5724,7 @@ namespace Legion {
           args.tag = tag;
           args.source = source;
           context->runtime->issue_runtime_meta_task(args, 
-              LG_LATENCY_WORK_PRIORITY, NULL/*op*/, precondition);
+              LG_LATENCY_WORK_PRIORITY, precondition);
         }
       }
       else
@@ -5832,7 +5832,7 @@ namespace Legion {
       context->runtime->send_index_space_child_request(owner_space, rez);
       if (defer == NULL)
       {
-        ready_event.lg_wait();
+        ready_event.wait();
         // Stupid volatile-ness
         IndexPartition handle_copy = *handle_ptr;
         if (!handle_copy.exists())
@@ -5945,7 +5945,7 @@ namespace Legion {
               Runtime::merge_events(left->partition_ready,
                                     right->partition_ready));
           ready = context->runtime->issue_runtime_meta_task(args,
-                                      LG_LATENCY_WORK_PRIORITY, NULL, pre);
+                                      LG_LATENCY_WORK_PRIORITY, pre);
           pending_tests[key] = ready;
           pending_tests[std::pair<LegionColor,LegionColor>(c2,c1)] = ready;
         }
@@ -5953,7 +5953,7 @@ namespace Legion {
           ready = finder->second;
       }
       // Wait for the ready event and then get the result
-      ready.lg_wait();
+      ready.wait();
       AutoLock n_lock(node_lock,1,false/*exclusive*/);
       if (disjoint_subsets.find(key) != disjoint_subsets.end())
         return true;
@@ -6050,7 +6050,7 @@ namespace Legion {
           rez.serialize(ready_event); 
         }
         context->runtime->send_index_space_colors_request(owner_space, rez);
-        ready_event.lg_wait();
+        ready_event.wait();
       }
       else
       {
@@ -6273,7 +6273,7 @@ namespace Legion {
         args.to_trigger = to_trigger;
         args.source = source;
         forest->runtime->issue_runtime_meta_task(args, 
-            LG_LATENCY_DEFERRED_PRIORITY, NULL/*op*/, defer);
+            LG_LATENCY_DEFERRED_PRIORITY, defer);
         return;
       }
       if (child != NULL)
@@ -6441,7 +6441,7 @@ namespace Legion {
         // Otherwise fall through and do the expensive test
       }
       IndexSpaceExpression *intersect = 
-        context->intersect_index_spaces(NULL, this, rhs);
+        context->intersect_index_spaces(this, rhs);
       return !intersect->is_empty();
     }
 
@@ -6480,7 +6480,7 @@ namespace Legion {
         // Otherwise fall through and do the expensive test
       }
       IndexSpaceExpression *intersect = 
-        context->intersect_index_spaces(NULL, this,rhs->get_union_expression());
+        context->intersect_index_spaces(this, rhs->get_union_expression());
       return !intersect->is_empty();
     }
 
@@ -6514,7 +6514,7 @@ namespace Legion {
         // Otherwise we fall through and do the expensive test
       }
       IndexSpaceExpression *diff = 
-        context->subtract_index_spaces(NULL, rhs, this);
+        context->subtract_index_spaces(rhs, this);
       return diff->is_empty();
     }
 
@@ -6549,7 +6549,7 @@ namespace Legion {
         // Otherwise we fall through and do the expensive test
       }
       IndexSpaceExpression *diff = 
-        context->subtract_index_spaces(NULL, rhs->get_union_expression(), this);
+        context->subtract_index_spaces(rhs->get_union_expression(), this);
       return diff->is_empty();
     }
 
@@ -6823,7 +6823,7 @@ namespace Legion {
           args.tag = tag;
           args.source = source;
           context->runtime->issue_runtime_meta_task(args, 
-              LG_LATENCY_WORK_PRIORITY, NULL/*op*/, precondition);
+              LG_LATENCY_WORK_PRIORITY, precondition);
         }
       }
       else
@@ -6926,7 +6926,7 @@ namespace Legion {
           // Someone else is already making it so just wait
           if (defer == NULL)
           {
-            wait_on.lg_wait();
+            wait_on.wait();
             AutoLock n_lock(node_lock,1,false/*exclusive*/);
             std::map<LegionColor,IndexSpaceNode*>::const_iterator finder =
               color_map.find(c);
@@ -6998,7 +6998,7 @@ namespace Legion {
         context->runtime->send_index_partition_child_request(owner_space, rez);
         if (defer == NULL)
         {
-          ready_event.lg_wait();
+          ready_event.wait();
           IndexSpace copy_handle = *handle_ptr;
 #ifdef DEBUG_LEGION
           assert(copy_handle.exists());
@@ -7110,7 +7110,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (!disjoint_ready.has_triggered())
-        disjoint_ready.lg_wait();
+        disjoint_ready.wait();
       return disjoint;
     }
 
@@ -7170,14 +7170,14 @@ namespace Legion {
           args.right = right;
           ApEvent pre = Runtime::merge_events(left_pre, right_pre);
           ready_event = context->runtime->issue_runtime_meta_task(args, 
-                  LG_LATENCY_WORK_PRIORITY, NULL, Runtime::protect_event(pre));
+                  LG_LATENCY_WORK_PRIORITY, Runtime::protect_event(pre));
           pending_tests[key] = ready_event;
           pending_tests[std::pair<LegionColor,LegionColor>(c2,c1)] =ready_event;
         }
         else
           ready_event = finder->second;
       }
-      ready_event.lg_wait();
+      ready_event.wait();
       AutoLock n_lock(node_lock,1,false/*exclusive*/);
       if (disjoint_subspaces.find(key) != disjoint_subspaces.end())
         return true;
@@ -7287,7 +7287,7 @@ namespace Legion {
         // We can always write the result immediately since we know
         // that the common sub-expression code will give the same
         // result if there is a race
-        union_expr = context->union_index_spaces(NULL, child_spaces);
+        union_expr = context->union_index_spaces(child_spaces);
       }
       return const_cast<IndexSpaceExpression*>(union_expr);
     }
@@ -7360,7 +7360,7 @@ namespace Legion {
         args.pending_child = child_color;
         // Don't remove the pending child until the handle is ready
         context->runtime->issue_runtime_meta_task(args,
-          LG_LATENCY_WORK_PRIORITY, NULL, Runtime::protect_event(domain_ready));
+          LG_LATENCY_WORK_PRIORITY, Runtime::protect_event(domain_ready));
       }
     }
 
@@ -7448,7 +7448,7 @@ namespace Legion {
       assert(!is_disjoint());
 #endif
       IndexSpaceExpression *diff = 
-        context->subtract_index_spaces(NULL, parent, get_union_expression());
+        context->subtract_index_spaces(parent, get_union_expression());
       return diff->is_empty();
     }
 
@@ -7487,7 +7487,7 @@ namespace Legion {
         // Otherwise fall through and do the expensive test
       }
       IndexSpaceExpression *intersect = 
-        context->intersect_index_spaces(NULL, get_union_expression(), rhs);
+        context->intersect_index_spaces(get_union_expression(), rhs);
       return !intersect->is_empty();
     }
 
@@ -7528,7 +7528,7 @@ namespace Legion {
         // Otherwise we fall through and do the expensive test
       }
       IndexSpaceExpression *intersect = 
-        context->intersect_index_spaces(NULL, get_union_expression(),
+        context->intersect_index_spaces(get_union_expression(),
                                         rhs->get_union_expression());
       return !intersect->is_empty();
     }
@@ -7558,7 +7558,7 @@ namespace Legion {
         // Otherwise we fall through and do the expensive test
       }
       IndexSpaceExpression *diff = 
-        context->subtract_index_spaces(NULL, rhs, get_union_expression());
+        context->subtract_index_spaces(rhs, get_union_expression());
       return diff->is_empty();
     }
     
@@ -7586,7 +7586,7 @@ namespace Legion {
         // Otherwise we fall through and do the expensive test
       }
       IndexSpaceExpression *diff = 
-        context->subtract_index_spaces(NULL, rhs->get_union_expression(),
+        context->subtract_index_spaces(rhs->get_union_expression(),
                                        get_union_expression());
       return diff->is_empty();
     }
@@ -7765,7 +7765,7 @@ namespace Legion {
         args.to_trigger = to_trigger;
         args.source = source;
         forest->runtime->issue_runtime_meta_task(args, 
-            LG_LATENCY_DEFERRED_PRIORITY, NULL/*op*/, defer);
+            LG_LATENCY_DEFERRED_PRIORITY, defer);
       }
       else
       {
@@ -8261,7 +8261,7 @@ namespace Legion {
           }
           context->runtime->send_field_space_semantic_request(owner_space, rez);
         }
-        wait_on.lg_wait();
+        wait_on.wait();
       }
       // When we wake up, we should be able to find everything
       AutoLock n_lock(node_lock,1,false/*exclusive*/); 
@@ -8362,7 +8362,7 @@ namespace Legion {
           }
           context->runtime->send_field_semantic_request(owner_space, rez);
         }
-        wait_on.lg_wait();
+        wait_on.wait();
       }
       // When we wake up, we should be able to find everything
       AutoLock n_lock(node_lock,1,false/*exclusive*/); 
@@ -8469,7 +8469,7 @@ namespace Legion {
           args.tag = tag;
           args.source = source;
           context->runtime->issue_runtime_meta_task(args, 
-              LG_LATENCY_WORK_PRIORITY, NULL/*op*/, precondition);
+              LG_LATENCY_WORK_PRIORITY, precondition);
         }
       }
       else
@@ -8527,7 +8527,7 @@ namespace Legion {
           args.tag = tag;
           args.source = source;
           context->runtime->issue_runtime_meta_task(args, 
-              LG_LATENCY_WORK_PRIORITY, NULL/*op*/, precondition);
+              LG_LATENCY_WORK_PRIORITY, precondition);
         }
       }
       else
@@ -8939,7 +8939,7 @@ namespace Legion {
         }
         context->runtime->send_local_field_alloc_request(owner_space, rez);
         // Wait for the result
-        allocated_event.lg_wait();
+        allocated_event.wait();
         if (new_indexes.empty())
           return false;
         // When we wake up then fill in the field information
@@ -9183,7 +9183,7 @@ namespace Legion {
         local_trees.insert(inst);
       }
       if (wait_on.exists())
-        wait_on.lg_wait();
+        wait_on.wait();
     }
 
     //--------------------------------------------------------------------------
@@ -10264,7 +10264,7 @@ namespace Legion {
       {
         if (is_remote && request.exists())
           send_semantic_request(owner_space, tag, can_fail, wait_until,request);
-        wait_on.lg_wait();
+        wait_on.wait();
       }
       // When we wake up, we should be able to find everything
       AutoLock n_lock(node_lock,1,false/*exclusive*/);
@@ -16343,7 +16343,7 @@ namespace Legion {
           args.tag = tag;
           args.source = source;
           context->runtime->issue_runtime_meta_task(args, 
-              LG_LATENCY_WORK_PRIORITY, NULL/*op*/, precondition);
+              LG_LATENCY_WORK_PRIORITY, precondition);
         }
       }
       else
@@ -17371,7 +17371,7 @@ namespace Legion {
           args.tag = tag;
           args.source = source;
           context->runtime->issue_runtime_meta_task(args, 
-              LG_LATENCY_WORK_PRIORITY, NULL/*op*/, precondition);
+              LG_LATENCY_WORK_PRIORITY, precondition);
         }
       }
       else

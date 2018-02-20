@@ -634,18 +634,16 @@ namespace Legion {
       // if these operations have been requested before and if so will 
       // return the common sub-expression, if not we will actually do 
       // the computation and memoize it for the future
-      IndexSpaceExpression* union_index_spaces(Operation *op,
+      IndexSpaceExpression* union_index_spaces(IndexSpaceExpression *lhs,
+                                               IndexSpaceExpression *rhs);
+      IndexSpaceExpression* union_index_spaces(
+                                 const std::set<IndexSpaceExpression*> &exprs);
+      IndexSpaceExpression* intersect_index_spaces(
                                                IndexSpaceExpression *lhs,
                                                IndexSpaceExpression *rhs);
-      IndexSpaceExpression* union_index_spaces(Operation *op,
+      IndexSpaceExpression* intersect_index_spaces(
                                  const std::set<IndexSpaceExpression*> &exprs);
-      IndexSpaceExpression* intersect_index_spaces(Operation *op,
-                                               IndexSpaceExpression *lhs,
-                                               IndexSpaceExpression *rhs);
-      IndexSpaceExpression* intersect_index_spaces(Operation *op,
-                                 const std::set<IndexSpaceExpression*> &exprs);
-      IndexSpaceExpression* subtract_index_spaces(Operation *op,
-                                                  IndexSpaceExpression *lhs, 
+      IndexSpaceExpression* subtract_index_spaces(IndexSpaceExpression *lhs, 
                                                   IndexSpaceExpression *rhs);
     public:
       // Methods for removing index space expression when they are done
@@ -791,7 +789,7 @@ namespace Legion {
     class IndexSpaceUnion : public IndexSpaceOperationT<DIM,T> {
     public:
       IndexSpaceUnion(const std::set<IndexSpaceExpression*> &to_union,
-                      RegionTreeForest *context, Operation *op);
+                      RegionTreeForest *context);
       IndexSpaceUnion(const IndexSpaceUnion<DIM,T> &rhs);
       virtual ~IndexSpaceUnion(void);
     public:
@@ -811,9 +809,9 @@ namespace Legion {
 
     class UnionOpCreator : public OperationCreator {
     public:
-      UnionOpCreator(RegionTreeForest *f, Operation *o, TypeTag t,
+      UnionOpCreator(RegionTreeForest *f, TypeTag t,
                      const std::set<IndexSpaceExpression*> &e)
-        : forest(f), op(o), type_tag(t), exprs(e) { }
+        : forest(f), type_tag(t), exprs(e) { }
     public:
       virtual IndexSpaceOperation* create(void)
       {
@@ -825,11 +823,10 @@ namespace Legion {
       static inline void demux(UnionOpCreator *creator)
       {
         creator->result = new IndexSpaceUnion<N::N,T>(creator->exprs,
-            creator->forest, creator->op);
+            creator->forest);
       }
     public:
       RegionTreeForest *const forest;
-      Operation *const op;
       const TypeTag type_tag;
       const std::set<IndexSpaceExpression*> &exprs;
       IndexSpaceOperation *result;
@@ -839,7 +836,7 @@ namespace Legion {
     class IndexSpaceIntersection : public IndexSpaceOperationT<DIM,T> {
     public:
       IndexSpaceIntersection(const std::set<IndexSpaceExpression*> &to_inter,
-                             RegionTreeForest *context, Operation *op);
+                             RegionTreeForest *context);
       IndexSpaceIntersection(const IndexSpaceIntersection &rhs);
       virtual ~IndexSpaceIntersection(void);
     public:
@@ -852,9 +849,9 @@ namespace Legion {
 
     class IntersectionOpCreator : public OperationCreator {
     public:
-      IntersectionOpCreator(RegionTreeForest *f, Operation *o, TypeTag t,
+      IntersectionOpCreator(RegionTreeForest *f, TypeTag t,
                             const std::set<IndexSpaceExpression*> &e)
-        : forest(f), op(o), type_tag(t), exprs(e) { }
+        : forest(f), type_tag(t), exprs(e) { }
     public:
       virtual IndexSpaceOperation* create(void)
       {
@@ -866,11 +863,10 @@ namespace Legion {
       static inline void demux(IntersectionOpCreator *creator)
       {
         creator->result = new IndexSpaceIntersection<N::N,T>(creator->exprs,
-            creator->forest, creator->op);
+            creator->forest);
       }
     public:
       RegionTreeForest *const forest;
-      Operation *const op;
       const TypeTag type_tag;
       const std::set<IndexSpaceExpression*> &exprs;
       IndexSpaceOperation *result;
@@ -880,7 +876,7 @@ namespace Legion {
     class IndexSpaceDifference : public IndexSpaceOperationT<DIM,T> {
     public:
       IndexSpaceDifference(IndexSpaceExpression *lhs,IndexSpaceExpression *rhs,
-                           RegionTreeForest *context, Operation *op);
+                           RegionTreeForest *context);
       IndexSpaceDifference(const IndexSpaceDifference &rhs);
       virtual ~IndexSpaceDifference(void);
     public:
@@ -894,9 +890,9 @@ namespace Legion {
 
     class DifferenceOpCreator : public OperationCreator {
     public:
-      DifferenceOpCreator(RegionTreeForest *f, Operation *o, TypeTag t,
+      DifferenceOpCreator(RegionTreeForest *f, TypeTag t,
                           IndexSpaceExpression *l, IndexSpaceExpression *r)
-        : forest(f), op(o), type_tag(t), lhs(l), rhs(r) { }
+        : forest(f), type_tag(t), lhs(l), rhs(r) { }
     public:
       virtual IndexSpaceOperation* create(void)
       {
@@ -908,11 +904,10 @@ namespace Legion {
       static inline void demux(DifferenceOpCreator *creator)
       {
         creator->result = new IndexSpaceDifference<N::N,T>(creator->lhs,
-            creator->rhs, creator->forest, creator->op);
+            creator->rhs, creator->forest);
       }
     public:
       RegionTreeForest *const forest;
-      Operation *const op;
       const TypeTag type_tag;
       IndexSpaceExpression *const lhs;
       IndexSpaceExpression *const rhs;

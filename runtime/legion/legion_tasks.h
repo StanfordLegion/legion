@@ -140,24 +140,83 @@ namespace Legion {
         SLICE_TASK_KIND,
       };
     public:
+      struct TriggerTaskArgs : public LgTaskArgs<TriggerTaskArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_TRIGGER_TASK_ID;
+      public:
+        TriggerTaskArgs(TaskOp *t)
+          : LgTaskArgs<TriggerTaskArgs>(t->get_unique_op_id()), op(t) { }
+      public:
+        TaskOp *const op;
+      };
       struct DeferDistributeArgs : public LgTaskArgs<DeferDistributeArgs> {
       public:
         static const LgTaskID TASK_ID = LG_DEFER_DISTRIBUTE_TASK_ID;
       public:
-        TaskOp *proxy_this;
+        DeferDistributeArgs(TaskOp *op)
+          : LgTaskArgs<DeferDistributeArgs>(op->get_unique_op_id()),
+            proxy_this(op) { }
+      public:
+        TaskOp *const proxy_this;
       };
       struct DeferMappingArgs : public LgTaskArgs<DeferMappingArgs> {
       public:
         static const LgTaskID TASK_ID = LG_DEFER_PERFORM_MAPPING_TASK_ID;
       public:
-        TaskOp *proxy_this;
-        MustEpochOp *must_op;
+        DeferMappingArgs(TaskOp *op, MustEpochOp *owner)
+          : LgTaskArgs<DeferMappingArgs>(op->get_unique_op_id()),
+            proxy_this(op), must_op(owner) { }
+      public:
+        TaskOp *const proxy_this;
+        MustEpochOp *const must_op;
       };
       struct DeferLaunchArgs : public LgTaskArgs<DeferLaunchArgs> {
       public:
         static const LgTaskID TASK_ID = LG_DEFER_LAUNCH_TASK_ID;
       public:
-        TaskOp *proxy_this;
+        DeferLaunchArgs(TaskOp *op)
+          : LgTaskArgs<DeferLaunchArgs>(op->get_unique_op_id()), 
+            proxy_this(op) { }
+      public:
+        TaskOp *const proxy_this;
+      };
+      struct DeferredFutureSetArgs : public LgTaskArgs<DeferredFutureSetArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_DEFERRED_FUTURE_SET_ID;
+      public:
+        DeferredFutureSetArgs(FutureImpl *tar, FutureImpl *res, TaskOp *t)
+          : LgTaskArgs<DeferredFutureSetArgs>(t->get_unique_op_id()),
+            target(tar), result(res), task_op(t) { }
+      public:
+        FutureImpl *const target;
+        FutureImpl *const result;
+        TaskOp *const task_op;
+      };
+      struct DeferredFutureMapSetArgs : 
+        public LgTaskArgs<DeferredFutureMapSetArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_DEFERRED_FUTURE_MAP_SET_ID;
+      public:
+        DeferredFutureMapSetArgs(FutureMapImpl *map, FutureImpl *res,
+                                 Domain d, TaskOp *t)
+          : LgTaskArgs<DeferredFutureMapSetArgs>(t->get_unique_op_id()),
+            future_map(map), result(res), domain(d), task_op(t) { }
+      public:
+        FutureMapImpl *const future_map;
+        FutureImpl *const result;
+        const Domain domain;
+        TaskOp *const task_op;
+      };
+      struct DeferredEnqueueArgs : public LgTaskArgs<DeferredEnqueueArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_DEFERRED_ENQUEUE_TASK_ID;
+      public:
+        DeferredEnqueueArgs(ProcessorManager *man, TaskOp *t)
+          : LgTaskArgs<DeferredEnqueueArgs>(t->get_unique_op_id()),
+            manager(man), task(t) { }
+      public:
+        ProcessorManager *const manager;
+        TaskOp *const task;
       };
     public:
       TaskOp(Runtime *rt);
@@ -365,14 +424,22 @@ namespace Legion {
       public:
         static const LgTaskID TASK_ID = LG_DEFERRED_POST_MAPPED_ID;
       public:
-        SingleTask *task;
+        DeferredPostMappedArgs(SingleTask *t)
+          : LgTaskArgs<DeferredPostMappedArgs>(t->get_unique_op_id()),
+            task(t) { }
+      public:
+        SingleTask *const task;
       };
       struct MisspeculationTaskArgs :
         public LgTaskArgs<MisspeculationTaskArgs> {
       public:
         static const LgTaskID TASK_ID = LG_MISSPECULATE_TASK_ID;
       public:
-        SingleTask *task;
+        MisspeculationTaskArgs(SingleTask *t)
+          : LgTaskArgs<MisspeculationTaskArgs>(t->get_unique_op_id()),
+            task(t) { }
+      public:
+        SingleTask *const task;
       };
     public:
       SingleTask(Runtime *rt);
@@ -937,6 +1004,10 @@ namespace Legion {
       struct DeferMapAndLaunchArgs : public LgTaskArgs<DeferMapAndLaunchArgs> {
       public:
         static const LgTaskID TASK_ID = LG_DEFER_MAP_AND_LAUNCH_TASK_ID;
+      public:
+        DeferMapAndLaunchArgs(SliceTask *t)
+          : LgTaskArgs<DeferMapAndLaunchArgs>(t->get_unique_op_id()),
+            proxy_this(t) { }
       public:
         SliceTask *proxy_this;
       };

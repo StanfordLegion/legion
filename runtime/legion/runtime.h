@@ -551,25 +551,13 @@ namespace Legion {
      * to be run for a processor.
      */
     class ProcessorManager {
-    public:
-      struct TriggerOpArgs : public LgTaskArgs<TriggerOpArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_TRIGGER_OP_ID;
-      public:
-        Operation *op;
-      };
+    public: 
       struct SchedulerArgs : public LgTaskArgs<SchedulerArgs> {
       public:
         static const LgTaskID TASK_ID = LG_SCHEDULER_ID;
       public:
         Processor proc;
-      };
-      struct TriggerTaskArgs : public LgTaskArgs<TriggerTaskArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_TRIGGER_TASK_ID;
-      public:
-        TaskOp *op;
-      };
+      }; 
       struct DeferMapperSchedulerArgs : 
         public LgTaskArgs<DeferMapperSchedulerArgs> {
       public:
@@ -1451,32 +1439,7 @@ namespace Legion {
         static const LgTaskID TASK_ID = LG_DEFERRED_RECYCLE_ID;
       public:
         DistributedID did;
-      };
-      struct DeferredFutureSetArgs : public LgTaskArgs<DeferredFutureSetArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_DEFERRED_FUTURE_SET_ID;
-      public:
-        FutureImpl *target;
-        FutureImpl *result;
-        TaskOp *task_op;
-      };
-      struct DeferredFutureMapSetArgs : 
-        public LgTaskArgs<DeferredFutureMapSetArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_DEFERRED_FUTURE_MAP_SET_ID;
-      public:
-        FutureMapImpl *future_map;
-        FutureImpl *result;
-        Domain domain;
-        TaskOp *task_op;
-      };
-      struct DeferredEnqueueArgs : public LgTaskArgs<DeferredEnqueueArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_DEFERRED_ENQUEUE_TASK_ID;
-      public:
-        ProcessorManager *manager;
-        TaskOp *task;
-      };
+      }; 
       struct TopFinishArgs : public LgTaskArgs<TopFinishArgs> {
       public:
         static const LgTaskID TASK_ID = LG_TOP_FINISH_TASK_ID;
@@ -1496,6 +1459,9 @@ namespace Legion {
       struct SelectTunableArgs : public LgTaskArgs<SelectTunableArgs> {
       public:
         static const LgTaskID TASK_ID = LG_SELECT_TUNABLE_TASK_ID;
+      public:
+        SelectTunableArgs(UniqueID uid)
+          : LgTaskArgs<SelectTunableArgs>(uid) { }
       public:
         MapperID mapper_id;
         MappingTagID tag;
@@ -2403,7 +2369,7 @@ namespace Legion {
       ProcessorMask find_processor_mask(const std::vector<Processor> &procs);
       template<typename T>
       inline RtEvent issue_runtime_meta_task(const LgTaskArgs<T> &args,
-                                   LgPriority lg_priority, Operation *op = NULL,
+                                             LgPriority lg_priority,
                                    RtEvent precondition = RtEvent::NO_RT_EVENT,
                                    Processor proc = Processor::NO_PROC);
     public:
@@ -3079,8 +3045,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<typename T>
     inline RtEvent Runtime::issue_runtime_meta_task(const LgTaskArgs<T> &args,
-                                      LgPriority priority, Operation *op, 
-                                      RtEvent precondition, Processor target)
+                    LgPriority priority, RtEvent precondition, Processor target)
     //--------------------------------------------------------------------------
     {
       // If this is not a task directly related to shutdown or is a message, 
@@ -3108,7 +3073,7 @@ namespace Legion {
       if ((T::TASK_ID < LG_MESSAGE_ID) && (profiler != NULL))
       {
         Realm::ProfilingRequestSet requests;
-        profiler->add_meta_request(requests, T::TASK_ID, op);
+        profiler->add_meta_request(requests, T::TASK_ID, args.provenance);
         return RtEvent(target.spawn(LG_TASK_ID, &args, sizeof(T),
                                     requests, precondition, priority));
       }

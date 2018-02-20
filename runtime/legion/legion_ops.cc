@@ -303,12 +303,11 @@ namespace Legion {
     {
       if (has_prepipeline_stage())
       {
-        PrepipelineArgs args;
-        args.proxy_this = this;
+        PrepipelineArgs args(this);
         // Give this deferred throughput priority so that it is always
         // ahead of the logical analysis
         return runtime->issue_runtime_meta_task(args, 
-                LG_THROUGHPUT_DEFERRED_PRIORITY, this);
+                      LG_THROUGHPUT_DEFERRED_PRIORITY);
       }
       else
         return RtEvent::NO_RT_EVENT;
@@ -663,10 +662,9 @@ namespace Legion {
       if (wait_on.exists() && !wait_on.has_triggered())
       {
         // We have to defer the execution of this operation
-        DeferredExecArgs args;
-        args.proxy_this = this;
-        runtime->issue_runtime_meta_task(args, LG_THROUGHPUT_DEFERRED_PRIORITY,
-                                         this, wait_on);
+        DeferredExecArgs args(this);
+        runtime->issue_runtime_meta_task(args, 
+            LG_THROUGHPUT_DEFERRED_PRIORITY, wait_on);
         return;
       }
       // Tell our parent context that we are done mapping
@@ -686,10 +684,9 @@ namespace Legion {
       {
         RtEvent trigger_pre = 
           Runtime::merge_events(mapped_event, resolved_event);
-        TriggerCompleteArgs args;
-        args.proxy_this = this;
+        TriggerCompleteArgs args(this);
         runtime->issue_runtime_meta_task(args, LG_THROUGHPUT_DEFERRED_PRIORITY,
-                                         this, trigger_pre);
+                                         trigger_pre);
       }
       else // Do the trigger now
         trigger_complete();
@@ -715,10 +712,9 @@ namespace Legion {
     {
       if (wait_on.exists() && !wait_on.has_triggered())
       {
-        DeferredCompleteArgs args;
-        args.proxy_this = this;
-        runtime->issue_runtime_meta_task(args, LG_THROUGHPUT_DEFERRED_PRIORITY,
-                                         this, wait_on);
+        DeferredCompleteArgs args(this);
+        runtime->issue_runtime_meta_task(args, 
+            LG_THROUGHPUT_DEFERRED_PRIORITY, wait_on);
         return;
       }
       bool need_trigger = false;
@@ -791,11 +787,9 @@ namespace Legion {
     {
       if (wait_on.exists() && !wait_on.has_triggered())
       {
-        DeferredCommitArgs args;
-        args.proxy_this = this;
-        args.deactivate = do_deactivate;
-        runtime->issue_runtime_meta_task(args, LG_THROUGHPUT_DEFERRED_PRIORITY,
-                                         this, wait_on);
+        DeferredCommitArgs args(this, do_deactivate);
+        runtime->issue_runtime_meta_task(args, 
+            LG_THROUGHPUT_DEFERRED_PRIORITY, wait_on);
         return;
       }
       // Tell our parent context that we are committed
@@ -1422,10 +1416,9 @@ namespace Legion {
       if (must_epoch == NULL)
       {
         // We always launch the task to avoid expensive recursive calls
-        DeferredReadyArgs args;
-        args.proxy_this = op;
+        DeferredReadyArgs args(op);
         runtime->issue_runtime_meta_task(args, LG_THROUGHPUT_DEFERRED_PRIORITY,
-                                         op, map_precondition);
+                                         map_precondition);
       }
       else if (!map_precondition.has_triggered())
         must_epoch->add_mapping_dependence(map_precondition);
@@ -1436,10 +1429,9 @@ namespace Legion {
           Runtime::merge_events(resolution_dependences);
         if (!resolve_precondition.has_triggered())
         {
-          DeferredResolutionArgs args;
-          args.proxy_this = op;
+          DeferredResolutionArgs args(op);
           runtime->issue_runtime_meta_task(args,LG_THROUGHPUT_DEFERRED_PRIORITY,
-                                           op, resolve_precondition);
+                                           resolve_precondition);
           resolve_now = false;
         }
       }
@@ -1457,11 +1449,9 @@ namespace Legion {
         RtEvent commit_precondition = Runtime::merge_events(commit_dependences);
         if (!commit_precondition.has_triggered())
         {
-          DeferredCommitTriggerArgs args;
-          args.proxy_this = op;
-          args.gen = op->get_generation();
+          DeferredCommitTriggerArgs args(op);
           runtime->issue_runtime_meta_task(args,LG_THROUGHPUT_DEFERRED_PRIORITY,
-                                           op, commit_precondition);
+                                           commit_precondition);
           return false;
         }
       }
@@ -1872,7 +1862,7 @@ namespace Legion {
       }
       if (wait_event.exists())
       {
-        wait_event.lg_wait();
+        wait_event.wait();
         // Might be a little bit of a race here with cleanup
 #ifdef DEBUG_LEGION
         assert((speculation_state == RESOLVE_TRUE_STATE) ||
@@ -1989,7 +1979,7 @@ namespace Legion {
       // Handle the waiting case if necessary
       if (wait_on.exists())
       {
-        wait_on.lg_wait();
+        wait_on.wait();
         // Now retake the lock and see if anything changed
         AutoLock o_lock(op_lock);
         switch (speculation_state)
@@ -2516,10 +2506,9 @@ namespace Legion {
         // triggering our completion event
         Runtime::trigger_event(completion_event, map_complete_event);
         need_completion_trigger = false;
-        DeferredExecuteArgs deferred_execute_args;
-        deferred_execute_args.proxy_this = this;
+        DeferredExecuteArgs deferred_execute_args(this);
         runtime->issue_runtime_meta_task(deferred_execute_args,
-                                         LG_THROUGHPUT_DEFERRED_PRIORITY, this,
+                                         LG_THROUGHPUT_DEFERRED_PRIORITY,
                                    Runtime::protect_event(map_complete_event));
       }
       else
@@ -5625,11 +5614,9 @@ namespace Legion {
       if (!done.has_triggered())
       {
         RtEvent wait_on = Runtime::protect_event(done);
-        DeferredExecuteArgs deferred_execute_args;
-        deferred_execute_args.proxy_this = this;
+        DeferredExecuteArgs deferred_execute_args(this);
         runtime->issue_runtime_meta_task(deferred_execute_args,
-                                         LG_THROUGHPUT_DEFERRED_PRIORITY,
-                                         this, wait_on);
+                       LG_THROUGHPUT_DEFERRED_PRIORITY, wait_on);
       }
       else
         deferred_execute();
@@ -6907,12 +6894,10 @@ namespace Legion {
               if (ready_event.exists() && !ready_event.has_triggered())
               {
                 // Now we have to defer it
-                DisjointCloseArgs args;
-                args.proxy_this = this;
-                args.child_node = it->first;
-                args.context = find_physical_context(0/*idx*/);
+                DisjointCloseArgs args(this, it->first, 
+                                       find_physical_context(0/*idx*/));
                 RtEvent done_event = runtime->issue_runtime_meta_task(args,
-                    LG_THROUGHPUT_DEFERRED_PRIORITY, this, ready_event);
+                              LG_THROUGHPUT_DEFERRED_PRIORITY, ready_event);
                 // Add the done event to the map applied events
                 map_applied_conditions.insert(done_event);
                 continue;
@@ -7246,7 +7231,7 @@ namespace Legion {
       if (!done_events.empty())
       {
         RtEvent wait_on = Runtime::merge_events(done_events);
-        wait_on.lg_wait();
+        wait_on.wait();
       }
     }
 
@@ -9183,10 +9168,9 @@ namespace Legion {
       ApEvent barrier = Runtime::get_previous_phase(collective.phase_barrier);
       if (!barrier.has_triggered())
       {
-        DeferredExecuteArgs deferred_execute_args;
-        deferred_execute_args.proxy_this = this;
+        DeferredExecuteArgs deferred_execute_args(this);
         runtime->issue_runtime_meta_task(deferred_execute_args,
-                                         LG_THROUGHPUT_DEFERRED_PRIORITY, this,
+                                         LG_THROUGHPUT_DEFERRED_PRIORITY,
                                          Runtime::protect_event(barrier));
       }
       else
@@ -9347,11 +9331,9 @@ namespace Legion {
       {
         // Launch a task to get the value
         add_predicate_reference();
-        ResolveFuturePredArgs args;
-        args.future_pred_op = this;
-        runtime->issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY, this,
-                                         Runtime::protect_event(
-                                           future.impl->get_ready_event()));
+        ResolveFuturePredArgs args(this);
+        runtime->issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY,
+                    Runtime::protect_event(future.impl->get_ready_event()));
       }
       // Mark that we completed mapping this operation
       complete_mapping();
@@ -10666,12 +10648,10 @@ namespace Legion {
       {
         if (!indiv_triggered[idx])
         {
-          MustEpochIndivArgs args;
-          args.triggerer = this;
-          args.task = indiv_tasks[idx];
+          MustEpochIndivArgs args(this, owner, indiv_tasks[idx]);
           RtEvent wait = 
             owner->runtime->issue_runtime_meta_task(args, 
-                  LG_THROUGHPUT_DEFERRED_PRIORITY, owner);
+                        LG_THROUGHPUT_DEFERRED_PRIORITY);
           if (wait.exists())
             wait_events.insert(wait);
         }
@@ -10680,12 +10660,10 @@ namespace Legion {
       {
         if (!index_triggered[idx])
         {
-          MustEpochIndexArgs args;
-          args.triggerer = this;
-          args.task = index_tasks[idx];
+          MustEpochIndexArgs args(this, owner, index_tasks[idx]);
           RtEvent wait = 
             owner->runtime->issue_runtime_meta_task(args,
-                  LG_THROUGHPUT_DEFERRED_PRIORITY, owner);
+                        LG_THROUGHPUT_DEFERRED_PRIORITY);
           if (wait.exists())
             wait_events.insert(wait);
         }
@@ -10695,7 +10673,7 @@ namespace Legion {
       if (!wait_events.empty())
       {
         RtEvent trigger_event = Runtime::merge_events(wait_events);
-        trigger_event.lg_wait();
+        trigger_event.wait();
       }
     }
 
@@ -10774,8 +10752,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(single_tasks.size() == dependences.size());
 #endif
-      MustEpochMapArgs args;
-      args.mapper = this;
+      MustEpochMapArgs args(this, owner);
       // For correctness we still have to abide by the mapping dependences
       // computed on the individual tasks while we are mapping them
       std::vector<RtEvent> mapped_events(single_tasks.size());
@@ -10797,18 +10774,18 @@ namespace Legion {
           RtEvent precondition = Runtime::merge_events(preconditions);
           mapped_events[idx] = 
             owner->runtime->issue_runtime_meta_task(args, 
-                LG_THROUGHPUT_DEFERRED_PRIORITY, owner, precondition); 
+                LG_THROUGHPUT_DEFERRED_PRIORITY, precondition); 
         }
         else
           mapped_events[idx] = 
             owner->runtime->issue_runtime_meta_task(args,
-                  LG_THROUGHPUT_DEFERRED_PRIORITY, owner);
+                        LG_THROUGHPUT_DEFERRED_PRIORITY);
       }
       std::set<RtEvent> wait_events(mapped_events.begin(), mapped_events.end());
       if (!wait_events.empty())
       {
         RtEvent mapped_event = Runtime::merge_events(wait_events);
-        mapped_event.lg_wait();
+        mapped_event.wait();
       }
     }
 
@@ -10819,13 +10796,13 @@ namespace Legion {
       // Before we can actually map, we have to perform our versioning analysis
       RtEvent versions_ready = task->perform_must_epoch_version_analysis(owner);
       if (versions_ready.exists())
-        versions_ready.lg_wait();
+        versions_ready.wait();
       // Note we don't need to hold a lock here because this is
       // a monotonic change.  Once it fails for anyone then it
       // fails for everyone.
       RtEvent done_mapping = task->perform_mapping(owner);
       if (done_mapping.exists())
-        done_mapping.lg_wait();
+        done_mapping.wait();
     }
 
     //--------------------------------------------------------------------------
@@ -10878,8 +10855,8 @@ namespace Legion {
                                 const std::set<SliceTask*> &slice_tasks)
     //--------------------------------------------------------------------------
     {
-      MustEpochDistributorArgs dist_args;
-      MustEpochLauncherArgs launch_args;
+      MustEpochDistributorArgs dist_args(owner);
+      MustEpochLauncherArgs launch_args(owner);
       std::set<RtEvent> wait_events;
       for (std::vector<IndividualTask*>::const_iterator it = 
             indiv_tasks.begin(); it != indiv_tasks.end(); it++)
@@ -10889,7 +10866,7 @@ namespace Legion {
           dist_args.task = *it;
           RtEvent wait = 
             runtime->issue_runtime_meta_task(dist_args, 
-                LG_THROUGHPUT_DEFERRED_PRIORITY, owner);
+                        LG_THROUGHPUT_DEFERRED_PRIORITY);
           if (wait.exists())
             wait_events.insert(wait);
         }
@@ -10898,7 +10875,7 @@ namespace Legion {
           launch_args.task = *it;
           RtEvent wait = 
             runtime->issue_runtime_meta_task(launch_args,
-                  LG_THROUGHPUT_DEFERRED_PRIORITY, owner);
+                          LG_THROUGHPUT_DEFERRED_PRIORITY);
           if (wait.exists())
             wait_events.insert(wait);
         }
@@ -10912,7 +10889,7 @@ namespace Legion {
           dist_args.task = *it;
           RtEvent wait = 
             runtime->issue_runtime_meta_task(dist_args, 
-                LG_THROUGHPUT_DEFERRED_PRIORITY, owner);
+                        LG_THROUGHPUT_DEFERRED_PRIORITY);
           if (wait.exists())
             wait_events.insert(wait);
         }
@@ -10921,7 +10898,7 @@ namespace Legion {
           launch_args.task = *it;
           RtEvent wait = 
             runtime->issue_runtime_meta_task(launch_args,
-                 LG_THROUGHPUT_DEFERRED_PRIORITY, owner);
+                         LG_THROUGHPUT_DEFERRED_PRIORITY);
           if (wait.exists())
             wait_events.insert(wait);
         }
@@ -10929,7 +10906,7 @@ namespace Legion {
       if (!wait_events.empty())
       {
         RtEvent dist_event = Runtime::merge_events(wait_events);
-        dist_event.lg_wait();
+        dist_event.wait();
       }
     }
 
@@ -12882,10 +12859,9 @@ namespace Legion {
         if (!future_ready_event.has_triggered())
         {
           // Launch a task to handle the deferred complete
-          DeferredExecuteArgs deferred_execute_args;
-          deferred_execute_args.proxy_this = this;
+          DeferredExecuteArgs deferred_execute_args(this);
           runtime->issue_runtime_meta_task(deferred_execute_args,
-                                           LG_THROUGHPUT_DEFERRED_PRIORITY,this,
+                                           LG_THROUGHPUT_DEFERRED_PRIORITY,
                                     Runtime::protect_event(future_ready_event));
         }
         else
@@ -14651,10 +14627,9 @@ namespace Legion {
         wait_on = Runtime::protect_event(Runtime::merge_events(pre_events));
       if (wait_on.exists() && !wait_on.has_triggered())
       {
-        DeferredExecuteArgs args;
-        args.proxy_this = this;
-        runtime->issue_runtime_meta_task(args, LG_THROUGHPUT_DEFERRED_PRIORITY,
-                                         this, wait_on);
+        DeferredExecuteArgs args(this);
+        runtime->issue_runtime_meta_task(args, 
+            LG_THROUGHPUT_DEFERRED_PRIORITY, wait_on);
       }
       else
         deferred_execute();

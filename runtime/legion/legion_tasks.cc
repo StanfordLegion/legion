@@ -910,10 +910,9 @@ namespace Legion {
               // themselves since they are already mapped
               if (task->is_origin_mapped())
               {
-                ProcessorManager::TriggerTaskArgs trigger_args;
-                trigger_args.op = task;
+                TriggerTaskArgs trigger_args(task);
                 rt->issue_runtime_meta_task(trigger_args, 
-                    LG_THROUGHPUT_WORK_PRIORITY, task, ready);
+                      LG_THROUGHPUT_WORK_PRIORITY, ready);
               }
               else
                 rt->add_to_ready_queue(current, task, ready);
@@ -933,10 +932,9 @@ namespace Legion {
               // themselves since they are already mapped
               if (task->is_origin_mapped())
               {
-                ProcessorManager::TriggerTaskArgs trigger_args;
-                trigger_args.op = task;
+                TriggerTaskArgs trigger_args(task);
                 rt->issue_runtime_meta_task(trigger_args, 
-                    LG_THROUGHPUT_WORK_PRIORITY, task, ready);
+                      LG_THROUGHPUT_WORK_PRIORITY, ready);
               }
               else
                 rt->add_to_ready_queue(current, task, ready);
@@ -1325,31 +1323,27 @@ namespace Legion {
     RtEvent TaskOp::defer_distribute_task(RtEvent precondition)
     //--------------------------------------------------------------------------
     {
-      DeferDistributeArgs args;
-      args.proxy_this = this;
+      DeferDistributeArgs args(this);
       return runtime->issue_runtime_meta_task(args,
-          LG_THROUGHPUT_DEFERRED_PRIORITY, this, precondition);
+          LG_THROUGHPUT_DEFERRED_PRIORITY, precondition);
     }
 
     //--------------------------------------------------------------------------
     RtEvent TaskOp::defer_perform_mapping(RtEvent precondition, MustEpochOp *op)
     //--------------------------------------------------------------------------
     {
-      DeferMappingArgs args;
-      args.proxy_this = this;
-      args.must_op = op;
+      DeferMappingArgs args(this, op);
       return runtime->issue_runtime_meta_task(args,
-          LG_THROUGHPUT_DEFERRED_PRIORITY, this, precondition);
+          LG_THROUGHPUT_DEFERRED_PRIORITY, precondition);
     }
 
     //--------------------------------------------------------------------------
     RtEvent TaskOp::defer_launch_task(RtEvent precondition)
     //--------------------------------------------------------------------------
     {
-      DeferLaunchArgs args;
-      args.proxy_this = this;
+      DeferLaunchArgs args(this);
       return runtime->issue_runtime_meta_task(args,
-          LG_THROUGHPUT_DEFERRED_PRIORITY, this, precondition);
+          LG_THROUGHPUT_DEFERRED_PRIORITY, precondition);
     }
 
     //--------------------------------------------------------------------------
@@ -2004,7 +1998,7 @@ namespace Legion {
       {
         RtEvent wait_on = Runtime::merge_events(version_ready_events);
         // This wait sucks but whatever for now
-        wait_on.lg_wait();
+        wait_on.wait();
       }
       for (std::vector<unsigned>::const_iterator it = must_premap.begin();
             it != must_premap.end(); it++)
@@ -3477,7 +3471,7 @@ namespace Legion {
           }
           // Wait until we have our read-only locks
           if (precondition.exists())
-            precondition.lg_wait();
+            precondition.wait();
         }
       }
       // After we've got our results, apply the state to the region tree
@@ -3982,10 +3976,9 @@ namespace Legion {
       // where the task misspeculates
       if (false_guard.exists())
       {
-        MisspeculationTaskArgs args;
-        args.task = this;
+        MisspeculationTaskArgs args(this);
         runtime->issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY, 
-                                         this, RtEvent(false_guard));
+                                         RtEvent(false_guard));
         // Fun little trick here: decrement the outstanding meta-task
         // counts for the mis-speculation task in case it doesn't run
         // If it does run, we'll increment the counts again
@@ -4259,10 +4252,9 @@ namespace Legion {
         // be mapped immediately, mapper be damned
         if (must_epoch != NULL)
         {
-          ProcessorManager::TriggerTaskArgs trigger_args;
-          trigger_args.op = slice;
+          TriggerTaskArgs trigger_args(slice);
           RtEvent done = runtime->issue_runtime_meta_task(trigger_args, 
-                                           LG_THROUGHPUT_WORK_PRIORITY, this);
+                                           LG_THROUGHPUT_WORK_PRIORITY);
           wait_for.insert(done);
         }
         // Figure out whether this task is local or remote
@@ -4285,7 +4277,7 @@ namespace Legion {
       if (!wait_for.empty())
       {
         RtEvent wait_on = Runtime::merge_events(wait_for);
-        wait_on.lg_wait();
+        wait_on.wait();
       }
     }
 
@@ -4872,10 +4864,9 @@ namespace Legion {
       // be mapped immediately, mapper be damned
       if (must_epoch != NULL)
       {
-        ProcessorManager::TriggerTaskArgs trigger_args;
-        trigger_args.op = this;
+        TriggerTaskArgs trigger_args(this);
         runtime->issue_runtime_meta_task(trigger_args, 
-                                         LG_THROUGHPUT_WORK_PRIORITY, this);
+                                         LG_THROUGHPUT_WORK_PRIORITY);
       }
       // Figure out whether this task is local or remote
       else if (!runtime->is_local(target_proc))
@@ -5008,12 +4999,10 @@ namespace Legion {
           // Add references so they aren't garbage collected
           result.impl->add_base_gc_ref(DEFERRED_TASK_REF, this);
           predicate_false_future.impl->add_base_gc_ref(DEFERRED_TASK_REF, this);
-          Runtime::DeferredFutureSetArgs args;
-          args.target = result.impl;
-          args.result = predicate_false_future.impl;
-          args.task_op = this;
+          DeferredFutureSetArgs args(result.impl, 
+                predicate_false_future.impl, this);
           execution_condition = 
-            runtime->issue_runtime_meta_task(args,LG_LATENCY_WORK_PRIORITY,this,
+            runtime->issue_runtime_meta_task(args,LG_LATENCY_WORK_PRIORITY,
                                              Runtime::protect_event(wait_on));
         }
       }
@@ -5351,10 +5340,9 @@ namespace Legion {
       // we need to wait before completing our mapping
       if (!mapped_precondition.has_triggered())
       {
-        SingleTask::DeferredPostMappedArgs args;
-        args.task = this;
+        SingleTask::DeferredPostMappedArgs args(this);
         runtime->issue_runtime_meta_task(args, LG_THROUGHPUT_DEFERRED_PRIORITY,
-                                         this, mapped_precondition);
+                                         mapped_precondition);
         return;
       }
       if (Runtime::legion_spy_enabled)
@@ -5410,7 +5398,7 @@ namespace Legion {
       {
         // Wait for the future to be ready
         ApEvent wait_on = predicate_false_future.impl->get_ready_event();
-        wait_on.lg_wait();
+        wait_on.wait();
         void *ptr = predicate_false_future.impl->get_untyped_result(true);
         size_t size = predicate_false_future.impl->get_untyped_size();
         execution_context->end_task(ptr, size, false/*owned*/); 
@@ -5593,7 +5581,7 @@ namespace Legion {
       parent_ctx = inline_ctx;
       // See if we need to wait for anything
       if (start_condition.exists())
-        start_condition.lg_wait();
+        start_condition.wait();
       variant->dispatch_inline(current, inline_ctx); 
       // Return any created privilege state
       inline_ctx->return_privilege_state(enclosing);
@@ -6304,10 +6292,9 @@ namespace Legion {
       DETAILED_PROFILER(runtime, POINT_TASK_POST_MAPPED_CALL);
       if (!mapped_precondition.has_triggered())
       {
-        SingleTask::DeferredPostMappedArgs args;
-        args.task = this;
+        SingleTask::DeferredPostMappedArgs args(this);
         runtime->issue_runtime_meta_task(args, LG_THROUGHPUT_DEFERRED_PRIORITY,
-                                         this, mapped_precondition);
+                                         mapped_precondition);
         return;
       }
       if (Runtime::legion_spy_enabled)
@@ -6415,7 +6402,7 @@ namespace Legion {
         if (f.impl != NULL)
         {
           ApEvent ready = f.impl->get_ready_event();
-          ready.lg_wait();
+          ready.wait();
           local_arglen = f.impl->get_untyped_size();
           // Have to make a local copy since the point takes ownership
           if (local_arglen > 0)
@@ -6917,14 +6904,11 @@ namespace Legion {
             future_map.impl->add_base_resource_ref(DEFERRED_TASK_REF);
             predicate_false_future.impl->add_base_gc_ref(DEFERRED_TASK_REF,
                                                          this);
-            Runtime::DeferredFutureMapSetArgs args;
-            args.future_map = future_map.impl;
-            args.result = predicate_false_future.impl;
-            args.domain = index_domain;
-            args.task_op = this;
+            DeferredFutureMapSetArgs args(future_map.impl,
+                  predicate_false_future.impl, index_domain, this);
             execution_condition = 
               runtime->issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY, 
-                                        this, Runtime::protect_event(wait_on));
+                                               Runtime::protect_event(wait_on));
           }
         }
         else
@@ -6959,13 +6943,11 @@ namespace Legion {
             reduction_future.impl->add_base_gc_ref(DEFERRED_TASK_REF, this);
             predicate_false_future.impl->add_base_gc_ref(DEFERRED_TASK_REF, 
                                                          this);
-            Runtime::DeferredFutureSetArgs args;
-            args.target = reduction_future.impl;
-            args.result = predicate_false_future.impl;
-            args.task_op = this;
+            DeferredFutureSetArgs args(reduction_future.impl,
+                                    predicate_false_future.impl, this);
             execution_condition = 
               runtime->issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY,
-                                        this, Runtime::protect_event(wait_on));
+                                               Runtime::protect_event(wait_on));
           }
         }
         else
@@ -7211,7 +7193,7 @@ namespace Legion {
       VariantImpl *variant = parent_ctx->select_inline_variant(this);
       // See if we need to wait for anything
       if (start_condition.exists())
-        start_condition.lg_wait();
+        start_condition.wait();
       // Save this for when things are being returned
       TaskContext *enclosing = parent_ctx;
       // Make a copy of our region requirements
@@ -8384,7 +8366,7 @@ namespace Legion {
       {
         // Wait for the future to be ready
         ApEvent wait_on = predicate_false_future.impl->get_ready_event();
-        wait_on.lg_wait(); 
+        wait_on.wait(); 
         result_size = predicate_false_future.impl->get_untyped_size();
         return predicate_false_future.impl->get_untyped_result(true);
       }
@@ -8728,10 +8710,9 @@ namespace Legion {
     RtEvent SliceTask::defer_map_and_launch(RtEvent precondition)
     //--------------------------------------------------------------------------
     {
-      DeferMapAndLaunchArgs args;
-      args.proxy_this = this;
+      DeferMapAndLaunchArgs args(this);
       return runtime->issue_runtime_meta_task(args,
-          LG_THROUGHPUT_DEFERRED_PRIORITY, this, precondition);
+          LG_THROUGHPUT_DEFERRED_PRIORITY, precondition);
     }
 
     //--------------------------------------------------------------------------

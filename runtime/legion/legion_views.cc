@@ -133,7 +133,7 @@ namespace Legion {
       RtEvent ready = RtEvent::NO_RT_EVENT;
       LogicalView *view = runtime->find_or_request_logical_view(did, ready);
       if (ready.exists())
-        ready.lg_wait();
+        ready.wait();
 #ifdef DEBUG_LEGION
       assert(view->is_instance_view());
 #endif
@@ -154,7 +154,7 @@ namespace Legion {
       RtEvent ready = RtEvent::NO_RT_EVENT;
       LogicalView *view = runtime->find_or_request_logical_view(did, ready);
       if (ready.exists())
-        ready.lg_wait();
+        ready.wait();
 #ifdef DEBUG_LEGION
       assert(view->is_instance_view());
 #endif
@@ -173,7 +173,7 @@ namespace Legion {
       RtEvent ready = RtEvent::NO_RT_EVENT;
       LogicalView *view = runtime->find_or_request_logical_view(did, ready);
       if (ready.exists())
-        ready.lg_wait();
+        ready.wait();
 #ifdef DEBUG_LEGION
       assert(view->is_instance_view());
 #endif
@@ -196,7 +196,7 @@ namespace Legion {
       RtEvent ready = RtEvent::NO_RT_EVENT;
       LogicalView *view = runtime->find_or_request_logical_view(did, ready);
       if (ready.exists())
-        ready.lg_wait();
+        ready.wait();
 #ifdef DEBUG_LEGION
       assert(view->is_instance_view());
 #endif
@@ -403,12 +403,12 @@ namespace Legion {
           rez.serialize(wait_on);
         }
         runtime->send_subview_did_request(owner_space, rez); 
-        wait_on.lg_wait();
+        wait_on.wait();
         RtEvent ready;
         LogicalView *child_view = 
           context->runtime->find_or_request_logical_view(child_did, ready);
         if (ready.exists())
-          ready.lg_wait();
+          ready.wait();
 #ifdef DEBUG_LEGION
         assert(child_view->is_materialized_view());
 #endif
@@ -2930,7 +2930,7 @@ namespace Legion {
               rez.serialize(wait_on);
             }
             runtime->send_atomic_reservation_request(owner_space, rez);
-            wait_on.lg_wait();
+            wait_on.wait();
             // Now retake the lock and get the remaining reservations
             AutoLock v_lock(view_lock, 1, false);
             for (std::vector<FieldID>::const_iterator it = 
@@ -3116,7 +3116,7 @@ namespace Legion {
           args.parent = static_cast<MaterializedView*>(par_view);
           args.context_uid = context_uid;
           runtime->issue_runtime_meta_task(args, LG_LATENCY_DEFERRED_PRIORITY,
-             NULL/*op*/, Runtime::merge_events(par_ready, man_ready));
+                                  Runtime::merge_events(par_ready, man_ready));
           return;
         }
 #ifdef DEBUG_LEGION
@@ -3125,7 +3125,7 @@ namespace Legion {
         parent = par_view->as_materialized_view();
       }
       if (man_ready.exists())
-        man_ready.lg_wait();
+        man_ready.wait();
 #ifdef DEBUG_LEGION
       assert(phy_man->is_instance_manager());
 #endif
@@ -3322,7 +3322,7 @@ namespace Legion {
         {
           // If we are the base caller, then we do the wait
           RtEvent wait_for = Runtime::merge_events(local_wait_on);
-          wait_for.lg_wait();
+          wait_for.wait();
         }
         else // Otherwise add the events to the set to wait on
           wait_on->insert(local_wait_on.begin(), local_wait_on.end());
@@ -5902,7 +5902,7 @@ namespace Legion {
             performed_write = *child_writes.begin();
           else
             performed_write = 
-              context->union_index_spaces(copier.info.op, child_writes);
+              context->union_index_spaces(child_writes);
           done = test_done(copier, performed_write, write_mask);
         }
         if (!done && !source_views.empty())
@@ -5913,8 +5913,8 @@ namespace Legion {
             if (write_mask != NULL)
             {
               // Compute a new write mask for the 
-              write_mask = context->union_index_spaces(copier.info.op,
-                  write_mask, performed_write);
+              write_mask = 
+                context->union_index_spaces(write_mask, performed_write);
               our_write = issue_update_copies_single(copier, logical_node,
                 src_version_tracker, pred_guard, source_views, write_mask);
             }
@@ -5922,8 +5922,8 @@ namespace Legion {
               our_write = issue_update_copies_single(copier, logical_node,
                 src_version_tracker, pred_guard, source_views, performed_write);
             if (our_write != NULL)
-              performed_write = context->union_index_spaces(copier.info.op,
-                  performed_write, our_write);
+              performed_write = 
+                context->union_index_spaces(performed_write, our_write);
           }
           else
             performed_write = issue_update_copies_single(
@@ -5981,7 +5981,7 @@ namespace Legion {
         logical_node->get_index_space_expression(); 
       IndexSpaceExpression *intersect_is = 
         (dst_is->expr_id == local_is->expr_id) ? local_is : 
-        context->intersect_index_spaces(info.op, dst_is, local_is);
+        context->intersect_index_spaces(dst_is, local_is);
       // First check to see if the target is already valid
       {
         PhysicalManager *dst_manager = dst->get_manager();
@@ -6006,7 +6006,7 @@ namespace Legion {
                 continue;
               // Construct the expression, intersect then subtract
               IndexSpaceExpression *expr = 
-                context->subtract_index_spaces(info.op,intersect_is,pit->first);
+                context->subtract_index_spaces(intersect_is, pit->first);
               LegionMap<IndexSpaceExpression*,FieldMask>::aligned::iterator
                 finder = performed_writes.find(expr);
               if (finder == performed_writes.end())
@@ -6101,7 +6101,6 @@ namespace Legion {
                                       DeferredCopier &copier, bool prune_global)
     //--------------------------------------------------------------------------
     {
-      Operation *op = copier.info.op;
       MaterializedView *dst = copier.dst;
       FieldMask &global_copy_mask = copier.deferred_copy_mask;
       LegionList<FieldSet<IndexSpaceExpression*> >::aligned write_sets;
@@ -6124,7 +6123,7 @@ namespace Legion {
 #endif
         IndexSpaceExpression *union_is = NULL;
         if (it->elements.size() > 1)
-          union_is = context->union_index_spaces(op, it->elements); 
+          union_is = context->union_index_spaces(it->elements); 
         else
           union_is = *(it->elements.begin()); 
         // Compute the pending difference so we can do the check
@@ -6132,7 +6131,7 @@ namespace Legion {
         // If it's done writing we can remove the fields from the
         // global copy mask, otherwise just keep the union_is
         IndexSpaceExpression *diff_is = 
-          context->subtract_index_spaces(op, dst_is, union_is);
+          context->subtract_index_spaces(dst_is, union_is);
         if (!diff_is->is_empty())
           write_masks[union_is] = it->set_mask;
         else if (prune_global)
@@ -6159,7 +6158,7 @@ namespace Legion {
         logical_node->get_index_space_expression(); 
       IndexSpaceExpression *intersect_is = 
         (dst_is->expr_id == local_is->expr_id) ? local_is : 
-        context->intersect_index_spaces(info.op, dst_is, local_is);
+        context->intersect_index_spaces(dst_is, local_is);
       MaterializedView *src_instance = NULL;
       DeferredView *deferred_instance = NULL;
       if (dst->logical_node->sort_copy_instances_single(info, dst,
@@ -6168,8 +6167,7 @@ namespace Legion {
         // If we get here then the destination is already valid
         // Construct the write expression, intersect then subtract
         if (write_mask != NULL)
-          return context->subtract_index_spaces(info.op, 
-                              intersect_is, write_mask);
+          return context->subtract_index_spaces(intersect_is, write_mask);
         else
           return intersect_is;
       }
@@ -6202,8 +6200,7 @@ namespace Legion {
           copier.record_postcondition(copy_post);
         // Construct the write expression, intersect then subtract
         if (write_mask != NULL)
-          return context->subtract_index_spaces(info.op, 
-                              intersect_is, write_mask);
+          return context->subtract_index_spaces(intersect_is, write_mask);
         else
           return intersect_is;
       }
@@ -6224,14 +6221,13 @@ namespace Legion {
                      IndexSpaceExpression *write1, IndexSpaceExpression *write2)
     //--------------------------------------------------------------------------
     {
-      Operation *op = copier.info.op;
       MaterializedView *dst = copier.dst;
       IndexSpaceExpression *dst_is = 
         dst->logical_node->get_index_space_expression();
       RegionTreeForest *context = dst->logical_node->context;
-      IndexSpaceExpression *diff = context->subtract_index_spaces(op,
+      IndexSpaceExpression *diff = context->subtract_index_spaces(
           dst_is, (write2 == NULL) ? write1 : 
-            context->union_index_spaces(op, write1, write2));
+            context->union_index_spaces(write1, write2));
       return diff->is_empty();
     }
 
@@ -6987,7 +6983,7 @@ namespace Legion {
         DeferCompositeViewRegistrationArgs args;
         args.view = view;
         runtime->issue_runtime_meta_task(args, LG_LATENCY_DEFERRED_PRIORITY,
-                                         NULL/*op*/, wait_on);
+                                         wait_on);
         // Not ready to perform registration yet
         return;
       }
@@ -7301,7 +7297,7 @@ namespace Legion {
       args.dc = dc;
       args.did = did;
       return context->runtime->issue_runtime_meta_task(args, 
-          LG_LATENCY_DEFERRED_PRIORITY, NULL/*op*/, precondition);
+          LG_LATENCY_DEFERRED_PRIORITY, precondition);
     }
 
     //--------------------------------------------------------------------------
@@ -7451,7 +7447,7 @@ namespace Legion {
           Runtime *runtime = logical_node->context->runtime;
           RtEvent precondition = 
             runtime->issue_runtime_meta_task(args, LG_LATENCY_DEFERRED_PRIORITY,
-                                             NULL/*op*/, capture_precondition);
+                                             capture_precondition);
           preconditions.insert(precondition);
         }
         else // We can do the capture now!
@@ -7463,7 +7459,7 @@ namespace Legion {
       if (!preconditions.empty())
       {
         RtEvent wait_on = Runtime::merge_events(preconditions);
-        wait_on.lg_wait();
+        wait_on.wait();
       }
     }
 
@@ -7664,7 +7660,7 @@ namespace Legion {
           args.owner_did = owner_did;
           RtEvent precondition = 
             runtime->issue_runtime_meta_task(args, LG_LATENCY_DEFERRED_PRIORITY,
-                                             NULL/*op*/, ready);
+                                             ready);
           preconditions.insert(precondition);
         }
         else
@@ -8518,10 +8514,10 @@ namespace Legion {
             continue;
           // Check to make sure that the sets are equal for now since
           // we won't handle the case correctly if they aren't
-          IndexSpaceExpression *diff1 = context->subtract_index_spaces(
-              copier.info.op, true_it->first, false_it->first);
-          IndexSpaceExpression *diff2 = context->subtract_index_spaces(
-              copier.info.op, false_it->first, true_it->first);
+          IndexSpaceExpression *diff1 = 
+            context->subtract_index_spaces(true_it->first, false_it->first);
+          IndexSpaceExpression *diff2 = 
+            context->subtract_index_spaces(false_it->first, true_it->first);
           if (!diff1->is_empty() || !diff2->is_empty())
             REPORT_LEGION_FATAL(LEGION_FATAL_INCONSISTENT_PHI_VIEW,
                 "Legion Internal Fatal Error: Phi View has different "
@@ -8587,10 +8583,10 @@ namespace Legion {
                   "developers mailing list.")
         // Check to make sure that the sets are equal for now since
         // we won't handle the case correctly if they aren't
-        IndexSpaceExpression *diff1 = context->subtract_index_spaces(
-            copier.info.op, true_write, false_write);
-        IndexSpaceExpression *diff2 = context->subtract_index_spaces(
-            copier.info.op, false_write, true_write);
+        IndexSpaceExpression *diff1 = 
+            context->subtract_index_spaces(true_write, false_write);
+        IndexSpaceExpression *diff2 = 
+            context->subtract_index_spaces(false_write, true_write);
         if (!diff1->is_empty() || !diff2->is_empty())
           REPORT_LEGION_FATAL(LEGION_FATAL_INCONSISTENT_PHI_VIEW,
                   "Legion Internal Fatal Error: Phi View has different "
@@ -8803,7 +8799,7 @@ namespace Legion {
       args.dc = dc;
       args.did = did;
       return context->runtime->issue_runtime_meta_task(args,
-          LG_LATENCY_DEFERRED_PRIORITY, NULL/*op*/, precondition);
+          LG_LATENCY_DEFERRED_PRIORITY, precondition);
     }
 
     //--------------------------------------------------------------------------
@@ -8923,7 +8919,7 @@ namespace Legion {
         DeferPhiViewRegistrationArgs args;
         args.view = view;
         runtime->issue_runtime_meta_task(args, LG_LATENCY_DEFERRED_PRIORITY,
-                                         NULL/*op*/, wait_on);
+                                         wait_on);
         return;
       }
       view->register_with_runtime(NULL/*remote registration not needed*/);
@@ -9911,7 +9907,7 @@ namespace Legion {
       PhysicalManager *phy_man = 
         runtime->find_or_request_physical_manager(manager_did, man_ready);
       if (man_ready.exists())
-        man_ready.lg_wait();
+        man_ready.wait();
 #ifdef DEBUG_LEGION
       assert(phy_man->is_reduction_manager());
 #endif
@@ -9962,7 +9958,7 @@ namespace Legion {
         context->runtime->send_view_update_request(logical_owner, rez);
       }
       if (!remote_request_event.has_triggered())
-        remote_request_event.lg_wait();
+        remote_request_event.wait();
     }
 
     //--------------------------------------------------------------------------
