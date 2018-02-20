@@ -1158,6 +1158,13 @@ namespace Legion {
        * @param silence_warnings silence any warnings for this blocking call
        */
       bool is_empty(bool block = false, bool silence_warnings = false) const;
+      /**
+       * Check to see if the future is ready. This will return
+       * true if the future can be used without blocking to wait
+       * on the computation that the future represents, otherwise
+       * it will return false.
+       */
+      bool is_ready(void) const;
     public:
       /**
        * Return a const reference to the future.
