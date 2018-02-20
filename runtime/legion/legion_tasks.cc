@@ -1996,7 +1996,7 @@ namespace Legion {
       {
         RtEvent wait_on = Runtime::merge_events(version_ready_events);
         // This wait sucks but whatever for now
-        wait_on.lg_wait();
+        wait_on.wait();
       }
       for (std::vector<unsigned>::const_iterator it = must_premap.begin();
             it != must_premap.end(); it++)
@@ -3469,7 +3469,7 @@ namespace Legion {
           }
           // Wait until we have our read-only locks
           if (precondition.exists())
-            precondition.lg_wait();
+            precondition.wait();
         }
       }
       // After we've got our results, apply the state to the region tree
@@ -4275,7 +4275,7 @@ namespace Legion {
       if (!wait_for.empty())
       {
         RtEvent wait_on = Runtime::merge_events(wait_for);
-        wait_on.lg_wait();
+        wait_on.wait();
       }
     }
 
@@ -5396,7 +5396,7 @@ namespace Legion {
       {
         // Wait for the future to be ready
         ApEvent wait_on = predicate_false_future.impl->get_ready_event();
-        wait_on.lg_wait();
+        wait_on.wait();
         void *ptr = predicate_false_future.impl->get_untyped_result(true);
         size_t size = predicate_false_future.impl->get_untyped_size();
         execution_context->end_task(ptr, size, false/*owned*/); 
@@ -5579,7 +5579,7 @@ namespace Legion {
       parent_ctx = inline_ctx;
       // See if we need to wait for anything
       if (start_condition.exists())
-        start_condition.lg_wait();
+        start_condition.wait();
       variant->dispatch_inline(current, inline_ctx); 
       // Return any created privilege state
       inline_ctx->return_privilege_state(enclosing);
@@ -6400,7 +6400,7 @@ namespace Legion {
         if (f.impl != NULL)
         {
           ApEvent ready = f.impl->get_ready_event();
-          ready.lg_wait();
+          ready.wait();
           local_arglen = f.impl->get_untyped_size();
           // Have to make a local copy since the point takes ownership
           if (local_arglen > 0)
@@ -7191,7 +7191,7 @@ namespace Legion {
       VariantImpl *variant = parent_ctx->select_inline_variant(this);
       // See if we need to wait for anything
       if (start_condition.exists())
-        start_condition.lg_wait();
+        start_condition.wait();
       // Save this for when things are being returned
       TaskContext *enclosing = parent_ctx;
       // Make a copy of our region requirements
@@ -8364,7 +8364,7 @@ namespace Legion {
       {
         // Wait for the future to be ready
         ApEvent wait_on = predicate_false_future.impl->get_ready_event();
-        wait_on.lg_wait(); 
+        wait_on.wait(); 
         result_size = predicate_false_future.impl->get_untyped_size();
         return predicate_false_future.impl->get_untyped_result(true);
       }

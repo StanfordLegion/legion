@@ -4321,7 +4321,7 @@ namespace Legion {
             // the request_mask in case we lose a race
             RtEvent wait_on = send_remote_version_request(version_mask,
                                                           ready_events);
-            wait_on.lg_wait();
+            wait_on.wait();
             // Only retake the reservation, when we are ready
             m_lock.reacquire();
 #ifdef DEBUG_LEGION
@@ -4384,7 +4384,7 @@ namespace Legion {
             RtEvent wait_on = send_remote_version_request(version_mask,
                                                           ready_events);
             // Only retake the reservation, when we are ready
-            wait_on.lg_wait();
+            wait_on.wait();
             m_lock.reacquire();
 #ifdef DEBUG_LEGION
             // When we wake up everything should be good
@@ -4458,7 +4458,7 @@ namespace Legion {
             rez.serialize(wait_on);
           }
           runtime->send_version_manager_unversioned_request(owner_space, rez);
-          wait_on.lg_wait();
+          wait_on.wait();
         }
         else
         {
@@ -4514,7 +4514,7 @@ namespace Legion {
           RtEvent wait_on = send_remote_version_request(version_mask,
                                                         ready_events);
           // Retake the lock only once we're ready to
-          wait_on.lg_wait();
+          wait_on.wait();
           m_lock.reacquire();
 #ifdef DEBUG_LEGION
           // When we wake up everything should be good
@@ -4575,7 +4575,7 @@ namespace Legion {
           RtEvent wait_on = send_remote_version_request(version_mask,
                                                         ready_events); 
           // Retake the lock only once we're ready to
-          wait_on.lg_wait();
+          wait_on.wait();
           m_lock.reacquire();
 #ifdef DEBUG_LEGION
           // When we wake up everything should be good
@@ -4638,7 +4638,7 @@ namespace Legion {
           RtEvent wait_on = send_remote_version_request(version_mask,
                                                         ready_events); 
           // Retake the lock only once we're ready to
-          wait_on.lg_wait();
+          wait_on.wait();
           m_lock.reacquire();
 #ifdef DEBUG_LEGION
           // When we wake up everything should be good
@@ -4868,7 +4868,7 @@ namespace Legion {
           RtEvent wait_on = send_remote_version_request(version_mask,
                                                         ready_events); 
           // Retake the lock only once we're ready to
-          wait_on.lg_wait();
+          wait_on.wait();
           m_lock.reacquire();
 #ifdef DEBUG_LEGION
           // When we wake up everything should be good
@@ -5663,7 +5663,7 @@ namespace Legion {
           RtEvent wait_on = send_remote_version_request(
               new_states.get_valid_mask(), applied_events);
           // Retake the lock only once we're ready to
-          wait_on.lg_wait();
+          wait_on.wait();
           m_lock.reacquire();
 #ifdef DEBUG_LEGION
           // When we wake up everything should be good
@@ -6263,7 +6263,7 @@ namespace Legion {
       if (!preconditions.empty())
       {
         RtEvent wait_on = Runtime::merge_events(preconditions);
-        wait_on.lg_wait();
+        wait_on.wait();
       }
 #ifdef DEBUG_LEGION
       assert(applied_events != NULL);
@@ -8025,7 +8025,7 @@ namespace Legion {
       if (!done_events.empty())
       {
         RtEvent done = Runtime::merge_events(done_events);
-        done.lg_wait();
+        done.wait();
       }
     }
 

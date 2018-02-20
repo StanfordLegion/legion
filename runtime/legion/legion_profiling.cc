@@ -1400,7 +1400,7 @@ namespace Legion {
       decrement_total_outstanding_requests();
 #endif
       if (!done_event.has_triggered())
-        done_event.lg_wait();
+        done_event.wait();
       for (std::vector<LegionProfInstance*>::const_iterator it = 
             instances.begin(); it != instances.end(); it++) {
         (*it)->dump_state(serializer);

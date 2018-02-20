@@ -958,7 +958,7 @@ namespace Legion {
       assert(reservation_lock.exists());
 #endif
       Internal::ApEvent lock_event(reservation_lock.acquire(mode,exclusive));
-      lock_event.lg_wait();
+      lock_event.wait();
     }
 
     //--------------------------------------------------------------------------
@@ -1084,7 +1084,7 @@ namespace Legion {
       assert(phase_barrier.exists());
 #endif
       Internal::ApEvent e = Internal::Runtime::get_previous_phase(*this);
-      e.lg_wait();
+      e.wait();
     }
 
     //--------------------------------------------------------------------------

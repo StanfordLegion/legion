@@ -1810,7 +1810,7 @@ namespace Legion {
         if (mapped_event.has_triggered())
           return;
         begin_task_wait(true/*from runtime*/);
-        mapped_event.lg_wait();
+        mapped_event.wait();
         end_task_wait();
       }
       else
@@ -1828,7 +1828,7 @@ namespace Legion {
         if (mapped_event.has_triggered())
           return;
         begin_task_wait(true/*from runtime*/);
-        mapped_event.lg_wait();
+        mapped_event.wait();
         end_task_wait();
       }
     }
@@ -2440,7 +2440,7 @@ namespace Legion {
       runtime->add_to_dependence_queue(this, executing_processor, part_op);
       // Wait for any notifications to occur before returning
       if (safe.exists())
-        safe.lg_wait();
+        safe.wait();
       return pid;
     }
 
@@ -2501,7 +2501,7 @@ namespace Legion {
       runtime->add_to_dependence_queue(this, executing_processor, part_op);
       // Wait for any notifications to occur before returning
       if (safe.exists())
-        safe.lg_wait();
+        safe.wait();
       return pid;
     }
 
@@ -2561,7 +2561,7 @@ namespace Legion {
       runtime->add_to_dependence_queue(this, executing_processor, part_op);
       // Wait for any notifications to occur before returning
       if (safe.exists())
-        safe.lg_wait();
+        safe.wait();
       return pid;
     }
 
@@ -2618,7 +2618,7 @@ namespace Legion {
       runtime->add_to_dependence_queue(this, executing_processor, part_op);
       // Wait for any notifications to occur before returning
       if (safe.exists())
-        safe.lg_wait();
+        safe.wait();
       return pid;
     }
 
@@ -2734,7 +2734,7 @@ namespace Legion {
       runtime->add_to_dependence_queue(this, executing_processor, part_op);
       // Wait for any notifications to occur before returning
       if (safe.exists())
-        safe.lg_wait();
+        safe.wait();
       return pid;
     }
 
@@ -2794,7 +2794,7 @@ namespace Legion {
         remap_unmapped_regions(current_trace, unmapped_regions);
       // Wait for any notifications to occur before returning
       if (safe.exists())
-        safe.lg_wait();
+        safe.wait();
       return pid;
     }
 
@@ -2856,7 +2856,7 @@ namespace Legion {
         remap_unmapped_regions(current_trace, unmapped_regions);
       // Wait for any notifications to occur before returning
       if (safe.exists())
-        safe.lg_wait();
+        safe.wait();
       return pid;
     }
 
@@ -2919,7 +2919,7 @@ namespace Legion {
         remap_unmapped_regions(current_trace, unmapped_regions);
       // Wait for any notifications to occur before returning
       if (safe.exists())
-        safe.lg_wait();
+        safe.wait();
       return pid;
     }
 
@@ -2991,7 +2991,7 @@ namespace Legion {
         remap_unmapped_regions(current_trace, unmapped_regions);
       // Wait for any notifications to occur before returning
       if (safe.exists())
-        safe.lg_wait();
+        safe.wait();
       return pid;
     }
 
@@ -3055,7 +3055,7 @@ namespace Legion {
         remap_unmapped_regions(current_trace, unmapped_regions);
       // Wait for any notifications to occur before returning
       if (safe.exists())
-        safe.lg_wait();
+        safe.wait();
       return pid;
     }
 
@@ -3084,7 +3084,7 @@ namespace Legion {
                  part_color, part_kind, did, partition_ready, partition_ready);
       // Wait for any notifications to occur before returning
       if (safe.exists())
-        safe.lg_wait();
+        safe.wait();
       return pid;
     }
 
@@ -3338,7 +3338,7 @@ namespace Legion {
       if (!done_events.empty())
       {
         RtEvent wait_on = Runtime::merge_events(done_events);
-        wait_on.lg_wait();
+        wait_on.wait();
       }
       return fid;
     }
@@ -3448,7 +3448,7 @@ namespace Legion {
       if (!done_events.empty())
       {
         RtEvent wait_on = Runtime::merge_events(done_events);
-        wait_on.lg_wait();
+        wait_on.wait();
       }
     }
 
@@ -4461,7 +4461,7 @@ namespace Legion {
         }
       }
       begin_task_wait(false/*from runtime*/);
-      wait_event.lg_wait();
+      wait_event.wait();
       end_task_wait();
       // Re-increment the count once we are awake again
       __sync_fetch_and_add(&outstanding_children_count,1);
@@ -4958,7 +4958,7 @@ namespace Legion {
         // we launch this meta-task which blocks the application task
         RtEvent wait_on = runtime->issue_runtime_meta_task(args,
                                       LG_LATENCY_WORK_PRIORITY);
-        wait_on.lg_wait();
+        wait_on.wait();
       }
     }
 
@@ -4981,7 +4981,7 @@ namespace Legion {
       }
       frame->set_previous(previous);
       if (!wait_on.has_triggered())
-        wait_on.lg_wait();
+        wait_on.wait();
     }
 
     //--------------------------------------------------------------------------
@@ -5030,7 +5030,7 @@ namespace Legion {
       }
       if (to_trigger.exists())
       {
-        wait_on.lg_wait();
+        wait_on.wait();
         runtime->activate_context(this);
         Runtime::trigger_event(to_trigger);
       }
@@ -5070,7 +5070,7 @@ namespace Legion {
       }
       if (to_trigger.exists())
       {
-        wait_on.lg_wait();
+        wait_on.wait();
         runtime->deactivate_context(this);
         Runtime::trigger_event(to_trigger);
       }
@@ -5099,7 +5099,7 @@ namespace Legion {
       }
       if (to_trigger.exists())
       {
-        wait_on.lg_wait();
+        wait_on.wait();
         runtime->deactivate_context(this);
         Runtime::trigger_event(to_trigger);
       }
@@ -5150,7 +5150,7 @@ namespace Legion {
         }
         else
         {
-          wait_on.lg_wait();
+          wait_on.wait();
           runtime->activate_context(this);
           Runtime::trigger_event(to_trigger);
         }
@@ -5181,7 +5181,7 @@ namespace Legion {
       }
       if (to_trigger.exists())
       {
-        wait_on.lg_wait();
+        wait_on.wait();
         runtime->deactivate_context(this);
         Runtime::trigger_event(to_trigger);
       }
@@ -5213,7 +5213,7 @@ namespace Legion {
       }
       if (to_trigger.exists())
       {
-        wait_on.lg_wait();
+        wait_on.wait();
         runtime->activate_context(this);
         Runtime::trigger_event(to_trigger);
       }
@@ -5592,7 +5592,7 @@ namespace Legion {
           rez.serialize(wait_on); 
         }
         runtime->send_create_top_view_request(manager->owner_space, rez);
-        wait_on.lg_wait();
+        wait_on.wait();
 #ifdef DEBUG_LEGION
         assert(result != NULL); // when we wake up we should have the result
 #endif
@@ -5625,7 +5625,7 @@ namespace Legion {
       if (wait_on.exists())
       {
         // Someone else is making it so we just have to wait for it
-        wait_on.lg_wait();
+        wait_on.wait();
         // Retake the lock and read out the result
         AutoLock inst_lock(instance_view_lock, 1, false/*exclusive*/);
         std::map<PhysicalManager*,InstanceView*>::const_iterator finder = 
@@ -6198,7 +6198,7 @@ namespace Legion {
       if (!wait_events.empty())
       {
         ApEvent wait_on = Runtime::merge_events(wait_events);
-        wait_on.lg_wait();
+        wait_on.wait();
       }
     }
 
@@ -6461,7 +6461,7 @@ namespace Legion {
         // Send it to the owner space 
         runtime->send_version_owner_request(owner_space, rez);
       }
-      wait_on.lg_wait();
+      wait_on.wait();
       // Retake the lock in read-only mode and get the answer
       AutoLock tree_lock(tree_owner_lock,1,false/*exclusive*/);
       std::map<RegionTreeNode*,
@@ -6778,7 +6778,7 @@ namespace Legion {
                           runtime->get_runtime_owner(context_uid);
         runtime->send_version_owner_request(target, rez);
       }
-      wait_on.lg_wait();
+      wait_on.wait();
       // Retake the lock in read-only mode and get the answer
       AutoLock tree_lock(tree_owner_lock,1,false/*exclusive*/);
       std::map<RegionTreeNode*,
@@ -6885,7 +6885,7 @@ namespace Legion {
           runtime->send_remote_context_physical_request(target, rez);
         }
         // Wait for the result to come back to us
-        wait_on.lg_wait();
+        wait_on.wait();
         // When we wake up it should be there
         AutoLock rem_lock(remote_lock, 1, false/*exclusive*/);
         // Get the handle if we need it
