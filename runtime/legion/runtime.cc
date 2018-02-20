@@ -834,8 +834,6 @@ namespace Legion {
     Future FutureMapImpl::get_future(const DomainPoint &point, bool allow_empty)
     //--------------------------------------------------------------------------
     {
-      if (op != NULL && context != NULL)
-        context->invalidate_current_template();
       if (!is_owner())
       {
         // See if we already have it
