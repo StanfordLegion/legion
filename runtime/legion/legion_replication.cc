@@ -3782,7 +3782,8 @@ namespace Legion {
     void ShardManager::launch_shard(ShardTask *task, RtEvent precondition) const
     //--------------------------------------------------------------------------
     {
-      ShardManagerLaunchArgs args(original_task, task);
+      ShardManagerLaunchArgs args;
+      args.shard = task;
       runtime->issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY, 
                                        precondition);
     }
