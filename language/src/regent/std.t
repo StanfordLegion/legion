@@ -3501,7 +3501,26 @@ function std.start(main_task, extra_setup_thunk)
   if std.config["pretty"] then os.exit() end
 
   assert(std.is_task(main_task))
-  local task_wrappers = make_task_wrappers()
+  local objfiles,task_wrappers = compile_tasks_in_parallel()
+
+  -- If task wrappers were compiled on separate processes, link them all into a
+  -- dynamic library and load that.
+  if #objfiles > 0 then
+    local dylib = os.tmpname()
+    local cmd = os.getenv('CXX') or 'c++'
+    if os.execute('test "$(uname)" = Darwin') == 0 then
+      cmd = cmd .. ' -dynamiclib -single_module -undefined dynamic_lookup -fPIC'
+    else
+      cmd = cmd .. ' -shared -fPIC'
+    end
+    cmd = cmd .. ' -o ' .. dylib
+    for _,f in ipairs(objfiles) do
+      cmd = cmd .. ' ' .. f
+    end
+    assert(os.execute(cmd) == 0)
+    terralib.linklibrary(dylib)
+  end
+
   local main = std.setup(main_task, extra_setup_thunk, task_wrappers)
 
   local args = std.args
