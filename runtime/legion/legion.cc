@@ -5975,10 +5975,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::detach_external_resource(Context ctx, PhysicalRegion region)
+    Future Runtime::detach_external_resource(Context ctx, PhysicalRegion region)
     //--------------------------------------------------------------------------
     {
-      runtime->detach_external_resource(ctx, region);
+      return runtime->detach_external_resource(ctx, region);
     }
 
     //--------------------------------------------------------------------------
