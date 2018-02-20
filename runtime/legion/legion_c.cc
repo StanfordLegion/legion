@@ -3199,7 +3199,7 @@ legion_attach_launcher_add_cpu_soa_field(legion_attach_launcher_t launcher_,
   launcher->attach_array_soa(base_ptr, column_major, fields, local_sysmem);
 }
 
-void
+legion_future_t
 legion_detach_external_resource(legion_runtime_t runtime_,
                                 legion_context_t ctx_,
                                 legion_physical_region_t handle_)
@@ -3208,7 +3208,9 @@ legion_detach_external_resource(legion_runtime_t runtime_,
   Context ctx = CObjectWrapper::unwrap(ctx_)->context();
   PhysicalRegion *handle = CObjectWrapper::unwrap(handle_);
 
-  runtime->detach_external_resource(ctx, *handle);
+  Future *result = new Future(
+      runtime->detach_external_resource(ctx, *handle));
+  return CObjectWrapper::wrap(result);
 }
 
 // -----------------------------------------------------------------------

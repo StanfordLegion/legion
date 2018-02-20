@@ -2753,7 +2753,7 @@ namespace Legion {
     };
 
     /**
-     * \class Detach Op
+     * \class DetachOp
      * Operation for detaching a file from a physical instance
      */
     class DetachOp : public Operation, public LegionHeapify<DetachOp> {
@@ -2766,7 +2766,7 @@ namespace Legion {
     public:
       DetachOp& operator=(const DetachOp &rhs);
     public:
-      void initialize_detach(TaskContext *ctx, PhysicalRegion region);
+      Future initialize_detach(TaskContext *ctx, PhysicalRegion region);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -2780,6 +2780,7 @@ namespace Legion {
       virtual void trigger_ready(void);
       virtual void trigger_mapping(void);
       virtual unsigned find_parent_index(unsigned idx);
+      virtual void trigger_complete(void);
       virtual void trigger_commit(void);
     protected:
       void compute_parent_index(void);
@@ -2790,6 +2791,7 @@ namespace Legion {
       VersionInfo version_info;
       RestrictInfo restrict_info;
       unsigned parent_req_index;
+      Future result;
     };
 
     /**

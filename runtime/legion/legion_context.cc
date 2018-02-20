@@ -4150,19 +4150,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InnerContext::detach_resource(PhysicalRegion region)
+    Future InnerContext::detach_resource(PhysicalRegion region)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
       DetachOp *detach_op = runtime->get_available_detach_op();
-      detach_op->initialize_detach(this, region);
-      runtime->add_to_dependence_queue(this, executing_processor, detach_op);
+      Future result = detach_op->initialize_detach(this, region);
       // If the region is still mapped, then unmap it
       if (region.is_mapped())
       {
         unregister_inline_mapped_region(region);
         region.impl->unmap_region();
       }
+      runtime->add_to_dependence_queue(this, executing_processor, detach_op);
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -7881,12 +7882,13 @@ namespace Legion {
     }
     
     //--------------------------------------------------------------------------
-    void LeafContext::detach_resource(PhysicalRegion region)
+    Future LeafContext::detach_resource(PhysicalRegion region)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_DETACH_RESOURCE_OPERATION,
         "Illegal detach resource operation performed in leaf "
                       "task %s (ID %lld)", get_task_name(), get_unique_id())
+      return Future();
     }
 
     //--------------------------------------------------------------------------
@@ -9047,10 +9049,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InlineContext::detach_resource(PhysicalRegion region)
+    Future InlineContext::detach_resource(PhysicalRegion region)
     //--------------------------------------------------------------------------
     {
-      enclosing->detach_resource(region);
+      return enclosing->detach_resource(region);
     }
 
     //--------------------------------------------------------------------------
