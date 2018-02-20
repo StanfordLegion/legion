@@ -6416,28 +6416,29 @@ namespace Legion {
       // We're about to do something expensive so if these are both 
       // in the same index space tree then walk up to a common partition
       // (if one exists) and see if it is disjoint
-      if (handle.get_tree_id() == rhs->handle.get_tree_id())
+      if ((handle.get_tree_id() == rhs->handle.get_tree_id()) && 
+          (parent != rhs->parent))
       {
-        if (parent != rhs->parent)
+        IndexSpaceNode *one = this;
+        IndexSpaceNode *two = rhs;
+        // Get them at the same depth
+        while (one->depth > two->depth)
+          one = one->parent->parent;
+        while (one->depth < two->depth)
+          two = two->parent->parent;
+        // Handle the case where one dominates the other
+        if (one == two)
+          return true;
+        // Now walk up until their parent is the same
+        while (one->parent != two->parent)
         {
-          IndexSpaceNode *one = this;
-          IndexSpaceNode *two = rhs;
-          // Get them at the same depth
-          while (one->depth > two->depth)
-            one = one->parent->parent;
-          while (one->depth < two->depth)
-            two = two->parent->parent;
-          // Now walk up until their parent is the same
-          while (one->parent != two->parent)
-          {
-            one = one->parent->parent;
-            two = two->parent->parent;
-          }
-          // If they have the same parent and it's not NULL and 
-          // it is disjoint then they 
-          if ((one->parent != NULL) && one->parent->is_disjoint())
-            return false;
+          one = one->parent->parent;
+          two = two->parent->parent;
         }
+        // If they have the same parent and it's not NULL and 
+        // it is disjoint then they don't intersect if they are different
+        if ((one->parent != NULL) && (one != two) && one->parent->is_disjoint())
+          return false;
         // Otherwise fall through and do the expensive test
       }
       IndexSpaceExpression *intersect = 
@@ -6467,6 +6468,9 @@ namespace Legion {
           one = one->parent->parent;
         while (one->depth < two->depth)
           two = two->parent->parent;
+        // Handle the case where one dominates the other
+        if (one == two)
+          return true;
         // Now walk up until their parent is the same
         while (one->parent != two->parent)
         {
@@ -6474,8 +6478,8 @@ namespace Legion {
           two = two->parent->parent;
         }
         // If they have the same parent and it's not NULL and 
-        // it is disjoint then they 
-        if ((one->parent != NULL) && one->parent->is_disjoint())
+        // it is disjoint then they don't intersect if they are different
+        if ((one->parent != NULL) && (one != two) && one->parent->is_disjoint())
           return false;
         // Otherwise fall through and do the expensive test
       }
@@ -7474,6 +7478,9 @@ namespace Legion {
           one = one->parent->parent;
         while (one->depth < two->depth)
           two = two->parent->parent;
+        // Handle the case where one dominates the other
+        if (one == two)
+          return true;
         // Now walk up until their parent is the same
         while (one->parent != two->parent)
         {
@@ -7481,8 +7488,8 @@ namespace Legion {
           two = two->parent->parent;
         }
         // If they have the same parent and it's not NULL and 
-        // it is disjoint then they 
-        if ((one->parent != NULL) && one->parent->is_disjoint())
+        // it is disjoint then they don't intersect if they are different
+        if ((one->parent != NULL) && (one != two) && one->parent->is_disjoint())
           return false;
         // Otherwise fall through and do the expensive test
       }
@@ -7503,28 +7510,31 @@ namespace Legion {
         return true;
       // We're about to do something expensive so see if we can use
       // the region tree as an acceleration data structure first
-      if (handle.get_tree_id() == rhs->handle.get_tree_id())
+      if ((handle.get_tree_id() == rhs->handle.get_tree_id()) && 
+          (parent != rhs->parent))
       {
-        if (parent != rhs->parent)
+        // Parent's are not the same, go up until we find 
+        // parents with a common partition
+        IndexSpaceNode *one = parent;
+        IndexSpaceNode *two = rhs->parent;
+        // Get them at the same depth
+        while (one->depth > two->depth)
+          one = one->parent->parent;
+        while (one->depth < two->depth)
+          two = two->parent->parent;
+        // Handle the case where one dominates the other
+        if (one == two)
+          return true;
+        // Now walk up until their parent is the same
+        while (one->parent != two->parent)
         {
-          // Parent's are not the same, go up until we find 
-          // parents with a common partition
-          IndexSpaceNode *one = parent;
-          IndexSpaceNode *two = rhs->parent;
-          // Get them at the same depth
-          while (one->depth > two->depth)
-            one = one->parent->parent;
-          while (one->depth < two->depth)
-            two = two->parent->parent;
-          // Now walk up until their parent is the same
-          while (one->parent != two->parent)
-          {
-            one = one->parent->parent;
-            two = two->parent->parent;
-          }
-          if ((one->parent != NULL) && one->parent->is_disjoint())
-            return false;
+          one = one->parent->parent;
+          two = two->parent->parent;
         }
+        // If they have the same parent and it's not NULL and
+        // it is dijsoint then they don't intersect if they are different
+        if ((one->parent != NULL) && (one != two) && one->parent->is_disjoint())
+          return false;
         // Otherwise we fall through and do the expensive test
       }
       IndexSpaceExpression *intersect = 
