@@ -215,6 +215,7 @@ namespace Legion {
       void get_void_result(bool silence_warnings = true);
       void* get_untyped_result(bool silence_warnings = true);
       bool is_empty(bool block, bool silence_warnings = true);
+      bool is_ready(void);
       size_t get_untyped_size(void);
       ApEvent get_ready_event(void) const { return ready_event; }
     public:

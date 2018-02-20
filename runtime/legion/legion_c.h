@@ -1954,6 +1954,12 @@ extern "C" {
                          bool block /* = false */);
 
   /**
+   * @see Legion::Future::is_ready()
+   */
+  bool
+  legion_future_is_ready(legion_future_t handle);
+
+  /**
    * @see Legion::Future::get_untyped_pointer()
    */
   const void *
