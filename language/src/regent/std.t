@@ -3454,16 +3454,21 @@ local function compile_tasks_in_parallel()
     variant.task:complete()
   end
 
+  -- Don't spawn extra processes if jobs == 1.
+  local n = math.max(tonumber(std.config["jobs"]) or 1, 1)
+  if n == 1 then
+    return terralib.newlist(), make_task_wrappers()
+  end
+
   -- Spawn children processes, assign a subset of tasks to each to compile.
   -- TODO: Terra functions used by more than one task may get compiled
   -- multiple times, and included in multiple object files by different
   -- children. This will cause bloat in the final executable.
-  local flags = terralib.newlist()
+  local objfiles = terralib.newlist()
   local child_pids = terralib.newlist()
-  local n = math.max(tonumber(std.config["jobs"]) or 1, 1)
   for i = 1,n do
     local objfile = os.tmpname()
-    flags:insert(objfile)
+    objfiles:insert(objfile)
     local pid = c.fork()
     if pid == 0 then
       local exports = make_task_wrappers(n, i)
@@ -3489,7 +3494,7 @@ local function compile_tasks_in_parallel()
   )
   local task_wrappers = terralib.includecstring(header)
 
-  return flags,task_wrappers
+  return objfiles,task_wrappers
 end
 
 function std.start(main_task, extra_setup_thunk)
@@ -3519,7 +3524,9 @@ end
 
 function std.saveobj(main_task, filename, filetype, extra_setup_thunk, link_flags)
   assert(std.is_task(main_task))
-  local flags,task_wrappers = compile_tasks_in_parallel()
+  local flags = terralib.newlist()
+  local objfiles,task_wrappers = compile_tasks_in_parallel()
+  flags:insertall(objfiles)
   local main, names = std.setup(main_task, extra_setup_thunk, task_wrappers)
   local use_cmake = os.getenv("USE_CMAKE") == "1"
   local lib_dir = os.getenv("LG_RT_DIR") .. "/../bindings/regent"
