@@ -1427,7 +1427,7 @@ namespace Legion {
       if (copy_domain_pre.exists() && !copy_domain_pre.has_triggered())
       {
         RtEvent wait_on = Runtime::protect_event(copy_domain_pre);
-        wait_on.lg_wait();
+        wait_on.wait();
       }
       Domain result = Domain::NO_DOMAIN;
       AutoLock m_lock(manager_lock);
@@ -2009,7 +2009,7 @@ namespace Legion {
                   memory_manager->memory, realm_layout, requests));
       // Wait for the profiling response
       if (!profiling_ready.has_triggered())
-        profiling_ready.lg_wait();
+        profiling_ready.wait();
       // If we couldn't make it then we are done
       if (!instance.exists())
         return NULL;

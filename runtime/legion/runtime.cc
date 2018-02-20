@@ -72,6 +72,7 @@ namespace Legion {
 
     __thread TaskContext *implicit_context = NULL;
     __thread AutoLock *local_lock_list = NULL;
+    __thread UniqueID task_profiling_provenance = 0;
 #ifdef DEBUG_LEGION_WAITS
     __thread int meta_task_id = -1;
 #endif
@@ -345,11 +346,11 @@ namespace Legion {
         if (context != NULL)
         {
           context->begin_task_wait(false/*from runtime*/);
-          ready_event.lg_wait();
+          ready_event.wait();
           context->end_task_wait();
         }
         else
-          ready_event.lg_wait();
+          ready_event.wait();
       }
       if (empty)
         REPORT_LEGION_ERROR(ERROR_ACCESSING_EMPTY_FUTURE, 
@@ -381,11 +382,11 @@ namespace Legion {
         if (context != NULL)
         {
           context->begin_task_wait(false/*from runtime*/);
-          ready_event.lg_wait();
+          ready_event.wait();
           context->end_task_wait();
         }
         else
-          ready_event.lg_wait();
+          ready_event.wait();
       }
       if (empty)
         REPORT_LEGION_ERROR(ERROR_ACCESSING_EMPTY_FUTURE, 
@@ -428,11 +429,11 @@ namespace Legion {
         if (context != NULL)
         {
           context->begin_task_wait(false/*from runtime*/);
-          ready_event.lg_wait();
+          ready_event.wait();
           context->end_task_wait();
         }
         else
-          ready_event.lg_wait();
+          ready_event.wait();
       }
       if (block)
         mark_sampled();
@@ -715,7 +716,7 @@ namespace Legion {
         args.dc = dc;
         args.count = count;
         // Spawn the task dependent on the future being ready
-        runtime->issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY, NULL,
+        runtime->issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY,
                                          Runtime::protect_event(ready_event));
       }
       else // If we've already triggered, then we can do the arrival now
@@ -858,7 +859,7 @@ namespace Legion {
           rez.serialize(ready_event);
         }
         runtime->send_future_map_request_future(owner_space, rez);
-        ready_event.lg_wait(); 
+        ready_event.wait(); 
         // When we wake up it should be here
         AutoLock m_lock(gc_lock,1,false/*exlusive*/);
         std::map<DomainPoint,Future>::const_iterator finder = 
@@ -892,7 +893,7 @@ namespace Legion {
 #endif
 #endif
         if (allow_empty && ready_event.exists())
-          ready_event.lg_wait();
+          ready_event.wait();
         if (valid)
         {
           Future result;
@@ -963,11 +964,11 @@ namespace Legion {
         if (context != NULL)
         {
           context->begin_task_wait(false/*from runtime*/);
-          ready_event.lg_wait();
+          ready_event.wait();
           context->end_task_wait();
         }
         else
-          ready_event.lg_wait();
+          ready_event.wait();
       }
     }
 
@@ -1020,11 +1021,11 @@ namespace Legion {
         if (context != NULL)
         {
           context->begin_task_wait(false/*from runtime*/);
-          ready_event.lg_wait();
+          ready_event.wait();
           context->end_task_wait();
         }
         else
-          ready_event.lg_wait();
+          ready_event.wait();
       }
       // No need for the lock since the map should be fixed at this point
       others = futures;
@@ -1215,7 +1216,7 @@ namespace Legion {
       // Now we need to figure out which shard we're on, see if we know
       // the sharding function yet, if not we have to wait
       if (!sharding_function_ready.has_triggered())
-        sharding_function_ready.lg_wait();
+        sharding_function_ready.wait();
       ShardID owner_shard = sharding_function->find_owner(point, full_domain);
       // If we're the owner shard we can just do the normal thing
       if (owner_shard != repl_ctx->owner_shard->shard_id)
@@ -1232,7 +1233,7 @@ namespace Legion {
         rez.serialize(done_event);
         repl_ctx->shard_manager->send_future_map_request(owner_shard, rez);
         // Wait for the event
-        done_event.lg_wait();
+        done_event.wait();
         // Now we can wake up see if we found it
         AutoLock m_lock(gc_lock,1,false/*exclusive*/);
         std::map<DomainPoint,Future>::const_iterator finder = 
@@ -1265,7 +1266,7 @@ namespace Legion {
       }
       // Wait for all the local futures to be completed
       if (!ready_event.has_triggered())
-        ready_event.lg_wait();
+        ready_event.wait();
       // Now we've got all our local futures so we can do the exchange
       // Have to hold the lock when doing this as there might be
       // other requests for the future map
@@ -1463,7 +1464,7 @@ namespace Legion {
               context->get_unique_id())
         if (context != NULL)
           context->begin_task_wait(false/*from runtime*/);
-        ready_event.lg_wait();
+        ready_event.wait();
         if (context != NULL)
           context->end_task_wait();
       }
@@ -1702,7 +1703,7 @@ namespace Legion {
         {
           if (context != NULL)
             context->begin_task_wait(false/*from runtime*/);
-          wait_for_unmap.lg_wait();
+          wait_for_unmap.wait();
           if (context != NULL)
             context->end_task_wait();
         }
@@ -2446,7 +2447,7 @@ namespace Legion {
           send_explicit_stage(-1);
         }
         // Wait for our done event to be ready
-        done_event.lg_wait();
+        done_event.wait();
       }
 #ifdef DEBUG_LEGION
       assert(forward_mapping.size() == runtime->total_address_spaces);
@@ -3254,9 +3255,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(op != NULL);
 #endif
-      TriggerOpArgs args;
-      args.op = op;
-      runtime->issue_runtime_meta_task(args, priority, op, wait_on); 
+      Operation::TriggerOpArgs args(op);
+      runtime->issue_runtime_meta_task(args, priority, wait_on); 
     }
 
     //--------------------------------------------------------------------------
@@ -3352,7 +3352,7 @@ namespace Legion {
           args.map_id = map_id;
           args.deferral_event = wait_on;
           runtime->issue_runtime_meta_task(args, LG_LATENCY_DEFERRED_PRIORITY,
-                                           NULL, wait_on);
+                                           wait_on);
           // We can continue because there is nothing left to do for this mapper
           continue;
         }
@@ -3449,7 +3449,6 @@ namespace Legion {
         }
         // Now that we've removed them from the queue, issue the
         // mapping analysis calls
-        TriggerTaskArgs trigger_args;
         for (std::list<const Task*>::iterator vis_it = visible_tasks.begin();
               vis_it != visible_tasks.end(); vis_it++)
         {
@@ -3462,9 +3461,9 @@ namespace Legion {
             task->set_target_proc(finder->second);
           // Mark that this task is no longer outstanding
           task->deactivate_outstanding_task();
-          trigger_args.op = task;
+          TaskOp::TriggerTaskArgs trigger_args(task);
           runtime->issue_runtime_meta_task(trigger_args,
-                                           LG_THROUGHPUT_WORK_PRIORITY, task);
+                                           LG_THROUGHPUT_WORK_PRIORITY);
         }
       }
 
@@ -3565,7 +3564,7 @@ namespace Legion {
         if (!wait_for.empty())
         {
           RtEvent wait_on = Runtime::merge_events(wait_for);
-          wait_on.lg_wait();
+          wait_on.wait();
         }
       }
     }
@@ -3734,7 +3733,7 @@ namespace Legion {
           rez.serialize(&result);
         }
         runtime->send_instance_request(owner_space, rez);
-        ready_event.lg_wait();
+        ready_event.wait();
         // When the event is triggered, everything will be filled in
       }
       else
@@ -3788,7 +3787,7 @@ namespace Legion {
           rez.serialize(&result);
         }
         runtime->send_instance_request(owner_space, rez);
-        ready_event.lg_wait();
+        ready_event.wait();
         // When the event is triggered, everything will be filled in
       }
       else
@@ -3853,7 +3852,7 @@ namespace Legion {
           rez.serialize(&created);
         }
         runtime->send_instance_request(owner_space, rez);
-        ready_event.lg_wait();
+        ready_event.wait();
         // When the event is triggered, everything will be filled in
       }
       else
@@ -3936,7 +3935,7 @@ namespace Legion {
           rez.serialize(&created);
         }
         runtime->send_instance_request(owner_space, rez);
-        ready_event.lg_wait();
+        ready_event.wait();
         // When the event is triggered, everything will be filled
       }
       else
@@ -4008,7 +4007,7 @@ namespace Legion {
           rez.serialize(&result);
         }
         runtime->send_instance_request(owner_space, rez);
-        ready_event.lg_wait();
+        ready_event.wait();
         // When the event is triggered, everything will be filled
       }
       else
@@ -4052,7 +4051,7 @@ namespace Legion {
           rez.serialize(&result);
         }
         runtime->send_instance_request(owner_space, rez);
-        ready_event.lg_wait();
+        ready_event.wait();
         // When the event is triggered, everything will be filled
       }
       else
@@ -4185,7 +4184,7 @@ namespace Legion {
         // is if we are waiting for a confirmation of setting max priority
         if (never_gc_wait.exists())
         {
-          never_gc_wait.lg_wait();
+          never_gc_wait.wait();
           bool remove_duplicate = false;
           if (success)
           {
@@ -4652,7 +4651,7 @@ namespace Legion {
       WrapperReferenceMutator mutator(preconditions);
       // If the manager isn't ready yet, then we need to wait for it
       if (manager_ready.exists())
-        manager_ready.lg_wait();
+        manager_ready.wait();
       // If we acquired on the owner node, add our own local reference
       // and then remove the remote DID
       if (acquire)
@@ -5836,6 +5835,10 @@ namespace Legion {
       // Only need to write the processor once
       *((LgTaskID*)sending_buffer) = LG_MESSAGE_ID;
       sending_index = sizeof(LgTaskID);
+      // We pack a dummy entry for provenance here as we store it
+      // separately for each message
+      *((UniqueID*)(((char*)sending_buffer)+sending_index)) = 0;
+      sending_index += sizeof(UniqueID);
       *((AddressSpaceID*)
           (((char*)sending_buffer)+sending_index)) = local_address_space;
       sending_index += sizeof(local_address_space);
@@ -5882,20 +5885,22 @@ namespace Legion {
       // including the overhead for the message: kind and size
       size_t buffer_size = rez.get_used_bytes();
       const char *buffer = (const char*)rez.get_buffer();
+      const size_t header_size = 
+        sizeof(k) + sizeof(task_profiling_provenance) + sizeof(buffer_size);
       // Need to hold the lock when manipulating the buffer
       AutoLock s_lock(send_lock);
-      if ((sending_index+buffer_size+sizeof(k)+sizeof(buffer_size)) > 
-          sending_buffer_size)
+      if ((sending_index+header_size+buffer_size) > sending_buffer_size)
       {
         // Make sure we can at least get the meta-data into the buffer
         // Since there is no partial data we can fake the flush
-        if ((sending_buffer_size - sending_index) <= 
-            (sizeof(k)+sizeof(buffer_size)))
+        if ((sending_buffer_size - sending_index) <= header_size)
           send_message(true/*complete*/, runtime, target, response, shutdown);
         // Now can package up the meta data
         packaged_messages++;
         *((MessageKind*)(sending_buffer+sending_index)) = k;
         sending_index += sizeof(k);
+        *((UniqueID*)(sending_buffer+sending_index)) =task_profiling_provenance;
+        sending_index += sizeof(task_profiling_provenance);
         *((size_t*)(sending_buffer+sending_index)) = buffer_size;
         sending_index += sizeof(buffer_size);
         while (buffer_size > 0)
@@ -5923,6 +5928,8 @@ namespace Legion {
         // Package up the kind and the size first
         *((MessageKind*)(sending_buffer+sending_index)) = k;
         sending_index += sizeof(k);
+        *((UniqueID*)(sending_buffer+sending_index)) =task_profiling_provenance;
+        sending_index += sizeof(task_profiling_provenance);
         *((size_t*)(sending_buffer+sending_index)) = buffer_size;
         sending_index += sizeof(buffer_size);
         // Then copy over the buffer
@@ -5951,8 +5958,8 @@ namespace Legion {
         partial = false;
       }
       // Save the header and the number of messages into the buffer
-      const size_t base_size = sizeof(LgTaskID) + sizeof(AddressSpaceID) 
-                                + sizeof(VirtualChannelKind);
+      const size_t base_size = sizeof(LgTaskID) + sizeof(UniqueID) + 
+        sizeof(AddressSpaceID) + sizeof(VirtualChannelKind);
       *((MessageHeader*)(sending_buffer + base_size)) = header;
       *((unsigned*)(sending_buffer + base_size + sizeof(header))) = 
                                                             packaged_messages;
@@ -6103,6 +6110,9 @@ namespace Legion {
           observed_recent = true;
         args += sizeof(kind);
         arglen -= sizeof(kind);
+        task_profiling_provenance = *((const UniqueID*)args);
+        args += sizeof(task_profiling_provenance);
+        arglen -= sizeof(task_profiling_provenance);
         size_t message_size = *((const size_t*)args);
         args += sizeof(message_size);
         arglen -= sizeof(message_size);
@@ -7247,7 +7257,7 @@ namespace Legion {
         else
           args.phase = phase;
         runtime->issue_runtime_meta_task(args, LG_LOW_PRIORITY,
-                                         NULL, precondition);
+                                         precondition);
       }
     }
 
@@ -7389,8 +7399,7 @@ namespace Legion {
         it++;
         bool done = (it == collections.end());
         RtEvent e = runtime->issue_runtime_meta_task(args,
-                                         LG_THROUGHPUT_WORK_PRIORITY, NULL,
-                                         precondition);
+                LG_THROUGHPUT_WORK_PRIORITY, precondition);
         events.insert(e);
         if (done)
           break;
@@ -7680,7 +7689,7 @@ namespace Legion {
         runtime->send_variant_request(owner_space, rez);
       }
       // Wait for the results
-      wait_on.lg_wait();
+      wait_on.wait();
       // Now we can re-take the lock and find our variant
       AutoLock t_lock(task_lock,1,false/*exclusive*/);
       std::map<VariantID,VariantImpl*>::const_iterator finder = 
@@ -7841,7 +7850,7 @@ namespace Legion {
               RtUserEvent wait_on = Runtime::create_rt_user_event();
               send_semantic_info(owner_space, tag, buffer, size, 
                                  is_mutable, wait_on);
-              wait_on.lg_wait();
+              wait_on.wait();
             }
             else
               send_semantic_info(owner_space, tag, buffer, size, is_mutable);
@@ -7920,7 +7929,7 @@ namespace Legion {
         // Send a request if necessary
         if (is_remote && request.exists())
           send_semantic_request(owner_space, tag, can_fail, wait_until,request);
-        wait_on.lg_wait();
+        wait_on.wait();
       }
       // When we wake up, we should be able to find everything
       AutoLock t_lock(task_lock,1,false/*exclusive*/);
@@ -8023,7 +8032,7 @@ namespace Legion {
           args.tag = tag;
           args.source = target;
           runtime->issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY, 
-                                           NULL/*op*/, precondition);
+                                           precondition);
         }
       }
       else
@@ -10626,7 +10635,7 @@ namespace Legion {
       TopFinishArgs args;
       args.ctx = top_context;
       ApEvent pre = top_task->get_task_completion();
-      issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY, NULL,
+      issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY,
                               Runtime::protect_event(pre));
       // Put the task in the ready queue
       add_to_ready_queue(target, top_task);
@@ -10664,7 +10673,7 @@ namespace Legion {
       args.event = result;
       args.ctx = map_context;
       ApEvent pre = f.impl->get_ready_event();
-      ApEvent post(issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY, NULL,
+      ApEvent post(issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY,
                                            Runtime::protect_event(pre)));
       // Chain the events properly
       Runtime::trigger_event(result, post);
@@ -12533,7 +12542,7 @@ namespace Legion {
       // Make this here to get a local reference on it now
       Future result_future(result);
       result->add_base_gc_ref(FUTURE_HANDLE_REF);
-      SelectTunableArgs args;
+      SelectTunableArgs args(ctx->get_owner_task()->get_unique_op_id());
       args.mapper_id = mid;
       args.tag = tag;
       args.tunable_id = tid;
@@ -12541,8 +12550,7 @@ namespace Legion {
         args.tunable_index = ctx->get_tunable_index();
       args.ctx = ctx;
       args.result = result;
-      issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY, 
-                              ctx->get_owner_task());
+      issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY); 
       ctx->end_runtime_call();
       return result_future;
     }
@@ -13336,7 +13344,7 @@ namespace Legion {
       {
         RtUserEvent done_event = Runtime::create_rt_user_event();
         impl->broadcast_variant(done_event, address_space, 0);
-        done_event.lg_wait();
+        done_event.wait();
       }
       if (legion_spy_enabled)
         LegionSpy::log_task_variant(registrar.task_id, vid, 
@@ -16538,7 +16546,7 @@ namespace Legion {
         ApEvent term_event = op->get_completion_event();
         ctx->add_to_dependence_queue(op, precondition);
         ctx->begin_task_wait(true/*from runtime*/);
-        term_event.lg_wait();
+        term_event.wait();
         ctx->end_task_wait();
       }
       else
@@ -16555,10 +16563,8 @@ namespace Legion {
 #endif
       if (wait_on.exists() && !wait_on.has_triggered())
       {
-        DeferredEnqueueArgs args;
-        args.manager = proc_managers[p];
-        args.task = op;
-        issue_runtime_meta_task(args, LG_LATENCY_DEFERRED_PRIORITY, op,wait_on);
+        TaskOp::DeferredEnqueueArgs args(proc_managers[p], op);
+        issue_runtime_meta_task(args, LG_LATENCY_DEFERRED_PRIORITY, wait_on);
       }
       else
         proc_managers[p]->add_to_ready_queue(op);
@@ -16707,7 +16713,7 @@ namespace Legion {
         DeferredRecycleArgs deferred_recycle_args;
         deferred_recycle_args.did = did;
         return issue_runtime_meta_task(deferred_recycle_args, 
-                LG_THROUGHPUT_WORK_PRIORITY, NULL, recycle_event);
+                LG_THROUGHPUT_WORK_PRIORITY, recycle_event);
       }
       else
       {
@@ -17168,7 +17174,7 @@ namespace Legion {
         rez.serialize(grant_event);
         find_messenger(0)->send_message(rez, SEND_TOP_LEVEL_TASK_REQUEST,
                                         DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
-        grant_event.lg_wait();
+        grant_event.wait();
       }
       else
       {
@@ -17235,7 +17241,7 @@ namespace Legion {
             current_gc_epoch = NULL;
           }
         }
-        gc_done.lg_wait();
+        gc_done.wait();
       }
       else if ((phase == ShutdownManager::CHECK_SHUTDOWN) && 
                 !prepared_for_shutdown)
@@ -18398,7 +18404,7 @@ namespace Legion {
         // Add a reference to the newly created context
         result->add_reference();
         // Wait for it to be ready
-        ready_event.lg_wait();
+        ready_event.wait();
         // We already know the answer cause we sent the message
         return result;
       }
@@ -18406,7 +18412,7 @@ namespace Legion {
       if (return_null_if_not_found && !wait_on.has_triggered())
         return NULL;
       // We wait for the results to be ready
-      wait_on.lg_wait();
+      wait_on.wait();
       // When we wake up the context should be here
       AutoLock ctx_lock(context_lock,1,false/*exclusive*/);
       std::map<UniqueID,RemoteContext*>::const_iterator finder = 
@@ -19407,7 +19413,7 @@ namespace Legion {
         }
       }
       // If we didn't find it send a remote request for the constraints
-      wait_on.lg_wait();
+      wait_on.wait();
       // When we wake up, the result should be there
       AutoLock l_lock(layout_constraints_lock);
       std::map<LayoutConstraintID,LayoutConstraints*>::const_iterator
@@ -20835,6 +20841,9 @@ namespace Legion {
       LgTaskID tid = *((const LgTaskID*)data);
       data += sizeof(tid);
       arglen -= sizeof(tid);
+      task_profiling_provenance = *((const UniqueID*)data);
+      data += sizeof(task_profiling_provenance);
+      arglen -= sizeof(task_profiling_provenance);
 #ifdef DEBUG_LEGION_WAITS
       meta_task_id = tid;
 #endif
@@ -20952,16 +20961,16 @@ namespace Legion {
         case LG_TRIGGER_OP_ID:
           {
             // Key off of args here instead of data
-            const ProcessorManager::TriggerOpArgs *trigger_args = 
-                            (const ProcessorManager::TriggerOpArgs*)args;
+            const Operation::TriggerOpArgs *trigger_args = 
+                            (const Operation::TriggerOpArgs*)args;
             trigger_args->op->trigger_mapping();
             break;
           }
         case LG_TRIGGER_TASK_ID:
           {
             // Key off of args here instead of data
-            const ProcessorManager::TriggerTaskArgs *trigger_args = 
-                          (const ProcessorManager::TriggerTaskArgs*)args;
+            const TaskOp::TriggerTaskArgs *trigger_args = 
+                          (const TaskOp::TriggerTaskArgs*)args;
             trigger_args->op->trigger_mapping(); 
             break;
           }
@@ -21005,8 +21014,8 @@ namespace Legion {
           }
         case LG_DEFERRED_FUTURE_SET_ID:
           {
-            DeferredFutureSetArgs *future_args =  
-              (DeferredFutureSetArgs*)args;
+            TaskOp::DeferredFutureSetArgs *future_args =  
+              (TaskOp::DeferredFutureSetArgs*)args;
             const size_t result_size = 
               future_args->task_op->check_future_size(future_args->result);
             if (result_size > 0)
@@ -21021,8 +21030,8 @@ namespace Legion {
           }
         case LG_DEFERRED_FUTURE_MAP_SET_ID:
           {
-            DeferredFutureMapSetArgs *future_args = 
-              (DeferredFutureMapSetArgs*)args;
+            TaskOp::DeferredFutureMapSetArgs *future_args = 
+              (TaskOp::DeferredFutureMapSetArgs*)args;
             const size_t result_size = 
               future_args->task_op->check_future_size(future_args->result);
             const void *result = future_args->result->get_untyped_result();
@@ -21231,8 +21240,8 @@ namespace Legion {
           }
         case LG_DEFERRED_ENQUEUE_TASK_ID:
           {
-            const DeferredEnqueueArgs *enqueue_args = 
-              (const DeferredEnqueueArgs*)args;
+            const TaskOp::DeferredEnqueueArgs *enqueue_args = 
+              (const TaskOp::DeferredEnqueueArgs*)args;
             enqueue_args->manager->add_to_ready_queue(enqueue_args->task);
             break;
           }
@@ -21310,7 +21319,7 @@ namespace Legion {
             RtEvent wait_on = margs->proxy_this->perform_mapping(
                                                     margs->must_op);
             if (wait_on.exists())
-              wait_on.lg_wait();
+              wait_on.wait();
             break;
           }
         case LG_DEFER_LAUNCH_TASK_ID:

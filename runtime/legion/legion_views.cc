@@ -135,7 +135,7 @@ namespace Legion {
       RtEvent ready = RtEvent::NO_RT_EVENT;
       LogicalView *view = runtime->find_or_request_logical_view(did, ready);
       if (ready.exists())
-        ready.lg_wait();
+        ready.wait();
 #ifdef DEBUG_LEGION
       assert(view->is_instance_view());
 #endif
@@ -156,7 +156,7 @@ namespace Legion {
       RtEvent ready = RtEvent::NO_RT_EVENT;
       LogicalView *view = runtime->find_or_request_logical_view(did, ready);
       if (ready.exists())
-        ready.lg_wait();
+        ready.wait();
 #ifdef DEBUG_LEGION
       assert(view->is_instance_view());
 #endif
@@ -175,7 +175,7 @@ namespace Legion {
       RtEvent ready = RtEvent::NO_RT_EVENT;
       LogicalView *view = runtime->find_or_request_logical_view(did, ready);
       if (ready.exists())
-        ready.lg_wait();
+        ready.wait();
 #ifdef DEBUG_LEGION
       assert(view->is_instance_view());
 #endif
@@ -198,7 +198,7 @@ namespace Legion {
       RtEvent ready = RtEvent::NO_RT_EVENT;
       LogicalView *view = runtime->find_or_request_logical_view(did, ready);
       if (ready.exists())
-        ready.lg_wait();
+        ready.wait();
 #ifdef DEBUG_LEGION
       assert(view->is_instance_view());
 #endif
@@ -217,7 +217,7 @@ namespace Legion {
       RtEvent ready;
       LogicalView *view = runtime->find_or_request_logical_view(did, ready);
       if (ready.exists())
-        ready.lg_wait();
+        ready.wait();
 #ifdef DEBUG_LEGION
       assert(view->is_instance_view());
 #endif
@@ -311,7 +311,7 @@ namespace Legion {
       RtEvent ready;
       LogicalView *view = runtime->find_or_request_logical_view(did, ready);
       if (ready.exists())
-        ready.lg_wait();
+        ready.wait();
 #ifdef DEBUG_LEGION
       assert(view->is_instance_view());
 #endif
@@ -361,7 +361,7 @@ namespace Legion {
       RtEvent ready;
       LogicalView *view = runtime->find_or_request_logical_view(did, ready);
       if (ready.exists())
-        ready.lg_wait();
+        ready.wait();
 #ifdef DEBUG_LEGION
       assert(view->is_instance_view());
 #endif
@@ -410,7 +410,7 @@ namespace Legion {
       RtEvent ready;
       LogicalView *view = runtime->find_or_request_logical_view(did, ready);
       if (ready.exists())
-        ready.lg_wait();
+        ready.wait();
 #ifdef DEBUG_LEGION
       assert(view->is_instance_view());
 #endif
@@ -456,7 +456,7 @@ namespace Legion {
       RtEvent ready;
       LogicalView *view = runtime->find_or_request_logical_view(did, ready);
       if (ready.exists())
-        ready.lg_wait();
+        ready.wait();
 #ifdef DEBUG_LEGION
       assert(view->is_instance_view());
 #endif
@@ -697,12 +697,12 @@ namespace Legion {
           rez.serialize(wait_on);
         }
         runtime->send_subview_did_request(owner_space, rez); 
-        wait_on.lg_wait();
+        wait_on.wait();
         RtEvent ready;
         LogicalView *child_view = 
           context->runtime->find_or_request_logical_view(child_did, ready);
         if (ready.exists())
-          ready.lg_wait();
+          ready.wait();
 #ifdef DEBUG_LEGION
         assert(child_view->is_materialized_view());
 #endif
@@ -2168,7 +2168,7 @@ namespace Legion {
           }
           runtime->send_view_filter_invalid_fields_request(logical_owner, rez);
           // Wait for the result to be ready
-          wait_on.lg_wait();
+          wait_on.wait();
           return;
         }
 #endif
@@ -3498,7 +3498,7 @@ namespace Legion {
               rez.serialize(wait_on);
             }
             runtime->send_atomic_reservation_request(owner_space, rez);
-            wait_on.lg_wait();
+            wait_on.wait();
             // Now retake the lock and get the remaining reservations
             AutoLock v_lock(view_lock, 1, false);
             for (std::vector<FieldID>::const_iterator it = 
@@ -3684,7 +3684,7 @@ namespace Legion {
           args.parent = static_cast<MaterializedView*>(par_view);
           args.context_uid = context_uid;
           runtime->issue_runtime_meta_task(args, LG_LATENCY_DEFERRED_PRIORITY,
-             NULL/*op*/, Runtime::merge_events(par_ready, man_ready));
+                                  Runtime::merge_events(par_ready, man_ready));
           return;
         }
 #ifdef DEBUG_LEGION
@@ -3693,7 +3693,7 @@ namespace Legion {
         parent = par_view->as_materialized_view();
       }
       if (man_ready.exists())
-        man_ready.lg_wait();
+        man_ready.wait();
 #ifdef DEBUG_LEGION
       assert(phy_man->is_instance_manager());
 #endif
@@ -3891,7 +3891,7 @@ namespace Legion {
         {
           // If we are the base caller, then we do the wait
           RtEvent wait_for = Runtime::merge_events(local_wait_on);
-          wait_for.lg_wait();
+          wait_for.wait();
         }
         else // Otherwise add the events to the set to wait on
           wait_on->insert(local_wait_on.begin(), local_wait_on.end());
@@ -4458,7 +4458,7 @@ namespace Legion {
       RtEvent ready;
       LogicalView *view = runtime->find_or_request_logical_view(did, ready);
       if (!ready.has_triggered())
-        ready.lg_wait();
+        ready.wait();
 #ifdef DEBUG_LEGION
       assert(view->is_materialized_view());
 #endif
@@ -5877,7 +5877,7 @@ namespace Legion {
         DeferInvalidateArgs args;
         args.view = this;
         runtime->issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY, 
-                                         NULL/*op*/, shard_invalid_barrier);
+                                         shard_invalid_barrier);
       }
       // Tell the nested views that they can be potentially collected too
       for (NestedViewMap::const_iterator it =
@@ -6372,7 +6372,7 @@ namespace Legion {
           {
             RtEvent wait_for = Runtime::merge_events(wait_on);
             if (wait_for.exists())
-              wait_for.lg_wait();
+              wait_for.wait();
           }
         }
         // Now we can add this to the set of checks that we've performed
@@ -6484,7 +6484,7 @@ namespace Legion {
         DeferCompositeViewRegistrationArgs args;
         args.view = view;
         runtime->issue_runtime_meta_task(args, LG_LATENCY_DEFERRED_PRIORITY,
-                                         NULL/*op*/, wait_on);
+                                         wait_on);
         // Not ready to perform registration yet
         return;
       }
@@ -6847,7 +6847,7 @@ namespace Legion {
       args.dc = dc;
       args.did = did;
       return context->runtime->issue_runtime_meta_task(args, 
-          LG_LATENCY_DEFERRED_PRIORITY, NULL/*op*/, precondition);
+          LG_LATENCY_DEFERRED_PRIORITY, precondition);
     }
 
     //--------------------------------------------------------------------------
@@ -7120,7 +7120,7 @@ namespace Legion {
               args.capture_mask = &it->second;
               capture_preconditions.insert(
                 owner_context->runtime->issue_runtime_meta_task(args,
-                  LG_LATENCY_WORK_PRIORITY, NULL/*op*/, version_precondition));
+                  LG_LATENCY_WORK_PRIORITY, version_precondition));
               continue;
             }
           }
@@ -7133,7 +7133,7 @@ namespace Legion {
           Runtime::trigger_event(capture_event,
               Runtime::merge_events(capture_preconditions));
           // Wait for it to be ready
-          capture_event.lg_wait();
+          capture_event.wait();
         }
         else
           Runtime::trigger_event(capture_event);
@@ -7145,7 +7145,7 @@ namespace Legion {
       if (!preconditions.empty())
       {
         RtEvent wait_on = Runtime::merge_events(preconditions);
-        wait_on.lg_wait();
+        wait_on.wait();
       }
     }
 
@@ -7385,7 +7385,7 @@ namespace Legion {
             derez.deserialize(*args.mask);
             RtEvent precondition = 
               runtime->issue_runtime_meta_task(args, 
-                  LG_LATENCY_DEFERRED_PRIORITY, NULL/*op*/, ready);
+                  LG_LATENCY_DEFERRED_PRIORITY, ready);
             preconditions.insert(precondition);
           }
           else
@@ -8325,7 +8325,7 @@ namespace Legion {
       args.dc = dc;
       args.did = did;
       return context->runtime->issue_runtime_meta_task(args,
-          LG_LATENCY_DEFERRED_PRIORITY, NULL/*op*/, precondition);
+          LG_LATENCY_DEFERRED_PRIORITY, precondition);
     }
 
     //--------------------------------------------------------------------------
@@ -8460,7 +8460,7 @@ namespace Legion {
         DeferPhiViewRegistrationArgs args;
         args.view = view;
         runtime->issue_runtime_meta_task(args, LG_LATENCY_DEFERRED_PRIORITY,
-                                         NULL/*op*/, wait_on);
+                                         wait_on);
         return;
       }
       view->register_with_runtime(NULL/*remote registration not needed*/);
@@ -9602,7 +9602,7 @@ namespace Legion {
       PhysicalManager *phy_man = 
         runtime->find_or_request_physical_manager(manager_did, man_ready);
       if (man_ready.exists())
-        man_ready.lg_wait();
+        man_ready.wait();
 #ifdef DEBUG_LEGION
       assert(phy_man->is_reduction_manager());
 #endif
@@ -9654,7 +9654,7 @@ namespace Legion {
         context->runtime->send_view_update_request(logical_owner, rez);
       }
       if (!remote_request_event.has_triggered())
-        remote_request_event.lg_wait();
+        remote_request_event.wait();
     }
 
     //--------------------------------------------------------------------------

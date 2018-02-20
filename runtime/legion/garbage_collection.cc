@@ -44,7 +44,7 @@ namespace Legion {
       if (!mutation_effects.empty())
       {
         RtEvent wait_on = Runtime::merge_events(mutation_effects);
-        wait_on.lg_wait();
+        wait_on.wait();
       }
     }
 
@@ -1565,7 +1565,7 @@ namespace Legion {
         RtEvent ready;
         target = runtime->find_distributed_collectable(did, ready);
         if (ready.exists() && !ready.has_triggered())
-          ready.lg_wait();
+          ready.wait();
       }
       else
         target = runtime->find_distributed_collectable(did);
@@ -1605,7 +1605,7 @@ namespace Legion {
         RtEvent ready;
         target = runtime->find_distributed_collectable(did, ready);
         if (ready.exists() && !ready.has_triggered())
-          ready.lg_wait();
+          ready.wait();
       }
       else
         target = runtime->find_distributed_collectable(did);
@@ -1645,7 +1645,7 @@ namespace Legion {
         RtEvent ready;
         target = runtime->find_distributed_collectable(did, ready);
         if (ready.exists() && !ready.has_triggered())
-          ready.lg_wait();
+          ready.wait();
       }
       else
         target = runtime->find_distributed_collectable(did);
@@ -1670,7 +1670,7 @@ namespace Legion {
       DistributedCollectable *target = 
         runtime->find_distributed_collectable(did, ready);
       if (ready.exists() && !ready.has_triggered())
-        ready.lg_wait();
+        ready.wait();
       if (done.exists())
       {
         std::set<RtEvent> preconditions;
@@ -1699,7 +1699,7 @@ namespace Legion {
       DistributedCollectable *target = 
         runtime->find_distributed_collectable(did, ready);
       if (ready.exists() && !ready.has_triggered())
-        ready.lg_wait();
+        ready.wait();
       if (done.exists())
       {
         std::set<RtEvent> preconditions;

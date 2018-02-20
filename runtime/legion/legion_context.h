@@ -38,7 +38,11 @@ namespace Legion {
       public:
         static const LgTaskID TASK_ID = LG_POST_END_ID;
       public:
-        TaskContext *proxy_this;
+        PostEndArgs(TaskOp *owner, TaskContext *ctx)
+          : LgTaskArgs<PostEndArgs>(owner->get_unique_op_id()),
+            proxy_this(ctx) { }
+      public:
+        TaskContext *const proxy_this;
         void *result;
         size_t result_size;
       };
@@ -621,7 +625,10 @@ namespace Legion {
       public:
         static const LgTaskID TASK_ID = LG_TRIGGER_DEPENDENCE_ID;
       public:
-        Operation *op;
+        DeferredDependenceArgs(Operation *o)
+          : LgTaskArgs<DeferredDependenceArgs>(o->get_unique_op_id()), op(o) { }
+      public:
+        Operation *const op;
       }; 
       struct PostDecrementArgs : public LgTaskArgs<PostDecrementArgs> {
       public:
@@ -633,9 +640,14 @@ namespace Legion {
       public:
         static const LgTaskID TASK_ID = LG_ISSUE_FRAME_TASK_ID;
       public:
-        InnerContext *parent_ctx;
-        FrameOp *frame;
-        ApEvent frame_termination;
+        IssueFrameArgs(TaskOp *owner, InnerContext *ctx,
+                       FrameOp *f, ApEvent term)
+          : LgTaskArgs<IssueFrameArgs>(owner->get_unique_op_id()),
+            parent_ctx(ctx), frame(f), frame_termination(term) { }
+      public:
+        InnerContext *const parent_ctx;
+        FrameOp *const frame;
+        const ApEvent frame_termination;
       };
       struct RemoteCreateViewArgs : public LgTaskArgs<RemoteCreateViewArgs> {
       public:
@@ -1189,8 +1201,12 @@ namespace Legion {
       public:
         static const LgTaskID TASK_ID = LG_RECLAIM_FUTURE_MAP_TASK_ID;
       public:
-        ReplicateContext *ctx;
-        ReplFutureMapImpl *impl;
+        ReclaimFutureMapArgs(ReplicateContext *c, ReplFutureMapImpl *map)
+          : LgTaskArgs<ReclaimFutureMapArgs>(map->op->get_unique_op_id()),
+            ctx(c), impl(map) { }
+      public:
+        ReplicateContext *const ctx;
+        ReplFutureMapImpl *const impl;
       };
       struct ISBroadcast {
       public:

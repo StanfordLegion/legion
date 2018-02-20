@@ -362,11 +362,9 @@ namespace Legion {
       if (versions_ready.exists() && !versions_ready.has_triggered())
       {
         // Defer completion until the versions are ready
-        DeferredExecuteArgs deferred_execute_args;
-        deferred_execute_args.proxy_this = this;
+        DeferredExecuteArgs deferred_execute_args(this);
         runtime->issue_runtime_meta_task(deferred_execute_args,
-                                         LG_THROUGHPUT_DEFERRED_PRIORITY,
-                                         this, versions_ready);
+              LG_THROUGHPUT_DEFERRED_PRIORITY, versions_ready);
       }
       else
         deferred_execute();
@@ -1358,11 +1356,9 @@ namespace Legion {
         if (versions_ready.exists() && !versions_ready.has_triggered())
         {
           // Defer completion until the versions are ready
-          DeferredExecuteArgs deferred_execute_args;
-          deferred_execute_args.proxy_this = this;
+          DeferredExecuteArgs deferred_execute_args(this);
           runtime->issue_runtime_meta_task(deferred_execute_args,
-                                           LG_THROUGHPUT_DEFERRED_PRIORITY,
-                                           this, versions_ready);
+                LG_THROUGHPUT_DEFERRED_PRIORITY, versions_ready);
         }
         else
           deferred_execute();
@@ -2811,8 +2807,7 @@ namespace Legion {
       // First compute the set of mapped events for the points that we own
       dependence_exchange->exchange_must_epoch_dependences(mapped_events);
 
-      MustEpochMapArgs args;
-      args.owner = const_cast<ReplMustEpochOp*>(this);
+      MustEpochMapArgs args(const_cast<ReplMustEpochOp*>(this));
       std::set<RtEvent> local_mapped_events;
       // For correctness we still have to abide by the mapping dependences
       // computed on the individual tasks while we are mapping them
@@ -2857,11 +2852,11 @@ namespace Legion {
         {
           RtEvent precondition = Runtime::merge_events(preconditions);
           done = runtime->issue_runtime_meta_task(args, 
-                LG_THROUGHPUT_DEFERRED_PRIORITY, args.owner, precondition); 
+                LG_THROUGHPUT_DEFERRED_PRIORITY, precondition); 
         }
         else
           done = runtime->issue_runtime_meta_task(args, 
-                LG_THROUGHPUT_DEFERRED_PRIORITY, args.owner);
+                      LG_THROUGHPUT_DEFERRED_PRIORITY);
         local_mapped_events.insert(done);
         if (own_point)
         {
@@ -2874,7 +2869,7 @@ namespace Legion {
       if (!local_mapped_events.empty())
       {
         RtEvent mapped_event = Runtime::merge_events(local_mapped_events);
-        mapped_event.lg_wait();
+        mapped_event.wait();
       }
     }
 
@@ -2883,10 +2878,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // We only want to distribute the points that are owned by our shard
-      MustEpochDistributorArgs dist_args;
-      MustEpochLauncherArgs launch_args;
-      std::set<RtEvent> wait_events;
       ReplMustEpochOp *owner = const_cast<ReplMustEpochOp*>(this);
+      MustEpochDistributorArgs dist_args(owner);
+      MustEpochLauncherArgs launch_args(owner);
+      std::set<RtEvent> wait_events;
       for (std::vector<IndividualTask*>::const_iterator it = 
             indiv_tasks.begin(); it != indiv_tasks.end(); it++)
       {
@@ -2898,7 +2893,7 @@ namespace Legion {
           dist_args.task = *it;
           RtEvent wait = 
             runtime->issue_runtime_meta_task(dist_args, 
-                LG_THROUGHPUT_DEFERRED_PRIORITY, owner);
+                LG_THROUGHPUT_DEFERRED_PRIORITY);
           if (wait.exists())
             wait_events.insert(wait);
         }
@@ -2907,7 +2902,7 @@ namespace Legion {
           launch_args.task = *it;
           RtEvent wait = 
             runtime->issue_runtime_meta_task(launch_args,
-                  LG_THROUGHPUT_DEFERRED_PRIORITY, owner);
+                  LG_THROUGHPUT_DEFERRED_PRIORITY);
           if (wait.exists())
             wait_events.insert(wait);
         }
@@ -2957,7 +2952,7 @@ namespace Legion {
           dist_args.task = *it;
           RtEvent wait = 
             runtime->issue_runtime_meta_task(dist_args, 
-                LG_THROUGHPUT_DEFERRED_PRIORITY, owner);
+                LG_THROUGHPUT_DEFERRED_PRIORITY);
           if (wait.exists())
             wait_events.insert(wait);
         }
@@ -2966,7 +2961,7 @@ namespace Legion {
           launch_args.task = *it;
           RtEvent wait = 
             runtime->issue_runtime_meta_task(launch_args,
-                 LG_THROUGHPUT_DEFERRED_PRIORITY, owner);
+                 LG_THROUGHPUT_DEFERRED_PRIORITY);
           if (wait.exists())
             wait_events.insert(wait);
         }
@@ -2974,7 +2969,7 @@ namespace Legion {
       if (!wait_events.empty())
       {
         RtEvent dist_event = Runtime::merge_events(wait_events);
-        dist_event.lg_wait();
+        dist_event.wait();
       }
     }
 
@@ -3184,11 +3179,9 @@ namespace Legion {
         if (result_ready.exists() && !result_ready.has_triggered())
         {
           // Defer completion until the value is ready
-          DeferredExecuteArgs deferred_execute_args;
-          deferred_execute_args.proxy_this = this;
+          DeferredExecuteArgs deferred_execute_args(this);
           runtime->issue_runtime_meta_task(deferred_execute_args,
-                                           LG_THROUGHPUT_DEFERRED_PRIORITY,
-                                           this, result_ready);
+                  LG_THROUGHPUT_DEFERRED_PRIORITY, result_ready);
         }
         else
           deferred_execute();
@@ -3789,10 +3782,9 @@ namespace Legion {
     void ShardManager::launch_shard(ShardTask *task, RtEvent precondition) const
     //--------------------------------------------------------------------------
     {
-      ShardManagerLaunchArgs args;
-      args.shard = task;
+      ShardManagerLaunchArgs args(original_task, task);
       runtime->issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY, 
-                                       original_task, precondition);
+                                       precondition);
     }
 
     //--------------------------------------------------------------------------
@@ -3802,7 +3794,7 @@ namespace Legion {
       // Do our arrival
       Runtime::phase_barrier_arrive(startup_barrier, 1/*count*/);
       // Then wait for everyone else to be ready
-      startup_barrier.lg_wait();
+      startup_barrier.wait();
     }
 
     //--------------------------------------------------------------------------
@@ -4231,7 +4223,7 @@ namespace Legion {
         runtime->find_or_request_physical_manager(manager_did, ready); 
       ShardManager *manager = runtime->find_shard_manager(repl_id);
       if (!ready.has_triggered())
-        ready.lg_wait();
+        ready.wait();
       manager->create_instance_top_view(physical_manager, source, 
                 request_context, request_source, true/*handle now*/);
     }
@@ -4254,9 +4246,9 @@ namespace Legion {
       InstanceView *view = static_cast<InstanceView*>(
           runtime->find_or_request_logical_view(view_did, view_ready));
       if (!manager_ready.has_triggered())
-        manager_ready.lg_wait();
+        manager_ready.wait();
       if (!view_ready.has_triggered())
-        view_ready.lg_wait();
+        view_ready.wait();
       request_context->record_replicate_instance_top_view(manager, view);
     }
 
@@ -4491,7 +4483,7 @@ namespace Legion {
       if (!done_event.has_triggered())
       {
         if (block)
-          done_event.lg_wait();
+          done_event.wait();
         else
           return done_event;
       }
@@ -4598,7 +4590,7 @@ namespace Legion {
       if (done_event.exists() && !done_event.has_triggered())
       {
         if (block)
-          done_event.lg_wait();
+          done_event.wait();
         else
           return done_event;
       }
@@ -4793,7 +4785,7 @@ namespace Legion {
       if (!done_event.has_triggered())
       {
         if (block)
-          done_event.lg_wait();
+          done_event.wait();
         else
           return done_event;
       }
@@ -5159,7 +5151,7 @@ namespace Legion {
         if (!done_preconditions.empty())
         {
           RtEvent ready = Runtime::merge_events(done_preconditions);
-          ready.lg_wait();
+          ready.wait();
         }
       }
     }
@@ -5894,7 +5886,7 @@ namespace Legion {
       if (!held_references.empty())
       {
         // Wait for all the other shards to be done
-        local_done_event.lg_wait();
+        local_done_event.wait();
         // Now we can remove our held references
         for (std::set<PhysicalManager*>::const_iterator it = 
               held_references.begin(); it != held_references.end(); it++)
@@ -6030,7 +6022,7 @@ namespace Legion {
       {
         RtEvent ready = Runtime::merge_events(ready_events);
         if (!ready.has_triggered())
-          ready.lg_wait();
+          ready.wait();
       }
       // Lastly we need to put acquire references on any of local instances
       WrapperReferenceMutator mutator(done_events);
@@ -6091,7 +6083,7 @@ namespace Legion {
       {
         RtEvent done = Runtime::merge_events(done_events);
         if (!done.has_triggered())
-          done.lg_wait();
+          done.wait();
       }
       // Now we can remove our held references
       for (std::set<PhysicalManager*>::const_iterator it = 
@@ -6314,7 +6306,7 @@ namespace Legion {
       {
         RtEvent ready = Runtime::merge_events(ready_events);
         if (!ready.has_triggered())
-          ready.lg_wait();
+          ready.wait();
       }
       // Lastly we need to put acquire references on any of local instances
       for (unsigned idx = 0; idx < constraint_indexes.size(); idx++)
@@ -6557,7 +6549,7 @@ namespace Legion {
       // happen and then we can remove our valid references 
       if ((local_shard == origin) && !held_references.empty())
       {
-        acknowledge_event.lg_wait();
+        acknowledge_event.wait();
         for (std::set<VersionState*>::const_iterator it = 
               held_references.begin(); it != held_references.end(); it++)
           (*it)->remove_base_valid_ref(REPLICATION_REF);
@@ -6642,7 +6634,7 @@ namespace Legion {
       if (!reference_preconditions.empty())
       {
         RtEvent wait_for = Runtime::merge_events(reference_preconditions);
-        wait_for.lg_wait();
+        wait_for.wait();
       }
       // Now we can add the references
       WrapperReferenceMutator mutator(ack_preconditions);
@@ -6737,7 +6729,7 @@ namespace Legion {
       if (!wait_on.empty())
       {
         RtEvent wait_for = Runtime::merge_events(wait_on);
-        wait_for.lg_wait();
+        wait_for.wait();
       }
     }
 
@@ -6766,10 +6758,9 @@ namespace Legion {
                                                            RtEvent precondition)
     //--------------------------------------------------------------------------
     {
-      DeferVersionBroadcastArgs args;
-      args.proxy_this = this;
+      DeferVersionBroadcastArgs args(op, this);
       context->runtime->issue_runtime_meta_task(args, 
-          LG_LATENCY_DEFERRED_PRIORITY, op, precondition);
+          LG_LATENCY_DEFERRED_PRIORITY, precondition);
     }
 
     //--------------------------------------------------------------------------

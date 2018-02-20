@@ -109,63 +109,112 @@ namespace Legion {
       public:
         static const LgTaskID TASK_ID = LG_PRE_PIPELINE_ID;
       public:
-        Operation *proxy_this;
+        PrepipelineArgs(Operation *op)
+          : LgTaskArgs<PrepipelineArgs>(op->get_unique_op_id()),
+            proxy_this(op) { }
+      public:
+        Operation *const proxy_this;
+      };
+      struct TriggerOpArgs : public LgTaskArgs<TriggerOpArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_TRIGGER_OP_ID;
+      public:
+        TriggerOpArgs(Operation *o)
+          : LgTaskArgs<TriggerOpArgs>(o->get_unique_op_id()), op(o) { }
+      public:
+        Operation *const op;
       };
       struct DeferredReadyArgs : public LgTaskArgs<DeferredReadyArgs> {
       public:
         static const LgTaskID TASK_ID = LG_DEFERRED_READY_TRIGGER_ID;
       public:
-        Operation *proxy_this;
+        DeferredReadyArgs(Operation *op)
+          : LgTaskArgs<DeferredReadyArgs>(op->get_unique_op_id()),
+            proxy_this(op) { }
+      public:
+        Operation *const proxy_this;
       };
       struct DeferredEnqueueArgs : public LgTaskArgs<DeferredEnqueueArgs> {
       public:
         static const LgTaskID TASK_ID = LG_DEFERRED_ENQUEUE_OP_ID;
       public:
-        Operation *proxy_this;
-        LgPriority priority;
+        DeferredEnqueueArgs(Operation *op, LgPriority p)
+          : LgTaskArgs<DeferredEnqueueArgs>(op->get_unique_op_id()),
+            proxy_this(op), priority(p) { }
+      public:
+        Operation *const proxy_this;
+        const LgPriority priority;
       };
       struct DeferredResolutionArgs :
         public LgTaskArgs<DeferredResolutionArgs> {
       public:
         static const LgTaskID TASK_ID = LG_DEFERRED_RESOLUTION_TRIGGER_ID;
       public:
-        Operation *proxy_this;
+        DeferredResolutionArgs(Operation *op)
+          : LgTaskArgs<DeferredResolutionArgs>(op->get_unique_op_id()),
+            proxy_this(op) { }
+      public:
+        Operation *const proxy_this;
       };
       struct DeferredExecuteArgs : public LgTaskArgs<DeferredExecuteArgs> {
       public:
         static const LgTaskID TASK_ID = LG_DEFERRED_EXECUTION_TRIGGER_ID;
       public:
-        Operation *proxy_this;
+        DeferredExecuteArgs(Operation *op)
+          : LgTaskArgs<DeferredExecuteArgs>(op->get_unique_op_id()),
+            proxy_this(op) { }
+      public:
+        Operation *const proxy_this;
       };
       struct DeferredExecArgs : public LgTaskArgs<DeferredExecArgs> {
       public:
         static const LgTaskID TASK_ID = LG_DEFERRED_EXECUTE_ID;
       public:
-        Operation *proxy_this;
+        DeferredExecArgs(Operation *op)
+          : LgTaskArgs<DeferredExecArgs>(op->get_unique_op_id()),
+            proxy_this(op) { }
+      public:
+        Operation *const proxy_this;
       };
       struct TriggerCompleteArgs : public LgTaskArgs<TriggerCompleteArgs> {
       public:
         static const LgTaskID TASK_ID = LG_TRIGGER_COMPLETE_ID;
       public:
-        Operation *proxy_this;
+        TriggerCompleteArgs(Operation *op)
+          : LgTaskArgs<TriggerCompleteArgs>(op->get_unique_op_id()),
+            proxy_this(op) { }
+      public:
+        Operation *const proxy_this;
       };
       struct DeferredCompleteArgs : public LgTaskArgs<DeferredCompleteArgs> {
       public:
         static const LgTaskID TASK_ID = LG_DEFERRED_COMPLETE_ID;
       public:
-        Operation *proxy_this;
+        DeferredCompleteArgs(Operation *op)
+          : LgTaskArgs<DeferredCompleteArgs>(op->get_unique_op_id()),
+            proxy_this(op) { }
+      public:
+        Operation *const proxy_this;
       };
       struct DeferredCommitTriggerArgs : 
         public LgTaskArgs<DeferredCommitTriggerArgs> {
       public:
         static const LgTaskID TASK_ID = LG_DEFERRED_COMMIT_TRIGGER_ID; 
       public:
-        Operation *proxy_this;
-        GenerationID gen;
+        DeferredCommitTriggerArgs(Operation *op)
+          : LgTaskArgs<DeferredCommitTriggerArgs>(op->get_unique_op_id()),
+            proxy_this(op), gen(op->get_generation()) { }
+      public:
+        Operation *const proxy_this;
+        const GenerationID gen;
       };
       struct DeferredCommitArgs : public LgTaskArgs<DeferredCommitArgs> {
       public:
         static const LgTaskID TASK_ID = LG_DEFERRED_COMMIT_ID;
+      public:
+        DeferredCommitArgs(Operation *op, bool d)
+          : LgTaskArgs<DeferredCommitArgs>(op->get_unique_op_id()),
+            proxy_this(op), deactivate(d) { }
       public:
         Operation *proxy_this;
         bool deactivate;
@@ -1729,7 +1778,11 @@ namespace Legion {
       public:
         static const LgTaskID TASK_ID = LG_RESOLVE_FUTURE_PRED_ID;
       public:
-        FuturePredOp *future_pred_op;
+        ResolveFuturePredArgs(FuturePredOp *op)
+          : LgTaskArgs<ResolveFuturePredArgs>(op->get_unique_op_id()),
+            future_pred_op(op) { }
+      public:
+        FuturePredOp *const future_pred_op;
       };
     public:
       FuturePredOp(Runtime *rt);
@@ -1872,21 +1925,33 @@ namespace Legion {
       public:
         static const LgTaskID TASK_ID = LG_MUST_INDIV_ID;
       public:
-        Processor current_proc;
-        IndividualTask *task;
+        MustEpochIndivArgs(Processor p, IndividualTask *t, MustEpochOp *o)
+          : LgTaskArgs<MustEpochIndivArgs>(o->get_unique_op_id()),
+            current_proc(p), task(t) { }
+      public:
+        const Processor current_proc;
+        IndividualTask *const task;
       };
       struct MustEpochIndexArgs : public LgTaskArgs<MustEpochIndexArgs> {
       public:
         static const LgTaskID TASK_ID = LG_MUST_INDEX_ID;
       public:
-        Processor current_proc;
-        IndexTask *task;
+        MustEpochIndexArgs(Processor p, IndexTask *t, MustEpochOp *o)
+          : LgTaskArgs<MustEpochIndexArgs>(o->get_unique_op_id()),
+            current_proc(p), task(t) { }
+      public:
+        const Processor current_proc;
+        IndexTask *const task;
       };
       struct MustEpochMapArgs : public LgTaskArgs<MustEpochMapArgs> {
       public:
         static const LgTaskID TASK_ID = LG_MUST_MAP_ID;
       public:
-        MustEpochOp *owner;
+        MustEpochMapArgs(MustEpochOp *o)
+          : LgTaskArgs<MustEpochMapArgs>(o->get_unique_op_id()),
+            owner(o), task(NULL) { }
+      public:
+        MustEpochOp *const owner;
         SingleTask *task;
       };
       struct MustEpochDistributorArgs : 
@@ -1894,12 +1959,20 @@ namespace Legion {
       public:
         static const LgTaskID TASK_ID = LG_MUST_DIST_ID;
       public:
+        MustEpochDistributorArgs(MustEpochOp *o)
+          : LgTaskArgs<MustEpochDistributorArgs>(o->get_unique_op_id()),
+            task(NULL) { }
+      public:
         TaskOp *task;
       };
       struct MustEpochLauncherArgs : 
         public LgTaskArgs<MustEpochLauncherArgs> {
       public:
         static const LgTaskID TASK_ID = LG_MUST_LAUNCH_ID;
+      public:
+        MustEpochLauncherArgs(MustEpochOp *o)
+          : LgTaskArgs<MustEpochLauncherArgs>(o->get_unique_op_id()),
+            task(NULL) { }
       public:
         TaskOp *task;
       };

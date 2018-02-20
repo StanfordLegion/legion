@@ -350,7 +350,8 @@ namespace Legion {
       output.initial_proc = default_policy_select_initial_processor(ctx, task);
       output.inline_task = false;
       output.stealable = stealing_enabled; 
-      // Unlike in the past, this is now the best choice
+      // This is the best choice for the default mapper assuming
+      // there is locality in the remote mapped tasks
       output.map_locally = false;
       // Control replicate the top-level task in multi-node settings
       // otherwise we do no control replication

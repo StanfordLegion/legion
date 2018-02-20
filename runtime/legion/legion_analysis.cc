@@ -308,7 +308,7 @@ namespace Legion {
               args.state = state;
               args.kind = REF_KIND;
               return runtime->issue_runtime_meta_task(args, 
-                      LG_LATENCY_WORK_PRIORITY, NULL, pre);
+                      LG_LATENCY_WORK_PRIORITY, pre);
             }
             else
             {
@@ -340,7 +340,7 @@ namespace Legion {
               args.state = state;
               args.kind = REF_KIND;
               return runtime->issue_runtime_meta_task(args, 
-                      LG_LATENCY_WORK_PRIORITY, NULL, pre);
+                      LG_LATENCY_WORK_PRIORITY, pre);
             }
             else
             {
@@ -369,7 +369,7 @@ namespace Legion {
               args.state = state;
               args.kind = REF_KIND;
               return runtime->issue_runtime_meta_task(args, 
-                      LG_LATENCY_WORK_PRIORITY, NULL, pre);
+                      LG_LATENCY_WORK_PRIORITY, pre);
             }
             else
             {
@@ -1339,7 +1339,7 @@ namespace Legion {
           DeferRestrictedManagerArgs args;
           args.manager = manager;
           ready = runtime->issue_runtime_meta_task(args, 
-              LG_LATENCY_DEFERRED_PRIORITY, NULL, ready);
+              LG_LATENCY_DEFERRED_PRIORITY, ready);
           ready_events.insert(ready);
         }
         else
@@ -4787,7 +4787,7 @@ namespace Legion {
             // the request_mask in case we lose a race
             RtEvent wait_on = send_remote_version_request(version_mask,
                                                           ready_events);
-            wait_on.lg_wait();
+            wait_on.wait();
             // Only retake the reservation, when we are ready
             m_lock.reacquire();
 #ifdef DEBUG_LEGION
@@ -4850,7 +4850,7 @@ namespace Legion {
             RtEvent wait_on = send_remote_version_request(version_mask,
                                                           ready_events);
             // Only retake the reservation, when we are ready
-            wait_on.lg_wait();
+            wait_on.wait();
             m_lock.reacquire();
 #ifdef DEBUG_LEGION
             // When we wake up everything should be good
@@ -4924,7 +4924,7 @@ namespace Legion {
             rez.serialize(wait_on);
           }
           runtime->send_version_manager_unversioned_request(owner_space, rez);
-          wait_on.lg_wait();
+          wait_on.wait();
         }
         else
         {
@@ -4980,7 +4980,7 @@ namespace Legion {
           RtEvent wait_on = send_remote_version_request(version_mask,
                                                         ready_events);
           // Retake the lock only once we're ready to
-          wait_on.lg_wait();
+          wait_on.wait();
           m_lock.reacquire();
 #ifdef DEBUG_LEGION
           // When we wake up everything should be good
@@ -5041,7 +5041,7 @@ namespace Legion {
           RtEvent wait_on = send_remote_version_request(version_mask,
                                                         ready_events); 
           // Retake the lock only once we're ready to
-          wait_on.lg_wait();
+          wait_on.wait();
           m_lock.reacquire();
 #ifdef DEBUG_LEGION
           // When we wake up everything should be good
@@ -5104,7 +5104,7 @@ namespace Legion {
           RtEvent wait_on = send_remote_version_request(version_mask,
                                                         ready_events); 
           // Retake the lock only once we're ready to
-          wait_on.lg_wait();
+          wait_on.wait();
           m_lock.reacquire();
 #ifdef DEBUG_LEGION
           // When we wake up everything should be good
@@ -5363,7 +5363,7 @@ namespace Legion {
         args.to_reclaim = advanced;
         RtEvent done = 
           runtime->issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY,
-                                           NULL, advanced);
+                                           advanced);
         // Add this event to the set of applied preconditions
         // in order to avoid cleanup races
         applied_events.insert(done);
@@ -5856,7 +5856,7 @@ namespace Legion {
                 args.capture_mask = new FieldMask(overlap);
                 RtEvent done = 
                   runtime->issue_runtime_meta_task(args, 
-                      LG_LATENCY_WORK_PRIORITY, NULL, precondition);
+                      LG_LATENCY_WORK_PRIORITY, precondition);
                 applied_events.insert(done);
                 state_overlap -= overlap;
                 if (!state_overlap)
@@ -6106,7 +6106,7 @@ namespace Legion {
           RtEvent wait_on = send_remote_version_request(
               new_states.get_valid_mask(), applied_events);
           // Retake the lock only once we're ready to
-          wait_on.lg_wait();
+          wait_on.wait();
           m_lock.reacquire();
 #ifdef DEBUG_LEGION
           // When we wake up everything should be good
@@ -6416,7 +6416,7 @@ namespace Legion {
         if (!ready_events.empty())
         {
           RtEvent wait_on = Runtime::merge_events(ready_events);
-          wait_on.lg_wait();
+          wait_on.wait();
         }
       }
 
@@ -6749,7 +6749,7 @@ namespace Legion {
       if (!preconditions.empty())
       {
         RtEvent wait_on = Runtime::merge_events(preconditions);
-        wait_on.lg_wait();
+        wait_on.wait();
       }
 #ifdef DEBUG_LEGION
       assert(applied_events != NULL);
@@ -8058,7 +8058,7 @@ namespace Legion {
       // meta-data for different fields (i.e. we don't track it at all
       // currently), therefore we may get requests for updates that we
       runtime->issue_runtime_meta_task(args, LG_LATENCY_DEFERRED_PRIORITY,
-                                       NULL/*op*/, precondition);
+                                       precondition);
     }
 
     //--------------------------------------------------------------------------
@@ -8423,7 +8423,7 @@ namespace Legion {
                   args.children = deferred_children;
                   // Need resource priority since we asked for the lock
                   RtEvent done = runtime->issue_runtime_meta_task(args, 
-                          LG_LATENCY_WORK_PRIORITY, NULL, precondition);
+                          LG_LATENCY_WORK_PRIORITY, precondition);
                   preconditions.insert(done);
                 }
                 else // We can run it now
@@ -8487,7 +8487,7 @@ namespace Legion {
                   args.children = reduce_children;
                   // Need resource priority since we asked for the lock
                   RtEvent done = runtime->issue_runtime_meta_task(args,
-                          LG_LATENCY_WORK_PRIORITY, NULL, precondition);
+                          LG_LATENCY_WORK_PRIORITY, precondition);
                   preconditions.insert(done);
                 }
                 else // We can run it now
@@ -8536,7 +8536,7 @@ namespace Legion {
               args.context = context;
               std::pair<RtEvent,FieldMask> &entry = pending_instances[manager];
               entry.first = runtime->issue_runtime_meta_task(args,
-                                       LG_LATENCY_WORK_PRIORITY, NULL, ready);
+                                       LG_LATENCY_WORK_PRIORITY, ready);
               derez.deserialize(entry.second);
               preconditions.insert(entry.first);
             }
@@ -8610,7 +8610,7 @@ namespace Legion {
           args.view_mask = new FieldMask(it->second.second);
           preconditions.insert(
               runtime->issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY,
-                                               NULL, it->second.first));
+                                               it->second.first));
         }
       }
       if (!preconditions.empty())
@@ -8642,7 +8642,7 @@ namespace Legion {
       if (!done_events.empty())
       {
         RtEvent done = Runtime::merge_events(done_events);
-        done.lg_wait();
+        done.wait();
       }
     }
 
@@ -8655,7 +8655,7 @@ namespace Legion {
       args.proxy_this = this;
       args.ref_kind = ref_kind;
       runtime->issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY,
-                                       NULL, done_event);
+                                       done_event);
     }
 
     //--------------------------------------------------------------------------

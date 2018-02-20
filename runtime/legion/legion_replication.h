@@ -592,6 +592,10 @@ namespace Legion {
       public:
         static const LgTaskID TASK_ID = LG_DEFER_VERSION_BROADCAST_TASK_ID;
       public:
+        DeferVersionBroadcastArgs(Operation *op, VersioningInfoBroadcast *b)
+          : LgTaskArgs<DeferVersionBroadcastArgs>(op->get_unique_op_id()),
+            proxy_this(b) { }
+      public:
         VersioningInfoBroadcast *proxy_this;
       };
     public:
@@ -1179,7 +1183,11 @@ namespace Legion {
       public:
         static const LgTaskID TASK_ID = LG_CONTROL_REP_LAUNCH_TASK_ID;
       public:
-        ShardTask *shard;
+        ShardManagerLaunchArgs(TaskOp *orig, ShardTask *s)
+          : LgTaskArgs<ShardManagerLaunchArgs>(orig->get_unique_op_id()),
+            shard(s) { }
+      public:
+        ShardTask *const shard;
       };
       struct ShardManagerDeleteArgs :
         public LgTaskArgs<ShardManagerDeleteArgs> {

@@ -2289,11 +2289,13 @@ class IndexPartition(object):
         # Check for dominance of children by parent
         for child in self.children.itervalues():
             if not self.parent.dominates(child):
-                print(('WARNING: child % is not dominated by parent %s in %s. '+
+                print(('WARNING: child %s is not dominated by parent %s in %s. '+
                       'This is definitely an application bug.') %
                       (child, self.parent, self))
                 if self.state.assert_on_warning:
                     assert False
+            # Recurse down the tree too
+            child.check_partition_properties()
         # Check disjointness
         if self.disjoint:
             previous = PointSet()
