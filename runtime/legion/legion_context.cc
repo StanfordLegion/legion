@@ -9564,7 +9564,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplicateContext::detach_resource(PhysicalRegion region)
+    Future ReplicateContext::detach_resource(PhysicalRegion region)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_REPLICATE_TASK_VIOLATION,
@@ -9572,6 +9572,7 @@ namespace Legion {
                     "replication contexts for task %s (UID %lld). It may be "
                     "supported in the future.",
                     get_task_name(), get_unique_id())
+      return Future();
     }
 
     //--------------------------------------------------------------------------
