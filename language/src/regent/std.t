@@ -16,11 +16,12 @@
 
 local ast = require("regent/ast")
 local base = require("regent/std_base")
+local cudahelper = require("regent/cudahelper")
 local data = require("common/data")
 local header_helper = require("regent/header_helper")
-local report = require("common/report")
 local pretty = require("regent/pretty")
-local cudahelper = require("regent/cudahelper")
+local profile = require("regent/profile")
+local report = require("common/report")
 
 local std = {}
 
@@ -3472,7 +3473,8 @@ local function compile_tasks_in_parallel()
     local pid = c.fork()
     if pid == 0 then
       local exports = make_task_wrappers(n, i)
-      terralib.saveobj(objfile, 'object', exports)
+      local tag = 'compile[' .. tostring(i) .. '/' .. tostring(n) .. ']'
+      profile(tag, nil, terralib.saveobj)(objfile, 'object', exports)
       os.exit(0)
     else
       child_pids:insert(pid)
@@ -3570,11 +3572,13 @@ function std.saveobj(main_task, filename, filetype, extra_setup_thunk, link_flag
   if use_cmake then
     flags:insertall({"-llegion", "-lrealm"})
   end
-  if filetype ~= nil then
-    terralib.saveobj(filename, filetype, names, flags)
-  else
-    terralib.saveobj(filename, names, flags)
-  end
+  profile('compile', nil, function()
+    if filetype ~= nil then
+      terralib.saveobj(filename, filetype, names, flags)
+    else
+      terralib.saveobj(filename, names, flags)
+    end
+  end)()
 end
 
 local function generate_task_interfaces()
@@ -3682,11 +3686,13 @@ function std.save_tasks(header_filename, filename, filetype,
   if use_cmake then
     flags:insertall({"-llegion", "-lrealm"})
   end
-  if filetype ~= nil then
-    terralib.saveobj(filename, filetype, names, flags)
-  else
-    terralib.saveobj(filename, names, flags)
-  end
+  profile('compile', nil, function()
+    if filetype ~= nil then
+      terralib.saveobj(filename, filetype, names, flags)
+    else
+      terralib.saveobj(filename, names, flags)
+    end
+  end)()
 end
 
 -- #####################################
