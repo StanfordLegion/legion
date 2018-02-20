@@ -684,12 +684,7 @@ $(SLIB_REALM) : $(REALM_OBJS)
 
 $(GEN_OBJS) : %.cc.o : %.cc
 	$(CXX) -o $@ -c $< $(CC_FLAGS) $(INC_FLAGS)
-
-ifeq ($(strip $(FORTRAN_LEAF_TASK)),1)	
-$(GEN_FORTRAN_OBJS) : %.o : %.f90
-	$(F90) -o $@ -c $< $(CC_FLAGS) $(INC_FLAGS)
-endif
-
+	
 $(ASM_OBJS) : %.S.o : %.S
 	$(CXX) -o $@ -c $< $(CC_FLAGS) $(INC_FLAGS)
 
@@ -710,9 +705,6 @@ $(GPU_RUNTIME_OBJS): %.cu.o : %.cu
 	
 $(LEGION_FORTRAN_API_OBJS) : %.o : %.f90
 	gfortran -cpp -J$(LG_RT_DIR) -o $@ -c $< $(FC_FLAGS) $(INC_FLAGS)
-	
-$(GEN_OBJS) : %.o : %.cc
-	$(CXX) -o $@ -c $< $(CC_FLAGS) $(INC_FLAGS)
 
 ifeq ($(strip $(FORTRAN_LEAF_TASK)),1)	
 $(GEN_FORTRAN_OBJS) : %.o : %.f90

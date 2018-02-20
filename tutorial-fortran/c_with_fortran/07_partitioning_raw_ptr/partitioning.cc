@@ -244,7 +244,8 @@ void init_field_task(const Task *task,
   const int point = task->index_point.point_data[0];
   printf("Initializing field %d for block %d...\n", fid, point);
 
-  const FieldAccessor<WRITE_DISCARD,double,1> acc(regions[0], fid);
+  const FieldAccessor<WRITE_DISCARD,double,1,coord_t,
+          Realm::AffineAccessor<double,1,coord_t> > acc(regions[0], fid);
   // Note here that we get the domain for the subregion for
   // this task from the runtime which makes it safe for running
   // both as a single task and as part of an index space of tasks.
@@ -264,9 +265,12 @@ void daxpy_task(const Task *task,
   double alpha = *((const double*)task->args);
   const int point = task->index_point.point_data[0];
 
-  const FieldAccessor<READ_ONLY,double,1> acc_x(regions[0], FID_X);
-  const FieldAccessor<READ_ONLY,double,1> acc_y(regions[0], FID_Y);
-  const FieldAccessor<WRITE_DISCARD,double,1> acc_z(regions[1], FID_Z);
+  const FieldAccessor<READ_ONLY,double,1,coord_t,
+            Realm::AffineAccessor<double,1,coord_t> > acc_x(regions[0], FID_X);
+  const FieldAccessor<READ_ONLY,double,1,coord_t,
+            Realm::AffineAccessor<double,1,coord_t> > acc_y(regions[0], FID_Y);
+  const FieldAccessor<WRITE_DISCARD,double,1,coord_t,
+            Realm::AffineAccessor<double,1,coord_t> > acc_z(regions[1], FID_Z);
   
   Rect<1> rect = runtime->get_index_space_domain(ctx, 
       task->regions[0].region.get_index_space());
@@ -288,9 +292,12 @@ void check_task(const Task *task,
   assert(task->arglen == sizeof(double));
   const double alpha = *((const double*)task->args);
 
-  const FieldAccessor<READ_ONLY,double,1> acc_x(regions[0], FID_X);
-  const FieldAccessor<READ_ONLY,double,1> acc_y(regions[0], FID_Y);
-  const FieldAccessor<READ_ONLY,double,1> acc_z(regions[1], FID_Z);
+  const FieldAccessor<READ_ONLY,double,1,coord_t,
+            Realm::AffineAccessor<double,1,coord_t> > acc_x(regions[0], FID_X);
+  const FieldAccessor<READ_ONLY,double,1,coord_t,
+            Realm::AffineAccessor<double,1,coord_t> > acc_y(regions[0], FID_Y);
+  const FieldAccessor<READ_ONLY,double,1,coord_t,
+            Realm::AffineAccessor<double,1,coord_t> > acc_z(regions[1], FID_Z);
 
   printf("Checking results...");
   Rect<1> rect = runtime->get_index_space_domain(ctx,
