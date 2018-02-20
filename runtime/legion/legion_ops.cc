@@ -14533,8 +14533,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void DetachOp::initialize_detach(TaskContext *ctx, 
-                                     PhysicalRegion region)
+    Future DetachOp::initialize_detach(TaskContext *ctx, PhysicalRegion region)
     //--------------------------------------------------------------------------
     {
       initialize_operation(ctx, true/*track*/);
@@ -14554,9 +14553,14 @@ namespace Legion {
                       "that had not previously been attached.",
                       get_unique_op_id(), parent_ctx->get_task_name(),
                       parent_ctx->get_unique_id())
+      // Create the future result that we will complete when we're done
+      result = Future(new FutureImpl(runtime, true/*register*/,
+                  runtime->get_available_distributed_id(),
+                  runtime->address_space, this));
       if (Runtime::legion_spy_enabled)
         LegionSpy::log_detach_operation(parent_ctx->get_unique_id(),
                                         unique_op_id);
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -14575,6 +14579,7 @@ namespace Legion {
       privilege_path.clear();
       version_info.clear();
       restrict_info.clear();
+      result = Future(); // clear any references on the future
       runtime->free_detach_op(this);
     }
 
@@ -14706,6 +14711,14 @@ namespace Legion {
       assert(idx == 0);
 #endif
       return parent_req_index;
+    }
+
+    //--------------------------------------------------------------------------
+    void DetachOp::trigger_complete(void)
+    //--------------------------------------------------------------------------
+    {
+      result.impl->complete_future(); 
+      complete_operation();
     }
 
     //--------------------------------------------------------------------------

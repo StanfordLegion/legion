@@ -5176,8 +5176,9 @@ namespace Legion {
        * Detach an external resource from a logical region
        * @param ctx enclosing task context
        * @param the physical region for the external resource
+       * @return an empty future indicating when the resource is detached
        */
-      void detach_external_resource(Context ctx, PhysicalRegion region);
+      Future detach_external_resource(Context ctx, PhysicalRegion region);
 
       /**
        * @deprecated

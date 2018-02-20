@@ -143,7 +143,8 @@ def install_terra(terra_dir, external_terra_dir, thread_count, llvm):
         return
 
     if not os.path.exists(terra_dir):
-        git_clone(terra_dir, 'https://github.com/zdevito/terra.git')
+        # git_clone(terra_dir, 'https://github.com/zdevito/terra.git')
+        git_clone(terra_dir, 'https://github.com/StanfordLegion/terra.git', branch='regent')
     else:
         git_update(terra_dir)
     build_terra(terra_dir, thread_count, llvm)
