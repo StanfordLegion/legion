@@ -759,39 +759,41 @@ function base.variant:wrapper_sig()
                                         .. ');'
 end
 
--- Generate task wrapper on this process (it will be compiled automatically).
-function base.variant:make_wrapper()
-  local wrapper
-  local body = self:get_definition()
-  local return_type = body:gettype().returntype
+local function make_task_wrapper(task_body)
+  local return_type = task_body:gettype().returntype
   if return_type == terralib.types.unit then
-    terra wrapper(data : &opaque, datalen : c.size_t,
-                  userdata : &opaque, userlen : c.size_t,
-                  proc_id : c.legion_proc_id_t)
+    return terra(data : &opaque, datalen : c.size_t,
+                 userdata : &opaque, userlen : c.size_t,
+                 proc_id : c.legion_proc_id_t)
       var task : c.legion_task_t,
           regions : &c.legion_physical_region_t,
           num_regions : uint32,
           ctx : c.legion_context_t,
           runtime : c.legion_runtime_t
       c.legion_task_preamble(data, datalen, proc_id, &task, &regions, &num_regions, &ctx, &runtime)
-      body(task, regions, num_regions, ctx, runtime)
+      task_body(task, regions, num_regions, ctx, runtime)
       c.legion_task_postamble(runtime, ctx, nil, 0)
     end
   else
-    terra wrapper(data : &opaque, datalen : c.size_t,
-                  userdata : &opaque, userlen : c.size_t,
-                  proc_id : c.legion_proc_id_t)
+    return terra(data : &opaque, datalen : c.size_t,
+                 userdata : &opaque, userlen : c.size_t,
+                 proc_id : c.legion_proc_id_t)
       var task : c.legion_task_t,
           regions : &c.legion_physical_region_t,
           num_regions : uint32,
           ctx : c.legion_context_t,
           runtime : c.legion_runtime_t
       c.legion_task_preamble(data, datalen, proc_id, &task, &regions, &num_regions, &ctx, &runtime)
-      var result = body(task, regions, num_regions, ctx, runtime)
+      var result = task_body(task, regions, num_regions, ctx, runtime)
       c.legion_task_postamble(runtime, ctx, result.value, result.size)
       c.free(result.value)
     end
   end
+end
+
+-- Generate task wrapper on this process (it will be compiled automatically).
+function base.variant:make_wrapper()
+  local wrapper = make_task_wrapper(self:get_definition())
   wrapper:setname(self:wrapper_name())
   return wrapper
 end
