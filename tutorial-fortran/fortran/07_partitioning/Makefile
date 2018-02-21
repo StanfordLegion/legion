@@ -29,7 +29,7 @@ ALT_MAPPERS     ?= 0		# Include alternative mappers (not recommended)
 # Put the binary file name here
 OUTFILE		?= partitioning
 # List all the application source files here
-GEN_FORTRAN_SRC	?= partitioning.f90		# .c files
+GEN_FORTRAN_SRC	?= partitioning.f90		# .f90 files
 GEN_GPU_SRC	?=				# .cu files
 
 # You can modify these variables, some will be appended to by the runtime makefile
@@ -39,8 +39,6 @@ NVCC_FLAGS	?=
 GASNET_FLAGS	?=
 LD_FLAGS	?=
 LEGION_WITH_FORTRAN	?= 1
-# For Point and Rect typedefs
-CC_FLAGS	+= -std=c++11
 ###########################################################################
 #
 #   Don't change anything below here

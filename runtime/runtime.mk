@@ -631,12 +631,6 @@ GEN_GPU_OBJS	:=
 GPU_RUNTIME_OBJS:=
 endif
 
-ifeq ($(strip $(FORTRAN_LEAF_TASK)),1)
-GEN_FORTRAN_OBJS	:= $(GEN_FORTRAN_SRC:.f90=.o)
-LD_FLAGS	+= -lgfortran
-F90	:= gfortran
-endif
-
 ifeq ($(strip $(LEGION_WITH_FORTRAN)),1)
 GEN_FORTRAN_OBJS	:= $(GEN_FORTRAN_SRC:.f90=.o)
 LD_FLAGS	+= -lgfortran
@@ -656,11 +650,7 @@ all: $(OUTFILE)
 endif
 
 # If we're using CUDA we have to link with nvcc
-ifeq ($(strip $(FORTRAN_LEAF_TASK)),1)
-$(OUTFILE) : $(SLIB_LEGION) $(SLIB_REALM) $(GEN_OBJS) $(GEN_FORTRAN_OBJS) $(GEN_GPU_OBJS)
-	@echo "---> Linking objects into one binary: $(OUTFILE)"
-	$(CXX) -o $(OUTFILE) $(GEN_OBJS) $(GEN_FORTRAN_OBJS) $(GEN_GPU_OBJS) $(LD_FLAGS) $(LEGION_LIBS) $(LEGION_LD_FLAGS) $(GASNET_FLAGS)
-else ifeq ($(strip $(LEGION_WITH_C)),1)
+ifeq ($(strip $(LEGION_WITH_C)),1)
 $(OUTFILE) : $(GEN_OBJS) $(GEN_C_OBJS) $(GEN_GPU_OBJS) $(SLIB_LEGION) $(SLIB_REALM)
 	@echo "---> Linking objects into one binary: $(OUTFILE)"
 	$(CXX) -o $(OUTFILE) $(GEN_OBJS) $(GEN_C_OBJS) $(GEN_GPU_OBJS) $(LD_FLAGS) $(LEGION_LIBS) $(LEGION_LD_FLAGS) $(GASNET_FLAGS)
@@ -704,12 +694,7 @@ $(GPU_RUNTIME_OBJS): %.cu.o : %.cu
 	$(NVCC) -o $@ -c $< $(NVCC_FLAGS) $(INC_FLAGS)
 	
 $(LEGION_FORTRAN_API_OBJS) : %.o : %.f90
-	gfortran -cpp -J$(LG_RT_DIR) -o $@ -c $< $(FC_FLAGS) $(INC_FLAGS)
-
-ifeq ($(strip $(FORTRAN_LEAF_TASK)),1)	
-$(GEN_FORTRAN_OBJS) : %.o : %.f90
-	$(F90) -cpp -o $@ -c $< $(CC_FLAGS) $(INC_FLAGS)
-endif
+	$(F90) -cpp -J$(LG_RT_DIR) -o $@ -c $< $(FC_FLAGS) $(INC_FLAGS)
 
 ifeq ($(strip $(LEGION_WITH_FORTRAN)),1)	
 $(GEN_FORTRAN_OBJS) : %.o : %.f90

@@ -41,9 +41,8 @@ CC_FLAGS	?=
 NVCC_FLAGS	?=
 GASNET_FLAGS	?=
 LD_FLAGS	?=
-FORTRAN_LEAF_TASK	?= 1
+LEGION_WITH_FORTRAN	?= 1
 
-CC_FLAGS	+= -std=c++11
 ###########################################################################
 #
 #   Don't change anything below here

@@ -29,7 +29,7 @@ ALT_MAPPERS     ?= 0		# Include alternative mappers (not recommended)
 # Put the binary file name here
 OUTFILE		?= attach_file
 # List all the application source files here
-GEN_FORTRAN_SRC	?= attach_file.f90		# .c files
+GEN_FORTRAN_SRC	?= attach_file.f90		# .f90 files
 GEN_SRC ?= generate_hdf_file.cc
 GEN_GPU_SRC	?=				# .cu files
 
@@ -40,8 +40,6 @@ NVCC_FLAGS	?=
 GASNET_FLAGS	?=
 LD_FLAGS	?=
 LEGION_WITH_FORTRAN	?= 1
-# For Point and Rect typedefs
-CC_FLAGS	+= -std=c++11
 ###########################################################################
 #
 #   Don't change anything below here
