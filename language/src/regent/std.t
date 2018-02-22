@@ -18,6 +18,7 @@ local ast = require("regent/ast")
 local base = require("regent/std_base")
 local cudahelper = require("regent/cudahelper")
 local data = require("common/data")
+local ffi = require("ffi")
 local header_helper = require("regent/header_helper")
 local pretty = require("regent/pretty")
 local profile = require("regent/profile")
@@ -3434,18 +3435,87 @@ function std.setup(main_task, extra_setup_thunk, task_wrappers, registration_nam
   return main, names
 end
 
--- Generate every n-th task wrapper in this process (all of them if n == 1),
--- the compiler will pick them up automatically.
-local function make_task_wrappers(n, i)
-  n = n or 1
-  i = i or 1
+-- Generate all task wrappers in this process, the compiler will pick them up
+-- automatically.
+local function make_task_wrappers()
   local task_wrappers = {}
-  for j,variant in ipairs(variants) do
-    if (j-1) % n == (i-1) then
-      task_wrappers[variant:wrapper_name()] = variant:make_wrapper()
-    end
+  for _,variant in ipairs(variants) do
+    task_wrappers[variant:wrapper_name()] = variant:make_wrapper()
   end
   return task_wrappers
+end
+
+local struct Pipe {
+  read_end : int,
+  write_end : int,
+}
+
+local terra make_pipe()
+  var fd : int[2]
+  var res = c.pipe(fd)
+  if res ~= 0 then
+    c.perror('pipe creation failed')
+    c.exit(c.EXIT_FAILURE)
+  end
+  return Pipe{ read_end = fd[0], write_end = fd[1] }
+end
+
+terra Pipe:close_read_end()
+  c.close(self.read_end)
+end
+
+terra Pipe:close_write_end()
+  c.close(self.write_end)
+end
+
+terra Pipe:write_int(x : int)
+  var bytes_written = c.write(self.write_end, &x, sizeof(int))
+  if bytes_written ~= sizeof(int) then
+    c.perror('pipe: int write error')
+    c.exit(c.EXIT_FAILURE)
+  end
+end
+
+terra Pipe:read_int() : int
+  var x : int
+  var bytes_read = c.read(self.read_end, &x, sizeof(int))
+  if bytes_read ~= sizeof(int) then
+    c.perror('pipe: int read error')
+    c.exit(c.EXIT_FAILURE)
+  end
+  return x
+end
+
+-- String can be up to 255 characters long.
+terra Pipe:write_string(str : &int8)
+  var len = c.strlen(str)
+  if len >= 256 then
+    c.fprintf(c.stderr, 'pipe: string too long for writing')
+    c.exit(c.EXIT_FAILURE)
+  end
+  var bytes_written = c.write(self.write_end, str, len + 1)
+  if bytes_written ~= len + 1 then
+    c.perror('pipe: string write error')
+    c.exit(c.EXIT_FAILURE)
+  end
+end
+
+-- Returned pointer must be manually free'd.
+terra Pipe:read_string() : &int8
+  var buf : int8[256]
+  var bytes_read = c.read(self.read_end, &(buf[0]), 256)
+  if bytes_read <= 0 then
+    c.perror('pipe: string read error')
+    c.exit(c.EXIT_FAILURE)
+  end
+  var len = c.strlen(buf)
+  if len >= 256 then
+    c.perror('pipe: string read error')
+    c.exit(c.EXIT_FAILURE)
+  end
+  var str = [&int8](c.malloc(len + 1))
+  c.strncpy(str, buf, len + 1)
+  return str
 end
 
 local function compile_tasks_in_parallel()
@@ -3456,33 +3526,72 @@ local function compile_tasks_in_parallel()
   end
 
   -- Don't spawn extra processes if jobs == 1.
-  local n = math.max(tonumber(std.config["jobs"]) or 1, 1)
-  if n == 1 then
+  local num_slaves = math.max(tonumber(std.config["jobs"]) or 1, 1)
+  if num_slaves == 1 then
     return terralib.newlist(), make_task_wrappers()
   end
 
-  -- Spawn children processes, assign a subset of tasks to each to compile.
+  -- Spawn slave processes & distribute work to them on demand.
   -- TODO: Terra functions used by more than one task may get compiled
   -- multiple times, and included in multiple object files by different
   -- children. This will cause bloat in the final executable.
   local objfiles = terralib.newlist()
-  local child_pids = terralib.newlist()
-  for i = 1,n do
-    local objfile = os.tmpname()
-    objfiles:insert(objfile)
+  local slave_pids = terralib.newlist()
+  local slave_pipes = terralib.newlist()
+  local slave2master = make_pipe()
+  for slave_id = 1,num_slaves do
+    local master2slave = make_pipe()
+    slave_pipes:insert(master2slave)
     local pid = c.fork()
+    assert(pid >= 0, 'fork failed')
     if pid == 0 then
-      local exports = make_task_wrappers(n, i)
-      local tag = 'compile[' .. tostring(i) .. '/' .. tostring(n) .. ']'
-      profile(tag, nil, terralib.saveobj)(objfile, 'object', exports)
-      os.exit(0)
+      slave2master:close_read_end()
+      master2slave:close_write_end()
+      while true do
+        slave2master:write_int(slave_id)
+        local variant_id = master2slave:read_int()
+        assert(0 <= variant_id and variant_id <= #variants,
+               'master2slave: variant_id read error')
+        if variant_id == 0 then
+          break
+        end
+        local raw_filename = master2slave:read_string()
+        local filename = ffi.string(raw_filename)
+        c.free(raw_filename)
+        local variant = variants[variant_id]
+        local exports = {}
+        exports[variant:wrapper_name()] = variant:make_wrapper()
+        profile('compile', variant, function()
+          terralib.saveobj(filename, 'object', exports)
+        end)()
+      end
+      slave2master:close_write_end()
+      master2slave:close_read_end()
+      os.exit(c.EXIT_SUCCESS)
     else
-      child_pids:insert(pid)
+      slave_pids:insert(pid)
+      master2slave:close_read_end()
     end
   end
-  for _,pid in ipairs(child_pids) do
+  slave2master:close_write_end()
+  for variant_id = 1,#variants do
+    local objfile = os.tmpname()
+    objfiles:insert(objfile)
+    local slave_id = slave2master:read_int()
+    assert(1 <= slave_id and slave_id <= num_slaves,
+           'slave2master: slave_id read error')
+    local master2slave = slave_pipes[slave_id]
+    master2slave:write_int(variant_id)
+    master2slave:write_string(objfile)
+  end
+  for _,master2slave in ipairs(slave_pipes) do
+    master2slave:write_int(0)
+    master2slave:close_write_end()
+  end
+  for _,pid in ipairs(slave_pids) do
     c.waitpid(pid, nil, 0)
   end
+  slave2master:close_read_end()
 
   -- Declare all task wrappers using a (fake) header file, so the compiler will
   -- expect them to be linked-in later.
