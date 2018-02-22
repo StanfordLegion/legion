@@ -18151,9 +18151,9 @@ namespace Legion {
 #endif
       // Need a barrier across all the processors to make sure that
       // they have done all their startup code for now
-      // TODO: Remove this when 
+      // TODO: Remove this when realm gives us back a startup event
       const RtEvent startup_barrier(realm.collective_spawn_by_kind(
-            Processor::NO_KIND, LG_STARTUP_BARRIER_ID, NULL, 0,
+            Processor::NO_KIND, Processor::TASK_ID_PROCESSOR_NOP, NULL, 0,
             false/*one per node*/, tasks_registered));
       // Then perform the initialization task that will initialize
       // all the runtime objects across the machine
@@ -18609,30 +18609,41 @@ namespace Legion {
       CodeDescriptor lg_task(Runtime::legion_runtime_task);
       CodeDescriptor rt_profiling_task(Runtime::profiling_runtime_task);
       CodeDescriptor startup_task(Runtime::startup_runtime_task);
-      CodeDescriptor startup_barrier(Runtime::startup_barrier_task);
       Realm::ProfilingRequestSet no_requests;
       // Keep track of all the registration events
       std::set<RtEvent> registered_events;
       for (std::map<Processor,Runtime*>::const_iterator it = 
             processor_mapping.begin(); it != processor_mapping.end(); it++)
       {
-        registered_events.insert(RtEvent(
-              it->first.register_task(LG_INITIALIZE_TASK_ID, initialize_task,
-                no_requests, &it->second, sizeof(it->second))));
-        registered_events.insert(RtEvent(
-              it->first.register_task(LG_SHUTDOWN_TASK_ID, shutdown_task,
-                no_requests, &it->second, sizeof(it->second))));
-        registered_events.insert(RtEvent(
-              it->first.register_task(LG_TASK_ID, lg_task,
-                no_requests, &it->second, sizeof(it->second))));
-        registered_events.insert(RtEvent(
-              it->first.register_task(LG_LEGION_PROFILING_ID, rt_profiling_task,
-                no_requests, &it->second, sizeof(it->second))));
-        registered_events.insert(RtEvent(
+        // These tasks get registered on startup_kind processors
+        if (it->first.kind() == startup_kind)
+        {
+          registered_events.insert(RtEvent(
+                it->first.register_task(LG_INITIALIZE_TASK_ID, initialize_task,
+                  no_requests, &it->second, sizeof(it->second))));
+          registered_events.insert(RtEvent(
               it->first.register_task(LG_STARTUP_TASK_ID, startup_task,
                 no_requests, &it->second, sizeof(it->second))));
-        registered_events.insert(RtEvent(
-              it->first.register_task(LG_STARTUP_BARRIER_ID, startup_barrier,
+        }
+        // Register these tasks on utility processors if we have
+        // them otherwise register them on the CPU processors
+        if ((!local_util_procs.empty() && 
+              (it->first.kind() == Processor::UTIL_PROC)) ||
+            (local_util_procs.empty() &&
+              (it->first.kind() == Processor::LOC_PROC)))
+        {
+          registered_events.insert(RtEvent(
+                it->first.register_task(LG_SHUTDOWN_TASK_ID, shutdown_task,
+                  no_requests, &it->second, sizeof(it->second))));
+          registered_events.insert(RtEvent(
+                it->first.register_task(LG_TASK_ID, lg_task,
+                  no_requests, &it->second, sizeof(it->second))));
+        }
+        // Profiling tasks get registered on CPUs and utility processors
+        if ((it->first.kind() == Processor::LOC_PROC) ||
+            (it->first.kind() == Processor::UTIL_PROC))
+          registered_events.insert(RtEvent(
+              it->first.register_task(LG_LEGION_PROFILING_ID, rt_profiling_task,
                 no_requests, &it->second, sizeof(it->second))));
       }
       // Lastly do any other registrations we might have
@@ -19003,6 +19014,10 @@ namespace Legion {
 #endif
       Runtime *runtime = *((Runtime**)userdata); 
       implicit_runtime = runtime;
+      // This is the part where the runtime starts at least until
+      // we figure out how to have python processors not statically
+      // register code as part of their startup
+      runtime_started = true;
       runtime->initialize_runtime();
     }
 
@@ -19651,19 +19666,6 @@ namespace Legion {
       Runtime *runtime = *((Runtime**)userdata);
       implicit_runtime = runtime;
       runtime->startup_runtime();
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void Runtime::startup_barrier_task(
-                                   const void *args, size_t arglen, 
-				   const void *userdata, size_t userlen,
-				   Processor p)
-    //--------------------------------------------------------------------------
-    {
-      // This is the part where the runtime starts at least until
-      // we figure out how to have python processors not statically
-      // register code as part of their startup
-      runtime_started = true;
     }
 
     //--------------------------------------------------------------------------

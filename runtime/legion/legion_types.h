@@ -233,8 +233,7 @@ namespace Legion {
       LG_TASK_ID              = Realm::Processor::TASK_ID_FIRST_AVAILABLE,
       LG_LEGION_PROFILING_ID  = Realm::Processor::TASK_ID_FIRST_AVAILABLE+1,
       LG_STARTUP_TASK_ID      = Realm::Processor::TASK_ID_FIRST_AVAILABLE+2,
-      LG_STARTUP_BARRIER_ID   = Realm::Processor::TASK_ID_FIRST_AVAILABLE+3,
-      TASK_ID_AVAILABLE       = Realm::Processor::TASK_ID_FIRST_AVAILABLE+4,
+      TASK_ID_AVAILABLE       = Realm::Processor::TASK_ID_FIRST_AVAILABLE+3,
     };
 
     // Realm dependent partitioning kinds
