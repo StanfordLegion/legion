@@ -178,7 +178,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(Runtime::legion_spy_enabled);
+      assert(implicit_runtime->legion_spy_enabled);
 #endif
       std::vector<FieldID> fields;  
       owner->get_field_ids(allocated_fields, fields);
@@ -542,7 +542,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(Runtime::legion_spy_enabled);
+      assert(runtime->legion_spy_enabled);
 #endif
       const ApEvent inst_event = get_use_event();
       LegionSpy::log_physical_instance_creator(inst_event, creator_id, proc.id);
@@ -980,7 +980,7 @@ namespace Legion {
       log_garbage.info("GC Instance Manager %lld %d " IDFMT " " IDFMT " ",
        LEGION_DISTRIBUTED_ID_FILTER(did), local_space, inst.id, mem->memory.id);
 #endif
-      if (Runtime::legion_spy_enabled)
+      if (runtime->legion_spy_enabled)
       {
 #ifdef DEBUG_LEGION
         assert(use_event.exists());
@@ -1259,7 +1259,7 @@ namespace Legion {
         op(o), redop(red), use_event(u_event)
     //--------------------------------------------------------------------------
     {  
-      if (Runtime::legion_spy_enabled)
+      if (runtime->legion_spy_enabled)
       {
 #ifdef DEBUG_LEGION
         assert(use_event.exists());
@@ -1901,38 +1901,6 @@ namespace Legion {
       return NULL;
     }
 
-    //--------------------------------------------------------------------------
-    /*static*/ void VirtualManager::initialize_virtual_instance(Runtime *rt,
-                                                              DistributedID did)
-    //--------------------------------------------------------------------------
-    {
-      VirtualManager *&singleton = get_singleton();
-      // make a layout constraints
-      LayoutConstraintSet constraint_set;
-      constraint_set.add_constraint(
-          SpecializedConstraint(VIRTUAL_SPECIALIZE));
-      LayoutConstraints *constraints = 
-        rt->register_layout(FieldSpace::NO_SPACE, constraint_set);
-      FieldMask all_ones(LEGION_FIELD_MASK_FIELD_ALL_ONES);
-      std::vector<unsigned> mask_index_map;
-      std::vector<CustomSerdezID> serdez;
-      std::vector<std::pair<FieldID,size_t> > field_sizes;
-      LayoutDescription *layout = new LayoutDescription(all_ones, constraints);
-      PointerConstraint pointer_constraint(Memory::NO_MEMORY, 0);
-      singleton = new VirtualManager(rt->forest, layout,pointer_constraint,did);
-      // put a permenant resource reference on this so it is never deleted
-      singleton->add_base_resource_ref(NEVER_GC_REF);
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void VirtualManager::finalize_virtual_instance(void)
-    //--------------------------------------------------------------------------
-    {
-      VirtualManager *&singleton = get_singleton();
-      if (singleton->remove_base_resource_ref(NEVER_GC_REF))
-        delete singleton;
-    }
-
     /////////////////////////////////////////////////////////////
     // Instance Builder
     /////////////////////////////////////////////////////////////
@@ -2015,7 +1983,7 @@ namespace Legion {
         return NULL;
       // For Legion Spy we need a unique ready event if it doesn't already
       // exist so we can uniquely identify the instance
-      if (!ready.exists() && Runtime::legion_spy_enabled)
+      if (!ready.exists() && runtime->legion_spy_enabled)
       {
         ApUserEvent rename_ready = Runtime::create_ap_user_event();
         Runtime::trigger_event(rename_ready);

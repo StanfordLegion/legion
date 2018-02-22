@@ -228,15 +228,12 @@ namespace Legion {
 
     // Runtime task numbering 
     enum {
-      LG_DUMMY_BARRIER_ID     = Realm::Processor::TASK_ID_PROCESSOR_NOP,
-      INIT_TASK_ID            = Realm::Processor::TASK_ID_PROCESSOR_INIT,
-      SHUTDOWN_TASK_ID        = Realm::Processor::TASK_ID_PROCESSOR_SHUTDOWN,
+      LG_INITIALIZE_TASK_ID   = Realm::Processor::TASK_ID_PROCESSOR_INIT,
+      LG_SHUTDOWN_TASK_ID     = Realm::Processor::TASK_ID_PROCESSOR_SHUTDOWN,
       LG_TASK_ID              = Realm::Processor::TASK_ID_FIRST_AVAILABLE,
       LG_LEGION_PROFILING_ID  = Realm::Processor::TASK_ID_FIRST_AVAILABLE+1,
-      LG_LAUNCH_TOP_LEVEL_ID  = Realm::Processor::TASK_ID_FIRST_AVAILABLE+2,
-      LG_MPI_INTEROP_ID       = Realm::Processor::TASK_ID_FIRST_AVAILABLE+3,
-      LG_STARTUP_SYNC_ID      = Realm::Processor::TASK_ID_FIRST_AVAILABLE+4,
-      TASK_ID_AVAILABLE       = Realm::Processor::TASK_ID_FIRST_AVAILABLE+5,
+      LG_STARTUP_TASK_ID      = Realm::Processor::TASK_ID_FIRST_AVAILABLE+2,
+      TASK_ID_AVAILABLE       = Realm::Processor::TASK_ID_FIRST_AVAILABLE+3,
     };
 
     // Realm dependent partitioning kinds
@@ -1306,7 +1303,8 @@ namespace Legion {
     class ContextInterface {
     public:
       virtual Task* get_task(void) = 0;
-      virtual const std::vector<PhysicalRegion>& begin_task(void) = 0;
+      virtual const std::vector<PhysicalRegion>& begin_task(
+                                      Legion::Runtime *&rt) = 0;
       virtual void end_task(const void *result, 
                             size_t result_size, bool owned) = 0;
       // This is safe because we see in legion_context.h that
@@ -1321,6 +1319,8 @@ namespace Legion {
     // Nasty global variable for TLS support of figuring out
     // our context implicitly
     extern __thread TaskContext *implicit_context;
+    // Same thing for the runtime
+    extern __thread Runtime *implicit_runtime;
     // Another nasty global variable for tracking the fast
     // reservations that we are holding
     extern __thread AutoLock *local_lock_list;

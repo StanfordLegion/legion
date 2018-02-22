@@ -363,7 +363,8 @@ namespace Legion {
       static void handle_create_top_view_response(Deserializer &derez,
                                                    Runtime *runtime);
     public:
-      virtual const std::vector<PhysicalRegion>& begin_task(void);
+      virtual const std::vector<PhysicalRegion>& begin_task(
+                                                   Legion::Runtime *&runtime);
       virtual void end_task(const void *res, size_t res_size, bool owned) = 0;
       virtual void post_end_task(const void *res, 
                                  size_t res_size, bool owned) = 0;
@@ -929,7 +930,8 @@ namespace Legion {
       static void handle_create_top_view_response(Deserializer &derez,
                                                    Runtime *runtime);
     public:
-      virtual const std::vector<PhysicalRegion>& begin_task(void);
+      virtual const std::vector<PhysicalRegion>& begin_task(
+                                                    Legion::Runtime *&runtime);
       virtual void end_task(const void *res, size_t res_size, bool owned);
       virtual void post_end_task(const void *res, size_t res_size, bool owned);
     public:
@@ -1816,7 +1818,8 @@ namespace Legion {
       static void handle_create_top_view_response(Deserializer &derez,
                                                    Runtime *runtime);
     public:
-      virtual const std::vector<PhysicalRegion>& begin_task(void);
+      virtual const std::vector<PhysicalRegion>& begin_task(
+                                                    Legion::Runtime *&runtime);
       virtual void end_task(const void *res, size_t res_size, bool owned);
       virtual void post_end_task(const void *res, size_t res_size, bool owned);
     public:

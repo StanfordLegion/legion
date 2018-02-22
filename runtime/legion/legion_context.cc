@@ -1300,7 +1300,7 @@ namespace Legion {
       {
         if (it->impl == region.impl)
         {
-          if (Runtime::runtime_warnings && !has_inline_accessor)
+          if (runtime->runtime_warnings && !has_inline_accessor)
             has_inline_accessor = it->impl->created_accessor();
           inline_regions.erase(it);
           return;
@@ -1732,17 +1732,20 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
-    const std::vector<PhysicalRegion>& TaskContext::begin_task(void)
+    const std::vector<PhysicalRegion>& TaskContext::begin_task(
+                                                           Legion::Runtime *&rt)
     //--------------------------------------------------------------------------
     {
       implicit_context = this;
+      implicit_runtime = this->runtime;
+      rt = this->runtime->external;
       task_profiling_provenance = owner_task->get_unique_op_id();
       if (overhead_tracker != NULL)
         previous_profiling_time = Realm::Clock::current_time_in_nanoseconds();
       // Switch over the executing processor to the one
       // that has actually been assigned to run this task.
       executing_processor = Processor::get_executing_processor();
-      if (Runtime::legion_spy_enabled)
+      if (runtime->legion_spy_enabled)
         LegionSpy::log_task_processor(get_unique_id(), executing_processor.id);
 #ifdef DEBUG_LEGION
       log_task.debug("Task %s (ID %lld) starting on processor " IDFMT "",
@@ -1901,12 +1904,12 @@ namespace Legion {
     {
       // Set some of the default values for a context
       context_configuration.max_window_size = 
-        Runtime::initial_task_window_size;
+        runtime->initial_task_window_size;
       context_configuration.hysteresis_percentage = 
-        Runtime::initial_task_window_hysteresis;
+        runtime->initial_task_window_hysteresis;
       context_configuration.max_outstanding_frames = 0;
       context_configuration.min_tasks_to_schedule = 
-        Runtime::initial_tasks_to_schedule;
+        runtime->initial_tasks_to_schedule;
       context_configuration.min_frames_to_schedule = 0;
       context_configuration.mutable_priority = false;
 #ifdef DEBUG_LEGION
@@ -2306,7 +2309,7 @@ namespace Legion {
       log_index.debug("Creating index space %x in task%s (ID %lld)", 
                       handle.id, get_task_name(), get_unique_id()); 
 #endif
-      if (Runtime::legion_spy_enabled)
+      if (runtime->legion_spy_enabled)
         LegionSpy::log_top_index_space(handle.id);
       forest->create_index_space(handle, realm_is, did); 
       register_index_space_creation(handle);
@@ -2329,7 +2332,7 @@ namespace Legion {
       log_index.debug("Creating index space %x in task%s (ID %lld)", 
                       handle.id, get_task_name(), get_unique_id()); 
 #endif
-      if (Runtime::legion_spy_enabled)
+      if (runtime->legion_spy_enabled)
         LegionSpy::log_top_index_space(handle.id);
       forest->create_union_space(handle, owner_task, spaces, did); 
       register_index_space_creation(handle);
@@ -2352,7 +2355,7 @@ namespace Legion {
       log_index.debug("Creating index space %x in task%s (ID %lld)", 
                       handle.id, get_task_name(), get_unique_id()); 
 #endif
-      if (Runtime::legion_spy_enabled)
+      if (runtime->legion_spy_enabled)
         LegionSpy::log_top_index_space(handle.id);
       forest->create_intersection_space(handle, owner_task, spaces, did);
       register_index_space_creation(handle);
@@ -2373,7 +2376,7 @@ namespace Legion {
       log_index.debug("Creating index space %x in task%s (ID %lld)", 
                       handle.id, get_task_name(), get_unique_id()); 
 #endif
-      if (Runtime::legion_spy_enabled)
+      if (runtime->legion_spy_enabled)
         LegionSpy::log_top_index_space(handle.id);
       forest->create_difference_space(handle, owner_task, left, right, did);
       register_index_space_creation(handle);
@@ -2677,11 +2680,11 @@ namespace Legion {
                                          domain_fid, range, id, tag);
       // Now figure out if we need to unmap and re-map any inline mappings
       std::vector<PhysicalRegion> unmapped_regions;
-      if (!Runtime::unsafe_launch)
+      if (!runtime->unsafe_launch)
         find_conflicting_regions(part_op, unmapped_regions);
       if (!unmapped_regions.empty())
       {
-        if (Runtime::runtime_warnings)
+        if (runtime->runtime_warnings)
         {
           REPORT_LEGION_WARNING(LEGION_WARNING_RUNTIME_UNMAPPING_REMAPPING,
             "Runtime is unmapping and remapping "
@@ -2773,11 +2776,11 @@ namespace Legion {
       part_op->initialize_by_field(this, pid, handle, parent_priv, fid, id,tag);
       // Now figure out if we need to unmap and re-map any inline mappings
       std::vector<PhysicalRegion> unmapped_regions;
-      if (!Runtime::unsafe_launch)
+      if (!runtime->unsafe_launch)
         find_conflicting_regions(part_op, unmapped_regions);
       if (!unmapped_regions.empty())
       {
-        if (Runtime::runtime_warnings)
+        if (runtime->runtime_warnings)
         {
           REPORT_LEGION_WARNING(LEGION_WARNING_RUNTIME_UNMAPPING_REMAPPING,
             "Runtime is unmapping and remapping "
@@ -2835,11 +2838,11 @@ namespace Legion {
       part_op->initialize_by_image(this, pid, projection, parent, fid, id, tag);
       // Now figure out if we need to unmap and re-map any inline mappings
       std::vector<PhysicalRegion> unmapped_regions;
-      if (!Runtime::unsafe_launch)
+      if (!runtime->unsafe_launch)
         find_conflicting_regions(part_op, unmapped_regions);
       if (!unmapped_regions.empty())
       {
-        if (Runtime::runtime_warnings)
+        if (runtime->runtime_warnings)
         {
           REPORT_LEGION_WARNING(LEGION_WARNING_RUNTIME_UNMAPPING_REMAPPING,
             "Runtime is unmapping and remapping "
@@ -2898,11 +2901,11 @@ namespace Legion {
                                          fid, id, tag);
       // Now figure out if we need to unmap and re-map any inline mappings
       std::vector<PhysicalRegion> unmapped_regions;
-      if (!Runtime::unsafe_launch)
+      if (!runtime->unsafe_launch)
         find_conflicting_regions(part_op, unmapped_regions);
       if (!unmapped_regions.empty())
       {
-        if (Runtime::runtime_warnings)
+        if (runtime->runtime_warnings)
         {
           REPORT_LEGION_WARNING(LEGION_WARNING_RUNTIME_UNMAPPING_REMAPPING,
             "Runtime is unmapping and remapping "
@@ -2970,11 +2973,11 @@ namespace Legion {
                                       parent, fid, id, tag);
       // Now figure out if we need to unmap and re-map any inline mappings
       std::vector<PhysicalRegion> unmapped_regions;
-      if (!Runtime::unsafe_launch)
+      if (!runtime->unsafe_launch)
         find_conflicting_regions(part_op, unmapped_regions);
       if (!unmapped_regions.empty())
       {
-        if (Runtime::runtime_warnings)
+        if (runtime->runtime_warnings)
         {
           REPORT_LEGION_WARNING(LEGION_WARNING_RUNTIME_UNMAPPING_REMAPPING,
             "Runtime is unmapping and remapping "
@@ -3034,11 +3037,11 @@ namespace Legion {
                                             parent, fid, id, tag);
       // Now figure out if we need to unmap and re-map any inline mappings
       std::vector<PhysicalRegion> unmapped_regions;
-      if (!Runtime::unsafe_launch)
+      if (!runtime->unsafe_launch)
         find_conflicting_regions(part_op, unmapped_regions);
       if (!unmapped_regions.empty())
       {
-        if (Runtime::runtime_warnings)
+        if (runtime->runtime_warnings)
         {
           REPORT_LEGION_WARNING(LEGION_WARNING_RUNTIME_UNMAPPING_REMAPPING,
             "Runtime is unmapping and remapping "
@@ -3228,7 +3231,7 @@ namespace Legion {
       log_field.debug("Creating field space %x in task %s (ID %lld)", 
                       space.id, get_task_name(), get_unique_id());
 #endif
-      if (Runtime::legion_spy_enabled)
+      if (runtime->legion_spy_enabled)
         LegionSpy::log_field_space(space.id);
 
       forest->create_field_space(space, did);
@@ -3272,7 +3275,7 @@ namespace Legion {
       }
 #endif
 
-      if (Runtime::legion_spy_enabled)
+      if (runtime->legion_spy_enabled)
         LegionSpy::log_field_creation(space.id, fid, field_size);
 
       std::set<RtEvent> done_events;
@@ -3282,13 +3285,13 @@ namespace Legion {
         // for this field space
         AutoLock local_lock(local_field_lock);
         std::vector<LocalFieldInfo> &infos = local_fields[space];
-        if (infos.size() == Runtime::max_local_fields)
+        if (infos.size() == runtime->max_local_fields)
           REPORT_LEGION_ERROR(ERROR_EXCEEDED_MAXIMUM_NUMBER_LOCAL_FIELDS,
             "Exceeded maximum number of local fields in "
                         "context of task %s (UID %lld). The maximum "
                         "is currently set to %d, but can be modified "
                         "with the -lg:local flag.", get_task_name(),
-                        get_unique_id(), Runtime::max_local_fields)
+                        get_unique_id(), runtime->max_local_fields)
         std::set<unsigned> current_indexes;
         for (std::vector<LocalFieldInfo>::const_iterator it = 
               infos.begin(); it != infos.end(); it++)
@@ -3380,7 +3383,7 @@ namespace Legion {
         }
 #endif
 
-        if (Runtime::legion_spy_enabled)
+        if (runtime->legion_spy_enabled)
           LegionSpy::log_field_creation(space.id, 
                                         resulting_fields[idx], sizes[idx]);
       }
@@ -3391,13 +3394,13 @@ namespace Legion {
         // for this field space
         AutoLock local_lock(local_field_lock);
         std::vector<LocalFieldInfo> &infos = local_fields[space];
-        if ((infos.size() + sizes.size()) > Runtime::max_local_fields)
+        if ((infos.size() + sizes.size()) > runtime->max_local_fields)
           REPORT_LEGION_ERROR(ERROR_EXCEEDED_MAXIMUM_NUMBER_LOCAL_FIELDS,
             "Exceeded maximum number of local fields in "
                         "context of task %s (UID %lld). The maximum "
                         "is currently set to %d, but can be modified "
                         "with the -lg:local flag.", get_task_name(),
-                        get_unique_id(), Runtime::max_local_fields)
+                        get_unique_id(), runtime->max_local_fields)
         std::set<unsigned> current_indexes;
         for (std::vector<LocalFieldInfo>::const_iterator it = 
               infos.begin(); it != infos.end(); it++)
@@ -3478,7 +3481,7 @@ namespace Legion {
                        get_task_name(), get_unique_id(), 
                        index_space.id, field_space.id, tid);
 #endif
-      if (Runtime::legion_spy_enabled)
+      if (runtime->legion_spy_enabled)
         LegionSpy::log_top_region(index_space.id, field_space.id, tid);
 
       forest->create_logical_region(region);
@@ -3566,7 +3569,7 @@ namespace Legion {
       IndividualTask *task = runtime->get_available_individual_task();
 #ifdef DEBUG_LEGION
       Future result = 
-        task->initialize_task(this, launcher, Runtime::check_privileges);
+        task->initialize_task(this, launcher, runtime->check_privileges);
       log_task.debug("Registering new single task with unique id %lld "
                       "and task %s (ID %lld) with high level runtime in "
                       "addresss space %d",
@@ -3685,7 +3688,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       FutureMap result = 
         task->initialize_task(this, launcher, launch_space,
-                              Runtime::check_privileges);
+                              runtime->check_privileges);
       log_task.debug("Registering new index space task with unique id "
                      "%lld and task %s (ID %lld) with high level runtime in "
                      "address space %d",
@@ -3756,7 +3759,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       Future result = 
         task->initialize_task(this, launcher, launch_space, redop, 
-                              Runtime::check_privileges);
+                              runtime->check_privileges);
       log_task.debug("Registering new index space task with unique id "
                      "%lld and task %s (ID %lld) with high level runtime in "
                      "address space %d",
@@ -3781,7 +3784,7 @@ namespace Legion {
       MapOp *map_op = runtime->get_available_map_op();
 #ifdef DEBUG_LEGION
       PhysicalRegion result = 
-        map_op->initialize(this, launcher, Runtime::check_privileges);
+        map_op->initialize(this, launcher, runtime->check_privileges);
       log_run.debug("Registering a map operation for region "
                     "(%x,%x,%x) in task %s (ID %lld)",
                     launcher.requirement.region.index_space.id, 
@@ -3857,7 +3860,7 @@ namespace Legion {
       AutoRuntimeCall call(this);
       FillOp *fill_op = runtime->get_available_fill_op();
 #ifdef DEBUG_LEGION
-      fill_op->initialize(this, launcher, Runtime::check_privileges);
+      fill_op->initialize(this, launcher, runtime->check_privileges);
       log_run.debug("Registering a fill operation in task %s (ID %lld)",
                      get_task_name(), get_unique_id());
 #else
@@ -3866,11 +3869,11 @@ namespace Legion {
       // Check to see if we need to do any unmappings and remappings
       // before we can issue this copy operation
       std::vector<PhysicalRegion> unmapped_regions;
-      if (!Runtime::unsafe_launch)
+      if (!runtime->unsafe_launch)
         find_conflicting_regions(fill_op, unmapped_regions);
       if (!unmapped_regions.empty())
       {
-        if (Runtime::runtime_warnings && !launcher.silence_warnings)
+        if (runtime->runtime_warnings && !launcher.silence_warnings)
         {
           REPORT_LEGION_WARNING(LEGION_WARNING_RUNTIME_UNMAPPING_REMAPPING,
             "WARNING: Runtime is unmapping and remapping "
@@ -3907,7 +3910,7 @@ namespace Legion {
       IndexFillOp *fill_op = runtime->get_available_index_fill_op();
 #ifdef DEBUG_LEGION
       fill_op->initialize(this, launcher, launch_space, 
-                          Runtime::check_privileges);
+                          runtime->check_privileges);
       log_run.debug("Registering an index fill operation in task %s (ID %lld)",
                      get_task_name(), get_unique_id());
 #else
@@ -3917,11 +3920,11 @@ namespace Legion {
       // Check to see if we need to do any unmappings and remappings
       // before we can issue this copy operation
       std::vector<PhysicalRegion> unmapped_regions;
-      if (!Runtime::unsafe_launch)
+      if (!runtime->unsafe_launch)
         find_conflicting_regions(fill_op, unmapped_regions);
       if (!unmapped_regions.empty())
       {
-        if (Runtime::runtime_warnings && !launcher.silence_warnings)
+        if (runtime->runtime_warnings && !launcher.silence_warnings)
         {
           REPORT_LEGION_WARNING(LEGION_WARNING_RUNTIME_UNMAPPING_REMAPPING,
             "Runtime is unmapping and remapping "
@@ -3946,7 +3949,7 @@ namespace Legion {
       AutoRuntimeCall call(this);
       CopyOp *copy_op = runtime->get_available_copy_op();
 #ifdef DEBUG_LEGION
-      copy_op->initialize(this, launcher, Runtime::check_privileges);
+      copy_op->initialize(this, launcher, runtime->check_privileges);
       log_run.debug("Registering a copy operation in task %s (ID %lld)",
                     get_task_name(), get_unique_id());
 #else
@@ -3955,11 +3958,11 @@ namespace Legion {
       // Check to see if we need to do any unmappings and remappings
       // before we can issue this copy operation
       std::vector<PhysicalRegion> unmapped_regions;
-      if (!Runtime::unsafe_launch)
+      if (!runtime->unsafe_launch)
         find_conflicting_regions(copy_op, unmapped_regions);
       if (!unmapped_regions.empty())
       {
-        if (Runtime::runtime_warnings && !launcher.silence_warnings)
+        if (runtime->runtime_warnings && !launcher.silence_warnings)
         {
           REPORT_LEGION_WARNING(LEGION_WARNING_RUNTIME_UNMAPPING_REMAPPING,
             "Runtime is unmapping and remapping "
@@ -3996,7 +3999,7 @@ namespace Legion {
       IndexCopyOp *copy_op = runtime->get_available_index_copy_op();
 #ifdef DEBUG_LEGION
       copy_op->initialize(this, launcher, launch_space, 
-                          Runtime::check_privileges);
+                          runtime->check_privileges);
       log_run.debug("Registering an index copy operation in task %s (ID %lld)",
                     get_task_name(), get_unique_id());
 #else
@@ -4006,11 +4009,11 @@ namespace Legion {
       // Check to see if we need to do any unmappings and remappings
       // before we can issue this copy operation
       std::vector<PhysicalRegion> unmapped_regions;
-      if (!Runtime::unsafe_launch)
+      if (!runtime->unsafe_launch)
         find_conflicting_regions(copy_op, unmapped_regions);
       if (!unmapped_regions.empty())
       {
-        if (Runtime::runtime_warnings && !launcher.silence_warnings)
+        if (runtime->runtime_warnings && !launcher.silence_warnings)
         {
           REPORT_LEGION_WARNING(LEGION_WARNING_RUNTIME_UNMAPPING_REMAPPING,
             "Runtime is unmapping and remapping "
@@ -4037,18 +4040,18 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       log_run.debug("Issuing an acquire operation in task %s (ID %lld)",
                     get_task_name(), get_unique_id());
-      acquire_op->initialize(this, launcher, Runtime::check_privileges);
+      acquire_op->initialize(this, launcher, runtime->check_privileges);
 #else
       acquire_op->initialize(this, launcher, false/*check privileges*/);
 #endif
       // Check to see if we need to do any unmappings and remappings
       // before we can issue this acquire operation.
       std::vector<PhysicalRegion> unmapped_regions;
-      if (!Runtime::unsafe_launch)
+      if (!runtime->unsafe_launch)
         find_conflicting_regions(acquire_op, unmapped_regions);
       if (!unmapped_regions.empty())
       {
-        if (Runtime::runtime_warnings && !launcher.silence_warnings)
+        if (runtime->runtime_warnings && !launcher.silence_warnings)
         {
           REPORT_LEGION_WARNING(LEGION_WARNING_RUNTIME_UNMAPPING_REMAPPING,
             "Runtime is unmapping and remapping "
@@ -4074,18 +4077,18 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       log_run.debug("Issuing a release operation in task %s (ID %lld)",
                     get_task_name(), get_unique_id());
-      release_op->initialize(this, launcher, Runtime::check_privileges);
+      release_op->initialize(this, launcher, runtime->check_privileges);
 #else
       release_op->initialize(this, launcher, false/*check privileges*/);
 #endif
       // Check to see if we need to do any unmappings and remappings
       // before we can issue the release operation
       std::vector<PhysicalRegion> unmapped_regions;
-      if (!Runtime::unsafe_launch)
+      if (!runtime->unsafe_launch)
         find_conflicting_regions(release_op, unmapped_regions);
       if (!unmapped_regions.empty())
       {
-        if (Runtime::runtime_warnings && !launcher.silence_warnings)
+        if (runtime->runtime_warnings && !launcher.silence_warnings)
         {
           REPORT_LEGION_WARNING(LEGION_WARNING_RUNTIME_UNMAPPING_REMAPPING,
             "Runtime is unmapping and remapping "
@@ -4110,7 +4113,7 @@ namespace Legion {
       AttachOp *attach_op = runtime->get_available_attach_op();
 #ifdef DEBUG_LEGION
       PhysicalRegion result = 
-        attach_op->initialize(this, launcher, Runtime::check_privileges);
+        attach_op->initialize(this, launcher, runtime->check_privileges);
 #else
       PhysicalRegion result = 
         attach_op->initialize(this, launcher, false/*check privileges*/);
@@ -4177,18 +4180,18 @@ namespace Legion {
       log_run.debug("Executing a must epoch in task %s (ID %lld)",
                     get_task_name(), get_unique_id());
       FutureMap result = 
-        epoch_op->initialize(this, launcher, Runtime::check_privileges);
+        epoch_op->initialize(this, launcher, runtime->check_privileges);
 #else
       FutureMap result = epoch_op->initialize(this, launcher, 
                                               false/*check privileges*/);
 #endif
       // Now find all the parent task regions we need to invalidate
       std::vector<PhysicalRegion> unmapped_regions;
-      if (!Runtime::unsafe_launch)
+      if (!runtime->unsafe_launch)
         epoch_op->find_conflicted_regions(unmapped_regions);
       if (!unmapped_regions.empty())
       {
-        if (Runtime::runtime_warnings && !launcher.silence_warnings)
+        if (runtime->runtime_warnings && !launcher.silence_warnings)
         {
           REPORT_LEGION_WARNING(LEGION_WARNING_RUNTIME_UNMAPPING_REMAPPING,
             "Runtime is unmapping and remapping "
@@ -4404,7 +4407,7 @@ namespace Legion {
           (context_configuration.max_window_size > 0) && 
             (outstanding_count > context_configuration.max_window_size))
         perform_window_wait();
-      if (Runtime::legion_spy_enabled)
+      if (runtime->legion_spy_enabled)
         LegionSpy::log_child_operation_index(get_context_uid(), result, 
                                              op->get_unique_op_id()); 
 #ifdef LEGION_SPY
@@ -4427,7 +4430,7 @@ namespace Legion {
     {
       // For now we just bump our counter
       unsigned result = total_close_count++;
-      if (Runtime::legion_spy_enabled)
+      if (runtime->legion_spy_enabled)
         LegionSpy::log_close_operation_index(get_context_uid(), result, 
                                              op->get_unique_op_id());
       return result;
@@ -5795,14 +5798,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const std::vector<PhysicalRegion>& InnerContext::begin_task(void)
+    const std::vector<PhysicalRegion>& InnerContext::begin_task(
+                                                           Legion::Runtime *&rt)
     //--------------------------------------------------------------------------
     {
       // If we have mutable priority we need to save our realm done event
       if (mutable_priority)
         realm_done_event = ApEvent(Processor::get_current_finish_event());
       // Now do the base begin task routine
-      return TaskContext::begin_task();
+      return TaskContext::begin_task(rt);
     }
 
     //--------------------------------------------------------------------------
@@ -5824,7 +5828,7 @@ namespace Legion {
       SingleTask *single_task = static_cast<SingleTask*>(owner_task);
 #endif
       // See if there are any runtime warnings to issue
-      if (Runtime::runtime_warnings)
+      if (runtime->runtime_warnings)
       {
         if (total_children_count == 0)
         {
@@ -6291,11 +6295,11 @@ namespace Legion {
         // Normal task launch, iterate over the context task's
         // regions and see if we need to unmap any of them
         std::vector<PhysicalRegion> unmapped_regions;
-        if (!Runtime::unsafe_launch)
+        if (!runtime->unsafe_launch)
           find_conflicting_regions(task, unmapped_regions);
         if (!unmapped_regions.empty())
         {
-          if (Runtime::runtime_warnings && !silence_warnings)
+          if (runtime->runtime_warnings && !silence_warnings)
           {
             if (index)
             {
@@ -9379,10 +9383,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const std::vector<PhysicalRegion>& InlineContext::begin_task(void)
+    const std::vector<PhysicalRegion>& InlineContext::begin_task(
+                                                           Legion::Runtime *&rt)
     //--------------------------------------------------------------------------
     {
-      return enclosing->get_physical_regions();
+      return enclosing->begin_task(rt);
     }
 
     //--------------------------------------------------------------------------

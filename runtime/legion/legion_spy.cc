@@ -130,7 +130,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      if (Runtime::logging_region_tree_state)
+      if (rt->logging_region_tree_state)
       {
         TreeStateLogger *logger = rt->get_tree_state_logger();
         assert(logger != NULL);

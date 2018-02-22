@@ -863,7 +863,7 @@ namespace Legion {
       // Now mark our trace as NULL to avoid registering this operation
       trace = NULL;
       tracing = false;
-      if (Runtime::legion_spy_enabled)
+      if (runtime->legion_spy_enabled)
         LegionSpy::log_trace_operation(ctx->get_unique_id(), unique_op_id);
     }
 
