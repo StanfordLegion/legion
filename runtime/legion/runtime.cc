@@ -16946,6 +16946,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
+      if ((context_uid % runtime_stride) != address_space)
+        printf("FAIL! %lld mod %d != %d\n", 
+                context_uid, runtime_stride, address_space);
       assert((context_uid % runtime_stride) == address_space); // sanity check
 #endif
       AutoLock ctx_lock(context_lock);
@@ -18094,7 +18097,8 @@ namespace Legion {
       // We have to set these prior to starting Realm as once we start
       // Realm it might fork child processes so they all need to see
       // the same values for these static variables
-      runtime_started = true;
+      // TODO: put this back once we figure out registration
+      //runtime_started = true;
       runtime_backgrounded = background;
       // Make a copy of this here so we can delete the data
       // structure before Realm does its subprocess stuff
@@ -18145,12 +18149,18 @@ namespace Legion {
       assert((startup_kind == Processor::LOC_PROC) ||
               (startup_kind == Processor::UTIL_PROC));
 #endif
+      // Need a barrier across all the processors to make sure that
+      // they have done all their startup code for now
+      // TODO: Remove this when 
+      const RtEvent startup_barrier(realm.collective_spawn_by_kind(
+            Processor::NO_KIND, LG_STARTUP_BARRIER_ID, NULL, 0,
+            false/*one per node*/, tasks_registered));
       // Then perform the initialization task that will initialize
       // all the runtime objects across the machine
       const RtEvent startup_precondition(realm.collective_spawn_by_kind(
             (config.separate_runtime_instances ? Processor::NO_KIND :
              startup_kind), LG_INITIALIZE_TASK_ID, NULL, 0,
-            !config.separate_runtime_instances, tasks_registered)); 
+            !config.separate_runtime_instances, startup_barrier)); 
       // Now we can do one more spawn call to startup the runtime 
       // across the machine since we know everything is initialized
       realm.collective_spawn_by_kind(
@@ -18599,6 +18609,7 @@ namespace Legion {
       CodeDescriptor lg_task(Runtime::legion_runtime_task);
       CodeDescriptor rt_profiling_task(Runtime::profiling_runtime_task);
       CodeDescriptor startup_task(Runtime::startup_runtime_task);
+      CodeDescriptor startup_barrier(Runtime::startup_barrier_task);
       Realm::ProfilingRequestSet no_requests;
       // Keep track of all the registration events
       std::set<RtEvent> registered_events;
@@ -18619,6 +18630,9 @@ namespace Legion {
                 no_requests, &it->second, sizeof(it->second))));
         registered_events.insert(RtEvent(
               it->first.register_task(LG_STARTUP_TASK_ID, startup_task,
+                no_requests, &it->second, sizeof(it->second))));
+        registered_events.insert(RtEvent(
+              it->first.register_task(LG_STARTUP_BARRIER_ID, startup_barrier,
                 no_requests, &it->second, sizeof(it->second))));
       }
       // Lastly do any other registrations we might have
@@ -19637,6 +19651,19 @@ namespace Legion {
       Runtime *runtime = *((Runtime**)userdata);
       implicit_runtime = runtime;
       runtime->startup_runtime();
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void Runtime::startup_barrier_task(
+                                   const void *args, size_t arglen, 
+				   const void *userdata, size_t userlen,
+				   Processor p)
+    //--------------------------------------------------------------------------
+    {
+      // This is the part where the runtime starts at least until
+      // we figure out how to have python processors not statically
+      // register code as part of their startup
+      runtime_started = true;
     }
 
     //--------------------------------------------------------------------------

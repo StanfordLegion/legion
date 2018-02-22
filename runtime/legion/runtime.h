@@ -2729,6 +2729,10 @@ namespace Legion {
                           const void *args, size_t arglen, 
 			  const void *userdata, size_t userlen,
 			  Processor p);
+      static void startup_barrier_task(
+                          const void *args, size_t arglen, 
+			  const void *userdata, size_t userlen,
+			  Processor p);
     protected:
       static void configure_collective_settings(int total_spaces);
     protected:
