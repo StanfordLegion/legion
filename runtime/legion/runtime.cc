@@ -18176,8 +18176,7 @@ namespace Legion {
       // We have to set these prior to starting Realm as once we start
       // Realm it might fork child processes so they all need to see
       // the same values for these static variables
-      // TODO: put this back once we figure out registration
-      //runtime_started = true;
+      runtime_started = true;
       runtime_backgrounded = background;
       // Make a copy of this here so we can delete the data
       // structure before Realm does its subprocess stuff
@@ -19137,10 +19136,6 @@ namespace Legion {
 #endif
       Runtime *runtime = *((Runtime**)userdata); 
       implicit_runtime = runtime;
-      // This is the part where the runtime starts at least until
-      // we figure out how to have python processors not statically
-      // register code as part of their startup
-      runtime_started = true;
       runtime->initialize_runtime();
     }
 
