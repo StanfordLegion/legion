@@ -3551,25 +3551,9 @@ extern "C" {
    */
   legion_task_id_t
   legion_runtime_register_task_variant_python_source(
-    legion_runtime_t runtime,
     legion_task_id_t id /* = AUTO_GENERATE_ID */,
     const char *task_name /* = NULL*/,
     bool global,
-    legion_execution_constraint_set_t execution_constraints,
-    legion_task_layout_constraint_set_t layout_constraints,
-    legion_task_config_options_t options,
-    const char *module_name,
-    const char *function_name,
-    const void *userdata,
-    size_t userlen);
-
-  /**
-   * @see Legion::Runtime::preregister_task_variant()
-   */
-  legion_task_id_t
-  legion_runtime_preregister_task_variant_python_source(
-    legion_task_id_t id /* = AUTO_GENERATE_ID */,
-    const char *task_name /* = NULL*/,
     legion_execution_constraint_set_t execution_constraints,
     legion_task_layout_constraint_set_t layout_constraints,
     legion_task_config_options_t options,
