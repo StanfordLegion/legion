@@ -7087,6 +7087,83 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
+    // Pending Initializations
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    PendingInitializationFunction::PendingInitializationFunction(
+                                          Processor::TaskFuncID fid,
+                                          Processor::Kind kind,
+                                          CodeDescriptor *desc,
+                                          const void *udata, size_t udata_size)
+      : func_id(fid), proc_kind(kind), realm_desc(desc)
+    //--------------------------------------------------------------------------
+    {
+      if (udata != NULL)
+      {
+        user_data_size = udata_size;
+        user_data = malloc(user_data_size);
+        memcpy(user_data,udata,user_data_size);
+      }
+      else
+      {
+        user_data_size = 0;
+        user_data = NULL;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    PendingInitializationFunction::PendingInitializationFunction(
+                                       const PendingInitializationFunction &rhs)
+      : func_id(rhs.func_id), proc_kind(rhs.proc_kind)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    PendingInitializationFunction::~PendingInitializationFunction(void)
+    //--------------------------------------------------------------------------
+    {
+      if (user_data != NULL)
+        free(user_data);
+      if (realm_desc)
+        delete realm_desc;
+    }
+
+    //--------------------------------------------------------------------------
+    PendingInitializationFunction& PendingInitializationFunction::operator=(
+                                       const PendingInitializationFunction &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent PendingInitializationFunction::register_function(Processor proc)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(proc.kind() == proc_kind);
+#endif
+      Realm::ProfilingRequestSet no_requests;
+      return RtEvent(proc.register_task(func_id, *realm_desc, no_requests,
+                      user_data, user_data_size));
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent PendingInitializationFunction::perform_function(
+                                      RealmRuntime &realm, RtEvent precondition)
+    //--------------------------------------------------------------------------
+    {
+      return RtEvent(realm.collective_spawn_by_kind(proc_kind, func_id,
+                        NULL, 0, false/*one per node*/, precondition));
+    }
+
+    /////////////////////////////////////////////////////////////
     // Pending Registrations 
     /////////////////////////////////////////////////////////////
 
@@ -9011,7 +9088,8 @@ namespace Legion {
         unique_operation_id((unique == 0) ? runtime_stride : unique),
         unique_field_id(MAX_APPLICATION_FIELD_ID + 
                         ((unique == 0) ? runtime_stride : unique)),
-        unique_code_descriptor_id(TASK_ID_AVAILABLE +
+        unique_code_descriptor_id(LG_TASK_ID_AVAILABLE +
+            get_pending_initialization_table().size() + 
                         ((unique == 0) ? runtime_stride : unique)),
         unique_constraint_id((unique == 0) ? runtime_stride : unique),
         unique_task_id(get_current_static_task_id()+unique),
@@ -18157,10 +18235,23 @@ namespace Legion {
             false/*one per node*/, tasks_registered));
       // Then perform the initialization task that will initialize
       // all the runtime objects across the machine
-      const RtEvent startup_precondition(realm.collective_spawn_by_kind(
+      RtEvent startup_precondition(realm.collective_spawn_by_kind(
             (config.separate_runtime_instances ? Processor::NO_KIND :
              startup_kind), LG_INITIALIZE_TASK_ID, NULL, 0,
             !config.separate_runtime_instances, startup_barrier)); 
+      // See if we have any initialization functions we need to do
+      const std::deque<PendingInitializationFunction*> &pending_table = 
+        get_pending_initialization_table();
+      if (!pending_table.empty())
+      {
+        for (std::deque<PendingInitializationFunction*>::const_iterator it = 
+              pending_table.begin(); it != pending_table.end(); it++)
+        {
+          startup_precondition = 
+            (*it)->perform_function(realm, startup_precondition);
+          delete (*it);
+        }
+      }
       // Now we can do one more spawn call to startup the runtime 
       // across the machine since we know everything is initialized
       realm.collective_spawn_by_kind(
@@ -18615,6 +18706,8 @@ namespace Legion {
       CodeDescriptor rt_profiling_task(Runtime::profiling_runtime_task);
       CodeDescriptor startup_task(Runtime::startup_runtime_task);
       Realm::ProfilingRequestSet no_requests;
+      const std::deque<PendingInitializationFunction*> &pending_table = 
+        get_pending_initialization_table();
       // Keep track of all the registration events
       std::set<RtEvent> registered_events;
       for (std::map<Processor,Runtime*>::const_iterator it = 
@@ -18650,7 +18743,14 @@ namespace Legion {
           registered_events.insert(RtEvent(
               it->first.register_task(LG_LEGION_PROFILING_ID, rt_profiling_task,
                 no_requests, &it->second, sizeof(it->second))));
+        for (std::deque<PendingInitializationFunction*>::const_iterator pit =
+              pending_table.begin(); pit != pending_table.end(); pit++)
+        {
+          if (it->first.kind() == (*pit)->proc_kind)
+            registered_events.insert((*pit)->register_function(it->first));
+        }
       }
+
       // Lastly do any other registrations we might have
       const ReductionOpTable& red_table = get_reduction_table();
       for(ReductionOpTable::const_iterator it = red_table.begin();
@@ -18849,6 +18949,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    /*static*/ std::deque<PendingInitializationFunction*>&
+                                 Runtime::get_pending_initialization_table(void)
+    //--------------------------------------------------------------------------
+    {
+      static std::deque<PendingInitializationFunction*> 
+                                                pending_initialization_table;
+      return pending_initialization_table;
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ TaskID& Runtime::get_current_static_task_id(void)
     //--------------------------------------------------------------------------
     {
@@ -18903,6 +19013,20 @@ namespace Legion {
                               registrar, user_data, user_data_size, 
                               code_desc, task_name));
       return vid;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void Runtime::preregister_initialization_function(
+                                        Processor::Kind proc_kind,
+                                        CodeDescriptor *realm_desc,
+                                        const void *user_data, size_t user_len)
+    //--------------------------------------------------------------------------
+    {
+      std::deque<PendingInitializationFunction*> &pending_table = 
+        get_pending_initialization_table();
+      pending_table.push_back(new PendingInitializationFunction(
+            LG_TASK_ID_AVAILABLE + pending_table.size(), proc_kind,
+            realm_desc, user_data, user_len));
     }
 
     //--------------------------------------------------------------------------
@@ -19000,14 +19124,6 @@ namespace Legion {
       }
     }
 #endif
-
-    //--------------------------------------------------------------------------
-    /*static*/ Processor::TaskFuncID Runtime::get_next_available_id(void)
-    //--------------------------------------------------------------------------
-    {
-      static Processor::TaskFuncID available = TASK_ID_AVAILABLE;
-      return available++;
-    } 
 
     //--------------------------------------------------------------------------
     /*static*/ void Runtime::initialize_runtime_task(const void *args, 

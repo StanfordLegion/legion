@@ -6978,6 +6978,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    /*static*/ void Runtime::preregister_initialization_function(
+                                         Processor::Kind proc_kind,
+                                         const CodeDescriptor &codedesc,
+                                         const void *user_data, size_t user_len)
+    //--------------------------------------------------------------------------
+    {
+      CodeDescriptor *realm_desc = new CodeDescriptor(codedesc);
+      Internal::Runtime::preregister_initialization_function(proc_kind, 
+                                      realm_desc, user_data, user_len);
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ void Runtime::legion_task_preamble(
                                        const void *data, size_t datalen,
                                        Processor p, const Task *& task,

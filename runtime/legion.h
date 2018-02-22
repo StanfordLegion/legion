@@ -6413,6 +6413,18 @@ namespace Legion {
        * @return a reference to the input arguments passed in at start-up
        */
       static const InputArgs& get_input_args(void);
+
+      /**
+       * This method provides a mechanism for applications to register
+       * initialization functions that have to be called on specific 
+       * processor kinds after the Legion runtime has been started, 
+       * but before the application top-level task is started.
+       */
+      static void preregister_initialization_function(
+                      Processor::Kind proc_kind,
+                      const CodeDescriptor &codedesc,
+                      const void *user_data = NULL,
+                      size_t user_len = 0);
     public:
       /**
        * Enable recording of profiling information.

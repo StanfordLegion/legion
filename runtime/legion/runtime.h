@@ -1099,6 +1099,35 @@ namespace Legion {
     };
 
     /**
+     * \class PendingInitializationFunction
+     * A special helper class for doing pending registration of
+     * initialization functions
+     */
+    class PendingInitializationFunction {
+    public:
+      PendingInitializationFunction(Processor::TaskFuncID func_id,
+                                    Processor::Kind proc_kind,
+                                    CodeDescriptor *realm_desc,
+                                    const void *user_data, 
+                                    size_t user_data_size);
+      PendingInitializationFunction(const PendingInitializationFunction &rhs);
+      ~PendingInitializationFunction(void);
+    public:
+      PendingInitializationFunction& operator=(
+                                    const PendingInitializationFunction &rhs);
+    public:
+      RtEvent register_function(Processor proc);
+      RtEvent perform_function(RealmRuntime &realm, RtEvent precondition);
+    public:
+      const Processor::TaskFuncID func_id;
+      const Processor::Kind proc_kind;
+    private:
+      CodeDescriptor *realm_desc;
+      void *user_data;
+      size_t user_data_size;
+    };
+
+    /**
      * \class PendingVariantRegistration
      * A small helper class for deferring the restration of task
      * variants until the runtime is started.
@@ -3000,6 +3029,8 @@ namespace Legion {
                                 get_pending_constraint_table(void);
       static std::map<ProjectionID,ProjectionFunctor*>&
                                 get_pending_projection_table(void);
+      static std::deque<PendingInitializationFunction*>&
+                                get_pending_initialization_table(void);
       static TaskID& get_current_static_task_id(void);
       static TaskID generate_static_task_id(void);
       static VariantID preregister_variant(
@@ -3007,6 +3038,10 @@ namespace Legion {
                       const void *user_data, size_t user_data_size,
                       CodeDescriptor *realm_desc, bool has_ret, 
                       const char *task_name,VariantID vid,bool check_id = true);
+      static void preregister_initialization_function(
+                      Processor::Kind proc_kind,
+                      CodeDescriptor *realm_desc,
+                      const void *user_data, size_t user_len);
     public:
       static void report_fatal_message(int code,
                                        const char *file_name,
@@ -3029,8 +3064,6 @@ namespace Legion {
       static void check_bounds(void *impl, ptr_t ptr);
       static void check_bounds(void *impl, const DomainPoint &dp);
 #endif
-    private:
-      static Processor::TaskFuncID get_next_available_id(void);
     public:
       // Static member variables
       static Processor::TaskFuncID legion_main_id;
