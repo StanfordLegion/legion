@@ -16947,7 +16947,7 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       if ((context_uid % runtime_stride) != address_space)
-        printf("FAIL! %lld mod %d != %d\n", 
+        log_run.error("FAIL! %lld mod %d != %d\n", 
                 context_uid, runtime_stride, address_space);
       assert((context_uid % runtime_stride) == address_space); // sanity check
 #endif
@@ -18584,6 +18584,11 @@ namespace Legion {
           config.configure_collective_settings(address_spaces.size());
         // Make one runtime instance and record it with all the processors
         const AddressSpace local_space = local_procs.begin()->address_space();
+#ifdef DEBUG_LEGION
+        for (std::set<Processor>::const_iterator it = 
+              local_procs.begin(); it != local_procs.end(); it++)
+          assert(it->address_space() == local_space);
+#endif
         InputArgs input_args;
         input_args.argc = argc;
         input_args.argv = argv;
