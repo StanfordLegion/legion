@@ -9100,6 +9100,9 @@ namespace Legion {
         gc_epoch_counter(0)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(address_space == my_node_id);
+#endif
       log_run.debug("Initializing high-level runtime in address space %x",
                             address_space);
       // Construct a local utility processor group
@@ -18681,6 +18684,9 @@ namespace Legion {
           config.configure_collective_settings(address_spaces.size());
         // Make one runtime instance and record it with all the processors
         const AddressSpace local_space = local_procs.begin()->address_space();
+#ifdef DEBUG_LEGION
+        assert(local_space == my_node_id);
+#endif
         InputArgs input_args;
         input_args.argc = argc;
         input_args.argv = argv;

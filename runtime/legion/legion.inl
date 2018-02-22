@@ -7901,7 +7901,7 @@ namespace LegionRuntime {
     LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef ::legion_distributed_id_t DistributedID;
     LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef ::legion_address_space_id_t AddressSpaceID;
+    typedef ::legion_address_space_t AddressSpaceID;
     LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef ::legion_tunable_id_t TunableID;
     LEGION_DEPRECATED("Use the Legion namespace instance instead.")
