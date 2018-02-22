@@ -672,10 +672,9 @@ class Task (object):
 
         task_name = ('%s.%s' % (self.body.__module__, self.body.__name__))
 
-        task_id = c.legion_runtime_register_task_variant_python_source(
+        task_id = c.legion_runtime_preregister_task_variant_python_source(
             ffi.cast('legion_task_id_t', -1), # AUTO_GENERATE_ID
             task_name.encode('utf-8'),
-            False, # global registration
             execution_constraints,
             layout_constraints,
             options[0],

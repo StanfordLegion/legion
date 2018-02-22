@@ -4546,6 +4546,7 @@ legion_runtime_preregister_task_variant_llvmir(
 #ifdef REALM_USE_PYTHON
 legion_task_id_t
 legion_runtime_register_task_variant_python_source(
+  legion_runtime_t runtime_,
   legion_task_id_t id /* = AUTO_GENERATE_ID */,
   const char *task_name /* = NULL*/,
   bool global,
@@ -4557,7 +4558,7 @@ legion_runtime_register_task_variant_python_source(
   const void *userdata,
   size_t userlen)
 {
-  Runtime *runtime = Runtime::get_runtime();
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   ExecutionConstraintSet *execution_constraints =
     CObjectWrapper::unwrap(execution_constraints_);
   TaskLayoutConstraintSet *layout_constraints =
@@ -4583,6 +4584,43 @@ legion_runtime_register_task_variant_python_source(
 
   if (task_name)
     runtime->attach_name(id, task_name);
+  return id;
+}
+
+legion_task_id_t
+legion_runtime_preregister_task_variant_python_source(
+  legion_task_id_t id /* = AUTO_GENERATE_ID */,
+  const char *task_name /* = NULL*/,
+  legion_execution_constraint_set_t execution_constraints_,
+  legion_task_layout_constraint_set_t layout_constraints_,
+  legion_task_config_options_t options,
+  const char *module_name,
+  const char *function_name,
+  const void *userdata,
+  size_t userlen)
+{
+  ExecutionConstraintSet *execution_constraints =
+    CObjectWrapper::unwrap(execution_constraints_);
+  TaskLayoutConstraintSet *layout_constraints =
+    CObjectWrapper::unwrap(layout_constraints_);
+
+  if (id == AUTO_GENERATE_ID)
+    id = Runtime::generate_static_task_id();
+
+  TaskVariantRegistrar registrar(id, task_name);
+  registrar.set_leaf(options.leaf);
+  registrar.set_inner(options.inner);
+  registrar.set_idempotent(options.idempotent);
+  if (layout_constraints)
+    registrar.layout_constraints = *layout_constraints;
+  if (execution_constraints)
+    registrar.execution_constraints = *execution_constraints;
+
+  CodeDescriptor code_desc(Realm::Type::from_cpp_type<Processor::TaskFuncPtr>());
+  code_desc.add_implementation(new Realm::PythonSourceImplementation(module_name, function_name));
+
+  /*VariantID vid =*/ Runtime::preregister_task_variant(
+    registrar, code_desc, userdata, userlen, task_name);
   return id;
 }
 #endif
