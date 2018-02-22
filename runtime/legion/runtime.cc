@@ -7143,7 +7143,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtEvent PendingInitializationFunction::register_function(Processor proc)
+    RtEvent PendingInitializationFunction::register_function(Processor proc,
+                                                             Runtime *runtime)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -7151,7 +7152,7 @@ namespace Legion {
 #endif
       Realm::ProfilingRequestSet no_requests;
       return RtEvent(proc.register_task(func_id, *realm_desc, no_requests,
-                      user_data, user_data_size));
+                      &runtime, sizeof(runtime)));
     }
 
     //--------------------------------------------------------------------------
@@ -7160,7 +7161,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return RtEvent(realm.collective_spawn_by_kind(proc_kind, func_id,
-                        NULL, 0, false/*one per node*/, precondition));
+            user_data, user_data_size, false/*one per node*/, precondition));
     }
 
     /////////////////////////////////////////////////////////////
@@ -18747,7 +18748,8 @@ namespace Legion {
               pending_table.begin(); pit != pending_table.end(); pit++)
         {
           if (it->first.kind() == (*pit)->proc_kind)
-            registered_events.insert((*pit)->register_function(it->first));
+            registered_events.insert(
+                (*pit)->register_function(it->first, it->second));
         }
       }
 

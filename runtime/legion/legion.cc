@@ -6990,6 +6990,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    /*static*/ void Runtime::initialization_function_preamble(
+                            const void *data, size_t datalen, Runtime *&runtime)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(datalen == sizeof(Internal::Runtime*));
+#endif
+      Internal::Runtime *rt = *((Internal::Runtime**)data); 
+      Internal::implicit_runtime = rt;
+      runtime = rt->external;
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ void Runtime::legion_task_preamble(
                                        const void *data, size_t datalen,
                                        Processor p, const Task *& task,

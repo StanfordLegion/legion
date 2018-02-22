@@ -6423,8 +6423,15 @@ namespace Legion {
       static void preregister_initialization_function(
                       Processor::Kind proc_kind,
                       const CodeDescriptor &codedesc,
-                      const void *user_data = NULL,
-                      size_t user_len = 0);
+                      const void *data= NULL,
+                      size_t datalen= 0);
+      /**
+       * This is the necessary preample call to be done on a 
+       * initialization function. Note that you should pass in
+       * the user data as this is a runtime initialization function
+       */
+      static void initialization_function_preamble(
+          const void *data, size_t datalen, Runtime *&runtime);
     public:
       /**
        * Enable recording of profiling information.

@@ -3602,6 +3602,15 @@ extern "C" {
     const void *retval,
     size_t retsize);
 
+  /**
+   * @see Legion::Runtime::initialization_function_preamble()
+   */
+  void
+  legion_initialization_function_preamble(
+      const void *data,
+      size_t datalen,
+      legion_runtime_t * runtimeptr);
+
   // -----------------------------------------------------------------------
   // Timing Operations
   // -----------------------------------------------------------------------

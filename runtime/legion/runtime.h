@@ -1116,7 +1116,7 @@ namespace Legion {
       PendingInitializationFunction& operator=(
                                     const PendingInitializationFunction &rhs);
     public:
-      RtEvent register_function(Processor proc);
+      RtEvent register_function(Processor proc, Runtime *runtime);
       RtEvent perform_function(RealmRuntime &realm, RtEvent precondition);
     public:
       const Processor::TaskFuncID func_id;
