@@ -1155,6 +1155,13 @@ namespace Legion {
        * @param silence_warnings silence any warnings for this blocking call
        */
       bool is_empty(bool block = false, bool silence_warnings = false) const;
+      /**
+       * Check to see if the future is ready. This will return
+       * true if the future can be used without blocking to wait
+       * on the computation that the future represents, otherwise
+       * it will return false.
+       */
+      bool is_ready(void) const;
     public:
       /**
        * Return a const reference to the future.
@@ -6406,6 +6413,25 @@ namespace Legion {
        * @return a reference to the input arguments passed in at start-up
        */
       static const InputArgs& get_input_args(void);
+
+      /**
+       * This method provides a mechanism for applications to register
+       * initialization functions that have to be called on specific 
+       * processor kinds after the Legion runtime has been started, 
+       * but before the application top-level task is started.
+       */
+      static void preregister_initialization_function(
+                      Processor::Kind proc_kind,
+                      const CodeDescriptor &codedesc,
+                      const void *data= NULL,
+                      size_t datalen= 0);
+      /**
+       * This is the necessary preample call to be done on a 
+       * initialization function. Note that you should pass in
+       * the user data as this is a runtime initialization function
+       */
+      static void initialization_function_preamble(
+          const void *data, size_t datalen, Runtime *&runtime);
     public:
       /**
        * Enable recording of profiling information.

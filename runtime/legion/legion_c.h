@@ -1954,6 +1954,12 @@ extern "C" {
                          bool block /* = false */);
 
   /**
+   * @see Legion::Future::is_ready()
+   */
+  bool
+  legion_future_is_ready(legion_future_t handle);
+
+  /**
    * @see Legion::Future::get_untyped_pointer()
    */
   const void *
@@ -3595,6 +3601,15 @@ extern "C" {
     legion_context_t ctx,
     const void *retval,
     size_t retsize);
+
+  /**
+   * @see Legion::Runtime::initialization_function_preamble()
+   */
+  void
+  legion_initialization_function_preamble(
+      const void *data,
+      size_t datalen,
+      legion_runtime_t * runtimeptr);
 
   // -----------------------------------------------------------------------
   // Timing Operations

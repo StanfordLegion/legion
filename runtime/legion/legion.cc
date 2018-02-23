@@ -2294,6 +2294,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool Future::is_ready(void) const
+    //--------------------------------------------------------------------------
+    {
+      if (impl != NULL)
+        return impl->is_ready();
+      return true; // Empty futures are always ready
+    }
+
+    //--------------------------------------------------------------------------
     void* Future::get_untyped_result(bool silence_warnings) const
     //--------------------------------------------------------------------------
     {
@@ -6806,8 +6815,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ int Runtime::start(int argc, char **argv, 
-                                           bool background)
+    /*static*/ int Runtime::start(int argc, char **argv, bool background)
     //--------------------------------------------------------------------------
     {
       return Internal::Runtime::start(argc, argv, background);
@@ -6821,8 +6829,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void Runtime::set_top_level_task_id(
-                                                  Processor::TaskFuncID top_id)
+    /*static*/ void Runtime::set_top_level_task_id(Processor::TaskFuncID top_id)
     //--------------------------------------------------------------------------
     {
       Internal::Runtime::set_top_level_task_id(top_id);
@@ -6887,14 +6894,14 @@ namespace Legion {
     /*static*/ const InputArgs& Runtime::get_input_args(void)
     //--------------------------------------------------------------------------
     {
-      return Internal::Runtime::get_input_args();
+      return Internal::implicit_runtime->input_args;
     }
 
     //--------------------------------------------------------------------------
     /*static*/ Runtime* Runtime::get_runtime(Processor p)
     //--------------------------------------------------------------------------
     {
-      return Internal::Runtime::get_runtime(p)->external;
+      return Internal::implicit_runtime->external;
     }
 
     //--------------------------------------------------------------------------
@@ -6971,6 +6978,31 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    /*static*/ void Runtime::preregister_initialization_function(
+                                         Processor::Kind proc_kind,
+                                         const CodeDescriptor &codedesc,
+                                         const void *user_data, size_t user_len)
+    //--------------------------------------------------------------------------
+    {
+      CodeDescriptor *realm_desc = new CodeDescriptor(codedesc);
+      Internal::Runtime::preregister_initialization_function(proc_kind, 
+                                      realm_desc, user_data, user_len);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void Runtime::initialization_function_preamble(
+                            const void *data, size_t datalen, Runtime *&runtime)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(datalen == sizeof(Internal::Runtime*));
+#endif
+      Internal::Runtime *rt = *((Internal::Runtime**)data); 
+      Internal::implicit_runtime = rt;
+      runtime = rt->external;
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ void Runtime::legion_task_preamble(
                                        const void *data, size_t datalen,
                                        Processor p, const Task *& task,
@@ -6978,9 +7010,6 @@ namespace Legion {
                                        Context& ctx, Runtime *& runtime)
     //--------------------------------------------------------------------------
     {
-      // Get the high level runtime
-      runtime = Runtime::get_runtime(p);
-
       // Read the context out of the buffer
 #ifdef DEBUG_LEGION
       assert(datalen == sizeof(Context));
@@ -6988,7 +7017,7 @@ namespace Legion {
       ctx = *((const Context*)data);
       task = ctx->get_task();
 
-      reg = &ctx->begin_task();
+      reg = &ctx->begin_task(runtime);
     }
 
     //--------------------------------------------------------------------------

@@ -2236,6 +2236,14 @@ legion_future_is_empty(legion_future_t handle_,
   return handle->is_empty(block);
 }
 
+bool
+legion_future_is_ready(legion_future_t handle_)
+{
+  Future *handle = CObjectWrapper::unwrap(handle_);
+
+  return handle->is_ready();
+}
+
 const void *
 legion_future_get_untyped_pointer(legion_future_t handle_)
 {
@@ -4667,6 +4675,19 @@ legion_task_postamble(
 				 ctx,
 				 retval,
 				 retsize);
+}
+
+void
+legion_initialization_function_preamble(
+    const void *data,
+    size_t datalen,
+    legion_runtime_t * runtimeptr)
+{
+  Runtime *runtime;
+
+  Runtime::initialization_function_preamble(data, datalen, runtime);
+
+  *runtimeptr = CObjectWrapper::wrap(runtime);
 }
 
 // -----------------------------------------------------------------------

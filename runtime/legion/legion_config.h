@@ -834,7 +834,6 @@ typedef unsigned int legion_generation_id_t;
 typedef unsigned int legion_type_handle;
 typedef unsigned int legion_projection_id_t;
 typedef unsigned int legion_region_tree_id_t;
-typedef unsigned int legion_address_space_id_t;
 typedef unsigned int legion_tunable_id_t;
 typedef unsigned int legion_local_variable_id_t;
 typedef unsigned long long legion_distributed_id_t;

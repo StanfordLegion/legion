@@ -481,18 +481,6 @@ namespace Legion {
       virtual void send_manager(AddressSpaceID target);
       virtual InstanceView* create_instance_top_view(InnerContext *context,
                                             AddressSpaceID logical_owner);
-    public:
-      static inline VirtualManager* get_virtual_instance(void)
-        { return get_singleton(); }
-      static void initialize_virtual_instance(Runtime *runtime,
-                                              DistributedID did);
-      static void finalize_virtual_instance(void);
-    protected:
-      static inline VirtualManager*& get_singleton(void)
-      {
-        static VirtualManager *singleton = NULL;
-        return singleton;
-      }
     };
 
     /**

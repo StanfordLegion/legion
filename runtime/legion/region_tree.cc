@@ -167,7 +167,7 @@ namespace Legion {
     {
       IndexSpaceNode *node = 
         create_node(handle, realm_is, NULL/*parent*/, 0/*color*/, did);
-      if (Runtime::legion_spy_enabled)
+      if (runtime->legion_spy_enabled)
         node->log_index_space_points();
     }
 
@@ -180,7 +180,7 @@ namespace Legion {
       IndexSpaceNode *node = 
         create_node(handle, NULL, NULL/*parent*/, 0/*color*/, did, to_trigger);
       node->initialize_union_space(to_trigger, op, handles);
-      if (Runtime::legion_spy_enabled)
+      if (runtime->legion_spy_enabled)
       {
         if (!node->index_space_ready.has_triggered())
           node->index_space_ready.wait();
@@ -197,7 +197,7 @@ namespace Legion {
       IndexSpaceNode *node = 
         create_node(handle, NULL, NULL/*parent*/, 0/*color*/, did, to_trigger);
       node->initialize_intersection_space(to_trigger, op, handles);
-      if (Runtime::legion_spy_enabled)
+      if (runtime->legion_spy_enabled)
       {
         if (!node->index_space_ready.has_triggered())
           node->index_space_ready.wait();
@@ -214,7 +214,7 @@ namespace Legion {
       IndexSpaceNode *node = 
         create_node(handle, NULL, NULL/*parent*/, 0/*color*/, did, to_trigger);
       node->initialize_difference_space(to_trigger, op, left, right);
-      if (Runtime::legion_spy_enabled)
+      if (runtime->legion_spy_enabled)
       {
         if (!node->index_space_ready.has_triggered())
           node->index_space_ready.wait();
@@ -272,7 +272,7 @@ namespace Legion {
         const bool disjoint = (part_kind == DISJOINT_KIND);
         create_node(pid, parent_node, color_node, partition_color,
                     disjoint, did, partition_ready, partial_pending);
-        if (Runtime::legion_spy_enabled)
+        if (runtime->legion_spy_enabled)
           LegionSpy::log_index_partition(parent.id, pid.id, disjoint,
                                          partition_color);
       }
@@ -2684,7 +2684,7 @@ namespace Legion {
         {
           int composite_idx = result.size();
           result.add_instance(
-            InstanceRef(VirtualManager::get_virtual_instance(), needed_fields));
+              InstanceRef(runtime->virtual_manager, needed_fields));
           return composite_idx;
         }
         else
@@ -2774,7 +2774,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(Runtime::legion_spy_enabled); 
+      assert(runtime->legion_spy_enabled); 
 #endif
       FieldSpaceNode *node = (req.handle_type != PART_PROJECTION) ? 
         get_node(req.region.get_field_space()) : 
@@ -4379,7 +4379,7 @@ namespace Legion {
     {
       get_node(handle)->attach_semantic_information(tag, source, buffer, 
                                                     size, is_mutable);
-      if (Runtime::legion_spy_enabled && (NAME_SEMANTIC_TAG == tag))
+      if (runtime->legion_spy_enabled && (NAME_SEMANTIC_TAG == tag))
         LegionSpy::log_index_space_name(handle.id,
             reinterpret_cast<const char*>(buffer));
     }
@@ -4395,7 +4395,7 @@ namespace Legion {
     {
       get_node(handle)->attach_semantic_information(tag, source, buffer, 
                                                     size, is_mutable);
-      if (Runtime::legion_spy_enabled && (NAME_SEMANTIC_TAG == tag))
+      if (runtime->legion_spy_enabled && (NAME_SEMANTIC_TAG == tag))
         LegionSpy::log_index_partition_name(handle.id,
             reinterpret_cast<const char*>(buffer));
     }
@@ -4411,7 +4411,7 @@ namespace Legion {
     {
       get_node(handle)->attach_semantic_information(tag, source, buffer, 
                                                     size, is_mutable);
-      if (Runtime::legion_spy_enabled && (NAME_SEMANTIC_TAG == tag))
+      if (runtime->legion_spy_enabled && (NAME_SEMANTIC_TAG == tag))
         LegionSpy::log_field_space_name(handle.id,
             reinterpret_cast<const char*>(buffer));
     }
@@ -4428,7 +4428,7 @@ namespace Legion {
     {
       get_node(handle)->attach_semantic_information(fid, tag, src, buf, 
                                                     size, is_mutable);
-      if (Runtime::legion_spy_enabled && (NAME_SEMANTIC_TAG == tag))
+      if (runtime->legion_spy_enabled && (NAME_SEMANTIC_TAG == tag))
         LegionSpy::log_field_name(handle.id, fid,
             reinterpret_cast<const char*>(buf));
     }
@@ -4444,7 +4444,7 @@ namespace Legion {
     {
       get_node(handle)->attach_semantic_information(tag, source, buffer, 
                                                     size, is_mutable);
-      if (Runtime::legion_spy_enabled && (NAME_SEMANTIC_TAG == tag))
+      if (runtime->legion_spy_enabled && (NAME_SEMANTIC_TAG == tag))
         LegionSpy::log_logical_region_name(handle.index_space.id,
             handle.field_space.id, handle.tree_id,
             reinterpret_cast<const char*>(buffer));
@@ -4461,7 +4461,7 @@ namespace Legion {
     {
       get_node(handle)->attach_semantic_information(tag, source, buffer, 
                                                     size, is_mutable);
-      if (Runtime::legion_spy_enabled && (NAME_SEMANTIC_TAG == tag))
+      if (runtime->legion_spy_enabled && (NAME_SEMANTIC_TAG == tag))
         LegionSpy::log_logical_partition_name(handle.index_partition.id,
             handle.field_space.id, handle.tree_id,
             reinterpret_cast<const char*>(buffer));
@@ -5915,7 +5915,7 @@ namespace Legion {
             ready = finder->second;
           else
           {
-            if (Runtime::dynamic_independence_tests)
+            if (implicit_runtime->dynamic_independence_tests)
               issue_dynamic_test = true;
             else
             {
@@ -6979,7 +6979,7 @@ namespace Legion {
             // Make a new index space node ready when the partition is ready
             result = context->create_node(is, NULL/*realm is*/, 
                                           this, c, did, partition_ready);
-          if (Runtime::legion_spy_enabled)
+          if (runtime->legion_spy_enabled)
             LegionSpy::log_index_subspace(handle.id, is.id, 
                           result->get_domain_point_color());
           return result; 
@@ -7104,7 +7104,7 @@ namespace Legion {
       // trigger the event saying when the disjointness value is ready
       Runtime::trigger_event(ready_event);
       // Record the result for Legion Spy
-      if (Runtime::legion_spy_enabled)
+      if (runtime->legion_spy_enabled)
           LegionSpy::log_index_partition(parent->handle.id, handle.id, 
                                          disjoint, color);
     }
@@ -7144,7 +7144,7 @@ namespace Legion {
             ready_event = finder->second;
           else
           {
-            if (Runtime::dynamic_independence_tests)
+            if (implicit_runtime->dynamic_independence_tests)
               issue_dynamic_test = true;
             else
             {
@@ -7859,7 +7859,7 @@ namespace Legion {
       if (is_owner())
       {
         this->available_indexes = FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES);
-        local_field_infos.resize(Runtime::max_local_fields);
+        local_field_infos.resize(runtime->max_local_fields);
       } 
 #ifdef LEGION_GC
       log_garbage.info("GC Field Space %lld %d %d",
@@ -7879,7 +7879,7 @@ namespace Legion {
       if (is_owner())
       {
         this->available_indexes = FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES);
-        local_field_infos.resize(Runtime::max_local_fields);
+        local_field_infos.resize(runtime->max_local_fields);
       }
       size_t num_fields;
       derez.deserialize(num_fields);
@@ -9309,15 +9309,6 @@ namespace Legion {
 #endif
         result.set_bit(finder->second.idx);
       }
-#ifdef DEBUG_LEGION
-      // Have a little bit of code for logging bit masks when requested
-      if (Runtime::bit_mask_logging)
-      {
-        char *bit_string = result.to_string();
-        fprintf(stderr,"%s\n",bit_string);
-        free(bit_string);
-      }
-#endif
       return result;
     }
 
@@ -9922,7 +9913,7 @@ namespace Legion {
       if (result >= 0)
       {
         // If we have slots for local fields then we can't use those
-        if (result >= int(MAX_FIELDS - Runtime::max_local_fields))
+        if (result >= int(MAX_FIELDS - runtime->max_local_fields))
           return -1;
         available_indexes.unset_bit(result);
       }
@@ -9996,7 +9987,7 @@ namespace Legion {
       {
         const size_t field_size = sizes[fidx];
         int chosen_index = -1;
-        unsigned global_idx = MAX_FIELDS - Runtime::max_local_fields;
+        unsigned global_idx = MAX_FIELDS - runtime->max_local_fields;
         for (unsigned local_idx = 0; 
               local_idx < local_field_infos.size(); local_idx++, global_idx++)
         {
@@ -10049,10 +10040,10 @@ namespace Legion {
       {
         // Translate back to a local field index
 #ifdef DEBUG_LEGION
-        assert(indexes[idx] >= (MAX_FIELDS - Runtime::max_local_fields));
+        assert(indexes[idx] >= (MAX_FIELDS - runtime->max_local_fields));
 #endif
         const unsigned local_index = 
-          indexes[idx] - (MAX_FIELDS - Runtime::max_local_fields);
+          indexes[idx] - (MAX_FIELDS - runtime->max_local_fields);
 #ifdef DEBUG_LEGION
         assert(local_index < local_field_infos.size());
 #endif
