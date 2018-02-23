@@ -9100,9 +9100,6 @@ namespace Legion {
         gc_epoch_counter(0)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(int(address_space) == my_node_id);
-#endif
       log_run.debug("Initializing high-level runtime in address space %x",
                             address_space);
       // Construct a local utility processor group
@@ -17028,15 +17025,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      if ((context_uid % runtime_stride) != address_space)
-      {
-        log_run.error("FAIL! %lld mod %d != %d", 
-                context_uid, runtime_stride, address_space);
-        for (std::set<Processor>::const_iterator it = 
-              local_procs.begin(); it != local_procs.end(); it++)
-          log_run.error("FAIL PROC: " IDFMT " %d",
-                        it->id, it->address_space());
-      }
       assert((context_uid % runtime_stride) == address_space); // sanity check
 #endif
       AutoLock ctx_lock(context_lock);
@@ -18691,9 +18679,6 @@ namespace Legion {
           config.configure_collective_settings(address_spaces.size());
         // Make one runtime instance and record it with all the processors
         const AddressSpace local_space = local_procs.begin()->address_space();
-#ifdef DEBUG_LEGION
-        assert(int(local_space) == my_node_id);
-#endif
         InputArgs input_args;
         input_args.argc = argc;
         input_args.argv = argv;
