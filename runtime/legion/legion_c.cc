@@ -4694,6 +4694,19 @@ legion_task_postamble(
 				 retsize);
 }
 
+void
+legion_initialization_function_preamble(
+    const void *data,
+    size_t datalen,
+    legion_runtime_t * runtimeptr)
+{
+  Runtime *runtime;
+
+  Runtime::initialization_function_preamble(data, datalen, runtime);
+
+  *runtimeptr = CObjectWrapper::wrap(runtime);
+}
+
 // -----------------------------------------------------------------------
 // Timing Operations
 // -----------------------------------------------------------------------

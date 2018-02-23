@@ -4034,7 +4034,8 @@ namespace Legion {
                                    Operation *op)
     //--------------------------------------------------------------------------
     {
-      ContinuationArgs args(op->get_unique_op_id(), this);
+      ContinuationArgs args((op == NULL) ? task_profiling_provenance :
+                              op->get_unique_op_id(), this);
       // Give this resource priority in case we are holding the mapper lock
       RtEvent wait_on = runtime->issue_runtime_meta_task(args,
                            LG_RESOURCE_PRIORITY, precondition);

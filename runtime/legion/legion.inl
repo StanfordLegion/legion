@@ -7097,15 +7097,13 @@ namespace Legion {
       LEGION_STATIC_ASSERT((LegionTypeInequality<T,FutureMap>::value));
       // Assert that the return type size is within the required size
       LEGION_STATIC_ASSERT(sizeof(T) <= MAX_RETURN_SIZE);
-      // Get the high level runtime
-      Runtime *runtime = Runtime::get_runtime(p);
       // Read the context out of the buffer
 #ifdef DEBUG_LEGION
       assert(arglen == sizeof(InternalContext));
 #endif
       InternalContext ctx = *((const InternalContext*)args);
-
-      const std::vector<PhysicalRegion> &regions = ctx->begin_task();
+      Runtime *runtime;
+      const std::vector<PhysicalRegion> &regions = ctx->begin_task(runtime);
 
       // Invoke the task with the given context
       T return_value = 
@@ -7126,16 +7124,13 @@ namespace Legion {
                                                 Processor p)
     //--------------------------------------------------------------------------
     {
-      // Get the high level runtime
-      Runtime *runtime = Runtime::get_runtime(p);
-
       // Read the context out of the buffer
 #ifdef DEBUG_LEGION
       assert(arglen == sizeof(InternalContext));
 #endif
       InternalContext ctx = *((const InternalContext*)args);
-
-      const std::vector<PhysicalRegion> &regions = ctx->begin_task(); 
+      Runtime *runtime;
+      const std::vector<PhysicalRegion> &regions = ctx->begin_task(runtime); 
 
       (*TASK_PTR)(ctx->get_task(), regions, ctx->as_context(), runtime);
 
@@ -7159,8 +7154,6 @@ namespace Legion {
       LEGION_STATIC_ASSERT((LegionTypeInequality<T,FutureMap>::value));
       // Assert that the return type size is within the required size
       LEGION_STATIC_ASSERT(sizeof(T) <= MAX_RETURN_SIZE);
-      // Get the high level runtime
-      Runtime *runtime = Runtime::get_runtime(p);
 
       // Read the context out of the buffer
 #ifdef DEBUG_LEGION
@@ -7169,8 +7162,8 @@ namespace Legion {
       InternalContext ctx = *((const InternalContext*)args);
 
       const UDT *user_data = reinterpret_cast<const UDT*>(userdata);
-
-      const std::vector<PhysicalRegion> &regions = ctx->begin_task(); 
+      Runtime *runtime;
+      const std::vector<PhysicalRegion> &regions = ctx->begin_task(runtime);
 
       // Invoke the task with the given context
       T return_value = (*TASK_PTR)(ctx->get_task(), regions, 
@@ -7191,9 +7184,6 @@ namespace Legion {
                                                     Processor p)
     //--------------------------------------------------------------------------
     {
-      // Get the high level runtime
-      Runtime *runtime = Runtime::get_runtime(p);
-
       // Read the context out of the buffer
 #ifdef DEBUG_LEGION
       assert(arglen == sizeof(InternalContext));
@@ -7201,8 +7191,8 @@ namespace Legion {
       InternalContext ctx = *((const InternalContext*)args);
 
       const UDT *user_data = reinterpret_cast<const UDT*>(userdata);
-
-      const std::vector<PhysicalRegion> &regions = ctx->begin_task(); 
+      Runtime *runtime;
+      const std::vector<PhysicalRegion> &regions = ctx->begin_task(runtime);
 
       (*TASK_PTR)(ctx->get_task(), regions, 
                   ctx->as_context(), runtime, *user_data);
@@ -7922,7 +7912,7 @@ namespace LegionRuntime {
     LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef ::legion_distributed_id_t DistributedID;
     LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef ::legion_address_space_id_t AddressSpaceID;
+    typedef ::legion_address_space_t AddressSpaceID;
     LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef ::legion_tunable_id_t TunableID;
     LEGION_DEPRECATED("Use the Legion namespace instance instead.")

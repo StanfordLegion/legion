@@ -571,7 +571,7 @@ namespace Legion {
       void complete_exchange(void);
     public:
       Runtime *const runtime;
-      const bool participating;
+      bool participating;
     public:
       std::map<int,AddressSpace> forward_mapping;
       std::map<AddressSpace,int> reverse_mapping;
@@ -580,6 +580,13 @@ namespace Legion {
       RtUserEvent done_event;
       std::vector<int> stage_notifications;
       std::vector<bool> sent_stages;
+    protected:
+      int collective_radix;
+      int collective_log_radix;
+      int collective_stages;
+      int collective_participating_spaces;
+      int collective_last_radix;
+      int collective_last_log_radix;
     }; 
 
     /**
@@ -1138,6 +1145,35 @@ namespace Legion {
     };
 
     /**
+     * \class PendingInitializationFunction
+     * A special helper class for doing pending registration of
+     * initialization functions
+     */
+    class PendingInitializationFunction {
+    public:
+      PendingInitializationFunction(Processor::TaskFuncID func_id,
+                                    Processor::Kind proc_kind,
+                                    CodeDescriptor *realm_desc,
+                                    const void *user_data, 
+                                    size_t user_data_size);
+      PendingInitializationFunction(const PendingInitializationFunction &rhs);
+      ~PendingInitializationFunction(void);
+    public:
+      PendingInitializationFunction& operator=(
+                                    const PendingInitializationFunction &rhs);
+    public:
+      RtEvent register_function(Processor proc, Runtime *runtime);
+      RtEvent perform_function(RealmRuntime &realm, RtEvent precondition);
+    public:
+      const Processor::TaskFuncID func_id;
+      const Processor::Kind proc_kind;
+    private:
+      CodeDescriptor *realm_desc;
+      void *user_data;
+      size_t user_data_size;
+    };
+
+    /**
      * \class PendingVariantRegistration
      * A small helper class for deferring the restration of task
      * variants until the runtime is started.
@@ -1576,6 +1612,91 @@ namespace Legion {
      */
     class Runtime {
     public:
+      struct LegionConfiguration {
+      public:
+        LegionConfiguration(void)
+          : delay_start(0),
+            legion_collective_radix(LEGION_COLLECTIVE_RADIX),
+            initial_task_window_size(DEFAULT_MAX_TASK_WINDOW),
+            initial_task_window_hysteresis(DEFAULT_TASK_WINDOW_HYSTERESIS),
+            initial_tasks_to_schedule(DEFAULT_MIN_TASKS_TO_SCHEDULE),
+            max_message_size(DEFAULT_MAX_MESSAGE_SIZE),
+            gc_epoch_size(DEFAULT_GC_EPOCH_SIZE),
+            max_control_replication_contexts(
+                        DEFAULT_MAX_CONTROL_REPLICATION_CONTEXTS),
+            max_local_fields(DEFAULT_LOCAL_FIELDS),
+            program_order_execution(false),
+            verify_disjointness(false),
+            runtime_warnings(false),
+            separate_runtime_instances(false),
+            record_registration(false),
+            stealing_disabled(false),
+            resilient_mode(false),
+            unsafe_launch(false),
+#ifdef DEBUG_LEGION
+            unsafe_mapper(false),
+#else
+            unsafe_mapper(true),
+#endif
+            dynamic_independence_tests(true),
+            legion_spy_enabled(false),
+            enable_test_mapper(false),
+            legion_ldb_enabled(false),
+            replay_file(NULL),
+            slow_config_ok(false),
+#ifdef DEBUG_LEGION
+            logging_region_tree_state(false),
+            verbose_logging(false),
+            logical_logging_only(false),
+            physical_logging_only(false),
+            check_privileges(true),
+#endif
+            num_profiling_nodes(0),
+            serializer_type("binary"),
+            prof_logfile(NULL),
+            prof_footprint_threshold(128 << 20),
+            prof_target_latency(100) { }
+      public:
+        int delay_start;
+        int legion_collective_radix;
+        int initial_task_window_size;
+        unsigned initial_task_window_hysteresis;
+        unsigned initial_tasks_to_schedule;
+        unsigned max_message_size;
+        unsigned gc_epoch_size;
+        unsigned max_control_replication_contexts;
+        unsigned max_local_fields;
+      public:
+        bool program_order_execution;
+        bool verify_disjointness;
+        bool runtime_warnings;
+        bool separate_runtime_instances;
+        bool record_registration;
+        bool stealing_disabled;
+        bool resilient_mode;
+        bool unsafe_launch;
+        bool unsafe_mapper;
+        bool dynamic_independence_tests;
+        bool legion_spy_enabled;
+        bool enable_test_mapper;
+        bool legion_ldb_enabled;
+        const char* replay_file;
+        bool slow_config_ok;
+#ifdef DEBUG_LEGION
+        bool logging_region_tree_state;
+        bool verbose_logging;
+        bool logical_logging_only;
+        bool physical_logging_only;
+        bool check_privileges;
+#endif
+      public:
+        unsigned num_profiling_nodes;
+        const char *serializer_type;
+        const char *prof_logfile;
+        size_t prof_footprint_threshold;
+        size_t prof_target_latency;
+      };
+    public:
       struct DeferredRecycleArgs : public LgTaskArgs<DeferredRecycleArgs> {
       public:
         static const LgTaskID TASK_ID = LG_DEFERRED_RECYCLE_ID;
@@ -1624,7 +1745,8 @@ namespace Legion {
         ProcessorMask       processor_mask;
       };
     public:
-      Runtime(Machine m, AddressSpaceID space_id,
+      Runtime(Machine m, const LegionConfiguration &config,
+              InputArgs input_args, AddressSpaceID space_id,
               const std::set<Processor> &local_procs,
               const std::set<Processor> &local_util_procs,
               const std::set<AddressSpaceID> &address_spaces,
@@ -1634,15 +1756,70 @@ namespace Legion {
     public:
       Runtime& operator=(const Runtime &rhs);
     public:
+      // The Runtime wrapper for this class
+      Legion::Runtime *const external;
+      // The Mapper Runtime for this class
+      Legion::Mapping::MapperRuntime *const mapper_runtime;
+      // The machine object for this runtime
+      const Machine machine;
+      const AddressSpaceID address_space; 
+      const unsigned total_address_spaces;
+      // stride for uniqueness, may or may not be the same depending
+      // on the number of available control replication contexts
+      const unsigned runtime_stride; // stride for uniqueness
+      LegionProfiler *profiler;
+      RegionTreeForest *const forest;
+      VirtualManager *virtual_manager;
+      Processor utility_group;
+      const bool has_explicit_utility_procs;
+    public:
+      const InputArgs input_args;
+      const int initial_task_window_size;
+      const unsigned initial_task_window_hysteresis;
+      const unsigned initial_tasks_to_schedule;
+      const unsigned max_message_size;
+      const unsigned gc_epoch_size;
+      const unsigned max_control_replication_contexts;
+      const unsigned max_local_fields;
+    public:
+      const bool program_order_execution;
+      const bool verify_disjointness;
+      const bool runtime_warnings;
+      const bool separate_runtime_instances;
+      const bool record_registration;
+      const bool stealing_disabled;
+      const bool resilient_mode;
+      const bool unsafe_launch;
+      const bool unsafe_mapper;
+      const bool dynamic_independence_tests;
+      const bool legion_spy_enabled;
+      const bool enable_test_mapper;
+      const bool legion_ldb_enabled;
+      const char*const replay_file;
+#ifdef DEBUG_LEGION
+      const bool logging_region_tree_state;
+      const bool verbose_logging;
+      const bool logical_logging_only;
+      const bool physical_logging_only;
+      const bool check_privileges;
+#endif
+    public:
+      const unsigned num_profiling_nodes;
+    public:
+      const int legion_collective_radix;
+      MPIRankTable *const mpi_rank_table;
+    public:
       void register_static_variants(void);
       void register_static_constraints(void);
       void register_static_projections(void);
       void register_static_sharding_functors(void);
-      void initialize_legion_prof(void);
+      void initialize_legion_prof(const LegionConfiguration &config);
+      void log_machine(Machine machine) const;
       void initialize_mappers(void);
-      void startup_mappers(void);
+      void initialize_virtual_manager(void);
+      void initialize_runtime(void);
+      void startup_runtime(RtEvent top_level_precondition);
       void finalize_runtime(void);
-      void launch_top_level_task(void);
       ApEvent launch_mapper_task(Mapper *mapper, Processor proc, 
                                  Processor::TaskFuncID tid,
                                  const TaskArgument &arg, MapperID map_id);
@@ -2827,11 +3004,11 @@ namespace Legion {
     public:
       // These are the static methods that become the meta-tasks
       // for performing all the needed runtime operations
-      static void initialize_runtime(
+      static void initialize_runtime_task(
                           const void *args, size_t arglen, 
 			  const void *userdata, size_t userlen,
 			  Processor p);
-      static void shutdown_runtime(
+      static void shutdown_runtime_task(
                           const void *args, size_t arglen, 
 			  const void *userdata, size_t userlen,
 			  Processor p);
@@ -2843,40 +3020,15 @@ namespace Legion {
                           const void *args, size_t arglen, 
 			  const void *userdata, size_t userlen,
 			  Processor p);
-      static void launch_top_level(
+      static void startup_runtime_task(
                           const void *args, size_t arglen, 
 			  const void *userdata, size_t userlen,
 			  Processor p);
-      static void init_mpi_interop(const void *args, size_t arglen, 
-			  const void *userdata, size_t userlen,
-			  Processor p);
-      static void startup_sync(const void *args, size_t arglen, 
-			  const void *userdata, size_t userlen,
-			  Processor p);
-      static void dummy_barrier(const void *args, size_t arglen,
-                          const void *userdata, size_t userlen,
-                          Processor p);
     protected:
       // Internal runtime methods invoked by the above static methods
       // after the find the right runtime instance to call
       void process_schedule_request(Processor p);
-      void process_message_task(const void *args, size_t arglen);
-    public:
-      // The Runtime wrapper for this class
-      Legion::Runtime *const external;
-      // The Mapper Runtime for this class
-      Legion::Mapping::MapperRuntime *const mapper_runtime;
-      // The machine object for this runtime
-      const Machine machine;
-      const AddressSpaceID address_space; 
-      const unsigned total_address_spaces;
-      // stride for uniqueness, may or may not be the same depending
-      // on the number of available control replication contexts
-      const unsigned runtime_stride; 
-      LegionProfiler *profiler;
-      RegionTreeForest *const forest;
-      Processor utility_group;
-      const bool has_explicit_utility_procs;
+      void process_message_task(const void *args, size_t arglen); 
     protected:
       bool prepared_for_shutdown;
     protected:
@@ -3016,9 +3168,8 @@ namespace Legion {
         off_t           diff_bytes;
       };
       mutable LocalLock allocation_lock; // leak this lock intentionally
-      // Make these static so they live through the end of the runtime
-      static std::map<AllocationType,AllocationTracker> allocation_manager;
-      static unsigned long long allocation_tracing_count;
+      std::map<AllocationType,AllocationTracker> allocation_manager;
+      unsigned long long allocation_tracing_count;
 #endif
     protected:
       mutable LocalLock individual_task_lock;
@@ -3147,6 +3298,11 @@ namespace Legion {
     public:
       // Static methods for start-up and callback phases
       static int start(int argc, char **argv, bool background);
+      static LegionConfiguration parse_arguments(int argc, char **argv);
+      static void perform_slow_config_checks(const LegionConfiguration &config);
+      static RtEvent configure_runtime(int argc, char **argv,
+          const LegionConfiguration &config, RealmRuntime &realm,
+          Processor::Kind &startup_kind);
       static void wait_for_shutdown(void);
       static void set_top_level_task_id(Processor::TaskFuncID top_id);
       static void configure_MPI_interoperability(int rank);
@@ -3155,8 +3311,6 @@ namespace Legion {
       static const SerdezOp* get_serdez_op(CustomSerdezID serdez_id);
       static const SerdezRedopFns* get_serdez_redop_fns(ReductionOpID redop_id);
       static void add_registration_callback(RegistrationCallbackFnptr callback);
-      static InputArgs& get_input_args(void);
-      static Runtime* get_runtime(Processor p);
       static ReductionOpTable& get_reduction_table(void);
       static SerdezOpTable& get_serdez_table(void);
       static SerdezRedopTable& get_serdez_redop_table(void);
@@ -3168,6 +3322,8 @@ namespace Legion {
                                 get_pending_projection_table(void);
       static std::map<ShardingID,ShardingFunctor*>&
                                 get_pending_sharding_table(void);
+      static std::deque<PendingInitializationFunction*>&
+                                get_pending_initialization_table(void);
       static TaskID& get_current_static_task_id(void);
       static TaskID generate_static_task_id(void);
       static VariantID preregister_variant(
@@ -3175,6 +3331,10 @@ namespace Legion {
                       const void *user_data, size_t user_data_size,
                       CodeDescriptor *realm_desc, bool has_ret, 
                       const char *task_name,VariantID vid,bool check_id = true);
+      static void preregister_initialization_function(
+                      Processor::Kind proc_kind,
+                      CodeDescriptor *realm_desc,
+                      const void *user_data, size_t user_len);
     public:
       static void report_fatal_message(int code,
                                        const char *file_name,
@@ -3197,66 +3357,19 @@ namespace Legion {
       static void check_bounds(void *impl, ptr_t ptr);
       static void check_bounds(void *impl, const DomainPoint &dp);
 #endif
-    private:
-      static RtEvent register_runtime_tasks(RealmRuntime &realm);
-      static Processor::TaskFuncID get_next_available_id(void);
-      static void log_machine(Machine machine);
     public:
       // Static member variables
-      static Runtime *the_runtime;
-      // the runtime map is only valid when running with -lg:separate
-      static std::map<Processor,Runtime*> *runtime_map;
-      static std::vector<RegistrationCallbackFnptr> registration_callbacks;
       static Processor::TaskFuncID legion_main_id;
-      static int initial_task_window_size;
-      static unsigned initial_task_window_hysteresis;
-      static unsigned initial_tasks_to_schedule;
-      static unsigned max_message_size;
-      static unsigned gc_epoch_size;
-      static unsigned max_control_replication_contexts;
-      static unsigned max_local_fields;
+      static std::vector<RegistrationCallbackFnptr> registration_callbacks;
       static bool runtime_started;
       static bool runtime_backgrounded;
-      static bool runtime_warnings;
-      static bool separate_runtime_instances;
-      static bool record_registration;
-      static bool stealing_disabled;
-      static bool resilient_mode;
-      static bool unsafe_launch;
-      static bool unsafe_mapper;
-      static bool dynamic_independence_tests;
-      static bool legion_spy_enabled;
-      static bool enable_test_mapper;
-      static bool legion_ldb_enabled;
-      static const char* replay_file;
-      // Collective settings
-      static int legion_collective_radix;
-      static int legion_collective_log_radix;
-      static int legion_collective_stages;
-      static int legion_collective_participating_spaces;
-      static int legion_collective_last_radix;
-      static int legion_collective_last_log_radix;
-      // MPI Interoperability
       static int mpi_rank;
-      static MPIRankTable *mpi_rank_table;
       static std::vector<MPILegionHandshake> *pending_handshakes;
 #ifdef DEBUG_LEGION
-      static bool logging_region_tree_state;
-      static bool verbose_logging;
-      static bool logical_logging_only;
-      static bool physical_logging_only;
-      static bool check_privileges;
-      static bool bit_mask_logging;
+#ifndef REALM_USE_SUBPROCESS
+      static Runtime *the_runtime; // useful for debugging
 #endif
-      static bool program_order_execution;
-      static bool verify_disjointness;
-    public:
-      static unsigned num_profiling_nodes;
-      static const char* serializer_type;
-      static const char* prof_logfile;
-      static size_t prof_footprint_threshold;
-      static size_t prof_target_latency;
-      static bool slow_debug_ok;
+#endif
     public:
       static inline ApEvent merge_events(ApEvent e1, ApEvent e2);
       static inline ApEvent merge_events(ApEvent e1, ApEvent e2, ApEvent e3);

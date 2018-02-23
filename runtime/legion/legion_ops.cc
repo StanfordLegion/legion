@@ -44,7 +44,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       dependence_tracker.mapping = NULL;
-      if (!Runtime::resilient_mode)
+      if (!runtime->resilient_mode)
         commit_event = RtUserEvent::NO_RT_USER_EVENT;
     }
 
@@ -85,7 +85,7 @@ namespace Legion {
       mapped_event = Runtime::create_rt_user_event();
       resolved_event = Runtime::create_rt_user_event();
       completion_event = Runtime::create_ap_user_event();
-      if (Runtime::resilient_mode)
+      if (runtime->resilient_mode)
         commit_event = Runtime::create_rt_user_event(); 
       execution_fence_event = ApEvent::NO_AP_EVENT;
       trace = NULL;
@@ -95,7 +95,7 @@ namespace Legion {
       assert(mapped_event.exists());
       assert(resolved_event.exists());
       assert(completion_event.exists());
-      if (Runtime::resilient_mode)
+      if (runtime->resilient_mode)
         assert(commit_event.exists());
 #endif
       if (runtime->profiler != NULL)
@@ -599,7 +599,7 @@ namespace Legion {
                       mapper_call_name, mapper->get_mapper_name(),
                       get_logging_name(), unique_op_id)
       // Little hack: permit this if we are doing replay mapping
-      if ((Runtime::replay_file == NULL) && (!finder->second.second || 
+      if ((runtime->replay_file == NULL) && (!finder->second.second || 
           (previous_managers.find(result) != previous_managers.end())))
         // Not a fresh instance
         REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
@@ -737,7 +737,7 @@ namespace Legion {
         // have been disable previously
         trigger_commit_invoked = false;
         // Check to see if we need to trigger commit
-        if ((!Runtime::resilient_mode) || early_commit_request ||
+        if ((!runtime->resilient_mode) || early_commit_request ||
             ((hardened && unverified_regions.empty())))
         {
           trigger_commit_invoked = true;
@@ -807,7 +807,7 @@ namespace Legion {
         committed = true;
       } 
       // Trigger the commit event
-      if (Runtime::resilient_mode)
+      if (runtime->resilient_mode)
         Runtime::trigger_event(commit_event);
       if (do_deactivate)
         deactivate();
@@ -1809,7 +1809,7 @@ namespace Legion {
         speculation_state = PENDING_ANALYSIS_STATE;
         predicate = p.impl;
         predicate->add_predicate_reference();
-        if (Runtime::legion_spy_enabled)
+        if (runtime->legion_spy_enabled)
           LegionSpy::log_predicate_use(unique_op_id, 
                                        predicate->get_unique_op_id());
       }
@@ -1885,7 +1885,7 @@ namespace Legion {
 #endif
         if (speculation_state == RESOLVE_FALSE_STATE)
         {
-          if (Runtime::legion_spy_enabled)
+          if (runtime->legion_spy_enabled)
             LegionSpy::log_predicated_false_op(unique_op_id);
           // Still need a commit tracker here
           dependence_tracker.commit = new CommitDependenceTracker();
@@ -2002,7 +2002,7 @@ namespace Legion {
         resolve_true(speculated, false/*launched*/);
       else if (continue_false)
       {
-        if (Runtime::legion_spy_enabled)
+        if (runtime->legion_spy_enabled)
           LegionSpy::log_predicated_false_op(unique_op_id);
         // Can remove our predicate reference since we don't need it anymore
         predicate->remove_predicate_reference();
@@ -2106,7 +2106,7 @@ namespace Legion {
         resolve_true(true/*speculated*/, true/*launched*/);
       else if (continue_false)
       {
-        if (Runtime::legion_spy_enabled)
+        if (runtime->legion_spy_enabled)
           LegionSpy::log_predicated_false_op(unique_op_id);
         resolve_false(true/*speculated*/, true/*launched*/);
       }
@@ -2195,7 +2195,7 @@ namespace Legion {
                               false/*virtual mapped*/, runtime));
       if (check_privileges)
         check_privilege();
-      if (Runtime::legion_spy_enabled)
+      if (runtime->legion_spy_enabled)
         LegionSpy::log_mapping_operation(parent_ctx->get_unique_id(),
                                          unique_op_id);
       return region;
@@ -2218,7 +2218,7 @@ namespace Legion {
       remap_region = region.impl->has_references();
       // No need to check the privileges here since we know that we have
       // them from the first time that we made this physical region
-      if (Runtime::legion_spy_enabled)
+      if (runtime->legion_spy_enabled)
         LegionSpy::log_mapping_operation(parent_ctx->get_unique_id(),
                                          unique_op_id);
     }
@@ -2303,7 +2303,7 @@ namespace Legion {
       // First compute our parent region requirement
       compute_parent_index();
       initialize_privilege_path(privilege_path, requirement);
-      if (Runtime::legion_spy_enabled)
+      if (runtime->legion_spy_enabled)
       { 
         LegionSpy::log_logical_requirement(unique_op_id,0/*index*/,
                                            true/*region*/,
@@ -2413,7 +2413,7 @@ namespace Legion {
         {
           ApEvent e = Runtime::get_previous_phase(*it); 
           mapped_preconditions.insert(e);
-          if (Runtime::legion_spy_enabled)
+          if (runtime->legion_spy_enabled)
             LegionSpy::log_phase_barrier_wait(unique_op_id, e);
         }
         for (std::vector<Grant>::const_iterator it = grants.begin();
@@ -2445,7 +2445,7 @@ namespace Legion {
       }
       else
         map_complete_event = mapped_instances[0].get_ready_event();
-      if (Runtime::legion_spy_enabled)
+      if (runtime->legion_spy_enabled)
       {
         runtime->forest->log_mapping_decision(unique_op_id, 0/*idx*/,
                                               requirement,
@@ -2475,7 +2475,7 @@ namespace Legion {
         for (std::vector<PhaseBarrier>::iterator it = 
               arrive_barriers.begin(); it != arrive_barriers.end(); it++)
         {
-          if (Runtime::legion_spy_enabled)
+          if (runtime->legion_spy_enabled)
             LegionSpy::log_phase_barrier_arrival(unique_op_id, 
                                                  it->phase_barrier);
           Runtime::phase_barrier_arrive(it->phase_barrier, 1/*count*/,
@@ -2610,7 +2610,7 @@ namespace Legion {
       Mapper::CreateInlineTemporaryInput input;
       Mapper::CreateInlineTemporaryOutput output;
       input.destination_instance = MappingInstance(dst);
-      if (!Runtime::unsafe_mapper)
+      if (!runtime->unsafe_mapper)
       {
         // Fields and regions must both be met
         // The instance must be freshly created
@@ -2629,7 +2629,7 @@ namespace Legion {
       }
       else
         mapper->invoke_inline_create_temporary(this, &input, &output);
-      if (Runtime::legion_spy_enabled)
+      if (runtime->legion_spy_enabled)
         log_temporary_instance(output.temporary_instance.impl, 
                                index, needed_fields);
       return output.temporary_instance.impl;
@@ -2888,7 +2888,7 @@ namespace Legion {
                                 requirement, output.chosen_instances, 
                                 chosen_instances, bad_tree, missing_fields,
                                 &acquired_instances, unacquired, 
-                                !Runtime::unsafe_mapper);
+                                !runtime->unsafe_mapper);
       if (bad_tree > 0)
         REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                       "Invalid mapper output from invocation of 'map_inline' "
@@ -2956,7 +2956,7 @@ namespace Legion {
                       mapper->get_mapper_name(), parent_ctx->get_task_name(),
                       parent_ctx->get_unique_id())
       // If we are doing unsafe mapping, then we can return
-      if (Runtime::unsafe_mapper)
+      if (runtime->unsafe_mapper)
         return;
       // If this requirement doesn't have a no access flag then we
       // need to check to make sure that the instances are visible
@@ -3303,7 +3303,7 @@ namespace Legion {
                           src_space.id)
         }
       }
-      if (Runtime::legion_spy_enabled)
+      if (runtime->legion_spy_enabled)
         LegionSpy::log_copy_operation(parent_ctx->get_unique_id(),
                                       unique_op_id);
     }
@@ -3454,7 +3454,7 @@ namespace Legion {
         initialize_privilege_path(dst_privilege_paths[idx],
                                   dst_requirements[idx]);
       }
-      if (Runtime::legion_spy_enabled)
+      if (runtime->legion_spy_enabled)
         log_copy_requirements();
     }
 
@@ -3675,7 +3675,7 @@ namespace Legion {
         {
           ApEvent e = Runtime::get_previous_phase(*it); 
           preconditions.insert(e);
-          if (Runtime::legion_spy_enabled)
+          if (runtime->legion_spy_enabled)
             LegionSpy::log_phase_barrier_wait(unique_op_id, e);
         }
         for (std::vector<Grant>::const_iterator it = grants.begin();
@@ -3705,7 +3705,7 @@ namespace Legion {
                                           output.src_instances[idx],
                                           src_targets,
                                           IS_REDUCE(dst_requirements[idx]));
-        if (Runtime::legion_spy_enabled)
+        if (runtime->legion_spy_enabled)
           runtime->forest->log_mapping_decision(unique_op_id, idx, 
                                                 src_requirements[idx],
                                                 src_targets);
@@ -3763,7 +3763,7 @@ namespace Legion {
                                                 , unique_op_id
 #endif
                                                 );
-        if (Runtime::legion_spy_enabled)
+        if (runtime->legion_spy_enabled)
           runtime->forest->log_mapping_decision(unique_op_id, 
              idx + src_requirements.size(), dst_requirements[idx], dst_targets);
         // Switch the privileges back when we are done
@@ -3830,7 +3830,7 @@ namespace Legion {
         copy_complete_event = Runtime::merge_events(restrict_postconditions);
       }
 #ifdef LEGION_SPY
-      if (Runtime::legion_spy_enabled)
+      if (runtime->legion_spy_enabled)
         LegionSpy::log_operation_events(unique_op_id, copy_complete_event,
                                         completion_event);
 #endif
@@ -3841,7 +3841,7 @@ namespace Legion {
         for (std::vector<PhaseBarrier>::iterator it = 
               arrive_barriers.begin(); it != arrive_barriers.end(); it++)
         {
-          if (Runtime::legion_spy_enabled)
+          if (runtime->legion_spy_enabled)
             LegionSpy::log_phase_barrier_arrival(unique_op_id, 
                                                  it->phase_barrier);
           Runtime::phase_barrier_arrive(it->phase_barrier, 1/*count*/,
@@ -3990,7 +3990,7 @@ namespace Legion {
       input.region_requirement_index = index;
       input.src_requirement = current_src;
       input.destination_instance = MappingInstance(dst);
-      if (!Runtime::unsafe_mapper)
+      if (!runtime->unsafe_mapper)
       {
         // Fields and regions must both be met
         // The instance must be freshly created
@@ -4010,7 +4010,7 @@ namespace Legion {
       }
       else
         mapper->invoke_copy_create_temporary(this, &input, &output);
-      if (Runtime::legion_spy_enabled)
+      if (runtime->legion_spy_enabled)
         log_temporary_instance(output.temporary_instance.impl, 
                                index, needed_fields);
       return output.temporary_instance.impl;
@@ -4294,7 +4294,7 @@ namespace Legion {
       int composite_idx = runtime->forest->physical_convert_mapping(this,
                               req, output, targets, bad_tree, missing_fields,
                               &acquired_instances, unacquired, 
-                              !Runtime::unsafe_mapper);
+                              !runtime->unsafe_mapper);
       if (bad_tree > 0)
         REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                       "Invalid mapper output from invocation of 'map_copy' "
@@ -4381,7 +4381,7 @@ namespace Legion {
                       "issued in task %s (ID %lld).", mapper->get_mapper_name(),
                       idx, parent_ctx->get_task_name(), 
                       parent_ctx->get_unique_id())
-      if (Runtime::unsafe_mapper)
+      if (runtime->unsafe_mapper)
         return composite_idx;
       std::vector<LogicalRegion> regions_to_check(1, req.region);
       for (unsigned idx = 0; idx < targets.size(); idx++)
@@ -4646,7 +4646,7 @@ namespace Legion {
                                false/*src*/, true/*permit projection*/);
         }
       }
-      if (Runtime::legion_spy_enabled)
+      if (runtime->legion_spy_enabled)
       {
         LegionSpy::log_copy_operation(parent_ctx->get_unique_id(),
                                       unique_op_id);
@@ -4716,7 +4716,7 @@ namespace Legion {
         initialize_privilege_path(dst_privilege_paths[idx],
                                   dst_requirements[idx]);
       }
-      if (Runtime::legion_spy_enabled)
+      if (runtime->legion_spy_enabled)
       { 
         for (unsigned idx = 0; idx < src_requirements.size(); idx++)
         {
@@ -4908,7 +4908,7 @@ namespace Legion {
             it != points.end(); it++)
         (*it)->check_domination();
 #endif
-      if (Runtime::legion_spy_enabled)
+      if (runtime->legion_spy_enabled)
       {
         for (std::vector<PointCopyOp*>::const_iterator it = points.begin();
               it != points.end(); it++) 
@@ -5180,7 +5180,7 @@ namespace Legion {
       src_restrict_infos = owner->src_restrict_infos;
       dst_restrict_infos = owner->dst_restrict_infos;
       predication_guard  = owner->predication_guard;
-      if (Runtime::legion_spy_enabled)
+      if (runtime->legion_spy_enabled)
         LegionSpy::log_index_point(owner->get_unique_op_id(), unique_op_id, p);
     }
 
@@ -5398,7 +5398,7 @@ namespace Legion {
 #endif
       initialize_operation(ctx, true/*track*/);
       fence_kind = kind;
-      if (Runtime::legion_spy_enabled)
+      if (runtime->legion_spy_enabled)
         LegionSpy::log_fence_operation(parent_ctx->get_unique_id(),
                                        unique_op_id);
     }
@@ -5704,7 +5704,7 @@ namespace Legion {
       initialize_operation(ctx, true/*track*/);
       kind = INDEX_SPACE_DELETION;
       index_space = handle;
-      if (Runtime::legion_spy_enabled)
+      if (runtime->legion_spy_enabled)
         LegionSpy::log_deletion_operation(parent_ctx->get_unique_id(),
                                           unique_op_id);
     }
@@ -5717,7 +5717,7 @@ namespace Legion {
       initialize_operation(ctx, true/*track*/);
       kind = INDEX_PARTITION_DELETION;
       index_part = handle;
-      if (Runtime::legion_spy_enabled)
+      if (runtime->legion_spy_enabled)
         LegionSpy::log_deletion_operation(parent_ctx->get_unique_id(),
                                           unique_op_id);
     }
@@ -5730,7 +5730,7 @@ namespace Legion {
       initialize_operation(ctx, true/*track*/);
       kind = FIELD_SPACE_DELETION;
       field_space = handle;
-      if (Runtime::legion_spy_enabled)
+      if (runtime->legion_spy_enabled)
         LegionSpy::log_deletion_operation(parent_ctx->get_unique_id(),
                                           unique_op_id);
     }
@@ -5744,7 +5744,7 @@ namespace Legion {
       kind = FIELD_DELETION;
       field_space = handle;
       free_fields.insert(fid);
-      if (Runtime::legion_spy_enabled)
+      if (runtime->legion_spy_enabled)
         LegionSpy::log_deletion_operation(parent_ctx->get_unique_id(),
                                           unique_op_id);
     }
@@ -5758,7 +5758,7 @@ namespace Legion {
       kind = FIELD_DELETION;
       field_space = handle;
       free_fields = to_free;
-      if (Runtime::legion_spy_enabled)
+      if (runtime->legion_spy_enabled)
         LegionSpy::log_deletion_operation(parent_ctx->get_unique_id(),
                                           unique_op_id);
     }
@@ -5771,7 +5771,7 @@ namespace Legion {
       initialize_operation(ctx, true/*track*/);
       kind = LOGICAL_REGION_DELETION;
       logical_region = handle;
-      if (Runtime::legion_spy_enabled)
+      if (runtime->legion_spy_enabled)
         LegionSpy::log_deletion_operation(parent_ctx->get_unique_id(),
                                           unique_op_id);
     }
@@ -5784,7 +5784,7 @@ namespace Legion {
       initialize_operation(ctx, true/*track*/);
       kind = LOGICAL_PARTITION_DELETION;
       logical_part = handle;
-      if (Runtime::legion_spy_enabled)
+      if (runtime->legion_spy_enabled)
         LegionSpy::log_deletion_operation(parent_ctx->get_unique_id(),
                                           unique_op_id);
     }
@@ -5875,7 +5875,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(deletion_requirements.size() == parent_req_indexes.size());
 #endif
-      if (Runtime::legion_spy_enabled)
+      if (runtime->legion_spy_enabled)
       {
         for (unsigned idx = 0; idx < deletion_requirements.size(); idx++)
         {
@@ -6139,7 +6139,7 @@ namespace Legion {
       start_node = start;
       open_path = path;
       open_mask = mask;
-      if (Runtime::legion_spy_enabled)
+      if (runtime->legion_spy_enabled)
       {
         LegionSpy::log_open_operation(creator->get_context()->get_unique_id(),
                                       unique_op_id);
@@ -6287,7 +6287,7 @@ namespace Legion {
       parent_node = parent;
       advance_mask = advance;
       parent_is_upper_bound = is_upper;
-      if (Runtime::legion_spy_enabled)
+      if (runtime->legion_spy_enabled)
       {
         LegionSpy::log_advance_operation(
             creator->get_context()->get_unique_id(), unique_op_id);
@@ -6574,7 +6574,7 @@ namespace Legion {
       parent_task = parent_ctx->get_task();
       requirement = req;
       initialize_privilege_path(privilege_path, requirement);
-      if (Runtime::legion_spy_enabled)
+      if (runtime->legion_spy_enabled)
         LegionSpy::log_internal_op_creator(unique_op_id, 
                                            creator->get_unique_op_id(), idx);
     }
@@ -6583,7 +6583,7 @@ namespace Legion {
     void CloseOp::perform_logging(void)
     //--------------------------------------------------------------------------
     {
-      if (!Runtime::legion_spy_enabled)
+      if (!runtime->legion_spy_enabled)
         return; 
       if (requirement.handle_type == PART_PROJECTION)
         LegionSpy::log_logical_requirement(unique_op_id, 0/*idx*/,
@@ -6685,7 +6685,7 @@ namespace Legion {
                               const FieldMask &close_m, Operation *creator)
     //--------------------------------------------------------------------------
     {
-      if (Runtime::legion_spy_enabled)
+      if (runtime->legion_spy_enabled)
         LegionSpy::log_close_operation(ctx->get_unique_id(), unique_op_id,
                                        true/*inter close*/, false/*read only*/);
       parent_req_index = creator->find_parent_index(close_idx);
@@ -6695,7 +6695,7 @@ namespace Legion {
       version_info.clone_logical(clone_info, close_m, closed_t->node);
       if (parent_ctx->has_restrictions())
         parent_ctx->perform_restricted_analysis(requirement, restrict_info);
-      if (Runtime::legion_spy_enabled)
+      if (runtime->legion_spy_enabled)
         perform_logging();
     } 
 
@@ -6826,7 +6826,7 @@ namespace Legion {
                                                   );
       // The physical perform close call took ownership
       closed_tree = NULL;
-      if (Runtime::legion_spy_enabled)
+      if (runtime->legion_spy_enabled)
       {
         runtime->forest->log_mapping_decision(unique_op_id, 0/*idx*/,
                                               requirement,
@@ -6924,7 +6924,7 @@ namespace Legion {
       Mapper::CreateCloseTemporaryInput input;
       Mapper::CreateCloseTemporaryOutput output;
       input.destination_instance = MappingInstance(dst);
-      if (!Runtime::unsafe_mapper)
+      if (!runtime->unsafe_mapper)
       {
         // Fields and regions must both be met
         // The instance must be freshly created
@@ -6942,7 +6942,7 @@ namespace Legion {
       }
       else
         mapper->invoke_close_create_temporary(this, &input, &output);
-      if (Runtime::legion_spy_enabled)
+      if (runtime->legion_spy_enabled)
         log_temporary_instance(output.temporary_instance.impl, 
                                index, needed_fields);
       return output.temporary_instance.impl;
@@ -6997,7 +6997,7 @@ namespace Legion {
                                   requirement, output.chosen_instances, 
                                   chosen_instances, bad_tree, missing_fields,
                                   &acquired_instances, unacquired, 
-                                  !Runtime::unsafe_mapper);
+                                  !runtime->unsafe_mapper);
       if (bad_tree > 0)
       {
         REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
@@ -7035,7 +7035,6 @@ namespace Legion {
                       "fields are listed below.", mapper->get_mapper_name(),
                       missing_fields.size(), parent_ctx->get_task_name(),
                       parent_ctx->get_unique_id())
-        
       }
       if (!unacquired.empty())
       {
@@ -7063,7 +7062,7 @@ namespace Legion {
                         parent_ctx->get_task_name(), 
                         parent_ctx->get_unique_id());
       } 
-      if (Runtime::unsafe_mapper)
+      if (runtime->unsafe_mapper)
         return;
       std::vector<LogicalRegion> regions_to_check(1, requirement.region);
       for (unsigned idx = 0; idx < chosen_instances.size(); idx++)
@@ -7373,7 +7372,7 @@ namespace Legion {
       close_mask       = owner->close_mask;
       parent_req_index = owner->parent_req_index;
       restrict_info    = owner->restrict_info;
-      if (Runtime::legion_spy_enabled)
+      if (runtime->legion_spy_enabled)
         LegionSpy::log_index_point(owner->get_unique_op_id(), unique_op_id, p);
     } 
 
@@ -7496,13 +7495,13 @@ namespace Legion {
                                  const FieldMask &close_m, Operation *creator)
     //--------------------------------------------------------------------------
     {
-      if (Runtime::legion_spy_enabled)
+      if (runtime->legion_spy_enabled)
         LegionSpy::log_close_operation(ctx->get_unique_id(), unique_op_id,
                                        true/*inter close*/, true/*read only*/);
       parent_req_index = creator->find_parent_index(close_idx);
       initialize_close(creator, close_idx, parent_req_index, req, trace_info);
       close_mask = close_m;
-      if (Runtime::legion_spy_enabled)
+      if (runtime->legion_spy_enabled)
         perform_logging();
     }
 
@@ -7604,7 +7603,7 @@ namespace Legion {
       parent_idx = idx;
       target_instances = targets;
       localize_region_requirement(requirement);
-      if (Runtime::legion_spy_enabled)
+      if (runtime->legion_spy_enabled)
       {
         LegionSpy::log_close_operation(ctx->get_unique_id(), unique_op_id,
                                        false/*inter*/, false/*read only*/);
@@ -7710,7 +7709,7 @@ namespace Legion {
                                                 , unique_op_id
 #endif
                                                 );
-      if (Runtime::legion_spy_enabled)
+      if (runtime->legion_spy_enabled)
       {
         runtime->forest->log_mapping_decision(unique_op_id, 0/*idx*/,
                                               requirement,
@@ -7802,7 +7801,7 @@ namespace Legion {
       Mapper::CreateCloseTemporaryInput input;
       Mapper::CreateCloseTemporaryOutput output;
       input.destination_instance = MappingInstance(dst);
-      if (!Runtime::unsafe_mapper)
+      if (!runtime->unsafe_mapper)
       {
         // Fields and regions must both be met
         // The instance must be freshly created
@@ -7820,7 +7819,7 @@ namespace Legion {
       }
       else
         mapper->invoke_close_create_temporary(this, &input, &output);
-      if (Runtime::legion_spy_enabled)
+      if (runtime->legion_spy_enabled)
         log_temporary_instance(output.temporary_instance.impl, 
                                index, needed_fields);
       return output.temporary_instance.impl;
@@ -7909,7 +7908,7 @@ namespace Legion {
       initialize_close(ctx, req, true/*track*/);
       parent_idx = index;
       localize_region_requirement(requirement);
-      if (Runtime::legion_spy_enabled)
+      if (runtime->legion_spy_enabled)
       {
         LegionSpy::log_close_operation(ctx->get_unique_id(), unique_op_id,
                                        false/*inter*/, false/*read only*/);
@@ -8066,7 +8065,7 @@ namespace Legion {
       tag = launcher.tag;
       if (check_privileges)
         check_acquire_privilege(); 
-      if (Runtime::legion_spy_enabled)
+      if (runtime->legion_spy_enabled)
         LegionSpy::log_acquire_operation(parent_ctx->get_unique_id(),
                                          unique_op_id);
     }
@@ -8145,7 +8144,7 @@ namespace Legion {
       // First compute the parent index
       compute_parent_index();
       initialize_privilege_path(privilege_path, requirement);
-      if (Runtime::legion_spy_enabled)
+      if (runtime->legion_spy_enabled)
       { 
         LegionSpy::log_logical_requirement(unique_op_id,0/*index*/,
                                            true/*region*/,
@@ -8276,7 +8275,7 @@ namespace Legion {
         {
           ApEvent e = Runtime::get_previous_phase(*it);
           acquire_preconditions.insert(e);
-          if (Runtime::legion_spy_enabled)
+          if (runtime->legion_spy_enabled)
             LegionSpy::log_phase_barrier_wait(unique_op_id, e);
         }
       }
@@ -8290,7 +8289,7 @@ namespace Legion {
         }
       }
       ApEvent acquire_complete = Runtime::merge_events(acquire_preconditions);
-      if (Runtime::legion_spy_enabled)
+      if (runtime->legion_spy_enabled)
       {
         runtime->forest->log_mapping_decision(unique_op_id, 0/*idx*/,
                                               requirement,
@@ -8306,7 +8305,7 @@ namespace Legion {
         for (std::vector<PhaseBarrier>::iterator it = 
               arrive_barriers.begin(); it != arrive_barriers.end(); it++)
         {
-          if (Runtime::legion_spy_enabled)
+          if (runtime->legion_spy_enabled)
             LegionSpy::log_phase_barrier_arrival(unique_op_id, 
                                                  it->phase_barrier);
           Runtime::phase_barrier_arrive(it->phase_barrier, 1/*count*/,
@@ -8684,7 +8683,7 @@ namespace Legion {
       tag = launcher.tag;
       if (check_privileges)
         check_release_privilege(); 
-      if (Runtime::legion_spy_enabled)
+      if (runtime->legion_spy_enabled)
         LegionSpy::log_release_operation(parent_ctx->get_unique_id(),
                                          unique_op_id);
     }
@@ -8763,7 +8762,7 @@ namespace Legion {
       // First compute the parent index
       compute_parent_index();
       initialize_privilege_path(privilege_path, requirement);
-      if (Runtime::legion_spy_enabled)
+      if (runtime->legion_spy_enabled)
       { 
         LegionSpy::log_logical_requirement(unique_op_id,0/*index*/,
                                            true/*region*/,
@@ -8892,7 +8891,7 @@ namespace Legion {
         {
           ApEvent e = Runtime::get_previous_phase(*it);
           release_preconditions.insert(e);
-          if (Runtime::legion_spy_enabled)
+          if (runtime->legion_spy_enabled)
             LegionSpy::log_phase_barrier_wait(unique_op_id, e);
         }
       }
@@ -8906,7 +8905,7 @@ namespace Legion {
         }
       }
       ApEvent release_complete = Runtime::merge_events(release_preconditions);
-      if (Runtime::legion_spy_enabled)
+      if (runtime->legion_spy_enabled)
       {
         runtime->forest->log_mapping_decision(unique_op_id, 0/*idx*/,
                                               requirement,
@@ -8922,7 +8921,7 @@ namespace Legion {
         for (std::vector<PhaseBarrier>::const_iterator it = 
               arrive_barriers.begin(); it != arrive_barriers.end(); it++)
         {
-          if (Runtime::legion_spy_enabled)
+          if (runtime->legion_spy_enabled)
             LegionSpy::log_phase_barrier_arrival(unique_op_id, 
                                                  it->phase_barrier);
           Runtime::phase_barrier_arrive(it->phase_barrier, 1/*count*/,
@@ -9011,7 +9010,7 @@ namespace Legion {
       Mapper::CreateReleaseTemporaryInput input;
       Mapper::CreateReleaseTemporaryOutput output;
       input.destination_instance = MappingInstance(dst);
-      if (!Runtime::unsafe_mapper)
+      if (!runtime->unsafe_mapper)
       {
         // Fields and regions must both be met
         // The instance must be freshly created
@@ -9029,7 +9028,7 @@ namespace Legion {
       }
       else
         mapper->invoke_release_create_temporary(this, &input, &output);
-      if (Runtime::legion_spy_enabled)
+      if (runtime->legion_spy_enabled)
         log_temporary_instance(output.temporary_instance.impl, 
                                index, needed_fields);
       return output.temporary_instance.impl;
@@ -9320,7 +9319,7 @@ namespace Legion {
             runtime->get_available_distributed_id(), 
             runtime->address_space, this));
       collective = dc;
-      if (Runtime::legion_spy_enabled)
+      if (runtime->legion_spy_enabled)
       {
         LegionSpy::log_dynamic_collective(ctx->get_unique_id(), unique_op_id);
         DomainPoint empty_point;
@@ -9508,7 +9507,7 @@ namespace Legion {
       // the parent task have been removed.
       initialize_operation(ctx, false/*track*/);
       future = f;
-      if (Runtime::legion_spy_enabled)
+      if (runtime->legion_spy_enabled)
       {
         LegionSpy::log_predicate_operation(ctx->get_unique_id(), unique_op_id);
         if ((future.impl != NULL) && future.impl->get_ready_event().exists())
@@ -9621,7 +9620,7 @@ namespace Legion {
         pred_op = p.impl;
         pred_op->add_predicate_reference();
       }
-      if (Runtime::legion_spy_enabled)
+      if (runtime->legion_spy_enabled)
       {
         LegionSpy::log_predicate_operation(ctx->get_unique_id(), unique_op_id);
         if ((p != Predicate::TRUE_PRED) && (p != Predicate::FALSE_PRED))
@@ -9757,7 +9756,7 @@ namespace Legion {
         previous.push_back(it->impl);
         it->impl->add_predicate_reference();
       }
-      if (Runtime::legion_spy_enabled)
+      if (runtime->legion_spy_enabled)
       {
         LegionSpy::log_predicate_operation(ctx->get_unique_id(), unique_op_id);
         for (std::vector<PredicateOp*>::const_iterator it = previous.begin();
@@ -9932,7 +9931,7 @@ namespace Legion {
         previous.push_back(it->impl);
         it->impl->add_predicate_reference();
       }
-      if (Runtime::legion_spy_enabled)
+      if (runtime->legion_spy_enabled)
       {
         LegionSpy::log_predicate_operation(ctx->get_unique_id(), unique_op_id);
         for (std::vector<PredicateOp*>::const_iterator it = previous.begin();
@@ -10151,7 +10150,7 @@ namespace Legion {
         assert(false);
       }
 #endif
-      if (Runtime::legion_spy_enabled)
+      if (runtime->legion_spy_enabled)
         LegionSpy::log_must_epoch_operation(ctx->get_unique_id(), unique_op_id);
       return result_map;
     }
@@ -11155,7 +11154,7 @@ namespace Legion {
       assert(thunk == NULL);
 #endif
       thunk = new EqualPartitionThunk(pid, granularity);
-      if (Runtime::legion_spy_enabled)
+      if (runtime->legion_spy_enabled)
         perform_logging();
     }
 
@@ -11171,7 +11170,7 @@ namespace Legion {
       assert(thunk == NULL);
 #endif
       thunk = new UnionPartitionThunk(pid, h1, h2);
-      if (Runtime::legion_spy_enabled)
+      if (runtime->legion_spy_enabled)
         perform_logging();
     }
 
@@ -11187,7 +11186,7 @@ namespace Legion {
       assert(thunk == NULL);
 #endif
       thunk = new IntersectionPartitionThunk(pid, h1, h2);
-      if (Runtime::legion_spy_enabled)
+      if (runtime->legion_spy_enabled)
         perform_logging();
     }
 
@@ -11203,7 +11202,7 @@ namespace Legion {
       assert(thunk == NULL);
 #endif
       thunk = new DifferencePartitionThunk(pid, h1, h2);
-      if (Runtime::legion_spy_enabled)
+      if (runtime->legion_spy_enabled)
         perform_logging();
     }
 
@@ -11222,7 +11221,7 @@ namespace Legion {
 #endif
       thunk = new RestrictedPartitionThunk(pid, transform, transform_size,
                                            extent, extent_size);
-      if (Runtime::legion_spy_enabled)
+      if (runtime->legion_spy_enabled)
         perform_logging();
     }
 
@@ -11238,7 +11237,7 @@ namespace Legion {
       assert(thunk == NULL);
 #endif
       thunk = new CrossProductThunk(base, source, part_color);
-      if (Runtime::legion_spy_enabled)
+      if (runtime->legion_spy_enabled)
         perform_logging();
     }
 
@@ -11253,7 +11252,7 @@ namespace Legion {
       assert(thunk == NULL);
 #endif
       thunk = new ComputePendingSpace(target, true/*union*/, handles);
-      if (Runtime::legion_spy_enabled)
+      if (runtime->legion_spy_enabled)
         perform_logging();
     }
 
@@ -11268,7 +11267,7 @@ namespace Legion {
       assert(thunk == NULL);
 #endif
       thunk = new ComputePendingSpace(target, true/*union*/, handle);
-      if (Runtime::legion_spy_enabled)
+      if (runtime->legion_spy_enabled)
         perform_logging();
     }
 
@@ -11282,7 +11281,7 @@ namespace Legion {
       assert(thunk == NULL);
 #endif
       thunk = new ComputePendingSpace(target, false/*union*/, handles);
-      if (Runtime::legion_spy_enabled)
+      if (runtime->legion_spy_enabled)
         perform_logging();
     }
 
@@ -11296,7 +11295,7 @@ namespace Legion {
       assert(thunk == NULL);
 #endif
       thunk = new ComputePendingSpace(target, false/*union*/, handle);
-      if (Runtime::legion_spy_enabled)
+      if (runtime->legion_spy_enabled)
         perform_logging();
     }
 
@@ -11311,7 +11310,7 @@ namespace Legion {
       assert(thunk == NULL);
 #endif
       thunk = new ComputePendingDifference(target, initial, handles);
-      if (Runtime::legion_spy_enabled)
+      if (runtime->legion_spy_enabled)
         perform_logging();
     }
 
@@ -11528,7 +11527,7 @@ namespace Legion {
       assert(thunk == NULL);
 #endif
       thunk = new ByFieldThunk(pid);
-      if (Runtime::legion_spy_enabled)
+      if (runtime->legion_spy_enabled)
         perform_logging();
     }
 
@@ -11565,7 +11564,7 @@ namespace Legion {
       assert(thunk == NULL);
 #endif
       thunk = new ByImageThunk(pid, projection.get_index_partition());
-      if (Runtime::legion_spy_enabled)
+      if (runtime->legion_spy_enabled)
         perform_logging();
     }
 
@@ -11603,7 +11602,7 @@ namespace Legion {
       assert(thunk == NULL);
 #endif
       thunk = new ByImageRangeThunk(pid, projection.get_index_partition());
-      if (Runtime::legion_spy_enabled)
+      if (runtime->legion_spy_enabled)
         perform_logging();
     }
 
@@ -11637,7 +11636,7 @@ namespace Legion {
       assert(thunk == NULL);
 #endif
       thunk = new ByPreimageThunk(pid, proj);
-      if (Runtime::legion_spy_enabled)
+      if (runtime->legion_spy_enabled)
         perform_logging();
     }
 
@@ -11671,7 +11670,7 @@ namespace Legion {
       assert(thunk == NULL);
 #endif
       thunk = new ByPreimageRangeThunk(pid, proj);
-      if (Runtime::legion_spy_enabled)
+      if (runtime->legion_spy_enabled)
         perform_logging();
     }
 
@@ -11705,7 +11704,7 @@ namespace Legion {
       assert(thunk == NULL);
 #endif
       thunk = new AssociationThunk(domain.get_index_space(), range);
-      if (Runtime::legion_spy_enabled)
+      if (runtime->legion_spy_enabled)
         perform_logging();
     }
 
@@ -11775,7 +11774,7 @@ namespace Legion {
       select_partition_projection();
       // Do thise now that we've picked our region requirement
       initialize_privilege_path(privilege_path, requirement);
-      if (Runtime::legion_spy_enabled)
+      if (runtime->legion_spy_enabled)
         log_requirement();
       if (is_index_space)
         projection_info = ProjectionInfo(runtime, requirement, launch_space);
@@ -11809,7 +11808,7 @@ namespace Legion {
       IndexPartNode *partition_node = 
        runtime->forest->get_node(output.chosen_partition.get_index_partition());
       // Make sure that it is complete, and then update our information
-      if (!Runtime::unsafe_mapper && !partition_node->is_complete(false))
+      if (!runtime->unsafe_mapper && !partition_node->is_complete(false))
         REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                       "Invalid mapper output from invocation of "
                       "'select_partition_projection' on mapper %s."
@@ -11874,7 +11873,7 @@ namespace Legion {
         function->project_points(this, 0/*idx*/, requirement,
                                  runtime, projection_points);
         // No need to check the validity of the points, we know they are good
-        if (Runtime::legion_spy_enabled)
+        if (runtime->legion_spy_enabled)
         {
           for (std::vector<PointDepPartOp*>::const_iterator it = 
                 points.begin(); it != points.end(); it++)
@@ -11927,7 +11926,7 @@ namespace Legion {
                                             version_info, valid_instances);
       // We have the valid instances so invoke the mapper
       invoke_mapper(valid_instances, mapped_instances);
-      if (Runtime::legion_spy_enabled)
+      if (runtime->legion_spy_enabled)
         runtime->forest->log_mapping_decision(unique_op_id, 0/*idx*/,
                                               requirement,
                                               mapped_instances);
@@ -11965,7 +11964,7 @@ namespace Legion {
         done_event = Runtime::merge_events(restricted_postconditions);
       }
 #ifdef LEGION_SPY
-      if (Runtime::legion_spy_enabled)
+      if (runtime->legion_spy_enabled)
         LegionSpy::log_operation_events(unique_op_id, done_event,
                                         completion_event);
 #endif
@@ -12075,7 +12074,7 @@ namespace Legion {
                                 requirement, output.chosen_instances, 
                                 mapped_instances, bad_tree, missing_fields,
                                 &acquired_instances, unacquired, 
-                                !Runtime::unsafe_mapper);
+                                !runtime->unsafe_mapper);
       if (bad_tree > 0)
         REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                       "Invalid mapper output from invocation of 'map_partition'"
@@ -12144,7 +12143,7 @@ namespace Legion {
                       parent_ctx->get_unique_id())
       } 
       // If we are doing unsafe mapping, then we can return
-      if (Runtime::unsafe_mapper)
+      if (runtime->unsafe_mapper)
         return;
       // Iterate over the instances and make sure they are all valid
       // for the given logical region which we are mapping
@@ -12455,7 +12454,7 @@ namespace Legion {
       Mapper::CreatePartitionTemporaryInput input;
       Mapper::CreatePartitionTemporaryOutput output;
       input.destination_instance = MappingInstance(dst);
-      if (!Runtime::unsafe_mapper)
+      if (!runtime->unsafe_mapper)
       {
         // Fields and regions must both be met
         // The instance must be freshly created
@@ -12474,7 +12473,7 @@ namespace Legion {
       }
       else
         mapper->invoke_partition_create_temporary(this, &input, &output);
-      if (Runtime::legion_spy_enabled)
+      if (runtime->legion_spy_enabled)
         log_temporary_instance(output.temporary_instance.impl, 
                                index, needed_fields);
       return output.temporary_instance.impl;
@@ -12600,7 +12599,7 @@ namespace Legion {
       tag         = owner->tag;
       parent_req_index = owner->parent_req_index;
       restrict_info = owner->restrict_info;
-      if (Runtime::legion_spy_enabled)
+      if (runtime->legion_spy_enabled)
         LegionSpy::log_index_point(own->get_unique_op_id(), unique_op_id, p);
     }
 
@@ -12759,7 +12758,7 @@ namespace Legion {
       tag = launcher.tag;
       if (check_privileges)
         check_fill_privilege();
-      if (Runtime::legion_spy_enabled)
+      if (runtime->legion_spy_enabled)
       {
         LegionSpy::log_fill_operation(parent_ctx->get_unique_id(), 
                                       unique_op_id);
@@ -12895,7 +12894,7 @@ namespace Legion {
       // First compute the parent index
       compute_parent_index();
       initialize_privilege_path(privilege_path, requirement);
-      if (Runtime::legion_spy_enabled)
+      if (runtime->legion_spy_enabled)
         log_fill_requirement();
     }
 
@@ -13041,7 +13040,7 @@ namespace Legion {
           for (std::vector<PhaseBarrier>::const_iterator it = 
                 arrive_barriers.begin(); it != arrive_barriers.end(); it++)
           {
-            if (Runtime::legion_spy_enabled)
+            if (runtime->legion_spy_enabled)
               LegionSpy::log_phase_barrier_arrival(unique_op_id, 
                                                    it->phase_barrier);
             Runtime::phase_barrier_arrive(it->phase_barrier, 1/*count*/,
@@ -13122,7 +13121,7 @@ namespace Legion {
         for (std::vector<PhaseBarrier>::const_iterator it = 
               arrive_barriers.begin(); it != arrive_barriers.end(); it++)
         {
-          if (Runtime::legion_spy_enabled)
+          if (runtime->legion_spy_enabled)
             LegionSpy::log_phase_barrier_arrival(unique_op_id, 
                                                  it->phase_barrier);
           Runtime::phase_barrier_arrive(it->phase_barrier, 1/*count*/,
@@ -13354,7 +13353,7 @@ namespace Legion {
         {
           ApEvent e = Runtime::get_previous_phase(it->phase_barrier);
           sync_preconditions.insert(e);
-          if (Runtime::legion_spy_enabled)
+          if (runtime->legion_spy_enabled)
             LegionSpy::log_phase_barrier_wait(unique_op_id, e);
         }
       }
@@ -13458,7 +13457,7 @@ namespace Legion {
       tag = launcher.tag;
       if (check_privileges)
         check_fill_privilege();
-      if (Runtime::legion_spy_enabled)
+      if (runtime->legion_spy_enabled)
       {
         LegionSpy::log_fill_operation(parent_ctx->get_unique_id(), 
                                       unique_op_id);
@@ -13517,7 +13516,7 @@ namespace Legion {
       // First compute the parent index
       compute_parent_index();
       initialize_privilege_path(privilege_path, requirement);
-      if (Runtime::legion_spy_enabled)
+      if (runtime->legion_spy_enabled)
       { 
         const bool reg = (requirement.handle_type == SINGULAR) ||
                          (requirement.handle_type == REG_PROJECTION);
@@ -13614,7 +13613,7 @@ namespace Legion {
       // Check for interfering point requirements in debug mode
       check_point_requirements();
 #endif
-      if (Runtime::legion_spy_enabled)
+      if (runtime->legion_spy_enabled)
       {
         for (std::vector<PointFillOp*>::const_iterator it = points.begin();
               it != points.end(); it++)
@@ -13813,7 +13812,7 @@ namespace Legion {
         value = malloc(value_size);
         memcpy(value, owner->value, value_size);
       }
-      if (Runtime::legion_spy_enabled)
+      if (runtime->legion_spy_enabled)
         LegionSpy::log_index_point(owner->get_unique_op_id(), unique_op_id, p);
     }
 
@@ -14036,7 +14035,7 @@ namespace Legion {
                               false/*virtual mapped*/, runtime));
       if (check_privileges)
         check_privilege();
-      if (Runtime::legion_spy_enabled)
+      if (runtime->legion_spy_enabled)
         LegionSpy::log_attach_operation(parent_ctx->get_unique_id(),
                                         unique_op_id);
       return region;
@@ -14104,7 +14103,7 @@ namespace Legion {
       // First compute the parent index
       compute_parent_index();
       initialize_privilege_path(privilege_path, requirement);
-      if (Runtime::legion_spy_enabled)
+      if (runtime->legion_spy_enabled)
       { 
         LegionSpy::log_logical_requirement(unique_op_id,0/*index*/,
                                            true/*region*/,
@@ -14324,7 +14323,7 @@ namespace Legion {
         default:
           assert(false);
       }
-      if (Runtime::legion_spy_enabled)
+      if (runtime->legion_spy_enabled)
       {
         // We always need a unique ready event for Legion Spy
         if (!ready_event.exists())
@@ -14557,7 +14556,7 @@ namespace Legion {
       result = Future(new FutureImpl(runtime, true/*register*/,
                   runtime->get_available_distributed_id(),
                   runtime->address_space, this));
-      if (Runtime::legion_spy_enabled)
+      if (runtime->legion_spy_enabled)
         LegionSpy::log_detach_operation(parent_ctx->get_unique_id(),
                                         unique_op_id);
       return result;
@@ -14611,7 +14610,7 @@ namespace Legion {
       // First compute the parent index
       compute_parent_index();
       initialize_privilege_path(privilege_path, requirement);
-      if (Runtime::legion_spy_enabled)
+      if (runtime->legion_spy_enabled)
       { 
         LegionSpy::log_logical_requirement(unique_op_id,0/*index*/,
                                            true/*region*/,
@@ -14794,7 +14793,7 @@ namespace Legion {
       result = Future(new FutureImpl(runtime, true/*register*/,
                   runtime->get_available_distributed_id(),
                   runtime->address_space, this));
-      if (Runtime::legion_spy_enabled)
+      if (runtime->legion_spy_enabled)
       {
         LegionSpy::log_timing_operation(ctx->get_unique_id(), unique_op_id);
         DomainPoint empty_point;

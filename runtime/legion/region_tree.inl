@@ -140,7 +140,7 @@ namespace Legion {
       else
       {
         // Log subspaces being set on the owner
-        if (Runtime::legion_spy_enabled && (parent != NULL))
+        if (implicit_runtime->legion_spy_enabled && (parent != NULL))
           this->log_index_space_points(realm_index_space);
         // We're the owner, send messages to everyone else that we've 
         // sent this node to except the source

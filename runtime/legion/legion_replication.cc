@@ -330,7 +330,7 @@ namespace Legion {
 #endif
       // Figure out whether this shard owns this point
       owner_shard = sharding_function->find_owner(index_point, index_domain);
-      if (Runtime::legion_spy_enabled)
+      if (runtime->legion_spy_enabled)
         LegionSpy::log_owner_shard(get_unique_id(), owner_shard);
       // If we own it we go on the queue, otherwise we complete early
       if (owner_shard != repl_ctx->owner_shard->shard_id)
@@ -1337,7 +1337,7 @@ namespace Legion {
       // Figure out whether this shard owns this point
       const ShardID owner_shard = 
         sharding_function->find_owner(index_point, index_domain); 
-      if (Runtime::legion_spy_enabled)
+      if (runtime->legion_spy_enabled)
         LegionSpy::log_owner_shard(get_unique_id(), owner_shard);
       // If we own it we go on the queue, otherwise we complete early
       if (owner_shard != repl_ctx->owner_shard->shard_id)
@@ -1950,7 +1950,7 @@ namespace Legion {
 #endif
       thunk = new ReplByFieldThunk(ctx, pid, shard, total_shards);
       partition_ready = ready_event;
-      if (Runtime::legion_spy_enabled)
+      if (runtime->legion_spy_enabled)
         perform_logging();
     }
 
@@ -1991,7 +1991,7 @@ namespace Legion {
       thunk = new ReplByImageThunk(ctx, target_shard, 
                                    pid, projection.get_index_partition());
       partition_ready = ready_event;
-      if (Runtime::legion_spy_enabled)
+      if (runtime->legion_spy_enabled)
         perform_logging();
     }
 
@@ -2034,7 +2034,7 @@ namespace Legion {
       thunk = new ReplByImageRangeThunk(ctx, target_shard, 
                                         pid, projection.get_index_partition());
       partition_ready = ready_event;
-      if (Runtime::legion_spy_enabled)
+      if (runtime->legion_spy_enabled)
         perform_logging();
     }
 
@@ -2070,7 +2070,7 @@ namespace Legion {
 #endif
       thunk = new ReplByPreimageThunk(ctx, target_shard, pid, proj);
       partition_ready = ready_event;
-      if (Runtime::legion_spy_enabled)
+      if (runtime->legion_spy_enabled)
         perform_logging();
     }
 
@@ -2107,7 +2107,7 @@ namespace Legion {
 #endif
       thunk = new ReplByPreimageRangeThunk(ctx, target_shard, pid, proj);
       partition_ready = ready_event;
-      if (Runtime::legion_spy_enabled)
+      if (runtime->legion_spy_enabled)
         perform_logging();
     }
 
