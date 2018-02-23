@@ -526,7 +526,7 @@ function codegen.select_task_options(rules, automata, signature,
     var [state_var] = [&mapper_state_type](ptr)
     -- XXX: These should be handled in the same way as other properties
     [options_var].inline_task = false
-    [options_var].map_locally = true
+    [options_var].map_locally = false
     [options_var].stealable = false
     [body]
   end
