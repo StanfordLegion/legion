@@ -30,11 +30,17 @@ end
 local exe = os.tmpname()
 regentlib.saveobj(main, exe, "executable")
 
--- Hack: On macOS, the child process isn't inheriting the parent's
--- environment, for some reason.
 local env = ""
 if os.getenv("DYLD_LIBRARY_PATH") then
-  env = "DYLD_LIBRARY_PATH=" .. os.getenv("DYLD_LIBRARY_PATH") .. " "
+  env = "DYLD_LIBRARY_PATH='" .. os.getenv("DYLD_LIBRARY_PATH") .. "' "
+elseif os.getenv("LD_LIBRARY_PATH") then
+  env = "LD_LIBRARY_PATH='" .. os.getenv("LD_LIBRARY_PATH") .. "' "
 end
 
-assert(os.execute(env .. exe) == 0)
+-- Pass the arguments along so that the child process is able to
+-- complete the execution of the parent.
+local args = ""
+for _, arg in ipairs(rawget(_G, "arg")) do
+  args = args .. " '" .. arg .. "'"
+end
+assert(os.execute(env .. exe .. args) == 0)
