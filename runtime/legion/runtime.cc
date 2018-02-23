@@ -2389,8 +2389,7 @@ namespace Legion {
         // type is 'int' so we're good
 	if ((collective_stages > 0) &&
 	    (runtime->address_space <
-	     (runtime->total_address_spaces -
-	      collective_participating_spaces)))
+	     (runtime->total_address_spaces - collective_participating_spaces)))
 	  stage_notifications[0] = -1;
         else
           stage_notifications[0] = 0;
@@ -2505,24 +2504,21 @@ namespace Legion {
 #ifdef DEBUG_LEGION
           assert(stage < int(stage_notifications.size()));
           if (stage == (collective_stages-1))
-            assert(stage_notifications[stage] < 
-                  collective_last_radix); 
+            assert(stage_notifications[stage] < collective_last_radix); 
           else
-            assert(stage_notifications[stage] <
-                  collective_radix);
+            assert(stage_notifications[stage] < collective_radix);
 #endif
           stage_notifications[stage]++;
           sent_stages[stage] = true;
           // Check to see if all the stages are done
-          all_stages_done = (stage_notifications.back() == 
-                      collective_last_radix); 
+          all_stages_done = 
+            (stage_notifications.back() == collective_last_radix); 
           if (all_stages_done)
           {
             for (int stage = 1; 
                   stage < collective_stages; stage++)
             {
-              if (stage_notifications[stage-1] == 
-                    collective_radix)
+              if (stage_notifications[stage-1] == collective_radix)
                 continue;
               all_stages_done = false;
               break;
@@ -2562,8 +2558,7 @@ namespace Legion {
             AddressSpaceID target = runtime->address_space ^
               (r << (stage * collective_log_radix));
 #ifdef DEBUG_LEGION
-            assert(int(target) < 
-                    collective_participating_spaces);
+            assert(int(target) < collective_participating_spaces);
 #endif
             runtime->send_mpi_rank_exchange(target, rez);
           }
@@ -2575,8 +2570,7 @@ namespace Legion {
             AddressSpaceID target = runtime->address_space ^
               (r << (stage * collective_log_radix));
 #ifdef DEBUG_LEGION
-            assert(int(target) < 
-                    collective_participating_spaces);
+            assert(int(target) < collective_participating_spaces);
 #endif
             runtime->send_mpi_rank_exchange(target, rez);
           }

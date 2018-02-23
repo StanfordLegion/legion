@@ -7176,7 +7176,7 @@ namespace Legion {
       launch_node->get_launch_space_domain(point_domain);
       projection_info = ProjectionInfo(runtime,requirement,launch_node->handle);
 #ifdef LEGION_SPY
-      if (Runtime::legion_spy_enabled)
+      if (runtime->legion_spy_enabled)
       {
         std::set<FieldID> disjoint_close_fields;
 #ifdef DEBUG_LEGION
