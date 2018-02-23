@@ -776,9 +776,8 @@ namespace Legion {
         else
         {
           // replace % with node number
-          Processor current = Processor::get_executing_processor();
           std::stringstream ss;
-          ss << filename.substr(0, pct) << current.address_space() <<
+          ss << filename.substr(0, pct) << target.address_space() <<
                 filename.substr(pct + 1);
           serializer = new LegionProfBinarySerializer(ss.str());
         }
