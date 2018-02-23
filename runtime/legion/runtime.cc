@@ -9987,7 +9987,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::startup_runtime(void)
+    void Runtime::startup_runtime(RtEvent top_level_precondition)
     //--------------------------------------------------------------------------
     {
       // If stealing is not disabled then startup our mappers
@@ -10057,7 +10057,7 @@ namespace Legion {
         issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY,
                                 Runtime::protect_event(pre));
         // Put the task in the ready queue
-        add_to_ready_queue(target, top_task);
+        add_to_ready_queue(target, top_task, top_level_precondition);
       }
     }
 
@@ -18261,12 +18261,19 @@ namespace Legion {
           delete (*it);
         }
       }
+      // Make a user event that we will trigger once we the 
+      // startup task is done. If we're node 0 then we will use this
+      // as the precondition for launching the top-level task
+      RtUserEvent start_event = Runtime::create_rt_user_event();
       // Now we can do one more spawn call to startup the runtime 
       // across the machine since we know everything is initialized
-      realm.collective_spawn_by_kind(
+      const RtEvent runtime_ready(realm.collective_spawn_by_kind(
               (config.separate_runtime_instances ? Processor::NO_KIND : 
-               startup_kind), LG_STARTUP_TASK_ID, NULL, 0,
-              !config.separate_runtime_instances, startup_precondition);
+               startup_kind), LG_STARTUP_TASK_ID, 
+              &start_event, sizeof(start_event),
+              !config.separate_runtime_instances, startup_precondition));
+      // Trigger the start event when the runtime is ready
+      Runtime::trigger_event(start_event, runtime_ready);
       // If we are supposed to background this thread, then we wait
       // for the runtime to shutdown, otherwise we can now return
       if (!background)
@@ -19786,11 +19793,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
+      assert(arglen == sizeof(RtEvent));
       assert(userlen == sizeof(Runtime**));
 #endif
+      RtEvent top_level_precondition = *((RtEvent*)args);
       Runtime *runtime = *((Runtime**)userdata);
       implicit_runtime = runtime;
-      runtime->startup_runtime();
+      runtime->startup_runtime(top_level_precondition);
     }
 
     //--------------------------------------------------------------------------
