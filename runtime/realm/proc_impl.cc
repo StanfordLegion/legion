@@ -182,9 +182,7 @@ namespace Realm {
 
     AddressSpace Processor::address_space(void) const
     {
-      // this is a hack for the Legion runtime, which only calls it on processor, not proc groups
       ID id(*this);
-      assert(id.is_processor());
       return id.proc.owner_node;
     }
 
