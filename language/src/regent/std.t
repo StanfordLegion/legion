@@ -3490,7 +3490,9 @@ end
 terra Pipe:write_string(str : &int8)
   var len = c.strlen(str)
   if len >= 256 then
-    c.fprintf(c.stderr, 'pipe: string too long for writing')
+    var stderr = c.fdopen(2, "w")
+    c.fprintf(stderr, 'pipe: string too long for writing')
+    c.fflush(stderr)
     c.exit(c.EXIT_FAILURE)
   end
   var bytes_written = c.write(self.write_end, str, len + 1)
