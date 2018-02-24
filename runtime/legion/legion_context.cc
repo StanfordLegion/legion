@@ -1899,7 +1899,8 @@ namespace Legion {
         outstanding_children_count(0), current_trace(NULL), 
         valid_wait_event(false), outstanding_subtasks(0), pending_subtasks(0), 
         pending_frames(0), currently_active_context(false),
-        current_fence(NULL), fence_gen(0), current_fence_index(0) 
+        current_mapping_fence(NULL), mapping_fence_gen(0), 
+        current_mapping_fence_index(0), current_execution_fence_index(0) 
     //--------------------------------------------------------------------------
     {
       // Set some of the default values for a context
@@ -4410,17 +4411,6 @@ namespace Legion {
       if (runtime->legion_spy_enabled)
         LegionSpy::log_child_operation_index(get_context_uid(), result, 
                                              op->get_unique_op_id()); 
-#ifdef LEGION_SPY
-      previous_completion_events.insert(op->get_completion_event());
-      // Periodically merge these to keep this data structure from exploding
-      // when we have a long-running task
-      if (previous_completion_events.size() == DEFAULT_MAX_TASK_WINDOW)
-      {
-        ApEvent merge = Runtime::merge_events(previous_completion_events);
-        previous_completion_events.clear();
-        previous_completion_events.insert(merge);
-      }
-#endif
       return result;
     }
 
@@ -4675,11 +4665,11 @@ namespace Legion {
     ApEvent InnerContext::register_fence_dependence(Operation *op)
     //--------------------------------------------------------------------------
     {
-      if (current_fence != NULL)
+      if (current_mapping_fence != NULL)
       {
 #ifdef LEGION_SPY
         // Can't prune when doing legion spy
-        op->register_dependence(current_fence, fence_gen);
+        op->register_dependence(current_mapping_fence, mapping_fence_gen);
         unsigned num_regions = op->get_region_count();
         if (num_regions > 0)
         {
@@ -4698,48 +4688,52 @@ namespace Legion {
         // If we can prune it then go ahead and do so
         // No need to remove the mapping reference because 
         // the fence has already been committed
-        if (op->register_dependence(current_fence, fence_gen))
-          current_fence = NULL;
+        if (op->register_dependence(current_mapping_fence, mapping_fence_gen))
+          current_mapping_fence = NULL;
 #endif
       }
 #ifdef LEGION_SPY
+      previous_completion_events.insert(op->get_completion_event());
+      // Periodically merge these to keep this data structure from exploding
+      // when we have a long-running task, although don't do this for fence
+      // operations in case we have to prune ourselves out of the set
+      if ((previous_completion_events.size() >= DEFAULT_MAX_TASK_WINDOW) &&
+          (op->get_operation_kind() == Operation::FENCE_OP_KIND))
+      {
+        ApEvent merge = Runtime::merge_events(previous_completion_events);
+        previous_completion_events.clear();
+        previous_completion_events.insert(merge);
+      }
       // Have to record this operation in case there is a fence later
       ops_since_last_fence.push_back(op->get_unique_op_id());
-      return current_fence_event;
+      return current_execution_fence_event;
 #else
-      if (current_fence_event.exists())
+      if (current_execution_fence_event.exists())
       {
-        if (current_fence_event.has_triggered())
-          current_fence_event = ApEvent::NO_AP_EVENT;
-        return current_fence_event;
+        if (current_execution_fence_event.has_triggered())
+          current_execution_fence_event = ApEvent::NO_AP_EVENT;
+        return current_execution_fence_event;
       }
       return ApEvent::NO_AP_EVENT;
 #endif
     }
 
-#ifdef LEGION_SPY
     //--------------------------------------------------------------------------
-    ApEvent InnerContext::get_fence_precondition(void) const
-    //--------------------------------------------------------------------------
-    {
-      return Runtime::merge_events(previous_completion_events);
-    }
-#endif
-
-    //--------------------------------------------------------------------------
-    void InnerContext::perform_fence_analysis(FenceOp *op)
+    ApEvent InnerContext::perform_fence_analysis(FenceOp *op, 
+                                                 bool mapping, bool execution)
     //--------------------------------------------------------------------------
     {
       std::map<Operation*,GenerationID> previous_operations;
-#ifdef LEGION_SPY
-      // Record dependences on all operations since the last fence
-      std::deque<UniqueID> all_previous_ops;
-#endif
+      std::set<ApEvent> previous_events;
       // Take the lock and iterate through our current pending
       // operations and find all the ones with a context index
       // that is less than the index for the fence operation
       const unsigned next_fence_index = op->get_ctx_index();
+      // We only need the list of previous operations if we are recording
+      // mapping dependences for this fence
+      if (!execution)
       {
+        // Mapping analysis only
         AutoLock child_lock(child_op_lock,1,false/*exclusive*/);
         for (std::map<Operation*,GenerationID>::const_iterator it = 
               executing_children.begin(); it != executing_children.end(); it++)
@@ -4748,7 +4742,7 @@ namespace Legion {
             continue;
           const unsigned op_index = it->first->get_ctx_index();
           // If it's older than the previous fence then we don't care
-          if (op_index < current_fence_index)
+          if (op_index < current_mapping_fence_index)
             continue;
           // Record a dependence if it didn't come after our fence
           if (op_index < next_fence_index)
@@ -4761,7 +4755,7 @@ namespace Legion {
             continue;
           const unsigned op_index = it->first->get_ctx_index();
           // If it's older than the previous fence then we don't care
-          if (op_index < current_fence_index)
+          if (op_index < current_mapping_fence_index)
             continue;
           // Record a dependence if it didn't come after our fence
           if (op_index < next_fence_index)
@@ -4774,57 +4768,171 @@ namespace Legion {
             continue;
           const unsigned op_index = it->first->get_ctx_index();
           // If it's older than the previous fence then we don't care
-          if (op_index < current_fence_index)
+          if (op_index < current_mapping_fence_index)
             continue;
           // Record a dependence if it didn't come after our fence
           if (op_index < next_fence_index)
             previous_operations.insert(*it);
         }
-#ifdef LEGION_SPY
-        all_previous_ops = ops_since_last_fence;
-#endif
+      }
+      else if (!mapping)
+      {
+        // Execution analysis only
+        AutoLock child_lock(child_op_lock,1,false/*exclusive*/);
+        for (std::map<Operation*,GenerationID>::const_iterator it = 
+              executing_children.begin(); it != executing_children.end(); it++)
+        {
+          if (it->first->get_generation() != it->second)
+            continue;
+          const unsigned op_index = it->first->get_ctx_index();
+          // If it's older than the previous fence then we don't care
+          if (op_index < current_execution_fence_index)
+            continue;
+          // Record a dependence if it didn't come after our fence
+          if (op_index < next_fence_index)
+            previous_events.insert(it->first->get_completion_event());
+        }
+        for (std::map<Operation*,GenerationID>::const_iterator it = 
+              executed_children.begin(); it != executed_children.end(); it++)
+        {
+          if (it->first->get_generation() != it->second)
+            continue;
+          const unsigned op_index = it->first->get_ctx_index();
+          // If it's older than the previous fence then we don't care
+          if (op_index < current_execution_fence_index)
+            continue;
+          // Record a dependence if it didn't come after our fence
+          if (op_index < next_fence_index)
+            previous_events.insert(it->first->get_completion_event());
+        }
+        for (std::map<Operation*,GenerationID>::const_iterator it = 
+              complete_children.begin(); it != complete_children.end(); it++)
+        {
+          if (it->first->get_generation() != it->second)
+            continue;
+          const unsigned op_index = it->first->get_ctx_index();
+          // If it's older than the previous fence then we don't care
+          if (op_index < current_execution_fence_index)
+            continue;
+          // Record a dependence if it didn't come after our fence
+          if (op_index < next_fence_index)
+            previous_events.insert(it->first->get_completion_event());
+        }
+      }
+      else
+      {
+        // Both mapping and execution analysis at the same time
+        for (std::map<Operation*,GenerationID>::const_iterator it = 
+              executing_children.begin(); it != executing_children.end(); it++)
+        {
+          if (it->first->get_generation() != it->second)
+            continue;
+          const unsigned op_index = it->first->get_ctx_index();
+          // If it's younger than our fence we don't care
+          if (op_index >= next_fence_index)
+            continue;
+          if (op_index >= current_mapping_fence_index)
+            previous_operations.insert(*it);
+          if (op_index >= current_execution_fence_index)
+            previous_events.insert(it->first->get_completion_event());
+        }
+        for (std::map<Operation*,GenerationID>::const_iterator it = 
+              executed_children.begin(); it != executed_children.end(); it++)
+        {
+          if (it->first->get_generation() != it->second)
+            continue;
+          const unsigned op_index = it->first->get_ctx_index();
+          // If it's younger than our fence we don't care
+          if (op_index >= next_fence_index)
+            continue;
+          if (op_index >= current_mapping_fence_index)
+            previous_operations.insert(*it);
+          if (op_index >= current_execution_fence_index)
+            previous_events.insert(it->first->get_completion_event());
+        }
+        for (std::map<Operation*,GenerationID>::const_iterator it = 
+              complete_children.begin(); it != complete_children.end(); it++)
+        {
+          if (it->first->get_generation() != it->second)
+            continue;
+          const unsigned op_index = it->first->get_ctx_index();
+          // If it's younger than our fence we don't care
+          if (op_index >= next_fence_index)
+            continue;
+          if (op_index >= current_mapping_fence_index)
+            previous_operations.insert(*it);
+          if (op_index >= current_execution_fence_index)
+            previous_events.insert(it->first->get_completion_event());
+        }
       }
 
       // Now record the dependences
-      for (std::map<Operation*,GenerationID>::const_iterator it = 
-            previous_operations.begin(); it != previous_operations.end(); it++)
-        op->register_dependence(it->first, it->second);
+      if (!previous_operations.empty())
+      {
+        for (std::map<Operation*,GenerationID>::const_iterator it = 
+             previous_operations.begin(); it != previous_operations.end(); it++)
+          op->register_dependence(it->first, it->second);
+      }
 
 #ifdef LEGION_SPY
       // Record a dependence on the previous fence
-      if (current_fence != NULL)
-        LegionSpy::log_mapping_dependence(get_unique_id(), current_fence_uid,
-            0/*index*/, op->get_unique_op_id(), 0/*index*/, TRUE_DEPENDENCE);
-      for (std::deque<UniqueID>::const_iterator it = 
-            all_previous_ops.begin(); it != all_previous_ops.end(); it++)
+      if (mapping)
       {
-        // Skip ourselves if we are here
-        if ((*it) == op->get_unique_op_id())
-          continue;
-        LegionSpy::log_mapping_dependence(get_unique_id(), *it, 0/*index*/,
-            op->get_unique_op_id(), 0/*index*/, TRUE_DEPENDENCE); 
+        if (current_mapping_fence != NULL)
+          LegionSpy::log_mapping_dependence(get_unique_id(), current_fence_uid,
+              0/*index*/, op->get_unique_op_id(), 0/*index*/, TRUE_DEPENDENCE);
+        for (std::deque<UniqueID>::const_iterator it = 
+              ops_since_last_fence.begin(); it != 
+              ops_since_last_fence.end(); it++)
+        {
+          // Skip ourselves if we are here
+          if ((*it) == op->get_unique_op_id())
+            continue;
+          LegionSpy::log_mapping_dependence(get_unique_id(), *it, 0/*index*/,
+              op->get_unique_op_id(), 0/*index*/, TRUE_DEPENDENCE); 
+        }
+      }
+      // If we're doing execution record dependence on all previous operations
+      if (execution)
+      {
+        previous_events.insert(previous_completion_events.begin(),
+                               previous_completion_events.end());
+        // Don't include ourselves though
+        previous_events.erase(op->get_completion_event());
       }
 #endif
+      // Now we can update the current fence
+      update_current_fence(op, mapping, execution); 
+      if (!previous_events.empty())
+        return Runtime::merge_events(previous_events);
+      return ApEvent::NO_AP_EVENT;
     }
 
     //--------------------------------------------------------------------------
-    void InnerContext::update_current_fence(FenceOp *op)
+    void InnerContext::update_current_fence(FenceOp *op, 
+                                            bool mapping, bool execution)
     //--------------------------------------------------------------------------
     {
-      if (current_fence != NULL)
-        current_fence->remove_mapping_reference(fence_gen);
-      current_fence = op;
-      fence_gen = op->get_generation();
-      current_fence_index = op->get_ctx_index();
-      current_fence->add_mapping_reference(fence_gen);
-      // Only update the current fence event if we're actually an
-      // execution fence, otherwise by definition we need the previous event
-      if (current_fence->is_execution_fence())
-        current_fence_event = current_fence->get_completion_event();
+      if (mapping)
+      {
+        if (current_mapping_fence != NULL)
+          current_mapping_fence->remove_mapping_reference(mapping_fence_gen);
+        current_mapping_fence = op;
+        mapping_fence_gen = op->get_generation();
+        current_mapping_fence_index = op->get_ctx_index();
+        current_mapping_fence->add_mapping_reference(mapping_fence_gen);
 #ifdef LEGION_SPY
-      current_fence_uid = op->get_unique_op_id();
-      ops_since_last_fence.clear();
+        current_fence_uid = op->get_unique_op_id();
+        ops_since_last_fence.clear();
 #endif
+      }
+      if (execution)
+      {
+        // Only update the current fence event if we're actually an
+        // execution fence, otherwise by definition we need the previous event
+        current_execution_fence_event = op->get_completion_event();
+        current_execution_fence_index = op->get_ctx_index();
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -8043,25 +8151,18 @@ namespace Legion {
       return ApEvent::NO_AP_EVENT;
     }
 
-#ifdef LEGION_SPY
     //--------------------------------------------------------------------------
-    ApEvent LeafContext::get_fence_precondition(void) const
+    ApEvent LeafContext::perform_fence_analysis(FenceOp *op, 
+                                                bool mapping, bool execution)
     //--------------------------------------------------------------------------
     {
       assert(false);
       return ApEvent::NO_AP_EVENT;
     }
-#endif
 
     //--------------------------------------------------------------------------
-    void LeafContext::perform_fence_analysis(FenceOp *op)
-    //--------------------------------------------------------------------------
-    {
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    void LeafContext::update_current_fence(FenceOp *op)
+    void LeafContext::update_current_fence(FenceOp *op, 
+                                           bool mapping, bool execution)
     //--------------------------------------------------------------------------
     {
       assert(false);
@@ -9182,27 +9283,20 @@ namespace Legion {
       return enclosing->register_fence_dependence(op);
     }
 
-#ifdef LEGION_SPY
     //--------------------------------------------------------------------------
-    ApEvent InlineContext::get_fence_precondition(void) const
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->get_fence_precondition();
-    }
-#endif
-
-    //--------------------------------------------------------------------------
-    void InlineContext::perform_fence_analysis(FenceOp *op)
+    ApEvent InlineContext::perform_fence_analysis(FenceOp *op, 
+                                                  bool mapping, bool execution)
     //--------------------------------------------------------------------------
     {
-      enclosing->perform_fence_analysis(op);
+      return enclosing->perform_fence_analysis(op, mapping, execution);
     }
 
     //--------------------------------------------------------------------------
-    void InlineContext::update_current_fence(FenceOp *op)
+    void InlineContext::update_current_fence(FenceOp *op, 
+                                             bool mapping, bool execution)
     //--------------------------------------------------------------------------
     {
-      enclosing->update_current_fence(op);
+      enclosing->update_current_fence(op, mapping, execution);
     }
 
     //--------------------------------------------------------------------------

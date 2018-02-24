@@ -5367,20 +5367,15 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef LEGION_SPY
-      execution_precondition = ctx->get_fence_precondition();
+      // Legion Spy thinks all fences are mapping fences right now
+      if (kind == EXECUTION_FENCE)
+        kind = MIXED_FENCE;
 #endif
       initialize_operation(ctx, true/*track*/);
       fence_kind = kind;
       if (runtime->legion_spy_enabled)
         LegionSpy::log_fence_operation(parent_ctx->get_unique_id(),
                                        unique_op_id);
-    }
-
-    //--------------------------------------------------------------------------
-    bool FenceOp::is_execution_fence(void) const
-    //--------------------------------------------------------------------------
-    {
-      return (fence_kind != MAPPING_FENCE);
     }
 
     //--------------------------------------------------------------------------
@@ -5416,12 +5411,31 @@ namespace Legion {
     void FenceOp::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
-      // Register this fence with all previous users in the parent's context
-      parent_ctx->perform_fence_analysis(this);
-      // Now update the parent context with this fence
-      // before we can complete the dependence analysis
-      // and possibly be deactivated
-      parent_ctx->update_current_fence(this);
+      // Perform fence analysis for the given fence in the context
+      // Depending on the kind of fence we will either do mapping
+      // analysis or execution analysis or both
+      switch (fence_kind) 
+      {
+        case MAPPING_FENCE:
+          {
+            parent_ctx->perform_fence_analysis(this, true, false);
+            break;
+          }
+        case EXECUTION_FENCE:
+          {
+            execution_precondition = 
+              parent_ctx->perform_fence_analysis(this, false, true);
+            break;
+          }
+        case MIXED_FENCE:
+          {
+            execution_precondition =
+              parent_ctx->perform_fence_analysis(this, true, true);
+            break;
+          }
+        default:
+          assert(false);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -5444,33 +5458,12 @@ namespace Legion {
           }
         case EXECUTION_FENCE:
           {
-            // Go through and launch a completion task dependent upon
-            // all the completion events of our incoming dependences.
-            // Make sure that the events that we pulled out our still valid.
-            // Note since we are performing this operation, then we know
-            // that we are mapped and therefore our set of input dependences
-            // have been fixed so we can read them without holding the lock.
-            std::set<ApEvent> trigger_events;
-            for (std::map<Operation*,GenerationID>::const_iterator it = 
-                  incoming.begin(); it != incoming.end(); it++)
-            {
-              ApEvent complete = it->first->get_completion_event();
-              if (it->second == it->first->get_generation())
-                trigger_events.insert(complete);
-            }
-#ifdef LEGION_SPY
-            // If we're doing Legion Spy verification, we also need to 
-            // validate that we have all the completion events from ALL
-            // the previous events in the context since the last fence
-            trigger_events.insert(execution_precondition);   
-#endif
-            ApEvent done = Runtime::merge_events(trigger_events);
             // We can always trigger the completion event when these are done
-            Runtime::trigger_event(completion_event, done);
             need_completion_trigger = false;
-            if (!done.has_triggered())
+            Runtime::trigger_event(completion_event, execution_precondition);
+            if (!execution_precondition.has_triggered())
             {
-              RtEvent wait_on = Runtime::protect_event(done);
+              RtEvent wait_on = Runtime::protect_event(execution_precondition);
               // Was already handled above
               if (fence_kind != MIXED_FENCE)
                 complete_mapping(wait_on);
