@@ -253,15 +253,6 @@ do
   end
 end
 
-task block(r : region(ispace(f2d), double))
-where reads writes(r) do
-  return 1
-end
-
-terra wait_for(x : int)
-  return 1
-end
-
 task cholesky(n : int, np : int, verify : bool)
   regentlib.assert(n % np == 0, "tile sizes should be uniform")
   var is = ispace(f2d, { x = n, y = n })
@@ -288,9 +279,8 @@ task cholesky(n : int, np : int, verify : bool)
     copy(src, dst)
   end
 
-  var _ = 0
-  for c in cs do _ += block(pB[c]) end
-  wait_for(_)
+  __fence(__execution, __block)
+  var ts_start = c.legion_get_current_time_in_micros()
 
   var bn = n / np
   for x = 0, np do
@@ -308,6 +298,10 @@ task cholesky(n : int, np : int, verify : bool)
       end
     end
   end
+
+  __fence(__execution, __block)
+  var ts_end = c.legion_get_current_time_in_micros()
+  c.printf("ELAPSED TIME = %7.3f ms\n", 1e-3 * (ts_end - ts_start))
 
   if verify then verify_result(n, rA, rB) end
 end
