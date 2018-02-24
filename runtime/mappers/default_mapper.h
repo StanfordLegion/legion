@@ -370,6 +370,11 @@ namespace Legion {
                                     const LayoutConstraintSet &constraints,
                                     bool force_new_instances, 
                                     bool meets_constraints);
+      virtual void default_policy_select_instance_fields(
+                                    MapperContext ctx,
+                                    const RegionRequirement &req,
+                                    const std::set<FieldID> &needed_fields,
+                                    std::vector<FieldID> &fields);
       virtual int default_policy_select_garbage_collection_priority(
                                     MapperContext ctx, 
                                     MappingKind kind, Memory memory, 
