@@ -4698,7 +4698,7 @@ namespace Legion {
       // when we have a long-running task, although don't do this for fence
       // operations in case we have to prune ourselves out of the set
       if ((previous_completion_events.size() >= DEFAULT_MAX_TASK_WINDOW) &&
-          (op->get_operation_kind() == Operation::FENCE_OP_KIND))
+          (op->get_operation_kind() != Operation::FENCE_OP_KIND))
       {
         ApEvent merge = Runtime::merge_events(previous_completion_events);
         previous_completion_events.clear();
