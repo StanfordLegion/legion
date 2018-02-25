@@ -70,7 +70,9 @@ namespace Legion {
     };
 
     __thread TaskContext *implicit_context = NULL;
+    __thread Runtime *implicit_runtime = NULL;
     __thread AutoLock *local_lock_list = NULL;
+    __thread UniqueID task_profiling_provenance = 0;
 
     const LgEvent LgEvent::NO_LG_EVENT = LgEvent();
     const ApEvent ApEvent::NO_AP_EVENT = ApEvent();
@@ -87,8 +89,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ArgumentMapImpl::ArgumentMapImpl(void)
-      : Collectable(), runtime(Runtime::get_runtime(
-                                        Processor::get_executing_processor())), 
+      : Collectable(), runtime(implicit_runtime),
         future_map(NULL), equivalent(false)
     //--------------------------------------------------------------------------
     {
@@ -96,8 +97,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ArgumentMapImpl::ArgumentMapImpl(const FutureMap &rhs)
-      : Collectable(), runtime(Runtime::get_runtime(
-                                        Processor::get_executing_processor())), 
+      : Collectable(), runtime(implicit_runtime),
         future_map(rhs.impl), equivalent(false)
     //--------------------------------------------------------------------------
     {
@@ -323,7 +323,7 @@ namespace Legion {
     void FutureImpl::get_void_result(bool silence_warnings)
     //--------------------------------------------------------------------------
     {
-      if (Runtime::runtime_warnings && !silence_warnings && 
+      if (runtime->runtime_warnings && !silence_warnings && 
           (producer_op != NULL))
       {
         TaskContext *context = producer_op->get_context();
@@ -343,11 +343,11 @@ namespace Legion {
         if (context != NULL)
         {
           context->begin_task_wait(false/*from runtime*/);
-          ready_event.lg_wait();
+          ready_event.wait();
           context->end_task_wait();
         }
         else
-          ready_event.lg_wait();
+          ready_event.wait();
       }
       if (empty)
         REPORT_LEGION_ERROR(ERROR_ACCESSING_EMPTY_FUTURE, 
@@ -361,7 +361,7 @@ namespace Legion {
     void* FutureImpl::get_untyped_result(bool silence_warnings)
     //--------------------------------------------------------------------------
     {
-      if (Runtime::runtime_warnings && !silence_warnings && 
+      if (runtime->runtime_warnings && !silence_warnings && 
           (producer_op != NULL))
       {
         TaskContext *context = producer_op->get_context();
@@ -379,11 +379,11 @@ namespace Legion {
         if (context != NULL)
         {
           context->begin_task_wait(false/*from runtime*/);
-          ready_event.lg_wait();
+          ready_event.wait();
           context->end_task_wait();
         }
         else
-          ready_event.lg_wait();
+          ready_event.wait();
       }
       if (empty)
         REPORT_LEGION_ERROR(ERROR_ACCESSING_EMPTY_FUTURE, 
@@ -407,7 +407,7 @@ namespace Legion {
     bool FutureImpl::is_empty(bool block, bool silence_warnings)
     //--------------------------------------------------------------------------
     {
-      if (Runtime::runtime_warnings && !silence_warnings && 
+      if (runtime->runtime_warnings && !silence_warnings && 
           (producer_op != NULL))
       {
         TaskContext *context = producer_op->get_context();
@@ -426,15 +426,22 @@ namespace Legion {
         if (context != NULL)
         {
           context->begin_task_wait(false/*from runtime*/);
-          ready_event.lg_wait();
+          ready_event.wait();
           context->end_task_wait();
         }
         else
-          ready_event.lg_wait();
+          ready_event.wait();
       }
       if (block)
         mark_sampled();
       return empty;
+    }
+
+    //--------------------------------------------------------------------------
+    bool FutureImpl::is_ready(void)
+    //--------------------------------------------------------------------------
+    {
+      return ready_event.has_triggered();
     }
 
     //--------------------------------------------------------------------------
@@ -713,7 +720,7 @@ namespace Legion {
         args.dc = dc;
         args.count = count;
         // Spawn the task dependent on the future being ready
-        runtime->issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY, NULL,
+        runtime->issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY,
                                          Runtime::protect_event(ready_event));
       }
       else // If we've already triggered, then we can do the arrival now
@@ -856,7 +863,7 @@ namespace Legion {
           rez.serialize(ready_event);
         }
         runtime->send_future_map_request_future(owner_space, rez);
-        ready_event.lg_wait(); 
+        ready_event.wait(); 
         // When we wake up it should be here
         AutoLock m_lock(gc_lock,1,false/*exlusive*/);
         std::map<DomainPoint,Future>::const_iterator finder = 
@@ -890,7 +897,7 @@ namespace Legion {
 #endif
 #endif
         if (allow_empty && ready_event.exists())
-          ready_event.lg_wait();
+          ready_event.wait();
         if (valid)
         {
           Future result;
@@ -908,7 +915,7 @@ namespace Legion {
             result = runtime->help_create_future(op);
             futures[point] = result;
           }
-          if (Runtime::legion_spy_enabled)
+          if (runtime->legion_spy_enabled)
             LegionSpy::log_future_creation(op->get_unique_op_id(),
                            result.impl->get_ready_event(), point);
           return result;
@@ -950,7 +957,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(is_owner());
 #endif
-      if (Runtime::runtime_warnings && !silence_warnings && 
+      if (runtime->runtime_warnings && !silence_warnings && 
           (context != NULL) && !context->is_leaf_context())
         REPORT_LEGION_WARNING(LEGION_WARNING_WAITING_ALL_FUTURES, 
             "Waiting for all futures in a future map in "
@@ -966,11 +973,11 @@ namespace Legion {
         if (context != NULL)
         {
           context->begin_task_wait(false/*from runtime*/);
-          ready_event.lg_wait();
+          ready_event.wait();
           context->end_task_wait();
         }
         else
-          ready_event.lg_wait();
+          ready_event.wait();
       }
     }
 
@@ -1026,11 +1033,11 @@ namespace Legion {
         if (context != NULL)
         {
           context->begin_task_wait(false/*from runtime*/);
-          ready_event.lg_wait();
+          ready_event.wait();
           context->end_task_wait();
         }
         else
-          ready_event.lg_wait();
+          ready_event.wait();
       }
       // No need for the lock since the map should be fixed at this point
       others = futures;
@@ -1207,7 +1214,7 @@ namespace Legion {
     {
       if (context != NULL)
         context->invalidate_current_template();
-      if (Runtime::runtime_warnings && !silence_warnings &&
+      if (runtime->runtime_warnings && !silence_warnings &&
           (context != NULL) && !context->is_leaf_context())
       {
         if (source != NULL)
@@ -1242,7 +1249,7 @@ namespace Legion {
               context->get_unique_id())
         if (context != NULL)
           context->begin_task_wait(false/*from runtime*/);
-        ready_event.lg_wait();
+        ready_event.wait();
         if (context != NULL)
           context->end_task_wait();
       }
@@ -1320,7 +1327,7 @@ namespace Legion {
             "Illegal call to 'get_accessor' inside task "
             "%s (UID %lld) for a variant that was labeled as an 'inner' "
             "variant.", context->get_task_name(), context->get_unique_id())
-        else if (Runtime::runtime_warnings && !silence_warnings &&
+        else if (runtime->runtime_warnings && !silence_warnings &&
                   !context->is_leaf_context())
           REPORT_LEGION_WARNING(LEGION_WARNING_NONLEAF_ACCESSOR, 
               "Call to 'get_accessor' in non-leaf task %s "
@@ -1338,7 +1345,7 @@ namespace Legion {
                         "Illegal implicit mapping of a virtual mapped region "
                         "in task %s (UID %lld)", context->get_task_name(),
                         context->get_unique_id())
-        if (Runtime::runtime_warnings && !silence_warnings)
+        if (runtime->runtime_warnings && !silence_warnings)
           REPORT_LEGION_WARNING(LEGION_WARNING_UNMAPPED_ACCESSOR, 
                           "Request for 'get_accessor' was "
                           "performed on an unmapped region in task %s "
@@ -1354,7 +1361,7 @@ namespace Legion {
       }
       // Wait until we are valid before returning the accessor
       wait_until_valid(silence_warnings, 
-                       Runtime::runtime_warnings, "get_accessor");
+                       runtime->runtime_warnings, "get_accessor");
       // You can only legally invoke this method when you have one instance
       if (references.size() > 1)
         REPORT_LEGION_ERROR(ERROR_DEPRECATED_METHOD_USE, 
@@ -1394,7 +1401,7 @@ namespace Legion {
             "Illegal call to 'get_field_accessor' inside "
             "task %s (UID %lld) for a variant that was labeled as an 'inner' "
             "variant.", context->get_task_name(), context->get_unique_id())
-        else if (Runtime::runtime_warnings && !silence_warnings &&
+        else if (runtime->runtime_warnings && !silence_warnings &&
                   !context->is_leaf_context())
           REPORT_LEGION_WARNING(LEGION_WARNING_NONLEAF_ACCESSOR, 
               "Call to 'get_field_accessor' in non-leaf "
@@ -1412,7 +1419,7 @@ namespace Legion {
                         "Illegal implicit mapping of a virtual mapped region "
                         "in task %s (UID %lld)", context->get_task_name(),
                         context->get_unique_id())
-        if (Runtime::runtime_warnings && !silence_warnings)
+        if (runtime->runtime_warnings && !silence_warnings)
           REPORT_LEGION_WARNING(LEGION_WARNING_UNMAPPED_ACCESSOR, 
                           "Request for 'get_field_accessor' was "
                           "performed on an unmapped region in task %s "
@@ -1428,7 +1435,7 @@ namespace Legion {
       }
       // Wait until we are valid before returning the accessor
       wait_until_valid(silence_warnings, 
-                       Runtime::runtime_warnings, "get_field_acessor");
+                       runtime->runtime_warnings, "get_field_acessor");
 #ifdef DEBUG_LEGION
       if (req.privilege_fields.find(fid) == req.privilege_fields.end())
         REPORT_LEGION_ERROR(ERROR_INVALID_FIELD_PRIVILEGES, 
@@ -1481,7 +1488,7 @@ namespace Legion {
         {
           if (context != NULL)
             context->begin_task_wait(false/*from runtime*/);
-          wait_for_unmap.lg_wait();
+          wait_for_unmap.wait();
           if (context != NULL)
             context->end_task_wait();
         }
@@ -1699,7 +1706,7 @@ namespace Legion {
             "Illegal accessor construction inside "
             "task %s (UID %lld) for a variant that was labeled as an 'inner' "
             "variant.", context->get_task_name(), context->get_unique_id())
-        else if (Runtime::runtime_warnings && !silence_warnings &&
+        else if (runtime->runtime_warnings && !silence_warnings &&
                   !context->is_leaf_context())
           REPORT_LEGION_WARNING(LEGION_WARNING_NONLEAF_ACCESSOR, 
               "Accessor construction in non-leaf "
@@ -1717,7 +1724,7 @@ namespace Legion {
                         "Illegal implicit mapping of a virtual mapped region "
                         "in task %s (UID %lld)", context->get_task_name(),
                         context->get_unique_id())
-        if (Runtime::runtime_warnings && !silence_warnings)
+        if (runtime->runtime_warnings && !silence_warnings)
           REPORT_LEGION_WARNING(LEGION_WARNING_UNMAPPED_ACCESSOR, 
                           "Accessor construction was "
                           "performed on an unmapped region in task %s "
@@ -1735,7 +1742,7 @@ namespace Legion {
         REPORT_LEGION_ERROR(ERROR_INVALID_FIELD_PRIVILEGES, 
                        "Accessor construction for field %d in task %s "
                        "without privileges!", fid, context->get_task_name())
-      if (generic_accessor && Runtime::runtime_warnings && !silence_warnings)
+      if (generic_accessor && runtime->runtime_warnings && !silence_warnings)
         REPORT_LEGION_WARNING(LEGION_WARNING_GENERIC_ACCESSOR,
                               "Using a generic accessor for accessing a "
                               "physical instance of task %s (UID %lld). "
@@ -1748,7 +1755,7 @@ namespace Legion {
                                       realm_is, type_tag);
       // Wait until we are valid before returning the accessor
       wait_until_valid(silence_warnings, 
-                       Runtime::runtime_warnings, "Accessor Construction");
+                       runtime->runtime_warnings, "Accessor Construction");
       made_accessor = true;
       for (unsigned idx = 0; idx < references.size(); idx++)
       {
@@ -2136,28 +2143,28 @@ namespace Legion {
     //--------------------------------------------------------------------------
     MPIRankTable::MPIRankTable(Runtime *rt)
       : runtime(rt), participating(int(runtime->address_space) <
-          Runtime::legion_collective_participating_spaces)
+          runtime->legion_collective_participating_spaces)
     //--------------------------------------------------------------------------
     {
       // We already have our contributions for each stage so
       // we can set the inditial participants to 1
       if (participating)
       {
-        sent_stages.resize(Runtime::legion_collective_stages, false);
+        sent_stages.resize(runtime->legion_collective_stages, false);
 #ifdef DEBUG_LEGION
-        assert(Runtime::legion_collective_stages > 0);
+        assert(runtime->legion_collective_stages > 0);
 #endif
-        stage_notifications.resize(Runtime::legion_collective_stages, 1);
+        stage_notifications.resize(runtime->legion_collective_stages, 1);
         // Stage 0 always starts with 0 notifications since we'll 
         // explictcly arrive on it
 	// Special case: if we expect a stage -1 message from a 
         // non-participating space, we'll count that as part of 
         // stage 0, it will make it a negative count, but the 
         // type is 'int' so we're good
-	if ((Runtime::legion_collective_stages > 0) &&
+	if ((runtime->legion_collective_stages > 0) &&
 	    (runtime->address_space <
 	     (runtime->total_address_spaces -
-	      Runtime::legion_collective_participating_spaces)))
+	      runtime->legion_collective_participating_spaces)))
 	  stage_notifications[0] = -1;
         else
           stage_notifications[0] = 0;
@@ -2209,9 +2216,9 @@ namespace Legion {
           // See if we are waiting for an initial notification
           // if not we can just send our message now
           if ((int(runtime->total_address_spaces) ==
-                Runtime::legion_collective_participating_spaces) ||
+                runtime->legion_collective_participating_spaces) ||
               (runtime->address_space >= (runtime->total_address_spaces -
-                Runtime::legion_collective_participating_spaces)))
+                runtime->legion_collective_participating_spaces)))
           {
             const bool all_stages_done =  send_explicit_stage(0);
             if (all_stages_done)
@@ -2225,7 +2232,7 @@ namespace Legion {
           send_explicit_stage(-1);
         }
         // Wait for our done event to be ready
-        done_event.lg_wait();
+        done_event.wait();
       }
 #ifdef DEBUG_LEGION
       assert(forward_mapping.size() == runtime->total_address_spaces);
@@ -2250,7 +2257,7 @@ namespace Legion {
         {
           size_t expected_size = 1;
           for (int idx = 0; idx < stage; idx++)
-            expected_size *= Runtime::legion_collective_radix;
+            expected_size *= runtime->legion_collective_radix;
           assert(expected_size <= forward_mapping.size());
         }
         if (stage >= 0)
@@ -2271,25 +2278,25 @@ namespace Legion {
         {
 #ifdef DEBUG_LEGION
           assert(stage < int(stage_notifications.size()));
-          if (stage == (Runtime::legion_collective_stages-1))
+          if (stage == (runtime->legion_collective_stages-1))
             assert(stage_notifications[stage] < 
-                  Runtime::legion_collective_last_radix); 
+                  runtime->legion_collective_last_radix); 
           else
             assert(stage_notifications[stage] <
-                  Runtime::legion_collective_radix);
+                  runtime->legion_collective_radix);
 #endif
           stage_notifications[stage]++;
           sent_stages[stage] = true;
           // Check to see if all the stages are done
           all_stages_done = (stage_notifications.back() == 
-                      Runtime::legion_collective_last_radix); 
+                      runtime->legion_collective_last_radix); 
           if (all_stages_done)
           {
             for (int stage = 1; 
-                  stage < Runtime::legion_collective_stages; stage++)
+                  stage < runtime->legion_collective_stages; stage++)
             {
               if (stage_notifications[stage-1] == 
-                    Runtime::legion_collective_radix)
+                    runtime->legion_collective_radix)
                 continue;
               all_stages_done = false;
               break;
@@ -2303,7 +2310,7 @@ namespace Legion {
         {
           // Send back to the nodes that are not participating
           AddressSpaceID target = runtime->address_space +
-            Runtime::legion_collective_participating_spaces;
+            runtime->legion_collective_participating_spaces;
 #ifdef DEBUG_LEGION
           assert(target < runtime->total_address_spaces);
 #endif
@@ -2313,7 +2320,7 @@ namespace Legion {
         {
           // Sent to a node that is participating
           AddressSpaceID target = runtime->address_space % 
-            Runtime::legion_collective_participating_spaces;
+            runtime->legion_collective_participating_spaces;
           runtime->send_mpi_rank_exchange(target, rez);
         }
       }
@@ -2322,28 +2329,28 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(stage >= 0);
 #endif
-        if (stage == (Runtime::legion_collective_stages-1))
+        if (stage == (runtime->legion_collective_stages-1))
         {
-          for (int r = 1; r < Runtime::legion_collective_last_radix; r++)
+          for (int r = 1; r < runtime->legion_collective_last_radix; r++)
           {
             AddressSpaceID target = runtime->address_space ^
-              (r << (stage * Runtime::legion_collective_log_radix));
+              (r << (stage * runtime->legion_collective_log_radix));
 #ifdef DEBUG_LEGION
             assert(int(target) < 
-                    Runtime::legion_collective_participating_spaces);
+                    runtime->legion_collective_participating_spaces);
 #endif
             runtime->send_mpi_rank_exchange(target, rez);
           }
         }
         else
         {
-          for (int r = 1; r < Runtime::legion_collective_radix; r++)
+          for (int r = 1; r < runtime->legion_collective_radix; r++)
           {
             AddressSpaceID target = runtime->address_space ^
-              (r << (stage * Runtime::legion_collective_log_radix));
+              (r << (stage * runtime->legion_collective_log_radix));
 #ifdef DEBUG_LEGION
             assert(int(target) < 
-                    Runtime::legion_collective_participating_spaces);
+                    runtime->legion_collective_participating_spaces);
 #endif
             runtime->send_mpi_rank_exchange(target, rez);
           }
@@ -2361,7 +2368,7 @@ namespace Legion {
 #endif
       // Iterate through the stages and send any that are ready
       // Remember that stages have to be done in order
-      for (int stage = 1; stage < Runtime::legion_collective_stages; stage++)
+      for (int stage = 1; stage < runtime->legion_collective_stages; stage++)
       {
         Serializer rez;
         {
@@ -2374,7 +2381,7 @@ namespace Legion {
           // Check to see if we're sending this stage
           // We need all the notifications from the previous stage before
           // we can send this stage
-          if (stage_notifications[stage-1] < Runtime::legion_collective_radix)
+          if (stage_notifications[stage-1] < runtime->legion_collective_radix)
             return false;
           // If we get here then we can send the stage
           sent_stages[stage] = true;
@@ -2382,7 +2389,7 @@ namespace Legion {
           {
             size_t expected_size = 1;
             for (int idx = 0; idx < stage; idx++)
-              expected_size *= Runtime::legion_collective_radix;
+              expected_size *= runtime->legion_collective_radix;
             assert(expected_size <= forward_mapping.size());
           }
 #endif
@@ -2395,28 +2402,28 @@ namespace Legion {
           }
         }
         // Now we can do the send
-        if (stage == (Runtime::legion_collective_stages-1))
+        if (stage == (runtime->legion_collective_stages-1))
         {
-          for (int r = 1; r < Runtime::legion_collective_last_radix; r++)
+          for (int r = 1; r < runtime->legion_collective_last_radix; r++)
           {
             AddressSpaceID target = runtime->address_space ^
-              (r << (stage * Runtime::legion_collective_log_radix));
+              (r << (stage * runtime->legion_collective_log_radix));
 #ifdef DEBUG_LEGION
             assert(int(target) < 
-                    Runtime::legion_collective_participating_spaces);
+                    runtime->legion_collective_participating_spaces);
 #endif
             runtime->send_mpi_rank_exchange(target, rez);
           }
         }
         else
         {
-          for (int r = 1; r < Runtime::legion_collective_radix; r++)
+          for (int r = 1; r < runtime->legion_collective_radix; r++)
           {
             AddressSpaceID target = runtime->address_space ^
-              (r << (stage * Runtime::legion_collective_log_radix));
+              (r << (stage * runtime->legion_collective_log_radix));
 #ifdef DEBUG_LEGION
             assert(int(target) < 
-                    Runtime::legion_collective_participating_spaces);
+                    runtime->legion_collective_participating_spaces);
 #endif
             runtime->send_mpi_rank_exchange(target, rez);
           }
@@ -2426,7 +2433,7 @@ namespace Legion {
       // if we've seen all the notifications for it
       AutoLock r_lock(reservation,1,false/*exclusive*/);
       return (stage_notifications.back() == 
-                Runtime::legion_collective_last_radix);
+                runtime->legion_collective_last_radix);
     }
 
     //--------------------------------------------------------------------------
@@ -2483,18 +2490,18 @@ namespace Legion {
       // A stage -1 message is counted as part of stage 0 (if it exists
       //  and we are participating)
       if ((stage == -1) && participating &&
-	  (Runtime::legion_collective_stages > 0))
+	  (runtime->legion_collective_stages > 0))
 	stage = 0;
       if (stage >= 0)
       {
 #ifdef DEBUG_LEGION
 	assert(stage < int(stage_notifications.size()));
-        if (stage < (Runtime::legion_collective_stages-1))
+        if (stage < (runtime->legion_collective_stages-1))
           assert(stage_notifications[stage] < 
-                  Runtime::legion_collective_radix);
+                  runtime->legion_collective_radix);
         else
           assert(stage_notifications[stage] < 
-                  Runtime::legion_collective_last_radix);
+                  runtime->legion_collective_last_radix);
 #endif
         stage_notifications[stage]++;
       }
@@ -2512,9 +2519,9 @@ namespace Legion {
       // See if we have to send a message back to a
       // non-participating node
       if ((int(runtime->total_address_spaces) > 
-           Runtime::legion_collective_participating_spaces) &&
+           runtime->legion_collective_participating_spaces) &&
           (int(runtime->address_space) < int(runtime->total_address_spaces -
-            Runtime::legion_collective_participating_spaces)))
+            runtime->legion_collective_participating_spaces)))
         send_explicit_stage(-1);
     }
 
@@ -3033,9 +3040,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(op != NULL);
 #endif
-      TriggerOpArgs args;
-      args.op = op;
-      runtime->issue_runtime_meta_task(args, priority, op, wait_on); 
+      Operation::TriggerOpArgs args(op);
+      runtime->issue_runtime_meta_task(args, priority, wait_on); 
     }
 
     //--------------------------------------------------------------------------
@@ -3131,7 +3137,7 @@ namespace Legion {
           args.map_id = map_id;
           args.deferral_event = wait_on;
           runtime->issue_runtime_meta_task(args, LG_LATENCY_DEFERRED_PRIORITY,
-                                           NULL, wait_on);
+                                           wait_on);
           // We can continue because there is nothing left to do for this mapper
           continue;
         }
@@ -3228,7 +3234,6 @@ namespace Legion {
         }
         // Now that we've removed them from the queue, issue the
         // mapping analysis calls
-        TriggerTaskArgs trigger_args;
         for (std::list<const Task*>::iterator vis_it = visible_tasks.begin();
               vis_it != visible_tasks.end(); vis_it++)
         {
@@ -3241,9 +3246,9 @@ namespace Legion {
             task->set_target_proc(finder->second);
           // Mark that this task is no longer outstanding
           task->deactivate_outstanding_task();
-          trigger_args.op = task;
+          TaskOp::TriggerTaskArgs trigger_args(task);
           runtime->issue_runtime_meta_task(trigger_args,
-                                           LG_THROUGHPUT_WORK_PRIORITY, task);
+                                           LG_THROUGHPUT_WORK_PRIORITY);
         }
       }
 
@@ -3344,7 +3349,7 @@ namespace Legion {
         if (!wait_for.empty())
         {
           RtEvent wait_on = Runtime::merge_events(wait_for);
-          wait_on.lg_wait();
+          wait_on.wait();
         }
       }
     }
@@ -3513,7 +3518,7 @@ namespace Legion {
           rez.serialize(&result);
         }
         runtime->send_instance_request(owner_space, rez);
-        ready_event.lg_wait();
+        ready_event.wait();
         // When the event is triggered, everything will be filled in
       }
       else
@@ -3523,7 +3528,7 @@ namespace Legion {
                                                      regions, creator_id);
         if (manager != NULL)
         {
-          if (Runtime::legion_spy_enabled)
+          if (runtime->legion_spy_enabled)
             manager->log_instance_creation(creator_id, processor, regions);
           record_created_instance(manager, acquire, mapper_id, processor,
                                   priority, remote);
@@ -3567,7 +3572,7 @@ namespace Legion {
           rez.serialize(&result);
         }
         runtime->send_instance_request(owner_space, rez);
-        ready_event.lg_wait();
+        ready_event.wait();
         // When the event is triggered, everything will be filled in
       }
       else
@@ -3577,7 +3582,7 @@ namespace Legion {
                                                      regions, creator_id);
         if (manager != NULL)
         {
-          if (Runtime::legion_spy_enabled)
+          if (runtime->legion_spy_enabled)
             manager->log_instance_creation(creator_id, processor, regions);
           record_created_instance(manager, acquire, mapper_id, processor,
                                   priority, remote);
@@ -3632,7 +3637,7 @@ namespace Legion {
           rez.serialize(&created);
         }
         runtime->send_instance_request(owner_space, rez);
-        ready_event.lg_wait();
+        ready_event.wait();
         // When the event is triggered, everything will be filled in
       }
       else
@@ -3648,7 +3653,7 @@ namespace Legion {
                                                        regions, creator_id);
           if (manager != NULL)
           {
-            if (Runtime::legion_spy_enabled)
+            if (runtime->legion_spy_enabled)
               manager->log_instance_creation(creator_id, processor, regions);
             // We're definitely going to succeed one way or another
             success = true;
@@ -3715,7 +3720,7 @@ namespace Legion {
           rez.serialize(&created);
         }
         runtime->send_instance_request(owner_space, rez);
-        ready_event.lg_wait();
+        ready_event.wait();
         // When the event is triggered, everything will be filled
       }
       else
@@ -3731,7 +3736,7 @@ namespace Legion {
                                                        regions, creator_id);
           if (manager != NULL)
           {
-            if (Runtime::legion_spy_enabled)
+            if (runtime->legion_spy_enabled)
               manager->log_instance_creation(creator_id, processor, regions);
             // If we make it here we're definitely going to succeed
             success = true;
@@ -3787,7 +3792,7 @@ namespace Legion {
           rez.serialize(&result);
         }
         runtime->send_instance_request(owner_space, rez);
-        ready_event.lg_wait();
+        ready_event.wait();
         // When the event is triggered, everything will be filled
       }
       else
@@ -3831,7 +3836,7 @@ namespace Legion {
           rez.serialize(&result);
         }
         runtime->send_instance_request(owner_space, rez);
-        ready_event.lg_wait();
+        ready_event.wait();
         // When the event is triggered, everything will be filled
       }
       else
@@ -3964,7 +3969,7 @@ namespace Legion {
         // is if we are waiting for a confirmation of setting max priority
         if (never_gc_wait.exists())
         {
-          never_gc_wait.lg_wait();
+          never_gc_wait.wait();
           bool remove_duplicate = false;
           if (success)
           {
@@ -4431,7 +4436,7 @@ namespace Legion {
       WrapperReferenceMutator mutator(preconditions);
       // If the manager isn't ready yet, then we need to wait for it
       if (manager_ready.exists())
-        manager_ready.lg_wait();
+        manager_ready.wait();
       // If we acquired on the owner node, add our own local reference
       // and then remove the remote DID
       if (acquire)
@@ -5615,6 +5620,10 @@ namespace Legion {
       // Only need to write the processor once
       *((LgTaskID*)sending_buffer) = LG_MESSAGE_ID;
       sending_index = sizeof(LgTaskID);
+      // We pack a dummy entry for provenance here as we store it
+      // separately for each message
+      *((UniqueID*)(((char*)sending_buffer)+sending_index)) = 0;
+      sending_index += sizeof(UniqueID);
       *((AddressSpaceID*)
           (((char*)sending_buffer)+sending_index)) = local_address_space;
       sending_index += sizeof(local_address_space);
@@ -5661,20 +5670,22 @@ namespace Legion {
       // including the overhead for the message: kind and size
       size_t buffer_size = rez.get_used_bytes();
       const char *buffer = (const char*)rez.get_buffer();
+      const size_t header_size = 
+        sizeof(k) + sizeof(task_profiling_provenance) + sizeof(buffer_size);
       // Need to hold the lock when manipulating the buffer
       AutoLock s_lock(send_lock);
-      if ((sending_index+buffer_size+sizeof(k)+sizeof(buffer_size)) > 
-          sending_buffer_size)
+      if ((sending_index+header_size+buffer_size) > sending_buffer_size)
       {
         // Make sure we can at least get the meta-data into the buffer
         // Since there is no partial data we can fake the flush
-        if ((sending_buffer_size - sending_index) <= 
-            (sizeof(k)+sizeof(buffer_size)))
+        if ((sending_buffer_size - sending_index) <= header_size)
           send_message(true/*complete*/, runtime, target, response, shutdown);
         // Now can package up the meta data
         packaged_messages++;
         *((MessageKind*)(sending_buffer+sending_index)) = k;
         sending_index += sizeof(k);
+        *((UniqueID*)(sending_buffer+sending_index)) =task_profiling_provenance;
+        sending_index += sizeof(task_profiling_provenance);
         *((size_t*)(sending_buffer+sending_index)) = buffer_size;
         sending_index += sizeof(buffer_size);
         while (buffer_size > 0)
@@ -5702,6 +5713,8 @@ namespace Legion {
         // Package up the kind and the size first
         *((MessageKind*)(sending_buffer+sending_index)) = k;
         sending_index += sizeof(k);
+        *((UniqueID*)(sending_buffer+sending_index)) =task_profiling_provenance;
+        sending_index += sizeof(task_profiling_provenance);
         *((size_t*)(sending_buffer+sending_index)) = buffer_size;
         sending_index += sizeof(buffer_size);
         // Then copy over the buffer
@@ -5730,8 +5743,8 @@ namespace Legion {
         partial = false;
       }
       // Save the header and the number of messages into the buffer
-      const size_t base_size = sizeof(LgTaskID) + sizeof(AddressSpaceID) 
-                                + sizeof(VirtualChannelKind);
+      const size_t base_size = sizeof(LgTaskID) + sizeof(UniqueID) + 
+        sizeof(AddressSpaceID) + sizeof(VirtualChannelKind);
       *((MessageHeader*)(sending_buffer + base_size)) = header;
       *((unsigned*)(sending_buffer + base_size + sizeof(header))) = 
                                                             packaged_messages;
@@ -5741,8 +5754,8 @@ namespace Legion {
       // see waits on message handlers
       // Note that we don't profile on shutdown messages or we would 
       // never actually finish running
-      if (!shutdown && (Runtime::num_profiling_nodes > 0) && 
-          (runtime->find_address_space(target) < Runtime::num_profiling_nodes))
+      if (!shutdown && (runtime->num_profiling_nodes > 0) && 
+          (runtime->find_address_space(target) < runtime->num_profiling_nodes))
       {
         Realm::ProfilingRequestSet requests;
         LegionProfiler::add_message_request(requests, target);
@@ -5882,6 +5895,9 @@ namespace Legion {
           observed_recent = true;
         args += sizeof(kind);
         arglen -= sizeof(kind);
+        task_profiling_provenance = *((const UniqueID*)args);
+        args += sizeof(task_profiling_provenance);
+        arglen -= sizeof(task_profiling_provenance);
         size_t message_size = *((const size_t*)args);
         args += sizeof(message_size);
         arglen -= sizeof(message_size);
@@ -6913,7 +6929,7 @@ namespace Legion {
         else
           args.phase = phase;
         runtime->issue_runtime_meta_task(args, LG_LOW_PRIORITY,
-                                         NULL, precondition);
+                                         precondition);
       }
     }
 
@@ -7055,8 +7071,7 @@ namespace Legion {
         it++;
         bool done = (it == collections.end());
         RtEvent e = runtime->issue_runtime_meta_task(args,
-                                         LG_THROUGHPUT_WORK_PRIORITY, NULL,
-                                         precondition);
+                LG_THROUGHPUT_WORK_PRIORITY, precondition);
         events.insert(e);
         if (done)
           break;
@@ -7077,6 +7092,84 @@ namespace Legion {
       LogicalView::handle_deferred_collect(args->view, finder->second);
       // See if we are done
       return (__sync_add_and_fetch(&remaining, -1) == 0);
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Pending Initializations
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    PendingInitializationFunction::PendingInitializationFunction(
+                                          Processor::TaskFuncID fid,
+                                          Processor::Kind kind,
+                                          CodeDescriptor *desc,
+                                          const void *udata, size_t udata_size)
+      : func_id(fid), proc_kind(kind), realm_desc(desc)
+    //--------------------------------------------------------------------------
+    {
+      if (udata != NULL)
+      {
+        user_data_size = udata_size;
+        user_data = malloc(user_data_size);
+        memcpy(user_data,udata,user_data_size);
+      }
+      else
+      {
+        user_data_size = 0;
+        user_data = NULL;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    PendingInitializationFunction::PendingInitializationFunction(
+                                       const PendingInitializationFunction &rhs)
+      : func_id(rhs.func_id), proc_kind(rhs.proc_kind)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    PendingInitializationFunction::~PendingInitializationFunction(void)
+    //--------------------------------------------------------------------------
+    {
+      if (user_data != NULL)
+        free(user_data);
+      if (realm_desc)
+        delete realm_desc;
+    }
+
+    //--------------------------------------------------------------------------
+    PendingInitializationFunction& PendingInitializationFunction::operator=(
+                                       const PendingInitializationFunction &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent PendingInitializationFunction::register_function(Processor proc,
+                                                             Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(proc.kind() == proc_kind);
+#endif
+      Realm::ProfilingRequestSet no_requests;
+      return RtEvent(proc.register_task(func_id, *realm_desc, no_requests,
+                      &runtime, sizeof(runtime)));
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent PendingInitializationFunction::perform_function(
+                                      RealmRuntime &realm, RtEvent precondition)
+    //--------------------------------------------------------------------------
+    {
+      return RtEvent(realm.collective_spawn_by_kind(proc_kind, func_id,
+            user_data, user_data_size, false/*one per node*/, precondition));
     }
 
     /////////////////////////////////////////////////////////////
@@ -7178,7 +7271,7 @@ namespace Legion {
         memcpy(name_copy, name, name_size);
         semantic_infos[NAME_SEMANTIC_TAG] = 
           SemanticInfo(name_copy, name_size, false/*mutable*/);
-        if (Runtime::legion_spy_enabled)
+        if (runtime->legion_spy_enabled)
           LegionSpy::log_task_name(task_id, name);
         // Also set the initial name to be safe
         memcpy(initial_name, name, name_size);
@@ -7346,7 +7439,7 @@ namespace Legion {
         runtime->send_variant_request(owner_space, rez);
       }
       // Wait for the results
-      wait_on.lg_wait();
+      wait_on.wait();
       // Now we can re-take the lock and find our variant
       AutoLock t_lock(task_lock,1,false/*exclusive*/);
       std::map<VariantID,VariantImpl*>::const_iterator finder = 
@@ -7507,7 +7600,7 @@ namespace Legion {
               RtUserEvent wait_on = Runtime::create_rt_user_event();
               send_semantic_info(owner_space, tag, buffer, size, 
                                  is_mutable, wait_on);
-              wait_on.lg_wait();
+              wait_on.wait();
             }
             else
               send_semantic_info(owner_space, tag, buffer, size, is_mutable);
@@ -7586,7 +7679,7 @@ namespace Legion {
         // Send a request if necessary
         if (is_remote && request.exists())
           send_semantic_request(owner_space, tag, can_fail, wait_until,request);
-        wait_on.lg_wait();
+        wait_on.wait();
       }
       // When we wake up, we should be able to find everything
       AutoLock t_lock(task_lock,1,false/*exclusive*/);
@@ -7689,7 +7782,7 @@ namespace Legion {
           args.tag = tag;
           args.source = target;
           runtime->issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY, 
-                                           NULL/*op*/, precondition);
+                                           precondition);
         }
       }
       else
@@ -7802,7 +7895,7 @@ namespace Legion {
       // Perform the registration, the normal case is not to have separate
       // runtime instances, but if we do have them, we only register on
       // the local processor
-      if (!Runtime::separate_runtime_instances)
+      if (!runtime->separate_runtime_instances)
       {
         Realm::ProfilingRequestSet profiling_requests;
         ready_event = ApEvent(Processor::register_task_by_kind(
@@ -7841,7 +7934,7 @@ namespace Legion {
                       "permitted to be both inner and leaf tasks "
                       "simultaneously.", variant_name, vid,
                       owner->get_name(), owner->task_id)
-      if (Runtime::record_registration)
+      if (runtime->record_registration)
         log_run.print("Task variant %s of task %s (ID %d) has Realm ID %ld",
               variant_name, owner->get_name(), owner->task_id, descriptor_id);
     }
@@ -8023,8 +8116,8 @@ namespace Legion {
     {
       std::vector<AddressSpaceID> targets;
       std::vector<AddressSpaceID> locals;
-      const AddressSpaceID start = local * Runtime::legion_collective_radix + 1;
-      for (int idx = 0; idx < Runtime::legion_collective_radix; idx++)
+      const AddressSpaceID start = local * runtime->legion_collective_radix + 1;
+      for (int idx = 0; idx < runtime->legion_collective_radix; idx++)
       {
         AddressSpaceID next = start+idx;
         if (next >= runtime->total_address_spaces)
@@ -8570,7 +8663,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // These can be shared in the case of multiple runtime instances
-      if (!Runtime::separate_runtime_instances)
+      if (!implicit_runtime->separate_runtime_instances)
         delete functor;
     }
 
@@ -8938,7 +9031,8 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    Runtime::Runtime(Machine m, AddressSpaceID unique,
+    Runtime::Runtime(Machine m, const LegionConfiguration &config,
+                     InputArgs args, AddressSpaceID unique,
                      const std::set<Processor> &locals,
                      const std::set<Processor> &local_utilities,
                      const std::set<AddressSpaceID> &address_spaces,
@@ -8948,8 +9042,52 @@ namespace Legion {
         machine(m), address_space(unique), 
         total_address_spaces(address_spaces.size()),
         runtime_stride(address_spaces.size()), profiler(NULL),
-        forest(new RegionTreeForest(this)), 
-        has_explicit_utility_procs(!local_utilities.empty()), 
+        forest(new RegionTreeForest(this)), virtual_manager(NULL), 
+        has_explicit_utility_procs(!local_utilities.empty()), input_args(args),
+        initial_task_window_size(config.initial_task_window_size),
+        initial_task_window_hysteresis(config.initial_task_window_hysteresis),
+        initial_tasks_to_schedule(config.initial_tasks_to_schedule),
+        max_message_size(config.max_message_size),
+        gc_epoch_size(config.gc_epoch_size),
+        max_local_fields(config.max_local_fields),
+        program_order_execution(config.program_order_execution),
+        dump_physical_traces(config.dump_physical_traces),
+        no_tracing(config.no_tracing),
+        no_physical_tracing(config.no_physical_tracing),
+        verify_disjointness(config.verify_disjointness),
+        runtime_warnings(config.runtime_warnings),
+        separate_runtime_instances(config.separate_runtime_instances),
+        record_registration(config.record_registration),
+        stealing_disabled(config.stealing_disabled),
+        resilient_mode(config.resilient_mode),
+        unsafe_launch(config.unsafe_launch),
+        unsafe_mapper(config.unsafe_mapper),
+        dynamic_independence_tests(config.dynamic_independence_tests),
+#ifdef LEGION_SPY
+        legion_spy_enabled(true),
+#else
+        legion_spy_enabled(config.legion_spy_enabled),
+#endif
+        enable_test_mapper(config.enable_test_mapper),
+        legion_ldb_enabled(config.legion_ldb_enabled),
+        replay_file(config.replay_file),
+#ifdef DEBUG_LEGION
+        logging_region_tree_state(config.logging_region_tree_state),
+        verbose_logging(config.verbose_logging),
+        logical_logging_only(config.logical_logging_only),
+        physical_logging_only(config.physical_logging_only),
+        check_privileges(config.check_privileges),
+#endif
+        num_profiling_nodes(config.num_profiling_nodes),
+        legion_collective_radix(config.legion_collective_radix),
+        legion_collective_log_radix(config.legion_collective_log_radix),
+        legion_collective_stages(config.legion_collective_stages),
+        legion_collective_last_radix(config.legion_collective_last_radix),
+        legion_collective_last_log_radix(
+                                 config.legion_collective_last_log_radix),
+        legion_collective_participating_spaces(
+                           config.legion_collective_participating_spaces),
+        mpi_rank_table((mpi_rank >= 0) ? new MPIRankTable(this) : NULL),
         prepared_for_shutdown(false),
         total_outstanding_tasks(0), outstanding_top_level_tasks(0), 
         local_procs(locals), local_utils(local_utilities),
@@ -8962,7 +9100,8 @@ namespace Legion {
         unique_operation_id((unique == 0) ? runtime_stride : unique),
         unique_field_id(MAX_APPLICATION_FIELD_ID + 
                         ((unique == 0) ? runtime_stride : unique)),
-        unique_code_descriptor_id(TASK_ID_AVAILABLE +
+        unique_code_descriptor_id(LG_TASK_ID_AVAILABLE +
+            get_pending_initialization_table().size() + 
                         ((unique == 0) ? runtime_stride : unique)),
         unique_constraint_id((unique == 0) ? runtime_stride : unique),
         unique_task_id(get_current_static_task_id()+unique),
@@ -9036,6 +9175,8 @@ namespace Legion {
       // Do some mixing
       for (int i = 0; i < 256; i++)
         nrand48(random_state);
+      if (address_space < num_profiling_nodes)
+        initialize_legion_prof(config);
 #ifdef DEBUG_LEGION
       if (logging_region_tree_state)
       {
@@ -9066,7 +9207,6 @@ namespace Legion {
 #ifdef DEBUG_SHUTDOWN_HANG
       outstanding_counts.resize(LG_LAST_TASK_ID, 0);
 #endif
-
       // Attach any accessor debug hooks for privilege or bounds checks
 #ifdef PRIVILEGE_CHECKS
       LegionRuntime::Accessor::DebugHooks::find_privilege_task_name =
@@ -9077,14 +9217,55 @@ namespace Legion {
 	&Legion::Internal::Runtime::check_bounds;
       LegionRuntime::Accessor::DebugHooks::check_bounds_dpoint =
 	&Legion::Internal::Runtime::check_bounds;
-#endif
+#endif 
     }
 
     //--------------------------------------------------------------------------
     Runtime::Runtime(const Runtime &rhs)
       : external(NULL), mapper_runtime(NULL), machine(rhs.machine), 
         address_space(0), total_address_spaces(0), runtime_stride(0), 
-        profiler(NULL), forest(NULL), has_explicit_utility_procs(false),
+        profiler(NULL), forest(NULL),
+        has_explicit_utility_procs(false), input_args(rhs.input_args), 
+        initial_task_window_size(rhs.initial_task_window_size),
+        initial_task_window_hysteresis(rhs.initial_task_window_hysteresis),
+        initial_tasks_to_schedule(rhs.initial_tasks_to_schedule),
+        max_message_size(rhs.max_message_size),
+        gc_epoch_size(rhs.gc_epoch_size), 
+        max_local_fields(rhs.max_local_fields),
+        program_order_execution(rhs.program_order_execution),
+        dump_physical_traces(rhs.dump_physical_traces),
+        no_tracing(rhs.no_tracing),
+        no_physical_tracing(rhs.no_physical_tracing),
+        verify_disjointness(rhs.verify_disjointness),
+        runtime_warnings(rhs.runtime_warnings),
+        separate_runtime_instances(rhs.separate_runtime_instances),
+        record_registration(rhs.record_registration),
+        stealing_disabled(rhs.stealing_disabled),
+        resilient_mode(rhs.resilient_mode),
+        unsafe_launch(rhs.unsafe_launch),
+        unsafe_mapper(rhs.unsafe_mapper),
+        dynamic_independence_tests(rhs.dynamic_independence_tests),
+        legion_spy_enabled(rhs.legion_spy_enabled),
+        enable_test_mapper(rhs.enable_test_mapper),
+        legion_ldb_enabled(rhs.legion_ldb_enabled),
+        replay_file(rhs.replay_file),
+#ifdef DEBUG_LEGION
+        logging_region_tree_state(rhs.logging_region_tree_state),
+        verbose_logging(rhs.verbose_logging),
+        logical_logging_only(rhs.logical_logging_only),
+        physical_logging_only(rhs.physical_logging_only),
+        check_privileges(rhs.check_privileges),
+#endif
+        num_profiling_nodes(rhs.num_profiling_nodes),
+        legion_collective_radix(rhs.legion_collective_radix),
+        legion_collective_log_radix(rhs.legion_collective_log_radix),
+        legion_collective_stages(rhs.legion_collective_stages),
+        legion_collective_last_radix(rhs.legion_collective_last_radix),
+        legion_collective_last_log_radix(
+                                 rhs.legion_collective_last_log_radix),
+        legion_collective_participating_spaces(
+                           rhs.legion_collective_participating_spaces),
+        mpi_rank_table(NULL),
         local_procs(rhs.local_procs), proc_spaces(rhs.proc_spaces)
     //--------------------------------------------------------------------------
     {
@@ -9113,6 +9294,8 @@ namespace Legion {
       delete forest;
       delete external;
       delete mapper_runtime;
+      if (mpi_rank_table != NULL)
+        delete mpi_rank_table;
       for (std::map<Processor,ProcessorManager*>::const_iterator it = 
             proc_managers.begin(); it != proc_managers.end(); it++)
       {
@@ -9354,7 +9537,7 @@ namespace Legion {
       }
       task_table.clear();
       // Skip this if we are in separate runtime mode
-      if (!Runtime::separate_runtime_instances)
+      if (!separate_runtime_instances)
       {
         for (std::deque<VariantImpl*>::const_iterator it = 
               variant_table.begin(); it != variant_table.end(); it++)
@@ -9364,7 +9547,7 @@ namespace Legion {
       }
       variant_table.clear();
       // Skip this if we are in separate runtime mode
-      if (!Runtime::separate_runtime_instances)
+      if (!separate_runtime_instances)
       {
         while (!layout_constraints_table.empty())
         {
@@ -9410,11 +9593,11 @@ namespace Legion {
         {
           (*it)->perform_registration(this);
           // avoid races on seaparte runtime instances
-          if (!Runtime::separate_runtime_instances)
+          if (!separate_runtime_instances)
             delete *it;
         }
         // avoid races on separate runtime instances
-        if (!Runtime::separate_runtime_instances)
+        if (!separate_runtime_instances)
           pending_variants.clear();
       }
     }
@@ -9440,7 +9623,7 @@ namespace Legion {
           register_layout(it->second, it->first);
         }
         // avoid races if we are doing separate runtime creation
-        if (!Runtime::separate_runtime_instances)
+        if (!separate_runtime_instances)
           pending_constraints.clear();
       }
     }
@@ -9465,7 +9648,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::initialize_legion_prof(void)
+    void Runtime::initialize_legion_prof(const LegionConfiguration &config)
     //--------------------------------------------------------------------------
     {
       LG_TASK_DESCRIPTIONS(lg_task_descriptions);
@@ -9475,15 +9658,11 @@ namespace Legion {
       // run on any processor that has a dedicated core which is either any
       // CPU processor a utility processor. There's no need to use GPU or
       // I/O processors since they share the same cores as the utility cores. 
-      Machine::ProcessorQuery local_prof_procs(machine);
-      local_prof_procs.local_address_space();
-      std::vector<Processor> prof_procs;
-      for (Machine::ProcessorQuery::iterator it = local_prof_procs.begin();
-            it != local_prof_procs.end(); it++)
+      std::vector<Processor> prof_procs(local_utils.begin(), local_utils.end());
+      for (std::set<Processor>::const_iterator it = local_procs.begin();
+            it != local_procs.end(); it++)
       {
         if (it->kind() == Processor::LOC_PROC)
-          prof_procs.push_back(*it);
-        else if (it->kind() == Processor::UTIL_PROC)
           prof_procs.push_back(*it);
       }
 #ifdef DEBUG_LEGION
@@ -9496,11 +9675,11 @@ namespace Legion {
                                     lg_task_descriptions,
                                     Operation::LAST_OP_KIND,
                                     Operation::op_names,
-                                    Runtime::serializer_type,
-                                    Runtime::prof_logfile,
+                                    config.serializer_type,
+                                    config.prof_logfile,
                                     total_address_spaces,
-                                    Runtime::prof_footprint_threshold,
-                                    Runtime::prof_target_latency);
+                                    config.prof_footprint_threshold,
+                                    config.prof_target_latency);
       LG_MESSAGE_DESCRIPTIONS(lg_message_descriptions);
       profiler->record_message_kinds(lg_message_descriptions, LAST_SEND_KIND);
       MAPPER_CALL_NAMES(lg_mapper_calls);
@@ -9513,10 +9692,186 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::log_machine(Machine machine) const
+    //--------------------------------------------------------------------------
+    {
+      if (!legion_spy_enabled)
+        return;
+      std::set<Processor::Kind> proc_kinds;
+      Machine::ProcessorQuery all_procs(machine);
+      // Log processors
+      for (Machine::ProcessorQuery::iterator it = all_procs.begin();
+            it != all_procs.end(); it++)
+      {
+        Processor::Kind kind = it->kind();
+        if (proc_kinds.find(kind) == proc_kinds.end())
+        {
+          switch (kind)
+          {
+            case Processor::NO_KIND:
+              {
+                LegionSpy::log_processor_kind(kind, "NoProc");
+                break;
+              }
+            case Processor::TOC_PROC:
+              {
+                LegionSpy::log_processor_kind(kind, "GPU");
+                break;
+              }
+            case Processor::LOC_PROC:
+              {
+                LegionSpy::log_processor_kind(kind, "CPU");
+                break;
+              }
+            case Processor::UTIL_PROC:
+              {
+                LegionSpy::log_processor_kind(kind, "Utility");
+                break;
+              }
+            case Processor::IO_PROC:
+              {
+                LegionSpy::log_processor_kind(kind, "IO");
+                break;
+              }
+            case Processor::PROC_GROUP:
+              {
+                LegionSpy::log_processor_kind(kind, "ProcGroup");
+                break;
+              }
+            case Processor::PROC_SET:
+              {
+                LegionSpy::log_processor_kind(kind, "ProcSet");
+                break;
+              }
+            case Processor::OMP_PROC:
+              {
+                LegionSpy::log_processor_kind(kind, "OpenMP");
+                break;
+              }
+            case Processor::PY_PROC:
+              {
+                LegionSpy::log_processor_kind(kind, "Python");
+                break;
+              }
+            default:
+              assert(false); // unknown processor kind
+          }
+          proc_kinds.insert(kind);
+        }
+        LegionSpy::log_processor(it->id, kind);
+      }
+      // Log memories
+      std::set<Memory::Kind> mem_kinds;
+      Machine::MemoryQuery all_mems(machine);
+      for (Machine::MemoryQuery::iterator it = all_mems.begin();
+            it != all_mems.end(); it++)
+      {
+        Memory::Kind kind = it->kind();
+        if (mem_kinds.find(kind) == mem_kinds.end())
+        {
+          switch (kind)
+          {
+            case GLOBAL_MEM:
+              {
+                LegionSpy::log_memory_kind(kind, "GASNet");
+                break;
+              }
+            case SYSTEM_MEM:
+              {
+                LegionSpy::log_memory_kind(kind, "System");
+                break;
+              }
+            case REGDMA_MEM:
+              {
+                LegionSpy::log_memory_kind(kind, "Registered");
+                break;
+              }
+            case SOCKET_MEM:
+              {
+                LegionSpy::log_memory_kind(kind, "NUMA");
+                break;
+              }
+            case Z_COPY_MEM:
+              {
+                LegionSpy::log_memory_kind(kind, "Zero-Copy");
+                break;
+              }
+            case GPU_FB_MEM:
+              {
+                LegionSpy::log_memory_kind(kind, "Framebuffer");
+                break;
+              }
+            case DISK_MEM:
+              {
+                LegionSpy::log_memory_kind(kind, "Disk");
+                break;
+              }
+            case HDF_MEM:
+              {
+                LegionSpy::log_memory_kind(kind, "HDF");
+                break;
+              }
+            case FILE_MEM:
+              {
+                LegionSpy::log_memory_kind(kind, "File");
+                break;
+              }
+            case LEVEL3_CACHE:
+              {
+                LegionSpy::log_memory_kind(kind, "L3");
+                break;
+              }
+            case LEVEL2_CACHE:
+              {
+                LegionSpy::log_memory_kind(kind, "L2");
+                break;
+              }
+            case LEVEL1_CACHE:
+              {
+                LegionSpy::log_memory_kind(kind, "L1");
+                break;
+              }
+            default:
+              assert(false); // unknown memory kind
+          }
+        }
+        LegionSpy::log_memory(it->id, it->capacity(), it->kind());
+      }
+      // Log Proc-Mem Affinity
+      Machine::ProcessorQuery all_procs2(machine);
+      for (Machine::ProcessorQuery::iterator pit = all_procs2.begin();
+            pit != all_procs2.end(); pit++)
+      {
+        std::vector<ProcessorMemoryAffinity> affinities;
+        machine.get_proc_mem_affinity(affinities, *pit);
+        for (std::vector<ProcessorMemoryAffinity>::const_iterator it = 
+              affinities.begin(); it != affinities.end(); it++)
+        {
+          LegionSpy::log_proc_mem_affinity(pit->id, it->m.id, 
+                                           it->bandwidth, it->latency);
+        }
+      }
+      // Log Mem-Mem Affinity
+      Machine::MemoryQuery all_mems2(machine);
+      for (Machine::MemoryQuery::iterator mit = all_mems2.begin();
+            mit != all_mems2.begin(); mit++)
+      {
+        std::vector<MemoryMemoryAffinity> affinities;
+        machine.get_mem_mem_affinity(affinities, *mit);
+        for (std::vector<MemoryMemoryAffinity>::const_iterator it = 
+              affinities.begin(); it != affinities.end(); it++)
+        {
+          LegionSpy::log_mem_mem_affinity(it->m1.id, it->m2.id, 
+                                          it->bandwidth, it->latency);
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::initialize_mappers(void)
     //--------------------------------------------------------------------------
     {
-      if (Runtime::replay_file == NULL) // This is the normal path
+      if (replay_file == NULL) // This is the normal path
       {
         if (enable_test_mapper)
         {
@@ -9595,21 +9950,140 @@ namespace Legion {
           }
         }
       }
+      
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::startup_mappers(void)
+    void Runtime::initialize_virtual_manager(void)
     //--------------------------------------------------------------------------
     {
-      for (std::map<Processor,ProcessorManager*>::const_iterator it = 
-            proc_managers.begin(); it != proc_managers.end(); it++)
-        it->second->startup_mappers();
+#ifdef DEBUG_LEGION
+      assert(virtual_manager == NULL);
+#endif
+      // make a layout constraints
+      LayoutConstraintSet constraint_set;
+      constraint_set.add_constraint(
+          SpecializedConstraint(VIRTUAL_SPECIALIZE));
+      LayoutConstraints *constraints = 
+        register_layout(FieldSpace::NO_SPACE, constraint_set);
+      FieldMask all_ones(LEGION_FIELD_MASK_FIELD_ALL_ONES);
+      std::vector<unsigned> mask_index_map;
+      std::vector<CustomSerdezID> serdez;
+      std::vector<std::pair<FieldID,size_t> > field_sizes;
+      LayoutDescription *layout = new LayoutDescription(all_ones, constraints);
+      PointerConstraint pointer_constraint(Memory::NO_MEMORY, 0);
+      virtual_manager = 
+        new VirtualManager(forest, layout, pointer_constraint, 0/*did*/);
+      virtual_manager->add_base_resource_ref(NEVER_GC_REF);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::initialize_runtime(void)
+    //--------------------------------------------------------------------------
+    {
+      register_static_variants();
+      register_static_constraints();
+      register_static_projections(); 
+      initialize_virtual_manager();
+      // Before doing the mapper initialization we have to construct
+      // any MPI rank tables that we have
+      if (mpi_rank_table != 0)
+      {
+#ifdef DEBUG_LEGION
+        assert(!separate_runtime_instances);
+#endif
+        mpi_rank_table->perform_rank_exchange();
+      }
+      initialize_mappers();
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::startup_runtime(RtEvent top_level_precondition)
+    //--------------------------------------------------------------------------
+    {
+      // If stealing is not disabled then startup our mappers
+      if (!stealing_disabled)
+      {
+        for (std::map<Processor,ProcessorManager*>::const_iterator it = 
+              proc_managers.begin(); it != proc_managers.end(); it++)
+          it->second->startup_mappers();
+      }
+      // If we are runtime 0 then we launch the top-level task
+      if (address_space == 0)
+      {
+#ifdef DEBUG_LEGION
+        assert(!local_procs.empty());
+#endif 
+        // Find a target processor, we'll prefer a CPU processor for
+        // backwards compatibility, but will take anything we get
+        Processor target = Processor::NO_PROC;
+        for (std::set<Processor>::const_iterator it = 
+              local_procs.begin(); it != local_procs.end(); it++)
+        {
+          if (it->kind() == Processor::LOC_PROC)
+          {
+            target = *it;
+            break;
+          }
+          else if (!target.exists())
+            target = *it;
+        }
+#ifdef DEBUG_LEGION
+        assert(target.exists());
+#endif
+        // Get an individual task to be the top-level task
+        IndividualTask *top_task = get_available_individual_task();
+        // Get a remote task to serve as the top of the top-level task
+        TopLevelContext *top_context = 
+          new TopLevelContext(this, get_unique_operation_id());
+        // Add a reference to the top level context
+        top_context->add_reference();
+        // Set the executing processor
+        top_context->set_executing_processor(target);
+        TaskLauncher launcher(Runtime::legion_main_id, TaskArgument());
+        // Mark that this task is the top-level task
+        top_task->set_top_level();
+        top_task->initialize_task(top_context, launcher, 
+                                  false/*check priv*/, false/*track parent*/);
+        // Set up the input arguments
+        top_task->arglen = sizeof(InputArgs);
+        top_task->args = malloc(top_task->arglen);
+        memcpy(top_task->args, &input_args, top_task->arglen);
+        // Set this to be the current processor
+        top_task->set_current_proc(target);
+        top_task->select_task_options();
+        if (legion_spy_enabled)
+        {
+          log_machine(machine);
+          LegionSpy::log_top_level_task(Runtime::legion_main_id,
+                                        top_task->get_unique_id(),
+                                        top_task->get_task_name());
+        }
+        increment_outstanding_top_level_tasks();
+        // Launch a task to deactivate the top-level context
+        // when the top-level task is done
+        TopFinishArgs args;
+        args.ctx = top_context;
+        ApEvent pre = top_task->get_task_completion();
+        issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY,
+                                Runtime::protect_event(pre));
+        // Put the task in the ready queue
+        add_to_ready_queue(target, top_task, top_level_precondition);
+      }
     }
 
     //--------------------------------------------------------------------------
     void Runtime::finalize_runtime(void)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(virtual_manager != NULL);
+#endif
+      if (virtual_manager->remove_base_resource_ref(NEVER_GC_REF))
+      {
+        delete virtual_manager;
+        virtual_manager = NULL;
+      }
       if (profiler != NULL)
       {
         // Have the memory managers for deletion of all their instances
@@ -9620,68 +10094,6 @@ namespace Legion {
       }
     }
     
-    //--------------------------------------------------------------------------
-    void Runtime::launch_top_level_task(void)
-    //--------------------------------------------------------------------------
-    {
-      // Grab the first local processor to be the initial target
-#ifdef DEBUG_LEGION
-      assert(!local_procs.empty());
-#endif
-      Processor target = *(local_procs.begin());
-      // For backwards compatibility right now we'll make sure this
-      // is a CPU processor if possible
-      if (target.kind() != Processor::LOC_PROC)
-      {
-        for (std::set<Processor>::const_iterator it = 
-              local_procs.begin(); it != local_procs.end(); it++)
-        {
-          if (it->kind() != Processor::LOC_PROC)
-            continue;
-          target = *it;
-          break;
-        }
-      }
-      // Get an individual task to be the top-level task
-      IndividualTask *top_task = get_available_individual_task();
-      // Get a remote task to serve as the top of the top-level task
-      TopLevelContext *top_context = 
-        new TopLevelContext(this, get_unique_operation_id());
-      // Add a reference to the top level context
-      top_context->add_reference();
-      // Set the executing processor
-      top_context->set_executing_processor(target);
-      TaskLauncher launcher(Runtime::legion_main_id, TaskArgument());
-      // Mark that this task is the top-level task
-      top_task->set_top_level();
-      top_task->initialize_task(top_context, launcher, 
-                                false/*check priv*/, false/*track parent*/);
-      // Set up the input arguments
-      top_task->arglen = sizeof(InputArgs);
-      top_task->args = malloc(top_task->arglen);
-      memcpy(top_task->args,&Runtime::get_input_args(),top_task->arglen);
-      // Set this to be the current processor
-      top_task->set_current_proc(target);
-      top_task->select_task_options();
-      if (legion_spy_enabled)
-      {
-        Runtime::log_machine(machine);
-        LegionSpy::log_top_level_task(Runtime::legion_main_id,
-                                      top_task->get_unique_id(),
-                                      top_task->get_task_name());
-      }
-      increment_outstanding_top_level_tasks();
-      // Launch a task to deactivate the top-level context
-      // when the top-level task is done
-      TopFinishArgs args;
-      args.ctx = top_context;
-      ApEvent pre = top_task->get_task_completion();
-      issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY, NULL,
-                              Runtime::protect_event(pre));
-      // Put the task in the ready queue
-      add_to_ready_queue(target, top_task);
-    }
-
     //--------------------------------------------------------------------------
     ApEvent Runtime::launch_mapper_task(Mapper *mapper, Processor proc, 
                                         Processor::TaskFuncID tid,
@@ -9714,7 +10126,7 @@ namespace Legion {
       args.event = result;
       args.ctx = map_context;
       ApEvent pre = f.impl->get_ready_event();
-      ApEvent post(issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY, NULL,
+      ApEvent post(issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY,
                                            Runtime::protect_event(pre)));
       // Chain the events properly
       Runtime::trigger_event(result, post);
@@ -11228,13 +11640,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::detach_external_resource(Context ctx, PhysicalRegion region)
+    Future Runtime::detach_external_resource(Context ctx, PhysicalRegion region)
     //--------------------------------------------------------------------------
     {
       if (ctx == DUMMY_CONTEXT)
         REPORT_DUMMY_CONTEXT(
             "Illegal dummy context detach external resource!");
-      ctx->detach_resource(region);
+      return ctx->detach_resource(region);
     }
 
     //--------------------------------------------------------------------------
@@ -11659,7 +12071,7 @@ namespace Legion {
       // Make this here to get a local reference on it now
       Future result_future(result);
       result->add_base_gc_ref(FUTURE_HANDLE_REF);
-      SelectTunableArgs args;
+      SelectTunableArgs args(ctx->get_owner_task()->get_unique_op_id());
       args.mapper_id = mid;
       args.tag = tag;
       args.tunable_id = tid;
@@ -11667,8 +12079,7 @@ namespace Legion {
         args.tunable_index = ctx->get_tunable_index();
       args.ctx = ctx;
       args.result = result;
-      issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY, 
-                              ctx->get_owner_task());
+      issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY); 
       ctx->end_runtime_call();
       return result_future;
     }
@@ -12036,7 +12447,7 @@ namespace Legion {
                       "ProjectionID %d has already been used in "
                       "the region projection table\n", pid)
       projection_functions[pid] = function;
-      if (Runtime::legion_spy_enabled)
+      if (legion_spy_enabled)
         LegionSpy::log_projection_function(pid, function->depth);
     }
 
@@ -12336,7 +12747,7 @@ namespace Legion {
       {
         RtUserEvent done_event = Runtime::create_rt_user_event();
         impl->broadcast_variant(done_event, address_space, 0);
-        done_event.lg_wait();
+        done_event.wait();
       }
       if (legion_spy_enabled)
         LegionSpy::log_task_variant(registrar.task_id, vid, 
@@ -12531,15 +12942,15 @@ namespace Legion {
       // First forward the message onto any remote nodes
       int base = index * radix;
       int init;
-      if (Runtime::separate_runtime_instances)
+      if (separate_runtime_instances)
       {
-        std::map<Processor,Runtime*>::const_iterator finder = 
-          runtime_map->find(source);
+        std::map<Processor,AddressSpaceID>::const_iterator finder = 
+          proc_spaces.find(source); 
 #ifdef DEBUG_LEGION
         // only works with a single process
-        assert(finder != runtime_map->end()); 
+        assert(finder != proc_spaces.end()); 
 #endif
-        init = finder->second->address_space;
+        init = finder->second;
       }
       else
         init = source.address_space();
@@ -15134,7 +15545,7 @@ namespace Legion {
         ApEvent term_event = op->get_completion_event();
         ctx->add_to_dependence_queue(op, precondition);
         ctx->begin_task_wait(true/*from runtime*/);
-        term_event.lg_wait();
+        term_event.wait();
         ctx->end_task_wait();
       }
       else
@@ -15151,10 +15562,8 @@ namespace Legion {
 #endif
       if (wait_on.exists() && !wait_on.has_triggered())
       {
-        DeferredEnqueueArgs args;
-        args.manager = proc_managers[p];
-        args.task = op;
-        issue_runtime_meta_task(args, LG_LATENCY_DEFERRED_PRIORITY, op,wait_on);
+        TaskOp::DeferredEnqueueArgs args(proc_managers[p], op);
+        issue_runtime_meta_task(args, LG_LATENCY_DEFERRED_PRIORITY, wait_on);
       }
       else
         proc_managers[p]->add_to_ready_queue(op);
@@ -15303,7 +15712,7 @@ namespace Legion {
         DeferredRecycleArgs deferred_recycle_args;
         deferred_recycle_args.did = did;
         return issue_runtime_meta_task(deferred_recycle_args, 
-                LG_THROUGHPUT_WORK_PRIORITY, NULL, recycle_event);
+                LG_THROUGHPUT_WORK_PRIORITY, recycle_event);
       }
       else
       {
@@ -15703,7 +16112,7 @@ namespace Legion {
                         get_unique_index_tree_id(), type_tag);
       DistributedID did = get_available_distributed_id();
       forest->create_index_space(result, realm_is, did);
-      if (Runtime::legion_spy_enabled)
+      if (legion_spy_enabled)
         LegionSpy::log_top_index_space(result.id);
       // Overwrite and leak for now, don't care too much as this 
       // should occur infrequently
@@ -15764,7 +16173,7 @@ namespace Legion {
         rez.serialize(grant_event);
         find_messenger(0)->send_message(rez, SEND_TOP_LEVEL_TASK_REQUEST,
                                         DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
-        grant_event.lg_wait();
+        grant_event.wait();
       }
       else
       {
@@ -15831,7 +16240,7 @@ namespace Legion {
             current_gc_epoch = NULL;
           }
         }
-        gc_done.lg_wait();
+        gc_done.wait();
       }
       else if ((phase == ShutdownManager::CHECK_SHUTDOWN) && 
                 !prepared_for_shutdown)
@@ -15917,7 +16326,7 @@ namespace Legion {
               it != all_procs.end(); it++)
         {
           shutdown_events.insert(
-              RtEvent(it->spawn(SHUTDOWN_TASK_ID, NULL, 0, empty_requests)));
+              RtEvent(it->spawn(LG_SHUTDOWN_TASK_ID, NULL, 0, empty_requests)));
         }
       }
       else
@@ -15931,7 +16340,7 @@ namespace Legion {
           if (shutdown_spaces.find(space) == shutdown_spaces.end())
           {
             shutdown_events.insert(
-                RtEvent(it->spawn(SHUTDOWN_TASK_ID, NULL, 0, empty_requests)));
+                RtEvent(it->spawn(LG_SHUTDOWN_TASK_ID,NULL,0,empty_requests)));
             shutdown_spaces.insert(space);
           }
         }
@@ -16791,7 +17200,7 @@ namespace Legion {
         // Add a reference to the newly created context
         result->add_reference();
         // Wait for it to be ready
-        ready_event.lg_wait();
+        ready_event.wait();
         // We already know the answer cause we sent the message
         return result;
       }
@@ -16799,7 +17208,7 @@ namespace Legion {
       if (return_null_if_not_found && !wait_on.has_triggered())
         return NULL;
       // We wait for the results to be ready
-      wait_on.lg_wait();
+      wait_on.wait();
       // When we wake up the context should be here
       AutoLock ctx_lock(context_lock,1,false/*exclusive*/);
       std::map<UniqueID,RemoteContext*>::const_iterator finder = 
@@ -17745,7 +18154,7 @@ namespace Legion {
         }
       }
       // If we didn't find it send a remote request for the constraints
-      wait_on.lg_wait();
+      wait_on.wait();
       // When we wake up, the result should be there
       AutoLock l_lock(layout_constraints_lock);
       std::map<LayoutConstraintID,LayoutConstraints*>::const_iterator
@@ -17761,76 +18170,18 @@ namespace Legion {
       return finder->second;
     }
 
-    /*static*/ Runtime* Runtime::the_runtime = NULL;
-    /*static*/ std::map<Processor,Runtime*>* Runtime::runtime_map = NULL;
+    /*static*/ Processor::TaskFuncID Runtime::legion_main_id = 0;
     /*static*/ std::vector<RegistrationCallbackFnptr> 
                                              Runtime::registration_callbacks;
-    /*static*/ Processor::TaskFuncID Runtime::legion_main_id = 0;
-    /*static*/ int Runtime::initial_task_window_size = 
-                                      DEFAULT_MAX_TASK_WINDOW;
-    /*static*/ unsigned Runtime::initial_task_window_hysteresis =
-                                      DEFAULT_TASK_WINDOW_HYSTERESIS;
-    /*static*/ unsigned Runtime::initial_tasks_to_schedule = 
-                                      DEFAULT_MIN_TASKS_TO_SCHEDULE;
-    /*static*/ unsigned Runtime::max_message_size = 
-                                      DEFAULT_MAX_MESSAGE_SIZE;
-    /*static*/ unsigned Runtime::gc_epoch_size = 
-                                      DEFAULT_GC_EPOCH_SIZE;
-    /*static*/ unsigned Runtime::max_local_fields = 
-                                      DEFAULT_LOCAL_FIELDS;
     /*static*/ bool Runtime::runtime_started = false;
     /*static*/ bool Runtime::runtime_backgrounded = false;
-    /*static*/ bool Runtime::runtime_warnings = false;
-    /*static*/ bool Runtime::separate_runtime_instances = false;
-    /*static*/ bool Runtime::record_registration = false;
-    /*sattic*/ bool Runtime::stealing_disabled = false;
-    /*static*/ bool Runtime::resilient_mode = false;
-    /*static*/ bool Runtime::unsafe_launch = false;
-#ifdef DEBUG_LEGION
-    /*static*/ bool Runtime::unsafe_mapper = false;
-#else
-    /*static*/ bool Runtime::unsafe_mapper = true;
-#endif
-    /*static*/ bool Runtime::dynamic_independence_tests = true;
-    /*static*/ bool Runtime::legion_spy_enabled = false;
-    /*static*/ bool Runtime::enable_test_mapper = false;
-    /*static*/ bool Runtime::legion_ldb_enabled = false;
-    /*static*/ const char* Runtime::replay_file = NULL;
-    /*static*/ int Runtime::legion_collective_radix = 
-                                     LEGION_COLLECTIVE_RADIX; 
-    /*static*/ int Runtime::legion_collective_log_radix = 0;
-    /*static*/ int Runtime::legion_collective_stages = 0;
-    /*static*/ int Runtime::legion_collective_participating_spaces = 0;
-    /*static*/ int Runtime::legion_collective_last_radix = 
-                                     LEGION_COLLECTIVE_RADIX;
-    /*static*/ int Runtime::legion_collective_last_log_radix = 0;
     /*static*/ int Runtime::mpi_rank = -1;
-    /*static*/ MPIRankTable* Runtime::mpi_rank_table = NULL;
     /*static*/ std::vector<MPILegionHandshake>* 
                       Runtime::pending_handshakes = NULL;
-    /*static*/ bool Runtime::program_order_execution = false;
-    /*static*/ bool Runtime::dump_physical_traces = false;
-    /*static*/ bool Runtime::no_tracing = false;
-    /*static*/ bool Runtime::no_physical_tracing = false;
-    /*static*/ bool Runtime::verify_disjointness = false;
 #ifdef DEBUG_LEGION
-    /*static*/ bool Runtime::logging_region_tree_state = false;
-    /*static*/ bool Runtime::verbose_logging = false;
-    /*static*/ bool Runtime::logical_logging_only = false;
-    /*static*/ bool Runtime::physical_logging_only = false;
-    /*static*/ bool Runtime::check_privileges = true;
-    /*static*/ bool Runtime::bit_mask_logging = false;
+#ifndef REALM_USE_SUBPROCESS
+    /*static*/ Runtime* Runtime::the_runtime = NULL;
 #endif
-    /*static*/ unsigned Runtime::num_profiling_nodes = 0;
-    /*static*/ const char* Runtime::serializer_type = "binary";
-    /*static*/ const char* Runtime::prof_logfile = NULL;
-    /*static*/ size_t Runtime::prof_footprint_threshold = 128 << 20;
-    /*static*/ size_t Runtime::prof_target_latency = 100;
-    /*static*/ bool Runtime::slow_debug_ok = false;
-#ifdef TRACE_ALLOCATION
-    /*static*/ std::map<AllocationType,Runtime::AllocationTracker>
-                                        Runtime::allocation_manager;
-    /*static*/ unsigned long long Runtime::allocation_tracing_count = 0;
 #endif
 
     //--------------------------------------------------------------------------
@@ -17846,29 +18197,6 @@ namespace Legion {
       LEGION_STATIC_ASSERT(DEFAULT_MIN_TASKS_TO_SCHEDULE > 0);
       LEGION_STATIC_ASSERT(DEFAULT_MAX_MESSAGE_SIZE > 0); 
 
-      // Need to pass argc and argv to low-level runtime before we can record 
-      // their values as they might be changed by GASNet or MPI or whatever.
-      // Note that the logger isn't initialized until after this call returns 
-      // which means any logging that occurs before this has undefined behavior.
-      RealmRuntime realm;
-#ifndef NDEBUG
-      bool ok = 
-#endif
-        realm.init(&argc, &argv);
-      assert(ok); 
-      
-      {
-	const ReductionOpTable& red_table = get_reduction_table();
-	for(ReductionOpTable::const_iterator it = red_table.begin();
-	    it != red_table.end();
-	    it++)
-	  realm.register_reduction(it->first, it->second);
-
-        const SerdezOpTable &serdez_table = get_serdez_table();
-        for (SerdezOpTable::const_iterator it = serdez_table.begin();
-              it != serdez_table.end(); it++)
-          realm.register_custom_serdez(it->first, it->second);
-      }
 #ifndef DISABLE_PARTITION_SHIM
       // Preregister any partition shim task variants we need 
       PartitionShim::ColorPoints<1>::register_task();
@@ -17884,243 +18212,283 @@ namespace Legion {
       PartitionShim::ColorRects<3,2>::register_task();
       PartitionShim::ColorRects<3,3>::register_task();
 #endif
-      
-      // Parse any inputs for the high level runtime
+
+      // We have to set these prior to starting Realm as once we start
+      // Realm it might fork child processes so they all need to see
+      // the same values for these static variables
+      runtime_started = true;
+      runtime_backgrounded = background;
+      // Make a copy of this here so we can delete the data
+      // structure before Realm does its subprocess stuff
+      std::vector<MPILegionHandshake> local_handshakes;
+      if (pending_handshakes != NULL)
       {
-#define INT_ARG(argname, varname) do { \
-        if(!strcmp((argv)[i], argname)) {		\
-          varname = atoi((argv)[++i]);		\
-          continue;					\
-        } } while(0)
+        local_handshakes.swap(*pending_handshakes);
+        delete pending_handshakes;
+        pending_handshakes = NULL;
+      }
 
-#define BOOL_ARG(argname, varname) do { \
-        if(!strcmp((argv)[i], argname)) {		\
-          varname = true;				\
-          continue;					\
-        } } while(0)
+      // Need to pass argc and argv to low-level runtime before we can record 
+      // their values as they might be changed by GASNet or MPI or whatever.
+      // Note that the logger isn't initialized until after this call returns 
+      // which means any logging that occurs before this has undefined behavior.
+      RealmRuntime realm;
+#ifndef NDEBUG
+      bool ok = 
+#endif
+        realm.init(&argc, &argv);
+      assert(ok); 
 
-        // Set these values here before parsing the input arguments
-        // so that we don't need to trust the C runtime to do 
-        // static initialization properly (always risky).
-        the_runtime = NULL;
-        runtime_map = NULL;
-        mpi_rank_table = NULL;
-        runtime_warnings = false;
-        separate_runtime_instances = false;
-        record_registration = false;
-        stealing_disabled = false;
-        resilient_mode = false;
-        unsafe_launch = false;
+      // If we have any pending MPI handshakes, we can initialize them now
+      if (!local_handshakes.empty())
+      {
+        for (std::vector<MPILegionHandshake>::const_iterator it = 
+              local_handshakes.begin(); it != local_handshakes.end(); it++)
+          it->impl->initialize();
+      }
+
+      // Parse the command line arguments
+      const LegionConfiguration config = parse_arguments(argc, argv);
+      // Perform any waits that the user requested before starting
+      if (config.delay_start > 0)
+          sleep(config.delay_start);
+      // Check for any slow configurations
+      if (!config.slow_config_ok)
+        perform_slow_config_checks(config);
+      // Configure legion spy if necessary
+      if (config.legion_spy_enabled)
+        LegionSpy::log_legion_spy_config();
+      // Construct our runtime objects 
+      Processor::Kind startup_kind = Processor::NO_KIND;
+      const RtEvent tasks_registered = configure_runtime(argc, argv,
+                                        config, realm, startup_kind);
 #ifdef DEBUG_LEGION
-        unsafe_mapper = false;
-#else
-        unsafe_mapper = true;
+      // Startup kind should be a CPU or a Utility processor
+      assert((startup_kind == Processor::LOC_PROC) ||
+              (startup_kind == Processor::UTIL_PROC));
 #endif
-        // We always turn this on as the Legion Spy will 
-        // now understand how to handle it.
-        dynamic_independence_tests = true;
-#ifdef LEGION_SPY
-        legion_spy_enabled = true;
-#else
-        legion_spy_enabled = false;
-#endif
-        enable_test_mapper = false;
-        legion_ldb_enabled = false;
-        replay_file = NULL;
-        initial_task_window_size = DEFAULT_MAX_TASK_WINDOW;
-        initial_task_window_hysteresis = DEFAULT_TASK_WINDOW_HYSTERESIS;
-        initial_tasks_to_schedule = DEFAULT_MIN_TASKS_TO_SCHEDULE;
-        max_message_size = DEFAULT_MAX_MESSAGE_SIZE;
-        gc_epoch_size = DEFAULT_GC_EPOCH_SIZE;
-        max_local_fields = DEFAULT_LOCAL_FIELDS;
-        program_order_execution = false;
-        dump_physical_traces = false;
-        no_tracing = false;
-        no_physical_tracing = false;
-        verify_disjointness = false;
-        num_profiling_nodes = 0;
-        serializer_type = "binary";
-        prof_logfile = NULL;
-        prof_footprint_threshold = 128 << 20;
-        prof_target_latency = 100;
-	slow_debug_ok = false;
-        legion_collective_radix = LEGION_COLLECTIVE_RADIX;
-        legion_collective_log_radix = 0;
-        legion_collective_stages = 0;
-        legion_collective_participating_spaces = 0;
-        legion_collective_last_radix = LEGION_COLLECTIVE_RADIX;
-        legion_collective_last_log_radix = 0;
-#ifdef DEBUG_LEGION
-        logging_region_tree_state = false;
-        verbose_logging = false;
-        logical_logging_only = false;
-        physical_logging_only = false;
-        check_privileges = true;
-        bit_mask_logging = false;
-#endif
-        unsigned delay_start = 0;
-        for (int i = 1; i < argc; i++)
+      // Need a barrier across all the processors to make sure that
+      // they have done all their startup code for now
+      // TODO: Remove this when realm gives us back a startup event
+      const RtEvent startup_barrier(realm.collective_spawn_by_kind(
+            Processor::NO_KIND, Processor::TASK_ID_PROCESSOR_NOP, NULL, 0,
+            false/*one per node*/, tasks_registered));
+      // Then perform the initialization task that will initialize
+      // all the runtime objects across the machine
+      RtEvent startup_precondition(realm.collective_spawn_by_kind(
+            (config.separate_runtime_instances ? Processor::NO_KIND :
+             startup_kind), LG_INITIALIZE_TASK_ID, NULL, 0,
+            !config.separate_runtime_instances, startup_barrier)); 
+      // See if we have any initialization functions we need to do
+      const std::deque<PendingInitializationFunction*> &pending_table = 
+        get_pending_initialization_table();
+      if (!pending_table.empty())
+      {
+        for (std::deque<PendingInitializationFunction*>::const_iterator it = 
+              pending_table.begin(); it != pending_table.end(); it++)
         {
-          BOOL_ARG("-lg:warn",runtime_warnings);
-          BOOL_ARG("-lg:separate",separate_runtime_instances);
-          BOOL_ARG("-lg:registration",record_registration);
-          BOOL_ARG("-lg:nosteal",stealing_disabled);
-          BOOL_ARG("-lg:resilient",resilient_mode);
-          BOOL_ARG("-lg:unsafe_launch",unsafe_launch);
-          BOOL_ARG("-lg:unsafe_mapper",unsafe_mapper);
-          if (!strcmp(argv[i],"-lg:safe_mapper"))
-            unsafe_mapper = false;
-          BOOL_ARG("-lg:inorder",program_order_execution);
-          BOOL_ARG("-lg:dump_physical_traces",dump_physical_traces);
-          BOOL_ARG("-lg:no_tracing",no_tracing);
-          BOOL_ARG("-lg:no_physical_tracing",no_physical_tracing);
-          BOOL_ARG("-lg:disjointness",verify_disjointness);
-          INT_ARG("-lg:window", initial_task_window_size);
-          INT_ARG("-lg:hysteresis", initial_task_window_hysteresis);
-          INT_ARG("-lg:sched", initial_tasks_to_schedule);
-          INT_ARG("-lg:message",max_message_size);
-          INT_ARG("-lg:epoch", gc_epoch_size);
-          INT_ARG("-lg:local", max_local_fields);
-          if (!strcmp(argv[i],"-lg:no_dyn"))
-            dynamic_independence_tests = false;
-          BOOL_ARG("-lg:spy",legion_spy_enabled);
-          BOOL_ARG("-lg:test",enable_test_mapper);
-          INT_ARG("-lg:delay", delay_start);
-          if (!strcmp(argv[i],"-lg:replay"))
-          {
-            replay_file = argv[++i];
-            continue;
-          }
-          if (!strcmp(argv[i],"-lg:ldb"))
-          {
-            replay_file = argv[++i];
-            legion_ldb_enabled = true;
-            continue;
-          }
-#ifdef DEBUG_LEGION
-          BOOL_ARG("-lg:tree",logging_region_tree_state);
-          BOOL_ARG("-lg:verbose",verbose_logging);
-          BOOL_ARG("-lg:logical_only",logical_logging_only);
-          BOOL_ARG("-lg:physical_only",physical_logging_only);
-          BOOL_ARG("-lg:bit_masks",bit_mask_logging);
-#else
-          if (!strcmp(argv[i],"-lg:tree"))
-          {
-            REPORT_LEGION_WARNING(LEGION_WARNING_REGION_TREE_STATE_LOGGING,
-                                  "Region tree state logging is "
-                          "disabled.  To enable region tree state logging "
-                                                  "compile in debug mode.");
-          }
-          if (!strcmp(argv[i],"-lg:disjointness"))
-          {
-            REPORT_LEGION_WARNING(LEGION_WARNING_DISJOINTNESS_VERIFICATION,
-                                  "Disjointness verification for "
-                      "partition creation is disabled.  To enable dynamic "
-                              "disjointness testing compile in debug mode.");
-          }
-#endif
-          INT_ARG("-lg:prof", num_profiling_nodes);
-          if (!strcmp(argv[i],"-lg:serializer"))
-          {
-            serializer_type = argv[++i];
-            continue;
-          }
-          if (!strcmp(argv[i],"-lg:prof_logfile"))
-          {
-            prof_logfile = argv[++i];
-            continue;
-          }
-          if (!strcmp(argv[i],"-lg:prof_footprint"))
-          {
-            prof_footprint_threshold = atoi(argv[++i]) << 20;
-            continue;
-          }
-          INT_ARG("-lg:prof_latency",prof_target_latency);
-
-	  BOOL_ARG("-lg:debug_ok",slow_debug_ok);
-          
-          // These are all the deprecated versions of these flag
-          BOOL_ARG("-hl:separate",separate_runtime_instances);
-          BOOL_ARG("-hl:registration",record_registration);
-          BOOL_ARG("-hl:nosteal",stealing_disabled);
-          BOOL_ARG("-hl:resilient",resilient_mode);
-          BOOL_ARG("-hl:unsafe_launch",unsafe_launch);
-          BOOL_ARG("-hl:unsafe_mapper",unsafe_mapper);
-          if (!strcmp(argv[i],"-hl:safe_mapper"))
-            unsafe_mapper = false;
-          BOOL_ARG("-hl:inorder",program_order_execution);
-          BOOL_ARG("-hl:dump_physical_traces",dump_physical_traces);
-          BOOL_ARG("-hl:no_tracing",no_tracing);
-          BOOL_ARG("-hl:no_physical_tracing",no_physical_tracing);
-          BOOL_ARG("-hl:disjointness",verify_disjointness);
-          INT_ARG("-hl:window", initial_task_window_size);
-          INT_ARG("-hl:hysteresis", initial_task_window_hysteresis);
-          INT_ARG("-hl:sched", initial_tasks_to_schedule);
-          INT_ARG("-hl:message",max_message_size);
-          INT_ARG("-hl:epoch", gc_epoch_size);
-          if (!strcmp(argv[i],"-hl:no_dyn"))
-            dynamic_independence_tests = false;
-          BOOL_ARG("-hl:spy",legion_spy_enabled);
-          BOOL_ARG("-hl:test",enable_test_mapper);
-          INT_ARG("-hl:delay", delay_start);
-          if (!strcmp(argv[i],"-hl:replay"))
-          {
-            replay_file = argv[++i];
-            continue;
-          }
-          if (!strcmp(argv[i],"-hl:ldb"))
-          {
-            replay_file = argv[++i];
-            legion_ldb_enabled = true;
-            continue;
-          }
-#ifdef DEBUG_LEGION
-          BOOL_ARG("-hl:tree",logging_region_tree_state);
-          BOOL_ARG("-hl:verbose",verbose_logging);
-          BOOL_ARG("-hl:logical_only",logical_logging_only);
-          BOOL_ARG("-hl:physical_only",physical_logging_only);
-          BOOL_ARG("-hl:bit_masks",bit_mask_logging);
-#else
-          if (!strcmp(argv[i],"-hl:tree"))
-          {
-            REPORT_LEGION_WARNING(LEGION_WARNING_REGION_TREE_STATE_LOGGING,
-                                  "Region tree state logging is "
-                          "disabled.  To enable region tree state logging "
-                                                  "compile in debug mode.");
-          }
-          if (!strcmp(argv[i],"-hl:disjointness"))
-          {
-            REPORT_LEGION_WARNING(LEGION_WARNING_DISJOINTNESS_VERIFICATION,
-                                  "Disjointness verification for "
-                      "partition creation is disabled.  To enable dynamic "
-                              "disjointness testing compile in debug mode.");
-          }
-#endif
-          INT_ARG("-hl:prof", num_profiling_nodes);
-          if (!strcmp(argv[i],"-hl:serializer"))
-          {
-            serializer_type = argv[++i];
-            continue;
-          }
-          if (!strcmp(argv[i],"-hl:prof_logfile"))
-          {
-            prof_logfile = argv[++i];
-            continue;
-          }
+          startup_precondition = 
+            (*it)->perform_function(realm, startup_precondition);
+          delete (*it);
         }
-        if (delay_start > 0)
-          sleep(delay_start);
+      }
+      // Make a user event that we will trigger once we the 
+      // startup task is done. If we're node 0 then we will use this
+      // as the precondition for launching the top-level task
+      RtUserEvent start_event = Runtime::create_rt_user_event();
+      // Now we can do one more spawn call to startup the runtime 
+      // across the machine since we know everything is initialized
+      const RtEvent runtime_ready(realm.collective_spawn_by_kind(
+              (config.separate_runtime_instances ? Processor::NO_KIND : 
+               startup_kind), LG_STARTUP_TASK_ID, 
+              &start_event, sizeof(start_event),
+              !config.separate_runtime_instances, startup_precondition));
+      // Trigger the start event when the runtime is ready
+      Runtime::trigger_event(start_event, runtime_ready);
+      // If we are supposed to background this thread, then we wait
+      // for the runtime to shutdown, otherwise we can now return
+      if (!background)
+        realm.wait_for_shutdown();
+      return 0;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ Runtime::LegionConfiguration Runtime::parse_arguments(int argc,
+                                                                    char **argv)
+    //--------------------------------------------------------------------------
+    {
+      LegionConfiguration config;
+#define INT_ARG(argname, varname) do {    \
+      if(!strcmp((argv)[i], argname)) {	  \
+        varname = atoi((argv)[++i]);	  \
+        continue;			  \
+      } } while(0)
+
+#define BOOL_ARG(argname, varname) do {   \
+      if(!strcmp((argv)[i], argname)) {	  \
+        varname = true;			  \
+        continue;			  \
+      } } while(0)
+      for (int i = 1; i < argc; i++)
+      {
+        BOOL_ARG("-lg:warn",config.runtime_warnings);
+        BOOL_ARG("-lg:separate",config.separate_runtime_instances);
+        BOOL_ARG("-lg:registration",config.record_registration);
+        BOOL_ARG("-lg:nosteal",config.stealing_disabled);
+        BOOL_ARG("-lg:resilient",config.resilient_mode);
+        BOOL_ARG("-lg:unsafe_launch",config.unsafe_launch);
+        BOOL_ARG("-lg:unsafe_mapper",config.unsafe_mapper);
+        if (!strcmp(argv[i],"-lg:safe_mapper"))
+          config.unsafe_mapper = false;
+        BOOL_ARG("-lg:inorder",config.program_order_execution);
+        BOOL_ARG("-lg:dump_physical_traces",config.dump_physical_traces);
+        BOOL_ARG("-lg:no_tracing",config.no_tracing);
+        BOOL_ARG("-lg:no_physical_tracing",config.no_physical_tracing);
+        BOOL_ARG("-lg:disjointness",config.verify_disjointness);
+        INT_ARG("-lg:window", config.initial_task_window_size);
+        INT_ARG("-lg:hysteresis", config.initial_task_window_hysteresis);
+        INT_ARG("-lg:sched", config.initial_tasks_to_schedule);
+        INT_ARG("-lg:message",config.max_message_size);
+        INT_ARG("-lg:epoch", config.gc_epoch_size);
+        INT_ARG("-lg:local", config.max_local_fields);
+        if (!strcmp(argv[i],"-lg:no_dyn"))
+          config.dynamic_independence_tests = false;
+        BOOL_ARG("-lg:spy",config.legion_spy_enabled);
+        BOOL_ARG("-lg:test",config.enable_test_mapper);
+        INT_ARG("-lg:delay", config.delay_start);
+        if (!strcmp(argv[i],"-lg:replay"))
+        {
+          config.replay_file = argv[++i];
+          continue;
+        }
+        if (!strcmp(argv[i],"-lg:ldb"))
+        {
+          config.replay_file = argv[++i];
+          config.legion_ldb_enabled = true;
+          continue;
+        }
+#ifdef DEBUG_LEGION
+        BOOL_ARG("-lg:tree",config.logging_region_tree_state);
+        BOOL_ARG("-lg:verbose",config.verbose_logging);
+        BOOL_ARG("-lg:logical_only",config.logical_logging_only);
+        BOOL_ARG("-lg:physical_only",config.physical_logging_only);
+#else
+        if (!strcmp(argv[i],"-lg:tree"))
+        {
+          REPORT_LEGION_WARNING(LEGION_WARNING_REGION_TREE_STATE_LOGGING,
+                                "Region tree state logging is "
+                        "disabled.  To enable region tree state logging "
+                                                "compile in debug mode.");
+        }
+        if (!strcmp(argv[i],"-lg:disjointness"))
+        {
+          REPORT_LEGION_WARNING(LEGION_WARNING_DISJOINTNESS_VERIFICATION,
+                                "Disjointness verification for "
+                    "partition creation is disabled.  To enable dynamic "
+                            "disjointness testing compile in debug mode.");
+        }
+#endif
+        INT_ARG("-lg:prof", config.num_profiling_nodes);
+        if (!strcmp(argv[i],"-lg:serializer"))
+        {
+          config.serializer_type = argv[++i];
+          continue;
+        }
+        if (!strcmp(argv[i],"-lg:prof_logfile"))
+        {
+          config.prof_logfile = argv[++i];
+          continue;
+        }
+        if (!strcmp(argv[i],"-lg:prof_footprint"))
+        {
+          config.prof_footprint_threshold = atoi(argv[++i]) << 20;
+          continue;
+        }
+        INT_ARG("-lg:prof_latency",config.prof_target_latency);
+
+        BOOL_ARG("-lg:debug_ok",config.slow_config_ok);
+        
+        // These are all the deprecated versions of these flag
+        BOOL_ARG("-hl:separate",config.separate_runtime_instances);
+        BOOL_ARG("-hl:registration",config.record_registration);
+        BOOL_ARG("-hl:nosteal",config.stealing_disabled);
+        BOOL_ARG("-hl:resilient",config.resilient_mode);
+        BOOL_ARG("-hl:unsafe_launch",config.unsafe_launch);
+        BOOL_ARG("-hl:unsafe_mapper",config.unsafe_mapper);
+        if (!strcmp(argv[i],"-hl:safe_mapper"))
+          config.unsafe_mapper = false;
+        BOOL_ARG("-hl:inorder",config.program_order_execution);
+        BOOL_ARG("-hl:disjointness",config.verify_disjointness);
+        INT_ARG("-hl:window", config.initial_task_window_size);
+        INT_ARG("-hl:hysteresis", config.initial_task_window_hysteresis);
+        INT_ARG("-hl:sched", config.initial_tasks_to_schedule);
+        INT_ARG("-hl:message",config.max_message_size);
+        INT_ARG("-hl:epoch", config.gc_epoch_size);
+        if (!strcmp(argv[i],"-hl:no_dyn"))
+          config.dynamic_independence_tests = false;
+        BOOL_ARG("-hl:spy",config.legion_spy_enabled);
+        BOOL_ARG("-hl:test",config.enable_test_mapper);
+        INT_ARG("-hl:delay", config.delay_start);
+        if (!strcmp(argv[i],"-hl:replay"))
+        {
+          config.replay_file = argv[++i];
+          continue;
+        }
+        if (!strcmp(argv[i],"-hl:ldb"))
+        {
+          config.replay_file = argv[++i];
+          config.legion_ldb_enabled = true;
+          continue;
+        }
+#ifdef DEBUG_LEGION
+        BOOL_ARG("-hl:tree",config.logging_region_tree_state);
+        BOOL_ARG("-hl:verbose",config.verbose_logging);
+        BOOL_ARG("-hl:logical_only",config.logical_logging_only);
+        BOOL_ARG("-hl:physical_only",config.physical_logging_only);
+#else
+        if (!strcmp(argv[i],"-hl:tree"))
+        {
+          REPORT_LEGION_WARNING(LEGION_WARNING_REGION_TREE_STATE_LOGGING,
+                                "Region tree state logging is "
+                        "disabled.  To enable region tree state logging "
+                                                "compile in debug mode.");
+        }
+        if (!strcmp(argv[i],"-hl:disjointness"))
+        {
+          REPORT_LEGION_WARNING(LEGION_WARNING_DISJOINTNESS_VERIFICATION,
+                                "Disjointness verification for "
+                    "partition creation is disabled.  To enable dynamic "
+                            "disjointness testing compile in debug mode.");
+        }
+#endif
+        INT_ARG("-hl:prof", config.num_profiling_nodes);
+        if (!strcmp(argv[i],"-hl:serializer"))
+        {
+          config.serializer_type = argv[++i];
+          continue;
+        }
+        if (!strcmp(argv[i],"-hl:prof_logfile"))
+        {
+          config.prof_logfile = argv[++i];
+          continue;
+        }
+      } 
 #undef INT_ARG
 #undef BOOL_ARG
 #ifdef DEBUG_LEGION
-        assert(initial_task_window_hysteresis <= 100);
-        assert(max_local_fields <= MAX_FIELDS);
+      assert(config.initial_task_window_hysteresis <= 100);
+      assert(config.max_local_fields <= MAX_FIELDS);
 #endif
-      }
-      if (legion_spy_enabled)
-        LegionSpy::log_legion_spy_config();
+      return config;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void Runtime::perform_slow_config_checks(
+                                              const LegionConfiguration &config)
+    //--------------------------------------------------------------------------
+    {
 #ifdef DEBUG_LEGION
-      if ((num_profiling_nodes > 0) && !slow_debug_ok)
+      if (config.num_profiling_nodes > 0)
       {
         // Give a massive warning about profiling with Legion Spy enabled
         for (int i = 0; i < 2; i++)
@@ -18145,7 +18513,7 @@ namespace Legion {
       }
 #endif
 #ifdef LEGION_SPY
-      if ((num_profiling_nodes > 0) && !slow_debug_ok)
+      if (config.num_profiling_nodes > 0)
       {
         // Give a massive warning about profiling with Legion Spy enabled
         for (int i = 0; i < 2; i++)
@@ -18169,7 +18537,7 @@ namespace Legion {
         sleep(5);
       }
 #else
-      if (legion_spy_enabled && (num_profiling_nodes > 0) && !slow_debug_ok)
+      if (config.legion_spy_enabled && (config.num_profiling_nodes > 0))
       {
         // Give a massive warning about profiling with Legion Spy enabled
         for (int i = 0; i < 2; i++)
@@ -18194,7 +18562,7 @@ namespace Legion {
       }
 #endif
 #ifdef BOUNDS_CHECKS
-      if ((num_profiling_nodes > 0) && !slow_debug_ok)
+      if (config.num_profiling_nodes > 0)
       {
         // Give a massive warning about profiling with Legion Spy enabled
         for (int i = 0; i < 2; i++)
@@ -18219,7 +18587,7 @@ namespace Legion {
       }
 #endif
 #ifdef PRIVILEGE_CHECKS
-      if ((num_profiling_nodes > 0) && !slow_debug_ok)
+      if (config.num_profiling_nodes > 0)
       {
         // Give a massive warning about profiling with Legion Spy enabled
         for (int i = 0; i < 2; i++)
@@ -18242,171 +18610,219 @@ namespace Legion {
         fflush(stderr);
         sleep(5);
       }
-#endif 
-      // Now we can set out input args
-      Runtime::get_input_args().argv = argv;
-      Runtime::get_input_args().argc = argc;
-      // For the moment, we only need to register our runtime tasks
-      // We'll register everything else once the Legion runtime starts
-      RtEvent tasks_registered = register_runtime_tasks(realm);
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ RtEvent Runtime::configure_runtime(int argc, char **argv,
+                             const LegionConfiguration &config,
+                             RealmRuntime &realm, Processor::Kind &startup_kind)
+    //--------------------------------------------------------------------------
+    {
       // Do some error checking in case we are running with separate instances
       Machine machine = Machine::get_machine();
-      if (separate_runtime_instances)
+      // Compute the data structures necessary for constructing a runtime 
+      std::set<Processor> local_procs;
+      std::set<Processor> local_util_procs;
+      // First we find all our local processors
       {
-#ifdef TRACE_ALLOCATION
-        REPORT_LEGION_ERROR(ERROR_TRACING_ALLOCATION_WITH_SEPARATE, 
-                      "Memory tracing not supported with "
-                      "separate runtime instances.")
-#endif
-        // Check for utility processors
-        Machine::ProcessorQuery util_procs(machine);
-        util_procs.local_address_space().only_kind(Processor::UTIL_PROC);
-        if (util_procs.count() > 0)
-          REPORT_LEGION_ERROR(ERROR_SEPARATE_UTILITY_PROCS, 
-                        "Separate runtime instances are not "
-                        "supported when running with explicit "
-                        "utility processors")
-#ifdef DEBUG_LEGION
-        assert(runtime_map == NULL);
-#endif
-        // Create the runtime map for everyone to use
-        runtime_map = new std::map<Processor,Runtime*>();
-        // Instantiate all the entries, but assign them to NULL
-        // so that the map doesn't change while parallel start-up
-        // is occurring
-        Machine::ProcessorQuery local_procs(machine);
-        local_procs.local_address_space();
-        for (Machine::ProcessorQuery::iterator it = local_procs.begin();
-              it != local_procs.end(); it++)
-        {
-          (*runtime_map)[*it] = NULL;
-        }
-      }
-      // Check for exceeding the local number of processors
-      // and also see if we are supposed to launch the top-level task
-      Processor top_level_proc = Processor::NO_PROC;
-      Processor::Kind startup_kind = Processor::NO_KIND;
-      {
-        Machine::ProcessorQuery local_procs(machine);
-        local_procs.local_address_space();
-        if (local_procs.count() > MAX_NUM_PROCS)
+        Machine::ProcessorQuery local_proc_query(machine);
+        local_proc_query.local_address_space();
+        // Check for exceeding the local number of processors
+        if (local_proc_query.count() > MAX_NUM_PROCS)
           REPORT_LEGION_ERROR(ERROR_MAXIMUM_PROCS_EXCEEDED, 
                         "Maximum number of local processors %zd exceeds "
                         "compile time maximum of %d.  Change the value "
                         "in legion_config.h and recompile.",
-                        local_procs.count(), MAX_NUM_PROCS)
-        const AddressSpace local_space = local_procs.begin()->address_space();
-        // We'll prefer CPUs for startup for now, but if we get
-        // a utility processor then we'll use it
+                        local_proc_query.count(), MAX_NUM_PROCS)
         for (Machine::ProcessorQuery::iterator it = 
-              local_procs.begin(); it != local_procs.end(); it++)
+              local_proc_query.begin(); it != local_proc_query.end(); it++)
         {
-          if (it->kind() == Processor::LOC_PROC)
+          if (it->kind() == Processor::UTIL_PROC)
           {
-            startup_kind = Processor::LOC_PROC;
-            if (local_space == 0)
-              top_level_proc = *it;
-            break;
+            local_util_procs.insert(*it);
+            // Startup can also be a utility processor if nothing else
+            if (startup_kind == Processor::NO_KIND)
+              startup_kind = Processor::UTIL_PROC;
           }
-          else if ((it->kind() == Processor::UTIL_PROC) &&
-                   (startup_kind == Processor::NO_KIND))
+          else
           {
-            startup_kind = Processor::UTIL_PROC;
-            if (local_space == 0)
-              top_level_proc = *it;
-            // Keep going for now to see if we have a CPU processor
+            local_procs.insert(*it);
+            // Prefer CPUs for the startup kind
+            if (it->kind() == Processor::LOC_PROC)
+              startup_kind = Processor::LOC_PROC;
           }
         }
+        if (local_procs.empty())
+          REPORT_LEGION_ERROR(ERROR_NO_PROCESSORS, 
+                        "Machine model contains no local processors!")
       }
       // Check to make sure we have something to do startup
       if (startup_kind == Processor::NO_KIND)
         REPORT_LEGION_ERROR(ERROR_NO_PROCESSORS, "Machine model contains "
             "no CPU processors and no utility processors! At least one "
             "CPU or one utility processor is required for Legion.")
-#ifdef DEBUG_LEGION
-      // Startup kind should be a CPU or a Utility processor
-      assert((startup_kind == Processor::LOC_PROC) ||
-              (startup_kind == Processor::UTIL_PROC));
+      // Now build the data structures for all processors 
+      std::map<Processor,Runtime*> processor_mapping;
+      if (config.separate_runtime_instances)
+      {
+#ifdef TRACE_ALLOCATION
+        REPORT_LEGION_ERROR(ERROR_TRACING_ALLOCATION_WITH_SEPARATE, 
+                      "Memory tracing not supported with "
+                      "separate runtime instances.")
 #endif
-      // Right now we launch a dummy barrier task on all the processors
-      // to ensure that Realm has started them such that any interpreter
-      // processors have loaded all their code
-      // TODO: Remove this once Realm gives us a startup event
-      RtEvent procs_started(realm.collective_spawn_by_kind(
-            Processor::NO_KIND, LG_DUMMY_BARRIER_ID, NULL, 0,
-            false/*one per node*/, tasks_registered));
-      // Now perform a collective spawn to initialize the runtime everywhere
-      // Save the precondition in case we are the node that needs to start
-      // the top-level task.
-      // If we're doing separate runtime instances we need to launch an
-      // init task on every processor on all nodes, otherwise we just
-      // need to launch one task on a CPU processor on every node
-      RtEvent runtime_startup_event(realm.collective_spawn_by_kind(
-          (separate_runtime_instances ? Processor::NO_KIND : startup_kind), 
-           INIT_TASK_ID, NULL, 0, !separate_runtime_instances, procs_started));
-      // See if we need to do any initialization for MPI interoperability
-      if (mpi_rank >= 0)
-      {
-        // Do another collective to construct the rank tables
-        RtEvent mpi_init_event(realm.collective_spawn_by_kind(
-              startup_kind, LG_MPI_INTEROP_ID, NULL, 0,
-              true/*one per node*/, runtime_startup_event));
-        // The mpi init event then becomes the new runtime startup event
-        runtime_startup_event = mpi_init_event;
-        // If we have any pending MPI handshakes, we need to initialize them now
-        if (pending_handshakes != NULL)
+        if (!local_util_procs.empty())
+          REPORT_LEGION_ERROR(ERROR_SEPARATE_UTILITY_PROCS, 
+                        "Separate runtime instances are not "
+                        "supported when running with explicit "
+                        "utility processors")
+        std::set<AddressSpaceID> address_spaces;
+        std::map<Processor,AddressSpaceID> proc_spaces;
+        // If we are doing separate runtime instances then each
+        // processor effectively gets its own address space
+        Machine::ProcessorQuery all_procs(machine);
+        AddressSpaceID sid = 0;
+        for (Machine::ProcessorQuery::iterator it = 
+              all_procs.begin(); it != all_procs.end(); it++,sid++)
         {
-          for (std::vector<MPILegionHandshake>::const_iterator it = 
-                pending_handshakes->begin(); it != 
-                pending_handshakes->end(); it++)
-            it->impl->initialize();
-          delete pending_handshakes;
-          pending_handshakes = NULL;
-	  // Another (dummy) collective task launch to ensure that
-	  // all ranks have initialized their handshakes before
-	  // the top-level task is started
-	  RtEvent startup_sync_event(realm.collective_spawn_by_kind(
-                startup_kind, LG_STARTUP_SYNC_ID, NULL, 0,
-                true/*one per node*/, runtime_startup_event));
-	  // The startup sync event then becomes the new runtime startup event
-	  runtime_startup_event = startup_sync_event;
+          address_spaces.insert(sid);
+          proc_spaces[*it] = sid;
         }
-        else if (!stealing_disabled)
+        if (address_spaces.size() > 1)
+          config.configure_collective_settings(address_spaces.size());
+        InputArgs input_args;
+        input_args.argc = argc;
+        input_args.argv = argv;
+        // Now we make runtime instances for each of the local processors
+        for (std::set<Processor>::const_iterator it =
+              local_procs.begin(); it != local_procs.end(); it++)
         {
-          // Even if we don't have any pending handshakes we have to 
-          // do a startup sync if stealing is enabled
-          RtEvent startup_sync_event(realm.collective_spawn_by_kind(
-                startup_kind, LG_STARTUP_SYNC_ID, NULL, 0,
-                true/*one per node*/, runtime_startup_event));
-          // The startup sync event then becomes the new runtime startup event
-	  runtime_startup_event = startup_sync_event;
+          const AddressSpace local_space = proc_spaces[*it];
+          // Only one local processor here
+          std::set<Processor> fake_local_procs;
+          fake_local_procs.insert(*it);
+          Runtime *runtime = new Runtime(machine, config,
+                                         input_args, local_space,
+                                         fake_local_procs, local_util_procs,
+                                         address_spaces, proc_spaces);
+          processor_mapping[*it] = runtime;
         }
-      } 
-      else if (!stealing_disabled)
-      {
-        // If there is no MPI interop, we still need a startup sync
-        // to have the mappers kick off any stealing they are going to do
-        RtEvent startup_sync_event(realm.collective_spawn_by_kind(
-              (separate_runtime_instances ? Processor::NO_KIND : 
-               startup_kind), LG_STARTUP_SYNC_ID, NULL, 0,
-              !separate_runtime_instances, runtime_startup_event));
-        // The startup sync event then becomes the new runtime startup event
-        runtime_startup_event = startup_sync_event;
       }
-      // See if we are supposed to start the top-level task
-      if (top_level_proc.exists())
+      else
       {
-        Realm::ProfilingRequestSet empty_requests;
-        top_level_proc.spawn(LG_LAUNCH_TOP_LEVEL_ID, NULL, 0,
-                             empty_requests, runtime_startup_event);
+        // The normal path
+        std::set<AddressSpaceID> address_spaces;
+        std::map<Processor,AddressSpaceID> proc_spaces;
+        Machine::ProcessorQuery all_procs(machine);
+        for (Machine::ProcessorQuery::iterator it = 
+              all_procs.begin(); it != all_procs.end(); it++)
+        {
+          AddressSpaceID sid = it->address_space();
+          address_spaces.insert(sid);
+          proc_spaces[*it] = sid;
+        }
+        if (address_spaces.size() > 1)
+          config.configure_collective_settings(address_spaces.size());
+        // Make one runtime instance and record it with all the processors
+        const AddressSpace local_space = local_procs.begin()->address_space();
+        InputArgs input_args;
+        input_args.argc = argc;
+        input_args.argv = argv;
+        Runtime *runtime = new Runtime(machine, config, 
+                                       input_args, local_space,
+                                       local_procs, local_util_procs,
+                                       address_spaces, proc_spaces);
+#ifdef DEBUG_LEGION
+#ifndef REALM_USE_SUBPROCESS
+        the_runtime = runtime;
+#endif
+#endif
+        for (std::set<Processor>::const_iterator it = 
+              local_procs.begin(); it != local_procs.end(); it++)
+          processor_mapping[*it] = runtime;
+        for (std::set<Processor>::const_iterator it = 
+              local_util_procs.begin(); it != local_util_procs.end(); it++)
+          processor_mapping[*it] = runtime;
       }
-      // If we are supposed to background this thread, then we wait
-      // for the runtime to shutdown, otherwise we can now return
-      if (background) // Record that the runtime was backgrounded
-        runtime_backgrounded = true;
-      else // Otherwise wait for realm to be shutdown
-        realm.wait_for_shutdown();
-      return 0;
+      // Make the code descriptors for our tasks
+      CodeDescriptor initialize_task(Runtime::initialize_runtime_task);
+      CodeDescriptor shutdown_task(Runtime::shutdown_runtime_task);
+      CodeDescriptor lg_task(Runtime::legion_runtime_task);
+      CodeDescriptor rt_profiling_task(Runtime::profiling_runtime_task);
+      CodeDescriptor startup_task(Runtime::startup_runtime_task);
+      Realm::ProfilingRequestSet no_requests;
+      const std::deque<PendingInitializationFunction*> &pending_table = 
+        get_pending_initialization_table();
+      // Keep track of all the registration events
+      std::set<RtEvent> registered_events;
+      for (std::map<Processor,Runtime*>::const_iterator it = 
+            processor_mapping.begin(); it != processor_mapping.end(); it++)
+      {
+        // These tasks get registered on startup_kind processors
+        if (it->first.kind() == startup_kind)
+        {
+          registered_events.insert(RtEvent(
+                it->first.register_task(LG_INITIALIZE_TASK_ID, initialize_task,
+                  no_requests, &it->second, sizeof(it->second))));
+          registered_events.insert(RtEvent(
+              it->first.register_task(LG_STARTUP_TASK_ID, startup_task,
+                no_requests, &it->second, sizeof(it->second))));
+        }
+        // Register these tasks on utility processors if we have
+        // them otherwise register them on the CPU processors
+        if ((!local_util_procs.empty() && 
+              (it->first.kind() == Processor::UTIL_PROC)) ||
+            (local_util_procs.empty() &&
+              (it->first.kind() == Processor::LOC_PROC)))
+        {
+          registered_events.insert(RtEvent(
+                it->first.register_task(LG_SHUTDOWN_TASK_ID, shutdown_task,
+                  no_requests, &it->second, sizeof(it->second))));
+          registered_events.insert(RtEvent(
+                it->first.register_task(LG_TASK_ID, lg_task,
+                  no_requests, &it->second, sizeof(it->second))));
+        }
+        // Profiling tasks get registered on CPUs and utility processors
+        if ((it->first.kind() == Processor::LOC_PROC) ||
+            (it->first.kind() == Processor::UTIL_PROC))
+          registered_events.insert(RtEvent(
+              it->first.register_task(LG_LEGION_PROFILING_ID, rt_profiling_task,
+                no_requests, &it->second, sizeof(it->second))));
+        for (std::deque<PendingInitializationFunction*>::const_iterator pit =
+              pending_table.begin(); pit != pending_table.end(); pit++)
+        {
+          if (it->first.kind() == (*pit)->proc_kind)
+            registered_events.insert(
+                (*pit)->register_function(it->first, it->second));
+        }
+      }
+
+      // Lastly do any other registrations we might have
+      const ReductionOpTable& red_table = get_reduction_table();
+      for(ReductionOpTable::const_iterator it = red_table.begin();
+          it != red_table.end();
+          it++)
+        realm.register_reduction(it->first, it->second);
+
+      const SerdezOpTable &serdez_table = get_serdez_table();
+      for (SerdezOpTable::const_iterator it = serdez_table.begin();
+            it != serdez_table.end(); it++)
+        realm.register_custom_serdez(it->first, it->second);
+      
+      if (config.record_registration)
+      {
+        log_run.print("Legion runtime initialize task has Realm ID %d",
+                      LG_INITIALIZE_TASK_ID);
+        log_run.print("Legion runtime shutdown task has Realm ID %d", 
+                      LG_SHUTDOWN_TASK_ID);
+        log_run.print("Legion runtime meta-task has Realm ID %d", 
+                      LG_TASK_ID);
+        log_run.print("Legion runtime profiling task Realm ID %d",
+                      LG_LEGION_PROFILING_ID);
+        log_run.print("Legion startup task has Realm ID %d",
+                      LG_STARTUP_TASK_ID);
+      }
+      return Runtime::merge_events(registered_events);
     }
 
     //--------------------------------------------------------------------------
@@ -18527,39 +18943,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ InputArgs& Runtime::get_input_args(void)
-    //--------------------------------------------------------------------------
-    {
-      static InputArgs inputs = { NULL, 0 };
-      return inputs;
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ Runtime* Runtime::get_runtime(Processor p)
-    //--------------------------------------------------------------------------
-    {
-      if (separate_runtime_instances)
-      {
-        if (!p.exists())
-          p = Processor::get_executing_processor();
-#ifdef DEBUG_LEGION
-        assert(runtime_map != NULL);
-        assert(the_runtime == NULL);
-        assert(runtime_map->find(p) != runtime_map->end());
-#endif
-        return (*runtime_map)[p];
-      }
-      else
-      {
-#ifdef DEBUG_LEGION
-        assert(runtime_map == NULL);
-        assert(the_runtime != NULL);
-#endif
-        return the_runtime;
-      }
-    }
-
-    //--------------------------------------------------------------------------
     /*static*/ ReductionOpTable& Runtime::get_reduction_table(void)
     //--------------------------------------------------------------------------
     {
@@ -18609,6 +18992,16 @@ namespace Legion {
     {
       static std::map<ProjectionID,ProjectionFunctor*> pending_projection_table;
       return pending_projection_table;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ std::deque<PendingInitializationFunction*>&
+                                 Runtime::get_pending_initialization_table(void)
+    //--------------------------------------------------------------------------
+    {
+      static std::deque<PendingInitializationFunction*> 
+                                                pending_initialization_table;
+      return pending_initialization_table;
     }
 
     //--------------------------------------------------------------------------
@@ -18666,6 +19059,20 @@ namespace Legion {
                               registrar, user_data, user_data_size, 
                               code_desc, task_name));
       return vid;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void Runtime::preregister_initialization_function(
+                                        Processor::Kind proc_kind,
+                                        CodeDescriptor *realm_desc,
+                                        const void *user_data, size_t user_len)
+    //--------------------------------------------------------------------------
+    {
+      std::deque<PendingInitializationFunction*> &pending_table = 
+        get_pending_initialization_table();
+      pending_table.push_back(new PendingInitializationFunction(
+            LG_TASK_ID_AVAILABLE + pending_table.size(), proc_kind,
+            realm_desc, user_data, user_len));
     }
 
     //--------------------------------------------------------------------------
@@ -18765,376 +19172,29 @@ namespace Legion {
 #endif
 
     //--------------------------------------------------------------------------
-    /*static*/ RtEvent Runtime::register_runtime_tasks(RealmRuntime &realm)
+    /*static*/ void Runtime::initialize_runtime_task(const void *args, 
+               size_t arglen, const void *userdata, size_t userlen, Processor p)
     //--------------------------------------------------------------------------
     {
-      // Make the code descriptors for our tasks
-      CodeDescriptor init_task(Runtime::initialize_runtime);
-      CodeDescriptor shutdown_task(Runtime::shutdown_runtime);
-      CodeDescriptor lg_task(Runtime::legion_runtime_task);
-      CodeDescriptor rt_profiling_task(Runtime::profiling_runtime_task);
-      CodeDescriptor launch_top_level_task(Runtime::launch_top_level);
-      CodeDescriptor mpi_interop_task(Runtime::init_mpi_interop);
-      CodeDescriptor startup_sync_task(Runtime::startup_sync);
-      Realm::ProfilingRequestSet no_requests;
-      // We'll just register these on all the processor kinds
-      std::set<RtEvent> registered_events;
-      Processor::Kind kinds[6] = { Processor::TOC_PROC, Processor::LOC_PROC,
-                                   Processor::UTIL_PROC, Processor::IO_PROC,
-                                   Processor::PROC_SET, Processor::OMP_PROC };
-      for (unsigned idx = 0; idx < 6; idx++)
-      {
-        registered_events.insert(RtEvent(
-            Processor::register_task_by_kind(kinds[idx], false/*global*/,
-                                       INIT_TASK_ID, init_task, no_requests)));
-        registered_events.insert(RtEvent(
-            Processor::register_task_by_kind(kinds[idx], false/*global*/,
-                               SHUTDOWN_TASK_ID, shutdown_task, no_requests)));
-        registered_events.insert(RtEvent(
-            Processor::register_task_by_kind(kinds[idx], false/*global*/,
-                                         LG_TASK_ID, lg_task, no_requests)));
-        registered_events.insert(RtEvent(
-            Processor::register_task_by_kind(kinds[idx], false/*global*/,
-                    LG_LEGION_PROFILING_ID, rt_profiling_task, no_requests)));
-        registered_events.insert(RtEvent(
-            Processor::register_task_by_kind(kinds[idx], false/*global*/,
-                LG_LAUNCH_TOP_LEVEL_ID, launch_top_level_task, no_requests)));
-        registered_events.insert(RtEvent(
-            Processor::register_task_by_kind(kinds[idx], false/*global*/,
-                          LG_MPI_INTEROP_ID, mpi_interop_task, no_requests)));
-        registered_events.insert(RtEvent(
-            Processor::register_task_by_kind(kinds[idx], false/*global*/,
-                          LG_STARTUP_SYNC_ID, startup_sync_task, no_requests)));
-      }
-      if (record_registration)
-      {
-        log_run.print("Legion dummy barrier task has Realm ID %d",
-                      LG_DUMMY_BARRIER_ID);
-        log_run.print("Legion runtime initialization task "
-                            "has Realm ID %d", INIT_TASK_ID);
-        log_run.print("Legion runtime shutdown task has "
-                            "Realm ID %d", SHUTDOWN_TASK_ID);
-        log_run.print("Legion runtime meta-task has Realm ID %d", 
-                      LG_TASK_ID);
-        log_run.print("Legion runtime profiling task Realm ID %d",
-                      LG_LEGION_PROFILING_ID);
-        log_run.print("Legion launch top-level task has Realm ID %d",
-                      LG_LAUNCH_TOP_LEVEL_ID);
-      }
-      return Runtime::merge_events(registered_events);
+#ifdef DEBUG_LEGION
+      assert(userlen == sizeof(Runtime**));
+#endif
+      Runtime *runtime = *((Runtime**)userdata); 
+      implicit_runtime = runtime;
+      runtime->initialize_runtime();
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ Processor::TaskFuncID Runtime::get_next_available_id(void)
+    /*static*/ void Runtime::shutdown_runtime_task(const void *args, 
+               size_t arglen, const void *userdata, size_t userlen, Processor p)
     //--------------------------------------------------------------------------
     {
-      static Processor::TaskFuncID available = TASK_ID_AVAILABLE;
-      return available++;
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void Runtime::log_machine(Machine machine)
-    //--------------------------------------------------------------------------
-    {
-      if (!legion_spy_enabled)
-        return;
-      std::set<Processor::Kind> proc_kinds;
-      Machine::ProcessorQuery all_procs(machine);
-      // Log processors
-      for (Machine::ProcessorQuery::iterator it = all_procs.begin();
-            it != all_procs.end(); it++)
-      {
-        Processor::Kind kind = it->kind();
-        if (proc_kinds.find(kind) == proc_kinds.end())
-        {
-          switch (kind)
-          {
-            case Processor::NO_KIND:
-              {
-                LegionSpy::log_processor_kind(kind, "NoProc");
-                break;
-              }
-            case Processor::TOC_PROC:
-              {
-                LegionSpy::log_processor_kind(kind, "GPU");
-                break;
-              }
-            case Processor::LOC_PROC:
-              {
-                LegionSpy::log_processor_kind(kind, "CPU");
-                break;
-              }
-            case Processor::UTIL_PROC:
-              {
-                LegionSpy::log_processor_kind(kind, "Utility");
-                break;
-              }
-            case Processor::IO_PROC:
-              {
-                LegionSpy::log_processor_kind(kind, "IO");
-                break;
-              }
-            case Processor::PROC_GROUP:
-              {
-                LegionSpy::log_processor_kind(kind, "ProcGroup");
-                break;
-              }
-            case Processor::PROC_SET:
-              {
-                LegionSpy::log_processor_kind(kind, "ProcSet");
-                break;
-              }
-            case Processor::OMP_PROC:
-              {
-                LegionSpy::log_processor_kind(kind, "OpenMP");
-                break;
-              }
-            case Processor::PY_PROC:
-              {
-                LegionSpy::log_processor_kind(kind, "Python");
-                break;
-              }
-            default:
-              assert(false); // unknown processor kind
-          }
-          proc_kinds.insert(kind);
-        }
-        LegionSpy::log_processor(it->id, kind);
-      }
-      // Log memories
-      std::set<Memory::Kind> mem_kinds;
-      Machine::MemoryQuery all_mems(machine);
-      for (Machine::MemoryQuery::iterator it = all_mems.begin();
-            it != all_mems.end(); it++)
-      {
-        Memory::Kind kind = it->kind();
-        if (mem_kinds.find(kind) == mem_kinds.end())
-        {
-          switch (kind)
-          {
-            case GLOBAL_MEM:
-              {
-                LegionSpy::log_memory_kind(kind, "GASNet");
-                break;
-              }
-            case SYSTEM_MEM:
-              {
-                LegionSpy::log_memory_kind(kind, "System");
-                break;
-              }
-            case REGDMA_MEM:
-              {
-                LegionSpy::log_memory_kind(kind, "Registered");
-                break;
-              }
-            case SOCKET_MEM:
-              {
-                LegionSpy::log_memory_kind(kind, "NUMA");
-                break;
-              }
-            case Z_COPY_MEM:
-              {
-                LegionSpy::log_memory_kind(kind, "Zero-Copy");
-                break;
-              }
-            case GPU_FB_MEM:
-              {
-                LegionSpy::log_memory_kind(kind, "Framebuffer");
-                break;
-              }
-            case DISK_MEM:
-              {
-                LegionSpy::log_memory_kind(kind, "Disk");
-                break;
-              }
-            case HDF_MEM:
-              {
-                LegionSpy::log_memory_kind(kind, "HDF");
-                break;
-              }
-            case FILE_MEM:
-              {
-                LegionSpy::log_memory_kind(kind, "File");
-                break;
-              }
-            case LEVEL3_CACHE:
-              {
-                LegionSpy::log_memory_kind(kind, "L3");
-                break;
-              }
-            case LEVEL2_CACHE:
-              {
-                LegionSpy::log_memory_kind(kind, "L2");
-                break;
-              }
-            case LEVEL1_CACHE:
-              {
-                LegionSpy::log_memory_kind(kind, "L1");
-                break;
-              }
-            default:
-              assert(false); // unknown memory kind
-          }
-        }
-        LegionSpy::log_memory(it->id, it->capacity(), it->kind());
-      }
-      // Log Proc-Mem Affinity
-      Machine::ProcessorQuery all_procs2(machine);
-      for (Machine::ProcessorQuery::iterator pit = all_procs2.begin();
-            pit != all_procs2.end(); pit++)
-      {
-        std::vector<ProcessorMemoryAffinity> affinities;
-        machine.get_proc_mem_affinity(affinities, *pit);
-        for (std::vector<ProcessorMemoryAffinity>::const_iterator it = 
-              affinities.begin(); it != affinities.end(); it++)
-        {
-          LegionSpy::log_proc_mem_affinity(pit->id, it->m.id, 
-                                           it->bandwidth, it->latency);
-        }
-      }
-      // Log Mem-Mem Affinity
-      Machine::MemoryQuery all_mems2(machine);
-      for (Machine::MemoryQuery::iterator mit = all_mems2.begin();
-            mit != all_mems2.begin(); mit++)
-      {
-        std::vector<MemoryMemoryAffinity> affinities;
-        machine.get_mem_mem_affinity(affinities, *mit);
-        for (std::vector<MemoryMemoryAffinity>::const_iterator it = 
-              affinities.begin(); it != affinities.end(); it++)
-        {
-          LegionSpy::log_mem_mem_affinity(it->m1.id, it->m2.id, 
-                                          it->bandwidth, it->latency);
-        }
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void Runtime::initialize_runtime(
-                                          const void *args, size_t arglen, 
-                                          const void *userdata, size_t userlen,
-                                          Processor p)
-    //--------------------------------------------------------------------------
-    { 
-      // We now know that this task will only get called once for each runtime 
-      // instance that is supposed to be created which wasn't always true
-      Machine machine = Machine::get_machine();
-      std::set<Processor> all_procs;
-      machine.get_all_processors(all_procs);
-      // not having any processors at all is a fatal error
-      if (all_procs.empty())
-        REPORT_LEGION_ERROR(ERROR_NO_PROCESSORS, 
-                      "Machine model contains no processors!");
-      // Compute the data structures necessary for
-      // constructing a runtime instance
-      std::set<Processor> local_procs;
-      std::set<Processor> local_util_procs;
-      std::set<AddressSpaceID> address_spaces;
-      std::map<Processor,AddressSpaceID> proc_spaces;
-      AddressSpaceID local_space_id = 0;
-      if (separate_runtime_instances)
-      {
-        // If we are doing separate runtime instances then each
-        // processor effectively gets its own address space
-        local_procs.insert(p);
-        AddressSpaceID sid = 0;
-        for (std::set<Processor>::const_iterator it = all_procs.begin();
-              it != all_procs.end(); it++,sid++)
-        {
-          if (p == (*it))
-            local_space_id = sid;
-          address_spaces.insert(sid); 
-          proc_spaces[*it] = sid;
-        }
-      }
-      else // The normal path
-      {
-        local_space_id = p.address_space();
-        for (std::set<Processor>::const_iterator it = all_procs.begin();
-              it != all_procs.end(); it++)
-        {
-          AddressSpaceID sid = it->address_space();
-          address_spaces.insert(sid);
-          proc_spaces[*it] = sid;
-          if (sid == local_space_id)
-          {
-            if (it->kind() == Processor::UTIL_PROC)
-              local_util_procs.insert(*it);
-            else
-              local_procs.insert(*it);
-          }
-        }
-      }
-      // Set up the runtime mask for this instance
-      Runtime *local_rt = new Runtime(machine, local_space_id, 
-                                      local_procs, local_util_procs,
-                                      address_spaces, proc_spaces);
-      if (separate_runtime_instances)
-      {
 #ifdef DEBUG_LEGION
-        assert(local_util_procs.empty());
-        assert(runtime_map != NULL);
+      assert(userlen == sizeof(Runtime**));
 #endif
-        // Now set up the runtime on all of the local processors
-        // and their utility processors
-        for (std::set<Processor>::const_iterator it = local_procs.begin();
-              it != local_procs.end(); it++)
-        {
-          std::map<Processor,Runtime*>::iterator finder = 
-            runtime_map->find(*it);
-#ifdef DEBUG_LEGION
-          assert(finder != runtime_map->end());
-          assert(finder->second == NULL);
-#endif
-          finder->second = local_rt;
-        }
-      }
-      else
-      {
-#ifdef DEBUG_LEGION
-        assert(the_runtime == NULL);
-#endif
-        the_runtime = local_rt; 
-      }
-      // Do the rest of our initialization
-      if (local_space_id < Runtime::num_profiling_nodes)
-        local_rt->initialize_legion_prof();
-      local_rt->register_static_variants();
-      local_rt->register_static_constraints();
-      local_rt->register_static_projections();
-      // Initialize our one virtual manager, do this after we register
-      // the static constraints so we get a valid layout constraint ID
-      VirtualManager::initialize_virtual_instance(local_rt, 
-                                                  0/*same across nodes*/);
-      // Configure our collective settings
-      if (address_spaces.size() > 1)
-        configure_collective_settings(address_spaces.size());
-      // If we have an MPI rank, then build the maps
-      // We'll initialize the mappers after the tables are built
-      if (Runtime::mpi_rank >= 0)
-      {
-#ifdef DEBUG_LEGION
-        assert(!separate_runtime_instances);
-        assert(mpi_rank_table == NULL);
-#endif
-        mpi_rank_table = new MPIRankTable(local_rt); 
-      }
-      else // We can initialize the mappers now
-        local_rt->initialize_mappers(); 
-      // Once we're done with this task, the Legion runtime is started
-      runtime_started = true;
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void Runtime::shutdown_runtime(const void *args, size_t arglen, 
-                              const void *userdata, size_t userlen, Processor p)
-    //--------------------------------------------------------------------------
-    {
-      // We can also finalize our virtual instance unless we're running with 
-      // separate runtime instances, in which case we'll just leak it
-      if (!Runtime::separate_runtime_instances)
-        VirtualManager::finalize_virtual_instance();
+      Runtime *runtime = *((Runtime**)userdata); 
+      implicit_runtime = runtime;
       // Finalize the runtime and then delete it
-      Runtime *runtime = get_runtime(p);
       runtime->finalize_runtime();
       delete runtime;
     }
@@ -19146,6 +19206,11 @@ namespace Legion {
 				  Processor p)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(userlen == sizeof(Runtime**));
+#endif
+      Runtime *runtime = *((Runtime**)userdata);
+      implicit_runtime = runtime;
       // We immediately bump the priority of all meta-tasks once they start
       // up to the highest level to ensure that they drain once they begin
       Processor::set_current_task_priority(LG_RUNNING_PRIORITY);
@@ -19153,19 +19218,21 @@ namespace Legion {
       LgTaskID tid = *((const LgTaskID*)data);
       data += sizeof(tid);
       arglen -= sizeof(tid);
+      task_profiling_provenance = *((const UniqueID*)data);
+      data += sizeof(task_profiling_provenance);
+      arglen -= sizeof(task_profiling_provenance);
       switch (tid)
       {
         case LG_SCHEDULER_ID:
           {
             const ProcessorManager::SchedulerArgs *sched_args = 
               (const ProcessorManager::SchedulerArgs*)args;
-            Runtime::get_runtime(p)->process_schedule_request(
-                                                            sched_args->proc);
+            runtime->process_schedule_request(sched_args->proc);
             break;
           }
         case LG_MESSAGE_ID:
           {
-            Runtime::get_runtime(p)->process_message_task(data, arglen);
+            runtime->process_message_task(data, arglen);
             break;
           }
         case LG_POST_END_ID:
@@ -19267,16 +19334,16 @@ namespace Legion {
         case LG_TRIGGER_OP_ID:
           {
             // Key off of args here instead of data
-            const ProcessorManager::TriggerOpArgs *trigger_args = 
-                            (const ProcessorManager::TriggerOpArgs*)args;
+            const Operation::TriggerOpArgs *trigger_args = 
+                            (const Operation::TriggerOpArgs*)args;
             trigger_args->op->trigger_mapping();
             break;
           }
         case LG_TRIGGER_TASK_ID:
           {
             // Key off of args here instead of data
-            const ProcessorManager::TriggerTaskArgs *trigger_args = 
-                          (const ProcessorManager::TriggerTaskArgs*)args;
+            const TaskOp::TriggerTaskArgs *trigger_args = 
+                          (const TaskOp::TriggerTaskArgs*)args;
             trigger_args->op->trigger_mapping(); 
             break;
           }
@@ -19289,8 +19356,7 @@ namespace Legion {
           {
             const DeferredRecycleArgs *deferred_recycle_args = 
               (const DeferredRecycleArgs*)args;
-            Runtime::get_runtime(p)->free_distributed_id(
-                                        deferred_recycle_args->did);
+            runtime->free_distributed_id(deferred_recycle_args->did);
             break;
           }
         case LG_MUST_INDIV_ID:
@@ -19320,8 +19386,8 @@ namespace Legion {
           }
         case LG_DEFERRED_FUTURE_SET_ID:
           {
-            DeferredFutureSetArgs *future_args =  
-              (DeferredFutureSetArgs*)args;
+            TaskOp::DeferredFutureSetArgs *future_args =  
+              (TaskOp::DeferredFutureSetArgs*)args;
             const size_t result_size = 
               future_args->task_op->check_future_size(future_args->result);
             if (result_size > 0)
@@ -19336,8 +19402,8 @@ namespace Legion {
           }
         case LG_DEFERRED_FUTURE_MAP_SET_ID:
           {
-            DeferredFutureMapSetArgs *future_args = 
-              (DeferredFutureMapSetArgs*)args;
+            TaskOp::DeferredFutureMapSetArgs *future_args = 
+              (TaskOp::DeferredFutureMapSetArgs*)args;
             const size_t result_size = 
               future_args->task_op->check_future_size(future_args->result);
             const void *result = future_args->result->get_untyped_result();
@@ -19378,7 +19444,6 @@ namespace Legion {
             fargs->ctx->free_remote_contexts();
             if (fargs->ctx->remove_reference())
               delete fargs->ctx;
-            Runtime *runtime = Runtime::get_runtime(p);
             // Finally tell the runtime that we have one less top level task
             runtime->decrement_outstanding_top_level_tasks();
             break;
@@ -19386,7 +19451,6 @@ namespace Legion {
         case LG_MAPPER_TASK_ID:
           {
             MapperTaskArgs *margs = (MapperTaskArgs*)args;
-            Runtime *runtime = Runtime::get_runtime(p);
             runtime->process_mapper_task_result(margs);
             // Now indicate that we are done with the future
             if (margs->future->remove_base_gc_ref(FUTURE_HANDLE_REF))
@@ -19403,7 +19467,6 @@ namespace Legion {
           {
             RegionTreeForest::DisjointnessArgs *dargs = 
               (RegionTreeForest::DisjointnessArgs*)args;
-            Runtime *runtime = Runtime::get_runtime(p);
             runtime->forest->compute_partition_disjointness(dargs->handle,
                                                             dargs->ready);
             break;
@@ -19433,7 +19496,7 @@ namespace Legion {
           {
             InnerContext::PostDecrementArgs *dargs = 
               (InnerContext::PostDecrementArgs*)args;
-            Runtime::get_runtime(p)->activate_context(dargs->parent_ctx);
+            runtime->activate_context(dargs->parent_ctx);
             break;
           }
         case LG_SEND_VERSION_STATE_UPDATE_TASK_ID:
@@ -19538,7 +19601,7 @@ namespace Legion {
           {
             const SelectTunableArgs *tunable_args = 
               (const SelectTunableArgs*)args;
-            Runtime::get_runtime(p)->perform_tunable_selection(tunable_args);
+            runtime->perform_tunable_selection(tunable_args);
             // Remove the reference that we added
             if (tunable_args->result->remove_base_gc_ref(FUTURE_HANDLE_REF)) 
               delete (tunable_args->result);
@@ -19554,8 +19617,8 @@ namespace Legion {
           }
         case LG_DEFERRED_ENQUEUE_TASK_ID:
           {
-            const DeferredEnqueueArgs *enqueue_args = 
-              (const DeferredEnqueueArgs*)args;
+            const TaskOp::DeferredEnqueueArgs *enqueue_args = 
+              (const TaskOp::DeferredEnqueueArgs*)args;
             enqueue_args->manager->add_to_ready_queue(enqueue_args->task);
             break;
           }
@@ -19628,7 +19691,7 @@ namespace Legion {
             RtEvent wait_on = margs->proxy_this->perform_mapping(
                                                     margs->must_op);
             if (wait_on.exists())
-              wait_on.lg_wait();
+              wait_on.wait();
             break;
           }
         case LG_DEFER_LAUNCH_TASK_ID:
@@ -19670,8 +19733,7 @@ namespace Legion {
           }
         case LG_DEFER_MATERIALIZED_VIEW_TASK_ID:
           {
-            MaterializedView::handle_deferred_materialized_view(
-                                  Runtime::get_runtime(p), args);
+            MaterializedView::handle_deferred_materialized_view(runtime, args);
             break;
           }
         case LG_MISSPECULATE_TASK_ID:
@@ -19710,7 +19772,6 @@ namespace Legion {
           {
             const ShutdownManager::RetryShutdownArgs *shutdown_args = 
               (const ShutdownManager::RetryShutdownArgs*)args;
-            Runtime *runtime = Runtime::get_runtime(p);
             runtime->initiate_runtime_shutdown(runtime->address_space,
                                                shutdown_args->phase);
             break;
@@ -19720,14 +19781,12 @@ namespace Legion {
       }
 #ifdef DEBUG_LEGION
       if (tid < LG_MESSAGE_ID)
-        Runtime::get_runtime(p)->decrement_total_outstanding_tasks(tid, 
-                                                                  true/*meta*/);
+        runtime->decrement_total_outstanding_tasks(tid, true/*meta*/);
 #else
       if (tid < LG_MESSAGE_ID)
-        Runtime::get_runtime(p)->decrement_total_outstanding_tasks();
+        runtime->decrement_total_outstanding_tasks();
 #endif
 #ifdef DEBUG_SHUTDOWN_HANG
-      Runtime *runtime = Runtime::get_runtime(p);
       __sync_fetch_and_add(&runtime->outstanding_counts[tid],-1);
 #endif
     }
@@ -19739,6 +19798,11 @@ namespace Legion {
 				   Processor p)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(userlen == sizeof(Runtime**));
+#endif
+      Runtime *runtime = *((Runtime**)userdata);
+      implicit_runtime = runtime;
       Realm::ProfilingResponse response(args, arglen);
       const ProfilingResponseBase *base = 
         (const ProfilingResponseBase*)response.user_data();
@@ -19746,56 +19810,32 @@ namespace Legion {
       {
         // If we got a NULL let's assume they meant the profiler
         // this mainly happens with messages that cross nodes
-        Runtime *rt = Runtime::get_runtime(p);
-        rt->profiler->handle_profiling_response(response);
+        runtime->profiler->handle_profiling_response(response);
       }
       else
         base->handler->handle_profiling_response(response);
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void Runtime::launch_top_level(
-                                   const void *args, size_t arglen, 
-				   const void *userdata, size_t userlen,
-				   Processor p)
-    //--------------------------------------------------------------------------
-    {
-      Runtime *rt = Runtime::get_runtime(p);
-      rt->launch_top_level_task();
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void Runtime::init_mpi_interop(
+    /*static*/ void Runtime::startup_runtime_task(
                                    const void *args, size_t arglen, 
 				   const void *userdata, size_t userlen,
 				   Processor p)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(mpi_rank_table != NULL);
+      assert(arglen == sizeof(RtEvent));
+      assert(userlen == sizeof(Runtime**));
 #endif
-      mpi_rank_table->perform_rank_exchange();
-      // Now configure the mappers
-      Runtime *rt = Runtime::get_runtime(p);
-      rt->initialize_mappers();
+      RtEvent top_level_precondition = *((RtEvent*)args);
+      Runtime *runtime = *((Runtime**)userdata);
+      implicit_runtime = runtime;
+      runtime->startup_runtime(top_level_precondition);
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void Runtime::startup_sync(
-                                   const void *args, size_t arglen, 
-				   const void *userdata, size_t userlen,
-				   Processor p)
-    //--------------------------------------------------------------------------
-    {
-      log_run.debug() << "startup sync task";
-      if (stealing_disabled)
-        return;
-      Runtime *rt = Runtime::get_runtime(p);
-      rt->startup_mappers();
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void Runtime::configure_collective_settings(int total_spaces)
+    void Runtime::LegionConfiguration::configure_collective_settings(
+                                                         int total_spaces) const
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION

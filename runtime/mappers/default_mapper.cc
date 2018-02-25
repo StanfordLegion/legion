@@ -353,7 +353,8 @@ namespace Legion {
       output.initial_proc = default_policy_select_initial_processor(ctx, task);
       output.inline_task = false;
       output.stealable = stealing_enabled; 
-      // Unlike in the past, this is now the best choice
+      // This is the best choice for the default mapper assuming
+      // there is locality in the remote mapped tasks
       output.map_locally = false;
     }
 
@@ -2002,8 +2003,11 @@ namespace Legion {
       // There are no constraints for these fields so we get to do what we want
       instances.resize(instances.size()+1);
       LayoutConstraintSet creation_constraints = our_constraints;
+      std::vector<FieldID> creation_fields;
+      default_policy_select_instance_fields(ctx, req, needed_fields,
+          creation_fields);
       creation_constraints.add_constraint(
-          FieldConstraint(needed_fields, false/*contig*/, false/*inorder*/));
+          FieldConstraint(creation_fields, false/*contig*/, false/*inorder*/));
       if (!default_make_instance(ctx, target_memory, creation_constraints, 
                 instances.back(), TASK_MAPPING, force_new_instances, 
                 true/*meets*/,  req))
@@ -2328,6 +2332,26 @@ namespace Legion {
         return result;
       }
     }
+
+    //--------------------------------------------------------------------------
+    void DefaultMapper::default_policy_select_instance_fields(
+                                    MapperContext ctx,
+                                    const RegionRequirement &req,
+                                    const std::set<FieldID> &needed_fields,
+                                    std::vector<FieldID> &fields)
+    //--------------------------------------------------------------------------
+    {
+      if (total_nodes == 1)
+      {
+        FieldSpace handle = req.region.get_field_space();
+        runtime->get_field_space_fields(ctx, handle, fields);
+      }
+      else
+      {
+        fields.insert(fields.end(), needed_fields.begin(), needed_fields.end());
+      }
+    }
+
 
     //--------------------------------------------------------------------------
     int DefaultMapper::default_policy_select_garbage_collection_priority(

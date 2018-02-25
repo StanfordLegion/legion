@@ -228,15 +228,12 @@ namespace Legion {
 
     // Runtime task numbering 
     enum {
-      LG_DUMMY_BARRIER_ID     = Realm::Processor::TASK_ID_PROCESSOR_NOP,
-      INIT_TASK_ID            = Realm::Processor::TASK_ID_PROCESSOR_INIT,
-      SHUTDOWN_TASK_ID        = Realm::Processor::TASK_ID_PROCESSOR_SHUTDOWN,
+      LG_INITIALIZE_TASK_ID   = Realm::Processor::TASK_ID_PROCESSOR_INIT,
+      LG_SHUTDOWN_TASK_ID     = Realm::Processor::TASK_ID_PROCESSOR_SHUTDOWN,
       LG_TASK_ID              = Realm::Processor::TASK_ID_FIRST_AVAILABLE,
       LG_LEGION_PROFILING_ID  = Realm::Processor::TASK_ID_FIRST_AVAILABLE+1,
-      LG_LAUNCH_TOP_LEVEL_ID  = Realm::Processor::TASK_ID_FIRST_AVAILABLE+2,
-      LG_MPI_INTEROP_ID       = Realm::Processor::TASK_ID_FIRST_AVAILABLE+3,
-      LG_STARTUP_SYNC_ID      = Realm::Processor::TASK_ID_FIRST_AVAILABLE+4,
-      TASK_ID_AVAILABLE       = Realm::Processor::TASK_ID_FIRST_AVAILABLE+5,
+      LG_STARTUP_TASK_ID      = Realm::Processor::TASK_ID_FIRST_AVAILABLE+2,
+      LG_TASK_ID_AVAILABLE    = Realm::Processor::TASK_ID_FIRST_AVAILABLE+3,
     };
 
     // Realm dependent partitioning kinds
@@ -338,20 +335,7 @@ namespace Legion {
       LG_MESSAGE_ID, // These two must be the last two
       LG_RETRY_SHUTDOWN_TASK_ID,
       LG_LAST_TASK_ID, // This one should always be last
-    };
-
-    /**
-     * \class LgTaskArgs
-     * The base class for all Legion Task arguments
-     */
-    template<typename T>
-    struct LgTaskArgs {
-    public:
-      LgTaskArgs(void)
-        : lg_task_id(T::TASK_ID) { }
-    public:
-      const LgTaskID lg_task_id;
-    };
+    }; 
 
     // Make this a macro so we can keep it close to 
     // declaration of the task IDs themselves
@@ -1327,7 +1311,8 @@ namespace Legion {
     class ContextInterface {
     public:
       virtual Task* get_task(void) = 0;
-      virtual const std::vector<PhysicalRegion>& begin_task(void) = 0;
+      virtual const std::vector<PhysicalRegion>& begin_task(
+                                      Legion::Runtime *&rt) = 0;
       virtual void end_task(const void *result, 
                             size_t result_size, bool owned) = 0;
       // This is safe because we see in legion_context.h that
@@ -1342,9 +1327,31 @@ namespace Legion {
     // Nasty global variable for TLS support of figuring out
     // our context implicitly
     extern __thread TaskContext *implicit_context;
+    // Same thing for the runtime
+    extern __thread Runtime *implicit_runtime;
     // Another nasty global variable for tracking the fast
     // reservations that we are holding
     extern __thread AutoLock *local_lock_list;
+    // One more nasty global variable that we use for tracking
+    // the provenance of meta-task operations for profiling
+    // purposes, this has no bearing on correctness
+    extern __thread ::legion_unique_id_t task_profiling_provenance;
+
+    /**
+     * \class LgTaskArgs
+     * The base class for all Legion Task arguments
+     */
+    template<typename T>
+    struct LgTaskArgs {
+    public:
+      LgTaskArgs(void)
+        : lg_task_id(T::TASK_ID), provenance(task_profiling_provenance) { }
+      LgTaskArgs(::legion_unique_id_t uid)
+        : lg_task_id(T::TASK_ID), provenance(uid) { }
+    public:
+      const LgTaskID lg_task_id;
+      const ::legion_unique_id_t provenance;
+    };
     
     // legion_trace.h
     class LegionTrace;
@@ -1602,7 +1609,7 @@ namespace Legion {
   typedef ::legion_projection_id_t ProjectionID;
   typedef ::legion_region_tree_id_t RegionTreeID;
   typedef ::legion_distributed_id_t DistributedID;
-  typedef ::legion_address_space_id_t AddressSpaceID;
+  typedef ::legion_address_space_t AddressSpaceID;
   typedef ::legion_tunable_id_t TunableID;
   typedef ::legion_local_variable_id_t LocalVariableID;
   typedef ::legion_mapping_tag_id_t MappingTagID;
@@ -1855,7 +1862,8 @@ namespace Legion {
       inline LgEvent& operator=(const LgEvent &rhs)
         { id = rhs.id; return *this; }
     public:
-      inline void lg_wait(void) const;
+      // Override the wait method so we can have our own implementation
+      inline void wait(void) const;
     };
 
     class PredEvent : public LgEvent {
@@ -2016,7 +2024,7 @@ namespace Legion {
           RtEvent ready = local_lock.wrlock();
           while (ready.exists())
           {
-            ready.lg_wait();
+            ready.wait();
             ready = local_lock.wrlock();
           }
         }
@@ -2025,7 +2033,7 @@ namespace Legion {
           RtEvent ready = local_lock.rdlock();
           while (ready.exists())
           {
-            ready.lg_wait();
+            ready.wait();
             ready = local_lock.rdlock();
           }
         }
@@ -2101,11 +2109,13 @@ namespace Legion {
     // Special method that we need here for waiting on events
 
     //--------------------------------------------------------------------------
-    inline void LgEvent::lg_wait(void) const
+    inline void LgEvent::wait(void) const
     //--------------------------------------------------------------------------
     {
       // Save the context locally
       Internal::TaskContext *local_ctx = Internal::implicit_context; 
+      // Save the task provenance information
+      UniqueID local_provenance = Internal::task_profiling_provenance;
       // Check to see if we have any local locks to notify
       if (Internal::local_lock_list != NULL)
       {
@@ -2117,7 +2127,7 @@ namespace Legion {
         const Realm::UserEvent done = Realm::UserEvent::create_user_event();
         local_lock_list_copy->advise_sleep_entry(done);
         // Now we can do the wait
-        wait();
+        Realm::Event::wait();
         // When we wake up, notify that we are done and exited the wait
         local_lock_list_copy->advise_sleep_exit();
         // Trigger the user-event
@@ -2129,9 +2139,11 @@ namespace Legion {
         Internal::local_lock_list = local_lock_list_copy; 
       }
       else // Just do the normal wait
-        wait();
+        Realm::Event::wait();
       // Write the context back
       Internal::implicit_context = local_ctx;
+      // Write the provenance information back
+      Internal::task_profiling_provenance = local_provenance;
     }
 
 #ifdef LEGION_SPY

@@ -168,7 +168,7 @@ namespace Legion {
     {
       IndexSpaceNode *node = 
         create_node(handle, realm_is, NULL/*parent*/, 0/*color*/, did);
-      if (Runtime::legion_spy_enabled)
+      if (runtime->legion_spy_enabled)
         node->log_index_space_points();
     }
 
@@ -181,10 +181,10 @@ namespace Legion {
       IndexSpaceNode *node = 
         create_node(handle, NULL, NULL/*parent*/, 0/*color*/, did, to_trigger);
       node->initialize_union_space(to_trigger, op, handles);
-      if (Runtime::legion_spy_enabled)
+      if (runtime->legion_spy_enabled)
       {
         if (!node->index_space_ready.has_triggered())
-          node->index_space_ready.lg_wait();
+          node->index_space_ready.wait();
         node->log_index_space_points();
       }
     }
@@ -198,10 +198,10 @@ namespace Legion {
       IndexSpaceNode *node = 
         create_node(handle, NULL, NULL/*parent*/, 0/*color*/, did, to_trigger);
       node->initialize_intersection_space(to_trigger, op, handles);
-      if (Runtime::legion_spy_enabled)
+      if (runtime->legion_spy_enabled)
       {
         if (!node->index_space_ready.has_triggered())
-          node->index_space_ready.lg_wait();
+          node->index_space_ready.wait();
         node->log_index_space_points();
       }
     }
@@ -215,10 +215,10 @@ namespace Legion {
       IndexSpaceNode *node = 
         create_node(handle, NULL, NULL/*parent*/, 0/*color*/, did, to_trigger);
       node->initialize_difference_space(to_trigger, op, left, right);
-      if (Runtime::legion_spy_enabled)
+      if (runtime->legion_spy_enabled)
       {
         if (!node->index_space_ready.has_triggered())
-          node->index_space_ready.lg_wait();
+          node->index_space_ready.wait();
         node->log_index_space_points();
       }
     }
@@ -273,7 +273,7 @@ namespace Legion {
         const bool disjoint = (part_kind == DISJOINT_KIND);
         create_node(pid, parent_node, color_node, partition_color,
                     disjoint, did, partition_ready, partial_pending);
-        if (Runtime::legion_spy_enabled)
+        if (runtime->legion_spy_enabled)
           LegionSpy::log_index_partition(parent.id, pid.id, disjoint,
                                          partition_color);
       }
@@ -288,7 +288,7 @@ namespace Legion {
         DisjointnessArgs args;
         args.handle = pid;
         args.ready = disjointness_event;
-        runtime->issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY, NULL,
+        runtime->issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY,
                                      Runtime::protect_event(partition_ready));
       }
       return parent_notified;
@@ -899,7 +899,7 @@ namespace Legion {
       FieldSpaceNode *node = get_node(handle);
       RtEvent ready = node->allocate_field(fid, field_size, serdez_id);
       if (ready.exists())
-        ready.lg_wait();
+        ready.wait();
       return false;
     }
 
@@ -926,7 +926,7 @@ namespace Legion {
       RtEvent ready = node->allocate_fields(sizes, fields, serdez_id);
       // Wait for this to exist
       if (ready.exists())
-        ready.lg_wait();
+        ready.wait();
     }
 
     //--------------------------------------------------------------------------
@@ -1938,7 +1938,7 @@ namespace Legion {
         }
         // Have to wait for all the locks to be acquired
         if (precondition.exists())
-          precondition.lg_wait();
+          precondition.wait();
         // Now do the mapping with our own applied event set
         std::set<RtEvent> local_applied;
         // Construct the traversal info
@@ -2758,7 +2758,7 @@ namespace Legion {
         {
           int composite_idx = result.size();
           result.add_instance(
-            InstanceRef(VirtualManager::get_virtual_instance(), needed_fields));
+              InstanceRef(runtime->virtual_manager, needed_fields));
           return composite_idx;
         }
         else
@@ -2848,7 +2848,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(Runtime::legion_spy_enabled); 
+      assert(runtime->legion_spy_enabled); 
 #endif
       FieldSpaceNode *node = (req.handle_type != PART_PROJECTION) ? 
         get_node(req.region.get_field_space()) : 
@@ -2912,7 +2912,7 @@ namespace Legion {
         if (!done_events.empty())
         {
           RtEvent ready = Runtime::merge_events(done_events);
-          ready.lg_wait();
+          ready.wait();
         }
         // Now figure out which ones we successfully acquired and which 
         // ones failed to be acquired
@@ -3589,7 +3589,7 @@ namespace Legion {
           wait_on = wait_finder->second;
       }
       // Wait on the event
-      wait_on.lg_wait();
+      wait_on.wait();
       AutoLock l_lock(lookup_lock,1,false/*exclusive*/);
       std::map<IndexSpace,IndexSpaceNode*>::const_iterator finder = 
           index_nodes.find(space);
@@ -3648,7 +3648,7 @@ namespace Legion {
       if (defer == NULL)
       {
         // Wait for the event
-        wait_on.lg_wait();
+        wait_on.wait();
         AutoLock l_lock(lookup_lock,1,false/*exclusive*/);
         std::map<IndexPartition,IndexPartNode*>::const_iterator finder = 
           index_parts.find(part);
@@ -3710,7 +3710,7 @@ namespace Legion {
           wait_on = wait_finder->second;
       }
       // Wait for the event to be ready
-      wait_on.lg_wait();
+      wait_on.wait();
       AutoLock l_lock(lookup_lock,1,false/*exclusive*/);
       std::map<FieldSpace,FieldSpaceNode*>::const_iterator finder = 
         field_nodes.find(space);
@@ -3791,7 +3791,7 @@ namespace Legion {
         // If we did find something to wait on, do that now
         if (wait_on.exists())
         {
-          wait_on.lg_wait();
+          wait_on.wait();
           // Retake the lock and see again if the handle we
           // were looking for was the top-level node or not
           AutoLock l_lock(lookup_lock,1,false/*exclusive*/);
@@ -3893,7 +3893,7 @@ namespace Legion {
         else
           wait_on = req_finder->second;
       }
-      wait_on.lg_wait();
+      wait_on.wait();
       AutoLock l_lock(lookup_lock,1,false/*exclusive*/);
       std::map<RegionTreeID,RegionNode*>::const_iterator finder = 
           tree_nodes.find(tid);
@@ -4457,7 +4457,7 @@ namespace Legion {
     {
       get_node(handle)->attach_semantic_information(tag, source, buffer, 
                                                     size, is_mutable);
-      if (Runtime::legion_spy_enabled && (NAME_SEMANTIC_TAG == tag))
+      if (runtime->legion_spy_enabled && (NAME_SEMANTIC_TAG == tag))
         LegionSpy::log_index_space_name(handle.id,
             reinterpret_cast<const char*>(buffer));
     }
@@ -4473,7 +4473,7 @@ namespace Legion {
     {
       get_node(handle)->attach_semantic_information(tag, source, buffer, 
                                                     size, is_mutable);
-      if (Runtime::legion_spy_enabled && (NAME_SEMANTIC_TAG == tag))
+      if (runtime->legion_spy_enabled && (NAME_SEMANTIC_TAG == tag))
         LegionSpy::log_index_partition_name(handle.id,
             reinterpret_cast<const char*>(buffer));
     }
@@ -4489,7 +4489,7 @@ namespace Legion {
     {
       get_node(handle)->attach_semantic_information(tag, source, buffer, 
                                                     size, is_mutable);
-      if (Runtime::legion_spy_enabled && (NAME_SEMANTIC_TAG == tag))
+      if (runtime->legion_spy_enabled && (NAME_SEMANTIC_TAG == tag))
         LegionSpy::log_field_space_name(handle.id,
             reinterpret_cast<const char*>(buffer));
     }
@@ -4506,7 +4506,7 @@ namespace Legion {
     {
       get_node(handle)->attach_semantic_information(fid, tag, src, buf, 
                                                     size, is_mutable);
-      if (Runtime::legion_spy_enabled && (NAME_SEMANTIC_TAG == tag))
+      if (runtime->legion_spy_enabled && (NAME_SEMANTIC_TAG == tag))
         LegionSpy::log_field_name(handle.id, fid,
             reinterpret_cast<const char*>(buf));
     }
@@ -4522,7 +4522,7 @@ namespace Legion {
     {
       get_node(handle)->attach_semantic_information(tag, source, buffer, 
                                                     size, is_mutable);
-      if (Runtime::legion_spy_enabled && (NAME_SEMANTIC_TAG == tag))
+      if (runtime->legion_spy_enabled && (NAME_SEMANTIC_TAG == tag))
         LegionSpy::log_logical_region_name(handle.index_space.id,
             handle.field_space.id, handle.tree_id,
             reinterpret_cast<const char*>(buffer));
@@ -4539,7 +4539,7 @@ namespace Legion {
     {
       get_node(handle)->attach_semantic_information(tag, source, buffer, 
                                                     size, is_mutable);
-      if (Runtime::legion_spy_enabled && (NAME_SEMANTIC_TAG == tag))
+      if (runtime->legion_spy_enabled && (NAME_SEMANTIC_TAG == tag))
         LegionSpy::log_logical_partition_name(handle.index_partition.id,
             handle.field_space.id, handle.tree_id,
             reinterpret_cast<const char*>(buffer));
@@ -4812,7 +4812,7 @@ namespace Legion {
         // Send a request if necessary
         if (is_remote && request.exists())
           send_semantic_request(owner_space, tag, can_fail, wait_until,request);
-        wait_on.lg_wait();
+        wait_on.wait();
       }
       // When we wake up, we should be able to find everything
       AutoLock n_lock(node_lock,1,false/*exclusive*/);
@@ -5068,7 +5068,7 @@ namespace Legion {
           args.tag = tag;
           args.source = source;
           context->runtime->issue_runtime_meta_task(args, 
-              LG_LATENCY_WORK_PRIORITY, NULL/*op*/, precondition);
+              LG_LATENCY_WORK_PRIORITY, precondition);
         }
       }
       else
@@ -5176,7 +5176,7 @@ namespace Legion {
       context->runtime->send_index_space_child_request(owner_space, rez);
       if (defer == NULL)
       {
-        ready_event.lg_wait();
+        ready_event.wait();
         // Stupid volatile-ness
         IndexPartition handle_copy = *handle_ptr;
         if (!handle_copy.exists())
@@ -5259,7 +5259,7 @@ namespace Legion {
             ready = finder->second;
           else
           {
-            if (Runtime::dynamic_independence_tests)
+            if (implicit_runtime->dynamic_independence_tests)
               issue_dynamic_test = true;
             else
             {
@@ -5289,7 +5289,7 @@ namespace Legion {
               Runtime::merge_events(left->partition_ready,
                                     right->partition_ready));
           ready = context->runtime->issue_runtime_meta_task(args,
-                                      LG_LATENCY_WORK_PRIORITY, NULL, pre);
+                                      LG_LATENCY_WORK_PRIORITY, pre);
           pending_tests[key] = ready;
           pending_tests[std::pair<LegionColor,LegionColor>(c2,c1)] = ready;
         }
@@ -5297,7 +5297,7 @@ namespace Legion {
           ready = finder->second;
       }
       // Wait for the ready event and then get the result
-      ready.lg_wait();
+      ready.wait();
       AutoLock n_lock(node_lock,1,false/*exclusive*/);
       if (disjoint_subsets.find(key) != disjoint_subsets.end())
         return true;
@@ -5394,7 +5394,7 @@ namespace Legion {
           rez.serialize(ready_event); 
         }
         context->runtime->send_index_space_colors_request(owner_space, rez);
-        ready_event.lg_wait();
+        ready_event.wait();
       }
       else
       {
@@ -5625,7 +5625,7 @@ namespace Legion {
         args.to_trigger = to_trigger;
         args.source = source;
         forest->runtime->issue_runtime_meta_task(args, 
-            LG_LATENCY_DEFERRED_PRIORITY, NULL/*op*/, defer);
+            LG_LATENCY_DEFERRED_PRIORITY, defer);
         return;
       }
       if (child != NULL)
@@ -6011,7 +6011,7 @@ namespace Legion {
           args.tag = tag;
           args.source = source;
           context->runtime->issue_runtime_meta_task(args, 
-              LG_LATENCY_WORK_PRIORITY, NULL/*op*/, precondition);
+              LG_LATENCY_WORK_PRIORITY, precondition);
         }
       }
       else
@@ -6114,7 +6114,7 @@ namespace Legion {
           // Someone else is already making it so just wait
           if (defer == NULL)
           {
-            wait_on.lg_wait();
+            wait_on.wait();
             AutoLock n_lock(node_lock,1,false/*exclusive*/);
             std::map<LegionColor,IndexSpaceNode*>::const_iterator finder =
               color_map.find(c);
@@ -6163,7 +6163,7 @@ namespace Legion {
             // Make a new index space node ready when the partition is ready
             result = context->create_node(is, NULL/*realm is*/, 
                                           this, c, did, partition_ready);
-          if (Runtime::legion_spy_enabled)
+          if (runtime->legion_spy_enabled)
             LegionSpy::log_index_subspace(handle.id, is.id, 
                           result->get_domain_point_color());
           return result; 
@@ -6186,7 +6186,7 @@ namespace Legion {
         context->runtime->send_index_partition_child_request(owner_space, rez);
         if (defer == NULL)
         {
-          ready_event.lg_wait();
+          ready_event.wait();
           IndexSpace copy_handle = *handle_ptr;
 #ifdef DEBUG_LEGION
           assert(copy_handle.exists());
@@ -6288,7 +6288,7 @@ namespace Legion {
       // trigger the event saying when the disjointness value is ready
       Runtime::trigger_event(ready_event);
       // Record the result for Legion Spy
-      if (Runtime::legion_spy_enabled)
+      if (runtime->legion_spy_enabled)
           LegionSpy::log_index_partition(parent->handle.id, handle.id, 
                                          disjoint, color);
     }
@@ -6298,7 +6298,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (!disjoint_ready.has_triggered())
-        disjoint_ready.lg_wait();
+        disjoint_ready.wait();
       return disjoint;
     }
 
@@ -6328,7 +6328,7 @@ namespace Legion {
             ready_event = finder->second;
           else
           {
-            if (Runtime::dynamic_independence_tests)
+            if (implicit_runtime->dynamic_independence_tests)
               issue_dynamic_test = true;
             else
             {
@@ -6358,14 +6358,14 @@ namespace Legion {
           args.right = right;
           ApEvent pre = Runtime::merge_events(left_pre, right_pre);
           ready_event = context->runtime->issue_runtime_meta_task(args, 
-                  LG_LATENCY_WORK_PRIORITY, NULL, Runtime::protect_event(pre));
+                  LG_LATENCY_WORK_PRIORITY, Runtime::protect_event(pre));
           pending_tests[key] = ready_event;
           pending_tests[std::pair<LegionColor,LegionColor>(c2,c1)] =ready_event;
         }
         else
           ready_event = finder->second;
       }
-      ready_event.lg_wait();
+      ready_event.wait();
       AutoLock n_lock(node_lock,1,false/*exclusive*/);
       if (disjoint_subspaces.find(key) != disjoint_subspaces.end())
         return true;
@@ -6519,7 +6519,7 @@ namespace Legion {
         args.pending_child = child_color;
         // Don't remove the pending child until the handle is ready
         context->runtime->issue_runtime_meta_task(args,
-          LG_LATENCY_WORK_PRIORITY, NULL, Runtime::protect_event(domain_ready));
+          LG_LATENCY_WORK_PRIORITY, Runtime::protect_event(domain_ready));
       }
     }
 
@@ -6773,7 +6773,7 @@ namespace Legion {
         args.to_trigger = to_trigger;
         args.source = source;
         forest->runtime->issue_runtime_meta_task(args, 
-            LG_LATENCY_DEFERRED_PRIORITY, NULL/*op*/, defer);
+            LG_LATENCY_DEFERRED_PRIORITY, defer);
       }
       else
       {
@@ -6857,7 +6857,7 @@ namespace Legion {
       if (is_owner())
       {
         this->available_indexes = FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES);
-        local_field_infos.resize(Runtime::max_local_fields);
+        local_field_infos.resize(runtime->max_local_fields);
       } 
 #ifdef LEGION_GC
       log_garbage.info("GC Field Space %lld %d %d",
@@ -6877,7 +6877,7 @@ namespace Legion {
       if (is_owner())
       {
         this->available_indexes = FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES);
-        local_field_infos.resize(Runtime::max_local_fields);
+        local_field_infos.resize(runtime->max_local_fields);
       }
       size_t num_fields;
       derez.deserialize(num_fields);
@@ -7269,7 +7269,7 @@ namespace Legion {
           }
           context->runtime->send_field_space_semantic_request(owner_space, rez);
         }
-        wait_on.lg_wait();
+        wait_on.wait();
       }
       // When we wake up, we should be able to find everything
       AutoLock n_lock(node_lock,1,false/*exclusive*/); 
@@ -7370,7 +7370,7 @@ namespace Legion {
           }
           context->runtime->send_field_semantic_request(owner_space, rez);
         }
-        wait_on.lg_wait();
+        wait_on.wait();
       }
       // When we wake up, we should be able to find everything
       AutoLock n_lock(node_lock,1,false/*exclusive*/); 
@@ -7477,7 +7477,7 @@ namespace Legion {
           args.tag = tag;
           args.source = source;
           context->runtime->issue_runtime_meta_task(args, 
-              LG_LATENCY_WORK_PRIORITY, NULL/*op*/, precondition);
+              LG_LATENCY_WORK_PRIORITY, precondition);
         }
       }
       else
@@ -7535,7 +7535,7 @@ namespace Legion {
           args.tag = tag;
           args.source = source;
           context->runtime->issue_runtime_meta_task(args, 
-              LG_LATENCY_WORK_PRIORITY, NULL/*op*/, precondition);
+              LG_LATENCY_WORK_PRIORITY, precondition);
         }
       }
       else
@@ -7947,7 +7947,7 @@ namespace Legion {
         }
         context->runtime->send_local_field_alloc_request(owner_space, rez);
         // Wait for the result
-        allocated_event.lg_wait();
+        allocated_event.wait();
         if (new_indexes.empty())
           return false;
         // When we wake up then fill in the field information
@@ -8191,7 +8191,7 @@ namespace Legion {
         local_trees.insert(inst);
       }
       if (wait_on.exists())
-        wait_on.lg_wait();
+        wait_on.wait();
     }
 
     //--------------------------------------------------------------------------
@@ -8307,15 +8307,6 @@ namespace Legion {
 #endif
         result.set_bit(finder->second.idx);
       }
-#ifdef DEBUG_LEGION
-      // Have a little bit of code for logging bit masks when requested
-      if (Runtime::bit_mask_logging)
-      {
-        char *bit_string = result.to_string();
-        fprintf(stderr,"%s\n",bit_string);
-        free(bit_string);
-      }
-#endif
       return result;
     }
 
@@ -8920,7 +8911,7 @@ namespace Legion {
       if (result >= 0)
       {
         // If we have slots for local fields then we can't use those
-        if (result >= int(MAX_FIELDS - Runtime::max_local_fields))
+        if (result >= int(MAX_FIELDS - runtime->max_local_fields))
           return -1;
         available_indexes.unset_bit(result);
       }
@@ -8994,7 +8985,7 @@ namespace Legion {
       {
         const size_t field_size = sizes[fidx];
         int chosen_index = -1;
-        unsigned global_idx = MAX_FIELDS - Runtime::max_local_fields;
+        unsigned global_idx = MAX_FIELDS - runtime->max_local_fields;
         for (unsigned local_idx = 0; 
               local_idx < local_field_infos.size(); local_idx++, global_idx++)
         {
@@ -9047,10 +9038,10 @@ namespace Legion {
       {
         // Translate back to a local field index
 #ifdef DEBUG_LEGION
-        assert(indexes[idx] >= (MAX_FIELDS - Runtime::max_local_fields));
+        assert(indexes[idx] >= (MAX_FIELDS - runtime->max_local_fields));
 #endif
         const unsigned local_index = 
-          indexes[idx] - (MAX_FIELDS - Runtime::max_local_fields);
+          indexes[idx] - (MAX_FIELDS - runtime->max_local_fields);
 #ifdef DEBUG_LEGION
         assert(local_index < local_field_infos.size());
 #endif
@@ -9272,7 +9263,7 @@ namespace Legion {
       {
         if (is_remote && request.exists())
           send_semantic_request(owner_space, tag, can_fail, wait_until,request);
-        wait_on.lg_wait();
+        wait_on.wait();
       }
       // When we wake up, we should be able to find everything
       AutoLock n_lock(node_lock,1,false/*exclusive*/);
@@ -15378,7 +15369,7 @@ namespace Legion {
           args.tag = tag;
           args.source = source;
           context->runtime->issue_runtime_meta_task(args, 
-              LG_LATENCY_WORK_PRIORITY, NULL/*op*/, precondition);
+              LG_LATENCY_WORK_PRIORITY, precondition);
         }
       }
       else
@@ -16392,7 +16383,7 @@ namespace Legion {
           args.tag = tag;
           args.source = source;
           context->runtime->issue_runtime_meta_task(args, 
-              LG_LATENCY_WORK_PRIORITY, NULL/*op*/, precondition);
+              LG_LATENCY_WORK_PRIORITY, precondition);
         }
       }
       else

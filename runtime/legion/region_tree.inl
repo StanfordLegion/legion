@@ -87,13 +87,13 @@ namespace Legion {
         if (need_tight_result)
         {
           // Wait for the index space to be tight
-          tight_index_space_set.lg_wait();
+          tight_index_space_set.wait();
           // Fall through and get the result when we're done
         }
         else
         {
           if (!realm_index_space_set.has_triggered())
-            realm_index_space_set.lg_wait();
+            realm_index_space_set.wait();
           // Not tight yet so still subject to change so we need the lock
           AutoLock n_lock(node_lock,1,false/*exclusive*/);
           result = realm_index_space;
@@ -140,7 +140,7 @@ namespace Legion {
       else
       {
         // Log subspaces being set on the owner
-        if (Runtime::legion_spy_enabled && (parent != NULL))
+        if (implicit_runtime->legion_spy_enabled && (parent != NULL))
           this->log_index_space_points(realm_index_space);
         // We're the owner, send messages to everyone else that we've 
         // sent this node to except the source
@@ -172,7 +172,7 @@ namespace Legion {
         TightenIndexSpaceArgs args;
         args.proxy_this = this;
         context->runtime->issue_runtime_meta_task(args,LG_LATENCY_WORK_PRIORITY,
-                  NULL/*Operation*/, Runtime::protect_event(index_space_ready));
+                                     Runtime::protect_event(index_space_ready));
         return;
       }
       Realm::IndexSpace<DIM,T> tight_space = realm_index_space.tighten();
@@ -825,7 +825,7 @@ namespace Legion {
         Runtime::merge_events(lhs_ready, rhs_ready)));
       // Wait for the result to be ready
       if (!ready.has_triggered())
-        ready.lg_wait();
+        ready.wait();
       // Always tighten these tests so that they are precise
       Realm::IndexSpace<DIM,T> tight_intersection = intersection.tighten();
       bool result = !tight_intersection.empty();
@@ -896,7 +896,7 @@ namespace Legion {
             lhs_space, rhs_space, intersection, requests,
             Runtime::merge_events(lhs_ready, rhs_ready)));
       if (!ready.has_triggered())
-        ready.lg_wait();
+        ready.wait();
       // Always tighten these tests so that they are precise
       Realm::IndexSpace<DIM,T> tight_intersection = intersection.tighten();
       bool result = !tight_intersection.empty();
@@ -966,7 +966,7 @@ namespace Legion {
         ApEvent ready(Realm::IndexSpace<DIM,T>::compute_difference(
           rhs_space, local_space, difference, requests, rhs_ready));
         if (!ready.has_triggered())
-          ready.lg_wait();
+          ready.wait();
         // Always tighten these tests so that they are precise
         Realm::IndexSpace<DIM,T> tight_difference = difference.tighten();
         result = tight_difference.empty();
@@ -1027,7 +1027,7 @@ namespace Legion {
         ApEvent ready(Realm::IndexSpace<DIM,T>::compute_difference(
               rhs_space, local_space, difference, requests, rhs_ready));
         if (!ready.has_triggered())
-          ready.lg_wait();
+          ready.wait();
         // Always tighten these tests so that they are precise
         Realm::IndexSpace<DIM,T> tight_difference = difference.tighten();
         result = tight_difference.empty();
@@ -3013,7 +3013,7 @@ namespace Legion {
       ApEvent diff_ready(Realm::IndexSpace<DIM,T>::compute_difference(
           parent_space, union_space, difference_space, requests, parent_ready));
       if (!diff_ready.has_triggered())
-        diff_ready.lg_wait();
+        diff_ready.wait();
       // Always tighten these tests so that they are precise
       Realm::IndexSpace<DIM,T> tight_space = difference_space.tighten();
       bool complete = tight_space.empty();
@@ -3070,7 +3070,7 @@ namespace Legion {
             lhs_space, rhs_space, intersection, requests,
             Runtime::merge_events(union_precondition, rhs_ready)));
       if (!ready.has_triggered())
-        ready.lg_wait();
+        ready.wait();
       // Always tighten these tests so that they are precise
       Realm::IndexSpace<DIM,T> tight_intersection = intersection.tighten();
       bool result = !tight_intersection.empty();
@@ -3143,7 +3143,7 @@ namespace Legion {
             lhs_space, rhs_space, intersection, requests,
             Runtime::merge_events(union_precondition, rhs_precondition)));
       if (!ready.has_triggered())
-        ready.lg_wait();
+        ready.wait();
       // Always tighten these tests so that they are precise
       Realm::IndexSpace<DIM,T> tight_intersection = intersection.tighten();
       bool result = !tight_intersection.empty();
@@ -3210,7 +3210,7 @@ namespace Legion {
         ApEvent ready(Realm::IndexSpace<DIM,T>::compute_difference(
               rhs_space, union_space, difference, requests, rhs_ready));
         if (!ready.has_triggered())
-          ready.lg_wait();
+          ready.wait();
         // Always tighten these tests so that they are precise
         Realm::IndexSpace<DIM,T> tight_difference = difference.tighten();
         result = tight_difference.empty();
@@ -3274,7 +3274,7 @@ namespace Legion {
         ApEvent ready(Realm::IndexSpace<DIM,T>::compute_difference(
               rhs_space, union_space, difference, requests, rhs_precondition));
         if (!ready.has_triggered())
-          ready.lg_wait();
+          ready.wait();
         // Always tighten these tests so that they are precise
         Realm::IndexSpace<DIM,T> tight_difference = difference.tighten();
         result = tight_difference.empty();
@@ -3367,7 +3367,7 @@ namespace Legion {
           if (delete_union_space)
           {
             if (!union_ready.has_triggered())
-              union_ready.lg_wait();
+              union_ready.wait();
             union_space.destroy(); 
           }
           if (!need_tight_result)
@@ -3384,7 +3384,7 @@ namespace Legion {
         }
         // If we make it here we need to tighten our result
         if (!partition_union_ready.has_triggered())
-          partition_union_ready.lg_wait();
+          partition_union_ready.wait();
         Realm::IndexSpace<DIM,T> tight_space = result.tighten();
         // Retake the lock and see if we were the first to tighten
         Realm::IndexSpace<DIM,T> to_destroy;

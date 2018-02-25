@@ -90,6 +90,7 @@ header = re.sub(r'typedef struct {.+?} max_align_t;', '', header, flags=re.DOTAL
 ffi = cffi.FFI()
 ffi.cdef(header)
 c = ffi.dlopen(None)
+pending_registrations = None
 
 # Returns true if this module is running inside of a Legion
 # executable. If false, then other Legion functionality should not be
@@ -551,7 +552,10 @@ class Task (object):
         self.calling_convention = 'python'
         self.task_id = None
         if register:
-            self.register()
+            global pending_registrations
+            if not pending_registrations:
+                pending_registrations = list()
+            pending_registrations.append(self)
 
     def __call__(self, *args):
         # Hack: This entrypoint needs to be able to handle both being
@@ -655,7 +659,7 @@ class Task (object):
         # Clear thread-local storage.
         del _my.ctx
 
-    def register(self):
+    def register(self, runtime):
         assert(self.task_id is None)
 
         execution_constraints = c.legion_execution_constraint_set_create()
@@ -672,9 +676,11 @@ class Task (object):
 
         task_name = ('%s.%s' % (self.body.__module__, self.body.__name__))
 
-        task_id = c.legion_runtime_preregister_task_variant_python_source(
+        task_id = c.legion_runtime_register_task_variant_python_source(
+            runtime,
             ffi.cast('legion_task_id_t', -1), # AUTO_GENERATE_ID
             task_name.encode('utf-8'),
+            False, # Global
             execution_constraints,
             layout_constraints,
             options[0],
@@ -921,3 +927,16 @@ class Tunable(object):
         future = Future(result, 'size_t')
         c.legion_future_destroy(result)
         return future
+
+def initialize(raw_args, user_data, proc):
+    raw_data_ptr = ffi.new('char[]', bytes(user_data))
+    raw_data_size = len(user_data)
+    runtime = ffi.new('legion_runtime_t *')
+    c.legion_initialization_function_preamble(
+            raw_data_ptr, raw_data_size, runtime)
+    global pending_registrations
+    if pending_registrations:
+        for task in pending_registrations:
+            task.register(runtime[0])
+        pending_registrations = None
+

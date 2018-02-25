@@ -2236,6 +2236,14 @@ legion_future_is_empty(legion_future_t handle_,
   return handle->is_empty(block);
 }
 
+bool
+legion_future_is_ready(legion_future_t handle_)
+{
+  Future *handle = CObjectWrapper::unwrap(handle_);
+
+  return handle->is_ready();
+}
+
 const void *
 legion_future_get_untyped_pointer(legion_future_t handle_)
 {
@@ -3199,7 +3207,7 @@ legion_attach_launcher_add_cpu_soa_field(legion_attach_launcher_t launcher_,
   launcher->attach_array_soa(base_ptr, column_major, fields, local_sysmem);
 }
 
-void
+legion_future_t
 legion_detach_external_resource(legion_runtime_t runtime_,
                                 legion_context_t ctx_,
                                 legion_physical_region_t handle_)
@@ -3208,7 +3216,9 @@ legion_detach_external_resource(legion_runtime_t runtime_,
   Context ctx = CObjectWrapper::unwrap(ctx_)->context();
   PhysicalRegion *handle = CObjectWrapper::unwrap(handle_);
 
-  runtime->detach_external_resource(ctx, *handle);
+  Future *result = new Future(
+      runtime->detach_external_resource(ctx, *handle));
+  return CObjectWrapper::wrap(result);
 }
 
 // -----------------------------------------------------------------------
@@ -4666,6 +4676,19 @@ legion_task_postamble(
 				 ctx,
 				 retval,
 				 retsize);
+}
+
+void
+legion_initialization_function_preamble(
+    const void *data,
+    size_t datalen,
+    legion_runtime_t * runtimeptr)
+{
+  Runtime *runtime;
+
+  Runtime::initialization_function_preamble(data, datalen, runtime);
+
+  *runtimeptr = CObjectWrapper::wrap(runtime);
 }
 
 // -----------------------------------------------------------------------

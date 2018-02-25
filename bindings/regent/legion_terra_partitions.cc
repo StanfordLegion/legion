@@ -1051,75 +1051,66 @@ create_cross_product_complete_structured(
     std::map<IndexSpace, std::vector<IndexSpace> >& product,
     legion_terra_index_space_list_list_t &result)
 {
-  std::vector<DomainPoint> lhs_colors;
-  lhs_colors.reserve(lhs.size());
+  std::map<IndexSpace, DomainPoint> lhs_colors;
+  std::map<DomainPoint, IndexSpace> colors_lhs;
   for (unsigned lhs_idx = 0; lhs_idx < lhs.size(); ++lhs_idx) {
     IndexSpace& lh_space = lhs[lhs_idx];
     DomainPoint lh_color = runtime->get_index_space_color_point(ctx, lh_space);
-    lhs_colors.push_back(lh_color);
+    assert(lhs_colors.find(lh_space) == lhs_colors.end());
+    assert(colors_lhs.find(lh_color) == colors_lhs.end());
+    lhs_colors[lh_space] = lh_color;
+    colors_lhs[lh_color] = lh_space;
   }
 
-  std::map<IndexSpace, DomainPointColoring> coloring; // Partition coloring for each RHS ispace.
-  std::map<IndexSpace, Domain> color_spaces; // Color space for each partitioning.
-  for (unsigned lhs_idx = 0; lhs_idx < lhs.size(); ++lhs_idx) {
-    IndexSpace lh_space = lhs[lhs_idx];
-    // Doesn't currently handle structured index spaces consisting of multiple
-    // domains.
-    assert(!runtime->has_multiple_domains(lh_space));
-    Domain lh_domain = runtime->get_index_space_domain(lh_space);
-    // Verify that index space is indeed structured.
-    assert(lh_domain.get_dim() > 0);
-
+  std::map<IndexSpace, Domain> color_domains;
+  std::map<IndexSpace, std::set<DomainPoint> > nonempty_intersections;
+  for (std::map<IndexSpace, std::vector<IndexSpace> >::iterator it = product.begin();
+       it != product.end(); ++it) {
+    IndexSpace lh_space = it->first;
     const std::vector<IndexSpace>& rh_spaces = product[lh_space];
-    DomainPoint lh_color = lhs_colors[lhs_idx];
-
+    DomainPoint lh_color = lhs_colors[lh_space];
     for (unsigned rhs_idx = 0; rhs_idx < rh_spaces.size(); ++rhs_idx) {
-      IndexSpace rh_space = rh_spaces[rhs_idx];
-      assert(!runtime->has_multiple_domains(rh_space));
-      Domain rh_domain = runtime->get_index_space_domain(rh_space);
-      assert(rh_domain.get_dim() > 0);
-
-      coloring[rh_space][lh_color] = rh_domain.intersection(lh_domain);
-      if (color_spaces.count(rh_space) > 0) {
-        color_spaces[rh_space] =
-          color_spaces[rh_space].convex_hull(lh_color);
+      const IndexSpace& rh_space = rh_spaces[rhs_idx];
+      if (color_domains.count(rh_space) > 0) {
+        color_domains[rh_space] =
+          color_domains[rh_space].convex_hull(lh_color);
       } else {
-        color_spaces[rh_space] = Domain::from_domain_point(lh_color);
+        color_domains[rh_space] = Domain::from_domain_point(lh_color);
       }
+      nonempty_intersections[rh_space].insert(lh_color);
     }
   }
 
+  std::map<IndexSpace, IndexSpace> color_spaces; // Color space for each partitioning.
   std::map<IndexSpace, IndexPartition> rh_partitions;
-  for (std::map<IndexSpace, DomainPointColoring>::iterator it = coloring.begin();
-       it != coloring.end(); ++it) {
+  for (std::map<IndexSpace, Domain>::iterator it = color_domains.begin();
+       it != color_domains.end(); ++it) {
+    IndexSpace color_space = runtime->create_index_space(ctx, it->second);
+    const IndexSpace& rh_space = it->first;
+    IndexPartition rh_partition = runtime->create_pending_partition(ctx, rh_space, color_space,
+        lhs_part_disjoint ? DISJOINT_KIND : ALIASED_KIND);
+    const std::set<DomainPoint>& intersections = nonempty_intersections[rh_space];
 
-    IndexSpace rh_space = it->first;
-    DomainPointColoring& coloring = it->second;
-    assert(color_spaces.count(rh_space) > 0);
-    Domain color_space = color_spaces[rh_space];
+    color_spaces[rh_space] = color_space;
+    rh_partitions[rh_space] = rh_partition;
 
-    for (Domain::DomainPointIterator dp(color_space); dp; dp++) {
-      if (coloring.find(dp.p) == coloring.end()) {
-        Domain empty_domain = runtime->get_index_space_domain(rh_space);
-        unsigned dim = empty_domain.get_dim();
-        for (unsigned idx = 0; idx < dim; ++idx) {
-          empty_domain.rect_data[idx] = 0;
-          empty_domain.rect_data[idx + dim] = -1;
-        }
-        coloring[dp.p] = empty_domain;
+    for (Domain::DomainPointIterator dp(it->second); dp; dp++)
+    {
+      std::vector<IndexSpace> handles;
+      if (intersections.find(dp.p) != intersections.end())
+      {
+        const IndexSpace& lh_space = colors_lhs[dp.p];
+        handles.push_back(rh_space);
+        handles.push_back(lh_space);
       }
+      runtime->create_index_space_intersection(ctx, rh_partition, dp.p, handles);
     }
-
-    IndexPartition ip = runtime->create_index_partition(
-        ctx, /* parent = */ rh_space, /* color_space = */ color_space,
-        coloring, lhs_part_disjoint ? DISJOINT_KIND : ALIASED_KIND);
-    rh_partitions[rh_space] = ip;
   }
 
   for (unsigned lhs_idx = 0; lhs_idx < lhs.size(); ++lhs_idx) {
-    IndexSpace lh_space = lhs[lhs_idx];
+    IndexSpace& lh_space = lhs[lhs_idx];
     std::vector<IndexSpace>& rh_spaces = product[lh_space];
-    DomainPoint lh_color = lhs_colors[lhs_idx];
+    DomainPoint lh_color = lhs_colors[lh_space];
 
     for (unsigned rhs_idx = 0; rhs_idx < rh_spaces.size(); ++rhs_idx) {
       IndexSpace& rh_space = rh_spaces[rhs_idx];

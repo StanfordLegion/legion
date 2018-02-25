@@ -1955,6 +1955,12 @@ extern "C" {
                          bool block /* = false */);
 
   /**
+   * @see Legion::Future::is_ready()
+   */
+  bool
+  legion_future_is_ready(legion_future_t handle);
+
+  /**
    * @see Legion::Future::get_untyped_pointer()
    */
   const void *
@@ -2674,7 +2680,12 @@ extern "C" {
                                            void *base_ptr,
                                            bool column_major);
 
-  void
+  /**
+   * @return Caller takes ownership of return value
+   *
+   * @see Legion::Runtime::detach_external_resource()
+   */
+  legion_future_t
   legion_detach_external_resource(legion_runtime_t runtime,
                                   legion_context_t ctx,
                                   legion_physical_region_t handle);
@@ -3592,6 +3603,15 @@ extern "C" {
     legion_context_t ctx,
     const void *retval,
     size_t retsize);
+
+  /**
+   * @see Legion::Runtime::initialization_function_preamble()
+   */
+  void
+  legion_initialization_function_preamble(
+      const void *data,
+      size_t datalen,
+      legion_runtime_t * runtimeptr);
 
   // -----------------------------------------------------------------------
   // Timing Operations

@@ -159,7 +159,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(memo_state == NO_MEMO);
 #endif
-      if (memoize && !Runtime::no_tracing && !Runtime::no_physical_tracing)
+      if (memoize && !this->runtime->no_tracing && 
+          !this->runtime->no_physical_tracing)
         memo_state = MEMO_REQ;
     }
 
