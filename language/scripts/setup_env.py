@@ -168,8 +168,8 @@ def install_llvm(llvm_dir, llvm_install_dir, llvm_version, llvm_use_cmake, cmake
         llvm_source_dir = os.path.join(llvm_dir, 'llvm-3.5.2.src')
         clang_tarball = os.path.join(llvm_dir, 'cfe-3.5.2.src.tar.xz')
         clang_source_dir = os.path.join(llvm_dir, 'cfe-3.5.2.src')
-        download(llvm_tarball, 'http://sapling.stanford.edu/~eslaught/llvm/3.5.2/llvm-3.5.2.src.tar.xz', '79638cf00584b08fd6eeb1e73ea69b331561e7f6', insecure=insecure)
-        download(clang_tarball, 'http://sapling.stanford.edu/~eslaught/llvm/3.5.2/cfe-3.5.2.src.tar.xz', '39d79c0b40cec548a602dcac3adfc594b18149fe', insecure=insecure)
+        download(llvm_tarball, 'http://sapling.stanford.edu/~eslaught/llvm/3.5.2/llvm-3.5.2.src.tar.xz', '85faf7cbd518dabeafc4d3f7e909338fc1dab3c4', insecure=insecure)
+        download(clang_tarball, 'http://sapling.stanford.edu/~eslaught/llvm/3.5.2/cfe-3.5.2.src.tar.xz', '50291e4c4ced8fcee3cca40bff0afb19fcc356e2', insecure=insecure)
     elif llvm_version == '38':
         llvm_tarball = os.path.join(llvm_dir, 'llvm-3.8.1.src.tar.xz')
         llvm_source_dir = os.path.join(llvm_dir, 'llvm-3.8.1.src')
