@@ -139,11 +139,11 @@ namespace Legion {
       output.memoize = false;
       Processor mapper_proc = OP::parent_ctx->get_executing_processor();
       MapperManager *mapper = OP::runtime->find_mapper(mapper_proc, mapper_id);
-      Memoizable *memoizable = get_memoizable();
+      Mappable *mappable = OP::get_mappable();
 #ifdef DEBUG_LEGION
-      assert(memoizable != NULL);
+      assert(mappable != NULL);
 #endif
-      mapper->invoke_memoize_operation(memoizable, &input, &output);
+      mapper->invoke_memoize_operation(mappable, &input, &output);
       if (OP::trace == NULL && output.memoize)
         REPORT_LEGION_ERROR(ERROR_INVALID_PHYSICAL_TRACING,
             "Invalid mapper output from 'memoize_operation'. Mapper requested"
