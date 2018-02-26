@@ -163,7 +163,14 @@ def install_llvm(llvm_dir, llvm_install_dir, llvm_version, llvm_use_cmake, cmake
         pass # Hope this means it already exists
     assert(os.path.isdir(llvm_dir))
 
-    if llvm_version == '38':
+    if llvm_version == '35':
+        llvm_tarball = os.path.join(llvm_dir, 'llvm-3.5.2.src.tar.xz')
+        llvm_source_dir = os.path.join(llvm_dir, 'llvm-3.5.2.src')
+        clang_tarball = os.path.join(llvm_dir, 'cfe-3.5.2.src.tar.xz')
+        clang_source_dir = os.path.join(llvm_dir, 'cfe-3.5.2.src')
+        download(llvm_tarball, 'http://sapling.stanford.edu/~eslaught/llvm/3.5.2/llvm-3.5.2.src.tar.xz', '79638cf00584b08fd6eeb1e73ea69b331561e7f6', insecure=insecure)
+        download(clang_tarball, 'http://sapling.stanford.edu/~eslaught/llvm/3.5.2/cfe-3.5.2.src.tar.xz', '39d79c0b40cec548a602dcac3adfc594b18149fe', insecure=insecure)
+    elif llvm_version == '38':
         llvm_tarball = os.path.join(llvm_dir, 'llvm-3.8.1.src.tar.xz')
         llvm_source_dir = os.path.join(llvm_dir, 'llvm-3.8.1.src')
         clang_tarball = os.path.join(llvm_dir, 'cfe-3.8.1.src.tar.xz')
@@ -177,6 +184,8 @@ def install_llvm(llvm_dir, llvm_install_dir, llvm_version, llvm_use_cmake, cmake
         clang_source_dir = os.path.join(llvm_dir, 'cfe-3.9.1.src')
         download(llvm_tarball, 'http://sapling.stanford.edu/~eslaught/llvm/3.9.1/llvm-3.9.1.src.tar.xz', 'ce801cf456b8dacd565ce8df8288b4d90e7317ff', insecure=insecure)
         download(clang_tarball, 'http://sapling.stanford.edu/~eslaught/llvm/3.9.1/cfe-3.9.1.src.tar.xz', '95e4be54b70f32cf98a8de36821ea5495b84add8', insecure=insecure)
+    else:
+        assert False
 
     if not cache:
         extract(llvm_dir, llvm_tarball, 'xz')
@@ -258,7 +267,9 @@ def driver(prefix_dir=None, cache=False, legion_use_cmake=False, llvm_version=No
         if 'HOST_CXX' not in os.environ:
             raise Exception('Please set HOST_CXX in your environment')
 
-    if llvm_version == '38':
+    if llvm_version == '35':
+        llvm_use_cmake = False
+    elif llvm_version == '38':
         llvm_use_cmake = False
     elif llvm_version == '39':
         llvm_use_cmake = True
@@ -373,7 +384,7 @@ if __name__ == '__main__':
         default=os.environ.get('USE_CMAKE') == 1,
         help='Use CMake to build Legion.')
     parser.add_argument(
-        '--llvm-version', dest='llvm_version', required=False, choices=('38', '39'),
+        '--llvm-version', dest='llvm_version', required=False, choices=('35', '38', '39'),
         default=discover_llvm_version(),
         help='Select LLVM version.')
     parser.add_argument(
