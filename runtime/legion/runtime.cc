@@ -1193,7 +1193,7 @@ namespace Legion {
         trigger_on_unmap = false;
         Runtime::trigger_event(termination_event);
       }
-      if (!references.empty())
+      if (!references.empty() && !context->owner_task->is_replaying())
         references.remove_valid_references(PHYSICAL_REGION_REF);
     }
 

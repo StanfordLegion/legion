@@ -3204,7 +3204,7 @@ namespace Legion {
       virtual_mapped.resize(regions.size(), false);
       std::map<PhysicalManager*,std::pair<unsigned,bool> > *acquired =
         get_acquired_instances_ref();
-      std::vector<PhysicalManager*> unacquired;
+      std::pair<unsigned,bool> init(1,false);
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
         InstanceSet &instances = physical_instances[idx];
@@ -3219,7 +3219,8 @@ namespace Legion {
           {
             PhysicalManager *manager = instances[iidx].get_manager();
             if (acquired->find(manager) == acquired->end())
-              unacquired.push_back(manager);
+              acquired->insert(std::pair<PhysicalManager*,
+                  std::pair<unsigned,bool> >(manager, init));
           }
         }
         if (runtime->legion_spy_enabled)
@@ -3227,7 +3228,6 @@ namespace Legion {
                                                 regions[idx],
                                                 instances);
       }
-      runtime->forest->perform_missing_acquires(this, *acquired, unacquired);
     }
 
     //--------------------------------------------------------------------------
