@@ -940,15 +940,6 @@ namespace Legion {
                                 bool permit_projection = false);
       void compute_parent_indexes(void);
     public:
-      // From Memoizable
-      virtual MemoizableType get_memoizable_type(void) const
-        { return COPY_MEMOIZABLE; }
-      virtual const Task* as_task(void) const { return NULL; }
-      virtual const Copy* as_copy(void) const { return this; }
-      virtual const Fill* as_fill(void) const { return NULL; }
-      virtual const DynamicCollective* as_dynamic_collective(void) const
-        { return NULL; }
-    public:
       // From MemoizableOp
       virtual void replay_analysis(void);
     public:
@@ -1788,10 +1779,6 @@ namespace Legion {
       virtual const Partition* as_partition(void) const { return NULL; }
       virtual const DynamicCollective* as_dynamic_collective(void) const
         { return &collective; }
-    public:
-      // From Memoizable
-      virtual MemoizableType get_memoizable_type(void) const
-        { return DYNAMIC_COLLECTIVE_MEMOIZABLE; }
     public:
       // From MemoizableOp
       virtual void replay_analysis(void);
@@ -2706,15 +2693,6 @@ namespace Legion {
       void compute_parent_index(void);
       ApEvent compute_sync_precondition(void) const;
       void log_fill_requirement(void) const;
-    public:
-      // From Memoizable
-      virtual MemoizableType get_memoizable_type(void) const
-        { return FILL_MEMOIZABLE; }
-      virtual const Task* as_task(void) const { return NULL; }
-      virtual const Copy* as_copy(void) const { return NULL; }
-      virtual const Fill* as_fill(void) const { return this; }
-      virtual const DynamicCollective* as_dynamic_collective(void) const
-        { return NULL; }
     public:
       // From MemoizableOp
       virtual void replay_analysis(void);

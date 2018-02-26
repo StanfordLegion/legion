@@ -228,15 +228,6 @@ namespace Legion {
       virtual int get_depth(void) const;
       virtual const char* get_task_name(void) const;
     public:
-      // From Memoizable
-      virtual MemoizableType get_memoizable_type(void) const
-        { return TASK_MEMOIZABLE; }
-      virtual const Task* as_task(void) const { return this; }
-      virtual const Copy* as_copy(void) const { return NULL; }
-      virtual const Fill* as_fill(void) const { return NULL; }
-      virtual const DynamicCollective* as_dynamic_collective(void) const
-        { return NULL; }
-    public:
       bool is_remote(void) const;
       inline bool is_stolen(void) const { return (steal_count > 0); }
       inline bool is_origin_mapped(void) const { return map_origin; }

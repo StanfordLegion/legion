@@ -1410,6 +1410,18 @@ namespace Legion {
     };
 
     /**
+     * \class Memoizable
+     * An abstract class for retrieving trace local ids in physical tracing.
+     */
+    class Memoizable
+    {
+    public:
+      // Return a trace local unique ID for this operation
+      typedef std::pair<unsigned, DomainPoint> TraceLocalID;
+      virtual TraceLocalID get_trace_local_id(void) const = 0;
+    };
+
+    /**
      * \class ProjectionFunction
      * A class for wrapping projection functors
      */

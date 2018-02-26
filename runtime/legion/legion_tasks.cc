@@ -6554,8 +6554,7 @@ namespace Legion {
     TraceLocalID PointTask::get_trace_local_id() const
     //--------------------------------------------------------------------------
     {
-      return
-        std::pair<unsigned, DomainPoint>(trace_local_id, get_domain_point());
+      return TraceLocalID(trace_local_id, get_domain_point());
     }
 
     /////////////////////////////////////////////////////////////
