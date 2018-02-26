@@ -332,8 +332,6 @@ local terra get_optional_arg(key : rawstring)
       else
         return nil
       end
-    elseif args.argv[i][0] == ('-')[0] then
-      i = i + 1
     end
     i = i + 1
   end
