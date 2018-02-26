@@ -9256,14 +9256,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     DynamicCollectiveOp::DynamicCollectiveOp(Runtime *rt)
-      : MemoizableOp<Operation>(rt)
+      : Mappable(), MemoizableOp<Operation>(rt)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     DynamicCollectiveOp::DynamicCollectiveOp(const DynamicCollectiveOp &rhs)
-      : MemoizableOp<Operation>(NULL)
+      : Mappable(), MemoizableOp<Operation>(NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -9306,6 +9306,20 @@ namespace Legion {
                                  future.impl->get_ready_event(), empty_point);
       }
       return future;
+    }
+
+    //--------------------------------------------------------------------------
+    unsigned DynamicCollectiveOp::get_context_index(void) const
+    //--------------------------------------------------------------------------
+    {
+      return context_index;
+    }
+
+    //--------------------------------------------------------------------------
+    int DynamicCollectiveOp::get_depth(void) const
+    //--------------------------------------------------------------------------
+    {
+      return (parent_ctx->get_depth() + 1);
     }
 
     //--------------------------------------------------------------------------

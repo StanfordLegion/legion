@@ -1758,7 +1758,8 @@ namespace Legion {
      * us the framework necessary to handle roll backs on 
      * collectives so we can memoize their results.
      */
-    class DynamicCollectiveOp : public MemoizableOp<Operation>,
+    class DynamicCollectiveOp : public Mappable,
+                                public MemoizableOp<Operation>,
                                 public LegionHeapify<DynamicCollectiveOp> {
     public:
       static const AllocationType alloc_type = DYNAMIC_COLLECTIVE_OP_ALLOC;
@@ -1771,15 +1772,26 @@ namespace Legion {
     public:
       Future initialize(TaskContext *ctx, const DynamicCollective &dc);
     public:
-      // From Memoizable
+      // From Mappable
       virtual UniqueID get_unique_id(void) const { return unique_op_id; }
-      virtual MemoizableType get_memoizable_type(void) const
-        { return DYNAMIC_COLLECTIVE_MEMOIZABLE; }
+      virtual unsigned get_context_index(void) const;
+      virtual int get_depth(void) const;
+      virtual MappableType get_mappable_type(void) const
+        { return DYNAMIC_COLLECTIVE_MAPPABLE; }
       virtual const Task* as_task(void) const { return NULL; }
       virtual const Copy* as_copy(void) const { return NULL; }
+      virtual const InlineMapping* as_inline(void) const { return NULL; }
+      virtual const Acquire* as_acquire(void) const { return NULL; }
+      virtual const Release* as_release(void) const { return NULL; }
+      virtual const Close* as_close(void) const { return NULL; }
       virtual const Fill* as_fill(void) const { return NULL; }
+      virtual const Partition* as_partition(void) const { return NULL; }
       virtual const DynamicCollective* as_dynamic_collective(void) const
         { return &collective; }
+    public:
+      // From Memoizable
+      virtual MemoizableType get_memoizable_type(void) const
+        { return DYNAMIC_COLLECTIVE_MEMOIZABLE; }
     public:
       // From MemoizableOp
       virtual void replay_analysis(void);
