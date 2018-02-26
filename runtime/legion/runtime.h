@@ -2017,7 +2017,7 @@ namespace Legion {
       void issue_release(Context ctx, const ReleaseLauncher &launcher);
       void issue_mapping_fence(Context ctx);
       void issue_execution_fence(Context ctx);
-      void begin_trace(Context ctx, TraceID tid, bool memoize);
+      void begin_trace(Context ctx, TraceID tid, bool logical_only);
       void end_trace(Context ctx, TraceID tid);
       void begin_static_trace(Context ctx, 
                               const std::set<RegionTreeID> *managed);

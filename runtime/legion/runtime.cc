@@ -11985,12 +11985,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::begin_trace(Context ctx, TraceID tid, bool memoize)
+    void Runtime::begin_trace(Context ctx, TraceID tid, bool logical_only)
     //--------------------------------------------------------------------------
     {
       if (ctx == DUMMY_CONTEXT)
         REPORT_DUMMY_CONTEXT("Illegal dummy context begin trace!");
-      ctx->begin_trace(tid, memoize);
+      ctx->begin_trace(tid, logical_only);
     }
 
     //--------------------------------------------------------------------------

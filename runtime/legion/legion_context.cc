@@ -4947,7 +4947,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InnerContext::begin_trace(TraceID tid, bool memoize)
+    void InnerContext::begin_trace(TraceID tid, bool logical_only)
     //--------------------------------------------------------------------------
     {
       if (runtime->no_tracing) return;
@@ -4969,7 +4969,7 @@ namespace Legion {
       if (finder == traces.end())
       {
         // Trace does not exist yet, so make one and record it
-        dynamic_trace = new DynamicTrace(tid, this, memoize);
+        dynamic_trace = new DynamicTrace(tid, this, logical_only);
         dynamic_trace->add_reference();
         traces[tid] = dynamic_trace;
       }
@@ -4984,7 +4984,7 @@ namespace Legion {
       begin->initialize_begin(this, dynamic_trace);
       runtime->add_to_dependence_queue(this, executing_processor, begin);
 
-      if (memoize)
+      if (!logical_only)
       {
         // Issue a replay op
         TraceReplayOp *replay = runtime->get_available_replay_op();
@@ -8241,7 +8241,7 @@ namespace Legion {
 
 
     //--------------------------------------------------------------------------
-    void LeafContext::begin_trace(TraceID tid, bool memoize)
+    void LeafContext::begin_trace(TraceID tid, bool logical_only)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_LEGION_BEGIN_TRACE,
@@ -9405,10 +9405,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InlineContext::begin_trace(TraceID tid, bool memoize)
+    void InlineContext::begin_trace(TraceID tid, bool logical_only)
     //--------------------------------------------------------------------------
     {
-      enclosing->begin_trace(tid, memoize);
+      enclosing->begin_trace(tid, logical_only);
     }
 
     //--------------------------------------------------------------------------
