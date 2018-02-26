@@ -2395,7 +2395,6 @@ namespace Legion {
       if (remap_region)
       {
         region.impl->get_references(mapped_instances);
-        // TODO: Implement physical tracing for map operation
         PhysicalTraceInfo trace_info;
         runtime->forest->physical_register_only(requirement,
                                                 version_info, restrict_info,
@@ -2415,7 +2414,6 @@ namespace Legion {
       }
       else
       {
-        // TODO: Implement physical tracing for map operation
         PhysicalTraceInfo trace_info;
         // We're going to need to invoke the mapper, find the set of valid
         // instances as part of our traversal
@@ -3649,7 +3647,6 @@ namespace Legion {
     void CopyOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
-      // TODO: Implement physical tracing for copy across operation
       PhysicalTraceInfo trace_info;
       if (is_recording())
       {
@@ -13036,7 +13033,6 @@ namespace Legion {
         assert(value != NULL);
 #endif
         InstanceSet mapped_instances;
-        // TODO: Implement physical tracing for fill operation
         if (restrict_info.has_restrictions())
         {
           mapped_instances = restrict_info.get_instances();
@@ -13127,7 +13123,6 @@ namespace Legion {
       void *result = malloc(result_size);
       memcpy(result, future.impl->get_untyped_result(), result_size);
       InstanceSet mapped_instances;
-      // TODO: Implement physical tracing for fill operation
       PhysicalTraceInfo trace_info;
       if (restrict_info.has_restrictions())
       {
