@@ -5585,7 +5585,7 @@ namespace Legion {
         case MAPPING_FENCE:
           {
             complete_mapping();
-            complete_execution(Runtime::protect_event(execution_fence_event));
+            complete_execution();
             break;
           }
         case MIXED_FENCE:
