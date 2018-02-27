@@ -68,7 +68,7 @@ task main()
   var q = partition(equal, r, cs)
 
   for color in cs do init(p[color]) end
-  for k = 0, 3 do
+  for k = 0, 20 do
     __demand(__trace)
     for i = 0, 3 do
       for color in cs do inc(p[color]) end
