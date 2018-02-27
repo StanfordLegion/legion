@@ -4822,6 +4822,7 @@ namespace Legion {
       else
       {
         // Both mapping and execution analysis at the same time
+        AutoLock child_lock(child_op_lock,1,false/*exclusive*/);
         for (std::map<Operation*,GenerationID>::const_iterator it = 
               executing_children.begin(); it != executing_children.end(); it++)
         {
