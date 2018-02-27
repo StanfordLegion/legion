@@ -47,7 +47,7 @@ def test(root_dir, install_only, debug, short, spy, gcov, hdf5, openmp, jobs, en
         if gcov: extra_flags.append('--run')
         if hdf5: extra_flags.append('--hdf5')
         if openmp: extra_flags.append('--openmp')
-        extra_flags.extend(['--extra=-fjobs', '--extra=' + jobs])
+        extra_flags.extend(['--extra=-fjobs', '--extra=%s' % jobs])
         if not spy and not gcov and not hdf5 and not openmp: extra_flags.append('--debug')
 
         subprocess.check_call(
