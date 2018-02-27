@@ -1182,26 +1182,7 @@ namespace Legion {
         template_completion = current_template->get_completion();
         Runtime::trigger_event(completion_event, template_completion);
         local_trace->end_trace_execution(this);
-        switch (fence_kind)
-        {
-          case MAPPING_FENCE:
-            {
-              parent_ctx->update_current_fence(this, true, false);
-              break;
-            }
-          case MIXED_FENCE:
-            {
-              parent_ctx->update_current_fence(this, true, true);
-              break;
-            }
-          case EXECUTION_FENCE:
-            {
-              parent_ctx->update_current_fence(this, false, true);
-              break;
-            }
-          default:
-            assert(false);
-        }
+        parent_ctx->update_current_fence(this, true, true);
         parent_ctx->record_previous_trace(local_trace);
         local_trace->initialize_tracing_state();
         replayed = true;
@@ -1226,26 +1207,7 @@ namespace Legion {
 #else
       // Now update the parent context with this fence before we can complete
       // the dependence analysis and possibly be deactivated
-      switch (fence_kind)
-      {
-        case MAPPING_FENCE:
-          {
-            parent_ctx->update_current_fence(this, true, false);
-            break;
-          }
-        case EXECUTION_FENCE:
-          {
-            parent_ctx->update_current_fence(this, false, true);
-            break;
-          }
-        case MIXED_FENCE:
-          {
-            parent_ctx->update_current_fence(this, true, true);
-            break;
-          }
-        default:
-          assert(false);
-      }
+      parent_ctx->update_current_fence(this, true, true);
 #endif
       // If this is a static trace, then we remove our reference when we're done
       if (local_trace->is_static_trace())
@@ -1393,7 +1355,8 @@ namespace Legion {
           physical_trace->check_template_preconditions();
 
         // Register this fence with all previous users in the parent's context
-        perform_fence_analysis();
+        execution_precondition = 
+          parent_ctx->perform_fence_analysis(this, false, true);
       }
 
       if (physical_trace->get_current_template() != NULL)
@@ -1404,7 +1367,7 @@ namespace Legion {
 
       // Now update the parent context with this fence before we can complete
       // the dependence analysis and possibly be deactivated
-      update_current_fence();
+      parent_ctx->update_current_fence(this, false, true);
     }
 
     /////////////////////////////////////////////////////////////
