@@ -18,7 +18,7 @@
 from __future__ import print_function
 import argparse, os, platform, subprocess
 
-def test(root_dir, install_only, debug, short, spy, gcov, hdf5, openmp, env):
+def test(root_dir, install_only, debug, short, spy, gcov, hdf5, openmp, jobs, env):
     threads = ['-j', '2'] if 'TRAVIS' in env else []
     terra = ['--with-terra', env['TERRA_DIR']] if 'TERRA_DIR' in env else []
     build = (['--with-cmake-build', env['CMAKE_BUILD_DIR']]
@@ -47,6 +47,7 @@ def test(root_dir, install_only, debug, short, spy, gcov, hdf5, openmp, env):
         if gcov: extra_flags.append('--run')
         if hdf5: extra_flags.append('--hdf5')
         if openmp: extra_flags.append('--openmp')
+        extra_flags.extend(['--extra=-fjobs', '--extra=' + jobs])
         if not spy and not gcov and not hdf5 and not openmp: extra_flags.append('--debug')
 
         subprocess.check_call(
@@ -78,4 +79,5 @@ if __name__ == '__main__':
     gcov = 'TEST_GCOV' in env and env['TEST_GCOV'] == '1'
     hdf5 = 'TEST_HDF' in env and env['TEST_HDF'] == '1'
     openmp = 'TEST_OPENMP' in env and env['TEST_OPENMP'] == '1'
-    test(root_dir, args.install_only, debug, short, spy, gcov, hdf5, openmp, env)
+    jobs = int(env['REGENT_JOBS']) if 'REGENT_JOBS' in env else 1
+    test(root_dir, args.install_only, debug, short, spy, gcov, hdf5, openmp, jobs, env)
