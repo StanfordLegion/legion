@@ -2467,7 +2467,6 @@ namespace Legion {
 #endif
       operations[key] = task;
       task_entries[key] = instructions.size();
-      op_list.push_back(key);
 
       instructions.push_back(new GetTermEvent(*this, lhs_, key));
 #ifdef DEBUG_LEGION
@@ -2938,7 +2937,6 @@ namespace Legion {
 #endif
       operations[key] = copy;
       task_entries[key] = instructions.size();
-      op_list.push_back(key);
 
       instructions.push_back(new GetCopyTermEvent(*this, lhs_, key));
 #ifdef DEBUG_LEGION

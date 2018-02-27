@@ -591,7 +591,6 @@ namespace Legion {
       std::map<TraceLocalID, Operation*> operations;
       std::vector<ApEvent> events;
       std::vector<ApUserEvent> user_events;
-      std::vector<TraceLocalID> op_list;
       CachedMappings                                  cached_mappings;
       LegionMap<InstanceView*, FieldMask>::aligned    previous_valid_views;
       LegionMap<std::pair<RegionTreeNode*, ContextID>,
