@@ -20,6 +20,7 @@ local cudahelper = require("regent/cudahelper")
 local data = require("common/data")
 local ffi = require("ffi")
 local header_helper = require("regent/header_helper")
+local log = require("common/log")
 local pretty = require("regent/pretty")
 local profile = require("regent/profile")
 local report = require("common/report")
@@ -3537,11 +3538,13 @@ local function compile_tasks_in_parallel()
   -- TODO: Terra functions used by more than one task may get compiled
   -- multiple times, and included in multiple object files by different
   -- children. This will cause bloat in the final executable.
+  local pclog = log.make_logger('paral_compile')
   local objfiles = terralib.newlist()
   local slave_pids = terralib.newlist()
   local slave_pipes = terralib.newlist()
   local slave2master = make_pipe()
   for slave_id = 1,num_slaves do
+    pclog:info('master: spawning slave ' .. slave_id)
     local master2slave = make_pipe()
     slave_pipes:insert(master2slave)
     local pid = c.fork()
@@ -3550,17 +3553,21 @@ local function compile_tasks_in_parallel()
       slave2master:close_read_end()
       master2slave:close_write_end()
       while true do
+        pclog:info('slave ' .. slave_id .. ': signaling master to send work')
         slave2master:write_int(slave_id)
         local variant_id = master2slave:read_int()
         assert(0 <= variant_id and variant_id <= #variants,
-               'master2slave: variant_id read error')
+               'slave ' .. slave_id .. ': variant id read error')
         if variant_id == 0 then
+          pclog:info('slave ' .. slave_id .. ': stopping')
           break
         end
         local raw_filename = master2slave:read_string()
         local filename = ffi.string(raw_filename)
         c.free(raw_filename)
         local variant = variants[variant_id]
+        pclog:info('slave ' .. slave_id .. ': compiling ' ..
+                   tostring(variant) .. ' to file ' .. filename)
         local exports = {}
         exports[variant:wrapper_name()] = variant:make_wrapper()
         profile('compile', variant, function()
@@ -3571,26 +3578,37 @@ local function compile_tasks_in_parallel()
       master2slave:close_read_end()
       os.exit(c.EXIT_SUCCESS)
     else
+      pclog:info('master: slave ' .. slave_id .. ' spawned as pid ' .. pid)
       slave_pids:insert(pid)
       master2slave:close_read_end()
     end
   end
   slave2master:close_write_end()
-  for variant_id = 1,#variants do
-    local objfile = os.tmpname()
-    objfiles:insert(objfile)
+  local next_variant = 1
+  local num_stopped = 0
+  while num_stopped < num_slaves do
+    pclog:info('master: waiting for next available slave')
     local slave_id = slave2master:read_int()
     assert(1 <= slave_id and slave_id <= num_slaves,
-           'slave2master: slave_id read error')
+           'master: slave id read error')
     local master2slave = slave_pipes[slave_id]
-    master2slave:write_int(variant_id)
-    master2slave:write_string(objfile)
+    if next_variant <= #variants then
+      local objfile = os.tmpname()
+      objfiles:insert(objfile)
+      pclog:info('master: assigning ' .. tostring(variants[next_variant]) ..
+                 ' to slave ' .. slave_id .. ', to be compiled to ' .. objfile)
+      master2slave:write_int(next_variant)
+      master2slave:write_string(objfile)
+      next_variant = next_variant + 1
+    else
+      pclog:info('master: sending stop command to slave ' .. slave_id)
+      master2slave:write_int(0)
+      master2slave:close_write_end()
+      num_stopped = num_stopped + 1
+    end
   end
-  for _,master2slave in ipairs(slave_pipes) do
-    master2slave:write_int(0)
-    master2slave:close_write_end()
-  end
-  for _,pid in ipairs(slave_pids) do
+  for slave_id,pid in ipairs(slave_pids) do
+    pclog:info('master: waiting for slave ' .. slave_id .. ' to finish')
     c.waitpid(pid, nil, 0)
   end
   slave2master:close_read_end()
