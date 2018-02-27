@@ -4901,6 +4901,11 @@ namespace Legion {
         previous_events.erase(op->get_completion_event());
       }
 #endif
+      // Also include the current execution fence in case the operation
+      // already completed and wasn't in the set, make sure to do this
+      // before we update the current fence
+      if (execution && current_execution_fence_event.exists())
+        previous_events.insert(current_execution_fence_event);
       if (!previous_events.empty())
         return Runtime::merge_events(previous_events);
       return ApEvent::NO_AP_EVENT;
