@@ -123,9 +123,9 @@ endif
 MARCH ?= native
 
 ifneq (${MARCH},)
-  # Summitdev is strange and wants to have this specified via -mcpu
+  # Summit/Summitdev are strange and want to have this specified via -mcpu
   # instead of -march. Unclear if this is true in general for PPC.
-  ifeq ($(findstring summitdev,$(shell uname -n)),summitdev)
+  ifeq ($(findstring ppc64le,$(shell uname -p)),ppc64le)
     CC_FLAGS += -mcpu=${MARCH} -maltivec -mabi=altivec -mvsx
   else
     CC_FLAGS += -march=${MARCH}
@@ -422,8 +422,9 @@ ifeq ($(strip $(USE_MPI)),1)
     CC		:= mpicc
     CXX		:= mpicxx
     F90         := mpif90
-    # Summitdev is strange and links this automatically (but still uses mpicxx).
-    ifneq ($(findstring summitdev,$(shell uname -n)),summitdev)
+    # Summit/Summitdev are strange and link this automatically (but still uses mpicxx).
+    # FIXME: Unfortunately you can't match against the Summit hostname right now...
+    ifneq ($(findstring ppc64le,$(shell uname -p)),ppc64le)
       LEGION_LD_FLAGS	+= -L$(MPI)/lib -lmpi
     endif
     LAPACK_LIBS ?= -lblas

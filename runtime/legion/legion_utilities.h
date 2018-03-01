@@ -106,9 +106,9 @@ namespace Legion {
 #endif
 #ifdef __ALTIVEC__
       template<unsigned int MAX>
-      inline void serialize(const PPCBitMask<MAX> &mask);
+      inline void serialize(const Internal::PPCBitMask<MAX> &mask);
       template<unsigned int MAX>
-      inline void serialize(const PPCTLBitMask<MAX> &mask);
+      inline void serialize(const Internal::PPCTLBitMask<MAX> &mask);
 #endif
       template<typename IT, typename DT, bool BIDIR>
       inline void serialize(
@@ -185,9 +185,9 @@ namespace Legion {
 #endif
 #ifdef __ALTIVEC__
       template<unsigned int MAX>
-      inline void deserialize(PPCBitMask<MAX> &mask);
+      inline void deserialize(Internal::PPCBitMask<MAX> &mask);
       template<unsigned int MAX>
-      inline void deserialize(PPCTLBitMask<MAX> &mask);
+      inline void deserialize(Internal::PPCTLBitMask<MAX> &mask);
 #endif
       template<typename IT, typename DT, bool BIDIR>
       inline void deserialize(Internal::IntegerSet<IT,DT,BIDIR> &index_set);
@@ -1594,7 +1594,7 @@ namespace Legion {
 #ifdef __ALTIVEC__
     //--------------------------------------------------------------------------
     template<unsigned int MAX>
-    inline void Serializer::serialize(const PPCBitMask<MAX> &mask)
+    inline void Serializer::serialize(const Internal::PPCBitMask<MAX> &mask)
     //--------------------------------------------------------------------------
     {
       mask.serialize(*this);
@@ -1602,7 +1602,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<unsigned int MAX>
-    inline void Serializer::serialize(const PPCTLBitMask<MAX> &mask)
+    inline void Serializer::serialize(const Internal::PPCTLBitMask<MAX> &mask)
     //--------------------------------------------------------------------------
     {
       mask.serialize(*this);
@@ -1814,7 +1814,7 @@ namespace Legion {
 #ifdef __ALTIVEC__
     //--------------------------------------------------------------------------
     template<unsigned int MAX>
-    inline void Deserializer::deserialize(PPCBitMask<MAX> &mask)
+    inline void Deserializer::deserialize(Internal::PPCBitMask<MAX> &mask)
     //--------------------------------------------------------------------------
     {
       mask.deserialize(*this);
@@ -1822,7 +1822,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<unsigned int MAX>
-    inline void Deserializer::deserialize(PPCTLBitMask<MAX> &mask)
+    inline void Deserializer::deserialize(Internal::PPCTLBitMask<MAX> &mask)
     //--------------------------------------------------------------------------
     {
       mask.deserialize(*this);

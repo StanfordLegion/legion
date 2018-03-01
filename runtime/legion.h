@@ -2103,6 +2103,8 @@ namespace Legion {
       // These methods can only be accessed by the FieldAccessor class
       template<PrivilegeMode, typename, int, typename, typename, bool>
       friend class FieldAccessor;
+      template<typename, bool, int, typename, typename, bool>
+      friend class ReductionAccessor;
       template<typename, int, typename, typename>
       friend class UnsafeFieldAccessor;
       Realm::RegionInstance get_instance_info(PrivilegeMode mode, 
@@ -2127,6 +2129,7 @@ namespace Legion {
      * default version of this class is empty, but the following
      * specializations of this class with different privilege modes
      * will provide different methods specific to that privilege type
+     * The ReduceAccessor class should be used for explicit reductions
      *
      * READ_ONLY
      *  - FT read(const Point<N,T>&) const
@@ -2148,10 +2151,6 @@ namespace Legion {
      *  - FT* ptr(const Point<N,T>&) const (Affine Accessor only)
      *  - FT* ptr(const Rect<N,T>&) const (Affine Accessor only)
      *  - FT& operator[](const Point<N,T>&) const (Affine Accessor only)
-     *
-     * REDUCE
-     *  - template<typename REDOP> void reduce(const Point<N,T>&, REDOP::RHS)
-     *    (Affine Accessor only)
      */
     template<PrivilegeMode MODE, typename FT, int N, typename COORD_T = coord_t,
              typename A = Realm::GenericAccessor<FT,N,COORD_T>,
@@ -2215,6 +2214,49 @@ namespace Legion {
                     bool check_field_size = false,
 #endif
                     bool silence_warnings = false) { }
+    };
+
+    /**
+     * \class ReductionAccessor
+     * A field accessor is a class used to perform reductions to a given
+     * field inside a PhysicalRegion object for a specific field. Reductions
+     * can be performed directly or array indexing can be used along with 
+     * the <<= operator to perform the reduction.
+     * This method currently only works with the Realm::AffineAccessor layout
+     */
+    template<typename REDOP, bool EXCLUSIVE, int N, typename COORD_T = coord_t,
+             typename A = Realm::GenericAccessor<typename REDOP::RHS,N,COORD_T>,
+#ifdef BOUNDS_CHECKS
+             bool CHECK_BOUNDS = true>
+#else
+             bool CHECK_BOUNDS = false>
+#endif
+    class ReductionAccessor {
+    public:
+      ReductionAccessor(void) { }
+      ReductionAccessor(const PhysicalRegion &region, FieldID fid,
+                        ReductionOpID redop, bool silence_warnings = false) { }
+      // For Realm::AffineAccessor specializations there are additional
+      // methods for creating accessors with limited bounding boxes and
+      // affine transformations for using alternative coordinates spaces
+      // Specify a specific bounds rectangle to use for the accessor
+      ReductionAccessor(const PhysicalRegion &region, FieldID fid,
+                        ReductionOpID redop, 
+                        const Rect<N,COORD_T> bounds,
+                        bool silence_warnings = false) { }
+      // Specify a specific Affine transform to use for interpreting points
+      template<int M>
+      ReductionAccessor(const PhysicalRegion &region, FieldID fid,
+                        ReductionOpID redop,
+                        const AffineTransform<M,N,COORD_T> transform,
+                        bool silence_warnings = false) { }
+      // Specify both a transform and a bounds to use
+      template<int M>
+      ReductionAccessor(const PhysicalRegion &region, FieldID fid,
+                        ReductionOpID redop,
+                        const AffineTransform<M,N,COORD_T> transform,
+                        const Rect<N,COORD_T> bounds,
+                        bool silence_warnings = false) { }
     };
  
     //==========================================================================

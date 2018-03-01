@@ -208,23 +208,25 @@ void CalcNewCurrentsTask::gpu_base_impl(const CircuitPiece &piece,
 #endif
 }
 
-template<typename REDOP>
+typedef ReductionAccessor<GPUAccumulateCharge,false/*exclusive*/,1,coord_t,
+                          Realm::AffineAccessor<float,1,coord_t> > AccessorRDfloat;
+
 __device__ __forceinline__
 void reduce_local(const AccessorRWfloat &pvt,
                   const AccessorRDfloat &shr,
                   const AccessorRDfloat &ghost,
-                  Point<1> ptr, PointerLocation loc, typename REDOP::RHS value)
+                  Point<1> ptr, PointerLocation loc, float value)
 {
   switch (loc)
   {
     case PRIVATE_PTR:
-      pvt.template reduce<REDOP,true/*exclusive*/>(ptr, value);
+      GPUAccumulateCharge::apply<true/*exclusive*/>(pvt[ptr], value);
       break;
     case SHARED_PTR:
-      shr.template reduce<REDOP,false/*exclusive*/>(ptr, value);
+      shr[ptr] <<= value;
       break;
     case GHOST_PTR:
-      ghost.template reduce<REDOP,false/*exclusive*/>(ptr, value);
+      ghost[ptr] <<= value;
       break;
     default:
       break; // assert(false); // should never make it here
@@ -256,13 +258,11 @@ void distribute_charge_kernel(Point<1> first,
     
     Point<1> in_ptr = fa_in_ptr[wire_ptr];
     PointerLocation in_loc = fa_in_loc[wire_ptr];
-    reduce_local<GPUAccumulateCharge>(fa_pvt_charge, fa_shr_charge, fa_ghost_charge,
-                                      in_ptr, in_loc, in_dq);
+    reduce_local(fa_pvt_charge, fa_shr_charge, fa_ghost_charge, in_ptr, in_loc, in_dq);
 
     Point<1> out_ptr = fa_out_ptr[wire_ptr];
     PointerLocation out_loc = fa_out_loc[wire_ptr];
-    reduce_local<GPUAccumulateCharge>(fa_pvt_charge, fa_shr_charge, fa_ghost_charge,
-                                      out_ptr, out_loc, out_dq);
+    reduce_local(fa_pvt_charge, fa_shr_charge, fa_ghost_charge, out_ptr, out_loc, out_dq);
   }
 }
 

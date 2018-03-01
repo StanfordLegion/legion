@@ -331,12 +331,11 @@ namespace Legion {
       virtual void register_child_commit(Operation *op) = 0; 
       virtual void unregister_child_operation(Operation *op) = 0;
       virtual ApEvent register_fence_dependence(Operation *op) = 0;
-#ifdef LEGION_SPY
-      virtual ApEvent get_fence_precondition(void) const = 0;
-#endif
     public:
-      virtual void perform_fence_analysis(FenceOp *op) = 0;
-      virtual void update_current_fence(FenceOp *op) = 0;
+      virtual ApEvent perform_fence_analysis(FenceOp *op, 
+                                             bool mapping, bool execution) = 0;
+      virtual void update_current_fence(FenceOp *op, 
+                                        bool mapping, bool execution) = 0;
     public:
       virtual void begin_trace(TraceID tid) = 0;
       virtual void end_trace(TraceID tid) = 0;
@@ -936,12 +935,11 @@ namespace Legion {
       virtual void register_child_commit(Operation *op); 
       virtual void unregister_child_operation(Operation *op);
       virtual ApEvent register_fence_dependence(Operation *op);
-#ifdef LEGION_SPY
-      virtual ApEvent get_fence_precondition(void) const;
-#endif
     public:
-      virtual void perform_fence_analysis(FenceOp *op);
-      virtual void update_current_fence(FenceOp *op);
+      virtual ApEvent perform_fence_analysis(FenceOp *op,
+                                          bool mapping, bool execution);
+      virtual void update_current_fence(FenceOp *op,
+                                        bool mapping, bool execution);
     public:
       virtual void begin_trace(TraceID tid);
       virtual void end_trace(TraceID tid);
@@ -1087,7 +1085,9 @@ namespace Legion {
       std::map<unsigned,Operation*> outstanding_children;
 #endif
 #ifdef LEGION_SPY
+      // Some help for Legion Spy for validating fences
       std::deque<UniqueID> ops_since_last_fence;
+      std::set<ApEvent> previous_completion_events;
 #endif
     protected:
       // Traces for this task's execution
@@ -1117,10 +1117,11 @@ namespace Legion {
       // indicating that it is no longer far enough ahead
       bool currently_active_context;
     protected:
-      FenceOp *current_fence;
-      GenerationID fence_gen;
-      ApEvent current_fence_event;
-      unsigned current_fence_index;
+      FenceOp *current_mapping_fence;
+      GenerationID mapping_fence_gen;
+      unsigned current_mapping_fence_index;
+      ApEvent current_execution_fence_event;
+      unsigned current_execution_fence_index;
     protected:
       // For managing changing task priorities
       ApEvent realm_done_event;
@@ -1148,11 +1149,6 @@ namespace Legion {
       // Track information for locally allocated fields
       mutable LocalLock                                 local_field_lock;
       std::map<FieldSpace,std::vector<LocalFieldInfo> > local_fields;
-#ifdef LEGION_SPY
-      // Some help for Legion Spy for validating execution fences
-    protected:
-      std::set<ApEvent> previous_completion_events;
-#endif
     };
 
     /**
@@ -1984,12 +1980,11 @@ namespace Legion {
       virtual void register_child_commit(Operation *op); 
       virtual void unregister_child_operation(Operation *op);
       virtual ApEvent register_fence_dependence(Operation *op);
-#ifdef LEGION_SPY
-      virtual ApEvent get_fence_precondition(void) const;
-#endif
     public:
-      virtual void perform_fence_analysis(FenceOp *op);
-      virtual void update_current_fence(FenceOp *op);
+      virtual ApEvent perform_fence_analysis(FenceOp *op,
+                                             bool mapping, bool execution);
+      virtual void update_current_fence(FenceOp *op,
+                                        bool mapping, bool execution);
     public:
       virtual void begin_trace(TraceID tid);
       virtual void end_trace(TraceID tid);
@@ -2328,12 +2323,11 @@ namespace Legion {
       virtual void register_child_commit(Operation *op); 
       virtual void unregister_child_operation(Operation *op);
       virtual ApEvent register_fence_dependence(Operation *op);
-#ifdef LEGION_SPY
-      virtual ApEvent get_fence_precondition(void) const;
-#endif
     public:
-      virtual void perform_fence_analysis(FenceOp *op);
-      virtual void update_current_fence(FenceOp *op);
+      virtual ApEvent perform_fence_analysis(FenceOp *op,
+                                             bool mapping, bool execution);
+      virtual void update_current_fence(FenceOp *op,
+                                        bool mapping, bool execution);
     public:
       virtual void begin_trace(TraceID tid);
       virtual void end_trace(TraceID tid);
