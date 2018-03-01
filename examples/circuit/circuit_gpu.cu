@@ -208,14 +208,14 @@ void CalcNewCurrentsTask::gpu_base_impl(const CircuitPiece &piece,
 #endif
 }
 
-typedef GPUReductionAccessor<GPUAccumulateCharge,false/*exclusive*/,1,coord_t,
+typedef ReductionAccessor<GPUAccumulateCharge,false/*exclusive*/,1,coord_t,
                           Realm::AffineAccessor<float,1,coord_t> > AccessorRDfloat;
 
 __device__ __forceinline__
 void reduce_local(const AccessorRWfloat &pvt,
                   const AccessorRDfloat &shr,
                   const AccessorRDfloat &ghost,
-                  Point<1> ptr, PointerLocation loc, typename REDOP::RHS value)
+                  Point<1> ptr, PointerLocation loc, float value)
 {
   switch (loc)
   {
