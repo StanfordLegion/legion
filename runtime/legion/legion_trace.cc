@@ -1201,14 +1201,17 @@ namespace Legion {
       // This also registers that we have dependences on all operations
       // in the trace.
       local_trace->end_trace_execution(this);
-#ifdef LEGION_SPY
-      // For Legion Spy we still have to run through the full fence analysis
-      FenceOp::trigger_dependence_analysis();
-#else
+
+      // We always need to run the full fence analysis, otherwise
+      // the operations replayed in the following trace will race
+      // with those in the current trace
+      execution_precondition =
+        parent_ctx->perform_fence_analysis(this, true, true);
+
       // Now update the parent context with this fence before we can complete
       // the dependence analysis and possibly be deactivated
       parent_ctx->update_current_fence(this, true, true);
-#endif
+
       // If this is a static trace, then we remove our reference when we're done
       if (local_trace->is_static_trace())
       {
