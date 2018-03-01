@@ -554,22 +554,24 @@ bool DistributeChargeTask::launch_check_fields(Context ctx, Runtime *runtime)
   return success;
 }
 
-template<typename REDOP>
+typedef ReductionAccessor<AccumulateCharge,false/*exclusive*/,1,coord_t,
+                          Realm::AffineAccessor<float,1,coord_t> > AccessorRDfloat;
+
 static inline void reduce_node(const AccessorRWfloat &priv,
                                const AccessorRDfloat &shr,
                                const AccessorRDfloat &ghost,
-                               PointerLocation loc, Point<1> ptr, typename REDOP::RHS value)
+                               PointerLocation loc, Point<1> ptr, float value)
 {
   switch (loc)
   {
     case PRIVATE_PTR:
-      priv.template reduce<REDOP,true/*exclusive*/>(ptr, value);
+      AccumulateCharge::apply<true/*exclusive*/>(priv[ptr], value);
       break;
     case SHARED_PTR:
-      shr.template reduce<REDOP,false/*exclusive*/>(ptr, value);
+      shr[ptr] <<= value;
       break;
     case GHOST_PTR:
-      ghost.template reduce<REDOP,false/*exclusive*/>(ptr, value);
+      ghost[ptr] <<= value;
       break;
     default:
       assert(false);
@@ -611,10 +613,10 @@ void DistributeChargeTask::cpu_base_impl(const CircuitPiece &p,
     PointerLocation in_loc = fa_in_loc[wire_ptr];
     PointerLocation out_loc = fa_out_loc[wire_ptr];
 
-    reduce_node<AccumulateCharge>(fa_pvt_charge, fa_shr_charge, fa_ghost_charge,
-                                  in_loc, in_ptr, in_current);
-    reduce_node<AccumulateCharge>(fa_pvt_charge, fa_shr_charge, fa_ghost_charge,
-                                  out_loc, out_ptr, out_current);
+    reduce_node(fa_pvt_charge, fa_shr_charge, fa_ghost_charge,
+                in_loc, in_ptr, in_current);
+    reduce_node(fa_pvt_charge, fa_shr_charge, fa_ghost_charge,
+                out_loc, out_ptr, out_current);
   }
 #endif
 }

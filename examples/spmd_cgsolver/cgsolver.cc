@@ -142,6 +142,9 @@ struct BarrierCombineReductionOp {
   static void fold(RHS& rhs1, RHS rhs2) { combine(rhs1, rhs2); }
 };
 
+typedef ReductionAccessor<BarrierCombineReductionOp,true/*exclusive*/,3,coord_t,
+          Realm::AffineAccessor<BarrierCombineReductionOp::RHS,3,coord_t> > AccessorRDpb;
+
 /*static*/ const PhaseBarrier BarrierCombineReductionOp::identity;
 
 struct DoubleAddReductionOp {
@@ -308,10 +311,12 @@ public:
     return FieldAccessor<PRIV,T,3,coord_t,Realm::AffineAccessor<T,3,coord_t> >(pr, fid);
   }
 
-  FieldAccessor<REDUCE,T,3,coord_t,Realm::AffineAccessor<T,3,coord_t> > fold_accessor(const PhysicalRegion& pr, int redop)
+  template<typename REDOP, bool EXCLUSIVE>
+  ReductionAccessor<REDOP,EXCLUSIVE,3,coord_t,Realm::AffineAccessor<T,3,coord_t> >
+    fold_accessor(const PhysicalRegion& pr, int redop)
   {
     assert(fid != AUTO_GENERATE_ID);
-    return FieldAccessor<REDUCE,T,3,coord_t,Realm::AffineAccessor<T,3,coord_t> >(pr, fid, redop);
+    return ReductionAccessor<REDOP,EXCLUSIVE,3,coord_t,Realm::AffineAccessor<T,3,coord_t> >(pr, fid, redop);
   }
 
 protected:
@@ -677,10 +682,12 @@ void spmd_init_task(const Task *task,
   log_app.print() << "in spmd_init_task, shard=" << args.shard << ", proc=" << runtime->get_executing_processor(ctx) << ", regions=" << regions.size();
 
   const AccessorROint fa_owner = fid_owner_shard.accessor<READ_ONLY>(regions[0]);
-  const AccessorROint fa_neighbors = fid_neighbor_count.accessor<READ_ONLY>(regions[0]);
+  const AccessorROint fa_neighbors = fid_neighbor_count.accessor<READ_ONLY>(regions[0]); 
 
-  const AccessorRDpb fa_ready = fid_ready_barrier.fold_accessor(regions[1], BarrierCombineReductionOp::redop_id);
-  const AccessorRDpb fa_done = fid_done_barrier.fold_accessor(regions[2], BarrierCombineReductionOp::redop_id);
+  const AccessorRDpb fa_ready = fid_ready_barrier.fold_accessor<BarrierCombineReductionOp,
+                      true/*exclusive*/>(regions[1], BarrierCombineReductionOp::redop_id);
+  const AccessorRDpb fa_done = fid_done_barrier.fold_accessor<BarrierCombineReductionOp,
+                      true/*exclusive*/>(regions[2], BarrierCombineReductionOp::redop_id);
 
   for(PointInRectIterator<3> pir(Rect<3>(
           Point<3>(0,0,0), args.blocks - Point<3>(1,1,1))); pir(); ++pir) {
@@ -695,8 +702,8 @@ void spmd_init_task(const Task *task,
 
       log_app.info() << "pbs: shard=" << args.shard << " blk=" << *pir << " neighbors=" << neighbors << " ready=" << pb_ready << " done=" << pb_done;
 
-      fa_ready.reduce<BarrierCombineReductionOp, true/*exclusive*/>(*pir, pb_ready);
-      fa_done.reduce<BarrierCombineReductionOp, true/*exclusive*/>(*pir, pb_done);
+      fa_ready[*pir] <<= pb_ready;
+      fa_done[*pir] <<= pb_done;
     }
   }
 }
