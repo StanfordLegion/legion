@@ -85,6 +85,7 @@ variables:
   TEST_LEGION_CXX: "0"
   TEST_REALM: "0"
   TEST_FUZZER: "0"
+  REGENT_JOBS: "2"
 
 ###
 ### Setup

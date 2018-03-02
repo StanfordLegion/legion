@@ -34,23 +34,29 @@ if log.get_log_level("profile") >= 3 then
 
 else
   local ast = require("regent/ast")
-  local std = require("regent/std")
-  local c = std.c
+  local base = require("regent/std_base")
+  local c = base.c
 
-  function profile:__call(pass_name, node, fn)
+  function profile:__call(pass_name, target, fn)
     assert(pass_name)
-    assert(node)
     assert(fn)
     return function(...)
       local start = tonumber(c.legion_get_current_time_in_micros())
       local result = {fn(...)}
       local stop = tonumber(c.legion_get_current_time_in_micros())
-      if node:is(ast.unspecialized.top.Task) or
-         node:is(ast.specialized.top.Task) or
-         node:is(ast.typed.top.Task) then
-        log_profile:info(tostring(node.name) .. " " ..
-          pass_name .. " took " ..
-          tostring((stop - start) * 1e-6) .. "s")
+      local tag
+      if not target then
+        tag = ""
+      elseif base.is_variant(target) then
+        tag = tostring(target) .. " "
+      elseif ast.is_node(target) and (target:is(ast.unspecialized.top.Task) or
+                                      target:is(ast.specialized.top.Task) or
+                                      target:is(ast.typed.top.Task)) then
+        tag = tostring(target.name) .. " "
+      end
+      if tag then
+        log_profile:info(tag .. pass_name .. " took " ..
+                         tostring((stop - start) * 1e-6) .. "s")
       end
       return unpack(result)
     end
