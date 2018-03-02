@@ -253,7 +253,6 @@ namespace Legion {
       // These three fields are only valid on the owner node
       Operation *const producer_op;
       const GenerationID op_gen;
-      TaskContext *const context;
 #ifdef LEGION_SPY
       const UniqueID producer_uid;
 #endif

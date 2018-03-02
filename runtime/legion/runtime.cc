@@ -264,7 +264,6 @@ namespace Legion {
           LEGION_DISTRIBUTED_HELP_ENCODE(did, FUTURE_DC), 
           own_space, register_now),
         producer_op(o), op_gen((o == NULL) ? 0 : o->get_generation()),
-        context((o == NULL) ? NULL : o->get_context()),
 #ifdef LEGION_SPY
         producer_uid((o == NULL) ? 0 : o->get_unique_op_id()),
 #endif
@@ -282,8 +281,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FutureImpl::FutureImpl(const FutureImpl &rhs)
-      : DistributedCollectable(NULL, 0, 0), producer_op(NULL), op_gen(0),
-        context(NULL)
+      : DistributedCollectable(NULL, 0, 0), producer_op(NULL), op_gen(0)
 #ifdef LEGION_SPY
         , producer_uid(0)
 #endif
@@ -336,10 +334,12 @@ namespace Legion {
              context->get_task_name(), context->get_unique_id());
         }
       }
-      if (context != NULL)
-        context->invalidate_current_template();
+      if (Internal::implicit_context != NULL)
+        Internal::implicit_context->invalidate_current_template();
       if (!ready_event.has_triggered())
       {
+        TaskContext *context =
+          (producer_op == NULL) ? NULL : producer_op->get_context();
         if (context != NULL)
         {
           context->begin_task_wait(false/*from runtime*/);
@@ -372,10 +372,12 @@ namespace Legion {
              "best practices. You may notice a severe performance degradation.",
              context->get_task_name(), context->get_unique_id())
       }
-      if (context != NULL)
-        context->invalidate_current_template();
+      if (Internal::implicit_context != NULL)
+        Internal::implicit_context->invalidate_current_template();
       if (!ready_event.has_triggered())
       {
+        TaskContext *context =
+          (producer_op == NULL) ? NULL : producer_op->get_context();
         if (context != NULL)
         {
           context->begin_task_wait(false/*from runtime*/);
@@ -419,10 +421,12 @@ namespace Legion {
               "severe performance degradation.", context->get_task_name(), 
               context->get_unique_id())
       }
-      if (block && context != NULL)
-        context->invalidate_current_template();
+      if (block && Internal::implicit_context != NULL)
+        Internal::implicit_context->invalidate_current_template();
       if (block && !ready_event.has_triggered())
       {
+        TaskContext *context =
+          (producer_op == NULL) ? NULL : producer_op->get_context();
         if (context != NULL)
         {
           context->begin_task_wait(false/*from runtime*/);
@@ -965,8 +969,8 @@ namespace Legion {
             "execution model best practices. You may notice a severe "
             "performance degredation.", context->get_task_name(),
             context->get_unique_id())
-      if (op != NULL && context != NULL)
-        context->invalidate_current_template();
+      if (Internal::implicit_context != NULL)
+        Internal::implicit_context->invalidate_current_template();
       // Wait on the event that indicates the entire task has finished
       if (valid && !ready_event.has_triggered())
       {
@@ -1026,8 +1030,8 @@ namespace Legion {
       assert(is_owner());
       assert(valid);
 #endif
-      if (op != NULL && context != NULL)
-        context->invalidate_current_template();
+      if (Internal::implicit_context != NULL)
+        Internal::implicit_context->invalidate_current_template();
       if (!ready_event.has_triggered())
       {
         if (context != NULL)
@@ -1212,8 +1216,8 @@ namespace Legion {
                                               bool warn, const char *source)
     //--------------------------------------------------------------------------
     {
-      if (context != NULL)
-        context->invalidate_current_template();
+      if (Internal::implicit_context != NULL)
+        Internal::implicit_context->invalidate_current_template();
       if (runtime->runtime_warnings && !silence_warnings &&
           (context != NULL) && !context->is_leaf_context())
       {
