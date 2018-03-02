@@ -19162,6 +19162,7 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(userlen == sizeof(Runtime**));
+      assert(implicit_context == NULL); // this better hold
 #endif
       Runtime *runtime = *((Runtime**)userdata);
       implicit_runtime = runtime;

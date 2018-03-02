@@ -1759,6 +1759,36 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void TaskContext::begin_misspeculation(void)
+    //--------------------------------------------------------------------------
+    {
+      // Issue a utility task to decrement the number of outstanding
+      // tasks now that this task has started running
+      pending_done = owner_task->get_context()->decrement_pending(owner_task);
+    }
+
+    //--------------------------------------------------------------------------
+    void TaskContext::end_misspeculation(const void *result, size_t result_size)
+    //--------------------------------------------------------------------------
+    {
+      // Grab some information before doing the next step in case it
+      // results in the deletion of 'this'
+#ifdef DEBUG_LEGION
+      assert(owner_task != NULL);
+      const TaskID owner_task_id = owner_task->task_id;
+#endif
+      Runtime *runtime_ptr = runtime;
+      // Call post end task
+      post_end_task(result, result_size, false/*owner*/);
+#ifdef DEBUG_LEGION
+      runtime_ptr->decrement_total_outstanding_tasks(owner_task_id, 
+                                                     false/*meta*/);
+#else
+      runtime_ptr->decrement_total_outstanding_tasks();
+#endif
+    }
+
+    //--------------------------------------------------------------------------
     void TaskContext::initialize_overhead_tracker(void)
     //--------------------------------------------------------------------------
     {
