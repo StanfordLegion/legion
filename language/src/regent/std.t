@@ -16,11 +16,14 @@
 
 local ast = require("regent/ast")
 local base = require("regent/std_base")
-local data = require("common/data")
-local header_helper = require("regent/header_helper")
-local report = require("common/report")
-local pretty = require("regent/pretty")
 local cudahelper = require("regent/cudahelper")
+local data = require("common/data")
+local ffi = require("ffi")
+local header_helper = require("regent/header_helper")
+local log = require("common/log")
+local pretty = require("regent/pretty")
+local profile = require("regent/profile")
+local report = require("common/report")
 
 local std = {}
 
@@ -732,7 +735,7 @@ function std.validate_args(node, params, args, isvararg, return_type, mapping, s
       -- Ok
       need_cast[i] = false
     elseif type_compatible(param_type, arg_type) then
-      -- Regions (and other unique types) require a special pass here 
+      -- Regions (and other unique types) require a special pass here
 
       -- Check for previous mappings. This can happen if two
       -- parameters are aliased to the same region.
@@ -3150,38 +3153,6 @@ function std.register_variant(variant)
   variants:insert(variant)
 end
 
-local function make_task_wrapper(task_body)
-  local return_type = task_body:gettype().returntype
-  if return_type == terralib.types.unit then
-    return terra(data : &opaque, datalen : c.size_t,
-                 userdata : &opaque, userlen : c.size_t,
-                 proc_id : c.legion_proc_id_t)
-      var task : c.legion_task_t,
-          regions : &c.legion_physical_region_t,
-          num_regions : uint32,
-          ctx : c.legion_context_t,
-          runtime : c.legion_runtime_t
-      c.legion_task_preamble(data, datalen, proc_id, &task, &regions, &num_regions, &ctx, &runtime)
-      task_body(task, regions, num_regions, ctx, runtime)
-      c.legion_task_postamble(runtime, ctx, nil, 0)
-    end
-  else
-    return terra(data : &opaque, datalen : c.size_t,
-                 userdata : &opaque, userlen : c.size_t,
-                 proc_id : c.legion_proc_id_t)
-      var task : c.legion_task_t,
-          regions : &c.legion_physical_region_t,
-          num_regions : uint32,
-          ctx : c.legion_context_t,
-          runtime : c.legion_runtime_t
-      c.legion_task_preamble(data, datalen, proc_id, &task, &regions, &num_regions, &ctx, &runtime)
-      var result = task_body(task, regions, num_regions, ctx, runtime)
-      c.legion_task_postamble(runtime, ctx, result.value, result.size)
-      c.free(result.value)
-    end
-  end
-end
-
 local max_dim = 3 -- Maximum dimension of an index space supported in Regent
 
 local function make_ordering_constraint(layout, dim)
@@ -3265,7 +3236,7 @@ local function make_reduction_layout(dim, op_id)
   end
 end
 
-function std.setup(main_task, extra_setup_thunk, registration_name)
+function std.setup(main_task, extra_setup_thunk, task_wrappers, registration_name)
   assert(not main_task or std.is_task(main_task))
 
   if not registration_name then
@@ -3353,8 +3324,6 @@ function std.setup(main_task, extra_setup_thunk, registration_name)
         proc_types[#proc_types + 1] = c.TOC_PROC
       end
 
-      local wrapped_task = make_task_wrapper(variant:get_definition())
-
       local layout_constraints = terralib.newsymbol(
         c.legion_task_layout_constraint_set_t, "layout_constraints")
       local layout_constraint_actions = terralib.newlist()
@@ -3409,7 +3378,7 @@ function std.setup(main_task, extra_setup_thunk, registration_name)
             [task:get_task_id()],
             [task:get_name():concat(".")],
             execution_constraints, layout_constraints, options,
-            [wrapped_task], nil, 0)
+            [task_wrappers[variant:wrapper_name()]], nil, 0)
           c.legion_execution_constraint_set_destroy(execution_constraints)
           c.legion_task_layout_constraint_set_destroy(layout_constraints)
         end)
@@ -3468,11 +3437,223 @@ function std.setup(main_task, extra_setup_thunk, registration_name)
   return main, names
 end
 
+-- Generate all task wrappers in this process, the compiler will pick them up
+-- automatically.
+local function make_task_wrappers()
+  local task_wrappers = {}
+  for _,variant in ipairs(variants) do
+    task_wrappers[variant:wrapper_name()] = variant:make_wrapper()
+  end
+  return task_wrappers
+end
+
+local struct Pipe {
+  read_end : int,
+  write_end : int,
+}
+
+local terra make_pipe()
+  var fd : int[2]
+  var res = c.pipe(fd)
+  if res ~= 0 then
+    c.perror('pipe creation failed')
+    c.exit(c.EXIT_FAILURE)
+  end
+  return Pipe{ read_end = fd[0], write_end = fd[1] }
+end
+
+terra Pipe:close_read_end()
+  c.close(self.read_end)
+end
+
+terra Pipe:close_write_end()
+  c.close(self.write_end)
+end
+
+terra Pipe:write_int(x : int)
+  var bytes_written = c.write(self.write_end, &x, sizeof(int))
+  if bytes_written ~= sizeof(int) then
+    c.perror('pipe: int write error')
+    c.exit(c.EXIT_FAILURE)
+  end
+end
+
+terra Pipe:read_int() : int
+  var x : int
+  var bytes_read = c.read(self.read_end, &x, sizeof(int))
+  if bytes_read ~= sizeof(int) then
+    c.perror('pipe: int read error')
+    c.exit(c.EXIT_FAILURE)
+  end
+  return x
+end
+
+-- String can be up to 255 characters long.
+terra Pipe:write_string(str : &int8)
+  var len = c.strlen(str)
+  if len >= 256 then
+    var stderr = c.fdopen(2, "w")
+    c.fprintf(stderr, 'pipe: string too long for writing')
+    c.fflush(stderr)
+    c.exit(c.EXIT_FAILURE)
+  end
+  var bytes_written = c.write(self.write_end, str, len + 1)
+  if bytes_written ~= len + 1 then
+    c.perror('pipe: string write error')
+    c.exit(c.EXIT_FAILURE)
+  end
+end
+
+-- Returned pointer must be manually free'd.
+terra Pipe:read_string() : &int8
+  var buf : int8[256]
+  var bytes_read = c.read(self.read_end, &(buf[0]), 256)
+  if bytes_read <= 0 then
+    c.perror('pipe: string read error')
+    c.exit(c.EXIT_FAILURE)
+  end
+  var len = c.strlen(buf)
+  if len >= 256 then
+    c.perror('pipe: string read error')
+    c.exit(c.EXIT_FAILURE)
+  end
+  var str = [&int8](c.malloc(len + 1))
+  c.strncpy(str, buf, len + 1)
+  return str
+end
+
+local function compile_tasks_in_parallel()
+  -- Force codegen; the main process will need to codegen later anyway, so we
+  -- might as well do it now and not duplicate the work on the children.
+  for _,variant in ipairs(variants) do
+    variant.task:complete()
+  end
+
+  -- Don't spawn extra processes if jobs == 1.
+  local num_slaves = math.max(tonumber(std.config["jobs"]) or 1, 1)
+  if num_slaves == 1 then
+    return terralib.newlist(), make_task_wrappers()
+  end
+
+  -- Spawn slave processes & distribute work to them on demand.
+  -- TODO: Terra functions used by more than one task may get compiled
+  -- multiple times, and included in multiple object files by different
+  -- children. This will cause bloat in the final executable.
+  local pclog = log.make_logger('paral_compile')
+  local objfiles = terralib.newlist()
+  local slave_pids = terralib.newlist()
+  local slave_pipes = terralib.newlist()
+  local slave2master = make_pipe()
+  for slave_id = 1,num_slaves do
+    pclog:info('master: spawning slave ' .. slave_id)
+    local master2slave = make_pipe()
+    slave_pipes:insert(master2slave)
+    local pid = c.fork()
+    assert(pid >= 0, 'fork failed')
+    if pid == 0 then
+      slave2master:close_read_end()
+      master2slave:close_write_end()
+      while true do
+        pclog:info('slave ' .. slave_id .. ': signaling master to send work')
+        slave2master:write_int(slave_id)
+        local variant_id = master2slave:read_int()
+        assert(0 <= variant_id and variant_id <= #variants,
+               'slave ' .. slave_id .. ': variant id read error')
+        if variant_id == 0 then
+          pclog:info('slave ' .. slave_id .. ': stopping')
+          break
+        end
+        local raw_filename = master2slave:read_string()
+        local filename = ffi.string(raw_filename)
+        c.free(raw_filename)
+        local variant = variants[variant_id]
+        pclog:info('slave ' .. slave_id .. ': compiling ' ..
+                   tostring(variant) .. ' to file ' .. filename)
+        local exports = {}
+        exports[variant:wrapper_name()] = variant:make_wrapper()
+        profile('compile', variant, function()
+          terralib.saveobj(filename, 'object', exports)
+        end)()
+      end
+      slave2master:close_write_end()
+      master2slave:close_read_end()
+      os.exit(c.EXIT_SUCCESS)
+    else
+      pclog:info('master: slave ' .. slave_id .. ' spawned as pid ' .. pid)
+      slave_pids:insert(pid)
+      master2slave:close_read_end()
+    end
+  end
+  slave2master:close_write_end()
+  local next_variant = 1
+  local num_stopped = 0
+  while num_stopped < num_slaves do
+    pclog:info('master: waiting for next available slave')
+    local slave_id = slave2master:read_int()
+    assert(1 <= slave_id and slave_id <= num_slaves,
+           'master: slave id read error')
+    local master2slave = slave_pipes[slave_id]
+    if next_variant <= #variants then
+      local objfile = os.tmpname()
+      objfiles:insert(objfile)
+      pclog:info('master: assigning ' .. tostring(variants[next_variant]) ..
+                 ' to slave ' .. slave_id .. ', to be compiled to ' .. objfile)
+      master2slave:write_int(next_variant)
+      master2slave:write_string(objfile)
+      next_variant = next_variant + 1
+    else
+      pclog:info('master: sending stop command to slave ' .. slave_id)
+      master2slave:write_int(0)
+      master2slave:close_write_end()
+      num_stopped = num_stopped + 1
+    end
+  end
+  for slave_id,pid in ipairs(slave_pids) do
+    pclog:info('master: waiting for slave ' .. slave_id .. ' to finish')
+    c.waitpid(pid, nil, 0)
+  end
+  slave2master:close_read_end()
+
+  -- Declare all task wrappers using a (fake) header file, so the compiler will
+  -- expect them to be linked-in later.
+  local header = [[
+#include "legion.h"
+#include "legion_terra.h"
+#include "legion_terra_partitions.h"
+]] ..
+  table.concat(
+    variants:map(function(variant) return variant:wrapper_sig() .. '\n' end)
+  )
+  local task_wrappers = terralib.includecstring(header)
+
+  return objfiles,task_wrappers
+end
+
 function std.start(main_task, extra_setup_thunk)
   if std.config["pretty"] then os.exit() end
 
   assert(std.is_task(main_task))
-  local main = std.setup(main_task, extra_setup_thunk)
+  local objfiles,task_wrappers = compile_tasks_in_parallel()
+
+  -- If task wrappers were compiled on separate processes, link them all into a
+  -- dynamic library and load that.
+  if #objfiles > 0 then
+    local dylib = os.tmpname()
+    local cmd = os.getenv('CXX') or 'c++'
+    if os.execute('test "$(uname)" = Darwin') == 0 then
+      cmd = cmd .. ' -dynamiclib -single_module -undefined dynamic_lookup -fPIC'
+    else
+      cmd = cmd .. ' -shared -fPIC'
+    end
+    cmd = cmd .. ' -o ' .. dylib
+    for _,f in ipairs(objfiles) do
+      cmd = cmd .. ' ' .. f
+    end
+    assert(os.execute(cmd) == 0)
+    terralib.linklibrary(dylib)
+  end
+
+  local main = std.setup(main_task, extra_setup_thunk, task_wrappers)
 
   local args = std.args
   local argc = #args
@@ -3494,14 +3675,15 @@ end
 
 function std.saveobj(main_task, filename, filetype, extra_setup_thunk, link_flags)
   assert(std.is_task(main_task))
-  local main, names = std.setup(main_task, extra_setup_thunk)
+  local flags = terralib.newlist()
+  local objfiles,task_wrappers = compile_tasks_in_parallel()
+  flags:insertall(objfiles)
+  local main, names = std.setup(main_task, extra_setup_thunk, task_wrappers)
   local use_cmake = os.getenv("USE_CMAKE") == "1"
   local lib_dir = os.getenv("LG_RT_DIR") .. "/../bindings/regent"
   if use_cmake then
     lib_dir = os.getenv("CMAKE_BUILD_DIR") .. "/lib"
   end
-
-  local flags = terralib.newlist()
   if os.getenv('CRAYPE_VERSION') then
     flags:insert("-Wl,-Bdynamic")
   end
@@ -3520,11 +3702,13 @@ function std.saveobj(main_task, filename, filetype, extra_setup_thunk, link_flag
   if use_cmake then
     flags:insertall({"-llegion", "-lrealm"})
   end
-  if filetype ~= nil then
-    terralib.saveobj(filename, filetype, names, flags)
-  else
-    terralib.saveobj(filename, names, flags)
-  end
+  profile('compile', nil, function()
+    if filetype ~= nil then
+      terralib.saveobj(filename, filetype, names, flags)
+    else
+      terralib.saveobj(filename, names, flags)
+    end
+  end)()
 end
 
 local function generate_task_interfaces()
@@ -3612,8 +3796,9 @@ end
 function std.save_tasks(header_filename, filename, filetype,
                        extra_setup_thunk, link_flags)
   assert(header_filename and filename)
+  local task_wrappers = make_task_wrappers()
   local registration_name, task_impl = write_header(header_filename)
-  local _, names = std.setup(nil, extra_setup_thunk, registration_name)
+  local _, names = std.setup(nil, extra_setup_thunk, task_wrappers, registration_name)
   local use_cmake = os.getenv("USE_CMAKE") == "1"
   local lib_dir = os.getenv("LG_RT_DIR") .. "/../bindings/regent"
   if use_cmake then
@@ -3631,11 +3816,13 @@ function std.save_tasks(header_filename, filename, filetype,
   if use_cmake then
     flags:insertall({"-llegion", "-lrealm"})
   end
-  if filetype ~= nil then
-    terralib.saveobj(filename, filetype, names, flags)
-  else
-    terralib.saveobj(filename, names, flags)
-  end
+  profile('compile', nil, function()
+    if filetype ~= nil then
+      terralib.saveobj(filename, filetype, names, flags)
+    else
+      terralib.saveobj(filename, names, flags)
+    end
+  end)()
 end
 
 -- #####################################

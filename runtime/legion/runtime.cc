@@ -20891,10 +20891,7 @@ namespace Legion {
           }
         case LG_POST_END_ID:
           {
-            const InnerContext::PostEndArgs *post_end_args = 
-              (const InnerContext::PostEndArgs*)args;
-            post_end_args->proxy_this->post_end_task(post_end_args->result, 
-                                post_end_args->result_size, true/*owned*/);
+            TaskContext::handle_post_end_task(args); 
             break;
           }
         case LG_DEFERRED_READY_TRIGGER_ID:

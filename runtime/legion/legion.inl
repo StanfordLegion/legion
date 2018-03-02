@@ -71,10 +71,15 @@ namespace Legion {
                                     T *result)
         {
           size_t buffer_size = result->legion_buffer_size();
-          void *buffer = malloc(buffer_size);
-          result->legion_serialize(buffer);
-          end_helper(rt, ctx, buffer, buffer_size, true/*owned*/);
-          // No need to free the buffer, the Legion runtime owns it now
+          if (buffer_size > 0)
+          {
+            void *buffer = malloc(buffer_size);
+            result->legion_serialize(buffer);
+            end_helper(rt, ctx, buffer, buffer_size, true/*owned*/);
+            // No need to free the buffer, the Legion runtime owns it now
+          }
+          else
+            end_helper(rt, ctx, NULL, 0, false/*owned*/);
         }
         static inline Future from_value(Runtime *rt, const T *value)
         {
@@ -91,6 +96,54 @@ namespace Legion {
         }
       };
 
+      // Further specialization for deferred reductions
+      template<typename REDOP, bool EXCLUSIVE>
+      struct NonPODSerializer<DeferredReduction<REDOP,EXCLUSIVE>,false> {
+        static inline void end_task(Runtime *rt, InternalContext ctx,
+                                    DeferredReduction<REDOP,EXCLUSIVE> *result)
+        {
+          result->finalize(ctx);
+        }
+        static inline Future from_value(Runtime *rt, 
+            const DeferredReduction<REDOP,EXCLUSIVE> *value)
+        {
+          // Should never be called
+          assert(false);
+          return from_value_helper(rt, (const void*)value,
+            sizeof(DeferredReduction<REDOP,EXCLUSIVE>), false/*owned*/);
+        }
+        static inline DeferredReduction<REDOP,EXCLUSIVE> 
+          unpack(const void *result)
+        {
+          // Should never be called
+          assert(false);
+          return (*((const DeferredReduction<REDOP,EXCLUSIVE>*)result));
+        }
+      };
+
+      // Further specialization to see if this a deferred value
+      template<typename T>
+      struct NonPODSerializer<DeferredValue<T>,false> {
+        static inline void end_task(Runtime *rt, InternalContext ctx,
+                                    DeferredValue<T> *result)
+        {
+          result->finalize(ctx);
+        }
+        static inline Future from_value(Runtime *rt, const DeferredValue<T> *value)
+        {
+          // Should never be called
+          assert(false);
+          return from_value_helper(rt, (const void*)value,
+                                   sizeof(DeferredValue<T>), false/*owned*/);
+        }
+        static inline DeferredValue<T> unpack(const void *result)
+        {
+          // Should never be called
+          assert(false);
+          return (*((const DeferredValue<T>*)result));
+        }
+      }; 
+      
       template<typename T>
       struct NonPODSerializer<T,false> {
         static inline void end_task(Runtime *rt, InternalContext ctx,
@@ -4467,6 +4520,121 @@ namespace Legion {
     public:
       Realm::AffineAccessor<FT,1,T> accessor;
     }; 
+
+    //--------------------------------------------------------------------------
+    template<typename T>
+    inline DeferredValue<T>::DeferredValue(T initial_value)
+    //--------------------------------------------------------------------------
+    {
+      // Construct a Region of size 1 in the zero copy memory for now
+      Machine machine = Realm::Machine::get_machine();
+      Machine::MemoryQuery finder(machine);
+      finder.has_affinity_to(Processor::get_executing_processor());
+      finder.only_kind(Memory::Z_COPY_MEM);
+      if (finder.count() == 0)
+      {
+        fprintf(stderr,"Deferred Values currently need a local allocation "
+                       "of zero-copy memory to work correctly. Please provide "
+                       "a non-zero amount with the -ll:zsize flag");
+        assert(false);
+      }
+      const Realm::Memory memory = finder.first();
+      const Realm::Point<1,coord_t> zero(0);
+      Realm::IndexSpace<1,coord_t> is = Realm::Rect<1,coord_t>(zero, zero);
+      const std::vector<size_t> field_sizes(1,sizeof(T));
+      Realm::ProfilingRequestSet no_requests; 
+      Internal::LgEvent wait_on(Realm::RegionInstance::create_instance(instance,
+                    memory, is, field_sizes, 0/*blocing factor*/, no_requests));
+      if (wait_on.exists())
+        wait_on.wait();
+      // We can make the accessor
+      accessor = Realm::AffineAccessor<T,1,coord_t>(instance, 0/*field id*/);
+      // Initialize the value
+      accessor[zero] = initial_value;
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T> __CUDA_HD__
+    inline T DeferredValue<T>::read(void) const
+    //--------------------------------------------------------------------------
+    {
+      return accessor.read(Point<1,coord_t>(0));
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T> __CUDA_HD__
+    inline void DeferredValue<T>::write(T value)
+    //--------------------------------------------------------------------------
+    {
+      accessor.write(Point<1,coord_t>(0), value);
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T> __CUDA_HD__
+    inline T* DeferredValue<T>::ptr(void)
+    //--------------------------------------------------------------------------
+    {
+      return accessor.ptr(Point<1,coord_t>(0));
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T> __CUDA_HD__
+    inline T& DeferredValue<T>::ref(void)
+    //--------------------------------------------------------------------------
+    {
+      return accessor[Point<1,coord_t>(0)];
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T> __CUDA_HD__
+    inline DeferredValue<T>::operator T(void) const
+    //--------------------------------------------------------------------------
+    {
+      return accessor[Point<1,coord_t>(0)];
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T> __CUDA_HD__
+    inline DeferredValue<T>& DeferredValue<T>::operator=(T value)
+    //--------------------------------------------------------------------------
+    {
+      accessor[Point<1,coord_t>(0)] = value;
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T> __CUDA_HD__
+    inline void DeferredValue<T>::finalize(InternalContext ctx) const
+    //--------------------------------------------------------------------------
+    {
+      ctx->end_task(accessor.ptr(Point<1,coord_t>(0)), sizeof(T),
+                    false/*owner*/, instance);
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename REDOP, bool EXCLUSIVE>
+    inline DeferredReduction<REDOP,EXCLUSIVE>::DeferredReduction(void)
+      : DeferredValue<typename REDOP::LHS>(REDOP::identity)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename REDOP, bool EXCLUSIVE>
+    inline void DeferredReduction<REDOP,EXCLUSIVE>::reduce(
+                                                      typename REDOP::RHS value)
+    //--------------------------------------------------------------------------
+    {
+      REDOP::fold<EXCLUSIVE>(this->accessor[Point<1,coord_t>(0)], value);
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename REDOP, bool EXCLUSIVE>
+    inline void DeferredReduction<REDOP,EXCLUSIVE>::operator<<=(
+                                                      typename REDOP::RHS value)
+    //--------------------------------------------------------------------------
+    {
+      REDOP::fold<EXCLUSIVE>(this->accessor[Point<1,coord_t>(0)], value);
+    }
 
     //--------------------------------------------------------------------------
     inline IndexSpace& IndexSpace::operator=(const IndexSpace &rhs)

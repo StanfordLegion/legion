@@ -32,6 +32,10 @@ local c = terralib.includecstring([[
 #include "legion_terra_partitions.h"
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <unistd.h>
 ]])
 base.c = c
 
@@ -738,21 +742,71 @@ function base.variant:disas()
   return self:get_definition():disas()
 end
 
+function base.variant:wrapper_name()
+  -- Must be an alphanumeric symbol, because it will be communicated through a
+  -- (generated) header file.
+  return
+    '__regent_task'
+    .. '_' .. self.task:get_task_id():asvalue()
+    .. '_' .. self:get_name()
+end
+
+function base.variant:wrapper_sig()
+  return 'void ' .. self:wrapper_name() .. '( void* data'
+                                        .. ', size_t datalen'
+                                        .. ', void* userdata'
+                                        .. ', size_t userlen'
+                                        .. ', legion_proc_id_t proc_id'
+                                        .. ');'
+end
+
+local function make_task_wrapper(task_body)
+  local return_type = task_body:gettype().returntype
+  if return_type == terralib.types.unit then
+    return terra(data : &opaque, datalen : c.size_t,
+                 userdata : &opaque, userlen : c.size_t,
+                 proc_id : c.legion_proc_id_t)
+      var task : c.legion_task_t,
+          regions : &c.legion_physical_region_t,
+          num_regions : uint32,
+          ctx : c.legion_context_t,
+          runtime : c.legion_runtime_t
+      c.legion_task_preamble(data, datalen, proc_id, &task, &regions, &num_regions, &ctx, &runtime)
+      task_body(task, regions, num_regions, ctx, runtime)
+      c.legion_task_postamble(runtime, ctx, nil, 0)
+    end
+  else
+    return terra(data : &opaque, datalen : c.size_t,
+                 userdata : &opaque, userlen : c.size_t,
+                 proc_id : c.legion_proc_id_t)
+      var task : c.legion_task_t,
+          regions : &c.legion_physical_region_t,
+          num_regions : uint32,
+          ctx : c.legion_context_t,
+          runtime : c.legion_runtime_t
+      c.legion_task_preamble(data, datalen, proc_id, &task, &regions, &num_regions, &ctx, &runtime)
+      var result = task_body(task, regions, num_regions, ctx, runtime)
+      c.legion_task_postamble(runtime, ctx, result.value, result.size)
+      c.free(result.value)
+    end
+  end
+end
+
+-- Generate task wrapper on this process (it will be compiled automatically).
+function base.variant:make_wrapper()
+  local wrapper = make_task_wrapper(self:get_definition())
+  wrapper:setname(self:wrapper_name())
+  return wrapper
+end
+
 function base.variant:__tostring()
-  return tostring(self:get_name())
+  return tostring(self.task:get_name()) .. '_' .. self:get_name()
 end
 
 do
   function base.new_variant(task, name)
     assert(base.is_task(task))
-
-    if type(name) == "string" then
-      name = data.newtuple(name)
-    elseif data.is_tuple(name) then
-      assert(data.all(name:map(function(n) return type(n) == "string" end)))
-    else
-      assert(false)
-    end
+    assert(type(name) == "string" and not name:match("%W"))
 
     local variant = setmetatable({
       task = task,

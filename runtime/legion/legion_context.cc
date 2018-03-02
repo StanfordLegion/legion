@@ -1897,6 +1897,24 @@ namespace Legion {
           std::pair<void*,void (*)(void*)>(const_cast<void*>(value),destructor);
     }
 
+    //--------------------------------------------------------------------------
+    /*static*/ void TaskContext::handle_post_end_task(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const PostEndArgs *pargs = (const PostEndArgs*)args;
+      if (pargs->instance.exists())
+      {
+        // We don't own it since this is in the instance
+        pargs->proxy_this->post_end_task(pargs->result, 
+                                         pargs->result_size, false/*owner*/);
+        // Once we've read the data then we can delete the instance
+        pargs->instance.destroy();
+      }
+      else
+        pargs->proxy_this->post_end_task(pargs->result, 
+                                         pargs->result_size, true/*owned*/);
+    }
+
 #ifdef LEGION_SPY
     //--------------------------------------------------------------------------
     RtEvent TaskContext::update_previous_mapped_event(RtEvent next)
@@ -6078,7 +6096,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InnerContext::end_task(const void *res, size_t res_size, bool owned)
+    void InnerContext::end_task(const void *res, size_t res_size, bool owned,
+                                PhysicalInstance deferred_result_instance)
     //--------------------------------------------------------------------------
     {
       if (overhead_tracker != NULL)
@@ -6188,7 +6207,25 @@ namespace Legion {
       // See if we want to move the rest of this computation onto
       // the utility processor. We also need to be sure that we have 
       // registered all of our operations before we can do the post end task
-      if (runtime->has_explicit_utility_procs || 
+      if (deferred_result_instance.exists())
+      {
+        // If we have a defered result instance then we definitely
+        // need to postpone doing the post-end until the results
+        // are actually ready
+        PostEndArgs post_end_args(owner_task, this);
+        post_end_args.result = const_cast<void*>(res);
+        post_end_args.result_size = res_size;
+        post_end_args.instance = deferred_result_instance;
+        RtEvent result_ready(Processor::get_current_finish_event());
+        if (!last_registration.has_triggered())
+          runtime->issue_runtime_meta_task(post_end_args,
+              LG_THROUGHPUT_DEFERRED_PRIORITY, 
+              Runtime::merge_events(last_registration, result_ready));
+        else
+          runtime->issue_runtime_meta_task(post_end_args,
+              LG_THROUGHPUT_DEFERRED_PRIORITY, result_ready);
+      }
+      else if (runtime->has_explicit_utility_procs || 
           !last_registration.has_triggered())
       {
         PostEndArgs post_end_args(owner_task, this);
@@ -6201,6 +6238,7 @@ namespace Legion {
         }
         else
           post_end_args.result = const_cast<void*>(res);
+        post_end_args.instance = PhysicalInstance::NO_INST;
         // Give these slightly higher priority too since they are cleaning up 
         // and will allow other tasks to run
         runtime->issue_runtime_meta_task(post_end_args,
@@ -12602,7 +12640,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LeafContext::end_task(const void *res, size_t res_size, bool owned)
+    void LeafContext::end_task(const void *res, size_t res_size, bool owned,
+                               PhysicalInstance deferred_result_instance)
     //--------------------------------------------------------------------------
     {
       if (overhead_tracker != NULL)
@@ -12618,7 +12657,20 @@ namespace Legion {
       const TaskID owner_task_id = owner_task->task_id;
 #endif
       Runtime *runtime_ptr = runtime;
-      if (runtime->has_explicit_utility_procs)
+      if (deferred_result_instance.exists())
+      {
+        // If we have a defered result instance then we definitely
+        // need to postpone doing the post-end until the results
+        // are actually ready
+        PostEndArgs post_end_args(owner_task, this);
+        post_end_args.result = const_cast<void*>(res);
+        post_end_args.result_size = res_size;
+        post_end_args.instance = deferred_result_instance;
+        RtEvent result_ready(Processor::get_current_finish_event());
+        runtime->issue_runtime_meta_task(post_end_args,
+              LG_THROUGHPUT_DEFERRED_PRIORITY, result_ready);
+      }
+      else if (runtime->has_explicit_utility_procs)
       {
         PostEndArgs post_end_args(owner_task, this);
         post_end_args.result_size = res_size;
@@ -12630,6 +12682,7 @@ namespace Legion {
         }
         else
           post_end_args.result = const_cast<void*>(res);
+        post_end_args.instance = PhysicalInstance::NO_INST;
         // Give these slightly higher priority too since they are 
         // cleaning up and will allow other tasks to run
         runtime->issue_runtime_meta_task(post_end_args, 
@@ -13848,9 +13901,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InlineContext::end_task(const void *res, size_t res_size, bool owned)
+    void InlineContext::end_task(const void *res, size_t res_size, bool owned,
+                                 PhysicalInstance deferred_result_instance)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(!deferred_result_instance.exists());
+#endif
       inline_task->end_inline_task(res, res_size, owned);
     }
 

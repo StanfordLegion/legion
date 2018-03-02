@@ -45,6 +45,7 @@ namespace Legion {
         TaskContext *const proxy_this;
         void *result;
         size_t result_size;
+        PhysicalInstance instance;
       };
       class AutoRuntimeCall {
       public:
@@ -392,15 +393,11 @@ namespace Legion {
     public:
       virtual InstanceView* create_instance_top_view(PhysicalManager *manager,
                                                      AddressSpaceID source) = 0;
-      static void handle_remote_view_creation(const void *args);
-      static void handle_create_top_view_request(Deserializer &derez, 
-                            Runtime *runtime, AddressSpaceID source);
-      static void handle_create_top_view_response(Deserializer &derez,
-                                                   Runtime *runtime);
     public:
       virtual const std::vector<PhysicalRegion>& begin_task(
                                                    Legion::Runtime *&runtime);
-      virtual void end_task(const void *res, size_t res_size, bool owned) = 0;
+      virtual void end_task(const void *res, size_t res_size, bool owned,
+                    PhysicalInstance inst = PhysicalInstance::NO_INST) = 0;
       virtual void post_end_task(const void *res, 
                                  size_t res_size, bool owned) = 0;
     public:
@@ -561,6 +558,8 @@ namespace Legion {
       void* get_local_task_variable(LocalVariableID id);
       void set_local_task_variable(LocalVariableID id, const void *value,
                                    void (*destructor)(void*));
+    public:
+      static void handle_post_end_task(const void *args);
     public:
       Runtime *const runtime;
       TaskOp *const owner_task;
@@ -1005,7 +1004,8 @@ namespace Legion {
     public:
       virtual const std::vector<PhysicalRegion>& begin_task(
                                                     Legion::Runtime *&runtime);
-      virtual void end_task(const void *res, size_t res_size, bool owned);
+      virtual void end_task(const void *res, size_t res_size, bool owned,
+                            PhysicalInstance inst = PhysicalInstance::NO_INST);
       virtual void post_end_task(const void *res, size_t res_size, bool owned);
     public:
       virtual void add_acquisition(AcquireOp *op, 
@@ -2037,13 +2037,9 @@ namespace Legion {
     public:
       virtual InstanceView* create_instance_top_view(PhysicalManager *manager,
                                                      AddressSpaceID source);
-      static void handle_remote_view_creation(const void *args);
-      static void handle_create_top_view_request(Deserializer &derez, 
-                            Runtime *runtime, AddressSpaceID source);
-      static void handle_create_top_view_response(Deserializer &derez,
-                                                   Runtime *runtime);
     public:
-      virtual void end_task(const void *res, size_t res_size, bool owned);
+      virtual void end_task(const void *res, size_t res_size, bool owned,
+                            PhysicalInstance inst = PhysicalInstance::NO_INST);
       virtual void post_end_task(const void *res, size_t res_size, bool owned);
     public:
       virtual void add_acquisition(AcquireOp *op, 
@@ -2381,15 +2377,11 @@ namespace Legion {
     public:
       virtual InstanceView* create_instance_top_view(PhysicalManager *manager,
                                                      AddressSpaceID source);
-      static void handle_remote_view_creation(const void *args);
-      static void handle_create_top_view_request(Deserializer &derez, 
-                            Runtime *runtime, AddressSpaceID source);
-      static void handle_create_top_view_response(Deserializer &derez,
-                                                   Runtime *runtime);
     public:
       virtual const std::vector<PhysicalRegion>& begin_task(
                                                     Legion::Runtime *&runtime);
-      virtual void end_task(const void *res, size_t res_size, bool owned);
+      virtual void end_task(const void *res, size_t res_size, bool owned,
+                            PhysicalInstance inst = PhysicalInstance::NO_INST);
       virtual void post_end_task(const void *res, size_t res_size, bool owned);
     public:
       virtual void add_acquisition(AcquireOp *op, 

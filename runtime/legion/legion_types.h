@@ -1463,7 +1463,8 @@ namespace Legion {
       virtual const std::vector<PhysicalRegion>& begin_task(
                                       Legion::Runtime *&rt) = 0;
       virtual void end_task(const void *result, 
-                            size_t result_size, bool owned) = 0;
+                            size_t result_size, bool owned, 
+          Realm::RegionInstance inst = Realm::RegionInstance::NO_INST) = 0;
       // This is safe because we see in legion_context.h that
       // TaskContext implements this interface and no one else
       // does. If only C++ implemented forward declarations of
