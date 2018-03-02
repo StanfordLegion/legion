@@ -400,6 +400,8 @@ namespace Legion {
                     PhysicalInstance inst = PhysicalInstance::NO_INST) = 0;
       virtual void post_end_task(const void *res, 
                                  size_t res_size, bool owned) = 0;
+      void begin_misspeculation(void);
+      void end_misspeculation(const void *res, size_t res_size);
     public:
       virtual void add_acquisition(AcquireOp *op, 
                                    const RegionRequirement &req) = 0;

@@ -4285,6 +4285,8 @@ namespace Legion {
       if (false_guard.exists())
       {
         MisspeculationTaskArgs args(this);
+        // Make sure this runs on an application processor where the
+        // original task was going to go 
         runtime->issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY, 
                                          RtEvent(false_guard));
         // Fun little trick here: decrement the outstanding meta-task
@@ -5708,8 +5710,7 @@ namespace Legion {
             &runtime->outstanding_counts[MisspeculationTaskArgs::TASK_ID],1);
 #endif
       // Pretend like we executed the task
-      Legion::Runtime *dummy;
-      execution_context->begin_task(dummy);
+      execution_context->begin_misspeculation();
       if (predicate_false_future.impl != NULL)
       {
         // Wait for the future to be ready
@@ -5717,11 +5718,11 @@ namespace Legion {
         wait_on.wait();
         void *ptr = predicate_false_future.impl->get_untyped_result(true);
         size_t size = predicate_false_future.impl->get_untyped_size();
-        execution_context->end_task(ptr, size, false/*owned*/); 
+        execution_context->end_misspeculation(ptr, size); 
       }
       else
-        execution_context->end_task(predicate_false_result,
-                                    predicate_false_size, false/*owned*/);
+        execution_context->end_misspeculation(predicate_false_result,
+                                              predicate_false_size);
     }
 
     //--------------------------------------------------------------------------
@@ -6712,11 +6713,10 @@ namespace Legion {
             &runtime->outstanding_counts[MisspeculationTaskArgs::TASK_ID],1);
 #endif
       // Pretend like we executed the task
-      Legion::Runtime *dummy_runtime;
-      execution_context->begin_task(dummy_runtime);
+      execution_context->begin_misspeculation();
       size_t result_size;
       const void *result = slice_owner->get_predicate_false_result(result_size);
-      execution_context->end_task(result, result_size, false/*owned*/);
+      execution_context->end_misspeculation(result, result_size);
     }
 
     //--------------------------------------------------------------------------
