@@ -334,8 +334,7 @@ namespace Legion {
              context->get_task_name(), context->get_unique_id());
         }
       }
-      if (producer_op != NULL && Internal::implicit_context != NULL &&
-          !Internal::implicit_context->is_task_executed())
+      if (Internal::implicit_context != NULL)
         Internal::implicit_context->invalidate_current_template();
       if (!ready_event.has_triggered())
       {
@@ -373,8 +372,7 @@ namespace Legion {
              "best practices. You may notice a severe performance degradation.",
              context->get_task_name(), context->get_unique_id())
       }
-      if (producer_op != NULL && Internal::implicit_context != NULL &&
-          !Internal::implicit_context->is_task_executed())
+      if (Internal::implicit_context != NULL)
         Internal::implicit_context->invalidate_current_template();
       if (!ready_event.has_triggered())
       {
@@ -423,8 +421,7 @@ namespace Legion {
               "severe performance degradation.", context->get_task_name(), 
               context->get_unique_id())
       }
-      if (block && producer_op != NULL && Internal::implicit_context != NULL &&
-          !Internal::implicit_context->is_task_executed())
+      if (block && Internal::implicit_context != NULL)
         Internal::implicit_context->invalidate_current_template();
       if (block && !ready_event.has_triggered())
       {
@@ -972,8 +969,7 @@ namespace Legion {
             "execution model best practices. You may notice a severe "
             "performance degredation.", context->get_task_name(),
             context->get_unique_id())
-      if (op != NULL && Internal::implicit_context != NULL &&
-          !Internal::implicit_context->is_task_executed())
+      if (Internal::implicit_context != NULL)
         Internal::implicit_context->invalidate_current_template();
       // Wait on the event that indicates the entire task has finished
       if (valid && !ready_event.has_triggered())
@@ -1034,8 +1030,7 @@ namespace Legion {
       assert(is_owner());
       assert(valid);
 #endif
-      if (op != NULL && Internal::implicit_context != NULL &&
-          !Internal::implicit_context->is_task_executed())
+      if (Internal::implicit_context != NULL)
         Internal::implicit_context->invalidate_current_template();
       if (!ready_event.has_triggered())
       {
@@ -1221,8 +1216,8 @@ namespace Legion {
                                               bool warn, const char *source)
     //--------------------------------------------------------------------------
     {
-      if (context != NULL)
-        context->invalidate_current_template();
+      if (Internal::implicit_context != NULL)
+        Internal::implicit_context->invalidate_current_template();
       if (runtime->runtime_warnings && !silence_warnings &&
           (context != NULL) && !context->is_leaf_context())
       {

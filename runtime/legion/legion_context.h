@@ -78,7 +78,6 @@ namespace Legion {
         { return !created_requirements.empty(); }
       inline TaskOp* get_owner_task(void) const { return owner_task; }
       inline bool is_priority_mutable(void) const { return mutable_priority; }
-      inline bool is_task_executed(void) const { return task_executed; }
     public:
       // Interface for task contexts
       virtual RegionTreeContext get_context(void) const = 0;
