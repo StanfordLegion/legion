@@ -1341,6 +1341,7 @@ namespace Legion {
       assert(physical_trace != NULL);
 #endif
       bool recurrent = true;
+      bool fence_registered = false;
       bool is_recording = local_trace->is_recording();
       if (physical_trace->get_current_template() == NULL || is_recording)
       {
@@ -1358,8 +1359,14 @@ namespace Legion {
           physical_trace->check_template_preconditions();
 
         // Register this fence with all previous users in the parent's context
+#ifdef LEGION_SPY
+        execution_precondition = 
+          parent_ctx->perform_fence_analysis(this, true, true);
+#else
         execution_precondition = 
           parent_ctx->perform_fence_analysis(this, false, true);
+#endif
+        fence_registered = true;
       }
 
       if (physical_trace->get_current_template() != NULL)
@@ -1367,10 +1374,24 @@ namespace Legion {
         physical_trace->initialize_template(get_completion_event(), recurrent);
         local_trace->set_state_replay();
       }
+      else if (!fence_registered)
+      {
+#ifdef LEGION_SPY
+        execution_precondition = 
+          parent_ctx->perform_fence_analysis(this, true, true);
+#else
+        execution_precondition = 
+          parent_ctx->perform_fence_analysis(this, false, true);
+#endif
+      }
 
       // Now update the parent context with this fence before we can complete
       // the dependence analysis and possibly be deactivated
+#ifdef LEGION_SPY
+      parent_ctx->update_current_fence(this, true, true);
+#else
       parent_ctx->update_current_fence(this, false, true);
+#endif
     }
 
     /////////////////////////////////////////////////////////////
