@@ -2096,6 +2096,8 @@ namespace Legion {
       // These methods can only be accessed by the FieldAccessor class
       template<PrivilegeMode, typename, int, typename, typename, bool>
       friend class FieldAccessor;
+      template<typename, bool, int, typename, typename, bool>
+      friend class ReductionAccessor;
       template<typename, int, typename, typename>
       friend class UnsafeFieldAccessor;
       Realm::RegionInstance get_instance_info(PrivilegeMode mode, 
@@ -2120,6 +2122,7 @@ namespace Legion {
      * default version of this class is empty, but the following
      * specializations of this class with different privilege modes
      * will provide different methods specific to that privilege type
+     * The ReduceAccessor class should be used for explicit reductions
      *
      * READ_ONLY
      *  - FT read(const Point<N,T>&) const
@@ -2133,18 +2136,14 @@ namespace Legion {
      *  - FT* ptr(const Point<N,T>&) const (Affine Accessor only)
      *  - FT* ptr(const Rect<N,T>&) const (Affine Accessor only)
      *  - FT& operator[](const Point<N,T>&) const (Affine Accessor only)
-     *  - template<typename REDOP> void reduce(const Point<N,T>&, REDOP::RHS);
-     *    (Affine Accessor only)
+     *  - template<typename REDOP, bool EXCLUSIVE> 
+     *      void reduce(const Point<N,T>&, REDOP::RHS); (Affine Accessor only)
      *
      *  WRITE_DISCARD
      *  - void write(const Point<N,T>&, FT val) const
      *  - FT* ptr(const Point<N,T>&) const (Affine Accessor only)
      *  - FT* ptr(const Rect<N,T>&) const (Affine Accessor only)
      *  - FT& operator[](const Point<N,T>&) const (Affine Accessor only)
-     *
-     * REDUCE
-     *  - template<typename REDOP> void reduce(const Point<N,T>&, REDOP::RHS)
-     *    (Affine Accessor only)
      */
     template<PrivilegeMode MODE, typename FT, int N, typename COORD_T = coord_t,
              typename A = Realm::GenericAccessor<FT,N,COORD_T>,
@@ -2208,6 +2207,110 @@ namespace Legion {
                     bool check_field_size = false,
 #endif
                     bool silence_warnings = false) { }
+    };
+
+    /**
+     * \class ReductionAccessor
+     * A field accessor is a class used to perform reductions to a given
+     * field inside a PhysicalRegion object for a specific field. Reductions
+     * can be performed directly or array indexing can be used along with 
+     * the <<= operator to perform the reduction.
+     * This method currently only works with the Realm::AffineAccessor layout
+     */
+    template<typename REDOP, bool EXCLUSIVE, int N, typename COORD_T = coord_t,
+             typename A = Realm::GenericAccessor<typename REDOP::RHS,N,COORD_T>,
+#ifdef BOUNDS_CHECKS
+             bool CHECK_BOUNDS = true>
+#else
+             bool CHECK_BOUNDS = false>
+#endif
+    class ReductionAccessor {
+    public:
+      ReductionAccessor(void) { }
+      ReductionAccessor(const PhysicalRegion &region, FieldID fid,
+                        ReductionOpID redop, bool silence_warnings = false) { }
+      // For Realm::AffineAccessor specializations there are additional
+      // methods for creating accessors with limited bounding boxes and
+      // affine transformations for using alternative coordinates spaces
+      // Specify a specific bounds rectangle to use for the accessor
+      ReductionAccessor(const PhysicalRegion &region, FieldID fid,
+                        ReductionOpID redop, 
+                        const Rect<N,COORD_T> bounds,
+                        bool silence_warnings = false) { }
+      // Specify a specific Affine transform to use for interpreting points
+      template<int M>
+      ReductionAccessor(const PhysicalRegion &region, FieldID fid,
+                        ReductionOpID redop,
+                        const AffineTransform<M,N,COORD_T> transform,
+                        bool silence_warnings = false) { }
+      // Specify both a transform and a bounds to use
+      template<int M>
+      ReductionAccessor(const PhysicalRegion &region, FieldID fid,
+                        ReductionOpID redop,
+                        const AffineTransform<M,N,COORD_T> transform,
+                        const Rect<N,COORD_T> bounds,
+                        bool silence_warnings = false) { }
+    };
+
+    /**
+     * \class DeferredValue
+     * A deferred value is a special helper class for handling return values 
+     * for tasks that do asynchronous operations (e.g. GPU kernel launches), 
+     * but we don't want to wait for the asynchronous operations to be returned. 
+     * This object should be returned directly as the result of a Legion task, 
+     * but its value will not be read until all of the "effects" of the task 
+     * are done. It is important that this object be returned from the task in
+     * order to ensure its memory is cleaned up. Not returning any created
+     * DeferredValue objects will result in a memory leak. It supports the 
+     * following methods during task execution:
+     *  - T read(void) const
+     *  - void write(T val) const
+     *  - T* ptr(void) const
+     *  - T& operator(void) const
+     */
+    template<typename T>
+    class DeferredValue {
+    public:
+      DeferredValue(T initial_value);
+    public:
+      __CUDA_HD__
+      inline T read(void) const;
+      __CUDA_HD__
+      inline void write(T value);
+      __CUDA_HD__
+      inline T* ptr(void);
+      __CUDA_HD__
+      inline T& ref(void);
+      __CUDA_HD__
+      inline operator T(void) const;
+      __CUDA_HD__
+      inline DeferredValue<T>& operator=(T value);
+    public:
+      inline void finalize(InternalContext ctx) const;
+    protected:
+      Realm::RegionInstance instance;
+      Realm::AffineAccessor<T,1,coord_t> accessor;
+    };
+
+    /**
+     * \class DeferredReduction 
+     * This is a special case of a DeferredValue that also supports
+     * a reduction operator. It should be returned directly as the
+     * result of a Legion task. It supports all the same methods
+     * as the DeferredValue as well as an additional method for
+     * doing reductions using a reduction operator.
+     *  - void reduce(REDOP::RHS val)
+     *  - void <<=(REDOP::RHS val)
+     */
+    template<typename REDOP, bool EXCLUSIVE=false>
+    class DeferredReduction: public DeferredValue<typename REDOP::RHS> {
+    public:
+      DeferredReduction(void);
+    public:
+      __CUDA_HD__
+      inline void reduce(typename REDOP::RHS val);
+      __CUDA_HD__
+      inline void operator<<=(typename REDOP::RHS val);
     };
  
     //==========================================================================
