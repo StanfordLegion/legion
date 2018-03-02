@@ -4602,7 +4602,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    template<typename T> __CUDA_HD__
+    template<typename T>
     inline void DeferredValue<T>::finalize(InternalContext ctx) const
     //--------------------------------------------------------------------------
     {
@@ -4619,7 +4619,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    template<typename REDOP, bool EXCLUSIVE>
+    template<typename REDOP, bool EXCLUSIVE> __CUDA_HD__
     inline void DeferredReduction<REDOP,EXCLUSIVE>::reduce(
                                                       typename REDOP::RHS value)
     //--------------------------------------------------------------------------
@@ -4628,7 +4628,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    template<typename REDOP, bool EXCLUSIVE>
+    template<typename REDOP, bool EXCLUSIVE> __CUDA_HD__
     inline void DeferredReduction<REDOP,EXCLUSIVE>::operator<<=(
                                                       typename REDOP::RHS value)
     //--------------------------------------------------------------------------
