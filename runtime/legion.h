@@ -2316,6 +2316,7 @@ namespace Legion {
     public:
       __CUDA_HD__
       inline void reduce(typename REDOP::RHS val);
+      __CUDA_HD__
       inline void operator<<=(typename REDOP::RHS val);
     };
  
