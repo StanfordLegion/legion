@@ -19216,7 +19216,6 @@ namespace Legion {
 #endif
       Runtime *runtime = *((Runtime**)userdata);
       implicit_runtime = runtime;
-      implicit_context = NULL;
       // We immediately bump the priority of all meta-tasks once they start
       // up to the highest level to ensure that they drain once they begin
       Processor::set_current_task_priority(LG_RUNNING_PRIORITY);
