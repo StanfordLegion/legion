@@ -2478,7 +2478,7 @@ class State(object):
         self.spy_state.post_parse(False, True)
 
         print("Performing physical analysis...")
-        self.spy_state.perform_physical_analysis(False, False)
+        self.spy_state.perform_physical_analysis(False, False, False)
         self.spy_state.simplify_physical_graph(need_cycle_check=False)
 
         op = self.spy_state.get_operation(self.spy_state.top_level_uid)

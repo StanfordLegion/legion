@@ -1036,7 +1036,6 @@ namespace Legion {
       FenceOp& operator=(const FenceOp &rhs);
     public:
       void initialize(TaskContext *ctx, FenceKind kind);
-      bool is_execution_fence(void) const;
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -1047,9 +1046,7 @@ namespace Legion {
       virtual void trigger_mapping(void);
     protected:
       FenceKind fence_kind;
-#ifdef LEGION_SPY
       ApEvent execution_precondition;
-#endif
     };
 
     /**

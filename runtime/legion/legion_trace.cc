@@ -999,11 +999,31 @@ namespace Legion {
       local_trace->end_trace_execution(this);
 #ifdef LEGION_SPY
       // For Legion Spy we still have to run through the full fence analysis
-      parent_ctx->perform_fence_analysis(this);
-#endif
+      FenceOp::trigger_dependence_analysis();
+#else
       // Now update the parent context with this fence before we can complete
       // the dependence analysis and possibly be deactivated
-      parent_ctx->update_current_fence(this);
+      switch (fence_kind)
+      {
+        case MAPPING_FENCE:
+          {
+            parent_ctx->update_current_fence(this, true, false);
+            break;
+          }
+        case EXECUTION_FENCE:
+          {
+            parent_ctx->update_current_fence(this, false, true);
+            break;
+          }
+        case MIXED_FENCE:
+          {
+            parent_ctx->update_current_fence(this, true, true);
+            break;
+          }
+        default:
+          assert(false);
+      }
+#endif
       // If this is a static trace, then we remove our reference when we're done
       if (local_trace->is_static_trace())
       {

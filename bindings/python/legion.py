@@ -90,7 +90,7 @@ header = re.sub(r'typedef struct {.+?} max_align_t;', '', header, flags=re.DOTAL
 ffi = cffi.FFI()
 ffi.cdef(header)
 c = ffi.dlopen(None)
-pending_registrations = None
+pending_registrations = []
 
 # Returns true if this module is running inside of a Legion
 # executable. If false, then other Legion functionality should not be
@@ -552,9 +552,6 @@ class Task (object):
         self.calling_convention = 'python'
         self.task_id = None
         if register:
-            global pending_registrations
-            if not pending_registrations:
-                pending_registrations = list()
             pending_registrations.append(self)
 
     def __call__(self, *args):
@@ -934,9 +931,6 @@ def initialize(raw_args, user_data, proc):
     runtime = ffi.new('legion_runtime_t *')
     c.legion_initialization_function_preamble(
             raw_data_ptr, raw_data_size, runtime)
-    global pending_registrations
-    if pending_registrations:
-        for task in pending_registrations:
-            task.register(runtime[0])
-        pending_registrations = None
-
+    for task in pending_registrations:
+        task.register(runtime[0])
+    del pending_registrations[:]
