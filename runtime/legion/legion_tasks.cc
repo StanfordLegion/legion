@@ -5247,6 +5247,12 @@ namespace Legion {
       // Release any restrictions we might have had
       if ((execution_context != NULL) && execution_context->has_restrictions())
         execution_context->release_restrictions();
+      // Invalidate any state that we had if we didn't already
+      // Do this before sending the complete message to avoid the
+      // race condition in the remote case where the top-level
+      // context cleans on the owner node while we still need it
+      if (execution_context != NULL)
+        execution_context->invalidate_region_tree_contexts();
       // For remote cases we have to keep track of the events for
       // returning any created logical state, we can't commit until
       // it is returned or we might prematurely release the references
@@ -5265,9 +5271,6 @@ namespace Legion {
         pack_remote_complete(rez);
         runtime->send_individual_remote_complete(orig_proc,rez);
       }
-      // Invalidate any state that we had if we didn't already
-      if (execution_context != NULL)
-        execution_context->invalidate_region_tree_contexts();
       // See if we need to trigger that our children are complete
       // Note it is only safe to do this if we were not sent remotely
       bool need_commit = false;
