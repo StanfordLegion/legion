@@ -886,10 +886,15 @@ namespace Legion {
       // Don't record it though to avoid confusing legion spy
       // Do this after all the rest of the dependence analysis to catch
       // dependences on any close operations that were generated
-      RtEvent previous_mapped = 
-        parent_ctx->update_previous_mapped_event(mapped_event);
-      if (previous_mapped.exists())
-        mapping_tracker->add_mapping_dependence(previous_mapped);
+      // Skip this for any operations that are part of a must epoch 
+      // launch as the must epoch op will handle this for us
+      if (must_epoch == NULL)
+      {
+        RtEvent previous_mapped = 
+          parent_ctx->update_previous_mapped_event(mapped_event);
+        if (previous_mapped.exists())
+          mapping_tracker->add_mapping_dependence(previous_mapped);
+      }
 #endif
       // Cannot touch anything not on our stack after this call
       mapping_tracker->issue_stage_triggers(this, runtime, must_epoch);
