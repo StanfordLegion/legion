@@ -3369,7 +3369,12 @@ namespace Legion {
       // No need for the lock, no one should be doing anything at this point
       for (std::map<PhysicalManager*,InstanceInfo>::const_iterator it = 
             current_instances.begin(); it != current_instances.end(); it++)
-        it->first->force_deletion();
+      {
+        if (it->second.current_state == PENDING_COLLECTED_STATE)
+          Runtime::trigger_event(it->second.deferred_collect);
+        else
+          it->first->force_deletion();
+      }
     }
     
     //--------------------------------------------------------------------------
@@ -10105,14 +10110,12 @@ namespace Legion {
         delete virtual_manager;
         virtual_manager = NULL;
       }
+      // Have the memory managers for deletion of all their instances
+      for (std::map<Memory,MemoryManager*>::const_iterator it =
+           memory_managers.begin(); it != memory_managers.end(); it++)
+        it->second->finalize();
       if (profiler != NULL)
-      {
-        // Have the memory managers for deletion of all their instances
-        for (std::map<Memory,MemoryManager*>::const_iterator it =
-             memory_managers.begin(); it != memory_managers.end(); it++)
-          it->second->finalize();
         profiler->finalize();
-      }
     }
     
     //--------------------------------------------------------------------------
