@@ -39,11 +39,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     Operation::Operation(Runtime *rt)
       : runtime(rt), gen(0), unique_op_id(0), context_index(0), 
-        outstanding_mapping_references(0),
-        hardened(false), parent_ctx(NULL)
+        outstanding_mapping_references(0), hardened(false), parent_ctx(NULL), 
+        mapping_tracker(NULL), commit_tracker(NULL)
     //--------------------------------------------------------------------------
     {
-      dependence_tracker.mapping = NULL;
       if (!runtime->resilient_mode)
         commit_event = RtUserEvent::NO_RT_USER_EVENT;
     }
@@ -112,10 +111,15 @@ namespace Legion {
       unverified_regions.clear();
       verify_regions.clear();
       logical_records.clear();
-      if (dependence_tracker.commit != NULL)
+      if (mapping_tracker != NULL)
       {
-        delete dependence_tracker.commit;
-        dependence_tracker.commit = NULL;
+        delete mapping_tracker;
+        mapping_tracker = NULL;
+      }
+      if (commit_tracker != NULL)
+      {
+        delete commit_tracker;
+        commit_tracker = NULL;
       }
       if ((trace != NULL) && (trace->remove_reference()))
         delete trace;
@@ -396,8 +400,6 @@ namespace Legion {
         {
           trigger_commit_invoked = true;
           need_trigger = true;
-          // Bump the generation
-          gen++;
         }
       }
       if (need_trigger)
@@ -742,20 +744,19 @@ namespace Legion {
         {
           trigger_commit_invoked = true;
           need_trigger = true;
-          gen++;
         }
         else if (outstanding_mapping_references == 0)
         {
-#ifdef DEBUG_LEGION
-          assert(dependence_tracker.commit != NULL);
-#endif
-          CommitDependenceTracker *tracker = dependence_tracker.commit;
-          need_trigger = tracker->issue_commit_trigger(this, runtime);
-          if (need_trigger)
+          if (commit_tracker != NULL)
           {
-            trigger_commit_invoked = true;
-            gen++;
+            need_trigger = commit_tracker->issue_commit_trigger(this, runtime);
+            delete commit_tracker;
+            commit_tracker = NULL;
           }
+          else
+            need_trigger = true;
+          if (need_trigger)
+            trigger_commit_invoked = true;
         }
       }
       if (need_completion_trigger)
@@ -805,6 +806,9 @@ namespace Legion {
         assert(!committed);
 #endif
         committed = true;
+        // At this point we bumb the generation as we can never roll back
+        // after we have committed the operation
+        gen++;
       } 
       // Trigger the commit event
       if (runtime->resilient_mode)
@@ -829,7 +833,6 @@ namespace Legion {
         {
           trigger_commit_invoked = true;
           need_trigger = true;
-          gen++;
         }
       }
       if (need_trigger)
@@ -857,10 +860,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(dependence_tracker.mapping == NULL);
+      assert(mapping_tracker == NULL);
 #endif
       // Make a dependence tracker
-      dependence_tracker.mapping = new MappingDependenceTracker();
+      mapping_tracker = new MappingDependenceTracker();
       // Register ourselves with our trace if there is one
       // This will also add any necessary dependences
       if (trace != NULL)
@@ -874,11 +877,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(dependence_tracker.mapping != NULL);
+      assert(mapping_tracker != NULL);
 #endif
-      MappingDependenceTracker *tracker = dependence_tracker.mapping;
-      // Now make a commit tracker
-      dependence_tracker.commit = new CommitDependenceTracker();
 #ifdef LEGION_SPY
       // Enforce serial mapping dependences for validating runtime analysis
       // Don't record it though to avoid confusing legion spy
@@ -887,11 +887,12 @@ namespace Legion {
       RtEvent previous_mapped = 
         parent_ctx->update_previous_mapped_event(mapped_event);
       if (previous_mapped.exists())
-        dependence_tracker.mapping->add_mapping_dependence(previous_mapped);
+        mapping_tracker->add_mapping_dependence(previous_mapped);
 #endif
       // Cannot touch anything not on our stack after this call
-      tracker->issue_stage_triggers(this, runtime, must_epoch);
-      delete tracker;
+      mapping_tracker->issue_stage_triggers(this, runtime, must_epoch);
+      delete mapping_tracker;
+      mapping_tracker = NULL;
     }
 
     //--------------------------------------------------------------------------
@@ -921,11 +922,11 @@ namespace Legion {
       bool registered_dependence = false;
       AutoLock o_lock(op_lock);
 #ifdef DEBUG_LEGION
-      assert(dependence_tracker.mapping != NULL);
+      assert(mapping_tracker != NULL);
 #endif
       bool prune = target->perform_registration(target_gen, this, gen,
                                                 registered_dependence,
-                                                dependence_tracker.mapping,
+                                                mapping_tracker,
                                                 commit_event);
       if (registered_dependence)
         incoming[target] = target_gen;
@@ -986,11 +987,11 @@ namespace Legion {
       if (do_registration)
       {
 #ifdef DEBUG_LEGION
-        assert(dependence_tracker.mapping != NULL);
+        assert(mapping_tracker != NULL);
 #endif
         prune = target->perform_registration(target_gen, this, gen,
                                                 registered_dependence,
-                                                dependence_tracker.mapping,
+                                                mapping_tracker,
                                                 commit_event);
       }
       if (registered_dependence)
@@ -1032,7 +1033,7 @@ namespace Legion {
       {
         AutoLock o_lock(op_lock);
         // Retest generation to see if we lost the race
-        if ((our_gen == gen) && !committed)
+        if (our_gen == gen)
         {
 #ifdef DEBUG_LEGION
           // should still have some mapping references
@@ -1054,11 +1055,12 @@ namespace Legion {
             tracker->add_resolution_dependence(resolved_event);
             // Record that we have a commit dependence on the
             // registering operation
-#ifdef DEBUG_LEGION
-            assert(dependence_tracker.commit != NULL);
-#endif
-            dependence_tracker.commit->add_commit_dependence(
-                                          other_commit_event);
+            if (runtime->resilient_mode)
+            {
+              if (commit_tracker == NULL)
+                commit_tracker = new CommitDependenceTracker();
+              commit_tracker->add_commit_dependence(other_commit_event);
+            }
             registered_dependence = true;
           }
           else
@@ -1120,16 +1122,16 @@ namespace Legion {
           // we can commit this operation
           if ((outstanding_mapping_references == 0) && !trigger_commit_invoked)
           {
-#ifdef DEBUG_LEGION
-            assert(dependence_tracker.commit != NULL);
-#endif
-            CommitDependenceTracker *tracker = dependence_tracker.commit;
-            need_trigger = tracker->issue_commit_trigger(this, runtime);
-            if (need_trigger)
+            if (commit_tracker != NULL)
             {
-              trigger_commit_invoked = true;
-              gen++;
+              need_trigger = commit_tracker->issue_commit_trigger(this,runtime);
+              delete commit_tracker;
+              commit_tracker = NULL;
             }
+            else
+              need_trigger = true;
+            if (need_trigger)
+              trigger_commit_invoked = true;
           }
         }
         // otherwise we were already recycled and are no longer valid
@@ -1182,7 +1184,6 @@ namespace Legion {
           {
             need_trigger = true;
             trigger_commit_invoked = true;
-            gen++;
           }
         }
       }
@@ -1889,8 +1890,6 @@ namespace Legion {
         {
           if (runtime->legion_spy_enabled)
             LegionSpy::log_predicated_false_op(unique_op_id);
-          // Still need a commit tracker here
-          dependence_tracker.commit = new CommitDependenceTracker();
           resolve_false(false/*speculated*/, false/*launched*/);
         }
         else
@@ -2008,8 +2007,6 @@ namespace Legion {
           LegionSpy::log_predicated_false_op(unique_op_id);
         // Can remove our predicate reference since we don't need it anymore
         predicate->remove_predicate_reference();
-        // Still need a commit tracker here
-        dependence_tracker.commit = new CommitDependenceTracker();
         resolve_false(speculated, false/*launched*/);
       }
 #ifdef DEBUG_LEGION
@@ -10428,9 +10425,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(dependence_tracker.mapping != NULL);
+      assert(mapping_tracker != NULL);
 #endif
-      dependence_tracker.mapping->add_mapping_dependence(precondition);
+      mapping_tracker->add_mapping_dependence(precondition);
     }
 
     //--------------------------------------------------------------------------
