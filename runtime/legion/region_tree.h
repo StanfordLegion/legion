@@ -697,7 +697,10 @@ namespace Legion {
         static const LgTaskID TASK_ID = 
           LG_TIGHTEN_INDEX_SPACE_TASK_ID;
       public:
-        IndexSpaceExpression *proxy_this;
+        TightenIndexSpaceArgs(IndexSpaceExpression *proxy)
+          : proxy_this(proxy) { proxy->add_expression_reference(); }
+      public:
+        IndexSpaceExpression *const proxy_this;
       };
     public:
       IndexSpaceExpression(void);

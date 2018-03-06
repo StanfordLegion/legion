@@ -142,8 +142,7 @@ namespace Legion {
               spaces, this->realm_index_space, requests, precondition));
       // Then launch the tighten call for it too since we know we're
       // going to want this eventually
-      IndexSpaceExpression::TightenIndexSpaceArgs args;
-      args.proxy_this = this;
+      IndexSpaceExpression::TightenIndexSpaceArgs args(this);
       this->tight_index_space_ready = 
         ctx->runtime->issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY, 
                       Runtime::protect_event(this->realm_index_space_ready));
@@ -230,8 +229,7 @@ namespace Legion {
               spaces, this->realm_index_space, requests, precondition));
       // Then launch the tighten call for it too since we know we're
       // going to want this eventually
-      IndexSpaceExpression::TightenIndexSpaceArgs args;
-      args.proxy_this = this;
+      IndexSpaceExpression::TightenIndexSpaceArgs args(this);
       this->tight_index_space_ready = 
         ctx->runtime->issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY,
                       Runtime::protect_event(this->realm_index_space_ready));
@@ -326,8 +324,7 @@ namespace Legion {
                               this->realm_index_space, requests, precondition));
         // Then launch the tighten call for it too since we know we're
         // going to want this eventually
-        IndexSpaceExpression::TightenIndexSpaceArgs args;
-        args.proxy_this = this;
+        IndexSpaceExpression::TightenIndexSpaceArgs args(this);
         this->tight_index_space_ready = 
           ctx->runtime->issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY,
                         Runtime::protect_event(this->realm_index_space_ready));
@@ -542,8 +539,7 @@ namespace Legion {
       if (!index_space_ready.has_triggered())
       {
         // If this index space isn't ready yet, then we have to defer this 
-        TightenIndexSpaceArgs args;
-        args.proxy_this = this;
+        TightenIndexSpaceArgs args(this);
         context->runtime->issue_runtime_meta_task(args,LG_LATENCY_WORK_PRIORITY,
                                      Runtime::protect_event(index_space_ready));
         return;

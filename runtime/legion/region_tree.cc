@@ -4861,6 +4861,8 @@ namespace Legion {
     {
       const TightenIndexSpaceArgs *targs = (const TightenIndexSpaceArgs*)args;
       targs->proxy_this->tighten_index_space();
+      if (targs->proxy_this->remove_expression_reference())
+        delete targs->proxy_this;
     }
 
     //--------------------------------------------------------------------------
