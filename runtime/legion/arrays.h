@@ -24,9 +24,6 @@
 #include <ostream>
 
 #include <assert.h>
-#ifndef __GNUC__
-#include "legion/atomics.h" // for __sync_fetch_and_add
-#endif
 
 #include <stdint.h>
 

@@ -14424,24 +14424,20 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(!manager->is_reduction_manager()); 
 #endif
-      InstanceManager *inst_manager = manager->as_instance_manager(); 
-      if (!inst_manager->is_external_instance())
-        REPORT_LEGION_ERROR(ERROR_ILLEGAL_DETACH_OPERATION,
-                      "Illegal detach operation on a physical region which "
-                      "was not attached!")
       std::set<RtEvent> applied_conditions;
       ApEvent detach_event = 
         runtime->forest->detach_external(requirement, this, 0/*idx*/, 
                                      version_info,reference,applied_conditions);
       version_info.apply_mapping(applied_conditions);
+      // Also tell the runtime to detach the external instance from memory
+      // This has to be done before we can consider this mapped
+      RtEvent detached_event = manager->detach_external_instance();
+      if (detached_event.exists())
+        applied_conditions.insert(detached_event);
       if (!applied_conditions.empty())
         complete_mapping(Runtime::merge_events(applied_conditions));
       else
         complete_mapping();
-
-      // Now remove the valid reference added by the attach operation
-      manager->memory_manager->set_garbage_collection_priority(manager,
-        0, parent_ctx->get_executing_processor(), GC_MAX_PRIORITY);
 
       Runtime::trigger_event(completion_event, detach_event);
       need_completion_trigger = false;

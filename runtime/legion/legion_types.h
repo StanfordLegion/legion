@@ -699,6 +699,7 @@ namespace Legion {
       SEND_VERSION_MANAGER_UNVERSIONED_RESPONSE,
       SEND_INSTANCE_REQUEST,
       SEND_INSTANCE_RESPONSE,
+      SEND_EXTERNAL_DETACH,
       SEND_GC_PRIORITY_UPDATE,
       SEND_NEVER_GC_RESPONSE,
       SEND_ACQUIRE_REQUEST,
@@ -832,6 +833,7 @@ namespace Legion {
         "Send Version Manager Unversioned Response",                  \
         "Send Instance Request",                                      \
         "Send Instance Response",                                     \
+        "Send External Detach",                                       \
         "Send GC Priority Update",                                    \
         "Send Never GC Response",                                     \
         "Send Acquire Request",                                       \

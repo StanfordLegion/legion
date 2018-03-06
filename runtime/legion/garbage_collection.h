@@ -233,7 +233,6 @@ namespace Legion {
       enum State {
         INACTIVE_STATE,
         ACTIVE_INVALID_STATE,
-        ACTIVE_DELETED_STATE,
         VALID_STATE,
         DELETED_STATE,
         PENDING_ACTIVE_STATE,
@@ -241,9 +240,6 @@ namespace Legion {
         PENDING_VALID_STATE,
         PENDING_INVALID_STATE,
         PENDING_ACTIVE_VALID_STATE,
-        PENDING_ACTIVE_DELETED_STATE,
-        PENDING_INVALID_DELETED_STATE,
-        PENDING_INACTIVE_DELETED_STATE,
       };
     public:
       template<ReferenceKind REF_KIND, bool ADD>
@@ -324,20 +320,15 @@ namespace Legion {
       inline void add_nested_resource_ref(DistributedID source, int cnt = 1);
       inline bool remove_base_resource_ref(ReferenceSource source, int cnt = 1);
       inline bool remove_nested_resource_ref(DistributedID source, int cnt = 1);
-    public: // some help for managing physical instances 
-      inline bool try_add_base_valid_ref(ReferenceSource source,
-                                         ReferenceMutator *mutator,
-                                         bool must_be_valid,
-                                         int cnt = 1);
-      bool try_active_deletion(void);
+    public:
+      // Atomic check and increment operations 
+      inline bool check_valid_and_increment(ReferenceSource source,int cnt = 1);
     private:
       void add_gc_reference(ReferenceMutator *mutator);
       bool remove_gc_reference(ReferenceMutator *mutator);
     private:
       void add_valid_reference(ReferenceMutator *mutator);
       bool remove_valid_reference(ReferenceMutator *mutator);
-      bool try_add_valid_reference(ReferenceMutator *mutator,
-                                   bool must_be_valid, int cnt);
     private:
       void add_resource_reference(void);
       bool remove_resource_reference(void);
@@ -367,9 +358,6 @@ namespace Legion {
                                     ReferenceMutator *mutator, int cnt);
       bool remove_nested_valid_ref_internal(DistributedID source, 
                                     ReferenceMutator *mutator, int cnt);
-      bool try_add_valid_reference_internal(ReferenceSource source, 
-                                            ReferenceMutator *mutator, 
-                                            bool must_be_valid, int cnt);
     public:
       void add_base_resource_ref_internal(ReferenceSource source, int cnt); 
       void add_nested_resource_ref_internal(DistributedID source, int cnt); 
@@ -894,31 +882,30 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    inline bool DistributedCollectable::try_add_base_valid_ref(
-                            ReferenceSource source, ReferenceMutator *mutator, 
-                            bool must_be_valid, int cnt/*=1*/)
+    inline bool DistributedCollectable::check_valid_and_increment(
+                                         ReferenceSource source, int cnt /*=1*/)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(cnt >= 0);
 #endif
-#ifdef LEGION_GC
-#ifdef DEBUG_LEGION_GC
-      bool result = try_add_valid_reference_internal(source, mutator, 
-                                                     must_be_valid, cnt);
-#else
-      bool result = try_add_valid_reference(mutator, must_be_valid, cnt);
+      // Don't support this if we are debugging GC
+#ifndef DEBUG_LEGION_GC
+      // Read the value in an unsafe way at first 
+      int current_cnt = valid_references;
+      // Don't even both trying if the count is zero
+      while (current_cnt > 0)
+      {
+        const int next_cnt = current_cnt + cnt;
+        const int prev_cnt = 
+          __sync_val_compare_and_swap(&valid_references, current_cnt, next_cnt);
+        if (prev_cnt == current_cnt)
+          return true;
+        // Update the current count
+        current_cnt = prev_cnt;
+      }
 #endif
-      if (result)
-        log_base_ref<true>(VALID_REF_KIND, did, local_space, source, cnt);
-      return result; 
-#else
-#ifdef DEBUG_LEGION_GC
-      return try_add_valid_reference_internal(source,mutator,must_be_valid,cnt);
-#else
-      return try_add_valid_reference(mutator, must_be_valid, cnt);
-#endif
-#endif
+      return false;
     }
 
   }; // namespace Internal 
