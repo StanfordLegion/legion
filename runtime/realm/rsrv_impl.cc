@@ -1214,6 +1214,8 @@ namespace Realm {
 	  }
 
 	  // other cases?
+	  log_reservation.fatal() << "wrlock_slow: unexpected state = "
+				  << std::hex << cur_state << std::dec;
 	  assert(0);
 	}
 
@@ -1353,13 +1355,15 @@ namespace Realm {
 	    break;
 	  }
 
-	  // case 2: a current lock holder is sleeping
+	  // case 3: a current lock holder is sleeping
 	  if((cur_state & STATE_SLEEPER) != 0) {
 	    wait_for = frs.sleeper_event;
 	    break;
 	  }
 
 	  // other cases?
+	  log_reservation.fatal() << "rdlock_slow: unexpected state = "
+				  << std::hex << cur_state << std::dec;
 	  assert(0);
 	}
 
