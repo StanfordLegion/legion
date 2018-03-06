@@ -174,6 +174,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool PhysicalInstance::is_external_instance(void) const
+    //--------------------------------------------------------------------------
+    {
+      if (impl == NULL)
+        return false;
+      return impl->is_external_instance();
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ PhysicalInstance PhysicalInstance::get_virtual_instance(void)
     //--------------------------------------------------------------------------
     {
