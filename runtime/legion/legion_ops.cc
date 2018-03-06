@@ -749,9 +749,10 @@ namespace Legion {
         {
           if (commit_tracker != NULL)
           {
-            need_trigger = commit_tracker->issue_commit_trigger(this, runtime);
-            delete commit_tracker;
+            CommitDependenceTracker *tracker = commit_tracker;
             commit_tracker = NULL;
+            need_trigger = tracker->issue_commit_trigger(this, runtime);
+            delete tracker;
           }
           else
             need_trigger = true;
@@ -895,9 +896,10 @@ namespace Legion {
       }
 #endif
       // Cannot touch anything not on our stack after this call
-      mapping_tracker->issue_stage_triggers(this, runtime, must_epoch);
-      delete mapping_tracker;
+      MappingDependenceTracker *tracker = mapping_tracker;
       mapping_tracker = NULL;
+      tracker->issue_stage_triggers(this, runtime, must_epoch);
+      delete tracker;
     }
 
     //--------------------------------------------------------------------------
@@ -1129,9 +1131,10 @@ namespace Legion {
           {
             if (commit_tracker != NULL)
             {
-              need_trigger = commit_tracker->issue_commit_trigger(this,runtime);
-              delete commit_tracker;
+              CommitDependenceTracker *tracker = commit_tracker;
               commit_tracker = NULL;
+              need_trigger = tracker->issue_commit_trigger(this,runtime);
+              delete tracker;
             }
             else
               need_trigger = true;
