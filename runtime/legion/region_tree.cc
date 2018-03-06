@@ -2811,8 +2811,7 @@ namespace Legion {
       for (std::vector<PhysicalManager*>::const_iterator it = 
             unacquired.begin(); it != unacquired.end(); it++)
       {
-        if ((*it)->try_add_base_valid_ref(MAPPING_ACQUIRE_REF, op,
-                                            !(*it)->is_owner()))
+        if ((*it)->acquire_instance(MAPPING_ACQUIRE_REF, op))
         {
           acquired.insert(std::pair<PhysicalManager*,
              std::pair<unsigned,bool> >(*it,std::pair<unsigned,bool>(1,false)));

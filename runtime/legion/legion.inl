@@ -2247,7 +2247,7 @@ namespace Legion {
           region.get_instance_info(READ_ONLY, fid, actual_field_size, &is,
               Internal::NT_TemplateHelper::encode_tag<N,T>(), 
               silence_warnings, false/*generic accessor*/, check_field_size);
-        accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, bounds);
+        accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, source_bounds);
         bounds = AffineBounds::Tester<N,T>(is, source_bounds);
       }
       // With explicit transform

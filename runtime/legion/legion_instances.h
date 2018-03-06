@@ -124,7 +124,6 @@ namespace Legion {
     public:
       void log_instance_creation(UniqueID creator_id, Processor proc,
                      const std::vector<LogicalRegion> &regions) const;
-      void force_deletion(void);
     public:
       inline bool is_reduction_manager(void) const;
       inline bool is_instance_manager(void) const;
@@ -192,9 +191,12 @@ namespace Legion {
       }
       inline Memory get_memory(void) const { return memory_manager->memory; }
     public:
+      bool acquire_instance(ReferenceSource source, ReferenceMutator *mutator);
       void perform_deletion(RtEvent deferred_event);
+      void force_deletion(void);
       void set_garbage_collection_priority(MapperID mapper_id, Processor p,
                                            GCPriority priority); 
+      RtEvent detach_external_instance(void);
     public:
       static inline DistributedID encode_instance_did(DistributedID did,
                                                       bool external);

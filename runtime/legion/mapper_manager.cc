@@ -1932,8 +1932,7 @@ namespace Legion {
           ctx->acquired_instances->end())
         return true;
       pause_mapper_call(ctx);
-      if (manager->try_add_base_valid_ref(MAPPING_ACQUIRE_REF, ctx->operation,
-                                          !manager->is_owner()))
+      if (manager->acquire_instance(MAPPING_ACQUIRE_REF, ctx->operation))
       {
         record_acquired_instance(ctx, manager, false/*created*/);
         resume_mapper_call(ctx);
@@ -2172,8 +2171,7 @@ namespace Legion {
         // Try to add an acquired reference immediately
         // If we're remote it has to be valid already to be sound, but if
         // we're local whatever works
-        if (manager->try_add_base_valid_ref(MAPPING_ACQUIRE_REF, 
-                                info->operation, !manager->is_owner()))
+        if (manager->acquire_instance(MAPPING_ACQUIRE_REF, info->operation))
         {
           // We already know it wasn't there before
           already_acquired[manager] = std::pair<unsigned,bool>(1, false);

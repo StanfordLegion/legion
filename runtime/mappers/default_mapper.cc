@@ -1842,7 +1842,11 @@ namespace Legion {
         {
           for (std::deque<PhysicalInstance>::const_iterator it =
                 to_downgrade.begin(); it != to_downgrade.end(); it++)
+          {
+            if (it->is_external_instance())
+              continue;
             runtime->set_garbage_collection_priority(ctx, *it, 0/*priority*/);
+          }
         }
       }
     }
@@ -2241,7 +2245,7 @@ namespace Legion {
       {
         int priority = default_policy_select_garbage_collection_priority(ctx, 
                 kind, target_memory, result, meets, (req.privilege == REDUCE));
-        if (priority != 0)
+        if ((priority != 0) && !result.is_external_instance())
           runtime->set_garbage_collection_priority(ctx, result,priority);
       }
       return true;

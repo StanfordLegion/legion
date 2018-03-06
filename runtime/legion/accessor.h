@@ -31,10 +31,6 @@
 #include "realm/instance.h"
 #include "legion/legion_domain.h"
 
-#ifndef __GNUC__
-#include "legion/atomics.h" // for __sync_fetch_and_add
-#endif
-
 // for fprintf
 #include <stdio.h>
 
