@@ -3101,6 +3101,9 @@ namespace Legion {
         }
         index_nodes[sp] = result;
         index_space_requests.erase(sp);
+        // Hold a resource reference to prevent deletion until we can
+        // add our other references while not holding the lock
+        result->add_base_resource_ref(REGION_TREE_REF);
       }
       LocalReferenceMutator mutator;
       // If we're the owner add a valid reference that will be removed
@@ -3120,6 +3123,8 @@ namespace Legion {
       // the tighten gets done and tries to delete the node
       if (realm_is != NULL)
         result->tighten_index_space();
+      // Now we can remove our resource reference
+      result->remove_base_resource_ref(REGION_TREE_REF);
       return result;
     }
 
@@ -3157,6 +3162,9 @@ namespace Legion {
         }
         index_nodes[sp] = result;
         index_space_requests.erase(sp);
+        // Hold a resource reference to prevent deletion until we can
+        // add our other references while not holding the lock
+        result->add_base_resource_ref(REGION_TREE_REF);
       }
       LocalReferenceMutator mutator;
       // If we're the owner add a valid reference that will be removed
@@ -3176,6 +3184,8 @@ namespace Legion {
       // the tighten gets done and tries to delete the node
       if (realm_is != NULL)
         result->tighten_index_space();
+      // Now we can remove our resource reference
+      result->remove_base_resource_ref(REGION_TREE_REF);
       return result;
     }
 
@@ -3214,6 +3224,9 @@ namespace Legion {
         }
         index_parts[p] = result;
         index_part_requests.erase(p);
+        // Hold a resource reference to prevent deletion until we can
+        // add our other references while not holding the lock
+        result->add_base_resource_ref(REGION_TREE_REF);
       }
       LocalReferenceMutator mutator;
       // If we're the owner add a valid reference that will be removed
@@ -3235,7 +3248,8 @@ namespace Legion {
       result->register_with_runtime(&mutator);
       if (parent != NULL)
         parent->add_child(result);
-      
+      // Now we can remove our resource reference
+      result->remove_base_resource_ref(REGION_TREE_REF); 
       return result;
     }
 
@@ -3274,6 +3288,9 @@ namespace Legion {
         }
         index_parts[p] = result;
         index_part_requests.erase(p);
+        // Hold a resource reference to prevent deletion until we can
+        // add our other references while not holding the lock
+        result->add_base_resource_ref(REGION_TREE_REF);
       }
       LocalReferenceMutator mutator;
       // If we're the owner add a valid reference that will be removed
@@ -3295,7 +3312,8 @@ namespace Legion {
       result->register_with_runtime(&mutator);
       if (parent != NULL)
         parent->add_child(result);
-      
+      // Now we can remove our resource reference
+      result->remove_base_resource_ref(REGION_TREE_REF);
       return result;
     }
  
@@ -3323,6 +3341,9 @@ namespace Legion {
         }
         field_nodes[space] = result;
         field_space_requests.erase(space);
+        // Hold a resource reference to prevent deletion until we can
+        // add our other references while not holding the lock
+        result->add_base_resource_ref(REGION_TREE_REF);
       }
       LocalReferenceMutator mutator;
       // If we're the owner add a valid reference that will be removed
@@ -3334,6 +3355,8 @@ namespace Legion {
       else
         result->add_base_gc_ref(REMOTE_DID_REF, &mutator);
       result->register_with_runtime(&mutator);
+      // Now we can remove our resource reference
+      result->remove_base_resource_ref(REGION_TREE_REF);
       return result;
     }
 
@@ -3362,6 +3385,9 @@ namespace Legion {
         }
         field_nodes[space] = result;
         field_space_requests.erase(space);
+        // Hold a resource reference to prevent deletion until we can
+        // add our other references while not holding the lock
+        result->add_base_resource_ref(REGION_TREE_REF);
       }
       LocalReferenceMutator mutator;
       // If we're the owner add a valid reference that will be removed
@@ -3373,6 +3399,8 @@ namespace Legion {
       else
         result->add_base_gc_ref(REMOTE_DID_REF, &mutator);
       result->register_with_runtime(&mutator);
+      // Now we can remove our resource reference
+      result->remove_base_resource_ref(REGION_TREE_REF);
       return result;
     }
 
@@ -3426,6 +3454,12 @@ namespace Legion {
           tree_nodes[r.tree_id] = result;
           region_tree_requests.erase(r.tree_id);
         }
+        // Add a reference that will be removed when we're destroyed
+#ifdef LEGION_GC
+        result->add_base_resource_ref(APPLICATION_REF);
+#else
+        result->add_reference();
+#endif
       }
       result->record_registered();
 
@@ -3469,6 +3503,12 @@ namespace Legion {
         }
         // Now we can put the node in the map
         part_nodes[p] = result;
+        // Add a reference that will be removed when we're destroyed
+#ifdef LEGION_GC
+        result->add_base_resource_ref(APPLICATION_REF);
+#else
+        result->add_reference();
+#endif
       }
       result->record_registered();
       
@@ -14942,12 +14982,7 @@ namespace Legion {
       row_source->add_base_resource_ref(REGION_TREE_REF); 
 #endif
       row_source->add_instance(this);
-      // Add a reference that will be moved when we're destroyed
-#ifdef LEGION_GC
-      add_base_resource_ref(APPLICATION_REF);
-#else
-      add_reference();
-#endif
+      
       registered = true;
     }
 
@@ -16798,12 +16833,7 @@ namespace Legion {
       parent->add_reference();
 #endif
       parent->add_child(this);
-      // Add a reference that will be moved when we're destroyed
-#ifdef LEGION_GC
-      add_base_resource_ref(APPLICATION_REF);
-#else
-      add_reference();
-#endif
+      
       registered = true;
     }
 
