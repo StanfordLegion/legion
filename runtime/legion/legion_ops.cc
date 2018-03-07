@@ -536,99 +536,6 @@ namespace Legion {
       }
     }
 
-#ifdef USE_OLD_COMPOSITE
-    //--------------------------------------------------------------------------
-    MaterializedView* Operation::create_temporary_instance(PhysicalManager *dst,
-                                 unsigned index, const FieldMask &needed_fields)
-    //--------------------------------------------------------------------------
-    {
-      PhysicalManager *result= 
-        select_temporary_instance(dst, index, needed_fields);
-#ifdef DEBUG_LEGION
-      assert(result->is_instance_manager());
-#endif
-      InstanceView *view = parent_ctx->create_instance_top_view(result, 
-                                                runtime->address_space);
-      return view->as_materialized_view();
-    }
-
-    //--------------------------------------------------------------------------
-    PhysicalManager* Operation::select_temporary_instance(PhysicalManager *dst,
-                                 unsigned index, const FieldMask &needed_fields)
-    //--------------------------------------------------------------------------
-    {
-      // Should only be called for interhited types
-      assert(false);
-      return NULL;
-    }
-
-    //--------------------------------------------------------------------------
-    void Operation::validate_temporary_instance(PhysicalManager *result,
-                                  std::set<PhysicalManager*> &previous_managers,
-           const std::map<PhysicalManager*,std::pair<unsigned,bool> > &acquired,
-                                  const FieldMask &needed_fields,
-                                  LogicalRegion needed_region,
-                                  MapperManager *mapper,
-                                  const char *mapper_call_name) const 
-    //--------------------------------------------------------------------------
-    {
-      if (!!(needed_fields - result->layout->allocated_fields))
-        // Doesn't have all the fields
-        REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
-                      "Invalid mapper output from invocation of '%s' on "
-                      "mapper %s. The temporary instance selected for %s "
-                      "(UID %lld) did not have space for all the necessary "
-                      "fields.", mapper_call_name, mapper->get_mapper_name(),
-                      get_logging_name(), unique_op_id)
-      std::vector<LogicalRegion> needed_regions(1, needed_region);
-      if (!result->meets_regions(needed_regions))
-        // Doesn't meet the needed region
-        REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
-                      "Invalid mapper output from invocation of '%s' on "
-                      "mapper %s. The temporary instance selected for %s "
-                      "(UID %lld) is not large enough for the necessary "
-                      "logical region.", mapper_call_name,
-                      mapper->get_mapper_name(), get_logging_name(),
-                      unique_op_id)
-      std::map<PhysicalManager*,std::pair<unsigned,bool> >::const_iterator
-        finder = acquired.find(result);
-      if (finder == acquired.end())
-        // Not acquired, these must be acquired so we can properly
-        // check that it is a fresh instance
-        REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
-                      "Invalid mapper output from invocation of '%s' on "
-                      "mapper %s. The temporary instance selected for %s "
-                      "(UID %lld) was not properly acquired.",
-                      mapper_call_name, mapper->get_mapper_name(),
-                      get_logging_name(), unique_op_id)
-      // Little hack: permit this if we are doing replay mapping
-      if ((runtime->replay_file == NULL) && (!finder->second.second || 
-          (previous_managers.find(result) != previous_managers.end())))
-        // Not a fresh instance
-        REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
-                      "Invalid mapper output from invocation of '%s' on "
-                      "mapper %s. The temporary instance selected for %s "
-                      "(UID %lld) is not a freshly created instance.",
-                      mapper_call_name, mapper->get_mapper_name(),
-                      get_logging_name(), unique_op_id)
-    }
-
-    //--------------------------------------------------------------------------
-    void Operation::log_temporary_instance(PhysicalManager *result, 
-                           unsigned index, const FieldMask &needed_fields) const
-    //--------------------------------------------------------------------------
-    {
-      std::vector<FieldID> fields;
-      result->region_node->column_source->get_field_set(needed_fields, fields); 
-      for (std::vector<FieldID>::const_iterator it = fields.begin();
-            it != fields.end(); it++)
-      {
-        LegionSpy::log_temporary_instance(unique_op_id, index, 
-                                          *it, result->get_use_event());
-      }
-    }
-#endif
-
     //--------------------------------------------------------------------------
     void Operation::enqueue_ready_operation(RtEvent wait_on/*=Event::NO_EVENT*/,
                            LgPriority priority/*= LG_THROUGHPUT_WORK_PRIORITY*/)
@@ -2606,46 +2513,6 @@ namespace Legion {
       map_applied_conditions.insert(event);
     }
 
-#ifdef USE_OLD_COMPOSITE
-    //--------------------------------------------------------------------------
-    PhysicalManager* MapOp::select_temporary_instance(PhysicalManager *dst,
-                                 unsigned index, const FieldMask &needed_fields)
-    //--------------------------------------------------------------------------
-    {
-      if (mapper == NULL)
-      {
-        Processor exec_proc = parent_ctx->get_executing_processor();
-        mapper = runtime->find_mapper(exec_proc, map_id);
-      }
-      Mapper::CreateInlineTemporaryInput input;
-      Mapper::CreateInlineTemporaryOutput output;
-      input.destination_instance = MappingInstance(dst);
-      if (!runtime->unsafe_mapper)
-      {
-        // Fields and regions must both be met
-        // The instance must be freshly created
-        // Instance must be acquired
-        std::set<PhysicalManager*> previous_managers;
-        // Get the set of previous managers we've made
-        for (std::map<PhysicalManager*,std::pair<unsigned,bool> >::
-              const_iterator it = acquired_instances.begin(); it !=
-              acquired_instances.end(); it++)
-          previous_managers.insert(it->first);
-        // Do the mapper call now
-        mapper->invoke_inline_create_temporary(this, &input, &output);
-        validate_temporary_instance(output.temporary_instance.impl,
-            previous_managers, acquired_instances, needed_fields,
-            requirement.region, mapper, "create_inline_temporary_instance");
-      }
-      else
-        mapper->invoke_inline_create_temporary(this, &input, &output);
-      if (runtime->legion_spy_enabled)
-        log_temporary_instance(output.temporary_instance.impl, 
-                               index, needed_fields);
-      return output.temporary_instance.impl;
-    }
-#endif
-
     //--------------------------------------------------------------------------
     void MapOp::record_restrict_postcondition(ApEvent restrict_postcondition)
     //--------------------------------------------------------------------------
@@ -3972,49 +3839,6 @@ namespace Legion {
     {
       map_applied_conditions.insert(event);
     }
-
-#ifdef USE_OLD_COMPOSITE
-    //--------------------------------------------------------------------------
-    PhysicalManager* CopyOp::select_temporary_instance(PhysicalManager *dst,
-                                 unsigned index, const FieldMask &needed_fields)
-    //--------------------------------------------------------------------------
-    {
-      if (mapper == NULL)
-      {
-        Processor exec_proc = parent_ctx->get_executing_processor();
-        mapper = runtime->find_mapper(exec_proc, map_id);
-      }
-      Mapper::CreateCopyTemporaryInput input;
-      Mapper::CreateCopyTemporaryOutput output;
-      input.region_requirement_index = index;
-      input.src_requirement = current_src;
-      input.destination_instance = MappingInstance(dst);
-      if (!runtime->unsafe_mapper)
-      {
-        // Fields and regions must both be met
-        // The instance must be freshly created
-        // Instance must be acquired
-        std::set<PhysicalManager*> previous_managers;
-        // Get the set of previous managers we've made
-        for (std::map<PhysicalManager*,std::pair<unsigned,bool> >::
-              const_iterator it = acquired_instances.begin(); it !=
-              acquired_instances.end(); it++)
-          previous_managers.insert(it->first);
-        mapper->invoke_copy_create_temporary(this, &input, &output);
-        validate_temporary_instance(output.temporary_instance.impl,
-            previous_managers, acquired_instances, needed_fields,
-            current_src ? src_requirements[index].region :
-                          dst_requirements[index].region, mapper,
-            "create_copy_temporary_instance");
-      }
-      else
-        mapper->invoke_copy_create_temporary(this, &input, &output);
-      if (runtime->legion_spy_enabled)
-        log_temporary_instance(output.temporary_instance.impl, 
-                               index, needed_fields);
-      return output.temporary_instance.impl;
-    }
-#endif
 
     //--------------------------------------------------------------------------
     ApEvent CopyOp::get_restrict_precondition(void) const
@@ -7000,45 +6824,6 @@ namespace Legion {
       map_applied_conditions.insert(event);
     }
 
-#ifdef USE_OLD_COMPOSITE
-    //--------------------------------------------------------------------------
-    PhysicalManager* InterCloseOp::select_temporary_instance(
-           PhysicalManager *dst, unsigned index, const FieldMask &needed_fields)
-    //--------------------------------------------------------------------------
-    {
-      if (mapper == NULL)
-      {
-        Processor exec_proc = parent_ctx->get_executing_processor();
-        mapper = runtime->find_mapper(exec_proc, map_id);
-      }
-      Mapper::CreateCloseTemporaryInput input;
-      Mapper::CreateCloseTemporaryOutput output;
-      input.destination_instance = MappingInstance(dst);
-      if (!runtime->unsafe_mapper)
-      {
-        // Fields and regions must both be met
-        // The instance must be freshly created
-        // Instance must be acquired
-        std::set<PhysicalManager*> previous_managers;
-        // Get the set of previous managers we've made
-        for (std::map<PhysicalManager*,std::pair<unsigned,bool> >::
-              const_iterator it = acquired_instances.begin(); it !=
-              acquired_instances.end(); it++)
-          previous_managers.insert(it->first);
-        mapper->invoke_close_create_temporary(this, &input, &output);
-        validate_temporary_instance(output.temporary_instance.impl,
-            previous_managers, acquired_instances, needed_fields,
-            requirement.region, mapper, "create_close_temporary_instance");
-      }
-      else
-        mapper->invoke_close_create_temporary(this, &input, &output);
-      if (runtime->legion_spy_enabled)
-        log_temporary_instance(output.temporary_instance.impl, 
-                               index, needed_fields);
-      return output.temporary_instance.impl;
-    }
-#endif
-
     //--------------------------------------------------------------------------
     void InterCloseOp::invoke_mapper(const InstanceSet &valid_instances)
     //--------------------------------------------------------------------------
@@ -7558,45 +7343,6 @@ namespace Legion {
     {
       map_applied_conditions.insert(event);
     }
-
-#ifdef USE_OLD_COMPOSITE
-    //--------------------------------------------------------------------------
-    PhysicalManager* PostCloseOp::select_temporary_instance(
-           PhysicalManager *dst, unsigned index, const FieldMask &needed_fields)
-    //--------------------------------------------------------------------------
-    {
-      if (mapper == NULL)
-      {
-        Processor exec_proc = parent_ctx->get_executing_processor();
-        mapper = runtime->find_mapper(exec_proc, map_id);
-      }
-      Mapper::CreateCloseTemporaryInput input;
-      Mapper::CreateCloseTemporaryOutput output;
-      input.destination_instance = MappingInstance(dst);
-      if (!runtime->unsafe_mapper)
-      {
-        // Fields and regions must both be met
-        // The instance must be freshly created
-        // Instance must be acquired
-        std::set<PhysicalManager*> previous_managers;
-        // Get the set of previous managers we've made
-        for (std::map<PhysicalManager*,std::pair<unsigned,bool> >::
-              const_iterator it = acquired_instances.begin(); it !=
-              acquired_instances.end(); it++)
-          previous_managers.insert(it->first);
-        mapper->invoke_close_create_temporary(this, &input, &output);
-        validate_temporary_instance(output.temporary_instance.impl,
-            previous_managers, acquired_instances, needed_fields,
-            requirement.region, mapper, "create_close_temporary_instance");
-      }
-      else
-        mapper->invoke_close_create_temporary(this, &input, &output);
-      if (runtime->legion_spy_enabled)
-        log_temporary_instance(output.temporary_instance.impl, 
-                               index, needed_fields);
-      return output.temporary_instance.impl;
-    }
-#endif
 
     //--------------------------------------------------------------------------
     void PostCloseOp::add_copy_profiling_request(
@@ -8769,45 +8515,6 @@ namespace Legion {
     {
       map_applied_conditions.insert(event);
     }
-
-#ifdef USE_OLD_COMPOSITE
-    //--------------------------------------------------------------------------
-    PhysicalManager* ReleaseOp::select_temporary_instance(PhysicalManager *dst,
-                                 unsigned index, const FieldMask &needed_fields)
-    //--------------------------------------------------------------------------
-    {
-      if (mapper == NULL)
-      {
-        Processor exec_proc = parent_ctx->get_executing_processor();
-        mapper = runtime->find_mapper(exec_proc, map_id);
-      }
-      Mapper::CreateReleaseTemporaryInput input;
-      Mapper::CreateReleaseTemporaryOutput output;
-      input.destination_instance = MappingInstance(dst);
-      if (!runtime->unsafe_mapper)
-      {
-        // Fields and regions must both be met
-        // The instance must be freshly created
-        // Instance must be acquired
-        std::set<PhysicalManager*> previous_managers;
-        // Get the set of previous managers we've made
-        for (std::map<PhysicalManager*,std::pair<unsigned,bool> >::
-              const_iterator it = acquired_instances.begin(); it !=
-              acquired_instances.end(); it++)
-          previous_managers.insert(it->first);
-        mapper->invoke_release_create_temporary(this, &input, &output);
-        validate_temporary_instance(output.temporary_instance.impl,
-            previous_managers, acquired_instances, needed_fields,
-            logical_region, mapper, "create_release_temporary_instance");
-      }
-      else
-        mapper->invoke_release_create_temporary(this, &input, &output);
-      if (runtime->legion_spy_enabled)
-        log_temporary_instance(output.temporary_instance.impl, 
-                               index, needed_fields);
-      return output.temporary_instance.impl;
-    }
-#endif
 
     //--------------------------------------------------------------------------
     ApEvent ReleaseOp::get_restrict_precondition(void) const
@@ -12238,46 +11945,6 @@ namespace Legion {
     {
       map_applied_conditions.insert(event);
     }
-
-#ifdef USE_OLD_COMPOSITE
-    //--------------------------------------------------------------------------
-    PhysicalManager* DependentPartitionOp::select_temporary_instance(
-           PhysicalManager *dst, unsigned index, const FieldMask &needed_fields)
-    //--------------------------------------------------------------------------
-    {
-      if (mapper == NULL)
-      {
-        Processor exec_proc = parent_ctx->get_executing_processor();
-        mapper = runtime->find_mapper(exec_proc, map_id);
-      }
-      Mapper::CreatePartitionTemporaryInput input;
-      Mapper::CreatePartitionTemporaryOutput output;
-      input.destination_instance = MappingInstance(dst);
-      if (!runtime->unsafe_mapper)
-      {
-        // Fields and regions must both be met
-        // The instance must be freshly created
-        // Instance must be acquired
-        std::set<PhysicalManager*> previous_managers;
-        // Get the set of previous managers we've made
-        for (std::map<PhysicalManager*,std::pair<unsigned,bool> >::
-              const_iterator it = acquired_instances.begin(); it !=
-              acquired_instances.end(); it++)
-          previous_managers.insert(it->first);
-        // Do the mapper call now
-        mapper->invoke_partition_create_temporary(this, &input, &output);
-        validate_temporary_instance(output.temporary_instance.impl,
-            previous_managers, acquired_instances, needed_fields,
-            requirement.region, mapper, "create_partition_temporary_instance");
-      }
-      else
-        mapper->invoke_partition_create_temporary(this, &input, &output);
-      if (runtime->legion_spy_enabled)
-        log_temporary_instance(output.temporary_instance.impl, 
-                               index, needed_fields);
-      return output.temporary_instance.impl;
-    }
-#endif
 
     //--------------------------------------------------------------------------
     void DependentPartitionOp::record_restrict_postcondition(
