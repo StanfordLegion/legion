@@ -5081,6 +5081,9 @@ namespace Legion {
           // Skip it if has already been collected
           if (it->second.current_state == PENDING_COLLECTED_STATE)
             continue;
+          // Skip any unattached external instances too
+          if (it->second.is_unattached_external())
+            continue;
           if (!it->first->meets_region_tree(regions))
             continue;
           it->first->add_base_resource_ref(MEMORY_MANAGER_REF);
@@ -5130,6 +5133,9 @@ namespace Legion {
         {
           // Skip it if has already been collected
           if (it->second.current_state == PENDING_COLLECTED_STATE)
+            continue;
+          // Skip any unattached external instances too
+          if (it->second.is_unattached_external())
             continue;
           if (!it->first->meets_region_tree(regions))
             continue;
@@ -5182,6 +5188,9 @@ namespace Legion {
           // Skip it if has already been collected
           if (it->second.current_state == PENDING_COLLECTED_STATE)
             continue;
+          // Skip any unattached external instances too
+          if (it->second.is_unattached_external())
+            continue;
           if (!it->first->meets_region_tree(regions))
             continue;
           it->first->add_base_resource_ref(MEMORY_MANAGER_REF);
@@ -5228,6 +5237,9 @@ namespace Legion {
         {
           // Skip it if has already been collected
           if (it->second.current_state == PENDING_COLLECTED_STATE)
+            continue;
+          // Skip any unattached external instances too
+          if (it->second.is_unattached_external())
             continue;
           if (!it->first->meets_region_tree(regions))
             continue;
@@ -5681,8 +5693,7 @@ namespace Legion {
       bool early_valid = acquire || (priority == GC_NEVER_PRIORITY);
       size_t instance_size = manager->get_instance_size();
       // Since we're going to put this in the table add a reference
-      if (is_owner)
-        manager->add_base_resource_ref(MEMORY_MANAGER_REF);
+      manager->add_base_resource_ref(MEMORY_MANAGER_REF);
       {
         AutoLock m_lock(manager_lock);
 #ifdef DEBUG_LEGION
@@ -5706,6 +5717,50 @@ namespace Legion {
       }
       if (priority == GC_NEVER_PRIORITY)
         manager->add_base_valid_ref(NEVER_GC_REF);
+    }
+
+    //--------------------------------------------------------------------------
+    void MemoryManager::record_external_instance(PhysicalManager *manager)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(is_owner);
+      assert(manager->is_external_instance());
+#endif
+      // First do the insertion
+      // If we're going to add a valid reference, mark this valid early
+      // to avoid races with deletions
+      size_t instance_size = manager->get_instance_size();
+      // Since we're going to put this in the table add a reference
+      manager->add_base_resource_ref(MEMORY_MANAGER_REF);
+      {
+        AutoLock m_lock(manager_lock);
+#ifdef DEBUG_LEGION
+        assert(current_instances.find(manager) == current_instances.end());
+#endif
+        InstanceInfo &info = current_instances[manager];
+        info.instance_size = instance_size;
+        info.is_external = true;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void MemoryManager::attach_external_instance(PhysicalManager *manager)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(is_owner);
+      assert(manager->is_external_instance());
+#endif
+      AutoLock m_lock(manager_lock);
+      std::map<PhysicalManager*,InstanceInfo>::iterator finder = 
+        current_instances.find(manager);
+#ifdef DEBUG_LEGION
+      assert(finder != current_instances.end());
+      assert(finder->second.is_external);
+      assert(!finder->second.attached_external);
+#endif
+      finder->second.attached_external = true;
     }
 
     //--------------------------------------------------------------------------

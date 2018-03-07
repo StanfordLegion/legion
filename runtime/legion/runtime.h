@@ -750,7 +750,8 @@ namespace Legion {
         InstanceInfo(void)
           : current_state(COLLECTABLE_STATE), 
             deferred_collect(RtUserEvent::NO_RT_USER_EVENT),
-            instance_size(0), pending_acquires(0), min_priority(0) { }
+            instance_size(0), pending_acquires(0), min_priority(0),
+            is_external(false), attached_external(false) { }
       public:
         InstanceState current_state;
         RtUserEvent deferred_collect;
@@ -758,6 +759,12 @@ namespace Legion {
         unsigned pending_acquires;
         GCPriority min_priority;
         std::map<std::pair<MapperID,Processor>,GCPriority> mapper_priorities;
+        // For tracking external instances and whether they can be used
+        bool is_external;
+        bool attached_external;
+      public:
+        inline bool is_unattached_external(void) const 
+          { return (is_external && !attached_external); }
       };
     public:
       MemoryManager(Memory mem, Runtime *rt);
@@ -824,6 +831,7 @@ namespace Legion {
       void record_created_instance( PhysicalManager *manager, bool acquire,
                                     MapperID mapper_id, Processor proc,
                                     GCPriority priority, bool remote);
+      void record_external_instance(PhysicalManager *manager);
     public:
       void process_instance_request(Deserializer &derez, AddressSpaceID source);
       void process_instance_response(Deserializer &derez,AddressSpaceID source);
@@ -884,6 +892,7 @@ namespace Legion {
     public:
       bool delete_by_size_and_state(const size_t needed_size, 
                                     InstanceState state, bool larger_only); 
+      void attach_external_instance(PhysicalManager *manager);
       RtEvent detach_external_instance(PhysicalManager *manager);
     public:
       // The memory that we are managing

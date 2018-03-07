@@ -749,9 +749,10 @@ namespace Legion {
         {
           if (commit_tracker != NULL)
           {
-            need_trigger = commit_tracker->issue_commit_trigger(this, runtime);
-            delete commit_tracker;
+            CommitDependenceTracker *tracker = commit_tracker;
             commit_tracker = NULL;
+            need_trigger = tracker->issue_commit_trigger(this, runtime);
+            delete tracker;
           }
           else
             need_trigger = true;
@@ -895,9 +896,10 @@ namespace Legion {
       }
 #endif
       // Cannot touch anything not on our stack after this call
-      mapping_tracker->issue_stage_triggers(this, runtime, must_epoch);
-      delete mapping_tracker;
+      MappingDependenceTracker *tracker = mapping_tracker;
       mapping_tracker = NULL;
+      tracker->issue_stage_triggers(this, runtime, must_epoch);
+      delete tracker;
     }
 
     //--------------------------------------------------------------------------
@@ -1127,9 +1129,10 @@ namespace Legion {
           {
             if (commit_tracker != NULL)
             {
-              need_trigger = commit_tracker->issue_commit_trigger(this,runtime);
-              delete commit_tracker;
+              CommitDependenceTracker *tracker = commit_tracker;
               commit_tracker = NULL;
+              need_trigger = tracker->issue_commit_trigger(this,runtime);
+              delete tracker;
             }
             else
               need_trigger = true;
@@ -14156,9 +14159,8 @@ namespace Legion {
         default:
           assert(false);
       }
-      external_instance->memory_manager->record_created_instance(
-        external_instance, false/*acquire*/, 0/*mapper id*/, 
-        parent_ctx->get_executing_processor(), 0/*priority*/, false/*remote*/);
+      MemoryManager *memory_manager = external_instance->memory_manager;
+      memory_manager->record_external_instance(external_instance);
       // Tell the parent that we added the restriction
       parent_ctx->add_restriction(this, external_instance, requirement);
     }
@@ -14166,7 +14168,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void AttachOp::trigger_ready(void)
     //--------------------------------------------------------------------------
-    {
+    { 
       std::set<RtEvent> preconditions;  
       runtime->forest->perform_versioning_analysis(this, 0/*idx*/,
                                                    requirement,
@@ -14183,6 +14185,10 @@ namespace Legion {
     void AttachOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
+      // Once we're ready to map we can tell the memory manager that
+      // this instance can be safely acquired for use
+      MemoryManager *memory_manager = external_instance->memory_manager;
+      memory_manager->attach_external_instance(external_instance);
       InstanceRef result = runtime->forest->attach_external(this, 0/*idx*/,
                                                         requirement,
                                                         external_instance,
