@@ -2160,9 +2160,23 @@ namespace Legion {
         assert(!held);
 #endif
         if (exclusive)
-          local_lock.wrlock();
+        {
+          RtEvent ready = local_lock.wrlock();
+          while (ready.exists())
+          {
+            ready.wait();
+            ready = local_lock.wrlock();
+          }
+        }
         else
-          local_lock.rdlock();
+        {
+          RtEvent ready = local_lock.rdlock();
+          while (ready.exists())
+          {
+            ready.wait();
+            ready = local_lock.rdlock();
+          }
+        }
         held = true;
       }
     public:
