@@ -751,7 +751,7 @@ namespace Legion {
           : current_state(COLLECTABLE_STATE), 
             deferred_collect(RtUserEvent::NO_RT_USER_EVENT),
             instance_size(0), pending_acquires(0), min_priority(0),
-            is_external(false), attached_external(false) { }
+            unattached_external(false) { }
       public:
         InstanceState current_state;
         RtUserEvent deferred_collect;
@@ -760,11 +760,7 @@ namespace Legion {
         GCPriority min_priority;
         std::map<std::pair<MapperID,Processor>,GCPriority> mapper_priorities;
         // For tracking external instances and whether they can be used
-        bool is_external;
-        bool attached_external;
-      public:
-        inline bool is_unattached_external(void) const 
-          { return (is_external && !attached_external); }
+        bool unattached_external;
       };
     public:
       MemoryManager(Memory mem, Runtime *rt);
