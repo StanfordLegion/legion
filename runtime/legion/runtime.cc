@@ -2363,7 +2363,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     MPIRankTable::MPIRankTable(Runtime *rt)
-      : runtime(rt), collective_radix(rt->legion_collective_radix) 
+      : runtime(rt), collective_radix(rt->legion_collective_radix),
+        done_triggered(false)
     //--------------------------------------------------------------------------
     {
       configure_collective_settings(runtime->total_address_spaces,
@@ -2445,7 +2446,7 @@ namespace Legion {
               (runtime->address_space >= (runtime->total_address_spaces -
                 collective_participating_spaces)))
           {
-            const bool all_stages_done =  send_explicit_stage(0);
+            const bool all_stages_done = send_explicit_stage(0);
             if (all_stages_done)
               complete_exchange();
           }
@@ -2523,6 +2524,10 @@ namespace Legion {
               all_stages_done = false;
               break;
             }
+            if (all_stages_done && !done_triggered)
+              done_triggered = true;
+            else
+              all_stages_done = false; // already did the last trigger
           }
         }
       }
@@ -2649,8 +2654,15 @@ namespace Legion {
       }
       // If we make it here, then we sent the last stage, check to see
       // if we've seen all the notifications for it
-      AutoLock r_lock(reservation,1,false/*exclusive*/);
-      return (stage_notifications.back() == collective_last_radix);
+      AutoLock r_lock(reservation);
+      if ((stage_notifications.back() == collective_last_radix) && 
+          !done_triggered)
+      {
+        done_triggered = true;
+        return true;
+      }
+      else
+        return false;
     }
 
     //--------------------------------------------------------------------------

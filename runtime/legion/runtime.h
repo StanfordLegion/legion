@@ -587,6 +587,9 @@ namespace Legion {
       int collective_participating_spaces;
       int collective_last_radix;
       int collective_last_log_radix;
+      // Handle a small race on deciding who gets to
+      // trigger the done event
+      bool done_triggered;
     }; 
 
     /**
