@@ -4851,7 +4851,7 @@ class MappingDependence(object):
         
 class Operation(object):
     __slots__ = ['state', 'uid', 'kind', 'context', 'name', 'reqs', 'mappings', 
-                 'temporaries', 'incoming', 'outgoing', 'logical_incoming', 
+                 'incoming', 'outgoing', 'logical_incoming', 
                  'logical_outgoing', 'physical_incoming', 'physical_outgoing', 
                  'start_event', 'finish_event', 'inter_close_ops', 'open_ops', 
                  'advance_ops', 'task', 'task_id', 'predicate', 'predicate_result',
@@ -4870,7 +4870,6 @@ class Operation(object):
         self.name = None
         self.reqs = None
         self.mappings = None
-        self.temporaries = None
         self.incoming = None # Mapping dependences
         self.outgoing = None # Mapping dependences
         self.logical_incoming = None # Operation dependences
@@ -5150,13 +5149,6 @@ class Operation(object):
             self.mappings[index] = dict()
         self.mappings[index][fid] = inst
 
-    def add_temporary_instance(self, index, fid, inst):
-        if self.temporaries is None:
-            self.temporaries = dict()
-        if index not in self.temporaries:
-            self.temporaries[index] = dict()
-        self.temporaries[index][fid] = inst
-
     def set_predicate_result(self, result):
         self.predicate_result = result
 
@@ -5172,14 +5164,6 @@ class Operation(object):
                 for inst in mapping.itervalues():
                     unique_insts.add(inst) 
                 for inst in unique_insts:
-                    inst.increment_use_count() 
-        if self.temporaries:
-            for index,temporary in self.temporaries.iteritems():
-                unique_pairs = dict()
-                for fid,inst in temporary.iteritems(): 
-                    assert fid in self.mappings[index]
-                    unique_pairs[self.mappings[index][fid]] = inst
-                for inst in unique_pairs.itervalues():
                     inst.increment_use_count() 
 
     def add_incoming(self, dep):
@@ -5239,15 +5223,6 @@ class Operation(object):
         if not self.used_futures:
             self.used_futures = set()
         self.used_futures.add(future)
-
-    def find_temporary_instance(self, index, fid):
-        if not self.temporaries:
-            return None
-        if index not in self.temporaries:
-            return None
-        if fid not in self.temporaries[index]:
-            return None
-        return self.temporaries[index][fid]
 
     def get_point_task(self, point):
         assert self.kind == INDEX_TASK_KIND
@@ -5310,12 +5285,6 @@ class Operation(object):
             for idx,mapping in other.mappings.iteritems():
                 assert idx not in self.mappings
                 self.mappings[idx] = mapping
-        if not self.temporaries:
-            self.temporaries = other.temporaries
-        elif other.temporaries:
-            for idx,temp in other.temporaries.iteritems():
-                assert idx not in self.temporaries
-                self.temporaries[idx] = temp
         if not self.start_event.exists():
             self.start_event = other.start_event
             if self.start_event.exists():
@@ -6448,18 +6417,6 @@ class Operation(object):
         else:
             replay_file.write(struct.pack('I',0))
 
-    def pack_temporary_replay_info(self, replay_file, req, mapping, temporary):
-        assert len(temporary) > 0
-        # Compute the unique set of pairs
-        unique_pairs = dict()
-        for fid,inst in temporary.iteritems():
-            assert fid in mapping
-            unique_pairs[mapping[fid]] = inst
-        replay_file.write(struct.pack('I',len(unique_pairs)))
-        for dst,src in unique_pairs.iteritems():
-            replay_file.write(struct.pack('Q',dst.handle))
-            replay_file.write(struct.pack('Q',src.handle))
-
     def pack_inline_replay_info(self, replay_file):
         assert self.kind == MAP_OP_KIND
         replay_file.write(struct.pack('Q',self.uid))
@@ -6469,13 +6426,6 @@ class Operation(object):
         replay_file.write(struct.pack('I',1))
         self.pack_requirement_replay_info(replay_file, self.reqs[0], 
                                           self.mappings[0])
-        if self.temporaries:
-            assert 0 in self.temporaries  
-            replay_file.write(struct.pack('I',1))
-            self.pack_temporary_replay_info(replay_file, self.reqs[0], 
-                                self.mappings[0], self.temporaries[0])
-        else:
-            replay_file.write(struct.pack('I',0))
 
     def pack_copy_replay_info(self, replay_file):
         assert self.kind == COPY_OP_KIND
@@ -6483,27 +6433,6 @@ class Operation(object):
         assert len(self.reqs) % 2 == 0
         half = len(self.reqs) / 2
         replay_file.write(struct.pack('I',half))
-        src_temporaries = set()
-        for idx in range(half):
-            self.pack_requirement_replay_info(replay_file, self.reqs[idx],
-              None if idx not in self.mappings[idx] else self.mappings[idx])
-            if self.temporaries and idx in self.temporaries:
-                src_temporaries.add(idx)
-        replay_file.write(struct.pack('I',half))
-        dst_temporaries = set()
-        for idx in range(half,2*half):
-            self.pack_requirement_replay_info(replay_file,self.reqs[idx],
-              None if idx not in self.mappings[idx] else self.mappings[idx])
-            if self.temporaries and idx in self.temporaries:
-                dst_temporaries.add(idx)
-        replay_file.write(struct.pack('I',len(src_temporaries)))
-        for idx in src_temporaries:
-            self.pack_temporary_replay_info(replay_file, self.reqs[idx],
-                              self.mappings[idx], self.temporaries[idx])
-        replay_file.write(struct.pack('I',len(dst_temporaries)))
-        for idx in dst_temporaries:
-            self.pack_temporary_replay_info(replay_file, self.reqs[idx],
-                              self.mappings[idx], self.temporaries[idx])
         
     def pack_close_replay_info(self, replay_file):
         assert self.kind == INTER_CLOSE_OP_KIND
@@ -6516,27 +6445,10 @@ class Operation(object):
                                               self.mappings[0])
         else:
             replay_file.write(struct.pack('I',0))
-        if self.temporaries:
-            assert 0 in self.mappings
-            assert 0 in self.temporaries  
-            replay_file.write(struct.pack('I',1))
-            self.pack_temporary_replay_info(replay_file, self.reqs[0], 
-                                self.mappings[0], self.temporaries[0])
-        else:
-            replay_file.write(struct.pack('I',0))
 
     def pack_release_replay_info(self, replay_file):
         assert self.kind == RELEASE_OP_KIND
         replay_file.write(struct.pack('Q',self.uid))
-        if self.temporaries:
-            assert 0 in self.reqs
-            assert 0 in self.mappings
-            assert 0 in self.temporaries  
-            replay_file.write(struct.pack('I',1))
-            self.pack_temporary_replay_info(replay_file, self.reqs[0], 
-                                self.mappings[0], self.temporaries[0])
-        else:
-            replay_file.write(struct.pack('I',0))
 
 class Variant(object):
     __slots__ = ['state', 'vid', 'inner', 'leaf', 'idempotent', 'name']
@@ -7143,15 +7055,6 @@ class Task(object):
                 replay_file.write(struct.pack('I',index))
                 self.op.pack_requirement_replay_info(replay_file,
                     self.op.reqs[index], mapping)
-        else:
-            replay_file.write(struct.pack('I',0))
-        # Pack the temporaries
-        if self.op.temporaries:
-            replay_file.write(struct.pack('I',len(self.op.temporaries)))
-            for index,temp in self.op.temporaries.iteritems():
-                replay_file.write(struct.pack('I',index))
-                self.op.pack_temporary_replay_info(replay_file, 
-                    self.op.reqs[index], self.op.mappings[index], temp)
         else:
             replay_file.write(struct.pack('I',0))
         # Pack the tunables
@@ -8843,9 +8746,6 @@ task_processor_pat      = re.compile(
     prefix+"Task Processor (?P<uid>[0-9]+) (?P<proc>[0-9a-f]+)")
 task_premapping_pat     = re.compile(
     prefix+"Task Premapping (?P<uid>[0-9]+) (?P<index>[0-9]+)")
-temporary_decision_pat  = re.compile(
-    prefix+"Temporary Instance (?P<uid>[0-9]+) (?P<idx>[0-9]+) (?P<fid>[0-9]+) "
-           "(?P<eid>[0-9a-f]+)")
 tunable_pat             = re.compile(
     prefix+"Task Tunable (?P<uid>[0-9]+) (?P<idx>[0-9]+) (?P<bytes>[0-9]+) "
            "(?P<value>[0-9a-f]+)")
@@ -9258,13 +9158,6 @@ def parse_legion_spy_line(line, state):
     if m is not None:
         task = state.get_task(int(m.group('uid')))
         task.add_premapping(int(m.group('index')))
-        return True
-    m = temporary_decision_pat.match(line)
-    if m is not None:
-        op = state.get_operation(int(m.group('uid')))
-        inst = state.get_instance(int(m.group('eid'),16))
-        op.add_temporary_instance(int(m.group('idx')),
-            int(m.group('fid')), inst)
         return True
     m = tunable_pat.match(line)
     if m is not None:
