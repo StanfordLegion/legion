@@ -3114,7 +3114,12 @@ namespace Legion {
       result->register_with_runtime(&mutator);
       if (parent != NULL)
         parent->add_child(result);
-      
+      // If we had a realm index space issue the tighten now since
+      // we know that we'll probably need it later
+      // We have to do this after we've added our reference in case
+      // the tighten gets done and tries to delete the node
+      if (realm_is != NULL)
+        result->tighten_index_space();
       return result;
     }
 
@@ -3165,7 +3170,12 @@ namespace Legion {
       result->register_with_runtime(&mutator);
       if (parent != NULL)
         parent->add_child(result);
-      
+      // If we had a realm index space issue the tighten now since
+      // we know that we'll probably need it later
+      // We have to do this after we've added our reference in case
+      // the tighten gets done and tries to delete the node
+      if (realm_is != NULL)
+        result->tighten_index_space();
       return result;
     }
 

@@ -397,7 +397,6 @@ namespace Legion {
       {
         realm_index_space = *is;
         Runtime::trigger_event(realm_index_space_set);
-        tighten_index_space();
       }
     }
 
