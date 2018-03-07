@@ -949,10 +949,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(dependence_tracker.mapping == NULL);
+      assert(mapping_tracker == NULL);
 #endif
       // Make a dependence tracker
-      dependence_tracker.mapping = new MappingDependenceTracker();
+      mapping_tracker = new MappingDependenceTracker();
       // See if we have any fence dependences
       execution_fence_event = parent_ctx->register_fence_dependence(this);
       parent_ctx->invalidate_trace_cache(local_trace);
