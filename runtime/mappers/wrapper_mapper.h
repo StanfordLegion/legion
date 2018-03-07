@@ -143,13 +143,6 @@ namespace Legion {
 	    const Task&                task,
 	    const SelectTaskSrcInput&  input,
 	    SelectTaskSrcOutput& output);
-#ifdef USE_OLD_COMPOSITE
-	void create_task_temporary_instance(
-	    const MapperContext              ctx,
-	    const Task&                      task,
-	    const CreateTaskTemporaryInput&  input,
-	    CreateTaskTemporaryOutput& output);
-#endif
 	void speculate(const MapperContext      ctx,
 	    const Task&              task,
 	    SpeculativeOutput& output);
@@ -165,13 +158,6 @@ namespace Legion {
 	    const InlineMapping&         inline_op,
 	    const SelectInlineSrcInput&  input,
 	    SelectInlineSrcOutput& output);
-#ifdef USE_OLD_COMPOSITE
-	void create_inline_temporary_instance(
-	    const MapperContext                ctx,
-	    const InlineMapping&               inline_op,
-	    const CreateInlineTemporaryInput&  input,
-	    CreateInlineTemporaryOutput& output);
-#endif
 	void report_profiling(const MapperContext         ctx,
 	    const InlineMapping&        inline_op,
 	    const InlineProfilingInfo&  input);
@@ -187,13 +173,6 @@ namespace Legion {
 	void speculate(const MapperContext      ctx,
 	    const Copy& copy,
 	    SpeculativeOutput& output);
-#ifdef USE_OLD_COMPOSITE
-	void create_copy_temporary_instance(
-	    const MapperContext              ctx,
-	    const Copy&                      copy,
-	    const CreateCopyTemporaryInput&  input,
-	    CreateCopyTemporaryOutput& output);
-#endif
 	void report_profiling(const MapperContext      ctx,
 	    const Copy&              copy,
 	    const CopyProfilingInfo& input);
@@ -206,13 +185,6 @@ namespace Legion {
 	    const Close&               close,
 	    const SelectCloseSrcInput&  input,
 	    SelectCloseSrcOutput& output);
-#ifdef USE_OLD_COMPOSITE
-	void create_close_temporary_instance(
-	    const MapperContext               ctx,
-	    const Close&                      close,
-	    const CreateCloseTemporaryInput&  input,
-	    CreateCloseTemporaryOutput& output);
-#endif
 	void report_profiling(const MapperContext       ctx,
 	    const Close&              close,
 	    const CloseProfilingInfo& input);
@@ -236,13 +208,6 @@ namespace Legion {
 	    const Release&                 release,
 	    const SelectReleaseSrcInput&   input,
 	    SelectReleaseSrcOutput&  output);
-#ifdef USE_OLD_COMPOSITE
-	void create_release_temporary_instance(
-	    const MapperContext                 ctx,
-	    const Release&                      release,
-	    const CreateReleaseTemporaryInput&  input,
-	    CreateReleaseTemporaryOutput& output);
-#endif
 	void speculate(const MapperContext         ctx,
 	    const Release&              release,
 	    SpeculativeOutput&    output);

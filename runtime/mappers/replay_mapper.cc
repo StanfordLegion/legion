@@ -338,26 +338,6 @@ namespace Legion {
       // TODO; update this once we record the output of select task sources
     }
 
-#ifdef USE_OLD_COMPOSITE
-    //--------------------------------------------------------------------------
-    void ReplayMapper::create_task_temporary_instance(
-                                    const MapperContext              ctx,
-                                    const Task&                      task,
-                                    const CreateTaskTemporaryInput&  input,
-                                          CreateTaskTemporaryOutput& output)
-    //--------------------------------------------------------------------------
-    {
-      TaskMappingInfo *mapping = find_task_mapping(ctx, task, task.index_point);
-      assert(mapping->temporaries.find(input.region_requirement_index) !=
-             mapping->temporaries.end());
-      unsigned long original_dst = find_original_instance_id(ctx,
-                                 input.destination_instance.get_instance_id());
-      mapping->temporaries[input.region_requirement_index]->map_temporary(
-            runtime, ctx, task.regions[input.region_requirement_index].parent, 
-            original_dst, output.temporary_instance);
-    }
-#endif
-
     //--------------------------------------------------------------------------
     void ReplayMapper::speculate(const MapperContext      ctx,
                                  const Task&              task,
@@ -398,23 +378,6 @@ namespace Legion {
       // TODO: update this once we record the output of select inline sources
     }
 
-#ifdef USE_OLD_COMPOSITE
-    //--------------------------------------------------------------------------
-    void ReplayMapper::create_inline_temporary_instance(
-                                  const MapperContext                ctx,
-                                  const InlineMapping&               inline_op,
-                                  const CreateInlineTemporaryInput&  input,
-                                        CreateInlineTemporaryOutput& output)
-    //--------------------------------------------------------------------------
-    {
-      InlineMappingInfo *mapping = find_inline_mapping(ctx, inline_op);
-      unsigned long original_dst = find_original_instance_id(ctx,
-                                 input.destination_instance.get_instance_id());
-      mapping->temporary->map_temporary(runtime, ctx, 
-         inline_op.requirement.parent, original_dst, output.temporary_instance);
-    }
-#endif
-
     //--------------------------------------------------------------------------
     void ReplayMapper::report_profiling(const MapperContext         ctx,
                                         const InlineMapping&        inline_op,
@@ -453,41 +416,6 @@ namespace Legion {
     {
       // TODO: Update this once we record the output of select copy sources
     }
-
-#ifdef USE_OLD_COMPOSITE
-    //--------------------------------------------------------------------------
-    void ReplayMapper::create_copy_temporary_instance(
-                                  const MapperContext              ctx,
-                                  const Copy&                      copy,
-                                  const CreateCopyTemporaryInput&  input,
-                                        CreateCopyTemporaryOutput& output)
-    //--------------------------------------------------------------------------
-    {
-      CopyMappingInfo *mapping = find_copy_mapping(ctx, copy);
-      if (input.src_requirement)
-      {
-        assert(mapping->src_temporaries.find(input.region_requirement_index) !=
-               mapping->src_temporaries.end());
-        unsigned long original_dst = find_original_instance_id(ctx,
-                                 input.destination_instance.get_instance_id());
-        mapping->src_temporaries[input.region_requirement_index]->map_temporary(
-            runtime, ctx, 
-            copy.src_requirements[input.region_requirement_index].parent, 
-            original_dst, output.temporary_instance);
-      }
-      else
-      {
-        assert(mapping->dst_temporaries.find(input.region_requirement_index) !=
-               mapping->dst_temporaries.end());
-        unsigned long original_dst = find_original_instance_id(ctx,
-                                 input.destination_instance.get_instance_id());
-        mapping->dst_temporaries[input.region_requirement_index]->map_temporary(
-            runtime, ctx, 
-            copy.dst_requirements[input.region_requirement_index].parent,
-            original_dst, output.temporary_instance);
-      }
-    }
-#endif
 
     //--------------------------------------------------------------------------
     void ReplayMapper::speculate(const MapperContext      ctx,
@@ -528,23 +456,6 @@ namespace Legion {
     {
       // TODO: update this once we record the output of select close sources
     }
-
-#ifdef USE_OLD_COMPOSITE
-    //--------------------------------------------------------------------------
-    void ReplayMapper::create_close_temporary_instance(
-                                  const MapperContext               ctx,
-                                  const Close&                      close,
-                                  const CreateCloseTemporaryInput&  input,
-                                        CreateCloseTemporaryOutput& output)
-    //--------------------------------------------------------------------------
-    {
-      CloseMappingInfo *mapping = find_close_mapping(ctx, close);
-      unsigned long original_dst = find_original_instance_id(ctx,
-                                 input.destination_instance.get_instance_id());
-      mapping->temporary->map_temporary(runtime, ctx, 
-          close.requirement.parent, original_dst, output.temporary_instance);
-    }
-#endif
 
     //--------------------------------------------------------------------------
     void ReplayMapper::report_profiling(const MapperContext       ctx,
@@ -612,23 +523,6 @@ namespace Legion {
       output.speculate = false;
     }
 
-#ifdef USE_OLD_COMPOSITE
-    //--------------------------------------------------------------------------
-    void ReplayMapper::create_release_temporary_instance(
-                                   const MapperContext                 ctx,
-                                   const Release&                      release,
-                                   const CreateReleaseTemporaryInput&  input,
-                                         CreateReleaseTemporaryOutput& output)
-    //--------------------------------------------------------------------------
-    {
-      ReleaseMappingInfo *mapping = find_release_mapping(ctx, release);
-      unsigned long original_dst = find_original_instance_id(ctx,
-                                 input.destination_instance.get_instance_id());
-      mapping->temporary->map_temporary(runtime, ctx, 
-          release.parent_region, original_dst, output.temporary_instance);
-    }
-#endif
-
     //--------------------------------------------------------------------------
     void ReplayMapper::report_profiling(const MapperContext         ctx,
                                         const Release&              release,
@@ -668,19 +562,6 @@ namespace Legion {
     {
       assert(false); // TODO
     }
-
-#ifdef USE_OLD_COMPOSITE
-    //--------------------------------------------------------------------------
-    void ReplayMapper::create_partition_temporary_instance(
-                            const MapperContext                   ctx,
-                            const Partition&                      partition,
-                            const CreatePartitionTemporaryInput&  input,
-                                  CreatePartitionTemporaryOutput& output)
-    //--------------------------------------------------------------------------
-    {
-      assert(false); // TODO
-    }
-#endif
 
     //--------------------------------------------------------------------------
     void ReplayMapper::report_profiling(const MapperContext              ctx,
@@ -1083,9 +964,6 @@ namespace Legion {
       {
         unsigned index;
         ignore_result(fread(&index, sizeof(index), 1, f));
-#ifdef USE_OLD_COMPOSITE
-        info->temporaries[index] = unpack_temporary(f);
-#endif
       }
       unsigned num_tunables;
       ignore_result(fread(&num_tunables, sizeof(num_tunables), 1, f));
@@ -1124,15 +1002,6 @@ namespace Legion {
         info->mapping = unpack_requirement(f);
       else
         info->mapping = NULL;
-#ifdef USE_OLD_COMPOSITE
-      unsigned num_temporaries;
-      ignore_result(fread(&num_temporaries, sizeof(num_temporaries), 1, f));
-      assert((num_temporaries == 0) || (num_temporaries == 1));
-      if (num_temporaries == 1)
-        info->temporary = unpack_temporary(f);
-      else
-        info->temporary = NULL;
-#endif
       return info;
     }
 
@@ -1151,26 +1020,6 @@ namespace Legion {
       ignore_result(fread(&num_dst_mappings, sizeof(num_dst_mappings), 1, f));
       for (unsigned idx = 0; idx < num_dst_mappings; idx++)
         info->dst_mappings[idx] = unpack_requirement(f);
-#ifdef USE_OLD_COMPOSITE
-      unsigned num_src_temporaries;
-      ignore_result(fread(&num_src_temporaries, 
-                          sizeof(num_src_temporaries), 1, f));
-      for (unsigned idx = 0; idx < num_src_temporaries; idx++)
-      {
-        unsigned index;
-        ignore_result(fread(&index, sizeof(index), 1, f));
-        info->src_temporaries[index] = unpack_temporary(f);
-      }
-      unsigned num_dst_temporaries;
-      ignore_result(fread(&num_dst_temporaries, 
-                          sizeof(num_dst_temporaries), 1, f));
-      for (unsigned idx = 0; idx < num_dst_temporaries; idx++)
-      {
-        unsigned index;
-        ignore_result(fread(&index, sizeof(index), 1, f));
-        info->dst_temporaries[index] = unpack_temporary(f);
-      }
-#endif
       return info;
     }
 
@@ -1187,15 +1036,6 @@ namespace Legion {
         info->mapping = unpack_requirement(f);
       else
         info->mapping = NULL;
-#ifdef USE_OLD_COMPOSITE
-      unsigned num_temporaries;
-      ignore_result(fread(&num_temporaries, sizeof(num_temporaries), 1, f));
-      assert((num_temporaries == 0) || (num_temporaries == 1));
-      if (num_temporaries == 1)
-        info->temporary = unpack_temporary(f);
-      else
-        info->temporary = NULL;
-#endif
       return info;
     }
 
@@ -1205,15 +1045,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       ReleaseMappingInfo *info = new ReleaseMappingInfo();
-#ifdef USE_OLD_COMPOSITE
-      unsigned num_temporaries;
-      ignore_result(fread(&num_temporaries, sizeof(num_temporaries), 1, f));
-      assert((num_temporaries == 0) || (num_temporaries == 1));
-      if (num_temporaries == 1)
-        info->temporary = unpack_temporary(f);
-      else
-        info->temporary = NULL;
-#endif
       return info;
     }
 
@@ -1237,30 +1068,6 @@ namespace Legion {
       }
       return req;
     }
-
-#ifdef USE_OLD_COMPOSITE
-    //--------------------------------------------------------------------------
-    ReplayMapper::TemporaryMapping*
-                                   ReplayMapper::unpack_temporary(FILE *f) const
-    //--------------------------------------------------------------------------
-    {
-      TemporaryMapping *temp = new TemporaryMapping();
-      unsigned num_instances;
-      ignore_result(fread(&num_instances, sizeof(num_instances), 1, f));
-      for (unsigned idx = 0; idx < num_instances; idx++)
-      {
-        unsigned long original_dst;
-        ignore_result(fread(&original_dst, sizeof(original_dst), 1, f));
-        unsigned long original_id;
-        ignore_result(fread(&original_id, sizeof(original_id), 1, f));
-        std::map<unsigned long,InstanceInfo*>::const_iterator finder = 
-          instance_infos.find(original_id);
-        assert(finder != instance_infos.end());
-        temp->instances[original_dst] = finder->second;
-      }
-      return temp;
-    }
-#endif
 
     //--------------------------------------------------------------------------
     ReplayMapper::TunableMapping* ReplayMapper::unpack_tunable(FILE *f) const
@@ -1630,20 +1437,6 @@ namespace Legion {
         targets[idx] = instances[idx]->get_instance(runtime, ctx, handle);
       targets[instances.size()] = PhysicalInstance::get_virtual_instance();
     }
-
-#ifdef USE_OLD_COMPOSITE
-    //--------------------------------------------------------------------------
-    void ReplayMapper::TemporaryMapping::map_temporary(MapperRuntime *runtime,
-                           MapperContext ctx, LogicalRegion handle, 
-                           unsigned long original_dst, PhysicalInstance &result)
-    //--------------------------------------------------------------------------
-    {
-      std::map<unsigned long,InstanceInfo*>::const_iterator finder = 
-        instances.find(original_dst);
-      assert(finder != instances.end());
-      result = finder->second->get_instance(runtime, ctx, handle);
-    }
-#endif
 
     //--------------------------------------------------------------------------
     void ReplayMapper::TunableMapping::set_tunable(void *&value, size_t &size)
