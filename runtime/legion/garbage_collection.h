@@ -79,7 +79,8 @@ namespace Legion {
       REGION_TREE_REF = 22,
       COMPOSITE_SHARD_REF = 23,
       REPLICATION_REF = 24,
-      LAST_SOURCE_REF = 25,
+      IS_EXPR_REF = 25,
+      LAST_SOURCE_REF = 26,
     };
 
     enum ReferenceKind {
@@ -115,6 +116,7 @@ namespace Legion {
       "Region Tree Reference",                      \
       "Composite Shard Reference",                  \
       "Replication Reference",                      \
+      "Index Space Expression",                     \
     }
 
     extern Realm::Logger log_garbage;

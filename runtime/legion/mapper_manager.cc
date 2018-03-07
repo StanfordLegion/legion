@@ -284,32 +284,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MapperManager::invoke_task_create_temporary(TaskOp *task,
-                                      Mapper::CreateTaskTemporaryInput *input,
-                                      Mapper::CreateTaskTemporaryOutput *output,
-                                      MappingCallInfo *info)
-    //--------------------------------------------------------------------------
-    {
-      if (info == NULL)
-      {
-        RtEvent continuation_precondition;
-        info = begin_mapper_call(TASK_CREATE_TEMPORARY_CALL,
-                                 task, continuation_precondition);
-        if (continuation_precondition.exists())
-        {
-          MapperContinuation3<TaskOp, Mapper::CreateTaskTemporaryInput,
-            Mapper::CreateTaskTemporaryOutput, 
-            &MapperManager::invoke_task_create_temporary>
-              continuation(this, task, input, output, info);
-          continuation.defer(runtime, continuation_precondition, task);
-          return;
-        }
-      }
-      mapper->create_task_temporary_instance(info, *task, *input, *output);
-      finish_mapper_call(info);
-    }
-
-    //--------------------------------------------------------------------------
     void MapperManager::invoke_task_speculate(TaskOp *task,
                                               Mapper::SpeculativeOutput *output,
                                               MappingCallInfo *info)
@@ -436,32 +410,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MapperManager::invoke_inline_create_temporary(MapOp *op,
-                                    Mapper::CreateInlineTemporaryInput *input,
-                                    Mapper::CreateInlineTemporaryOutput *output,
-                                    MappingCallInfo *info)
-    //--------------------------------------------------------------------------
-    {
-      if (info == NULL)
-      {
-        RtEvent continuation_precondition;
-        info = begin_mapper_call(INLINE_CREATE_TEMPORARY_CALL,
-                                 op, continuation_precondition);
-        if (continuation_precondition.exists())
-        {
-          MapperContinuation3<MapOp, Mapper::CreateInlineTemporaryInput,
-                              Mapper::CreateInlineTemporaryOutput, 
-                              &MapperManager::invoke_inline_create_temporary>
-                                continuation(this, op, input, output, info);
-          continuation.defer(runtime, continuation_precondition, op);
-          return;
-        }
-      }
-      mapper->create_inline_temporary_instance(info, *op, *input, *output);
-      finish_mapper_call(info);
-    }
-
-    //--------------------------------------------------------------------------
     void MapperManager::invoke_inline_report_profiling(MapOp *op, 
                                      Mapper::InlineProfilingInfo *input,
                                      MappingCallInfo *info)
@@ -533,32 +481,6 @@ namespace Legion {
         }
       }
       mapper->select_copy_sources(info, *op, *input, *output);
-      finish_mapper_call(info);
-    }
-
-    //--------------------------------------------------------------------------
-    void MapperManager::invoke_copy_create_temporary(CopyOp *op,
-                                    Mapper::CreateCopyTemporaryInput *input,
-                                    Mapper::CreateCopyTemporaryOutput *output,
-                                    MappingCallInfo *info)
-    //--------------------------------------------------------------------------
-    {
-      if (info == NULL)
-      {
-        RtEvent continuation_precondition;
-        info = begin_mapper_call(COPY_CREATE_TEMPORARY_CALL,
-                                 op, continuation_precondition);
-        if (continuation_precondition.exists())
-        {
-          MapperContinuation3<CopyOp, Mapper::CreateCopyTemporaryInput,
-            Mapper::CreateCopyTemporaryOutput, 
-            &MapperManager::invoke_copy_create_temporary>
-              continuation(this, op, input, output, info);
-          continuation.defer(runtime, continuation_precondition, op);
-          return;
-        }
-      }
-      mapper->create_copy_temporary_instance(info, *op, *input, *output);
       finish_mapper_call(info);
     }
 
@@ -684,32 +606,6 @@ namespace Legion {
         }
       }
       mapper->select_close_sources(info, *op, *input, *output);
-      finish_mapper_call(info);
-    }
-
-    //--------------------------------------------------------------------------
-    void MapperManager::invoke_close_create_temporary(CloseOp *op,
-                                    Mapper::CreateCloseTemporaryInput *input,
-                                    Mapper::CreateCloseTemporaryOutput *output,
-                                    MappingCallInfo *info)
-    //--------------------------------------------------------------------------
-    {
-      if (info == NULL)
-      {
-        RtEvent continuation_precondition;
-        info = begin_mapper_call(CLOSE_CREATE_TEMPORARY_CALL,
-                                 op, continuation_precondition);
-        if (continuation_precondition.exists())
-        {
-          MapperContinuation3<CloseOp, Mapper::CreateCloseTemporaryInput,
-            Mapper::CreateCloseTemporaryOutput, 
-            &MapperManager::invoke_close_create_temporary>
-              continuation(this, op, input, output, info);
-          continuation.defer(runtime, continuation_precondition, op);
-          return;
-        }
-      }
-      mapper->create_close_temporary_instance(info, *op, *input, *output);
       finish_mapper_call(info);
     }
 
@@ -914,32 +810,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MapperManager::invoke_release_create_temporary(ReleaseOp *op,
-                                  Mapper::CreateReleaseTemporaryInput *input,
-                                  Mapper::CreateReleaseTemporaryOutput *output,
-                                  MappingCallInfo *info)
-    //--------------------------------------------------------------------------
-    {
-      if (info == NULL)
-      {
-        RtEvent continuation_precondition;
-        info = begin_mapper_call(RELEASE_CREATE_TEMPORARY_CALL,
-                                 op, continuation_precondition);
-        if (continuation_precondition.exists())
-        {
-          MapperContinuation3<ReleaseOp, Mapper::CreateReleaseTemporaryInput,
-                              Mapper::CreateReleaseTemporaryOutput, 
-                              &MapperManager::invoke_release_create_temporary>
-                                continuation(this, op, input, output, info);
-          continuation.defer(runtime, continuation_precondition, op);
-          return;
-        }
-      }
-      mapper->create_release_temporary_instance(info, *op, *input, *output);
-      finish_mapper_call(info);
-    }
-
-    //--------------------------------------------------------------------------
     void MapperManager::invoke_release_speculate(ReleaseOp *op,
                                              Mapper::SpeculativeOutput *output,
                                              MappingCallInfo *info)
@@ -1093,34 +963,6 @@ namespace Legion {
         }
       }
       mapper->select_partition_sources(info, *op, *input, *output);
-      finish_mapper_call(info);
-    }
-
-    //--------------------------------------------------------------------------
-    void MapperManager::invoke_partition_create_temporary(
-                                DependentPartitionOp *op,
-                                Mapper::CreatePartitionTemporaryInput *input,
-                                Mapper::CreatePartitionTemporaryOutput *output,
-                                MappingCallInfo *info)
-    //--------------------------------------------------------------------------
-    {
-      if (info == NULL)
-      {
-        RtEvent continuation_precondition;
-        info = begin_mapper_call(PARTITION_CREATE_TEMPORARY_CALL,
-                                 op, continuation_precondition);
-        if (continuation_precondition.exists())
-        {
-          MapperContinuation3<DependentPartitionOp, 
-                            Mapper::CreatePartitionTemporaryInput,
-                            Mapper::CreatePartitionTemporaryOutput, 
-                            &MapperManager::invoke_partition_create_temporary>
-                              continuation(this, op, input, output, info);
-          continuation.defer(runtime, continuation_precondition, op);
-          return;
-        }
-      }
-      mapper->create_partition_temporary_instance(info, *op, *input, *output);
       finish_mapper_call(info);
     }
 

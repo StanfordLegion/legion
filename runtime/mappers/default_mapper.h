@@ -168,11 +168,6 @@ namespace Legion {
                                        const Task&                task,
                                        const SelectTaskSrcInput&  input,
                                              SelectTaskSrcOutput& output);
-      virtual void create_task_temporary_instance(
-                                    const MapperContext              ctx,
-                                    const Task&                      task,
-                                    const CreateTaskTemporaryInput&  input,
-                                          CreateTaskTemporaryOutput& output);
       virtual void speculate(const MapperContext      ctx,
                              const Task&              task,
                                    SpeculativeOutput& output);
@@ -193,11 +188,6 @@ namespace Legion {
                                        const InlineMapping&         inline_op,
                                        const SelectInlineSrcInput&  input,
                                              SelectInlineSrcOutput& output);
-      virtual void create_inline_temporary_instance(
-                                  const MapperContext                ctx,
-                                  const InlineMapping&               inline_op,
-                                  const CreateInlineTemporaryInput&  input,
-                                        CreateInlineTemporaryOutput& output);
       virtual void report_profiling(const MapperContext         ctx,
                                     const InlineMapping&        inline_op,
                                     const InlineProfilingInfo&  input);
@@ -210,11 +200,6 @@ namespace Legion {
                                        const Copy&                  copy,
                                        const SelectCopySrcInput&    input,
                                              SelectCopySrcOutput&   output);
-      virtual void create_copy_temporary_instance(
-                                  const MapperContext              ctx,
-                                  const Copy&                      copy,
-                                  const CreateCopyTemporaryInput&  input,
-                                        CreateCopyTemporaryOutput& output);
       virtual void speculate(const MapperContext      ctx,
                              const Copy& copy,
                                    SpeculativeOutput& output);
@@ -235,11 +220,6 @@ namespace Legion {
                                         const Close&                close,
                                         const SelectCloseSrcInput&  input,
                                               SelectCloseSrcOutput& output);
-      virtual void create_close_temporary_instance(
-                                  const MapperContext               ctx,
-                                  const Close&                      close,
-                                  const CreateCloseTemporaryInput&  input,
-                                        CreateCloseTemporaryOutput& output);
       virtual void report_profiling(const MapperContext       ctx,
                                     const Close&              close,
                                     const CloseProfilingInfo& input);
@@ -273,11 +253,6 @@ namespace Legion {
                                      const Release&                 release,
                                      const SelectReleaseSrcInput&   input,
                                            SelectReleaseSrcOutput&  output);
-      virtual void create_release_temporary_instance(
-                                   const MapperContext                 ctx,
-                                   const Release&                      release,
-                                   const CreateReleaseTemporaryInput&  input,
-                                         CreateReleaseTemporaryOutput& output);
       virtual void speculate(const MapperContext         ctx,
                              const Release&              release,
                                    SpeculativeOutput&    output);
@@ -303,11 +278,6 @@ namespace Legion {
                                      const Partition&                partition,
                                      const SelectPartitionSrcInput&  input,
                                            SelectPartitionSrcOutput& output);
-      virtual void create_partition_temporary_instance(
-                              const MapperContext                   ctx,
-                              const Partition&                      partition,
-                              const CreatePartitionTemporaryInput&  input,
-                                    CreatePartitionTemporaryOutput& output);
       virtual void report_profiling(const MapperContext              ctx,
                                     const Partition&                 partition,
                                     const PartitionProfilingInfo&    input);
@@ -434,10 +404,6 @@ namespace Legion {
                                     std::deque<PhysicalInstance> &ranking);
       virtual bool default_policy_select_close_virtual(const MapperContext ctx,
                                                        const Close &close);
-      virtual PhysicalInstance default_policy_create_temporary(
-                                    const MapperContext ctx, 
-                                    LogicalRegion region,
-                                    PhysicalInstance target_instance);
     protected: // help for generating random numbers
       long default_generate_random_integer(void) const;
       double default_generate_random_real(void) const;

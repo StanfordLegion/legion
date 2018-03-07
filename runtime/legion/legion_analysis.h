@@ -847,21 +847,6 @@ namespace Legion {
     }; 
 
     /**
-     * \struct EventSet 
-     * A helper class for building sets of fields with 
-     * a common set of preconditions for doing copies.
-     */
-    struct EventSet {
-    public:
-      EventSet(void) { }
-      EventSet(const FieldMask &m)
-        : set_mask(m) { }
-    public:
-      FieldMask set_mask;
-      std::set<ApEvent> preconditions;
-    }; 
-    
-    /**
      * \class PhysicalState
      * A physical state is a temporary buffer for holding a merged
      * group of version state objects which can then be used by 

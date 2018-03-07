@@ -640,6 +640,7 @@ namespace Legion {
       // Allocates memory that becomes owned by the caller
       inline char* to_string(void) const;
     public:
+      inline int pop_count(void) const;
       static inline int pop_count(
             const TLBitMask<unsigned,MAX,SHIFT,MASK> &mask);
       static inline int pop_count(
@@ -720,6 +721,7 @@ namespace Legion {
       // Allocates memory that becomes owned by the caller
       inline char* to_string(void) const;
     public:
+      inline int pop_count(void) const;
       static inline int pop_count(const SSEBitMask<MAX> &mask);
     protected:
       union {
@@ -800,6 +802,7 @@ namespace Legion {
       // Allocates memory that becomes owned by the caller
       inline char* to_string(void) const;
     public:
+      inline int pop_count(void) const;
       static inline int pop_count(const SSETLBitMask<MAX> &mask);
       static inline uint64_t extract_mask(__m128i value);
     protected:
@@ -886,6 +889,7 @@ namespace Legion {
       // Allocates memory that becomes owned by the caller
       inline char* to_string(void) const;
     public:
+      inline int pop_count(void) const;
       static inline int pop_count(const AVXBitMask<MAX> &mask);
     protected:
       union {
@@ -969,6 +973,7 @@ namespace Legion {
       // Allocates memory that becomes owned by the caller
       inline char* to_string(void) const;
     public:
+      inline int pop_count(void) const;
       static inline int pop_count(const AVXTLBitMask<MAX> &mask);
       static inline uint64_t extract_mask(__m256i value);
       static inline uint64_t extract_mask(__m256d value);
@@ -1054,6 +1059,7 @@ namespace Legion {
       // Allocates memory that becomes owned by the caller
       inline char* to_string(void) const;
     public:
+      inline int pop_count(void) const;
       static inline int pop_count(const PPCBitMask<MAX> &mask);
     protected:
       union {
@@ -1130,6 +1136,7 @@ namespace Legion {
       // Allocates memory that becomes owned by the caller
       inline char* to_string(void) const;
     public:
+      inline int pop_count(void) const;
       static inline int pop_count(const PPCTLBitMask<MAX> &mask);
       static inline uint64_t extract_mask(__vector unsigned long long value);
     protected:
@@ -1233,6 +1240,7 @@ namespace Legion {
       // Allocates memory that becomes owned by the caller
       inline char* to_string(void) const;
     public:
+      inline int pop_count(void) const;
       static inline int pop_count(const 
                         CompoundBitMask<BITMASK,MAX,WORDS> &mask);
     protected:
@@ -3471,6 +3479,29 @@ namespace Legion {
 
     //-------------------------------------------------------------------------
     template<typename T, unsigned int MAX, unsigned SHIFT, unsigned MASK>
+    inline int TLBitMask<T,MAX,SHIFT,MASK>::pop_count(void) const
+    //-------------------------------------------------------------------------
+    {
+      if (!sum_mask)
+        return 0;
+      int result = 0;
+#ifndef VALGRIND
+      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+      {
+        result += __builtin_popcount(bit_vector[idx]);
+      }
+#else
+      for (unsigned idx = 0; idx < MAX; idx++)
+      {
+        if (is_set(idx))
+          result++;
+      }
+#endif
+      return result;
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename T, unsigned int MAX, unsigned SHIFT, unsigned MASK>
     /*static*/ inline int TLBitMask<T,MAX,SHIFT,MASK>::pop_count(
                                const TLBitMask<unsigned,MAX,SHIFT,MASK> &mask)
     //-------------------------------------------------------------------------
@@ -4139,6 +4170,27 @@ namespace Legion {
     //-------------------------------------------------------------------------
     {
       return BitMaskHelper::to_string(bits.bit_vector, MAX);
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline int SSEBitMask<MAX>::pop_count(void) const
+    //-------------------------------------------------------------------------
+    {
+      int result = 0;
+#ifndef VALGRIND
+      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+      {
+        result += __builtin_popcountl(bits.bit_vector[idx]);
+      }
+#else
+      for (unsigned idx = 0; idx < MAX; idx++)
+      {
+        if (is_set(idx))
+          result++;
+      }
+#endif
+      return result;
     }
 
     //-------------------------------------------------------------------------
@@ -4826,10 +4878,35 @@ namespace Legion {
 
     //-------------------------------------------------------------------------
     template<unsigned int MAX>
+    inline int SSETLBitMask<MAX>::pop_count(void) const
+    //-------------------------------------------------------------------------
+    {
+      if (!sum_mask)
+        return 0;
+      int result = 0;
+#ifndef VALGRIND
+      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+      {
+        result += __builtin_popcountl(bits.bit_vector[idx]);
+      }
+#else
+      for (unsigned idx = 0; idx < MAX; idx++)
+      {
+        if (is_set(idx))
+          result++;
+      }
+#endif
+      return result;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
     /*static*/ inline int SSETLBitMask<MAX>::pop_count(
                                                  const SSETLBitMask<MAX> &mask)
     //-------------------------------------------------------------------------
     {
+      if (!mask.sum_mask)
+        return 0;
       int result = 0;
 #ifndef VALGRIND
       for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
@@ -5555,6 +5632,27 @@ namespace Legion {
     //-------------------------------------------------------------------------
     {
       return BitMaskHelper::to_string(bits.bit_vector, MAX);
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline int AVXBitMask<MAX>::pop_count(void) const
+    //-------------------------------------------------------------------------
+    {
+      int result = 0;
+#ifndef VALGRIND
+      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+      {
+        result += __builtin_popcountl(bits.bit_vector[idx]);
+      }
+#else
+      for (unsigned idx = 0; idx < MAX; idx++)
+      {
+        if (is_set(idx))
+          result++;
+      }
+#endif
+      return result;
     }
 
     //-------------------------------------------------------------------------
@@ -6339,10 +6437,35 @@ namespace Legion {
 
     //-------------------------------------------------------------------------
     template<unsigned int MAX>
+    inline int AVXTLBitMask<MAX>::pop_count(void) const
+    //-------------------------------------------------------------------------
+    {
+      if (!sum_mask)
+        return 0;
+      int result = 0;
+#ifndef VALGRIND
+      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+      {
+        result += __builtin_popcountl(bits.bit_vector[idx]);
+      }
+#else
+      for (unsigned idx = 0; idx < MAX; idx++)
+      {
+        if (is_set(idx))
+          result++;
+      }
+#endif
+      return result;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
     /*static*/ inline int AVXTLBitMask<MAX>::pop_count(
                                                  const AVXTLBitMask<MAX> &mask)
     //-------------------------------------------------------------------------
     {
+      if (!mask.sum_mask)
+        return 0;
       int result = 0;
 #ifndef VALGRIND
       for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
@@ -7001,6 +7124,27 @@ namespace Legion {
     //-------------------------------------------------------------------------
     {
       return BitMaskHelper::to_string(bits.bit_vector, MAX);
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline int PPCBitMask<MAX>::pop_count(void) const
+    //-------------------------------------------------------------------------
+    {
+      int result = 0;
+#ifndef VALGRIND
+      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+      {
+        result += __builtin_popcountl(bits.bit_vector[idx]);
+      }
+#else
+      for (unsigned idx = 0; idx < MAX; idx++)
+      {
+        if (is_set(idx))
+          result++;
+      }
+#endif
+      return result;
     }
 
     //-------------------------------------------------------------------------
@@ -7694,10 +7838,35 @@ namespace Legion {
 
     //-------------------------------------------------------------------------
     template<unsigned int MAX>
+    inline int PPCTLBitMask<MAX>::pop_count(void) const
+    //-------------------------------------------------------------------------
+    {
+      if (!sum_mask)
+        return 0;
+      int result = 0;
+#ifndef VALGRIND
+      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+      {
+        result += __builtin_popcountl(bits.bit_vector[idx]);
+      }
+#else
+      for (unsigned idx = 0; idx < MAX; idx++)
+      {
+        if (is_set(idx))
+          result++;
+      }
+#endif
+      return result;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
     /*static*/ inline int PPCTLBitMask<MAX>::pop_count(
                                                  const PPCTLBitMask<MAX> &mask)
     //-------------------------------------------------------------------------
     {
+      if (!mask.sum_mask)
+        return 0;
       int result = 0;
 #ifndef VALGRIND
       for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
@@ -10459,6 +10628,103 @@ namespace Legion {
       assert(n->level == 0);
 #endif
       return n;
+    }
+
+    /**
+     * \struct FieldSet
+     * A helper template class for the method below for describing
+     * sets of members that all contain the same fields
+     */
+    template<typename T>
+    struct FieldSet {
+    public:
+      FieldSet(void) { }
+      FieldSet(const FieldMask &m)
+        : set_mask(m) { }
+    public:
+      FieldMask set_mask;
+      std::set<T> elements;
+    };
+
+    //--------------------------------------------------------------------------
+    template<typename T>
+    inline void compute_field_sets(FieldMask universe_mask,
+                        const typename LegionMap<T,FieldMask>::aligned &inputs,
+                        typename LegionList<FieldSet<T> >::aligned &output_sets)
+    //--------------------------------------------------------------------------
+    {
+      for (typename LegionMap<T,FieldMask>::aligned::const_iterator pit = 
+            inputs.begin(); pit != inputs.end(); pit++)
+      {
+        bool inserted = false;
+        // Also keep track of which fields have updates
+        // but don't have any members 
+        if (!!universe_mask)
+          universe_mask -= pit->second;
+        FieldMask remaining = pit->second;
+        // Insert this event into the precondition sets 
+        for (typename LegionList<FieldSet<T> >::aligned::iterator it = 
+              output_sets.begin(); it != output_sets.end(); it++)
+        {
+          // Easy case, check for equality
+          if (remaining == it->set_mask)
+          {
+            it->elements.insert(pit->first);
+            inserted = true;
+            break;
+          }
+          FieldMask overlap = remaining & it->set_mask;
+          // Easy case, they are disjoint so keep going
+          if (!overlap)
+            continue;
+          // Moderate case, we are dominated, split into two sets
+          // reusing existing set and making a new set
+          if (overlap == remaining)
+          {
+            // Leave the existing set and make it the difference 
+            it->set_mask -= overlap;
+            output_sets.push_back(FieldSet<T>(overlap));
+            FieldSet<T> &last = output_sets.back();
+            last.elements = it->elements;
+            last.elements.insert(pit->first);
+            inserted = true;
+            break;
+          }
+          // Moderate case, we dominate the existing set
+          if (overlap == it->set_mask)
+          {
+            // Add ourselves to the existing set and then
+            // keep going for the remaining fields
+            it->elements.insert(pit->first);
+            remaining -= overlap;
+            // Can't consider ourselves added yet
+            continue;
+          }
+          // Hard case, neither dominates, compute three
+          // distinct sets of fields, keep left one in
+          // place and reduce scope, add new one at the
+          // end for overlap, continue iterating for right one
+          it->set_mask -= overlap;
+          const std::set<T> &temp_elements = it->elements;
+          it = output_sets.insert(it, FieldSet<T>(overlap));
+          it->elements = temp_elements;
+          it->elements.insert(pit->first);
+          remaining -= overlap;
+          continue;
+        }
+        if (!inserted)
+        {
+          output_sets.push_back(FieldSet<T>(remaining));
+          FieldSet<T> &last = output_sets.back();
+          last.elements.insert(pit->first);
+        }
+      }
+      // For any fields which need copies but don't have
+      // any elements, but them in their own set.
+      // Put it on the front because it is the copy with
+      // no elements so it can start right away!
+      if (!!universe_mask)
+        output_sets.push_front(FieldSet<T>(universe_mask));
     }
 
   }; // namespace Internal

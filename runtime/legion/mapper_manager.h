@@ -96,10 +96,6 @@ namespace Legion {
                                       Mapper::SelectTaskSrcInput *input,
                                       Mapper::SelectTaskSrcOutput *output,
                                       MappingCallInfo *info = NULL);
-      void invoke_task_create_temporary(TaskOp *task,
-                                      Mapper::CreateTaskTemporaryInput *input,
-                                      Mapper::CreateTaskTemporaryOutput *output,
-                                      MappingCallInfo *info = NULL);
       void invoke_task_speculate(TaskOp *task, 
                                  Mapper::SpeculativeOutput *output,
                                  MappingCallInfo *info = NULL);
@@ -118,10 +114,6 @@ namespace Legion {
                                         Mapper::SelectInlineSrcInput *input,
                                         Mapper::SelectInlineSrcOutput *output,
                                         MappingCallInfo *info = NULL);
-      void invoke_inline_create_temporary(MapOp *op,
-                                    Mapper::CreateInlineTemporaryInput *input,
-                                    Mapper::CreateInlineTemporaryOutput *output,
-                                    MappingCallInfo *info = NULL);
       void invoke_inline_report_profiling(MapOp *op, 
                                           Mapper::InlineProfilingInfo *input,
                                           MappingCallInfo *info = NULL);
@@ -134,10 +126,6 @@ namespace Legion {
                                       Mapper::SelectCopySrcInput *input,
                                       Mapper::SelectCopySrcOutput *output,
                                       MappingCallInfo *info = NULL);
-      void invoke_copy_create_temporary(CopyOp *op,
-                                  Mapper::CreateCopyTemporaryInput *input,
-                                  Mapper::CreateCopyTemporaryOutput *output,
-                                  MappingCallInfo *info = NULL);
       void invoke_copy_speculate(CopyOp *op, Mapper::SpeculativeOutput *output,
                                  MappingCallInfo *info = NULL);
       void invoke_copy_report_profiling(CopyOp *op,
@@ -156,10 +144,6 @@ namespace Legion {
                                        Mapper::SelectCloseSrcInput *input,
                                        Mapper::SelectCloseSrcOutput *output,
                                        MappingCallInfo *info = NULL);
-      void invoke_close_create_temporary(CloseOp *op,
-                                     Mapper::CreateCloseTemporaryInput *input,
-                                     Mapper::CreateCloseTemporaryOutput *output,
-                                     MappingCallInfo *info = NULL);
       void invoke_close_report_profiling(CloseOp *op,
                                          Mapper::CloseProfilingInfo *input,
                                          MappingCallInfo *info = NULL);
@@ -191,10 +175,6 @@ namespace Legion {
                                          Mapper::SelectReleaseSrcInput *input,
                                          Mapper::SelectReleaseSrcOutput *output,
                                          MappingCallInfo *info = NULL);
-      void invoke_release_create_temporary(ReleaseOp *op,
-                                  Mapper::CreateReleaseTemporaryInput *input,
-                                  Mapper::CreateReleaseTemporaryOutput *output,
-                                  MappingCallInfo *info = NULL);
       void invoke_release_speculate(ReleaseOp *op,
                                     Mapper::SpeculativeOutput *output,
                                     MappingCallInfo *info = NULL);
@@ -217,10 +197,6 @@ namespace Legion {
       void invoke_select_partition_sources(DependentPartitionOp *op,
                           Mapper::SelectPartitionSrcInput *input,
                           Mapper::SelectPartitionSrcOutput *output,
-                          MappingCallInfo *info = NULL);
-      void invoke_partition_create_temporary(DependentPartitionOp *op,
-                          Mapper::CreatePartitionTemporaryInput *input,
-                          Mapper::CreatePartitionTemporaryOutput *output,
                           MappingCallInfo *info = NULL);
       void invoke_partition_report_profiling(DependentPartitionOp *op,
                           Mapper::PartitionProfilingInfo *input,

@@ -2661,7 +2661,8 @@ namespace Legion {
                                                      dst_precondition,
                                                      precondition);
             ApEvent copy_post = dst_node->issue_copy(op, src_it->second,
-                                       dst_it->second, copy_pre, guard);
+                                       dst_it->second, copy_pre, guard,
+                                       NULL/*intersect*/, NULL/*mask*/);
             if (copy_post.exists())
               result_events.insert(copy_post);
           }
@@ -2781,7 +2782,7 @@ namespace Legion {
         ApEvent copy_pre = Runtime::merge_events(fold_copy_preconditions);
         ApEvent copy_post = dst_node->issue_copy(op, 
                             src_fields_fold, dst_fields_fold, copy_pre, 
-                            predicate_guard, NULL/*intersect*/, 
+                            predicate_guard, NULL/*intersect*/, NULL/*mask*/,
                             dst_req.redop, true/*fold*/);
         if (copy_post.exists())
           result_events.insert(copy_post);
@@ -2792,7 +2793,7 @@ namespace Legion {
         ApEvent copy_pre = Runtime::merge_events(list_copy_preconditions);
         ApEvent copy_post = dst_node->issue_copy(op, 
                             src_fields_list, dst_fields_list, copy_pre, 
-                            predicate_guard, NULL/*intersect*/, 
+                            predicate_guard, NULL/*intersect*/, NULL/*mask*/, 
                             dst_req.redop, false/*fold*/);
         if (copy_post.exists())
           result_events.insert(copy_post);
@@ -4771,6 +4772,741 @@ namespace Legion {
                                                          can_fail, wait_until);
     }
 
+    //--------------------------------------------------------------------------
+    IndexSpaceExpression* RegionTreeForest::union_index_spaces(
+                           IndexSpaceExpression *lhs, IndexSpaceExpression *rhs)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(lhs->type_tag == rhs->type_tag);
+#endif
+      std::set<IndexSpaceExpression*> exprs;
+      exprs.insert(lhs);
+      exprs.insert(rhs);
+      return union_index_spaces(exprs);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpaceExpression* RegionTreeForest::union_index_spaces(
+                                   const std::set<IndexSpaceExpression*> &exprs)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!exprs.empty());
+#endif
+      IndexSpaceExpression *first = *(exprs.begin());
+      if (exprs.size() == 1)
+        return first;
+      const IndexSpaceExprID key = first->expr_id;
+      std::vector<IndexSpaceExpression*> expressions(exprs.begin(),exprs.end());
+      // See if we can find it in read-only mode
+      {
+        AutoLock l_lock(lookup_is_op_lock,1,false/*exclusive*/);
+        std::map<IndexSpaceExprID,ExpressionTrieNode*>::const_iterator 
+          finder = union_ops.find(key);
+        if (finder != union_ops.end())
+        {
+          IndexSpaceOperation *result = NULL;
+          ExpressionTrieNode *next = NULL;
+          if (finder->second->find_operation(expressions, result, next))
+            return result;
+          UnionOpCreator creator(this, first->type_tag, exprs);
+          return next->find_or_create_operation(expressions, creator);
+        }
+      }
+      ExpressionTrieNode *node = NULL;
+      UnionOpCreator creator(this, first->type_tag, exprs);
+      // Didn't find it, retake the lock, see if we lost the race
+      // and if no make the actual trie node
+      AutoLock l_lock(lookup_is_op_lock);
+      std::map<IndexSpaceExprID,ExpressionTrieNode*>::const_iterator 
+        finder = union_ops.find(key);
+      if (finder == union_ops.end())
+      {
+        // Didn't lose the race, so make the node
+        node = new ExpressionTrieNode(0/*depth*/, first->expr_id);
+        union_ops[key] = node;
+      }
+      else
+        node = finder->second;
+#ifdef DEBUG_LEGION
+      assert(node != NULL);
+#endif
+      return node->find_or_create_operation(expressions, creator);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpaceExpression* RegionTreeForest::intersect_index_spaces(
+                           IndexSpaceExpression *lhs, IndexSpaceExpression *rhs)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(lhs->type_tag == rhs->type_tag);
+#endif
+      std::set<IndexSpaceExpression*> exprs;
+      exprs.insert(lhs);
+      exprs.insert(rhs);
+      return intersect_index_spaces(exprs);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpaceExpression* RegionTreeForest::intersect_index_spaces(
+                                   const std::set<IndexSpaceExpression*> &exprs)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!exprs.empty());
+#endif
+      IndexSpaceExpression *first = *(exprs.begin());
+      if (exprs.size() == 1)
+        return first;
+      const IndexSpaceExprID key = first->expr_id;
+      std::vector<IndexSpaceExpression*> expressions(exprs.begin(),exprs.end());
+      // See if we can find it in read-only mode
+      {
+        AutoLock l_lock(lookup_is_op_lock,1,false/*exclusive*/);
+        std::map<IndexSpaceExprID,ExpressionTrieNode*>::const_iterator 
+          finder = intersection_ops.find(key);
+        if (finder != intersection_ops.end())
+        {
+          IndexSpaceOperation *result = NULL;
+          ExpressionTrieNode *next = NULL;
+          if (finder->second->find_operation(expressions, result, next))
+            return result;
+          IntersectionOpCreator creator(this, first->type_tag, exprs);
+          return next->find_or_create_operation(expressions, creator);
+        }
+      }
+      ExpressionTrieNode *node = NULL;
+      IntersectionOpCreator creator(this, first->type_tag, exprs);
+      // Didn't find it, retake the lock, see if we lost the race
+      // and if not make the actual trie node
+      AutoLock l_lock(lookup_is_op_lock);
+      // See if we lost the race
+      std::map<IndexSpaceExprID,ExpressionTrieNode*>::const_iterator 
+        finder = intersection_ops.find(key);
+      if (finder == intersection_ops.end())
+      {
+        // Didn't lose the race so make the node
+        node = new ExpressionTrieNode(0/*depth*/, first->expr_id);
+        intersection_ops[key] = node;
+      }
+      else
+        node = finder->second;
+#ifdef DEBUG_LEGION
+      assert(node != NULL); 
+#endif
+      return node->find_or_create_operation(expressions, creator);
+    }
+    
+    //--------------------------------------------------------------------------
+    IndexSpaceExpression* RegionTreeForest::subtract_index_spaces(
+                           IndexSpaceExpression *lhs, IndexSpaceExpression *rhs)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(lhs->type_tag == rhs->type_tag);
+#endif
+      const IndexSpaceExprID key = lhs->expr_id;
+      std::vector<IndexSpaceExpression*> expressions(2);
+      expressions[0] = lhs;
+      expressions[1] = rhs;
+      // See if we can find it in read-only mode
+      {
+        AutoLock l_lock(lookup_is_op_lock,1,false/*exclusive*/);
+        std::map<IndexSpaceExprID,ExpressionTrieNode*>::const_iterator 
+          finder = difference_ops.find(key);
+        if (finder != difference_ops.end())
+        {
+          IndexSpaceOperation *result = NULL;
+          ExpressionTrieNode *next = NULL;
+          if (finder->second->find_operation(expressions, result, next))
+            return result;
+          DifferenceOpCreator creator(this, lhs->type_tag, lhs, rhs);
+          return next->find_or_create_operation(expressions, creator);
+        }
+      }
+      ExpressionTrieNode *node = NULL;
+      DifferenceOpCreator creator(this, lhs->type_tag, lhs, rhs);
+      // Didn't find it, retake the lock, see if we lost the race
+      // and if not make the actual trie node
+      AutoLock l_lock(lookup_is_op_lock);
+      // See if we lost the race
+      std::map<IndexSpaceExprID,ExpressionTrieNode*>::const_iterator 
+        finder = difference_ops.find(key);
+      if (finder == difference_ops.end())
+      {
+        // Didn't lose the race so make the node
+        node = new ExpressionTrieNode(0/*depth*/, lhs->expr_id);
+        difference_ops[key] = node;
+      }
+      else
+        node = finder->second;
+#ifdef DEBUG_LEGION
+      assert(node != NULL);
+#endif
+      return node->find_or_create_operation(expressions, creator);
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeForest::invalidate_index_space_expression(
+                                  const std::set<IndexSpaceOperation*> &parents)
+    //--------------------------------------------------------------------------
+    {
+      // Two phases here: in read-only made figure out the set of operations
+      // we are going to invalidate but don't remove them yet
+      std::deque<IndexSpaceOperation*> to_remove;
+      {
+        AutoLock l_lock(lookup_is_op_lock,1,false/*exclusive*/);
+        for (std::set<IndexSpaceOperation*>::const_iterator it = 
+              parents.begin(); it != parents.end(); it++)
+          (*it)->invalidate_operation(to_remove);
+      }
+      if (to_remove.empty())
+        return;
+      // Now retake the lock and do the removal
+      std::deque<IndexSpaceOperation*> to_delete;
+      {
+        AutoLock l_lock(lookup_is_op_lock);
+        for (std::deque<IndexSpaceOperation*>::const_iterator it = 
+              to_remove.begin(); it != to_remove.end(); it++)
+        {
+          if ((*it)->remove_operation(this))
+            to_delete.push_back(*it);
+        }
+      }
+      if (to_delete.empty())
+        return;
+      for (std::deque<IndexSpaceOperation*>::const_iterator it = 
+            to_delete.begin(); it != to_delete.end(); it++)
+        delete (*it);
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeForest::remove_union_operation(IndexSpaceOperation *op,
+                                const std::vector<IndexSpaceExpression*> &exprs)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(op->op_kind == IndexSpaceOperation::UNION_OP_KIND);
+#endif
+      // No need for the lock, we're holding it above
+      // from invalidate_index_space_expression
+      const IndexSpaceExprID key = exprs[0]->expr_id;
+      std::map<IndexSpaceExprID,ExpressionTrieNode*>::iterator 
+        finder = union_ops.find(key);
+#ifdef DEBUG_LEGION
+      assert(finder != union_ops.end());
+#endif
+      if (finder->second->remove_operation(exprs))
+      {
+        delete finder->second;
+        union_ops.erase(finder);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeForest::remove_intersection_operation(
+       IndexSpaceOperation *op, const std::vector<IndexSpaceExpression*> &exprs)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(op->op_kind == IndexSpaceOperation::INTERSECT_OP_KIND);
+#endif
+      // No need for the lock, we're holding it above
+      // from invalidate_index_space_expression
+      const IndexSpaceExprID key(exprs[0]->expr_id);
+      std::map<IndexSpaceExprID,ExpressionTrieNode*>::iterator 
+        finder = intersection_ops.find(key);
+#ifdef DEBUG_LEGION
+      assert(finder != intersection_ops.end());
+#endif
+      if (finder->second->remove_operation(exprs))
+      {
+        delete finder->second;
+        intersection_ops.erase(finder);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeForest::remove_subtraction_operation(IndexSpaceOperation *op,
+                           IndexSpaceExpression *lhs, IndexSpaceExpression *rhs)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(op->op_kind == IndexSpaceOperation::DIFFERENCE_OP_KIND);
+#endif
+      // No need for the lock, we're holding it above
+      // from invalidate_index_space_expression
+      const IndexSpaceExprID key = lhs->expr_id;
+      std::map<IndexSpaceExprID,ExpressionTrieNode*>::iterator 
+        finder = difference_ops.find(key);
+#ifdef DEBUG_LEGION
+      assert(finder != difference_ops.end());
+#endif
+      std::vector<IndexSpaceExpression*> exprs(2);
+      exprs[0] = lhs;
+      exprs[1] = rhs;
+      if (finder->second->remove_operation(exprs))
+      {
+        delete finder->second;
+        difference_ops.erase(finder);
+      }
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Index Space Expression 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    IndexSpaceExpression::IndexSpaceExpression(void)
+      : type_tag(0), expr_id(0), has_empty(false)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpaceExpression::IndexSpaceExpression(TypeTag tag)
+      : type_tag(tag), expr_id(next_expr_id()), has_empty(false)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpaceExpression::~IndexSpaceExpression(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(parent_operations.empty());
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void IndexSpaceExpression::handle_tighten_index_space(
+                                                               const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const TightenIndexSpaceArgs *targs = (const TightenIndexSpaceArgs*)args;
+      targs->proxy_this->tighten_index_space();
+      if (targs->proxy_this->remove_expression_reference())
+        delete targs->proxy_this;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ IndexSpaceExprID IndexSpaceExpression::next_expr_id(void)
+    //--------------------------------------------------------------------------
+    {
+      // Monotonically increasing counter of expression IDs for uniqueness
+      static IndexSpaceExprID next_id = 1;
+      IndexSpaceExprID result = __sync_fetch_and_add(&next_id, 1);
+#ifdef DEBUG_LEGION
+      assert(result <= next_id); // check for overflow
+#endif
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexSpaceExpression::add_parent_operation(IndexSpaceOperation *op)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(parent_operations.find(op) == parent_operations.end());
+#endif
+      parent_operations.insert(op);
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexSpaceExpression::remove_parent_operation(IndexSpaceOperation *op)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(parent_operations.find(op) != parent_operations.end());
+#endif
+      parent_operations.erase(op);
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Index Space Operation 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    IndexSpaceOperation::IndexSpaceOperation(TypeTag tag, OperationKind kind,
+                                             RegionTreeForest *ctx)
+      : IndexSpaceExpression(tag), op_kind(kind), context(ctx), invalidated(0)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpaceOperation::~IndexSpaceOperation(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(invalidated > 0);
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexSpaceOperation::add_expression_reference(void)
+    //--------------------------------------------------------------------------
+    {
+      add_reference();
+    }
+
+    //--------------------------------------------------------------------------
+    bool IndexSpaceOperation::remove_expression_reference(void)
+    //--------------------------------------------------------------------------
+    {
+      // Only delete this if we have no references and we've been invalidated
+      if (remove_reference())
+        return (__sync_fetch_and_add(&invalidated, 0) > 0);
+      return false;
+    }
+    
+    //--------------------------------------------------------------------------
+    void IndexSpaceOperation::invalidate_operation(
+                                    std::deque<IndexSpaceOperation*> &to_remove)
+    //--------------------------------------------------------------------------
+    {
+      // See if we're the first one here, there can be a race with
+      // multiple invalidations occurring at the same time
+      if (__sync_fetch_and_add(&invalidated, 1) > 0)
+        return;
+      // Add ourselves to the list if we're here first
+      to_remove.push_back(this);
+      // Add an expression reference to prevent us being collected early
+      add_expression_reference();
+      // Then continue up the expression tree
+      for (std::set<IndexSpaceOperation*>::const_iterator it = 
+            parent_operations.begin(); it != parent_operations.end(); it++)
+        (*it)->invalidate_operation(to_remove);
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Expression Trie Node 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    ExpressionTrieNode::ExpressionTrieNode(unsigned d, IndexSpaceExprID id,
+                                           IndexSpaceOperation *op)
+      : depth(d), expr(id), local_operation(op)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    ExpressionTrieNode::ExpressionTrieNode(const ExpressionTrieNode &rhs)
+      : depth(rhs.depth), expr(rhs.expr)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    ExpressionTrieNode::~ExpressionTrieNode(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    ExpressionTrieNode& ExpressionTrieNode::operator=(
+                                                  const ExpressionTrieNode &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    bool ExpressionTrieNode::find_operation(
+                        const std::vector<IndexSpaceExpression*> &expressions,
+                        IndexSpaceOperation *&result, ExpressionTrieNode *&last)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(depth < expressions.size());
+      assert(expressions[depth]->expr_id == expr); // these should match
+#endif
+      // Three cases here
+      if (expressions.size() == (depth+1))
+      {
+        // We're the node that should have the operation
+        // Check to see if we've made the operation yet
+        if (local_operation != NULL)
+        {
+          result = local_operation;
+          return true;
+        }
+        last = this;
+        return false;
+      }
+      else if (expressions.size() == (depth+2))
+      {
+        // The next node should have the operation, but we might be
+        // storing it until it actually gets made
+        // See if we already have it or we have the next trie node
+        ExpressionTrieNode *next = NULL;
+        const IndexSpaceExprID target_expr = expressions.back()->expr_id;
+        {
+          AutoLock t_lock(trie_lock,1,false/*exclusive*/);
+          std::map<IndexSpaceExprID,IndexSpaceOperation*>::const_iterator
+            op_finder = operations.find(target_expr);
+          if (op_finder != operations.end())
+          {
+            result = op_finder->second;
+            return true;
+          }
+          std::map<IndexSpaceExprID,ExpressionTrieNode*>::const_iterator
+            node_finder = nodes.find(target_expr);
+          if (node_finder != nodes.end())
+            next = node_finder->second;
+        }
+        // Didn't find either, retake the lock in exclusive mode and then
+        // see if we lost the race, if not make the operation or
+        if (next == NULL)
+        {
+          AutoLock t_lock(trie_lock);
+          std::map<IndexSpaceExprID,IndexSpaceOperation*>::const_iterator
+            op_finder = operations.find(target_expr);
+          if (op_finder != operations.end())
+          {
+            result = op_finder->second;
+            return true;
+          }
+          // Still don't have the op
+          std::map<IndexSpaceExprID,ExpressionTrieNode*>::const_iterator
+            node_finder = nodes.find(target_expr);
+          if (node_finder == nodes.end())
+          {
+            last = this;
+            return false;
+          }
+          else
+            next = node_finder->second;
+        }
+#ifdef DEBUG_LEGION
+        assert(next != NULL);
+#endif
+        return next->find_operation(expressions, result, last);
+      }
+      else
+      {
+        // Intermediate case 
+        // See if we have the next node, or if we have to make it
+        ExpressionTrieNode *next = NULL;
+        const IndexSpaceExprID target_expr = expressions[depth+1]->expr_id;
+        {
+          AutoLock t_lock(trie_lock,1,false/*exclusive*/);
+          std::map<IndexSpaceExprID,ExpressionTrieNode*>::const_iterator
+            finder = nodes.find(target_expr);
+          if (finder != nodes.end())
+            next = finder->second;
+        }
+        // Still don't have it so we have to try and make it
+        if (next == NULL)
+        {
+          AutoLock t_lock(trie_lock);
+          // See if we lost the race
+          std::map<IndexSpaceExprID,ExpressionTrieNode*>::const_iterator
+            finder = nodes.find(target_expr);
+          if (finder == nodes.end())
+          {
+            // We have to make the next node, also check to see if we
+            // already made an operation expression for it or not
+            std::map<IndexSpaceExprID,IndexSpaceOperation*>::iterator
+              op_finder = operations.find(target_expr);
+            if (op_finder != operations.end())
+            {
+              next = new ExpressionTrieNode(depth+1, target_expr, 
+                                            op_finder->second);
+              operations.erase(op_finder);    
+            }
+            else
+              next = new ExpressionTrieNode(depth+1, target_expr);
+            nodes[target_expr] = next;
+          }
+          else // lost the race
+            next = finder->second;
+        }
+#ifdef DEBUG_LEGION
+        assert(next != NULL);
+#endif
+        return next->find_operation(expressions, result, last);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpaceOperation* ExpressionTrieNode::find_or_create_operation(
+                          const std::vector<IndexSpaceExpression*> &expressions,
+                          OperationCreator &creator)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(depth < expressions.size());
+      assert(expressions[depth]->expr_id == expr); // these should match
+#endif
+      // Three cases here
+      if (expressions.size() == (depth+1))
+      {
+        // We're the node that should have the operation
+        // Check to see if we've made the operation yet
+        if (local_operation != NULL)
+          return local_operation;
+        // Operation doesn't exist yet, retake the lock and try to make it
+        AutoLock t_lock(trie_lock);
+        if (local_operation != NULL)
+          return local_operation;
+        local_operation = creator.create();
+        return local_operation;
+      }
+      else if (expressions.size() == (depth+2))
+      {
+        // The next node should have the operation, but we might be
+        // storing it until it actually gets made
+        // See if we already have it or we have the next trie node
+        ExpressionTrieNode *next = NULL;
+        const IndexSpaceExprID target_expr = expressions.back()->expr_id;
+        {
+          AutoLock t_lock(trie_lock,1,false/*exclusive*/);
+          std::map<IndexSpaceExprID,IndexSpaceOperation*>::const_iterator
+            op_finder = operations.find(target_expr);
+          if (op_finder != operations.end())
+            return op_finder->second;
+          std::map<IndexSpaceExprID,ExpressionTrieNode*>::const_iterator
+            node_finder = nodes.find(target_expr);
+          if (node_finder != nodes.end())
+            next = node_finder->second;
+        }
+        // Didn't find either, retake the lock in exclusive mode and then
+        // see if we lost the race, if not make the operation or
+        if (next == NULL)
+        {
+          AutoLock t_lock(trie_lock);
+          std::map<IndexSpaceExprID,IndexSpaceOperation*>::const_iterator
+            op_finder = operations.find(target_expr);
+          if (op_finder != operations.end())
+            return op_finder->second;
+          // Still don't have the op
+          std::map<IndexSpaceExprID,ExpressionTrieNode*>::const_iterator
+            node_finder = nodes.find(target_expr);
+          if (node_finder == nodes.end())
+          {
+            // Didn't find the sub-node, so make the operation here
+            IndexSpaceOperation *result = creator.create();
+            operations[target_expr] = result;
+            return result;
+          }
+          else
+            next = node_finder->second;
+        }
+#ifdef DEBUG_LEGION
+        assert(next != NULL);
+#endif
+        return next->find_or_create_operation(expressions, creator);
+      }
+      else
+      {
+        // Intermediate case 
+        // See if we have the next node, or if we have to make it
+        ExpressionTrieNode *next = NULL;
+        const IndexSpaceExprID target_expr = expressions[depth+1]->expr_id;
+        {
+          AutoLock t_lock(trie_lock,1,false/*exclusive*/);
+          std::map<IndexSpaceExprID,ExpressionTrieNode*>::const_iterator
+            finder = nodes.find(target_expr);
+          if (finder != nodes.end())
+            next = finder->second;
+        }
+        // Still don't have it so we have to try and make it
+        if (next == NULL)
+        {
+          AutoLock t_lock(trie_lock);
+          // See if we lost the race
+          std::map<IndexSpaceExprID,ExpressionTrieNode*>::const_iterator
+            finder = nodes.find(target_expr);
+          if (finder == nodes.end())
+          {
+            // We have to make the next node, also check to see if we
+            // already made an operation expression for it or not
+            std::map<IndexSpaceExprID,IndexSpaceOperation*>::iterator
+              op_finder = operations.find(target_expr);
+            if (op_finder != operations.end())
+            {
+              next = new ExpressionTrieNode(depth+1, target_expr, 
+                                            op_finder->second);
+              operations.erase(op_finder);    
+            }
+            else
+              next = new ExpressionTrieNode(depth+1, target_expr);
+            nodes[target_expr] = next;
+          }
+          else // lost the race
+            next = finder->second;
+        }
+#ifdef DEBUG_LEGION
+        assert(next != NULL);
+#endif
+        return next->find_or_create_operation(expressions, creator);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    bool ExpressionTrieNode::remove_operation(
+                          const std::vector<IndexSpaceExpression*> &expressions)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(depth < expressions.size());
+      assert(expressions[depth]->expr_id == expr); // these should match
+#endif
+      // No need for locks here, we're protected by the big lock at the top
+      // Three cases here
+      if (expressions.size() == (depth+1))
+      {
+        // Simple case, clear our local operation
+        local_operation = NULL;
+      }
+      else if (expressions.size() == (depth+2))
+      {
+        // See if we should continue traversing or if we have the operation
+        const IndexSpaceExprID target_expr = expressions.back()->expr_id;
+        std::map<IndexSpaceExprID,IndexSpaceOperation*>::iterator op_finder =
+          operations.find(target_expr);
+        if (op_finder == operations.end())
+        {
+          std::map<IndexSpaceExprID,ExpressionTrieNode*>::iterator
+            node_finder = nodes.find(target_expr);
+#ifdef DEBUG_LEGION
+          assert(node_finder != nodes.end());
+#endif
+          if (node_finder->second->remove_operation(expressions))
+            nodes.erase(node_finder);
+        }
+        else
+          operations.erase(op_finder);
+      }
+      else
+      {
+        const IndexSpaceExprID target_expr = expressions[depth+1]->expr_id;
+        std::map<IndexSpaceExprID,ExpressionTrieNode*>::iterator finder =
+          nodes.find(target_expr);
+#ifdef DEBUG_LEGION
+        assert(finder != nodes.end());
+#endif
+        if (finder->second->remove_operation(expressions))
+          nodes.erase(finder);
+      }
+      if (local_operation != NULL)
+        return false;
+      if (!operations.empty())
+        return false;
+      if (!nodes.empty())
+        return false;
+      return true;
+    }
+
     /////////////////////////////////////////////////////////////
     // Index Tree Node 
     /////////////////////////////////////////////////////////////
@@ -4799,7 +5535,7 @@ namespace Legion {
       {
         legion_free(SEMANTIC_INFO_ALLOC, it->second.buffer, it->second.size);
       }
-    }
+    } 
 
     //--------------------------------------------------------------------------
     void IndexTreeNode::attach_semantic_information(SemanticTag tag,
@@ -5001,6 +5737,7 @@ namespace Legion {
                                    DistributedID did, ApEvent ready)
       : IndexTreeNode(ctx, (par == NULL) ? 0 : par->depth + 1, c,
                       did, get_owner_space(h, ctx->runtime)),
+        IndexSpaceExpression(h.type_tag),
         handle(h), parent(par), index_space_ready(ready), 
         realm_index_space_set(Runtime::create_rt_user_event()), 
         tight_index_space_set(Runtime::create_rt_user_event()),
@@ -5626,15 +6363,7 @@ namespace Legion {
     {
       const bool disjoint = !left->intersects_with(right);
       parent->record_disjointness(disjoint, left->color, right->color);
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void IndexSpaceNode::handle_tighten_index_space(const void *args)
-    //--------------------------------------------------------------------------
-    {
-      const TightenIndexSpaceArgs *targs = (const TightenIndexSpaceArgs*)args;
-      targs->proxy_this->tighten_index_space();
-    }
+    } 
 
     //--------------------------------------------------------------------------
     void IndexSpaceNode::send_node(AddressSpaceID target, bool up)
@@ -5901,6 +6630,173 @@ namespace Legion {
       derez.deserialize(handle);
       IndexSpaceNode *node = forest->get_node(handle);
       node->unpack_index_space(derez, source);
+    } 
+
+    //--------------------------------------------------------------------------
+    void IndexSpaceNode::add_expression_reference(void)
+    //--------------------------------------------------------------------------
+    {
+      add_base_resource_ref(IS_EXPR_REF);
+    }
+
+    //--------------------------------------------------------------------------
+    bool IndexSpaceNode::remove_expression_reference(void)
+    //--------------------------------------------------------------------------
+    {
+      return remove_base_resource_ref(IS_EXPR_REF);
+    }
+
+    //--------------------------------------------------------------------------
+    bool IndexSpaceNode::intersects_with(IndexSpaceNode *rhs, bool compute)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(rhs->handle.get_type_tag() == handle.get_type_tag());
+#endif
+      if (rhs == this)
+        return true;
+      // We're about to do something expensive so if these are both 
+      // in the same index space tree then walk up to a common partition
+      // (if one exists) and see if it is disjoint
+      if ((handle.get_tree_id() == rhs->handle.get_tree_id()) && 
+          (parent != rhs->parent))
+      {
+        IndexSpaceNode *one = this;
+        IndexSpaceNode *two = rhs;
+        // Get them at the same depth
+        while (one->depth > two->depth)
+          one = one->parent->parent;
+        while (one->depth < two->depth)
+          two = two->parent->parent;
+        // Handle the case where one dominates the other
+        if (one == two)
+          return true;
+        // Now walk up until their parent is the same
+        while (one->parent != two->parent)
+        {
+          one = one->parent->parent;
+          two = two->parent->parent;
+        }
+        // If they have the same parent and it's not NULL and 
+        // it is disjoint then they don't intersect if they are different
+        if ((one->parent != NULL) && (one != two) && one->parent->is_disjoint())
+          return false;
+        // Otherwise fall through and do the expensive test
+      }
+      IndexSpaceExpression *intersect = 
+        context->intersect_index_spaces(this, rhs);
+      return !intersect->is_empty();
+    }
+
+    //--------------------------------------------------------------------------
+    bool IndexSpaceNode::intersects_with(IndexPartNode *rhs, bool compute)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(rhs->handle.get_type_tag() == handle.get_type_tag());
+#endif
+      // A very simple test but an obvious one
+      if ((rhs->parent == this) || (parent == rhs))
+          return true;
+      // We're about to do something expensive so if these are both
+      // in the same index space tree then walk up to a common partition
+      // if one exists and see if it is disjoint
+      if (handle.get_tree_id() == rhs->handle.get_tree_id())
+      {
+        IndexSpaceNode *one = this;
+        IndexSpaceNode *two = rhs->parent;
+        // Get them at the same depth
+        while (one->depth > two->depth)
+          one = one->parent->parent;
+        while (one->depth < two->depth)
+          two = two->parent->parent;
+        // Handle the case where one dominates the other
+        if (one == two)
+          return true;
+        // Now walk up until their parent is the same
+        while (one->parent != two->parent)
+        {
+          one = one->parent->parent;
+          two = two->parent->parent;
+        }
+        // If they have the same parent and it's not NULL and 
+        // it is disjoint then they don't intersect if they are different
+        if ((one->parent != NULL) && (one != two) && one->parent->is_disjoint())
+          return false;
+        // Otherwise fall through and do the expensive test
+      }
+      IndexSpaceExpression *intersect = 
+        context->intersect_index_spaces(this, rhs->get_union_expression());
+      return !intersect->is_empty();
+    }
+
+    //--------------------------------------------------------------------------
+    bool IndexSpaceNode::dominates(IndexSpaceNode *rhs)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(rhs->handle.get_type_tag() == handle.get_type_tag());
+#endif
+      if (rhs == this)
+        return true;
+      // We're about to do something expensive, so use the region tree
+      // as an acceleration data structure to try to make our tests
+      // more efficient. If these are in the same tree, see if we can
+      // walk up the tree from rhs and find ourself
+      if (handle.get_tree_id() == rhs->handle.get_tree_id())
+      {
+        // If we're the root of the tree we also trivially dominate
+        if (depth == 0)
+          return true;
+        if (rhs->depth > depth)
+        {
+          IndexSpaceNode *temp = rhs;
+          while (depth < temp->depth)
+            temp = temp->parent->parent;
+          // If we find ourself at the same depth then we dominate
+          if (temp == this)
+            return true;
+        }
+        // Otherwise we fall through and do the expensive test
+      }
+      IndexSpaceExpression *diff = 
+        context->subtract_index_spaces(rhs, this);
+      return diff->is_empty();
+    }
+
+    //--------------------------------------------------------------------------
+    bool IndexSpaceNode::dominates(IndexPartNode *rhs)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(rhs->handle.get_type_tag() == handle.get_type_tag());
+#endif
+      // A simple but common case
+      if (rhs->parent == this)
+        return true;
+      // We're about to do something expensive so use the region tree
+      // as an acceleration data structure to try to make our tests
+      // more efficient. If these are in the same tree, see if we can
+      // walk up the tree from rhs and find ourself
+      if (handle.get_tree_id() == rhs->handle.get_tree_id())
+      {
+        // If we're the root of the tree we also trivially domainate
+        if (depth == 0)
+          return true;
+        if (rhs->depth > depth)
+        {
+          IndexSpaceNode *temp = rhs->parent;
+          while (depth < temp->depth)
+            temp = temp->parent->parent;
+          // If we find ourself at the same depth then we dominate
+          if (temp == this)
+            return true;
+        }
+        // Otherwise we fall through and do the expensive test
+      }
+      IndexSpaceExpression *diff = 
+        context->subtract_index_spaces(rhs->get_union_expression(), this);
+      return diff->is_empty();
     }
 
     /////////////////////////////////////////////////////////////
@@ -5918,7 +6814,8 @@ namespace Legion {
         color_space(color_sp), total_children(color_sp->get_volume()), 
         max_linearized_color(color_sp->get_max_linearized_color()),
         partition_ready(part_ready), partial_pending(partial),
-        shard_mapping(mapping), disjoint(dis), has_complete(false)
+        shard_mapping(mapping), disjoint(dis), has_complete(false),
+        union_expr(NULL)
     //--------------------------------------------------------------------------
     { 
       parent->add_nested_resource_ref(did);
@@ -5947,7 +6844,8 @@ namespace Legion {
         color_space(color_sp), total_children(color_sp->get_volume()),
         max_linearized_color(color_sp->get_max_linearized_color()),
         partition_ready(part_ready), partial_pending(part), shard_mapping(map),
-        disjoint_ready(dis_ready), disjoint(false), has_complete(false)
+        disjoint_ready(dis_ready), disjoint(false), has_complete(false),
+        union_expr(NULL)
     //--------------------------------------------------------------------------
     {
       parent->add_nested_resource_ref(did);
@@ -6625,6 +7523,35 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    IndexSpaceExpression* IndexPartNode::get_union_expression(void)
+    //--------------------------------------------------------------------------
+    {
+      if (union_expr == NULL)
+      {
+        std::set<IndexSpaceExpression*> child_spaces;
+        if (total_children == max_linearized_color)
+        {
+          for (LegionColor color = 0; color < total_children; color++)
+            child_spaces.insert(get_child(color));
+        }
+        else
+        {
+          for (LegionColor color = 0; color < total_children; color++)
+          {
+            if (!color_space->contains_color(color))
+              continue;
+            child_spaces.insert(get_child(color));
+          }
+        }
+        // We can always write the result immediately since we know
+        // that the common sub-expression code will give the same
+        // result if there is a race
+        union_expr = context->union_index_spaces(child_spaces);
+      }
+      return const_cast<IndexSpaceExpression*>(union_expr);
+    }
+
+    //--------------------------------------------------------------------------
     void IndexPartNode::get_colors(std::vector<LegionColor> &colors)
     //--------------------------------------------------------------------------
     {
@@ -6755,7 +7682,164 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void IndexPartNode::handle_disjointness_test(
+    bool IndexPartNode::compute_complete(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!is_disjoint());
+#endif
+      IndexSpaceExpression *diff = 
+        context->subtract_index_spaces(parent, get_union_expression());
+      return diff->is_empty();
+    }
+
+    //--------------------------------------------------------------------------
+    bool IndexPartNode::intersects_with(IndexSpaceNode *rhs, bool compute)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(rhs->handle.get_type_tag() == handle.get_type_tag());
+#endif
+      // A very simple test but an obvious one
+      if ((rhs->parent == this) || (parent == rhs))
+        return true;
+      // We're about to do something expensive so if these are both
+      // in the same index space tree then walk up to a common partition
+      // if one exists and see if it is disjoint
+      if (handle.get_tree_id() == rhs->handle.get_tree_id())
+      {
+        IndexSpaceNode *one = parent;
+        IndexSpaceNode *two = rhs;
+        // Get them at the same depth
+        while (one->depth > two->depth)
+          one = one->parent->parent;
+        while (one->depth < two->depth)
+          two = two->parent->parent;
+        // Handle the case where one dominates the other
+        if (one == two)
+          return true;
+        // Now walk up until their parent is the same
+        while (one->parent != two->parent)
+        {
+          one = one->parent->parent;
+          two = two->parent->parent;
+        }
+        // If they have the same parent and it's not NULL and 
+        // it is disjoint then they don't intersect if they are different
+        if ((one->parent != NULL) && (one != two) && one->parent->is_disjoint())
+          return false;
+        // Otherwise fall through and do the expensive test
+      }
+      IndexSpaceExpression *intersect = 
+        context->intersect_index_spaces(get_union_expression(), rhs);
+      return !intersect->is_empty();
+    }
+
+    //--------------------------------------------------------------------------
+    bool IndexPartNode::intersects_with(IndexPartNode *rhs, bool compute)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(rhs->handle.get_type_tag() == handle.get_type_tag());
+#endif
+      // A very simple but obvious test to do
+      if (rhs == this)
+        return true;
+      // We're about to do something expensive so see if we can use
+      // the region tree as an acceleration data structure first
+      if ((handle.get_tree_id() == rhs->handle.get_tree_id()) && 
+          (parent != rhs->parent))
+      {
+        // Parent's are not the same, go up until we find 
+        // parents with a common partition
+        IndexSpaceNode *one = parent;
+        IndexSpaceNode *two = rhs->parent;
+        // Get them at the same depth
+        while (one->depth > two->depth)
+          one = one->parent->parent;
+        while (one->depth < two->depth)
+          two = two->parent->parent;
+        // Handle the case where one dominates the other
+        if (one == two)
+          return true;
+        // Now walk up until their parent is the same
+        while (one->parent != two->parent)
+        {
+          one = one->parent->parent;
+          two = two->parent->parent;
+        }
+        // If they have the same parent and it's not NULL and
+        // it is dijsoint then they don't intersect if they are different
+        if ((one->parent != NULL) && (one != two) && one->parent->is_disjoint())
+          return false;
+        // Otherwise we fall through and do the expensive test
+      }
+      IndexSpaceExpression *intersect = 
+        context->intersect_index_spaces(get_union_expression(),
+                                        rhs->get_union_expression());
+      return !intersect->is_empty();
+    }
+
+    //--------------------------------------------------------------------------
+    bool IndexPartNode::dominates(IndexSpaceNode *rhs)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(rhs->handle.get_type_tag() == handle.get_type_tag());
+#endif
+      // A simple but common case
+      if (rhs->parent == this)
+        return true;
+      // We're about to do something expensive, so use the region tree
+      // as an acceleration data structure to try to make our tests
+      // more efficient
+      if ((handle.get_tree_id() == rhs->handle.get_tree_id()) && 
+          (rhs->depth > depth))
+      {
+        IndexPartNode *temp = rhs->parent;
+        while (depth < temp->depth)
+          temp = temp->parent->parent;
+        // If we find ourselves at the same depth then we dominate
+        if (temp == this)
+          return true;
+        // Otherwise we fall through and do the expensive test
+      }
+      IndexSpaceExpression *diff = 
+        context->subtract_index_spaces(rhs, get_union_expression());
+      return diff->is_empty();
+    }
+    
+    //--------------------------------------------------------------------------
+    bool IndexPartNode::dominates(IndexPartNode *rhs)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(rhs->handle.get_type_tag() == handle.get_type_tag());
+#endif
+      if (rhs == this)
+        return true;
+      // We're about to do something expensive, so use the region tree
+      // as an acceleration data structure and try to make our tests
+      // more efficient
+      if ((handle.get_tree_id() == rhs->handle.get_tree_id()) &&
+          (rhs->depth > depth))
+      {
+        IndexPartNode *temp = rhs;
+        while (depth < temp->depth)
+          temp = temp->parent->parent;
+        // If we find ourselves at the same depth then we dominate
+        if (temp == this)
+          return true;
+        // Otherwise we fall through and do the expensive test
+      }
+      IndexSpaceExpression *diff = 
+        context->subtract_index_spaces(rhs->get_union_expression(),
+                                       get_union_expression());
+      return diff->is_empty();
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/void IndexPartNode::handle_disjointness_test(
              IndexPartNode *parent, IndexSpaceNode *left, IndexSpaceNode *right)
     //--------------------------------------------------------------------------
     {
@@ -12626,6 +13710,90 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool RegionTreeNode::sort_copy_instances_single(const TraversalInfo &info,
+                                                    MaterializedView *dst,
+                                                    const FieldMask &copy_mask,
+                                const std::vector<LogicalView*> &copy_instances,
+                                                    MaterializedView *&instance,
+                                                    DeferredView *&deferred)
+    //--------------------------------------------------------------------------
+    {
+      DETAILED_PROFILER(context->runtime, REGION_NODE_SORT_COPY_INSTANCES_CALL);
+      // Initialize these in case they aren't already initialized
+      instance = NULL;
+      deferred = NULL;
+      // No need to call the mapper if there is only one valid instance
+      if (copy_instances.size() == 1)
+      {
+        LogicalView *src = copy_instances.front();
+        // No need to do anything if src and dst are the same
+        if (src != dst)
+        {
+          if (!src->is_deferred_view())
+          {
+#ifdef DEBUG_LEGION
+            assert(src->is_instance_view());
+            assert(src->as_instance_view()->is_materialized_view());
+#endif
+            instance = src->as_instance_view()->as_materialized_view(); 
+          }
+          else
+            deferred = src->as_deferred_view();
+        }
+        else
+          return true;
+      }
+      else if (!copy_instances.empty())
+      {
+        InstanceSet src_refs;
+        std::vector<MaterializedView*> src_views;
+        src_views.reserve(copy_instances.size());
+        for (std::vector<LogicalView*>::const_iterator it =
+              copy_instances.begin(); it != copy_instances.end(); it++)
+        {
+          // Easy out if we find what the desination
+          if ((*it) == dst)
+            return true;
+          if ((*it)->is_deferred_view())
+          {
+#ifdef DEBUG_LEGION
+            assert(deferred == NULL); // should only be one of these at most
+#endif
+            deferred = (*it)->as_deferred_view();
+          }
+          else
+          {
+#ifdef DEBUG_LEGION
+            assert((*it)->is_instance_view());
+            assert((*it)->as_instance_view()->is_materialized_view());
+#endif
+            MaterializedView *src_view = 
+              (*it)->as_instance_view()->as_materialized_view();
+            src_refs.add_instance(
+                InstanceRef(src_view->get_manager(), copy_mask));
+            src_views.push_back(src_view);
+          }
+        }
+        // See if we need to ask the mapper to pick an order
+        if (src_views.size() > 1)
+        {
+          std::vector<unsigned> ranking;
+          InstanceRef target(dst->get_manager(), copy_mask);
+          // Ask the mapper to pick the ranking
+          info.op->select_sources(target, src_refs, ranking);
+          // Just need to grab the first one
+          if (ranking.empty())
+            instance = src_views.front();
+          else
+            instance = src_views[ranking.front()];
+        }
+        else if (!src_views.empty())
+          instance = src_views.front();
+      }
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
     void RegionTreeNode::issue_grouped_copies(const TraversalInfo &info,
                                               MaterializedView *dst,
                                               bool restrict_out,
@@ -12633,148 +13801,158 @@ namespace Legion {
                            LegionMap<ApEvent,FieldMask>::aligned &preconditions,
                                        const FieldMask &update_mask,
            const LegionMap<MaterializedView*,FieldMask>::aligned &src_instances,
-                                             VersionTracker *src_versions,
+                                              VersionTracker *src_versions,
                           LegionMap<ApEvent,FieldMask>::aligned &postconditions,
                                              CopyAcrossHelper *helper/*= NULL*/,
-                                             RegionTreeNode *intersect/*=NULL*/)
+                                             RegionTreeNode *intersect/*=NULL*/,
+      const LegionMap<IndexSpaceExpression*,FieldMask>::aligned *masks/*=NULL*/,
+            LegionMap<IndexSpaceExpression*,FieldMask>::aligned *perf/*=NULL*/)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(context->runtime,REGION_NODE_ISSUE_GROUPED_COPIES_CALL);
       // Now let's build maximal sets of fields which have
-      // identical event preconditions. Use a list so our
-      // iterators remain valid under insertion and push back
-      LegionList<EventSet>::aligned precondition_sets;
-      compute_event_sets(update_mask, preconditions, precondition_sets);
+      // identical event preconditions. 
+      LegionList<FieldSet<ApEvent> >::aligned precondition_sets;
+      compute_field_sets<ApEvent>(update_mask, preconditions,precondition_sets);
       // Now that we have our precondition sets, it's time
       // to issue the distinct copies to the low-level runtime
       // Issue a copy for each of the different precondition sets
-      const AddressSpaceID local_space = context->runtime->address_space;
-      for (LegionList<EventSet>::aligned::iterator pit = 
+      for (LegionList<FieldSet<ApEvent> >::aligned::iterator pit = 
             precondition_sets.begin(); pit != 
             precondition_sets.end(); pit++)
       {
-        EventSet &pre_set = *pit;
-        // Build the src and dst fields vectors
-        std::vector<CopySrcDstField> src_fields;
-        std::vector<CopySrcDstField> dst_fields;
-        LegionMap<MaterializedView*,FieldMask>::aligned update_views;
-        for (LegionMap<MaterializedView*,FieldMask>::aligned::const_iterator 
-              it = src_instances.begin(); it != src_instances.end(); it++)
+        FieldSet<ApEvent> &pre_set = *pit;
+        const ApEvent copy_pre = Runtime::merge_events(pre_set.elements);
+        // If we have different write masks then we have to issue
+        // different copies for each of the different masks
+        if (masks != NULL)
         {
-          FieldMask op_mask = pre_set.set_mask & it->second;
-          if (!!op_mask)
+          // Find any write masks that we overlap with 
+          // and issue copies for them specifically
+          for (LegionMap<IndexSpaceExpression*,FieldMask>::aligned::
+                const_iterator it = masks->begin(); it != masks->end(); it++)
           {
-            it->first->copy_from(op_mask, src_fields);
-            dst->copy_to(op_mask, dst_fields, helper);
-            update_views[it->first] = op_mask;
+            const FieldMask overlap = pre_set.set_mask & it->second;
+            if (!overlap)
+              continue;
+            issue_masked_copy(info, overlap, dst, restrict_out,
+                predicate_guard, copy_pre, src_instances, src_versions,
+                postconditions, helper, intersect, it->first, perf);
+            pre_set.set_mask -= overlap;
+            if (!pre_set.set_mask)
+              break;
           }
+          // If we don't have any remaining fields then we're done
+          // otherwise we fall through and issue an unmasked copy
+          // for all the remaining fields
+          if (!pre_set.set_mask)
+            continue;
         }
-#ifdef DEBUG_LEGION
-        assert(!src_fields.empty());
-        assert(!dst_fields.empty());
-        assert(src_fields.size() == dst_fields.size());
-#endif
-        // Now that we've got our offsets ready, we
-        // can now issue the copy to the low-level runtime
-        ApEvent copy_pre = Runtime::merge_events(pre_set.preconditions);
-        ApEvent copy_post = issue_copy(info.op, src_fields, dst_fields, 
-                                       copy_pre, predicate_guard, intersect);
-        // Save the copy post in the post conditions
-        if (copy_post.exists())
-        {
-          // Register copy post with the source views
-          // Note it is up to the caller to make sure the event
-          // gets registered with the destination
-          for (LegionMap<MaterializedView*,FieldMask>::aligned::const_iterator 
-                it = update_views.begin(); it != update_views.end(); it++)
-          {
-            it->first->add_copy_user(0/*redop*/, copy_post, src_versions,
-                                     info.op->get_unique_op_id(), info.index,
-                                     it->second, true/*reading*/, restrict_out,
-                                     local_space, info.map_applied_events);
-          }
-          postconditions[copy_post] = pre_set.set_mask;
-        }
+        issue_masked_copy(info, pre_set.set_mask, dst, restrict_out,
+            predicate_guard, copy_pre, src_instances, src_versions,
+            postconditions, helper, intersect, NULL/*mask*/, perf);
       }
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void RegionTreeNode::compute_event_sets(FieldMask update_mask, 
-                    const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
-                    LegionList<EventSet>::aligned &precondition_sets)
+    void RegionTreeNode::issue_masked_copy(const TraversalInfo &info, 
+                                           const FieldMask &copy_mask,
+                                           MaterializedView *dst, 
+                                           bool restrict_out,
+                                           PredEvent predicate_guard, 
+                                           ApEvent copy_pre,
+           const LegionMap<MaterializedView*,FieldMask>::aligned &src_instances,
+                                           VersionTracker *src_versions,
+                 LegionMap<ApEvent,FieldMask>::aligned &postconditions,
+                                           CopyAcrossHelper *helper,
+                                           RegionTreeNode *intersect,
+                                           IndexSpaceExpression *mask,
+                 LegionMap<IndexSpaceExpression*,FieldMask>::aligned *perf)
     //--------------------------------------------------------------------------
     {
-      for (LegionMap<ApEvent,FieldMask>::aligned::const_iterator pit = 
-            preconditions.begin(); pit != preconditions.end(); pit++)
+      // Build the src and dst fields vectors
+      std::vector<CopySrcDstField> src_fields;
+      std::vector<CopySrcDstField> dst_fields;
+      LegionMap<MaterializedView*,FieldMask>::aligned update_views;
+      FieldMask op_mask;
+      for (LegionMap<MaterializedView*,FieldMask>::aligned::const_iterator 
+            it = src_instances.begin(); it != src_instances.end(); it++)
       {
-        bool inserted = false;
-        // Also keep track of which fields have updates
-        // but don't have any preconditions
-        update_mask -= pit->second;
-        FieldMask remaining = pit->second;
-        // Insert this event into the precondition sets 
-        for (LegionList<EventSet>::aligned::iterator it = 
-              precondition_sets.begin(); it != precondition_sets.end(); it++)
-        {
-          // Easy case, check for equality
-          if (remaining == it->set_mask)
-          {
-            it->preconditions.insert(pit->first);
-            inserted = true;
-            break;
-          }
-          FieldMask overlap = remaining & it->set_mask;
-          // Easy case, they are disjoint so keep going
-          if (!overlap)
-            continue;
-          // Moderate case, we are dominated, split into two sets
-          // reusing existing set and making a new set
-          if (overlap == remaining)
-          {
-            // Leave the existing set and make it the difference 
-            it->set_mask -= overlap;
-            precondition_sets.push_back(EventSet(overlap));
-            EventSet &last = precondition_sets.back();
-            last.preconditions = it->preconditions;
-            last.preconditions.insert(pit->first);
-            inserted = true;
-            break;
-          }
-          // Moderate case, we dominate the existing set
-          if (overlap == it->set_mask)
-          {
-            // Add ourselves to the existing set and then
-            // keep going for the remaining fields
-            it->preconditions.insert(pit->first);
-            remaining -= overlap;
-            // Can't consider ourselves added yet
-            continue;
-          }
-          // Hard case, neither dominates, compute three
-          // distinct sets of fields, keep left one in
-          // place and reduce scope, add new one at the
-          // end for overlap, continue iterating for right one
-          it->set_mask -= overlap;
-          const std::set<ApEvent> &temp_preconditions = it->preconditions;
-          it = precondition_sets.insert(it, EventSet(overlap));
-          it->preconditions = temp_preconditions;
-          it->preconditions.insert(pit->first);
-          remaining -= overlap;
+        const FieldMask overlap= copy_mask & it->second;
+        if (!overlap)
           continue;
-        }
-        if (!inserted)
-        {
-          precondition_sets.push_back(EventSet(remaining));
-          EventSet &last = precondition_sets.back();
-          last.preconditions.insert(pit->first);
-        }
+        it->first->copy_from(overlap, src_fields);
+        dst->copy_to(overlap, dst_fields, helper);
+        update_views[it->first] = overlap;
+        op_mask |= overlap;
+        if (op_mask == copy_mask)
+          break;
       }
-      // For any fields which need copies but don't have
-      // any preconditions, but them in their own set.
-      // Put it on the front because it is the copy with
-      // no preconditions so it can start right away!
-      if (!!update_mask)
-        precondition_sets.push_front(EventSet(update_mask));
+#ifdef DEBUG_LEGION
+      assert(!src_fields.empty());
+      assert(!dst_fields.empty());
+      assert(src_fields.size() == dst_fields.size());
+#endif
+      // Now that we've got our offsets ready, we
+      // can now issue the copy to the low-level runtime
+      ApEvent copy_post = issue_copy(info.op, src_fields, dst_fields, 
+                           copy_pre, predicate_guard, intersect, mask,
+                           0/*redop*/, false/*fold*/, perf, &copy_mask);
+      // Save the copy post in the post conditions
+      if (copy_post.exists())
+      {
+        const AddressSpaceID local_space = context->runtime->address_space;
+        // Register copy post with the source views
+        // Note it is up to the caller to make sure the event
+        // gets registered with the destination
+        for (LegionMap<MaterializedView*,FieldMask>::aligned::const_iterator 
+              it = update_views.begin(); it != update_views.end(); it++)
+        {
+          it->first->add_copy_user(0/*redop*/, copy_post, src_versions,
+                                   info.op->get_unique_op_id(), info.index,
+                                   it->second, true/*reading*/, restrict_out,
+                                   local_space, info.map_applied_events);
+        }
+        postconditions[copy_post] = copy_mask;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    ApEvent RegionTreeNode::issue_single_copy(const TraversalInfo &info,
+                                MaterializedView *dst, bool restrict_out,
+                                PredEvent predicate_guard, ApEvent copy_pre,
+                                const FieldMask &copy_mask,
+                                MaterializedView *src,
+                                VersionTracker *src_version_tracker,
+                                CopyAcrossHelper *across_helper,
+                                RegionTreeNode *intersect,
+                                IndexSpaceExpression *mask)
+    //--------------------------------------------------------------------------
+    {
+      // Build the src and dst fields vectors
+      std::vector<CopySrcDstField> src_fields;
+      std::vector<CopySrcDstField> dst_fields;
+      src->copy_from(copy_mask, src_fields);
+      dst->copy_to(copy_mask, dst_fields, across_helper);
+#ifdef DEBUG_LEGION
+      assert(!src_fields.empty());
+      assert(!dst_fields.empty());
+      assert(src_fields.size() == dst_fields.size());
+#endif
+      // Now that we've got our offsets ready, we
+      // can now issue the copy to the low-level runtime
+      ApEvent copy_post = issue_copy(info.op, src_fields, dst_fields, 
+                           copy_pre, predicate_guard, intersect, mask,
+                           0/*redop*/, false/*fold*/);
+      if (copy_post.exists())
+      {
+        const AddressSpaceID local_space = context->runtime->address_space;
+        src->add_copy_user(0/*redop*/, copy_post, src_version_tracker,
+                           info.op->get_unique_op_id(), info.index,
+                           copy_mask, true/*reading*/, restrict_out,
+                           local_space, info.map_applied_events);
+      }
+      return copy_post;
     }
 
     //--------------------------------------------------------------------------
@@ -14099,6 +15277,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    IndexSpaceExpression* RegionNode::get_index_space_expression(void) const
+    //--------------------------------------------------------------------------
+    {
+      return row_source;
+    }
+
+    //--------------------------------------------------------------------------
     RegionTreeID RegionNode::get_tree_id(void) const
     //--------------------------------------------------------------------------
     {
@@ -14121,11 +15306,13 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ApEvent RegionNode::issue_copy(Operation *op,
-                        const std::vector<CopySrcDstField> &src_fields,
-                        const std::vector<CopySrcDstField> &dst_fields,
-                        ApEvent precondition, PredEvent predicate_guard,
-                        RegionTreeNode *intersect/*=NULL*/,
-                        ReductionOpID redop /*=0*/,bool reduction_fold/*=true*/)
+                      const std::vector<CopySrcDstField> &src_fields,
+                      const std::vector<CopySrcDstField> &dst_fields,
+                      ApEvent precondition, PredEvent predicate_guard,
+                      RegionTreeNode *intersect, IndexSpaceExpression *mask,
+                      ReductionOpID redop /*=0*/,bool reduction_fold/*=true*/,
+                      LegionMap<IndexSpaceExpression*,FieldMask>::aligned *perf,
+                      const FieldMask *performed_mask)
     //--------------------------------------------------------------------------
     {
 #ifdef LEGION_SPY
@@ -14139,13 +15326,12 @@ namespace Legion {
       ApEvent result = row_source->issue_copy(op, realm_src_fields, 
           realm_dst_fields, precondition, predicate_guard, 
           (intersect == NULL) ? NULL : intersect->get_row_source(),
-          redop, reduction_fold);
-      ApEvent copy_pre = precondition;
+          mask, redop, reduction_fold, perf, performed_mask);
       if ((op != NULL) && op->has_execution_fence_event())
-        copy_pre = Runtime::merge_events(copy_pre,
-                                         op->get_execution_fence_event());
-      LegionSpy::log_copy_events(op->get_unique_op_id(), handle, copy_pre,
-                                 result);
+        precondition= Runtime::merge_events(precondition,
+                                            op->get_execution_fence_event());
+      LegionSpy::log_copy_events(op->get_unique_op_id(), handle, 
+                                 precondition, result);
       for (unsigned idx = 0; idx < src_fields.size(); idx++)
         LegionSpy::log_copy_field(result, src_fields[idx].field_id,
                                   src_fields[idx].inst_event,
@@ -14172,19 +15358,21 @@ namespace Legion {
       return row_source->issue_copy(op, src_fields, dst_fields,
           precondition, predicate_guard, 
           (intersect == NULL) ? NULL : intersect->get_row_source(),
-          redop, reduction_fold);
+          mask, redop, reduction_fold, perf, performed_mask);
 #endif
     }
 
     //--------------------------------------------------------------------------
     ApEvent RegionNode::issue_fill(Operation *op,
-                        const std::vector<CopySrcDstField> &dst_fields,
-                        const void *fill_value, size_t fill_size,
-                        ApEvent precondition, PredEvent predicate_guard,
+                      const std::vector<CopySrcDstField> &dst_fields,
+                      const void *fill_value, size_t fill_size,
+                      ApEvent precondition, PredEvent predicate_guard,
 #ifdef LEGION_SPY
-                        UniqueID fill_uid,
+                      UniqueID fill_uid,
 #endif
-                        RegionTreeNode *intersect)
+                      RegionTreeNode *intersect, IndexSpaceExpression *mask,
+                      LegionMap<IndexSpaceExpression*,FieldMask>::aligned *perf,
+                      const FieldMask *performed_mask)
     //--------------------------------------------------------------------------
     {
       
@@ -14195,13 +15383,13 @@ namespace Legion {
         realm_dst_fields[idx] = dst_fields[idx];
       ApEvent result = row_source->issue_fill(op, realm_dst_fields,
           fill_value, fill_size, precondition, predicate_guard,
-          (intersect == NULL) ? NULL : intersect->get_row_source());
-      ApEvent fill_pre = precondition;
+          (intersect == NULL) ? NULL : intersect->get_row_source(), 
+          mask, perf, performed_mask);
       if ((op != NULL) && op->has_execution_fence_event())
-        fill_pre = Runtime::merge_events(fill_pre,
-                                         op->get_execution_fence_event());
-      LegionSpy::log_fill_events(op->get_unique_op_id(), handle, fill_pre,
-                                 result, fill_uid);
+        precondition = Runtime::merge_events(precondition,
+                                             op->get_execution_fence_event());
+      LegionSpy::log_fill_events(op->get_unique_op_id(), handle, 
+                                 precondition, result, fill_uid);
       for (unsigned idx = 0; idx < dst_fields.size(); idx++)
         LegionSpy::log_fill_field(result, dst_fields[idx].field_id,
                                   dst_fields[idx].inst_event);
@@ -14225,7 +15413,8 @@ namespace Legion {
 #else
       return row_source->issue_fill(op, dst_fields,
           fill_value, fill_size, precondition, predicate_guard,
-          (intersect == NULL) ? NULL : intersect->get_row_source());
+          (intersect == NULL) ? NULL : intersect->get_row_source(),
+          mask, perf, performed_mask);
 #endif
     }
 
@@ -15059,15 +16248,15 @@ namespace Legion {
         if (sync_precondition.exists())
           preconditions[sync_precondition] = fill_mask;
         // Sort the preconditions into event sets
-        LegionList<EventSet>::aligned event_sets;
-        compute_event_sets(fill_mask, preconditions, event_sets);
+        LegionList<FieldSet<ApEvent> >::aligned event_sets;
+        compute_field_sets<ApEvent>(fill_mask, preconditions, event_sets);
         // Iterate over the event sets and issue the fill operations on 
         // the different fields
-        for (LegionList<EventSet>::aligned::iterator pit = 
+        for (LegionList<FieldSet<ApEvent> >::aligned::iterator pit = 
               event_sets.begin(); pit != event_sets.end(); pit++)
         {
           // If we have a predicate guard we add that to the set now
-          ApEvent precondition = Runtime::merge_events(pit->preconditions);
+          ApEvent precondition = Runtime::merge_events(pit->elements);
           std::vector<CopySrcDstField> dst_fields;
           target->copy_to(pit->set_mask, dst_fields);
           ApEvent fill_event = issue_fill(op, dst_fields, value, 
@@ -15925,6 +17114,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    IndexSpaceExpression* PartitionNode::get_index_space_expression(void) const
+    //--------------------------------------------------------------------------
+    {
+      return row_source->get_union_expression();
+    }
+
+    //--------------------------------------------------------------------------
     RegionTreeID PartitionNode::get_tree_id(void) const
     //--------------------------------------------------------------------------
     {
@@ -15947,26 +17143,31 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ApEvent PartitionNode::issue_copy(Operation *op,
-                        const std::vector<CopySrcDstField> &src_fields,
-                        const std::vector<CopySrcDstField> &dst_fields,
-                        ApEvent precondition, PredEvent predicate_guard,
-                        RegionTreeNode *intersect/*=NULL*/,
-                        ReductionOpID redop /*=0*/,bool reduction_fold/*=true*/)
+                      const std::vector<CopySrcDstField> &src_fields,
+                      const std::vector<CopySrcDstField> &dst_fields,
+                      ApEvent precondition, PredEvent predicate_guard,
+                      RegionTreeNode *intersect, IndexSpaceExpression *mask,
+                      ReductionOpID redop /*=0*/,bool reduction_fold/*=true*/,
+                      LegionMap<IndexSpaceExpression*,FieldMask>::aligned *perf,
+                      const FieldMask *performed_mask)
     //--------------------------------------------------------------------------
     {
       return parent->issue_copy(op, src_fields, dst_fields, precondition,
-                      predicate_guard, intersect, redop, reduction_fold);
+                                predicate_guard, intersect, mask, redop, 
+                                reduction_fold, perf, performed_mask);
     }
 
     //--------------------------------------------------------------------------
     ApEvent PartitionNode::issue_fill(Operation *op,
-                        const std::vector<CopySrcDstField> &dst_fields,
-                        const void *fill_value, size_t fill_size,
-                        ApEvent precondition, PredEvent predicate_guard,
+                      const std::vector<CopySrcDstField> &dst_fields,
+                      const void *fill_value, size_t fill_size,
+                      ApEvent precondition, PredEvent predicate_guard,
 #ifdef LEGION_SPY
-                        UniqueID fill_uid,
+                      UniqueID fill_uid,
 #endif
-                        RegionTreeNode *intersect)
+                      RegionTreeNode *intersect, IndexSpaceExpression *mask,
+                      LegionMap<IndexSpaceExpression*,FieldMask>::aligned *perf,
+                      const FieldMask *performed_mask)
     //--------------------------------------------------------------------------
     {
       return parent->issue_fill(op, dst_fields, fill_value, fill_size, 
@@ -15974,7 +17175,7 @@ namespace Legion {
 #ifdef LEGION_SPY
                                 fill_uid,
 #endif
-                                intersect);
+                                intersect, mask, perf, performed_mask);
     }
 
     //--------------------------------------------------------------------------

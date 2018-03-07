@@ -281,8 +281,6 @@ namespace Legion {
                                   std::vector<unsigned> &ranking);
       virtual void update_atomic_locks(Reservation lock, bool exclusive);
       virtual ApEvent get_restrict_precondition(void) const;
-      virtual PhysicalManager* select_temporary_instance(PhysicalManager *dst,
-                              unsigned index, const FieldMask &needed_fields);
       virtual unsigned find_parent_index(unsigned idx);
       virtual VersionInfo& get_version_info(unsigned idx);
       virtual RestrictInfo& get_restrict_info(unsigned idx);
