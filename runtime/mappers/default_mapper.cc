@@ -2484,42 +2484,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    PhysicalInstance DefaultMapper::default_policy_create_temporary(
-         const MapperContext ctx, LogicalRegion region, PhysicalInstance target)
-    //--------------------------------------------------------------------------
-    {
-      PhysicalInstance result;
-      std::vector<LogicalRegion> create_regions(1, region);
-      // Always make the temporary with the same layout as the target
-      LayoutConstraintID layout_id = target.get_layout_id();
-      // Try making it in the same memory
-      Memory target_mem = target.get_location();
-      // Give these temporary instances minimum priority
-      if (runtime->create_physical_instance(ctx, target_mem, layout_id,
-              create_regions, result, true/*acquire*/, GC_MAX_PRIORITY))
-        return result;
-      // If that didn't work, try making it in any memory with affinity
-      // to the target memory
-      Machine::MemoryQuery other_mems(machine);
-      other_mems.best_affinity_to(target_mem);
-      for (Machine::MemoryQuery::iterator it = other_mems.begin();
-            it != other_mems.end(); it++)
-      {
-        if (runtime->create_physical_instance(ctx, *it, layout_id,
-              create_regions, result, true/*acquire*/, GC_MAX_PRIORITY))
-          return result;
-      }
-      // If that didn't work we'll punt for now. We can try puting it in 
-      // some other weird memory that may result in a multi-hop copy later
-      log_mapper.error("Default mapper error. Mapper %s failed to create "
-                       "a temporary instance in any reasonable memory.",
-                       get_mapper_name());
-      assert(false);
-      return result;
-    }
-#endif
-
-    //--------------------------------------------------------------------------
     void DefaultMapper::speculate(const MapperContext      ctx,
                                   const Task&              task,
                                         SpeculativeOutput& output)
