@@ -4860,7 +4860,7 @@ namespace Legion {
           if (it->second.current_state == PENDING_COLLECTED_STATE)
             continue;
           // Skip any unattached external instances too
-          if (it->second.is_unattached_external())
+          if (it->second.unattached_external)
             continue;
           if (!it->first->meets_region_tree(regions))
             continue;
@@ -4913,7 +4913,7 @@ namespace Legion {
           if (it->second.current_state == PENDING_COLLECTED_STATE)
             continue;
           // Skip any unattached external instances too
-          if (it->second.is_unattached_external())
+          if (it->second.unattached_external)
             continue;
           if (!it->first->meets_region_tree(regions))
             continue;
@@ -4967,7 +4967,7 @@ namespace Legion {
           if (it->second.current_state == PENDING_COLLECTED_STATE)
             continue;
           // Skip any unattached external instances too
-          if (it->second.is_unattached_external())
+          if (it->second.unattached_external)
             continue;
           if (!it->first->meets_region_tree(regions))
             continue;
@@ -5017,7 +5017,7 @@ namespace Legion {
           if (it->second.current_state == PENDING_COLLECTED_STATE)
             continue;
           // Skip any unattached external instances too
-          if (it->second.is_unattached_external())
+          if (it->second.unattached_external)
             continue;
           if (!it->first->meets_region_tree(regions))
             continue;
@@ -5067,6 +5067,9 @@ namespace Legion {
           // Only consider ones that are currently valid
           if (it->second.current_state != VALID_STATE)
             continue;
+          // Skip any unattached external instances too
+          if (it->second.unattached_external)
+            continue;
           it->first->add_base_resource_ref(MEMORY_MANAGER_REF);
           candidates.push_back(it->first);
         }
@@ -5115,6 +5118,9 @@ namespace Legion {
         {
           // Only consider ones that are currently valid
           if (it->second.current_state != VALID_STATE)
+            continue;
+          // Skip any unattached external instances too
+          if (it->second.unattached_external)
             continue;
           it->first->add_base_resource_ref(MEMORY_MANAGER_REF);
           candidates.push_back(it->first);
@@ -5302,11 +5308,14 @@ namespace Legion {
           // Skip it if has already been collected
           if (it->second.current_state == PENDING_COLLECTED_STATE)
             continue;
-          // Check if the region trees are the same
-          if (!it->first->meets_region_tree(regions))
+          // Skip any unattached external instances too
+          if (it->second.unattached_external)
             continue;
           // If we already considered it we don't have to do it again
           if (candidates.find(it->first) != candidates.end())
+            continue;
+          // Check if the region trees are the same
+          if (!it->first->meets_region_tree(regions))
             continue;
           // We found an alternate candidate so break out so we can test it
           it->first->add_base_resource_ref(MEMORY_MANAGER_REF);
@@ -5410,11 +5419,14 @@ namespace Legion {
           // Skip it if has already been collected
           if (it->second.current_state == PENDING_COLLECTED_STATE)
             continue;
-          // Check if the region trees are the same
-          if (!it->first->meets_region_tree(regions))
+          // Skip any unattached external instances too
+          if (it->second.unattached_external)
             continue;
           // If we already considered it we don't have to do it again
           if (candidates.find(it->first) != candidates.end())
+            continue;
+          // Check if the region trees are the same
+          if (!it->first->meets_region_tree(regions))
             continue;
           // We found an alternate candidate so break out so we can test it
           it->first->add_base_resource_ref(MEMORY_MANAGER_REF);
@@ -5518,7 +5530,7 @@ namespace Legion {
 #endif
         InstanceInfo &info = current_instances[manager];
         info.instance_size = instance_size;
-        info.is_external = true;
+        info.unattached_external = true;
       }
     }
 
@@ -5535,10 +5547,9 @@ namespace Legion {
         current_instances.find(manager);
 #ifdef DEBUG_LEGION
       assert(finder != current_instances.end());
-      assert(finder->second.is_external);
-      assert(!finder->second.attached_external);
+      assert(finder->second.unattached_external);
 #endif
-      finder->second.attached_external = true;
+      finder->second.unattached_external = false;
     }
 
     //--------------------------------------------------------------------------
