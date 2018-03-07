@@ -612,11 +612,9 @@ namespace Legion {
       LegionList<LogicalUser,LOGICAL_REC_ALLOC>::track_aligned logical_records;
       // A set of advance operations recorded during logical traversal
       LegionList<LogicalUser,LOGICAL_REC_ALLOC>::track_aligned logical_advances;
-      // A dependence tracker for this operation
-      union {
-        MappingDependenceTracker *mapping;
-        CommitDependenceTracker  *commit;
-      } dependence_tracker;
+      // Dependence trackers for detecting when it is safe to map and commit
+      MappingDependenceTracker *mapping_tracker;
+      CommitDependenceTracker  *commit_tracker;
     };
 
     /**

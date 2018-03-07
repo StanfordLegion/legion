@@ -1178,7 +1178,14 @@ namespace Realm {
 	  // if we're going to spin as a writer, set a flag that prevents
 	  //  new readers from taking the lock until we (or some other writer)
 	  //  get our turn
-	  __sync_fetch_and_or(&frs.state, STATE_WRITER_WAITING);
+          // unfortunately, this update is not atomic with the test above,
+          //  so only set the flag if the state has not been changed to avoid
+          //  setting the WAITING flag and then possibly going to sleep if
+          //  some exceptional condition comes along - if the CAS fails
+          //  because the read count changed, that's not the end of the world
+          __sync_bool_compare_and_swap(&frs.state,
+                                       cur_state,
+                                       cur_state | STATE_WRITER_WAITING);
 
 	  mm_pause();
 	  continue;
@@ -1213,7 +1220,16 @@ namespace Realm {
 	    break;
 	  }
 
+          // case 3: if we're back to normal readers/writers, don't sleep
+          //   after all
+          if((cur_state & ~(STATE_READER_COUNT_MASK | STATE_WRITER | STATE_WRITER_WAITING)) == 0) {
+            wait_for = Event::NO_EVENT;
+            break;
+          }
+
 	  // other cases?
+	  log_reservation.fatal() << "wrlock_slow: unexpected state = "
+				  << std::hex << cur_state << std::dec;
 	  assert(0);
 	}
 
@@ -1353,13 +1369,22 @@ namespace Realm {
 	    break;
 	  }
 
-	  // case 2: a current lock holder is sleeping
+	  // case 3: a current lock holder is sleeping
 	  if((cur_state & STATE_SLEEPER) != 0) {
 	    wait_for = frs.sleeper_event;
 	    break;
 	  }
 
+          // case 4: if we're back to normal readers/writers, don't sleep
+          //   after all
+          if((cur_state & ~(STATE_READER_COUNT_MASK | STATE_WRITER | STATE_WRITER_WAITING)) == 0) {
+            wait_for = Event::NO_EVENT;
+            break;
+          }
+
 	  // other cases?
+	  log_reservation.fatal() << "rdlock_slow: unexpected state = "
+				  << std::hex << cur_state << std::dec;
 	  assert(0);
 	}
 
@@ -1462,10 +1487,15 @@ namespace Realm {
       // set the sleeper flag - it must not already be set
       State old_state = __sync_fetch_and_add(&frs.state, STATE_SLEEPER);
       assert((old_state & STATE_SLEEPER) == 0);
+      // if the WRITER_WAITING bit is set, clear it, since it'll sleep now
+      if((old_state & STATE_WRITER_WAITING) != 0)
+        __sync_fetch_and_and(&frs.state, ~STATE_WRITER_WAITING);
       frs.sleeper_count = 1;
     } else {
       assert(frs.sleeper_event.exists());
       assert((frs.state & STATE_SLEEPER) != 0);
+      // double-check that WRITER_WAITING isn't set
+      assert((frs.state & STATE_WRITER_WAITING) == 0);
       frs.sleeper_count++;
       if(guard_event != frs.sleeper_event)
 	frs.sleeper_event = Event::merge_events(frs.sleeper_event,
@@ -1488,6 +1518,8 @@ namespace Realm {
       // clear the sleeper flag - it must already be set
       State old_state = __sync_fetch_and_sub(&frs.state, STATE_SLEEPER);
       assert((old_state & STATE_SLEEPER) != 0);
+      // double-check that WRITER_WAITING isn't set
+      assert((frs.state & STATE_WRITER_WAITING) == 0);
       frs.sleeper_count = 0;
       assert(frs.sleeper_event.exists());
       frs.sleeper_event = Event::NO_EVENT;

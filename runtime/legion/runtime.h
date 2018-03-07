@@ -694,8 +694,9 @@ namespace Legion {
       enum InstanceState {
         COLLECTABLE_STATE = 0,
         ACTIVE_STATE = 1,
-        ACTIVE_COLLECTED_STATE = 2,
+        PENDING_COLLECTED_STATE = 2, // sticky
         VALID_STATE = 3,
+        PENDING_ACQUIRE_STATE = 4,
       };
     public:
       struct InstanceInfo {
@@ -703,31 +704,14 @@ namespace Legion {
         InstanceInfo(void)
           : current_state(COLLECTABLE_STATE), 
             deferred_collect(RtUserEvent::NO_RT_USER_EVENT),
-            instance_size(0), min_priority(0) { }
+            instance_size(0), pending_acquires(0), min_priority(0) { }
       public:
         InstanceState current_state;
         RtUserEvent deferred_collect;
         size_t instance_size;
+        unsigned pending_acquires;
         GCPriority min_priority;
         std::map<std::pair<MapperID,Processor>,GCPriority> mapper_priorities;
-      };
-      template<bool SMALLER>
-      struct CollectableInfo {
-      public:
-        CollectableInfo(void)
-          : manager(NULL), instance_size(0), priority(0) { }
-        CollectableInfo(PhysicalManager *m, size_t size, GCPriority p);
-        CollectableInfo(const CollectableInfo &rhs);
-        ~CollectableInfo(void);
-      public:
-        CollectableInfo& operator=(const CollectableInfo &rhs);
-      public:
-        bool operator<(const CollectableInfo &rhs) const;
-        bool operator==(const CollectableInfo &rhs) const;
-      public:
-        PhysicalManager *manager;
-        size_t instance_size;
-        GCPriority priority;
       };
     public:
       MemoryManager(Memory mem, Runtime *rt);
@@ -746,6 +730,8 @@ namespace Legion {
       void deactivate_instance(PhysicalManager *manager);
       void validate_instance(PhysicalManager *manager);
       void invalidate_instance(PhysicalManager *manager);
+      bool attempt_acquire(PhysicalManager *manager);
+      void complete_acquire(PhysicalManager *manager);
     public:
       bool create_physical_instance(const LayoutConstraintSet &contraints,
                                     const std::vector<LogicalRegion> &regions,
@@ -849,14 +835,10 @@ namespace Legion {
                                     bool acquire, MapperID mapper_id, 
                                     Processor proc, GCPriority priority,
                                     bool tight_region_bounds, bool remote);
-      void record_deleted_instance(PhysicalManager *manager); 
-      void find_instances_by_state(size_t needed_size, InstanceState state, 
-                     std::set<CollectableInfo<true> > &smaller_instances,
-                     std::set<CollectableInfo<false> > &larger_instances) const;
-      template<bool SMALLER>
-      PhysicalManager* delete_and_allocate(InstanceBuilder &builder, 
-                            size_t needed_size, size_t &total_bytes_deleted,
-                      const std::set<CollectableInfo<SMALLER> > &instances);
+    public:
+      bool delete_by_size_and_state(const size_t needed_size, 
+                                    InstanceState state, bool larger_only); 
+      RtEvent detach_external_instance(PhysicalManager *manager);
     public:
       // The memory that we are managing
       const Memory memory;
@@ -2312,6 +2294,7 @@ namespace Legion {
                                                      Serializer &rez);
       void send_instance_request(AddressSpaceID target, Serializer &rez);
       void send_instance_response(AddressSpaceID target, Serializer &rez);
+      void send_external_detach(AddressSpaceID target, Serializer &rez);
       void send_gc_priority_update(AddressSpaceID target, Serializer &rez);
       void send_never_gc_response(AddressSpaceID target, Serializer &rez);
       void send_acquire_request(AddressSpaceID target, Serializer &rez);
@@ -2491,6 +2474,7 @@ namespace Legion {
       void handle_version_manager_unversioned_response(Deserializer &derez);
       void handle_instance_request(Deserializer &derez, AddressSpaceID source);
       void handle_instance_response(Deserializer &derez,AddressSpaceID source);
+      void handle_external_detach(Deserializer &derez);
       void handle_gc_priority_update(Deserializer &derez,AddressSpaceID source);
       void handle_never_gc_response(Deserializer &derez);
       void handle_acquire_request(Deserializer &derez, AddressSpaceID source);

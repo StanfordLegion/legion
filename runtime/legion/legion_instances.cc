@@ -594,26 +594,7 @@ namespace Legion {
             constraints->offset_constraints.end(); it++)
         LegionSpy::log_instance_offset_constraint(inst_event,
                                           it->fid, it->offset);
-    }
-
-    //--------------------------------------------------------------------------
-    void PhysicalManager::force_deletion(void)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(is_owner());
-#endif
-      log_garbage.spew("Force deleting physical instance " IDFMT " in memory "
-                       IDFMT "", instance.id, memory_manager->memory.id);
-#ifndef DISABLE_GC
-      std::vector<PhysicalInstance::DestroyedField> serdez_fields;
-      layout->compute_destroyed_fields(serdez_fields); 
-      if (!serdez_fields.empty())
-        instance.destroy(serdez_fields);
-      else
-        instance.destroy();
-#endif
-    }
+    } 
 
     //--------------------------------------------------------------------------
     void PhysicalManager::notify_active(ReferenceMutator *mutator)
@@ -903,6 +884,36 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool PhysicalManager::acquire_instance(ReferenceSource source,
+                                           ReferenceMutator *mutator)
+    //--------------------------------------------------------------------------
+    {
+      // Do an atomic operation to check to see if we are already valid
+      // and increment our count if we are, in this case the acquire 
+      // has succeeded and we are done, this should be the common case
+      // since we are likely already holding valid references elsewhere
+      // Note that we cannot do this for external instances as they might
+      // have been detached while still holding valid references so they
+      // have to go through the full path every time
+      if (!is_external_instance() && check_valid_and_increment(source))
+        return true;
+      // If we're not the owner, we're not going to succeed past this
+      // since we aren't on the same node as where the instance lives
+      // which is where the point of serialization is for garbage collection
+      if (!is_owner())
+        return false;
+      // Tell our manager, we're attempting an acquire, if it tells
+      // us false then we are not allowed to proceed
+      if (!memory_manager->attempt_acquire(this))
+        return false;
+      // At this point we're in the clear to add our valid reference
+      add_base_valid_ref(source, mutator);
+      // Complete the handshake with the memory manager
+      memory_manager->complete_acquire(this);
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
     void PhysicalManager::perform_deletion(RtEvent deferred_event)
     //--------------------------------------------------------------------------
     {
@@ -941,12 +952,41 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void PhysicalManager::force_deletion(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(is_owner());
+#endif
+      log_garbage.spew("Force deleting physical instance " IDFMT " in memory "
+                       IDFMT "", instance.id, memory_manager->memory.id);
+#ifndef DISABLE_GC
+      std::vector<PhysicalInstance::DestroyedField> serdez_fields;
+      layout->compute_destroyed_fields(serdez_fields); 
+      if (!serdez_fields.empty())
+        instance.destroy(serdez_fields);
+      else
+        instance.destroy();
+#endif
+    }
+
+    //--------------------------------------------------------------------------
     void PhysicalManager::set_garbage_collection_priority(MapperID mapper_id,
                                             Processor proc, GCPriority priority)
     //--------------------------------------------------------------------------
     {
       memory_manager->set_garbage_collection_priority(this, mapper_id,
                                                       proc, priority);
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent PhysicalManager::detach_external_instance(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(is_external_instance());
+#endif
+      return memory_manager->detach_external_instance(this);
     }
 
     /////////////////////////////////////////////////////////////
