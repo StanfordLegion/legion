@@ -5225,8 +5225,8 @@ namespace Legion {
       // If we get through all these and still can't collect then we're screwed
       const size_t needed_size = builder.compute_needed_size(runtime->forest);
       // Keep trying to delete large collectable instances first
-      while (delete_by_size_and_state(needed_size, COLLECTABLE_STATE, 
-                                      true/*large only*/))
+      while (!delete_by_size_and_state(needed_size, COLLECTABLE_STATE, 
+                                       true/*large only*/))
       {
         // See if we can make the instance
         PhysicalManager *result = 
@@ -5235,8 +5235,8 @@ namespace Legion {
           return result;
       }
       // Then try deleting as many small collectable instances next
-      while (delete_by_size_and_state(needed_size, COLLECTABLE_STATE,
-                                      false/*large only*/))
+      while (!delete_by_size_and_state(needed_size, COLLECTABLE_STATE,
+                                       false/*large only*/))
       {
         // See if we can make the instance
         PhysicalManager *result = 
@@ -5245,8 +5245,8 @@ namespace Legion {
           return result;
       }
       // Now switch to large objects still in the active state
-      while (delete_by_size_and_state(needed_size, ACTIVE_STATE,
-                                      true/*large only*/))
+      while (!delete_by_size_and_state(needed_size, ACTIVE_STATE,
+                                       true/*large only*/))
       {
         // See if we can make the instance
         PhysicalManager *result = 
@@ -5255,8 +5255,8 @@ namespace Legion {
           return result;
       }
       // Finally switch to doing small objects in the active state
-      while (delete_by_size_and_state(needed_size, ACTIVE_STATE,
-                                      false/*large only*/))
+      while (!delete_by_size_and_state(needed_size, ACTIVE_STATE,
+                                       false/*large only*/))
       {
         // See if we can make the instance
         PhysicalManager *result = 
