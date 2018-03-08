@@ -1879,6 +1879,7 @@ namespace Legion {
             instances.erase(instances.begin()+(*it));
         }
       }
+      resume_mapper_call(ctx);
       return (local_acquired && remote_acquired);
     }
 
