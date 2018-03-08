@@ -17,6 +17,8 @@
 #ifndef __LEGION_GARBAGE_COLLECTION__
 #define __LEGION_GARBAGE_COLLECTION__
 
+#define DEBUG_LEGION_GC
+
 #include "legion/legion_types.h"
 
 // This is a macro for enabling the use of remote references
