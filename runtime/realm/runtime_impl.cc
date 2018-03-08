@@ -2466,6 +2466,7 @@ namespace Realm {
       assert((signal == SIGILL) || (signal == SIGFPE) || 
              (signal == SIGABRT) || (signal == SIGSEGV) ||
              (signal == SIGBUS));
+#if 0
       void *bt[256];
       int bt_size = backtrace(bt, 256);
       char **bt_syms = backtrace_symbols(bt, bt_size);
@@ -2526,11 +2527,22 @@ namespace Realm {
       fflush(stderr);
       free(buffer);
       free(funcname);
+#endif
+      Backtrace bt;
+      bt.capture_backtrace(1 /* skip this handler */);
+      bt.lookup_symbols();
+      fflush(stdout);
+      fflush(stderr);
+      std::cout << std::flush;
+      std::cerr << "Signal " << signal << " received by process " << getpid()
+                << " (thread "  << std::hex << uintptr_t(pthread_self())
+                << std::dec << ") at: " << bt << std::flush;
       // returning would almost certainly cause this signal to be raised again,
       //  so sleep for a second in case other threads also want to chronicle
       //  their own deaths, and then exit
       sleep(1);
-      exit(1);
+      // don't bother trying to clean things up
+      _exit(1);
     }
 
   
