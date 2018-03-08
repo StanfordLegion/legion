@@ -837,7 +837,7 @@ namespace Legion {
       void process_gc_priority_update(Deserializer &derez, AddressSpaceID src);
       void process_never_gc_response(Deserializer &derez);
       void process_acquire_request(Deserializer &derez, AddressSpaceID source);
-      void process_acquire_response(Deserializer &derez);
+      void process_acquire_response(Deserializer &derez, AddressSpaceID src);
     protected:
       bool find_satisfying_instance(const LayoutConstraintSet &constraints,
                                     const std::vector<LogicalRegion> &regions,
@@ -2684,7 +2684,7 @@ namespace Legion {
       void handle_gc_priority_update(Deserializer &derez,AddressSpaceID source);
       void handle_never_gc_response(Deserializer &derez);
       void handle_acquire_request(Deserializer &derez, AddressSpaceID source);
-      void handle_acquire_response(Deserializer &derez);
+      void handle_acquire_response(Deserializer &derez, AddressSpaceID source);
       void handle_variant_request(Deserializer &derez, AddressSpaceID source);
       void handle_variant_response(Deserializer &derez);
       void handle_variant_broadcast(Deserializer &derez);

@@ -5860,7 +5860,7 @@ namespace Legion {
     void IndexSpaceNode::notify_invalid(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
-      std::vector<IndexPartNode*> to_delete;
+      std::vector<IndexPartNode*> to_destroy;
       if (is_owner())
       {
         // Need read-only lock while accessing these structures, 
@@ -5874,14 +5874,17 @@ namespace Legion {
         }
         for (std::map<LegionColor,IndexPartNode*>::const_iterator it = 
               color_map.begin(); it != color_map.end(); it++)
-          if (it->second->destroy_node(runtime->address_space))
-            to_delete.push_back(it->second);
+          to_destroy.push_back(it->second);
       }
       else // Remove the valid reference that we have on the owner
+      {
         send_remote_valid_update(owner_space, mutator, 1/*count*/,false/*add*/);
+        return;
+      }
       for (std::vector<IndexPartNode*>::const_iterator it = 
-            to_delete.begin(); it != to_delete.end(); it++)
-        delete (*it);
+            to_destroy.begin(); it != to_destroy.end(); it++)
+        if ((*it)->destroy_node(runtime->address_space))
+          delete (*it);
     }
 
     //--------------------------------------------------------------------------
@@ -6970,7 +6973,7 @@ namespace Legion {
     void IndexPartNode::notify_invalid(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
-      std::vector<IndexSpaceNode*> to_delete;
+      std::vector<IndexSpaceNode*> to_destroy;
       if (is_owner())
       {
         // Remove the valid reference that we hold on the color space
@@ -6987,14 +6990,17 @@ namespace Legion {
         }
         for (std::map<LegionColor,IndexSpaceNode*>::const_iterator it = 
               color_map.begin(); it != color_map.end(); it++)
-          if (it->second->destroy_node(runtime->address_space))
-            to_delete.push_back(it->second);
+          to_destroy.push_back(it->second);
       }
       else // Remove the valid reference that we have on the owner
+      {
         send_remote_valid_update(owner_space, mutator, 1/*count*/,false/*add*/);
+        return;
+      }
       for (std::vector<IndexSpaceNode*>::const_iterator it = 
-            to_delete.begin(); it != to_delete.end(); it++)
-        delete (*it);
+            to_destroy.begin(); it != to_destroy.end(); it++)
+        if ((*it)->destroy_node(runtime->address_space))
+          delete (*it);
     }
 
     //--------------------------------------------------------------------------

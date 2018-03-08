@@ -547,6 +547,8 @@ namespace Realm {
 			  size_t shared_memory, cudaStream_t stream);
       void setup_argument(const void *arg, size_t size, size_t offset);
       void launch(const void *func);
+      void launch_kernel(const void *func, dim3 grid_dim, dim3 block_dim, 
+                         void **args, size_t shared_memory, cudaStream_t stream);
 
       void gpu_memcpy(void *dst, const void *src, size_t size, cudaMemcpyKind kind);
       void gpu_memcpy_async(void *dst, const void *src, size_t size,
