@@ -454,7 +454,12 @@ namespace Realm {
       // TODO: memory needs to handle non-ready releases
       assert(precondition.has_triggered());
 
-      {
+      RegionInstanceImpl *impl = get_instance(i);
+
+      // better not be in the unallocated state...
+      assert(impl->metadata.inst_offset != size_t(-1));
+      // deallocate unless the allocation had failed
+      if(impl->metadata.inst_offset != size_t(-2)) {
 	AutoHSLLock al(allocator_mutex);
 	allocator.deallocate(i);
       }
