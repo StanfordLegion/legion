@@ -19,8 +19,6 @@
 
 #include "legion/legion_types.h"
 
-#define DEBUG_LEGION_GC
-
 // This is a macro for enabling the use of remote references
 // on distributed collectable objects. Remote references 
 // account for the transitory nature of references that are
