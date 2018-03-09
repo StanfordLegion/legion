@@ -7137,7 +7137,10 @@ namespace Legion {
     CompositeNode::CompositeNode(RegionTreeNode* node, CompositeBase *p,
                                  DistributedID own_did, bool root_own)
       : CompositeBase(node_lock), logical_node(node), parent(p), 
-        owner_did(own_did), root_owner(root_own), valid_version_states(NULL)
+        owner_did(own_did), root_owner(root_own)
+#ifndef CVOPT
+        , valid_version_states(NULL)
+#endif
     //--------------------------------------------------------------------------
     {
     }
@@ -7233,7 +7236,67 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       RtUserEvent capture_event;
-      std::set<RtEvent> preconditions; 
+      std::set<RtEvent> preconditions;
+#ifdef CVOPT
+      // Do a quick test with read-only lock first
+      {
+        AutoLock n_lock(node_lock,1,false/*exclusive*/);
+        // Remove any fields that have already been captured
+        mask -= captured_fields;
+        if (!mask)
+          return;
+        // See if there are any pending captures to wait for also
+        for (LegionMap<RtUserEvent,FieldMask>::aligned::const_iterator it = 
+              pending_captures.begin(); it != pending_captures.end(); it++)
+        {
+          if (it->second * mask)
+            continue;
+          preconditions.insert(it->first);
+          mask -= it->second;
+          if (!mask)
+            break;
+        }
+      }
+       
+      LegionMap<VersionState*,FieldMask>::aligned needed_states;
+      // If we still have fields we have to do more work
+      if (!!mask)
+      {
+        AutoLock n_lock(node_lock);
+        // Retest to see if we lost the race
+        mask -= captured_fields;
+        if (!mask)
+          return;
+        // See if there are any pending captures which we can wait for
+        for (LegionMap<RtUserEvent,FieldMask>::aligned::const_iterator it = 
+              pending_captures.begin(); it != pending_captures.end(); it++)
+        {
+          if (it->second * mask)
+            continue;
+          preconditions.insert(it->first);
+          mask -= it->second;
+          if (!mask)
+            break;
+        }
+        // If we still have fields then we are going to do a pending capture
+        if (!!mask)
+        {
+          for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it =
+                version_states.begin(); it != version_states.end(); it++)
+          {
+            const FieldMask overlap = it->second & mask;
+            if (!overlap)
+              continue;
+            needed_states[it->first] = overlap;
+          }
+          if (!needed_states.empty())
+          {
+            capture_event = Runtime::create_rt_user_event();
+            pending_captures[capture_event] = mask;
+          }
+        }
+      }
+#else
       LegionMap<VersionState*,FieldMask>::aligned needed_states;
       bool have_capture_fields = true;
       // Do a quick test with read-only lock first
@@ -7299,6 +7362,7 @@ namespace Legion {
           uncaptured_fields -= capture_mask;
         }
       }
+#endif
       if (capture_event.exists())
       {
         // Request final states for all the version states and then either
@@ -7552,12 +7616,14 @@ namespace Legion {
         {
           FieldMask state_mask;
           derez.deserialize(state_mask);
+#ifndef CVOPT
           const FieldMask diff_mask = state_mask - finder->second;
           if (!!diff_mask)
           {
             uncaptured_states[state] |= diff_mask;
             uncaptured_fields |= diff_mask;
           }
+#endif
           finder->second |= state_mask;
           // No need to add any references since it was already captured
 #ifdef DEBUG_LEGION
@@ -7588,8 +7654,10 @@ namespace Legion {
             // Version State is ready now, so we can unpack it directly
             FieldMask &state_mask = version_states[state];
             derez.deserialize(state_mask);
+#ifndef CVOPT
             uncaptured_states[state] = state_mask;
             uncaptured_fields |= state_mask;
+#endif
             state->add_nested_resource_ref(owner_did);
             // If we're the root owner then we also have to add our
             // gc ref, but no valid ref since we don't own it
@@ -7601,6 +7669,7 @@ namespace Legion {
       }
     }
 
+#ifndef CVOPT
     //--------------------------------------------------------------------------
     void CompositeNode::add_uncaptured_state(VersionState *state, 
                                              const FieldMask &state_mask)
@@ -7626,6 +7695,7 @@ namespace Legion {
         version_states[state] = state_mask;
       }
     }
+#endif
 
     //--------------------------------------------------------------------------
     /*static*/ void CompositeNode::handle_deferred_node_state(const void *args)
@@ -7638,8 +7708,10 @@ namespace Legion {
       LocalReferenceMutator mutator;
       if (nargs->root_owner)
         nargs->state->add_nested_gc_ref(nargs->owner_did, &mutator);
+#ifndef CVOPT
       // Add the state to the view
       nargs->proxy_this->add_uncaptured_state(nargs->state, *nargs->mask);
+#endif
       // Free up the mask that we allocated
       delete nargs->mask;
     }
@@ -7728,19 +7800,23 @@ namespace Legion {
       if (finder == version_states.end())
       {
         version_states[state] = mask;
+#ifndef CVOPT
         // Also need to update the uncaptured state
         uncaptured_states[state] = mask;
         uncaptured_fields |= mask;
+#endif
         state->add_nested_resource_ref(owner_did);
         // Root owners need gc and valid references on the tree
         // otherwise everyone else just needs a resource reference
         if (root_owner)
         {
           state->add_nested_gc_ref(owner_did, mutator);
+#ifndef CVOPT
           if (valid_version_states == NULL)
             valid_version_states = new std::vector<VersionState*>();
-          state->add_nested_valid_ref(owner_did, mutator);
           valid_version_states->push_back(state);
+#endif
+          state->add_nested_valid_ref(owner_did, mutator);
         }
       }
       else
@@ -7749,8 +7825,10 @@ namespace Legion {
         const FieldMask uncaptured_mask = mask - finder->second;
         if (!!uncaptured_mask)
         {
+#ifndef CVOPT
           uncaptured_states[state] |= uncaptured_mask;
           uncaptured_fields |= uncaptured_mask;
+#endif
           // Only need to update this if the fields aren't already valid
           finder->second |= uncaptured_mask;
         }
@@ -7777,6 +7855,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(root_owner); // should only be called on the root owner
 #endif
+#ifndef CVOPT
       // No need to check for deletion, we know we're also holding gc refs
       if (valid_version_states != NULL)
       {
@@ -7787,6 +7866,7 @@ namespace Legion {
         delete valid_version_states;
         valid_version_states = NULL;
       }
+#endif
     }
 
     //--------------------------------------------------------------------------

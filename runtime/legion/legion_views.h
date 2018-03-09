@@ -1541,7 +1541,9 @@ namespace Legion {
                  bool root_owner);
       void unpack_version_states(Deserializer &derez, Runtime *runtime,
                        std::set<RtEvent> &preconditions, bool need_lock);
+#ifndef CVOPT
       void add_uncaptured_state(VersionState *state, const FieldMask &mask);
+#endif
       static void handle_deferred_node_state(const void *args);
     public:
       void record_dirty_fields(const FieldMask &dirty_mask);
@@ -1567,14 +1569,22 @@ namespace Legion {
       // No need to hold references in general, but we do have to hold
       // them if we are the root child of a composite view subtree
       LegionMap<VersionState*,FieldMask>::aligned version_states;
+#ifndef CVOPT
       // Only used on the owner node to track the set of version 
       // states on which we hold valid references
       std::vector<VersionState*> *valid_version_states;
+#endif
     protected:
+#ifdef CVOPT
+      // Keep track of the fields we have captured
+      FieldMask captured_fields;
+      LegionMap<RtUserEvent,FieldMask>::aligned pending_captures;
+#else
       // Keep track of the fields for which we still need captures
       FieldMask uncaptured_fields;
       LegionMap<RtUserEvent,FieldMask>::aligned pending_captures;
       LegionMap<VersionState*,FieldMask>::aligned uncaptured_states;
+#endif
     }; 
 
     /**
