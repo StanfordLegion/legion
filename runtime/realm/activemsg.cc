@@ -53,6 +53,7 @@ static const void *ignore_gasnet_warning2 __attribute__((unused)) = (void *)_gas
 #endif
 
 #include "realm/activemsg.h"
+#include "realm/cmdline.h"
 
 #include <queue>
 #include <assert.h>
@@ -2434,51 +2435,35 @@ void init_endpoints(int gasnet_mem_size_in_mb,
 		    int registered_mem_size_in_mb,
 		    int registered_ib_mem_size_in_mb,
 		    Realm::CoreReservationSet& crs,
-		    int argc, const char *argv[])
+		    std::vector<std::string>& cmdline)
 {
-  size_t srcdatapool_size = 64 << 20;
+  size_t lmbsize_in_kb = 0;
+  size_t sdpsize_in_mb = 64;
+  size_t spillwarn_in_mb = 0;
+  size_t spillstep_in_mb = 0;
+  size_t spillstall_in_mb = 0;
 
-  for(int i = 1; i < argc; i++) {
-    if(!strcmp(argv[i], "-ll:numlmbs")) {
-      num_lmbs = atoi(argv[++i]);
-      continue;
-    }
+  Realm::CommandLineParser cp;
+  cp.add_option_int("-ll:numlmbs", num_lmbs)
+    .add_option_int("-ll:lmbsize", lmbsize_in_kb)
+    .add_option_int("-ll:forcelong", force_long_messages)
+    .add_option_int("-ll:sdpsize", sdpsize_in_mb)
+    .add_option_int("-ll:maxsend", max_msgs_to_send)
+    .add_option_int("-ll:spillwarn", spillwarn_in_mb)
+    .add_option_int("-ll:spillstep", spillstep_in_mb)
+    .add_option_int("-ll:spillstall", spillstep_in_mb);
 
-    if(!strcmp(argv[i], "-ll:lmbsize")) {
-      lmb_size = ((size_t)atoi(argv[++i])) << 10; // convert KB to bytes
-      continue;
-    }
+  bool ok = cp.parse_command_line(cmdline);
+  assert(ok);
 
-    if(!strcmp(argv[i], "-ll:forcelong")) {
-      force_long_messages = atoi(argv[++i]) != 0;
-      continue;
-    }
-
-    if(!strcmp(argv[i], "-ll:sdpsize")) {
-      srcdatapool_size = ((size_t)atoi(argv[++i])) << 20; // convert MB to bytes
-      continue;
-    }
-
-    if(!strcmp(argv[i], "-ll:maxsend")) {
-      max_msgs_to_send = atoi(argv[++i]);
-      continue;
-    }
-
-    if(!strcmp(argv[i], "-ll:spillwarn")) {
-      SrcDataPool::print_spill_threshold = ((size_t)atoi(argv[++i])) << 20; // convert MB to bytes
-      continue;
-    }
-
-    if(!strcmp(argv[i], "-ll:spillstep")) {
-      SrcDataPool::print_spill_step = ((size_t)atoi(argv[++i])) << 20; // convert MB to bytes
-      continue;
-    }
-
-    if(!strcmp(argv[i], "-ll:spillstall")) {
-      SrcDataPool::max_spill_bytes = ((size_t)atoi(argv[++i])) << 20; // convert MB to bytes
-      continue;
-    }
-  }
+  size_t srcdatapool_size = sdpsize_in_mb << 20;
+  if(lmbsize_in_kb) lmb_size = lmb_size << 10;
+  if(spillwarn_in_mb)
+    SrcDataPool::print_spill_threshold = spillwarn_in_mb << 20;
+  if(spillstep_in_mb)
+    SrcDataPool::print_spill_step = spillstep_in_mb << 20;
+  if(spillstall_in_mb)
+    SrcDataPool::max_spill_bytes = spillstall_in_mb << 20;
 
   size_t total_lmb_size = (gasnet_nodes() * 
 			   num_lmbs *
@@ -2994,7 +2979,7 @@ void init_endpoints(int gasnet_mem_size_in_mb,
 		    int registered_mem_size_in_mb,
 		    int registered_ib_mem_size_in_mb,
 		    Realm::CoreReservationSet& crs,
-		    int argc, const char *argv[])
+		    std::vector<std::string>& cmdline)
 {
   // nothing to do without GASNet
 }

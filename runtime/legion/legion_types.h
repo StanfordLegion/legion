@@ -2024,6 +2024,10 @@ namespace Legion {
         : local_lock(r), previous(Internal::local_lock_list), 
           exclusive(excl), held(true)
       {
+#ifdef DEBUG_REENTRANT_LOCKS
+        if (previous != NULL)
+          previous->check_for_reentrant_locks(&local_lock);
+#endif
         if (exclusive)
         {
           RtEvent ready = local_lock.wrlock();
@@ -2054,13 +2058,11 @@ namespace Legion {
       inline ~AutoLock(void)
       {
 #ifdef DEBUG_LEGION
+        assert(held);
         assert(Internal::local_lock_list == this);
 #endif
-        Internal::local_lock_list = previous;
-#ifdef DEBUG_LEGION
-        assert(held);
-#endif
         local_lock.unlock();
+        Internal::local_lock_list = previous;
       }
     public:
       inline AutoLock& operator=(const AutoLock &rhs)
@@ -2074,14 +2076,21 @@ namespace Legion {
       { 
 #ifdef DEBUG_LEGION
         assert(held);
+        assert(Internal::local_lock_list == this);
 #endif
         local_lock.unlock(); 
+        Internal::local_lock_list = previous;
         held = false; 
       }
       inline void reacquire(void)
       {
 #ifdef DEBUG_LEGION
         assert(!held);
+        assert(Internal::local_lock_list == previous);
+#endif
+#ifdef DEBUG_REENTRANT_LOCKS
+        if (previous != NULL)
+          previous->check_for_reentrant_locks(&local_lock);
 #endif
         if (exclusive)
         {
@@ -2101,6 +2110,7 @@ namespace Legion {
             ready = local_lock.rdlock();
           }
         }
+        Internal::local_lock_list = this;
         held = true;
       }
     public:
@@ -2118,6 +2128,14 @@ namespace Legion {
         if (previous != NULL)
           previous->advise_sleep_exit();
       }
+#ifdef DEBUG_REENTRANT_LOCKS
+      inline void check_for_reentrant_locks(LocalLock *to_acquire) const
+      {
+        assert(to_acquire != &local_lock);
+        if (previous != NULL)
+          previous->check_for_reentrant_locks(to_acquire);
+      }
+#endif
     private:
       LocalLock &local_lock;
       AutoLock *const previous;

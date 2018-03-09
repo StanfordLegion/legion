@@ -343,7 +343,8 @@ namespace Legion {
     {
       AutoLock gc(gc_lock);
 #ifdef DEBUG_LEGION
-      assert(!has_resource_references);
+      // Should have at least one reference here
+      assert(__sync_fetch_and_add(&resource_references, 0) > 0);
 #endif
       has_resource_references = true;
     }
@@ -354,10 +355,17 @@ namespace Legion {
     {
       AutoLock gc(gc_lock);
 #ifdef DEBUG_LEGION
+      // This should always be true here
       assert(has_resource_references);
 #endif
-      has_resource_references = false;
-      return can_delete();
+      // Check to see if we lost the race for changing state
+      if (__sync_fetch_and_add(&resource_references, 0) == 0)
+      {
+        has_resource_references = false;
+        return can_delete();
+      }
+      else
+        return false;
     }
 
 #ifdef USE_REMOTE_REFERENCES
@@ -914,63 +922,6 @@ namespace Legion {
                             need_invalidate, need_deactivate, do_deletion);
       }
       return do_deletion;
-    }
-
-    //--------------------------------------------------------------------------
-    bool DistributedCollectable::try_add_valid_reference_internal(
-                            ReferenceSource source, ReferenceMutator *mutator, 
-                            bool must_be_valid, int cnt)
-    //--------------------------------------------------------------------------
-    {
-      bool need_activate = false;
-      bool need_validate = false;
-      bool need_invalidate = false;
-      bool need_deactivate = false;
-      bool do_deletion = false;
-      bool done = false;
-      bool first = true;
-      while (!done)
-      {
-        if (need_activate)
-          notify_active(mutator);
-        if (need_validate)
-          notify_valid(mutator);
-        if (need_invalidate)
-          notify_invalid(mutator);
-        if (need_deactivate)
-          notify_inactive(mutator);
-        AutoLock gc(gc_lock);
-        // Check our state and see if this is going to work
-        if (must_be_valid && (current_state != VALID_STATE))
-          return false;
-        // If we are in any of the deleted states, it is no good
-        if (current_state == DELETED_STATE)
-          return false;
-        if (first)
-        {
-          unsigned previous = valid_references;
-          valid_references += cnt;
-          std::map<ReferenceSource,int>::iterator finder = 
-            detailed_base_valid_references.find(source);
-          if (finder == detailed_base_valid_references.end())
-            detailed_base_valid_references[source] = cnt;
-          else
-            finder->second += cnt;
-          if (previous > 0)
-            return true;
-          has_valid_references = true;
-          first = false;
-        }
-        done = update_state(need_activate, need_validate,
-                            need_invalidate, need_deactivate, do_deletion);
-      }
-      if (do_deletion)
-      {
-        // This probably indicates a race in reference counting algorithm
-        assert(false);
-        delete this;
-      }
-      return true;
     }
 
     //--------------------------------------------------------------------------

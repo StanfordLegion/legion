@@ -4226,7 +4226,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(!is_owner); // should never be called on the owner
 #endif
-      results.resize(managers.size(), true/*all good*/);
+      results.resize(managers.size(), false/*assume everything fails*/);
       // Package everything up and send the request 
       RtUserEvent done = Runtime::create_rt_user_event();
       Serializer rez;
@@ -4236,7 +4236,10 @@ namespace Legion {
         rez.serialize<size_t>(managers.size());
         for (std::set<PhysicalManager*>::const_iterator it = 
               managers.begin(); it != managers.end(); it++)
+        {
           rez.serialize((*it)->did);
+          rez.serialize(*it);
+        }
         rez.serialize(&results);
         rez.serialize(done);
       }
@@ -4772,13 +4775,15 @@ namespace Legion {
                                                 AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      std::vector<unsigned> failures;
+      std::vector<std::pair<unsigned,PhysicalManager*> > successes;
       size_t num_managers;
       derez.deserialize(num_managers);
       for (unsigned idx = 0; idx < num_managers; idx++)
       {
         DistributedID did;
         derez.deserialize(did);
+        PhysicalManager *remote_manager; // remote pointer, never use!
+        derez.deserialize(remote_manager);
         PhysicalManager *manager = NULL;
         // Prevent changes until we can get a resource reference
         {
@@ -4796,26 +4801,27 @@ namespace Legion {
           }
         }
         if (manager == NULL)
-        {
-          failures.push_back(idx);
           continue;
-        }
         // Otherwise try to acquire it locally
         if (!manager->acquire_instance(REMOTE_DID_REF, NULL))
         {
-          failures.push_back(idx);
+          // Failed to acquire so this is not helpful
           if (manager->remove_base_resource_ref(MEMORY_MANAGER_REF))
             delete manager;
         }
         else // just remove our reference since we succeeded
+        {
+          successes.push_back(
+              std::pair<unsigned,PhysicalManager*>(idx, remote_manager));
           manager->remove_base_resource_ref(MEMORY_MANAGER_REF);
+        }
       }
       std::vector<unsigned> *target;
       derez.deserialize(target);
       RtUserEvent to_trigger;
       derez.deserialize(to_trigger);
       // See if we had any failures
-      if (!failures.empty())
+      if (!successes.empty())
       {
         // Send back the failures
         Serializer rez;
@@ -4823,34 +4829,49 @@ namespace Legion {
           RezCheck z(rez);
           rez.serialize(memory);
           rez.serialize(target);
-          rez.serialize<size_t>(failures.size());
-          for (unsigned idx = 0; idx < failures.size(); idx++)
-            rez.serialize(idx);
+          rez.serialize<size_t>(successes.size());
+          for (std::vector<std::pair<unsigned,PhysicalManager*> >::
+                const_iterator it = successes.begin(); 
+                it != successes.end(); it++)
+          {
+            rez.serialize(it->first);
+            rez.serialize(it->second);
+          }
           rez.serialize(to_trigger);
         }
         runtime->send_acquire_response(source, rez);
       }
-      else // if we succeeded, then this is easy, just trigger
+      else // if everything failed, this easy, just trigger
         Runtime::trigger_event(to_trigger);
     }
 
     //--------------------------------------------------------------------------
-    void MemoryManager::process_acquire_response(Deserializer &derez)
+    void MemoryManager::process_acquire_response(Deserializer &derez,
+                                                 AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
       std::vector<unsigned> *target;
       derez.deserialize(target);
       size_t num_failures;
       derez.deserialize(num_failures);
+      std::set<RtEvent> preconditions;
+      WrapperReferenceMutator mutator(preconditions);
       for (unsigned idx = 0; idx < num_failures; idx++)
       {
         unsigned index;
         derez.deserialize(index);
-        (*target)[index] = false;
+        (*target)[index] = true;
+        PhysicalManager *manager;
+        derez.deserialize(manager);
+        manager->add_base_valid_ref(MAPPING_ACQUIRE_REF, &mutator);
+        manager->send_remote_valid_update(source, NULL, 1, false/*add*/);  
       }
       RtUserEvent to_trigger;
       derez.deserialize(to_trigger);
-      Runtime::trigger_event(to_trigger);
+      if (!preconditions.empty())
+        Runtime::trigger_event(to_trigger,Runtime::merge_events(preconditions));
+      else
+        Runtime::trigger_event(to_trigger);
     }
     
     //--------------------------------------------------------------------------
@@ -4870,6 +4891,9 @@ namespace Legion {
         {
           // Skip it if has already been collected
           if (it->second.current_state == PENDING_COLLECTED_STATE)
+            continue;
+          // Skip any unattached external instances too
+          if (it->second.unattached_external)
             continue;
           if (!it->first->meets_region_tree(regions))
             continue;
@@ -4920,6 +4944,9 @@ namespace Legion {
         {
           // Skip it if has already been collected
           if (it->second.current_state == PENDING_COLLECTED_STATE)
+            continue;
+          // Skip any unattached external instances too
+          if (it->second.unattached_external)
             continue;
           if (!it->first->meets_region_tree(regions))
             continue;
@@ -4972,6 +4999,9 @@ namespace Legion {
           // Skip it if has already been collected
           if (it->second.current_state == PENDING_COLLECTED_STATE)
             continue;
+          // Skip any unattached external instances too
+          if (it->second.unattached_external)
+            continue;
           if (!it->first->meets_region_tree(regions))
             continue;
           it->first->add_base_resource_ref(MEMORY_MANAGER_REF);
@@ -5018,6 +5048,9 @@ namespace Legion {
         {
           // Skip it if has already been collected
           if (it->second.current_state == PENDING_COLLECTED_STATE)
+            continue;
+          // Skip any unattached external instances too
+          if (it->second.unattached_external)
             continue;
           if (!it->first->meets_region_tree(regions))
             continue;
@@ -5067,6 +5100,9 @@ namespace Legion {
           // Only consider ones that are currently valid
           if (it->second.current_state != VALID_STATE)
             continue;
+          // Skip any unattached external instances too
+          if (it->second.unattached_external)
+            continue;
           it->first->add_base_resource_ref(MEMORY_MANAGER_REF);
           candidates.push_back(it->first);
         }
@@ -5115,6 +5151,9 @@ namespace Legion {
         {
           // Only consider ones that are currently valid
           if (it->second.current_state != VALID_STATE)
+            continue;
+          // Skip any unattached external instances too
+          if (it->second.unattached_external)
             continue;
           it->first->add_base_resource_ref(MEMORY_MANAGER_REF);
           candidates.push_back(it->first);
@@ -5198,8 +5237,8 @@ namespace Legion {
       // If we get through all these and still can't collect then we're screwed
       const size_t needed_size = builder.compute_needed_size(runtime->forest);
       // Keep trying to delete large collectable instances first
-      while (delete_by_size_and_state(needed_size, COLLECTABLE_STATE, 
-                                      true/*large only*/))
+      while (!delete_by_size_and_state(needed_size, COLLECTABLE_STATE, 
+                                       true/*large only*/))
       {
         // See if we can make the instance
         PhysicalManager *result = 
@@ -5208,8 +5247,8 @@ namespace Legion {
           return result;
       }
       // Then try deleting as many small collectable instances next
-      while (delete_by_size_and_state(needed_size, COLLECTABLE_STATE,
-                                      false/*large only*/))
+      while (!delete_by_size_and_state(needed_size, COLLECTABLE_STATE,
+                                       false/*large only*/))
       {
         // See if we can make the instance
         PhysicalManager *result = 
@@ -5218,8 +5257,8 @@ namespace Legion {
           return result;
       }
       // Now switch to large objects still in the active state
-      while (delete_by_size_and_state(needed_size, ACTIVE_STATE,
-                                      true/*large only*/))
+      while (!delete_by_size_and_state(needed_size, ACTIVE_STATE,
+                                       true/*large only*/))
       {
         // See if we can make the instance
         PhysicalManager *result = 
@@ -5228,8 +5267,8 @@ namespace Legion {
           return result;
       }
       // Finally switch to doing small objects in the active state
-      while (delete_by_size_and_state(needed_size, ACTIVE_STATE,
-                                      false/*large only*/))
+      while (!delete_by_size_and_state(needed_size, ACTIVE_STATE,
+                                       false/*large only*/))
       {
         // See if we can make the instance
         PhysicalManager *result = 
@@ -5302,11 +5341,14 @@ namespace Legion {
           // Skip it if has already been collected
           if (it->second.current_state == PENDING_COLLECTED_STATE)
             continue;
-          // Check if the region trees are the same
-          if (!it->first->meets_region_tree(regions))
+          // Skip any unattached external instances too
+          if (it->second.unattached_external)
             continue;
           // If we already considered it we don't have to do it again
           if (candidates.find(it->first) != candidates.end())
+            continue;
+          // Check if the region trees are the same
+          if (!it->first->meets_region_tree(regions))
             continue;
           // We found an alternate candidate so break out so we can test it
           it->first->add_base_resource_ref(MEMORY_MANAGER_REF);
@@ -5410,11 +5452,14 @@ namespace Legion {
           // Skip it if has already been collected
           if (it->second.current_state == PENDING_COLLECTED_STATE)
             continue;
-          // Check if the region trees are the same
-          if (!it->first->meets_region_tree(regions))
+          // Skip any unattached external instances too
+          if (it->second.unattached_external)
             continue;
           // If we already considered it we don't have to do it again
           if (candidates.find(it->first) != candidates.end())
+            continue;
+          // Check if the region trees are the same
+          if (!it->first->meets_region_tree(regions))
             continue;
           // We found an alternate candidate so break out so we can test it
           it->first->add_base_resource_ref(MEMORY_MANAGER_REF);
@@ -5471,8 +5516,7 @@ namespace Legion {
       bool early_valid = acquire || (priority == GC_NEVER_PRIORITY);
       size_t instance_size = manager->get_instance_size();
       // Since we're going to put this in the table add a reference
-      if (is_owner)
-        manager->add_base_resource_ref(MEMORY_MANAGER_REF);
+      manager->add_base_resource_ref(MEMORY_MANAGER_REF);
       {
         AutoLock m_lock(manager_lock);
 #ifdef DEBUG_LEGION
@@ -5496,6 +5540,49 @@ namespace Legion {
       }
       if (priority == GC_NEVER_PRIORITY)
         manager->add_base_valid_ref(NEVER_GC_REF);
+    }
+
+    //--------------------------------------------------------------------------
+    void MemoryManager::record_external_instance(PhysicalManager *manager)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(is_owner);
+      assert(manager->is_external_instance());
+#endif
+      // First do the insertion
+      // If we're going to add a valid reference, mark this valid early
+      // to avoid races with deletions
+      size_t instance_size = manager->get_instance_size();
+      // Since we're going to put this in the table add a reference
+      manager->add_base_resource_ref(MEMORY_MANAGER_REF);
+      {
+        AutoLock m_lock(manager_lock);
+#ifdef DEBUG_LEGION
+        assert(current_instances.find(manager) == current_instances.end());
+#endif
+        InstanceInfo &info = current_instances[manager];
+        info.instance_size = instance_size;
+        info.unattached_external = true;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void MemoryManager::attach_external_instance(PhysicalManager *manager)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(is_owner);
+      assert(manager->is_external_instance());
+#endif
+      AutoLock m_lock(manager_lock);
+      std::map<PhysicalManager*,InstanceInfo>::iterator finder = 
+        current_instances.find(manager);
+#ifdef DEBUG_LEGION
+      assert(finder != current_instances.end());
+      assert(finder->second.unattached_external);
+#endif
+      finder->second.unattached_external = false;
     }
 
     //--------------------------------------------------------------------------
@@ -6569,7 +6656,7 @@ namespace Legion {
             }
           case SEND_ACQUIRE_RESPONSE:
             {
-              runtime->handle_acquire_response(derez);
+              runtime->handle_acquire_response(derez, remote_address_space);
               break;
             }
           case SEND_VARIANT_REQUEST:
@@ -15325,14 +15412,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_acquire_response(Deserializer &derez)
+    void Runtime::handle_acquire_response(Deserializer &derez, 
+                                          AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
       Memory target_memory;
       derez.deserialize(target_memory);
       MemoryManager *manager = find_memory_manager(target_memory);
-      manager->process_acquire_response(derez);
+      manager->process_acquire_response(derez, source);
     }
 
     //--------------------------------------------------------------------------
@@ -19277,11 +19365,12 @@ namespace Legion {
 				  Processor p)
     //--------------------------------------------------------------------------
     {
+      Runtime *runtime = *((Runtime**)userdata);
 #ifdef DEBUG_LEGION
       assert(userlen == sizeof(Runtime**));
-      assert(implicit_context == NULL); // this better hold
+      if (!runtime->separate_runtime_instances)
+        assert(implicit_context == NULL); // this better hold
 #endif
-      Runtime *runtime = *((Runtime**)userdata);
       implicit_runtime = runtime;
       // We immediately bump the priority of all meta-tasks once they start
       // up to the highest level to ensure that they drain once they begin

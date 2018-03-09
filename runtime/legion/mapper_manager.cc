@@ -2064,6 +2064,7 @@ namespace Legion {
             instances.erase(instances.begin()+(*it));
         }
       }
+      resume_mapper_call(ctx);
       return (local_acquired && remote_acquired);
     }
 
@@ -2237,15 +2238,8 @@ namespace Legion {
               req_it->second.instances.end(); it++, idx++)
         {
           if (req_it->second.results[idx])
-          {
             // record that we acquired it
             record_acquired_instance(info, *it, false/*created*/); 
-            // make the reference a local reference and 
-            // remove our remote did reference
-            (*it)->add_base_valid_ref(MAPPING_ACQUIRE_REF, info->operation);
-            (*it)->send_remote_valid_update(req_it->first->owner_space, NULL,
-                                            1, false/*add*/);
-          }
           else
             all_acquired = false;
         }
