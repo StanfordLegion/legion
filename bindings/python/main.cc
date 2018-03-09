@@ -25,21 +25,6 @@ enum TaskIDs {
   MAIN_TASK_ID = 1,
 };
 
-VariantID preregister_python_task_variant(
-  const TaskVariantRegistrar &registrar,
-  const char *module_name,
-  const char *function_name,
-  const void *userdata = NULL,
-  size_t userlen = 0)
-{
-  CodeDescriptor code_desc(Realm::Type::from_cpp_type<Processor::TaskFuncPtr>());
-  code_desc.add_implementation(new Realm::PythonSourceImplementation(module_name, function_name));
-
-  return Runtime::preregister_task_variant(
-    registrar, code_desc, userdata, userlen,
-    registrar.task_variant_name);
-}
-
 int main(int argc, char **argv)
 {
   // Add the binary directory to PYTHONPATH. This is needed for
@@ -82,12 +67,6 @@ int main(int argc, char **argv)
   const char *module_name = argv[1];
 
   Realm::Python::PythonModule::import_python_module(module_name);
-
-  {
-    TaskVariantRegistrar registrar(MAIN_TASK_ID, "main");
-    registrar.add_constraint(ProcessorConstraint(Processor::PY_PROC));
-    preregister_python_task_variant(registrar, module_name, "main");
-  }
 
   Runtime::set_top_level_task_id(MAIN_TASK_ID);
 

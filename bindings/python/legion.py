@@ -91,8 +91,11 @@ ffi = cffi.FFI()
 ffi.cdef(header)
 c = ffi.dlopen(None)
 max_legion_python_tasks = 1000000
-next_legion_task_id = -1
-max_legion_task_id = -1 
+next_legion_task_id = c.legion_runtime_generate_library_task_ids(
+                        c.legion_runtime_get_runtime(),
+                        os.path.basename(__file__).encode('utf-8'),
+                        max_legion_python_tasks)
+max_legion_task_id = next_legion_task_id + max_legion_python_tasks
 
 # Returns true if this module is running inside of a Legion
 # executable. If false, then other Legion functionality should not be
@@ -543,7 +546,7 @@ class Task (object):
 
     def __init__(self, body, privileges=None,
                  leaf=False, inner=False, idempotent=False,
-                 register=True):
+                 register=True, top_level=False):
         self.body = body
         if privileges is not None:
             privileges = [(x if x is not None else N) for x in privileges]
@@ -554,7 +557,7 @@ class Task (object):
         self.calling_convention = 'python'
         self.task_id = None
         if register:
-            self.register()
+            self.register(top_level)
 
     def __call__(self, *args):
         # Hack: This entrypoint needs to be able to handle both being
@@ -658,22 +661,16 @@ class Task (object):
         # Clear thread-local storage.
         del _my.ctx
 
-    def register(self):
+    def register(self, top_level_task):
         assert(self.task_id is None)
-        runtime = c.legion_runtime_get_runtime()
-        global next_legion_task_id
-        if next_legion_task_id < 0:
-            library_name = os.path.basename(__file__)
-            next_legion_task_id = c.legion_runtime_generate_library_task_ids(
-                    runtime,
-                    library_name.encode('utf-8'),
-                    max_legion_python_tasks)
-            global max_legion_task_id
-            max_legion_task_id = next_legion_task_id + max_legion_python_tasks 
-        task_id = next_legion_task_id 
-        next_legion_task_id += 1
-        # If we ever hit this then we need to allocate more task IDs
-        assert task_id < max_legion_task_id 
+        if not top_level_task:
+            global next_legion_task_id
+            task_id = next_legion_task_id 
+            next_legion_task_id += 1
+            # If we ever hit this then we need to allocate more task IDs
+            assert task_id < max_legion_task_id 
+        else:
+            task_id = 1 # Predefined value for the top-level task
 
         execution_constraints = c.legion_execution_constraint_set_create()
         c.legion_execution_constraint_set_add_processor_constraint(
@@ -690,7 +687,7 @@ class Task (object):
         task_name = ('%s.%s' % (self.body.__module__, self.body.__name__))
 
         c.legion_runtime_register_task_variant_python_source(
-            runtime,
+            c.legion_runtime_get_runtime(),
             task_id,
             task_name.encode('utf-8'),
             False, # Global
