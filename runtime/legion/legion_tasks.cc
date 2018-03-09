@@ -6512,7 +6512,7 @@ namespace Legion {
       // this point task was not actually executed, e.g. this was a point
       // task in an index space launcher for a must-epoch launch in a 
       // control replication context
-      bool need_commit = true;
+      bool need_commit = false;
       if (execution_context != NULL)
       {
         // This is common case where we actually did run
