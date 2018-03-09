@@ -6508,25 +6508,42 @@ namespace Legion {
       if ((__sync_add_and_fetch(&outstanding_profiling_requests, -1) == 0) &&
           profiling_reported.exists())
         Runtime::trigger_event(profiling_reported);
-      // Release any restrictions we might have had
-      if (execution_context->has_restrictions())
-        execution_context->release_restrictions();
-      // Pass back our created and deleted operations 
-      slice_owner->return_privileges(execution_context);
-      slice_owner->record_child_complete();
-      // Since this point is now complete we know
-      // that we can trigger it. Note we don't need to do
-      // this if we're a leaf task with no virtual mappings
-      // because we would have performed the leaf task
-      // early complete chaining operation.
-      if (!is_leaf() || has_virtual_instances())
-        Runtime::trigger_event(point_termination);
+      // In some cases we might not have an execution context because
+      // this point task was not actually executed, e.g. this was a point
+      // task in an index space launcher for a must-epoch launch in a 
+      // control replication context
+      bool need_commit = true;
+      if (execution_context != NULL)
+      {
+        // This is common case where we actually did run
+        // Release any restrictions we might have had
+        if (execution_context->has_restrictions())
+          execution_context->release_restrictions();
+        // Pass back our created and deleted operations 
+        slice_owner->return_privileges(execution_context);
+        slice_owner->record_child_complete();
+        // Since this point is now complete we know
+        // that we can trigger it. Note we don't need to do
+        // this if we're a leaf task with no virtual mappings
+        // because we would have performed the leaf task
+        // early complete chaining operation.
+        if (!is_leaf() || has_virtual_instances())
+          Runtime::trigger_event(point_termination);
 
-      // Invalidate any context that we had so that the child
-      // operations can begin committing
-      execution_context->invalidate_region_tree_contexts();
-      // See if we need to trigger that our children are complete
-      const bool need_commit = execution_context->attempt_children_commit();
+        // Invalidate any context that we had so that the child
+        // operations can begin committing
+        execution_context->invalidate_region_tree_contexts();
+        // See if we need to trigger that our children are complete
+        need_commit = execution_context->attempt_children_commit();
+      }
+      else
+      {
+        // The very uncommon case where we didn't actually run
+#ifdef DEBUG_LEGION
+        assert(!point_termination.has_triggered());
+#endif
+        Runtime::trigger_event(point_termination);
+      }
       // Mark that this operation is now complete
       complete_operation();
       if (need_commit)
