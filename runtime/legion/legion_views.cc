@@ -7294,6 +7294,8 @@ namespace Legion {
             capture_event = Runtime::create_rt_user_event();
             pending_captures[capture_event] = mask;
           }
+          else // Nothing to capture so these fields are "captured"
+            captured_fields |= mask;
         }
       }
 #else
@@ -7411,6 +7413,11 @@ namespace Legion {
         // Now we can remove the capture event from the set
         AutoLock n_lock(node_lock);
         pending_captures.erase(capture_event);
+#ifdef CVOPT
+        // Once we're done with the capture then we can record 
+        // the fields as having been captured
+        captured_fields |= mask;
+#endif
       }
       // Wait for anything else that we need to trigger
       if (!preconditions.empty())
