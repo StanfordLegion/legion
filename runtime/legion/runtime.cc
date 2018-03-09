@@ -18879,11 +18879,16 @@ namespace Legion {
       // can be called to spawn subprocesses.
       realm.start();
 
+      // First we issue a "barrier" NOP task that runs on all the
+      // Realm processors to make sure that Realm is initialized
+      const RtEvent realm_initialized(realm.collective_spawn_by_kind(
+            Processor::NO_KIND, 0/*NOP*/, NULL, 0, false/*one per node*/));
+
       // Now we initialize all the runtimes so that they are ready
       // to begin execution. Note this also acts as a barrier across
       // the machine to ensure that nobody does anything related to
       // startup until all the runtimes are initialized everywhere
-      const RtEvent initialized_precondition(realm.collective_spawn_by_kind(
+      const RtEvent legion_initialized(realm.collective_spawn_by_kind(
             (config.separate_runtime_instances ? Processor::NO_KIND :
              startup_kind), LG_INITIALIZE_TASK_ID, NULL, 0,
             !config.separate_runtime_instances, tasks_registered)); 
@@ -18893,13 +18898,14 @@ namespace Legion {
       RtUserEvent start_event = Runtime::create_rt_user_event();
       // Now we can do one more spawn call to startup the runtime 
       // across the machine since we know everything is initialized
-      const RtEvent runtime_ready(realm.collective_spawn_by_kind(
+      const RtEvent runtime_started(realm.collective_spawn_by_kind(
               (config.separate_runtime_instances ? Processor::NO_KIND : 
                startup_kind), LG_STARTUP_TASK_ID, 
               &start_event, sizeof(start_event),
-              !config.separate_runtime_instances, initialized_precondition));
+              !config.separate_runtime_instances, 
+              Runtime::merge_events(realm_initialized, legion_initialized)));
       // Trigger the start event when the runtime is ready
-      Runtime::trigger_event(start_event, runtime_ready);
+      Runtime::trigger_event(start_event, runtime_started);
       // If we are supposed to background this thread, then we wait
       // for the runtime to shutdown, otherwise we can now return
       if (!background)
