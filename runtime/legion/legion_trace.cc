@@ -1750,7 +1750,6 @@ namespace Legion {
     bool PhysicalTemplate::check_preconditions(void)
     //--------------------------------------------------------------------------
     {
-      DETAILED_PROFILER(trace->runtime, PHYSICAL_TRACE_PRECONDITION_CHECK_CALL);
       for (LegionMap<std::pair<RegionTreeNode*, ContextID>,
                      FieldMask>::aligned::iterator it =
            previous_open_nodes.begin(); it !=
@@ -1867,7 +1866,6 @@ namespace Legion {
     void PhysicalTemplate::execute_all(void)
     //--------------------------------------------------------------------------
     {
-      DETAILED_PROFILER(task->runtime, PHYSICAL_TRACE_EXECUTE_CALL);
       for (std::vector<Instruction*>::const_iterator it = instructions.begin();
            it != instructions.end(); ++it)
         (*it)->execute();
@@ -1911,7 +1909,6 @@ namespace Legion {
     void PhysicalTemplate::optimize(void)
     //--------------------------------------------------------------------------
     {
-      DETAILED_PROFILER(trace->runtime, PHYSICAL_TRACE_OPTIMIZE_CALL);
       std::vector<unsigned> generate;
       std::vector<std::set<unsigned> > preconditions;
       std::vector<std::set<unsigned> > simplified;
