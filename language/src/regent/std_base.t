@@ -678,7 +678,7 @@ do
       self.cudakernels = {}
     end
     local kernel_id = global_kernel_id
-    local kernel_name = self.name:concat("_") .. "_cuda" .. tostring(kernel_id)
+    local kernel_name = self.name .. "_cuda" .. tostring(kernel_id)
     self.cudakernels[kernel_id] = {
       name = kernel_name,
       kernel = kernel,
