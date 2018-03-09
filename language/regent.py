@@ -79,6 +79,7 @@ if os_name == 'Darwin':
 lib_path = (
     (os.environ[LD_LIBRARY_PATH].split(':')
      if LD_LIBRARY_PATH in os.environ else []) +
+    ([os.path.join(cuda_dir, 'lib64', 'stubs')] if cuda_dir else []) +
     [os.path.join(terra_dir, 'build'),
      (os.path.join(cmake_build_dir, 'lib') if cmake else bindings_dir)])
 

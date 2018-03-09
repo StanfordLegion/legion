@@ -15,6 +15,7 @@
 -- Regent Standard Library - Base Layer
 
 local config = require("regent/config")
+local cudahelper = require("regent/cudahelper")
 local data = require("common/data")
 
 local base = {}
@@ -25,6 +26,13 @@ base.config, base.args = config.args()
 -- ## Legion Bindings
 -- #################
 
+if config["cuda"] and cudahelper.check_cuda_available() then
+  -- Terralib.linklibrary only seems to consider LD_LIBRARY_PATH when linking a
+  -- dynamic library directly, and not when trying to find the libraries that
+  -- it depends on, so we load libcuda.so preemptively, before libregent.so
+  -- requests it.
+  cudahelper.link_driver_library()
+end
 terralib.linklibrary("libregent.so")
 local c = terralib.includecstring([[
 #include "legion.h"
