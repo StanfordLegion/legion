@@ -29,14 +29,8 @@ local ffi = require('ffi')
 local cudapaths = { OSX = "/usr/local/cuda/lib/libcuda.dylib";
                     Linux =  "libcuda.so";
                     Windows = "nvcuda.dll"; }
-
-local cudaruntimelinked = false
-function cudahelper.link_driver_library()
-    if cudaruntimelinked then return end
-    local path = assert(cudapaths[ffi.os],"unknown OS?")
-    terralib.linklibrary(path)
-    cudaruntimelinked = true
-end
+local path = assert(cudapaths[ffi.os],"unknown OS?")
+terralib.linklibrary(path)
 
 --
 
@@ -73,32 +67,8 @@ local DriverAPI = {
     {&int32,&int32,int32} -> uint32);
 }
 
-local dlfcn = terralib.includec("dlfcn.h")
-local terra has_symbol(symbol : rawstring)
-  var lib = dlfcn.dlopen([&int8](0), dlfcn.RTLD_LAZY)
-  var has_symbol = dlfcn.dlsym(lib, symbol) ~= [&opaque](0)
-  dlfcn.dlclose(lib)
-  return has_symbol
-end
-
-do
-  if has_symbol("cuInit") then
-    if not config["cuda-offline"]  then
-      local r = DriverAPI.cuInit(0)
-      assert(r == 0)
-      terra cudahelper.check_cuda_available()
-        return [r] == 0;
-      end
-    else
-      terra cudahelper.check_cuda_available()
-        return true
-      end
-    end
-  else
-    terra cudahelper.check_cuda_available()
-      return false
-    end
-  end
+terra cudahelper.check_cuda_available()
+  return true
 end
 
 -- copied and modified from cudalib.lua in Terra interpreter
