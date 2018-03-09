@@ -9293,6 +9293,11 @@ namespace Legion {
         nrand48(random_state);
       if (address_space < num_profiling_nodes)
         initialize_legion_prof(config);
+      // Pull in any static registrations that were done
+      register_static_variants();
+      register_static_constraints();
+      register_static_projections(); 
+      initialize_virtual_manager();
 #ifdef DEBUG_LEGION
       if (logging_region_tree_state)
       {
@@ -10093,11 +10098,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void Runtime::initialize_runtime(void)
     //--------------------------------------------------------------------------
-    {
-      register_static_variants();
-      register_static_constraints();
-      register_static_projections(); 
-      initialize_virtual_manager();
+    { 
       // Before doing the mapper initialization we have to construct
       // any MPI rank tables that we have
       if (mpi_rank_table != 0)
@@ -18325,21 +18326,6 @@ namespace Legion {
       PartitionShim::ColorRects<3,3>::register_task();
 #endif
 
-      // We have to set these prior to starting Realm as once we start
-      // Realm it might fork child processes so they all need to see
-      // the same values for these static variables
-      runtime_started = true;
-      runtime_backgrounded = background;
-      // Make a copy of this here so we can delete the data
-      // structure before Realm does its subprocess stuff
-      std::vector<MPILegionHandshake> local_handshakes;
-      if (pending_handshakes != NULL)
-      {
-        local_handshakes.swap(*pending_handshakes);
-        delete pending_handshakes;
-        pending_handshakes = NULL;
-      }
-
       // Need to pass argc and argv to low-level runtime before we can record 
       // their values as they might be changed by GASNet or MPI or whatever.
       // Note that the logger isn't initialized until after this call returns 
@@ -18348,16 +18334,16 @@ namespace Legion {
 #ifndef NDEBUG
       bool ok = 
 #endif
-        realm.init(&argc, &argv);
-      assert(ok); 
+        realm.network_init(&argc, &argv);
+      assert(ok);
 
-      // If we have any pending MPI handshakes, we can initialize them now
-      if (!local_handshakes.empty())
-      {
-        for (std::vector<MPILegionHandshake>::const_iterator it = 
-              local_handshakes.begin(); it != local_handshakes.end(); it++)
-          it->impl->initialize();
-      }
+      // Next we configure the realm runtime after which we can access the
+      // machine model and make events and reservations and do reigstrations
+#ifndef NDEBUG
+      ok = 
+#endif
+        realm.configure_from_command_line(argc, argv);
+      assert(ok);
 
       // Parse the command line arguments
       const LegionConfiguration config = parse_arguments(argc, argv);
@@ -18370,6 +18356,15 @@ namespace Legion {
       // Configure legion spy if necessary
       if (config.legion_spy_enabled)
         LegionSpy::log_legion_spy_config();
+      // Initialize any MPI Legion handshake objects
+      if (pending_handshakes != NULL)
+      {
+        for (std::vector<MPILegionHandshake>::const_iterator it = 
+             pending_handshakes->begin(); it != pending_handshakes->end(); it++)
+          it->impl->initialize();
+        delete pending_handshakes;
+        pending_handshakes = NULL;
+      }
       // Construct our runtime objects 
       Processor::Kind startup_kind = Processor::NO_KIND;
       const RtEvent tasks_registered = configure_runtime(argc, argv,
@@ -18379,6 +18374,17 @@ namespace Legion {
       assert((startup_kind == Processor::LOC_PROC) ||
               (startup_kind == Processor::UTIL_PROC));
 #endif
+      // We have to set these prior to starting Realm as once we start
+      // Realm it might fork child processes so they all need to see
+      // the same values for these static variables
+      runtime_started = true;
+      runtime_backgrounded = background;
+
+      // Now that we have everything setup we can tell Realm to
+      // start the processors. It is at this point which fork
+      // can be called to spawn subprocesses.
+      realm.start();
+
       // Need a barrier across all the processors to make sure that
       // they have done all their startup code for now
       // TODO: Remove this when realm gives us back a startup event
