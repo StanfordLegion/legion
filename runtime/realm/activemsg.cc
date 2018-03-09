@@ -2979,7 +2979,7 @@ void init_endpoints(int gasnet_mem_size_in_mb,
 		    int registered_mem_size_in_mb,
 		    int registered_ib_mem_size_in_mb,
 		    Realm::CoreReservationSet& crs,
-		    int argc, const char *argv[])
+		    std::vector<std::string>& cmdline)
 {
   // nothing to do without GASNet
 }
