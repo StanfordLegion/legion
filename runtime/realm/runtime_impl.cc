@@ -285,7 +285,10 @@ namespace Realm {
       return r;
     }
 
-    bool Runtime::init(int *argc, char ***argv)
+    // performs any network initialization and, critically, makes sure
+    //  *argc and *argv contain the application's real command line
+    //  (instead of e.g. mpi spawner information)
+    bool Runtime::network_init(int *argc, char ***argv)
     {
       if(runtime_singleton != 0) {
 	fprintf(stderr, "ERROR: cannot initialize more than one runtime at a time!\n");
@@ -293,8 +296,51 @@ namespace Realm {
       }
 
       impl = new RuntimeImpl;
-      runtime_singleton = ((RuntimeImpl *)impl);
-      return ((RuntimeImpl *)impl)->init(argc, argv);
+      runtime_singleton = static_cast<RuntimeImpl *>(impl);
+      return static_cast<RuntimeImpl *>(impl)->network_init(argc, argv);
+    }
+
+    // configures the runtime from the provided command line - after this 
+    //  call it is possible to create user events/reservations/etc, 
+    //  perform registrations and query the machine model, but not spawn
+    //  tasks or create instances
+    bool Runtime::configure_from_command_line(int argc, char **argv)
+    {
+      assert(impl != 0);
+      std::vector<std::string> cmdline;
+      cmdline.reserve(argc);
+      for(int i = 1; i < argc; i++)
+	cmdline.push_back(argv[i]);
+      return static_cast<RuntimeImpl *>(impl)->configure_from_command_line(cmdline);
+    }
+
+    bool Runtime::configure_from_command_line(std::vector<std::string> &cmdline,
+					      bool remove_realm_args /*= false*/)
+    {
+      assert(impl != 0);
+      if(remove_realm_args) {
+	return static_cast<RuntimeImpl *>(impl)->configure_from_command_line(cmdline);
+      } else {
+	// pass in a copy so we don't mess up the original
+	std::vector<std::string> cmdline_copy(cmdline);
+	return static_cast<RuntimeImpl *>(impl)->configure_from_command_line(cmdline_copy);
+      }
+    }
+
+    // starts up the runtime, allowing task/instance creation
+    void Runtime::start(void)
+    {
+      assert(impl != 0);
+      static_cast<RuntimeImpl *>(impl)->start();
+    }
+
+    // single-call version of the above three calls
+    bool Runtime::init(int *argc, char ***argv)
+    {
+      if(!network_init(argc, argv)) return false;
+      if(!configure_from_command_line(*argc, *argv)) return false;
+      start();
+      return true;
     }
     
     // this is now just a wrapper around Processor::register_task - consider switching to
@@ -898,7 +944,7 @@ namespace Realm {
 	}
     }
 
-    bool RuntimeImpl::init(int *argc, char ***argv)
+    bool RuntimeImpl::network_init(int *argc, char ***argv)
     {
       DetailedTimer::init_timers();
 
@@ -981,6 +1027,9 @@ namespace Realm {
 #endif
 #endif
 
+      // TODO: this is here to match old behavior, but it'd probably be
+      //  better to have REALM_DEFAULT_ARGS only be visible to Realm...
+
       // if the REALM_DEFAULT_ARGS environment variable is set, these arguments
       //  are inserted at the FRONT of the command line (so they may still be
       //  overridden by actual command line args)
@@ -1040,15 +1089,11 @@ namespace Realm {
 	}
       }
 
-      // new command-line parsers will work from a vector<string> representation of the
-      //  command line
-      std::vector<std::string> cmdline;
-      if(*argc > 1) {
-	cmdline.resize(*argc - 1);
-	for(int i = 1; i < *argc; i++)
-	  cmdline[i - 1] = (*argv)[i];
-      }
+      return true;
+    }
 
+    bool RuntimeImpl::configure_from_command_line(std::vector<std::string> &cmdline)
+    {
       // very first thing - let the logger initialization happen
       Logger::configure_from_cmdline(cmdline);
 
@@ -1123,16 +1168,6 @@ namespace Realm {
       cp.add_option_bool("-ll:force_kthreads", Config::force_kernel_threads);
       cp.add_option_bool("-ll:frsrv_fallback", Config::use_fast_reservation_fallback);
 
-      // these are actually parsed in activemsg.cc, but consume them here for now
-      size_t dummy = 0;
-      cp.add_option_int("-ll:numlmbs", dummy)
-	.add_option_int("-ll:lmbsize", dummy)
-	.add_option_int("-ll:forcelong", dummy)
-	.add_option_int("-ll:sdpsize", dummy)
-	.add_option_int("-ll:spillwarn", dummy)
-	.add_option_int("-ll:spillstep", dummy)
-	.add_option_int("-ll:spillstall", dummy);
-
       bool cmdline_ok = cp.parse_command_line(cmdline);
 
       if(!cmdline_ok) {
@@ -1157,15 +1192,6 @@ namespace Realm {
 	fprintf(stderr,"WARNING: prefix set, but NODE_LOGGING not enabled at compile time!\n");
       }
 #endif
-
-      // scan through what's left and see if anything starts with -ll: - probably a misspelled argument
-      for(std::vector<std::string>::const_iterator it = cmdline.begin();
-	  it != cmdline.end();
-	  it++)
-	if(it->compare(0, 4, "-ll:") == 0) {
-	  fprintf(stderr, "ERROR: unrecognized lowlevel option: %s\n", it->c_str());
-          assert(0);
-	}
 
       // Check that we have enough resources for the number of nodes we are using
       if (max_node_id >= MAX_NUM_NODES)
@@ -1288,7 +1314,18 @@ namespace Realm {
 
       init_endpoints(gasnet_mem_size_in_mb, reg_mem_size_in_mb, reg_ib_mem_size_in_mb,
 		     *core_reservations,
-		     *argc, (const char **)*argv);
+		     cmdline);
+
+      // now that we've done all of our argument parsing, scan through what's
+      //  left and see if anything starts with -ll: - probably a misspelled
+      //  argument
+      for(std::vector<std::string>::const_iterator it = cmdline.begin();
+	  it != cmdline.end();
+	  it++)
+	if(it->compare(0, 4, "-ll:") == 0) {
+	  fprintf(stderr, "ERROR: unrecognized lowlevel option: %s\n", it->c_str());
+          assert(0);
+	}
 
 #ifndef USE_GASNET
       // network initialization is also responsible for setting the "zero_time"
@@ -1758,6 +1795,16 @@ namespace Realm {
       }
 
       return true;
+    }
+
+    void RuntimeImpl::start(void)
+    {
+      // all we have to do here is tell the processors to start up their
+      //  threads...
+      for(std::vector<ProcessorImpl *>::const_iterator it = nodes[my_node_id].processors.begin();
+	  it != nodes[my_node_id].processors.end();
+	  ++it)
+	(*it)->start_threads();
     }
 
   template <typename T>
