@@ -343,7 +343,8 @@ namespace Legion {
     {
       AutoLock gc(gc_lock);
 #ifdef DEBUG_LEGION
-      assert(!has_resource_references);
+      // Should have at least one reference here
+      assert(__sync_fetch_and_add(&resource_references, 0) > 0);
 #endif
       has_resource_references = true;
     }
@@ -354,10 +355,17 @@ namespace Legion {
     {
       AutoLock gc(gc_lock);
 #ifdef DEBUG_LEGION
+      // This should always be true here
       assert(has_resource_references);
 #endif
-      has_resource_references = false;
-      return can_delete();
+      // Check to see if we lost the race for changing state
+      if (__sync_fetch_and_add(&resource_references, 0) == 0)
+      {
+        has_resource_references = false;
+        return can_delete();
+      }
+      else
+        return false;
     }
 
 #ifdef USE_REMOTE_REFERENCES

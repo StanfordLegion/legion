@@ -172,17 +172,18 @@ namespace Realm {
 
       cudaError_t cudaStreamCreate(cudaStream_t *stream)
       {
-	/*GPUProcessor *p =*/ get_gpu_or_die("cudaStreamCreate");
-	// TODO: actually create sub-streams and connect them up - for now we provide a dummy stream
-	CUstream s = 0;
-	*stream = s;
+	GPUProcessor *p = get_gpu_or_die("cudaStreamCreate");
+        // For now we always return the stream for this task in case the user actually uses it
+	// TODO: actually create sub-streams and connect them up
+	*stream = p->gpu->get_current_task_stream()->get_stream();
 	return cudaSuccess;
       }
 
       cudaError_t cudaStreamDestroy(cudaStream_t stream)
       {
 	/*GPUProcessor *p =*/ get_gpu_or_die("cudaStreamDestroy");
-	assert(stream == 0);
+        // Ignore this for now
+        // TODO: Do the right thing if we are making substreams
 	return cudaSuccess;
       }
 
