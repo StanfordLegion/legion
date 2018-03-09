@@ -3389,7 +3389,6 @@ function std.setup(main_task, extra_setup_thunk, task_wrappers, registration_nam
     end)
   local cuda_setup = quote end
   if std.config["cuda"] and cudahelper.check_cuda_available() then
-    cudahelper.link_driver_library()
     local all_kernels = {}
     variants:map(function(variant)
       if variant:is_cuda() then

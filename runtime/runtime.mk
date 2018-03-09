@@ -305,7 +305,7 @@ endif
 ifeq ($(strip $(DARWIN)),1)
 LEGION_LD_FLAGS	+= -L$(CUDA)/lib -lcuda
 else
-LEGION_LD_FLAGS	+= -L$(CUDA)/lib64 -lcuda -Xlinker -rpath=$(CUDA)/lib64
+LEGION_LD_FLAGS	+= -L$(CUDA)/lib64 -L$(CUDA)/lib64/stubs -lcuda -Xlinker -rpath=$(CUDA)/lib64
 endif
 # CUDA arch variables
 ifeq ($(strip $(GPU_ARCH)),fermi)

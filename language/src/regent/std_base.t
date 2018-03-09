@@ -15,6 +15,7 @@
 -- Regent Standard Library - Base Layer
 
 local config = require("regent/config")
+local cudahelper = require("regent/cudahelper")
 local data = require("common/data")
 
 local base = {}
