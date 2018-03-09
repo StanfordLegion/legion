@@ -714,6 +714,12 @@ namespace Legion {
       SEND_TOP_LEVEL_TASK_REQUEST,
       SEND_TOP_LEVEL_TASK_COMPLETE,
       SEND_MPI_RANK_EXCHANGE,
+      SEND_LIBRARY_MAPPER_REQUEST,
+      SEND_LIBRARY_MAPPER_RESPONSE,
+      SEND_LIBRARY_PROJECTION_REQUEST,
+      SEND_LIBRARY_PROJECTION_RESPONSE,
+      SEND_LIBRARY_TASK_REQUEST,
+      SEND_LIBRARY_TASK_RESPONSE,
       SEND_SHUTDOWN_NOTIFICATION,
       SEND_SHUTDOWN_RESPONSE,
       LAST_SEND_KIND, // This one must be last
@@ -848,6 +854,12 @@ namespace Legion {
         "Top Level Task Request",                                     \
         "Top Level Task Complete",                                    \
         "Send MPI Rank Exchange",                                     \
+        "Send Library Mapper Request",                                \
+        "Send Library Mapper Response",                               \
+        "Send Library Projection Request",                            \
+        "Send Library Projection Response",                           \
+        "Send Library Task Request",                                  \
+        "Send Library Task Response",                                 \
         "Send Shutdown Notification",                                 \
         "Send Shutdown Response",                                     \
       };

@@ -1086,35 +1086,6 @@ namespace Legion {
     };
 
     /**
-     * \class PendingInitializationFunction
-     * A special helper class for doing pending registration of
-     * initialization functions
-     */
-    class PendingInitializationFunction {
-    public:
-      PendingInitializationFunction(Processor::TaskFuncID func_id,
-                                    Processor::Kind proc_kind,
-                                    CodeDescriptor *realm_desc,
-                                    const void *user_data, 
-                                    size_t user_data_size);
-      PendingInitializationFunction(const PendingInitializationFunction &rhs);
-      ~PendingInitializationFunction(void);
-    public:
-      PendingInitializationFunction& operator=(
-                                    const PendingInitializationFunction &rhs);
-    public:
-      RtEvent register_function(Processor proc, Runtime *runtime);
-      RtEvent perform_function(RealmRuntime &realm, RtEvent precondition);
-    public:
-      const Processor::TaskFuncID func_id;
-      const Processor::Kind proc_kind;
-    private:
-      CodeDescriptor *realm_desc;
-      void *user_data;
-      size_t user_data_size;
-    };
-
-    /**
      * \class PendingVariantRegistration
      * A small helper class for deferring the restration of task
      * variants until the runtime is started.
@@ -2026,6 +1997,7 @@ namespace Legion {
     public:
       Mapping::MapperRuntime* get_mapper_runtime(void);
       MapperID generate_dynamic_mapper_id(void);
+      MapperID generate_library_mapper_ids(const char *name, size_t count);
       static MapperID& get_current_static_mapper_id(void);
       static MapperID generate_static_mapper_id(void);
       void add_mapper(MapperID map_id, Mapper *mapper, Processor proc);
@@ -2035,6 +2007,7 @@ namespace Legion {
                                         MapperID map_id, Processor proc);
     public:
       ProjectionID generate_dynamic_projection_id(void);
+      ProjectionID generate_library_projection_ids(const char *name,size_t cnt);
       static ProjectionID& get_current_static_projection_id(void);
       static ProjectionID generate_static_projection_id(void);
       void register_projection_functor(ProjectionID pid, 
@@ -2097,6 +2070,7 @@ namespace Legion {
                        const std::set<FieldID> &to_free);
     public:
       TaskID generate_dynamic_task_id(void);
+      TaskID generate_library_task_ids(const char *name, size_t count);
       VariantID register_variant(const TaskVariantRegistrar &registrar,
                                  const void *user_data, size_t user_data_size,
                                  CodeDescriptor *realm,
@@ -2291,6 +2265,14 @@ namespace Legion {
       void send_constraint_release(AddressSpaceID target, Serializer &rez);
       void send_constraint_removal(AddressSpaceID target, Serializer &rez);
       void send_mpi_rank_exchange(AddressSpaceID target, Serializer &rez);
+      void send_library_mapper_request(AddressSpaceID target, Serializer &rez);
+      void send_library_mapper_response(AddressSpaceID target, Serializer &rez);
+      void send_library_projection_request(AddressSpaceID target, 
+                                           Serializer &rez);
+      void send_library_projection_response(AddressSpaceID target,
+                                            Serializer &rez);
+      void send_library_task_request(AddressSpaceID target, Serializer &rez);
+      void send_library_task_response(AddressSpaceID target, Serializer &rez);
       void send_shutdown_notification(AddressSpaceID target, Serializer &rez);
       void send_shutdown_response(AddressSpaceID target, Serializer &rez);
     public:
@@ -2473,6 +2455,15 @@ namespace Legion {
       void handle_top_level_task_request(Deserializer &derez);
       void handle_top_level_task_complete(Deserializer &derez);
       void handle_mpi_rank_exchange(Deserializer &derez);
+      void handle_library_mapper_request(Deserializer &derez,
+                                         AddressSpaceID source);
+      void handle_library_mapper_response(Deserializer &derez);
+      void handle_library_projection_request(Deserializer &derez,
+                                             AddressSpaceID source);
+      void handle_library_projection_response(Deserializer &derez);
+      void handle_library_task_request(Deserializer &derez,
+                                       AddressSpaceID source);
+      void handle_library_task_response(Deserializer &derez);
       void handle_shutdown_notification(Deserializer &derez, 
                                         AddressSpaceID source);
       void handle_shutdown_response(Deserializer &derez);
@@ -2827,6 +2818,40 @@ namespace Legion {
       unsigned unique_mapper_id;
       unsigned unique_projection_id;
     protected:
+      mutable LocalLock library_lock;
+      struct LibraryMapperIDs {
+      public:
+        MapperID result;
+        size_t count;
+        RtEvent ready;
+        bool result_set;
+      };
+      std::map<std::string,LibraryMapperIDs> library_mapper_ids;
+      // This is only valid on node 0
+      unsigned unique_library_mapper_id;
+    protected:
+      struct LibraryProjectionIDs {
+      public:
+        ProjectionID result;
+        size_t count;
+        RtEvent ready;
+        bool result_set;
+      };
+      std::map<std::string,LibraryProjectionIDs> library_projection_ids;
+      // This is only valid on node 0
+      unsigned unique_library_projection_id;
+    protected:
+      struct LibraryTaskIDs {
+      public:
+        TaskID result;
+        size_t count;
+        RtEvent ready;
+        bool result_set;
+      };
+      std::map<std::string,LibraryTaskIDs> library_task_ids;
+      // This is only valid on node 0
+      unsigned unique_library_task_id;
+    protected:
       mutable LocalLock projection_lock;
       std::map<ProjectionID,ProjectionFunction*> projection_functions;
     protected:
@@ -2998,6 +3023,7 @@ namespace Legion {
       static int start(int argc, char **argv, bool background);
       static LegionConfiguration parse_arguments(int argc, char **argv);
       static void perform_slow_config_checks(const LegionConfiguration &config);
+      static void configure_mpi_interoperability(bool separate_runtimes);
       static RtEvent configure_runtime(int argc, char **argv,
           const LegionConfiguration &config, RealmRuntime &realm,
           Processor::Kind &startup_kind);
@@ -3018,8 +3044,6 @@ namespace Legion {
                                 get_pending_constraint_table(void);
       static std::map<ProjectionID,ProjectionFunctor*>&
                                 get_pending_projection_table(void);
-      static std::deque<PendingInitializationFunction*>&
-                                get_pending_initialization_table(void);
       static TaskID& get_current_static_task_id(void);
       static TaskID generate_static_task_id(void);
       static VariantID preregister_variant(
@@ -3027,10 +3051,6 @@ namespace Legion {
                       const void *user_data, size_t user_data_size,
                       CodeDescriptor *realm_desc, bool has_ret, 
                       const char *task_name,VariantID vid,bool check_id = true);
-      static void preregister_initialization_function(
-                      Processor::Kind proc_kind,
-                      CodeDescriptor *realm_desc,
-                      const void *user_data, size_t user_len);
     public:
       static void report_fatal_message(int code,
                                        const char *file_name,
@@ -3059,13 +3079,10 @@ namespace Legion {
       static std::vector<RegistrationCallbackFnptr> registration_callbacks;
       static bool runtime_started;
       static bool runtime_backgrounded;
+      static Runtime *the_runtime;
+      // Static member variables for MPI interop
       static int mpi_rank;
       static std::vector<MPILegionHandshake> *pending_handshakes;
-#ifdef DEBUG_LEGION
-#ifndef REALM_USE_SUBPROCESS
-      static Runtime *the_runtime; // useful for debugging
-#endif
-#endif
     public:
       static inline ApEvent merge_events(ApEvent e1, ApEvent e2);
       static inline ApEvent merge_events(ApEvent e1, ApEvent e2, ApEvent e3);
