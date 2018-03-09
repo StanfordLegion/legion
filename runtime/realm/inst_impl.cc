@@ -545,10 +545,16 @@ namespace Realm {
       // send any remaining incomplete profiling responses
       measurements.send_responses(requests);
 
-      // send any required invalidation messages for metadata
-      bool recycle_now = metadata.initiate_cleanup(me.id);
-      if(recycle_now)
+      // was this a successfully allocatated instance?
+      if(metadata.inst_offset != size_t(-2)) {
+	// send any required invalidation messages for metadata
+	bool recycle_now = metadata.initiate_cleanup(me.id);
+	if(recycle_now)
+	  recycle_instance();
+      } else {
+	// failed allocations never had valid metadata - recycle immediately
 	recycle_instance();
+      }
     }
 
     void RegionInstanceImpl::recycle_instance(void)

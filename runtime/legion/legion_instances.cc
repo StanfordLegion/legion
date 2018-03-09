@@ -2180,8 +2180,9 @@ namespace Legion {
       if (!result.success)
       {
         // Destroy the instance first so that Realm can reclaim the ID
-        //instance.destroy();
+        instance.destroy();
         instance = PhysicalInstance::NO_INST;
+        own_realm_layout = false;  // it was destroyed with the realm instance
       }
       // No matter what trigger the event
       Runtime::trigger_event(profiling_ready);
