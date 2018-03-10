@@ -3479,6 +3479,15 @@ extern "C" {
     legion_registration_callback_pointer_t callback);
 
   /**
+   * @see Legion::Runtime::generate_library_mapper_ids()
+   */
+  legion_mapper_id_t
+  legion_runtime_generate_library_mapper_ids(
+      legion_runtime_t runtime,
+      const char *library_name,
+      size_t count);
+
+  /**
    * @see Legion::Runtime::replace_default_mapper()
    */
   void
@@ -3488,6 +3497,15 @@ extern "C" {
     legion_processor_t proc);
 
   /**
+   * @see Legion::Runtime::generate_library_projection_ids()
+   */
+  legion_projection_id_t
+  legion_runtime_generate_library_projection_ids(
+      legion_runtime_t runtime,
+      const char *library_name,
+      size_t count);
+
+  /**
    * @see Legion::Runtime::register_projection_functor()
    */
   void
@@ -3495,6 +3513,15 @@ extern "C" {
     legion_projection_id_t id,
     legion_projection_functor_logical_region_t region_functor,
     legion_projection_functor_logical_partition_t partition_functor);
+
+  /**
+   * @see Legion::Runtime::generate_library_task_ids()
+   */
+  legion_task_id_t
+  legion_runtime_generate_library_task_ids(
+      legion_runtime_t runtime,
+      const char *library_name,
+      size_t count);
 
   /**
    * @see Legion::Runtime::register_task_variant()
@@ -3576,21 +3603,6 @@ extern "C" {
     size_t userlen);
 
   /**
-   * @see Legion::Runtime::preregister_task_variant()
-   */
-  legion_task_id_t
-  legion_runtime_preregister_task_variant_python_source(
-    legion_task_id_t id /* = AUTO_GENERATE_ID */,
-    const char *task_name /* = NULL*/,
-    legion_execution_constraint_set_t execution_constraints,
-    legion_task_layout_constraint_set_t layout_constraints,
-    legion_task_config_options_t options,
-    const char *module_name,
-    const char *function_name,
-    const void *userdata,
-    size_t userlen);
-
-  /**
    * @see Legion::LegionTaskWrapper::legion_task_preamble()
    */
   void
@@ -3613,15 +3625,6 @@ extern "C" {
     legion_context_t ctx,
     const void *retval,
     size_t retsize);
-
-  /**
-   * @see Legion::Runtime::initialization_function_preamble()
-   */
-  void
-  legion_initialization_function_preamble(
-      const void *data,
-      size_t datalen,
-      legion_runtime_t * runtimeptr);
 
   // -----------------------------------------------------------------------
   // Timing Operations

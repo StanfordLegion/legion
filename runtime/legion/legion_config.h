@@ -196,6 +196,12 @@
 #define LEGION_PRUNE_DEPTH_WARNING        8
 #endif
 
+// Initial offset for library IDs
+// Controls how many IDs are available for dynamic use
+#ifndef LEGION_INITIAL_LIBRARY_ID_OFFSET
+#define LEGION_INITIAL_LIBRARY_ID_OFFSET (1 << 30)
+#endif
+
 // Some helper macros
 
 // This statically computes an integer log base 2 for a number
@@ -565,6 +571,8 @@ typedef enum legion_error_t {
   ERROR_ATTACH_OPERATION_MISSING_POINTER = 546,
   ERROR_RESERVED_VARIANT_ID = 547,
   ERROR_NON_DENSE_RECTANGLE = 548,
+  ERROR_LIBRARY_COUNT_MISMATCH = 549, 
+  ERROR_MPI_INTEROP_MISCONFIGURATION = 550,
   ERROR_RESERVED_SHARDING_ID = 601,
   ERROR_DUPLICATE_SHARDING_ID = 602,
   ERROR_INVALID_SHARDING_ID = 603,
@@ -635,6 +643,7 @@ typedef enum legion_error_t {
   LEGION_FATAL_CTRL_REPL_RETURN_PRIV = 2009,
   LEGION_FATAL_UNIMPLEMENTED_FEATURE = 2010,  
   LEGION_FATAL_INCONSISTENT_PHI_VIEW = 2011, 
+  LEGION_FATAL_EXCEEDED_LIBRARY_ID_OFFSET = 2012,
   
 }  legion_error_t;
 

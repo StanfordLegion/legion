@@ -37,6 +37,23 @@ namespace Realm {
 
       static Runtime get_runtime(void);
 
+      // performs any network initialization and, critically, makes sure
+      //  *argc and *argv contain the application's real command line
+      //  (instead of e.g. mpi spawner information)
+      bool network_init(int *argc, char ***argv);
+
+      // configures the runtime from the provided command line - after this 
+      //  call it is possible to create user events/reservations/etc, 
+      //  perform registrations and query the machine model, but not spawn
+      //  tasks or create instances
+      bool configure_from_command_line(int argc, char **argv);
+      bool configure_from_command_line(std::vector<std::string> &cmdline,
+				       bool remove_realm_args = false);
+
+      // starts up the runtime, allowing task/instance creation
+      void start(void);
+
+      // single-call version of the above three calls
       bool init(int *argc, char ***argv);
 
       // this is now just a wrapper around Processor::register_task - consider switching to

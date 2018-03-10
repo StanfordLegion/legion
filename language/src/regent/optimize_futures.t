@@ -1316,6 +1316,65 @@ function optimize_futures.stat_break(cx, node)
   return terralib.newlist({node})
 end
 
+local function unwrap_field_access(node)
+  if node:is(ast.typed.expr.FieldAccess) then
+    return unwrap_field_access(node.value)
+  end
+  return node
+end
+
+local function rewrap_field_access(node, replacement)
+  if node:is(ast.typed.expr.FieldAccess) then
+    return node { value = rewrap_field_access(node.value, replacement) }
+  end
+  return replacement
+end
+
+local function is_future_field_assignment(node)
+  return node:is(ast.typed.expr.FieldAccess) and
+    unwrap_field_access(node):is(ast.typed.expr.FutureGetResult)
+end
+
+local function handle_future_field_assignment(cx, lhs, rhs)
+  local lhs_value = unwrap_field_access(lhs)
+  local lhs_type = std.as_read(lhs_value.expr_type)
+  local symbol = std.newsymbol(lhs_type)
+
+  local symbol_value = ast.typed.expr.ID {
+    value = symbol,
+    expr_type = std.rawref(&lhs_type),
+    annotations = ast.default_annotations(),
+    span = lhs.span,
+  }
+
+  return terralib.newlist({
+    ast.typed.stat.Var {
+      symbol = symbol,
+      type = lhs_type,
+      value = lhs_value,
+      annotations = ast.default_annotations(),
+      span = lhs.span,
+    },
+    ast.typed.stat.Assignment {
+      lhs = rewrap_field_access(lhs, symbol_value),
+      rhs = rhs,
+      annotations = ast.default_annotations(),
+      span = lhs.span,
+    },
+    ast.typed.stat.Assignment {
+      lhs = lhs_value.value,
+      rhs = ast.typed.expr.Future {
+        value = symbol_value,
+        expr_type = std.future(lhs_type),
+        annotations = ast.default_annotations(),
+        span = lhs.span,
+      },
+      annotations = ast.default_annotations(),
+      span = lhs.span,
+    },
+  })
+end
+
 function optimize_futures.stat_assignment(cx, node)
   local lhs = optimize_futures.expr(cx, node.lhs)
   local rhs = optimize_futures.expr(cx, node.rhs)
@@ -1326,6 +1385,12 @@ function optimize_futures.stat_assignment(cx, node)
     normalized_rhs = promote(rhs, lhs_type)
   else
     normalized_rhs = concretize(rhs)
+  end
+
+  -- Hack: Can't write directly to the field of a future; must write
+  -- an entire struct. Generate an updated struct and assign it.
+  if is_future_field_assignment(lhs) then
+    return handle_future_field_assignment(cx, lhs, normalized_rhs)
   end
 
   return terralib.newlist({

@@ -6275,6 +6275,18 @@ namespace Legion {
       MapperID generate_dynamic_mapper_id(void);
 
       /**
+       * Generate a contiguous set of MapperIDs for use by a library.
+       * This call will always generate the same answer for the same library
+       * name no many how many times it is called or on how many nodes it
+       * is called. If the count passed in to this method differs for the 
+       * same library name the runtime will raise an error.
+       * @param name a unique null-terminated string that names the library
+       * @param count the number of mapper IDs that should be generated
+       * @return the first mapper ID that is allocated to the library
+       */
+      MapperID generate_library_mapper_ids(const char *name, size_t count);
+
+      /**
        * Statically generate a unique Mapper ID for use across the machine.
        * This can only be called prior to the runtime starting. It must
        * be invoked symmetrically across all nodes in the machine prior
@@ -6317,6 +6329,19 @@ namespace Legion {
        * @reutrn a ProjectionID that is globally unique across the machine
        */
       ProjectionID generate_dynamic_projection_id(void);
+
+      /** 
+       * Generate a contiguous set of ProjectionIDs for use by a library.
+       * This call will always generate the same answer for the same library
+       * name no many how many times it is called or on how many nodes it
+       * is called. If the count passed in to this method differs for the 
+       * same library name the runtime will raise an error.
+       * @param name a unique null-terminated string that names the library
+       * @param count the number of projection IDs that should be generated
+       * @return the first projection ID that is allocated to the library
+       */
+      ProjectionID generate_library_projection_ids(const char *name, 
+                                                   size_t count);
 
       /**
        * Statically generate a unique Projection ID for use across the machine.
@@ -6683,25 +6708,6 @@ namespace Legion {
        * @return a reference to the input arguments passed in at start-up
        */
       static const InputArgs& get_input_args(void);
-
-      /**
-       * This method provides a mechanism for applications to register
-       * initialization functions that have to be called on specific 
-       * processor kinds after the Legion runtime has been started, 
-       * but before the application top-level task is started.
-       */
-      static void preregister_initialization_function(
-                      Processor::Kind proc_kind,
-                      const CodeDescriptor &codedesc,
-                      const void *data= NULL,
-                      size_t datalen= 0);
-      /**
-       * This is the necessary preample call to be done on a 
-       * initialization function. Note that you should pass in
-       * the user data as this is a runtime initialization function
-       */
-      static void initialization_function_preamble(
-          const void *data, size_t datalen, Runtime *&runtime);
     public:
       /**
        * Enable recording of profiling information.
@@ -6784,6 +6790,18 @@ namespace Legion {
        * @return a Task ID that is globally unique across the machine
        */
       TaskID generate_dynamic_task_id(void);
+
+      /**
+       * Generate a contiguous set of TaskIDs for use by a library.
+       * This call will always generate the same answer for the same library
+       * name no many how many times it is called or on how many nodes it
+       * is called. If the count passed in to this method differs for the 
+       * same library name the runtime will raise an error.
+       * @param name a unique null-terminated string that names the library
+       * @param count the number of task IDs that should be generated
+       * @return the first task ID that is allocated to the library
+       */
+      TaskID generate_library_task_ids(const char *name, size_t count);
 
       /**
        * Statically generate a unique Task ID for use across the machine.

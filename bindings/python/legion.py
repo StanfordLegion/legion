@@ -90,7 +90,12 @@ header = re.sub(r'typedef struct {.+?} max_align_t;', '', header, flags=re.DOTAL
 ffi = cffi.FFI()
 ffi.cdef(header)
 c = ffi.dlopen(None)
-pending_registrations = []
+max_legion_python_tasks = 1000000
+next_legion_task_id = c.legion_runtime_generate_library_task_ids(
+                        c.legion_runtime_get_runtime(),
+                        os.path.basename(__file__).encode('utf-8'),
+                        max_legion_python_tasks)
+max_legion_task_id = next_legion_task_id + max_legion_python_tasks
 
 # Returns true if this module is running inside of a Legion
 # executable. If false, then other Legion functionality should not be
@@ -537,11 +542,11 @@ def extern_task(**kwargs):
     return ExternTask(**kwargs)
 
 class Task (object):
-    __slots__ = ['body', 'privileges', 'leaf', 'inner', 'idempotent', 'calling_convention', 'task_id']
+    __slots__ = ['body', 'privileges', 'leaf', 'inner', 'idempotent', 'calling_convention', 'task_id', 'registered']
 
     def __init__(self, body, privileges=None,
                  leaf=False, inner=False, idempotent=False,
-                 register=True):
+                 register=True, top_level=False):
         self.body = body
         if privileges is not None:
             privileges = [(x if x is not None else N) for x in privileges]
@@ -552,7 +557,7 @@ class Task (object):
         self.calling_convention = 'python'
         self.task_id = None
         if register:
-            pending_registrations.append(self)
+            self.register(top_level)
 
     def __call__(self, *args):
         # Hack: This entrypoint needs to be able to handle both being
@@ -656,8 +661,16 @@ class Task (object):
         # Clear thread-local storage.
         del _my.ctx
 
-    def register(self, runtime):
+    def register(self, top_level_task):
         assert(self.task_id is None)
+        if not top_level_task:
+            global next_legion_task_id
+            task_id = next_legion_task_id 
+            next_legion_task_id += 1
+            # If we ever hit this then we need to allocate more task IDs
+            assert task_id < max_legion_task_id 
+        else:
+            task_id = 1 # Predefined value for the top-level task
 
         execution_constraints = c.legion_execution_constraint_set_create()
         c.legion_execution_constraint_set_add_processor_constraint(
@@ -673,9 +686,9 @@ class Task (object):
 
         task_name = ('%s.%s' % (self.body.__module__, self.body.__name__))
 
-        task_id = c.legion_runtime_register_task_variant_python_source(
-            runtime,
-            ffi.cast('legion_task_id_t', -1), # AUTO_GENERATE_ID
+        c.legion_runtime_register_task_variant_python_source(
+            c.legion_runtime_get_runtime(),
+            task_id,
             task_name.encode('utf-8'),
             False, # Global
             execution_constraints,
@@ -925,12 +938,3 @@ class Tunable(object):
         c.legion_future_destroy(result)
         return future
 
-def initialize(raw_args, user_data, proc):
-    raw_data_ptr = ffi.new('char[]', bytes(user_data))
-    raw_data_size = len(user_data)
-    runtime = ffi.new('legion_runtime_t *')
-    c.legion_initialization_function_preamble(
-            raw_data_ptr, raw_data_size, runtime)
-    for task in pending_registrations:
-        task.register(runtime[0])
-    del pending_registrations[:]

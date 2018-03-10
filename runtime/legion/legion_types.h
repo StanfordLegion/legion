@@ -750,6 +750,12 @@ namespace Legion {
       SEND_REPLICATE_TRIGGER_COMPLETE,
       SEND_REPLICATE_TRIGGER_COMMIT,
       SEND_CONTROL_REPLICATE_COLLECTIVE_MESSAGE,
+      SEND_LIBRARY_MAPPER_REQUEST,
+      SEND_LIBRARY_MAPPER_RESPONSE,
+      SEND_LIBRARY_PROJECTION_REQUEST,
+      SEND_LIBRARY_PROJECTION_RESPONSE,
+      SEND_LIBRARY_TASK_REQUEST,
+      SEND_LIBRARY_TASK_RESPONSE,
       SEND_SHUTDOWN_NOTIFICATION,
       SEND_SHUTDOWN_RESPONSE,
       LAST_SEND_KIND, // This one must be last
@@ -905,6 +911,12 @@ namespace Legion {
         "Send Replication Trigger Complete",                          \
         "Send Replication Trigger Commit",                            \
         "Send Control Replication Collective Message",                \
+        "Send Library Mapper Request",                                \
+        "Send Library Mapper Response",                               \
+        "Send Library Projection Request",                            \
+        "Send Library Projection Response",                           \
+        "Send Library Task Request",                                  \
+        "Send Library Task Response",                                 \
         "Send Shutdown Notification",                                 \
         "Send Shutdown Response",                                     \
       };
