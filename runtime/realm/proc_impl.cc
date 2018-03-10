@@ -411,6 +411,10 @@ namespace Realm {
     {
     }
 
+    void ProcessorImpl::start_threads(void)
+    {
+    }
+
     void ProcessorImpl::shutdown(void)
     {
     }
@@ -835,9 +839,6 @@ namespace Realm {
       log_proc.info("no processor init task: proc=" IDFMT "", me.id);
     }
 #endif
-
-    // finally, fire up the scheduler
-    sched->start();
   }
 
   void LocalTaskProcessor::add_to_group(ProcessorGroup *group)
@@ -942,6 +943,13 @@ namespace Realm {
     (tte.fnptr)(task_args.base(), task_args.size(),
 		tte.user_data.base(), tte.user_data.size(),
 		me);
+  }
+
+  // starts worker threads and performs any per-processor initialization
+  void LocalTaskProcessor::start_threads(void)
+  {
+    // finally, fire up the scheduler
+    sched->start();
   }
 
   // blocks until things are cleaned up

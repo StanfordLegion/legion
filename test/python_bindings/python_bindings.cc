@@ -38,19 +38,6 @@ VariantID preregister_python_task_variant(
     registrar.task_variant_name);
 }
 
-void preregister_python_initialization_function(
-    const char *module_name,
-    const char *function_name,
-    const void *userdata = NULL,
-    size_t userlen = 0)
-{
-  CodeDescriptor code_desc(Realm::Type::from_cpp_type<Processor::TaskFuncPtr>());
-  code_desc.add_implementation(new Realm::PythonSourceImplementation(module_name, function_name));
-
-  return Runtime::preregister_initialization_function(
-      Processor::PY_PROC, code_desc, userdata, userlen);
-}
-
 int main(int argc, char **argv)
 {
   // do this before any threads are spawned
@@ -68,7 +55,6 @@ int main(int argc, char **argv)
   }
 
   Runtime::set_top_level_task_id(MAIN_TASK_ID);
-  preregister_python_initialization_function("legion", "initialize");
 
   return Runtime::start(argc, argv);
 }

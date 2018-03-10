@@ -128,6 +128,9 @@ namespace Realm {
     virtual void execute_task(Processor::TaskFuncID func_id,
 			      const ByteArrayRef& task_args);
 
+    // starts worker threads and performs any per-processor initialization
+    virtual void start_threads(void);
+
     virtual void shutdown(void);
 
     virtual void add_to_group(ProcessorGroup *group);

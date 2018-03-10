@@ -4298,6 +4298,17 @@ legion_runtime_add_registration_callback(
   callbacks.push_back(callback_);
 }
 
+legion_mapper_id_t
+legion_runtime_generate_library_mapper_ids(
+    legion_runtime_t runtime_,
+    const char *library_name,
+    size_t count)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+
+  return runtime->generate_library_mapper_ids(library_name, count);
+}
+
 void
 legion_runtime_replace_default_mapper(
   legion_runtime_t runtime_,
@@ -4367,6 +4378,17 @@ private:
   legion_projection_functor_logical_partition_t partition_functor;
 };
 
+legion_projection_id_t
+legion_runtime_generate_library_projection_ids(
+    legion_runtime_t runtime_,
+    const char *library_name,
+    size_t count)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+
+  return runtime->generate_library_projection_ids(library_name, count);
+}
+
 void
 legion_runtime_register_projection_functor(
   legion_runtime_t runtime_,
@@ -4380,6 +4402,17 @@ legion_runtime_register_projection_functor(
   FunctorWrapper *functor =
     new FunctorWrapper(runtime, depth, region_functor, partition_functor);
   runtime->register_projection_functor(id, functor);
+}
+
+legion_task_id_t
+legion_runtime_generate_library_task_ids(
+    legion_runtime_t runtime_,
+    const char *library_name,
+    size_t count)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+
+  return runtime->generate_library_task_ids(library_name, count);
 }
 
 legion_task_id_t
@@ -4586,43 +4619,6 @@ legion_runtime_register_task_variant_python_source(
     runtime->attach_name(id, task_name);
   return id;
 }
-
-legion_task_id_t
-legion_runtime_preregister_task_variant_python_source(
-  legion_task_id_t id /* = AUTO_GENERATE_ID */,
-  const char *task_name /* = NULL*/,
-  legion_execution_constraint_set_t execution_constraints_,
-  legion_task_layout_constraint_set_t layout_constraints_,
-  legion_task_config_options_t options,
-  const char *module_name,
-  const char *function_name,
-  const void *userdata,
-  size_t userlen)
-{
-  ExecutionConstraintSet *execution_constraints =
-    CObjectWrapper::unwrap(execution_constraints_);
-  TaskLayoutConstraintSet *layout_constraints =
-    CObjectWrapper::unwrap(layout_constraints_);
-
-  if (id == AUTO_GENERATE_ID)
-    id = Runtime::generate_static_task_id();
-
-  TaskVariantRegistrar registrar(id, task_name);
-  registrar.set_leaf(options.leaf);
-  registrar.set_inner(options.inner);
-  registrar.set_idempotent(options.idempotent);
-  if (layout_constraints)
-    registrar.layout_constraints = *layout_constraints;
-  if (execution_constraints)
-    registrar.execution_constraints = *execution_constraints;
-
-  CodeDescriptor code_desc(Realm::Type::from_cpp_type<Processor::TaskFuncPtr>());
-  code_desc.add_implementation(new Realm::PythonSourceImplementation(module_name, function_name));
-
-  /*VariantID vid =*/ Runtime::preregister_task_variant(
-    registrar, code_desc, userdata, userlen, task_name);
-  return id;
-}
 #endif
 
 void
@@ -4675,19 +4671,6 @@ legion_task_postamble(
 				 ctx,
 				 retval,
 				 retsize);
-}
-
-void
-legion_initialization_function_preamble(
-    const void *data,
-    size_t datalen,
-    legion_runtime_t * runtimeptr)
-{
-  Runtime *runtime;
-
-  Runtime::initialization_function_preamble(data, datalen, runtime);
-
-  *runtimeptr = CObjectWrapper::wrap(runtime);
 }
 
 // -----------------------------------------------------------------------

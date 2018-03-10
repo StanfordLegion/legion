@@ -287,9 +287,6 @@ namespace Realm {
 
   void PythonThreadTaskScheduler::python_scheduler_loop(void)
   {
-    // hold scheduler lock for whole thing
-    AutoHSLLock al(lock);
-
     // global startup of python interpreter if needed
     if(pyproc->interpreter == 0) {
       log_py.info() << "creating interpreter";
@@ -304,7 +301,8 @@ namespace Realm {
     assert(pythreads.count(Thread::self()) == 0);
     pythreads[Thread::self()] = pythread;
 
-    // now go into main scheduler loop
+    // now go into main scheduler loop, holding scheduler lock for whole thing
+    AutoHSLLock al(lock);
     while(true) {
       // remember the work counter value before we start so that we don't iterate
       //   unnecessarily
@@ -582,13 +580,19 @@ namespace Realm {
 
     sched = new PythonThreadTaskScheduler(this, *core_rsrv);
     sched->add_task_queue(&task_queue);
-    sched->start();
   }
 
   LocalPythonProcessor::~LocalPythonProcessor(void)
   {
     delete core_rsrv;
     delete sched;
+  }
+
+  // starts worker threads and performs any per-processor initialization
+  void LocalPythonProcessor::start_threads(void)
+  {
+    // finally, fire up the scheduler
+    sched->start();
   }
 
   void LocalPythonProcessor::shutdown(void)

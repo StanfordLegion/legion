@@ -24,6 +24,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <vector>
+#include <string>
 
 #include <sys/types.h>
 
@@ -188,7 +189,7 @@ extern void init_endpoints(int gasnet_mem_size_in_mb,
 			   int registered_mem_size_in_mb,
 			   int registered_ib_mem_size_in_mb,
 			   Realm::CoreReservationSet& crs,
-			   int argc, const char *argv[]);
+			   std::vector<std::string>& cmdline);
 extern void start_polling_threads(int count);
 extern void start_handler_threads(int count, Realm::CoreReservationSet& crs, size_t stacksize);
 extern void stop_activemsg_threads(void);
@@ -815,7 +816,7 @@ inline void init_endpoints(gasnet_handlerentry_t *handlers, int hcount,
 			   int registered_mem_size_in_mb,
 			   int registered_ib_mem_size_in_mb,
 			   Realm::CoreReservationSet& crs,
-                           int argc, const char *argv[])
+			   std::vector<std::string>& cmdline)
 {
   // just use malloc to obtain "gasnet" and/or "registered" memory
   fake_gasnet_mem_size = (gasnet_mem_size_in_mb + 

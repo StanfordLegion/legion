@@ -267,7 +267,8 @@ class LegionProfBinaryDeserializer(LegionDeserializer):
         # change the callbacks to be by id
         if not self.callbacks_translated:
             new_callbacks = {LegionProfBinaryDeserializer.name_to_id[name]: callback 
-                               for name, callback in self.callbacks.iteritems()}
+                               for name, callback in self.callbacks.iteritems()
+                               if name in LegionProfBinaryDeserializer.name_to_id}
             self.callbacks = new_callbacks
             self.callbacks_translated = True
 

@@ -189,7 +189,11 @@ namespace Realm {
       RuntimeImpl(void);
       ~RuntimeImpl(void);
 
-      bool init(int *argc, char ***argv);
+      bool network_init(int *argc, char ***argv);
+
+      bool configure_from_command_line(std::vector<std::string> &cmdline);
+
+      void start(void);
 
       bool register_task(Processor::TaskFuncID taskid, Processor::TaskFuncPtr taskptr);
       bool register_reduction(ReductionOpID redop_id, const ReductionOpUntyped *redop);
