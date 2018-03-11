@@ -6384,6 +6384,18 @@ namespace Legion {
        */
       ShardingID generate_dynamic_sharding_id(void);
 
+      /** 
+       * Generate a contiguous set of ShardingIDs for use by a library.
+       * This call will always generate the same answer for the same library
+       * name no many how many times it is called or on how many nodes it
+       * is called. If the count passed in to this method differs for the 
+       * same library name the runtime will raise an error.
+       * @param name a unique null-terminated string that names the library
+       * @param count the number of sharding IDs that should be generated
+       * @return the first sharding ID that is allocated to the library
+       */
+      ShardingID generate_library_sharding_ids(const char *name, size_t count);
+
       /**
        * Statically generate a unique Sharding ID for use across the machine.
        * This can only be called prior to the runtime starting. It must be

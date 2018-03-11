@@ -754,6 +754,8 @@ namespace Legion {
       SEND_LIBRARY_MAPPER_RESPONSE,
       SEND_LIBRARY_PROJECTION_REQUEST,
       SEND_LIBRARY_PROJECTION_RESPONSE,
+      SEND_LIBRARY_SHARDING_REQUEST,
+      SEND_LIBRARY_SHARDING_RESPONSE,
       SEND_LIBRARY_TASK_REQUEST,
       SEND_LIBRARY_TASK_RESPONSE,
       SEND_SHUTDOWN_NOTIFICATION,
@@ -915,6 +917,8 @@ namespace Legion {
         "Send Library Mapper Response",                               \
         "Send Library Projection Request",                            \
         "Send Library Projection Response",                           \
+        "Send Library Sharding Request",                              \
+        "Send Library Sharding Response",                             \
         "Send Library Task Request",                                  \
         "Send Library Task Response",                                 \
         "Send Shutdown Notification",                                 \

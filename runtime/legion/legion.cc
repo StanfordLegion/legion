@@ -6562,6 +6562,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    ShardingID Runtime::generate_library_sharding_ids(const char *name,
+                                                      size_t count)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->generate_library_sharding_ids(name, count);
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ ShardingID Runtime::generate_static_sharding_id(void)
     //--------------------------------------------------------------------------
     {

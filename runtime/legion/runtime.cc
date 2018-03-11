@@ -7067,6 +7067,17 @@ namespace Legion {
               runtime->handle_library_projection_response(derez);
               break;
             }
+          case SEND_LIBRARY_SHARDING_REQUEST:
+            {
+              runtime->handle_library_sharding_request(derez, 
+                                                       remote_address_space);
+              break;
+            }
+          case SEND_LIBRARY_SHARDING_RESPONSE:
+            {
+              runtime->handle_library_sharding_response(derez);
+              break;
+            }
           case SEND_LIBRARY_TASK_REQUEST:
             {
               runtime->handle_library_task_request(derez, remote_address_space);
@@ -10029,6 +10040,7 @@ namespace Legion {
         unique_sharding_id(get_current_static_sharding_id()+unique),
         unique_library_mapper_id(LEGION_INITIAL_LIBRARY_ID_OFFSET),
         unique_library_projection_id(LEGION_INITIAL_LIBRARY_ID_OFFSET),
+        unique_library_sharding_id(LEGION_INITIAL_LIBRARY_ID_OFFSET),
         unique_library_task_id(LEGION_INITIAL_LIBRARY_ID_OFFSET),
         unique_distributed_id((unique == 0) ? runtime_stride : unique),
         gc_epoch_counter(0)
@@ -13685,6 +13697,115 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    ShardingID Runtime::generate_library_sharding_ids(const char *name,
+                                                      size_t cnt)
+    //--------------------------------------------------------------------------
+    {
+      // Easy case if the user asks for no IDs
+      if (cnt == 0)
+        return AUTO_GENERATE_ID;
+      const std::string library_name(name); 
+      // Take the lock in read only mode and see if we can find the result
+      RtEvent wait_on;
+      {
+        AutoLock l_lock(library_lock,1,false/*exclusive*/);
+        std::map<std::string,LibraryShardingIDs>::const_iterator finder = 
+          library_sharding_ids.find(library_name);
+        if (finder != library_sharding_ids.end())
+        {
+          // First do a check to see if the counts match
+          if (finder->second.count != cnt)
+            REPORT_LEGION_ERROR(ERROR_LIBRARY_COUNT_MISMATCH,
+               "ShardingID generation counts %zd and %zd differ for library %s",
+               finder->second.count, cnt, name)
+          if (finder->second.result_set)
+            return finder->second.result;
+          // This should never happen unless we are on a node other than 0
+#ifdef DEBUG_LEGION
+          assert(address_space > 0);
+#endif
+          wait_on = finder->second.ready;
+        }
+      }
+      RtUserEvent request_event;
+      if (!wait_on.exists())
+      {
+        AutoLock l_lock(library_lock);
+        // Check to make sure we didn't lose the race
+        std::map<std::string,LibraryShardingIDs>::const_iterator finder = 
+          library_sharding_ids.find(library_name);
+        if (finder != library_sharding_ids.end())
+        {
+          // First do a check to see if the counts match
+          if (finder->second.count != cnt)
+            REPORT_LEGION_ERROR(ERROR_LIBRARY_COUNT_MISMATCH,
+               "ShardingID generation counts %zd and %zd differ for library %s",
+               finder->second.count, cnt, name)
+          if (finder->second.result_set)
+            return finder->second.result;
+          // This should never happen unless we are on a node other than 0
+#ifdef DEBUG_LEGION
+          assert(address_space > 0);
+#endif
+          wait_on = finder->second.ready;
+        }
+        if (!wait_on.exists())
+        {
+          LibraryShardingIDs &record = library_sharding_ids[library_name];
+          record.count = cnt;
+          if (address_space == 0)
+          {
+            // We're going to make the result
+            record.result = unique_library_sharding_id;
+            unique_library_sharding_id += cnt;
+#ifdef DEBUG_LEGION
+            assert(unique_library_sharding_id > record.result);
+#endif
+            record.result_set = true;
+            return record.result;
+          }
+          else
+          {
+            // We're going to request the result
+            request_event = Runtime::create_rt_user_event();
+            record.ready = request_event;
+            record.result_set = false;
+          }
+        }
+      }
+      // Should only get here on nodes other than 0
+#ifdef DEBUG_LEGION
+      assert(address_space > 0);
+      assert(wait_on.exists());
+#endif
+      if (request_event.exists())
+      {
+        // Include the null terminator in length
+        const size_t string_length = strlen(name) + 1;
+        // Send the request to node 0 for the result
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize<size_t>(string_length);
+          rez.serialize(name, string_length);
+          rez.serialize<size_t>(cnt);
+          rez.serialize(request_event);
+        }
+        send_library_sharding_request(0/*target*/, rez);
+      }
+      wait_on.wait();
+      // When we wake up we should be able to find the result
+      AutoLock l_lock(library_lock,1,false/*exclusive*/);
+      std::map<std::string,LibraryShardingIDs>::const_iterator finder = 
+          library_sharding_ids.find(library_name);
+#ifdef DEBUG_LEGION
+      assert(finder != library_sharding_ids.end());
+      assert(finder->second.result_set);
+#endif
+      return finder->second.result;
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ ShardingID& Runtime::get_current_static_sharding_id(void)
     //--------------------------------------------------------------------------
     {
@@ -15893,6 +16014,24 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_library_sharding_request(AddressSpaceID target, 
+                                                Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_LIBRARY_SHARDING_REQUEST,
+                                     DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_library_sharding_response(AddressSpaceID target,
+                                                 Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_LIBRARY_SHARDING_RESPONSE,
+                   DEFAULT_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_library_task_request(AddressSpaceID target, 
                                             Serializer &rez)
     //--------------------------------------------------------------------------
@@ -17347,6 +17486,63 @@ namespace Legion {
           library_projection_ids.find(library_name);
 #ifdef DEBUG_LEGION
         assert(finder != library_projection_ids.end());
+        assert(!finder->second.result_set);
+        assert(finder->second.ready == done);
+#endif
+        finder->second.result = result;
+        finder->second.result_set = true;
+      }
+      Runtime::trigger_event(done);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_library_sharding_request(Deserializer &derez,
+                                                  AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      size_t string_length;
+      derez.deserialize(string_length);
+      const char *name = (const char*)derez.get_current_pointer();
+      derez.advance_pointer(string_length);
+      size_t count;
+      derez.deserialize(count);
+      RtUserEvent done;
+      derez.deserialize(done);
+      
+      ShardingID result = generate_library_sharding_ids(name, count);
+      Serializer rez;
+      {
+        RezCheck z2(rez);
+        rez.serialize(string_length);
+        rez.serialize(name, string_length);
+        rez.serialize(result);
+        rez.serialize(done);
+      }
+      send_library_sharding_response(source, rez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_library_sharding_response(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      size_t string_length;
+      derez.deserialize(string_length);
+      const char *name = (const char*)derez.get_current_pointer();
+      derez.advance_pointer(string_length);
+      ShardingID result;
+      derez.deserialize(result);
+      RtUserEvent done;
+      derez.deserialize(done);
+
+      const std::string library_name(name);
+      {
+        AutoLock l_lock(library_lock); 
+        std::map<std::string,LibraryShardingIDs>::iterator finder = 
+          library_sharding_ids.find(library_name);
+#ifdef DEBUG_LEGION
+        assert(finder != library_sharding_ids.end());
         assert(!finder->second.result_set);
         assert(finder->second.ready == done);
 #endif

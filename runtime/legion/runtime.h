@@ -2169,6 +2169,7 @@ namespace Legion {
       ProjectionFunction* find_projection_function(ProjectionID pid);
     public:
       ShardingID generate_dynamic_sharding_id(void);
+      ShardingID generate_library_sharding_ids(const char *name, size_t count);
       static ShardingID& get_current_static_sharding_id(void);
       static ShardingID generate_static_sharding_id(void);
       void register_sharding_functor(ShardingID sid,
@@ -2470,6 +2471,9 @@ namespace Legion {
                                            Serializer &rez);
       void send_library_projection_response(AddressSpaceID target,
                                             Serializer &rez);
+      void send_library_sharding_request(AddressSpaceID target,Serializer &rez);
+      void send_library_sharding_response(AddressSpaceID target, 
+                                          Serializer &rez);
       void send_library_task_request(AddressSpaceID target, Serializer &rez);
       void send_library_task_response(AddressSpaceID target, Serializer &rez);
       void send_shutdown_notification(AddressSpaceID target, Serializer &rez);
@@ -2689,6 +2693,9 @@ namespace Legion {
       void handle_library_projection_request(Deserializer &derez,
                                              AddressSpaceID source);
       void handle_library_projection_response(Deserializer &derez);
+      void handle_library_sharding_request(Deserializer &derez,
+                                           AddressSpaceID source);
+      void handle_library_sharding_response(Deserializer &derez);
       void handle_library_task_request(Deserializer &derez,
                                        AddressSpaceID source);
       void handle_library_task_response(Deserializer &derez);
@@ -3109,6 +3116,17 @@ namespace Legion {
       std::map<std::string,LibraryProjectionIDs> library_projection_ids;
       // This is only valid on node 0
       unsigned unique_library_projection_id;
+    protected:
+      struct LibraryShardingIDs {
+      public:
+        ShardingID result;
+        size_t count;
+        RtEvent ready;
+        bool result_set;
+      };
+      std::map<std::string,LibraryShardingIDs> library_sharding_ids;
+      // This is only valid on node 0
+      unsigned unique_library_sharding_id;
     protected:
       struct LibraryTaskIDs {
       public:
