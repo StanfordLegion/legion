@@ -983,6 +983,23 @@ namespace Legion {
       };
       typedef std::map<ReductionView*,
                        LegionList<PendingReduction>::aligned> PendingReductions;
+#ifdef CVOPT
+      struct ReductionShard {
+      public:
+        ReductionShard(void)
+          : intersect(NULL), mask(NULL) { }
+        ReductionShard(const FieldMask &m, PredEvent g, 
+                       RegionTreeNode *i, IndexSpaceExpression *e)
+          : reduction_mask(m), pred_guard(g), intersect(i), mask(e) { }
+      public:
+        FieldMask reduction_mask;
+        PredEvent pred_guard;
+        RegionTreeNode *intersect;
+        IndexSpaceExpression *mask;
+      };
+      typedef std::map<ShardID,
+                   LegionList<ReductionShard>::aligned> PendingReductionShards;
+#endif
     public:
       DeferredCopier(const TraversalInfo &info, 
                      MaterializedView *dst, 
@@ -1006,11 +1023,17 @@ namespace Legion {
                              RegionTreeNode *intersect,
          const LegionMap<IndexSpaceExpression*,FieldMask>::aligned &write_masks,
                LegionMap<ReductionView*,FieldMask>::aligned &source_reductions);
+#ifdef CVOPT
+      void buffer_reduction_shards(PredEvent pred_guard, 
+              RegionTreeNode *intersect, const WriteMasks &write_masks,
+              std::map<ShardID,WriteMasks> &reduction_shards);
+#endif
       void begin_guard_protection(void);
       void end_guard_protection(void);
       void begin_reduction_epoch(void);
       void end_reduction_epoch(void);
       void finalize(std::set<ApEvent> *postconditions = NULL);
+      void pack_copier(Serializer &rez);
     protected:
       void uniquify_copy_postconditions(void);
       void compute_dst_preconditions(const FieldMask &mask);
@@ -1033,6 +1056,9 @@ namespace Legion {
       // Reduction data 
       unsigned current_reduction_epoch;
       std::vector<PendingReductions> reduction_epochs;
+#ifdef CVTOP
+      std::vector<PendingReductionShards> reduction_shards;
+#endif
       LegionVector<FieldMask>::aligned reduction_epoch_masks;
     protected:
       // Handle protection of events for guarded operations
@@ -1061,6 +1087,21 @@ namespace Legion {
         IndexSpaceExpression *mask;
       };
       typedef std::map<ReductionView*,PendingReduction> PendingReductions;
+#ifdef CVOPT
+      struct ReductionShard {
+      public:
+        ReductionShard(void)
+          : intersect(NULL) { }
+        ReductionShard(PredEvent g, RegionTreeNode *i, IndexSpaceExpression *e)
+          : pred_guard(g), intersect(i), mask(e) { }
+      public:
+        PredEvent pred_guard;
+        RegionTreeNode *intersect;
+        IndexSpaceExpression *mask;
+      };
+      typedef std::map<ShardID,
+                   LegionList<ReductionShard>::aligned> PendingReductionShards;
+#endif
     public:
       DeferredSingleCopier(const TraversalInfo &info, 
                            MaterializedView *dst, 
@@ -1082,11 +1123,17 @@ namespace Legion {
       void buffer_reductions(VersionTracker *tracker, PredEvent pred_guard,
                              RegionTreeNode *intersect, IndexSpaceExpression *mask,
                              std::vector<ReductionView*> &source_reductions);
+#ifdef CVOPT
+      void buffer_reduction_shards(PredEvent pred_guard, 
+          RegionTreeNode *intersect, IndexSpaceExpression *mask,
+          std::map<ShardID,IndexSpaceExpression*> &source_reductions);
+#endif
       void begin_guard_protection(void);
       void end_guard_protection(void);
       void begin_reduction_epoch(void);
       void end_reduction_epoch(void);
       void finalize(std::set<ApEvent> *postconditions = NULL);
+      void pack_copier(Serializer &rez);
       inline void record_postcondition(ApEvent post)
         { copy_postconditions.insert(post); }
     protected:
@@ -1104,6 +1151,9 @@ namespace Legion {
     protected: // internal members
       unsigned current_reduction_epoch;
       std::vector<PendingReductions> reduction_epochs;
+#ifdef CVOPT
+      std::vector<PendingReductionShards> reduction_shards;
+#endif
     protected:
       std::set<ApEvent> dst_preconditions;
       std::vector<std::set<ApEvent> > protected_copy_posts;
@@ -1206,10 +1256,8 @@ namespace Legion {
      */
     class CompositeBase {
     public:
-      CompositeBase(LocalLock &base_lock);
+      CompositeBase(LocalLock &base_lock, bool composite_shard);
       virtual ~CompositeBase(void);
-    protected:
-      typedef LegionMap<IndexSpaceExpression*,FieldMask>::aligned WriteMasks;
     protected:
       void issue_composite_updates(DeferredCopier &copier,
                                    RegionTreeNode *logical_node,
@@ -1217,7 +1265,8 @@ namespace Legion {
                                    VersionTracker *src_version_tracker,
                                    PredEvent pred_guard, 
                                    const WriteMasks &write_masks,
-                                   WriteMasks &performed_writes/*write-only*/);
+                                   WriteMasks &performed_writes/*write-only*/,
+                                   bool need_shard_check = true);
       // Single field version of the method above
       bool issue_composite_updates_single(DeferredSingleCopier &copier,
                                    RegionTreeNode *logical_node,
@@ -1225,7 +1274,8 @@ namespace Legion {
                                    PredEvent pred_guard,
                                    IndexSpaceExpression *write_mask,
                                    // Only valid if !done
-                                   IndexSpaceExpression *&performed);
+                                   IndexSpaceExpression *&performed,
+                                   bool need_shard_check = true);
     public:
       static void issue_update_copies(DeferredCopier &copier, 
                                RegionTreeNode *logical_node,FieldMask copy_mask,
@@ -1266,9 +1316,24 @@ namespace Legion {
       virtual void unpack_composite_view_response(Deserializer &derez,
                                                   Runtime *runtime) = 0;
     public:
+      virtual void issue_shard_updates(DeferredCopier &copier,
+                                       RegionTreeNode *logical_node,
+                                       const FieldMask &local_copy_mask,
+                                       PredEvent pred_guard,
+                                       const WriteMasks &write_masks,
+                                             WriteMasks &performed_writes)
+        { assert(false); }
+      virtual IndexSpaceExpression *issue_shard_updates_single(
+                                              DeferredSingleCopier &copier,
+                                              RegionTreeNode *logical_node,
+                                              PredEvent pred_guard,
+                                              IndexSpaceExpression *write_mask)
+        { assert(false); return NULL; }
+    public:
       CompositeNode* find_child_node(RegionTreeNode *child); 
     private:
       LocalLock &base_lock;
+      const bool composite_shard;
     protected:
       FieldMask dirty_mask, reduction_mask;
       LegionMap<CompositeNode*,FieldMask>::aligned children;
@@ -1415,6 +1480,18 @@ namespace Legion {
       virtual void unpack_composite_view_response(Deserializer &derez,
                                                   Runtime *runtime);
     public:
+      virtual void issue_shard_updates(DeferredCopier &copier,
+                                       RegionTreeNode *logical_node,
+                                       const FieldMask &local_copy_mask,
+                                       PredEvent pred_guard,
+                                       const WriteMasks &write_masks,
+                                             WriteMasks &performed_writes);
+      virtual IndexSpaceExpression *issue_shard_updates_single(
+                                              DeferredSingleCopier &copier,
+                                              RegionTreeNode *logical_node,
+                                              PredEvent pred_guard,
+                                              IndexSpaceExpression *write_mask);
+    public:
       static void handle_send_composite_view(Runtime *runtime, 
                               Deserializer &derez, AddressSpaceID source);
       static void handle_deferred_view_registration(const void *args);
@@ -1439,10 +1516,15 @@ namespace Legion {
       static void handle_deferred_view_ref(const void *args);
     public:
       // For control replication
+#ifdef CVOPT
+      void handle_sharding_copy_request(Deserializer &derez, Runtime *runtime);
+      void handle_sharding_reduction_request(Deserializer &derez, Runtime *rt);
+#else
       void handle_sharding_update_request(Deserializer &derez,
                                           Runtime *runtime);
       static void handle_composite_view_response(Deserializer &derez,
                                                  Runtime *runtime);
+#endif
     public:
       // The path version info for this composite instance
       DeferredVersionInfo *const version_info;
@@ -1461,6 +1543,7 @@ namespace Legion {
       NestedViewMap nested_composite_views;
     protected:
       LegionMap<RegionTreeNode*,NodeVersionInfo>::aligned node_versions;
+#ifndef CVOPT
     protected:
       // Keep track of a packed version of tree for this shard 
       // when we are running in a control replication setting
@@ -1471,6 +1554,7 @@ namespace Legion {
       // we've performed for different sub-nodes
       LegionMap<RegionTreeNode*,FieldMask>::aligned shard_checks; 
       std::map<ShardID,RtEvent> requested_shards;
+#endif
     };
 
     /**

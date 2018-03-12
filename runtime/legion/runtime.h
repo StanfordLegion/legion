@@ -1457,6 +1457,7 @@ namespace Legion {
       void project_points(Operation *op, unsigned idx, 
                           const RegionRequirement &req, Runtime *runtime,
                           const std::vector<ProjectionPoint*> &points);
+#ifndef CVOPT
       // For inverting the projection function and finding interfering
       // points given a specific target in the region tree
       void find_interfering_points(RegionTreeForest *forest,
@@ -1465,6 +1466,7 @@ namespace Legion {
                                    const Domain &launch_space_domain,
                                    RegionTreeNode *target,
                                    std::set<DomainPoint> &results);
+#endif
     protected:
       // Old checking code explicitly for tasks
       void check_projection_region_result(const RegionRequirement &req,
@@ -1506,8 +1508,10 @@ namespace Legion {
       ProjectionFunctor *const functor;
     protected:
       mutable LocalLock projection_reservation;
+#ifndef CVOPT
       std::map<std::pair<RegionTreeNode*,IndexSpace>,
                std::set<DomainPoint> > interfering_points;
+#endif
       std::map<ProjectionSummary,
                std::vector<ElideCloseResult> > elide_close_results;
     }; 
@@ -2375,10 +2379,17 @@ namespace Legion {
                                                      Serializer &rez);
       void send_control_replicate_future_map_response(AddressSpaceID target,
                                                       Serializer &rez);
+#ifdef CVOPT
+      void send_control_replicate_composite_view_copy_request(
+                                      AddressSpaceID target, Serializer &rez);
+      void send_control_replicate_composite_view_reduction_request(
+                                      AddressSpaceID target, Serializer &rez);
+#else
       void send_control_replicate_composite_view_request(AddressSpaceID target,
                                                          Serializer &rez);
       void send_control_replicate_composite_view_response(AddressSpaceID target,
                                                           Serializer &rez);
+#endif
       void send_control_replicate_top_view_request(AddressSpaceID target,
                                                    Serializer &rez);
       void send_control_replicate_top_view_response(AddressSpaceID target,
@@ -2421,8 +2432,15 @@ namespace Legion {
                                                 Serializer &rez);
       void send_remote_context_physical_response(AddressSpaceID target,
                                                  Serializer &rez);
+#ifdef CVOPT
+      void send_remote_context_shard_copy_request(AddressSpaceID target, 
+                                                  Serializer &rez);
+      void send_remote_context_shard_reduction_request(AddressSpaceID target,
+                                                       Serializer &rez);
+#else
       void send_remote_context_shard_request(AddressSpaceID target, 
                                              Serializer &rez);
+#endif
       void send_version_owner_request(AddressSpaceID target, Serializer &rez);
       void send_version_owner_response(AddressSpaceID target, Serializer &rez);
       void send_version_state_response(AddressSpaceID target, Serializer &rez);
@@ -2599,8 +2617,15 @@ namespace Legion {
       void handle_future_map_future_response(Deserializer &derez);
       void handle_control_replicate_future_map_request(Deserializer &derez);
       void handle_control_replicate_future_map_response(Deserializer &derez);
+#ifdef CVOPT
+      void handle_control_replicate_composite_view_copy_request(
+                                                        Deserializer &derez);
+      void handle_control_replicate_composite_view_reduction_request(
+                                                        Deserializer &derez);
+#else
       void handle_control_replicate_composite_view_request(Deserializer &derez);
       void handle_control_replicate_composite_view_response(Deserializer &derez);
+#endif
       void handle_control_replicate_top_view_request(Deserializer &derez,
                                                      AddressSpaceID source);
       void handle_control_replicate_top_view_response(Deserializer &derez);
@@ -2644,7 +2669,12 @@ namespace Legion {
       void handle_remote_context_physical_request(Deserializer &derez,
                                                   AddressSpaceID source);
       void handle_remote_context_physical_response(Deserializer &derez);
+#ifdef CVOPT
+      void handle_remote_context_shard_copy_request(Deserializer &derez);
+      void handle_remote_context_shard_reduction_request(Deserializer &derez);
+#else
       void handle_remote_context_shard_request(Deserializer &derez);
+#endif
       void handle_version_owner_request(Deserializer &derez, 
                                         AddressSpaceID source);
       void handle_version_owner_response(Deserializer &derez);

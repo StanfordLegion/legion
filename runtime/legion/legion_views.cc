@@ -5349,8 +5349,8 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    CompositeBase::CompositeBase(LocalLock &r)
-      : base_lock(r)
+    CompositeBase::CompositeBase(LocalLock &r, bool shard)
+      : base_lock(r), composite_shard(shard)
     //--------------------------------------------------------------------------
     {
     }
@@ -5368,13 +5368,43 @@ namespace Legion {
                                           VersionTracker *src_version_tracker,
                                           PredEvent pred_guard, 
                                           const WriteMasks &write_masks,
-                                                WriteMasks &performed_writes)
+                                                WriteMasks &performed_writes,
+                                                bool need_shard_check/*=true*/)
     //--------------------------------------------------------------------------
-    {
+    { 
       FieldMask &global_copy_mask = copier.deferred_copy_mask;
 #ifdef DEBUG_LEGION
       assert(!(local_copy_mask - global_copy_mask)); // only true at beginning
 #endif
+      // If this is a composite shard, check to see if we need to issue any
+      // updates from shards on remote nodes
+      if (need_shard_check && composite_shard)
+      {
+        WriteMasks shard_writes;
+        // Perform any shard writes and then update our write masks if necessary
+        issue_shard_updates(copier, logical_node, local_copy_mask, 
+                            pred_guard, write_masks, shard_writes);
+        if (!shard_writes.empty())
+        {
+          // Add our shard writes to the performed write set
+          merge_write_sets(performed_writes, shard_writes);
+          // Now build a new write set for going down
+          if (!write_masks.empty())
+            merge_write_sets(shard_writes, write_masks);
+          combine_writes(shard_writes, copier);
+          // Check to see if we still have fields to issue copies for
+          if (!!global_copy_mask)
+          {
+            const FieldMask new_local_mask = local_copy_mask & global_copy_mask;
+            issue_composite_updates(copier, logical_node, new_local_mask,
+                           src_version_tracker, pred_guard, shard_writes, 
+                           performed_writes, false/*don't need shard check*/);
+          }
+          // Return because we already traversed down
+          return;
+        }
+        // Otherwise we can fall through and keep going
+      }
       // First check to see if we have all the valid meta-data
       perform_ready_check(local_copy_mask, logical_node);
       // Find any children that need to be traversed as well as any instances
@@ -5522,12 +5552,48 @@ namespace Legion {
                                    VersionTracker *src_version_tracker,
                                    PredEvent pred_guard,
                                    IndexSpaceExpression *write_mask,
-                                   IndexSpaceExpression *&performed_write)
+                                   IndexSpaceExpression *&performed_write,
+                                   bool need_shard_check/*=true*/)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(performed_write == NULL); // should be NULL on the way in
 #endif
+      RegionTreeForest *context = copier.dst->logical_node->context;
+      if (need_shard_check && composite_shard)
+      {
+        IndexSpaceExpression *shard_write = issue_shard_updates_single(copier,
+                                        logical_node, pred_guard, write_mask);
+        if (shard_write != NULL)
+        {
+          IndexSpaceExpression *local_performed = NULL;
+          if (write_mask != NULL)
+          {
+            // Make a new write mask
+            IndexSpaceExpression *new_write_mask = 
+              context->union_index_spaces(write_mask, shard_write);
+            issue_composite_updates_single(copier, logical_node,
+                src_version_tracker, pred_guard, new_write_mask,
+                local_performed, false/*need shard check*/);
+          }
+          else
+            issue_composite_updates_single(copier, logical_node, 
+                  src_version_tracker, pred_guard, shard_write, 
+                  local_performed, false/*need shard_check*/);
+          if (local_performed != NULL)
+            // Merge together the two writes
+            performed_write = 
+              context->union_index_spaces(shard_write, local_performed);
+          else
+            performed_write = shard_write;
+          // Return at this point since we already recursed
+          if (performed_write != NULL)
+            return test_done(copier, performed_write, write_mask);
+          return false;
+        }
+        // Otherwise we can fall through and keep going since we did no
+        // shard writes on remote nodes
+      }
       // First check to see if we have all the valid meta-data
       perform_ready_check(copier.copy_mask, logical_node);
       // Find any children that need to be traversed as well as any instances
@@ -5568,8 +5634,7 @@ namespace Legion {
               temp_views.begin(); it != temp_views.end(); it++)
           source_views.push_back(it->first);
       }
-      bool done = false;
-      RegionTreeForest *context = copier.dst->logical_node->context;
+      bool done = false; 
       if (!children_to_traverse.empty())
       {
         // Do the child traversals and record any writes that we do
@@ -5951,10 +6016,13 @@ namespace Legion {
                               RtBarrier invalid_bar/*= NO_RT_BARRIER*/,
                               ShardID origin/*=0*/)
       : DeferredView(ctx, encode_composite_did(did), owner_proc, 
-                     node, register_now), CompositeBase(view_lock),
+                     node, register_now), 
+        CompositeBase(view_lock, invalid_bar.exists()),
         version_info(info), closed_tree(tree), owner_context(context),
-        repl_id(repl), shard_invalid_barrier(invalid_bar), origin_shard(origin),
-        packed_shard(NULL)
+        repl_id(repl), shard_invalid_barrier(invalid_bar), origin_shard(origin)
+#ifndef CVOPT
+        , packed_shard(NULL)
+#endif
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -5979,7 +6047,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     CompositeView::CompositeView(const CompositeView &rhs)
-      : DeferredView(NULL, 0, 0, NULL, false), CompositeBase(view_lock),
+      : DeferredView(NULL, 0, 0, NULL, false), CompositeBase(view_lock, false),
         version_info(NULL), closed_tree(NULL), owner_context(NULL),
         repl_id(0), shard_invalid_barrier(RtBarrier::NO_RT_BARRIER), 
         origin_shard(0)
@@ -6002,8 +6070,10 @@ namespace Legion {
       // Remove the reference on our context
       if (owner_context->remove_reference())
         delete owner_context;
+#ifndef CVOPT
       if (packed_shard != NULL)
         delete packed_shard;
+#endif
       // Remove any resource references we still have
       if (!is_owner())
       {
@@ -6510,6 +6580,141 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void CompositeView::issue_shard_updates(DeferredCopier &copier,
+                                            RegionTreeNode *logical_node,
+                                            const FieldMask &local_copy_mask,
+                                            PredEvent pred_guard,
+                                            const WriteMasks &write_masks,
+                                                  WriteMasks &performed_writes)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(shard_invalid_barrier.exists());
+#endif
+#ifdef CVOPT
+      std::map<ShardID,WriteMasks> needed_shards, reduction_shards; 
+      closed_tree->find_needed_shards(local_copy_mask, logical_node,
+                      write_masks, needed_shards, reduction_shards);
+      for (std::map<ShardID,WriteMasks>::const_iterator it = 
+            needed_shards.begin(); it != needed_shards.end(); it++)
+      {
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(repl_id);
+          rez.serialize(it->first);
+          rez.serialize<RtEvent>(shard_invalid_barrier);
+          copier.pack_copier(rez);
+          rez.serialize(pred_guard);
+#ifdef DEBUG_LEGION
+          assert(!it->second.empty());
+#endif
+          rez.serialize<size_t>(it->second.size());
+          for (WriteMasks::const_iterator wit = it->second.begin();
+                wit != it->second.end(); wit++)
+          {
+            wit->first->pack_expression(rez);
+            // We need a separate completion event for each field
+            // in order to avoid unnecessary serialization, we don't
+            // know which fields are going to be grouped together or
+            // not yet
+            const size_t pop_count = wit->second.pop_count();
+#ifdef DEBUG_LEGION
+            assert(pop_count > 0);
+#endif
+            rez.serialize(pop_count);
+            int index = wit->second.find_first_set(); 
+            for (unsigned idx = 0; idx < pop_count; idx++)
+            {
+              if (idx > 0)
+                index = wit->second.find_next_set(index+1);
+#ifdef DEBUG_LEGION
+              assert(index >= 0);
+#endif
+              rez.serialize<unsigned>(index);
+              ApUserEvent field_done = Runtime::create_ap_user_event();
+              rez.serialize(field_done);
+#ifdef DEBUG_LEGION
+              assert(copier.copy_postconditions.find(field_done) ==
+                      copier.copy_postconditions.end());
+#endif
+              // This puts the event in the set and sets the bit for the field
+              copier.copy_postconditions[field_done].set_bit(index);
+            }
+            // Also update the performed writes set here
+            WriteMasks::iterator finder = performed_writes.find(wit->first);
+            if (finder != performed_writes.end())
+              finder->second |= wit->second;
+            else
+              performed_writes.insert(*wit);
+          }
+        }
+        // Now we can send the copy message to the remote node
+        owner_context->send_composite_view_shard_copy_request(it->first, rez);
+      }
+      // Buffer up any reduction shards we might have
+      if (!reduction_shards.empty())
+        copier.buffer_reduction_shards(pred_guard,
+            (copier.dst->logical_node == logical_node) ? NULL : logical_node,
+            write_masks, reduction_shards);
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpaceExpression* CompositeView::issue_shard_updates_single(
+                                               DeferredSingleCopier &copier,
+                                               RegionTreeNode *logical_node,
+                                               PredEvent pred_guard,
+                                               IndexSpaceExpression *write_mask)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(shard_invalid_barrier.exists());
+#endif
+#ifdef CVOPT
+      std::map<ShardID,IndexSpaceExpression*> needed_shards, reduction_shards;
+      closed_tree->find_needed_shards_single(copier.field_index, logical_node,
+                                 write_mask, needed_shards, reduction_shards);
+      std::set<IndexSpaceExpression*> shard_writes;
+      for (std::map<ShardID,IndexSpaceExpression*>::const_iterator it = 
+            needed_shards.begin(); it != needed_shards.end(); it++)
+      {
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(repl_id);
+          rez.serialize(it->first);
+          rez.serialize<RtEvent>(shard_invalid_barrier);
+          copier.pack_copier(rez);
+          rez.serialize(pred_guard);
+          rez.serialize<size_t>(1/*write maks count*/);
+          it->second->pack_expression(rez);
+          // Save the write expression in the shard writes
+          shard_writes.insert(it->second);
+          rez.serialize<size_t>(1/*population count*/);
+          rez.serialize<unsigned>(copier.field_index);
+          ApUserEvent field_done = Runtime::create_ap_user_event();
+          rez.serialize(field_done);
+#ifdef DEBUG_LEGION
+          assert(copier.copy_postconditions.find(field_done) ==
+                  copier.copy_postconditions.end());
+#endif
+          copier.record_postcondition(field_done);
+        }
+        // Now we can send the copy message to the remote node
+        owner_context->send_composite_view_shard_copy_request(it->first, rez);
+      }
+      if (!reduction_shards.empty())
+        copier.buffer_reduction_shards(pred_guard, 
+            (copier.dst->logical_node == logical_node) ? NULL : logical_node,
+            write_mask, reduction_shards);
+      if (!shard_writes.empty())
+        return context->union_index_spaces(shard_writes);
+#endif
+      return NULL;
+    }
+
+    //--------------------------------------------------------------------------
     InnerContext* CompositeView::get_owner_context(void) const
     //--------------------------------------------------------------------------
     {
@@ -6521,6 +6726,7 @@ namespace Legion {
                                             RegionTreeNode *target)
     //--------------------------------------------------------------------------
     {
+#ifndef CVOPT
       // See if we need to do a sharding test for control replication
       if (shard_invalid_barrier.exists() && (target != NULL))
       {
@@ -6587,6 +6793,7 @@ namespace Legion {
         AutoLock v_lock(view_lock);
         shard_checks[target] |= check_mask;
       }
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -6923,6 +7130,7 @@ namespace Legion {
       // where it is safe to register ourselves as a composite view
       if (shard_invalid_barrier.exists())
       {
+#ifndef CVOPT
         // Compute an initial packing of shard
 #ifdef DEBUG_LEGION
         assert(packed_shard == NULL);
@@ -6935,6 +7143,7 @@ namespace Legion {
           it->first->pack_composite_node(*packed_shard);
           packed_shard->serialize(it->second);
         }
+#endif
         // Then do our registration
 #ifdef DEBUG_LEGION
         ReplicateContext *ctx = dynamic_cast<ReplicateContext*>(owner_context);
@@ -7076,6 +7285,7 @@ namespace Legion {
         delete iargs->view;
     }
 
+#ifndef CVOPT
     //--------------------------------------------------------------------------
     void CompositeView::handle_sharding_update_request(Deserializer &derez,
                                                        Runtime *runtime)
@@ -7128,6 +7338,7 @@ namespace Legion {
       derez.deserialize(view);
       view->unpack_composite_view_response(derez, runtime);
     }
+#endif
 
     /////////////////////////////////////////////////////////////
     // CompositeNode 
@@ -7136,7 +7347,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     CompositeNode::CompositeNode(RegionTreeNode* node, CompositeBase *p,
                                  DistributedID own_did, bool root_own)
-      : CompositeBase(node_lock), logical_node(node), parent(p), 
+      : CompositeBase(node_lock, false), logical_node(node), parent(p), 
         owner_did(own_did), root_owner(root_own)
 #ifndef CVOPT
         , valid_version_states(NULL)
@@ -7147,7 +7358,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     CompositeNode::CompositeNode(const CompositeNode &rhs)
-      : CompositeBase(node_lock), logical_node(NULL), parent(NULL), 
+      : CompositeBase(node_lock, false), logical_node(NULL), parent(NULL), 
         owner_did(0), root_owner(false)
     //--------------------------------------------------------------------------
     {
@@ -8265,7 +8476,7 @@ namespace Legion {
                      DeferredVersionInfo *info, RegionTreeNode *node, 
                      PredEvent tguard, PredEvent fguard, bool register_now) 
       : DeferredView(ctx, encode_phi_did(did), owner_space, node, 
-                     register_now), CompositeBase(view_lock),
+                     register_now), CompositeBase(view_lock, false),
         true_guard(tguard), false_guard(fguard), version_info(info)
     //--------------------------------------------------------------------------
     {
@@ -8278,7 +8489,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PhiView::PhiView(const PhiView &rhs)
-      : DeferredView(NULL, 0, 0, NULL, false), CompositeBase(view_lock),
+      : DeferredView(NULL, 0, 0, NULL, false), CompositeBase(view_lock, false),
         true_guard(PredEvent::NO_PRED_EVENT), 
         false_guard(PredEvent::NO_PRED_EVENT), version_info(NULL)
     //--------------------------------------------------------------------------

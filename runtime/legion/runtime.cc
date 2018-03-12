@@ -6704,6 +6704,20 @@ namespace Legion {
               runtime->handle_control_replicate_future_map_response(derez);
               break;
             }
+#ifdef CVOPT
+          case SEND_REPL_COMPOSITE_VIEW_COPY_REQUEST:
+            {
+              runtime->handle_control_replicate_composite_view_copy_request(
+                                                                      derez);
+              break;
+            }
+          case SEND_REPL_COMPOSITE_VIEW_REDUCTION_REQUEST:
+            {
+              runtime->
+               handle_control_replicate_composite_view_reduction_request(derez);
+              break;
+            }
+#else
           case SEND_REPL_COMPOSITE_VIEW_REQUEST:
             {
               runtime->handle_control_replicate_composite_view_request(derez);
@@ -6714,6 +6728,7 @@ namespace Legion {
               runtime->handle_control_replicate_composite_view_response(derez);
               break;
             }
+#endif
           case SEND_REPL_TOP_VIEW_REQUEST:
             {
               runtime->handle_control_replicate_top_view_request(derez,
@@ -6856,11 +6871,24 @@ namespace Legion {
               runtime->handle_remote_context_physical_response(derez);
               break;
             }
+#ifdef CVOPT
+          case SEND_REMOTE_CONTEXT_SHARD_COPY_REQUEST:
+            {
+              runtime->handle_remote_context_shard_copy_request(derez);
+              break;
+            }
+          case SEND_REMOTE_CONTEXT_SHARD_REDUCTION_REQUEST:
+            {
+              runtime->handle_remote_context_shard_reduction_request(derez);
+              break;
+            }
+#else
           case SEND_REMOTE_CONTEXT_SHARD_REQUEST:
             {
               runtime->handle_remote_context_shard_request(derez);
               break;
             }
+#endif
           case SEND_VERSION_OWNER_REQUEST: 
             {
               runtime->handle_version_owner_request(derez,remote_address_space);
@@ -9351,6 +9379,7 @@ namespace Legion {
       }
     }
 
+#ifndef CVOPT
     //--------------------------------------------------------------------------
     void ProjectionFunction::find_interfering_points(RegionTreeForest *forest,
                                              RegionTreeNode *upper_bound,
@@ -9404,6 +9433,7 @@ namespace Legion {
       AutoLock p_lock(projection_reservation);
       interfering_points[key] = results;
     }
+#endif
 
     //--------------------------------------------------------------------------
     void ProjectionFunction::check_projection_region_result(
@@ -15416,6 +15446,27 @@ namespace Legion {
                   COLLECTIVE_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
     }
 
+#ifdef CVOPT
+    //--------------------------------------------------------------------------
+    void Runtime::send_control_replicate_composite_view_copy_request(
+                                         AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, 
+                SEND_REPL_COMPOSITE_VIEW_COPY_REQUEST, 
+                COLLECTIVE_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_control_replicate_composite_view_reduction_request(
+                                         AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, 
+                SEND_REPL_COMPOSITE_VIEW_REDUCTION_REQUEST, 
+                COLLECTIVE_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+#else
     //--------------------------------------------------------------------------
     void Runtime::send_control_replicate_composite_view_request(
                                          AddressSpaceID target, Serializer &rez)
@@ -15435,6 +15486,7 @@ namespace Legion {
                 SEND_REPL_COMPOSITE_VIEW_RESPONSE,
                 COLLECTIVE_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
     }
+#endif
 
     //--------------------------------------------------------------------------
     void Runtime::send_control_replicate_top_view_request(AddressSpaceID target,
@@ -15668,6 +15720,27 @@ namespace Legion {
           CONTEXT_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
     }
 
+#ifdef CVOPT
+    //--------------------------------------------------------------------------
+    void Runtime::send_remote_context_shard_copy_request(AddressSpaceID target,
+                                                         Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, 
+          SEND_REMOTE_CONTEXT_SHARD_COPY_REQUEST, 
+          CONTEXT_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_remote_context_shard_reduction_request(
+                                         AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, 
+          SEND_REMOTE_CONTEXT_SHARD_REDUCTION_REQUEST, 
+          CONTEXT_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+#else
     //--------------------------------------------------------------------------
     void Runtime::send_remote_context_shard_request(AddressSpaceID target,
                                                     Serializer &rez)
@@ -15677,6 +15750,7 @@ namespace Legion {
           SEND_REMOTE_CONTEXT_SHARD_REQUEST, 
           CONTEXT_VIRTUAL_CHANNEL, true/*flush*/);
     }
+#endif
 
     //--------------------------------------------------------------------------
     void Runtime::send_version_owner_request(AddressSpaceID target,
@@ -16784,6 +16858,23 @@ namespace Legion {
       ReplFutureMapImpl::handle_future_map_response(derez, this);
     }
 
+#ifdef CVOPT
+    //--------------------------------------------------------------------------
+    void Runtime::handle_control_replicate_composite_view_copy_request(
+                                                            Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      ShardManager::handle_composite_view_copy_request(derez, this);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_control_replicate_composite_view_reduction_request(
+                                                            Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      ShardManager::handle_composite_view_reduction_request(derez, this);
+    }
+#else
     //--------------------------------------------------------------------------
     void Runtime::handle_control_replicate_composite_view_request(
                                                             Deserializer &derez)
@@ -16799,6 +16890,7 @@ namespace Legion {
     {
       CompositeView::handle_composite_view_response(derez, this); 
     }
+#endif
 
     //--------------------------------------------------------------------------
     void Runtime::handle_control_replicate_top_view_request(Deserializer &derez,
@@ -17045,12 +17137,29 @@ namespace Legion {
       RemoteContext::handle_physical_response(derez, this);
     }
 
+#ifdef CVOPT
+    //--------------------------------------------------------------------------
+    void Runtime::handle_remote_context_shard_copy_request(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      RemoteContext::handle_shard_copy_request(derez, this);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_remote_context_shard_reduction_request(
+                                                            Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      RemoteContext::handle_shard_reduction_request(derez, this);
+    }
+#else
     //--------------------------------------------------------------------------
     void Runtime::handle_remote_context_shard_request(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       RemoteContext::handle_shard_request(derez, this);
     }
+#endif
 
     //--------------------------------------------------------------------------
     void Runtime::handle_version_owner_request(Deserializer &derez,

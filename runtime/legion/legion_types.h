@@ -686,8 +686,13 @@ namespace Legion {
       SEND_FUTURE_MAP_RESPONSE,
       SEND_REPL_FUTURE_MAP_REQUEST,
       SEND_REPL_FUTURE_MAP_RESPONSE,
+#ifdef CVOPT
+      SEND_REPL_COMPOSITE_VIEW_COPY_REQUEST,
+      SEND_REPL_COMPOSITE_VIEW_REDUCTION_REQUEST,
+#else
       SEND_REPL_COMPOSITE_VIEW_REQUEST,
       SEND_REPL_COMPOSITE_VIEW_RESPONSE,
+#endif
       SEND_REPL_TOP_VIEW_REQUEST,
       SEND_REPL_TOP_VIEW_RESPONSE,
       SEND_REPL_CLONE_BARRIER,
@@ -713,7 +718,12 @@ namespace Legion {
       SEND_REMOTE_CONTEXT_FREE,
       SEND_REMOTE_CONTEXT_PHYSICAL_REQUEST,
       SEND_REMOTE_CONTEXT_PHYSICAL_RESPONSE,
+#ifdef CVOPT
+      SEND_REMOTE_CONTEXT_SHARD_COPY_REQUEST,
+      SEND_REMOTE_CONTEXT_SHARD_REDUCTION_REQUEST,
+#else
       SEND_REMOTE_CONTEXT_SHARD_REQUEST,
+#endif
       SEND_VERSION_OWNER_REQUEST,
       SEND_VERSION_OWNER_RESPONSE,
       SEND_VERSION_STATE_REQUEST,
@@ -763,6 +773,170 @@ namespace Legion {
       LAST_SEND_KIND, // This one must be last
     };
 
+#ifdef CVOPT
+#define LG_MESSAGE_DESCRIPTIONS(name)                                 \
+      const char *name[LAST_SEND_KIND] = {                            \
+        "Task Message",                                               \
+        "Steal Message",                                              \
+        "Advertisement Message",                                      \
+        "Send Index Space Node",                                      \
+        "Send Index Space Request",                                   \
+        "Send Index Space Return",                                    \
+        "Send Index Space Set",                                       \
+        "Send Index Space Child Request",                             \
+        "Send Index Space Child Response",                            \
+        "Send Index Space Colors Request",                            \
+        "Send Index Space Colors Response",                           \
+        "Send Index Partition Notification",                          \
+        "Send Index Partition Node",                                  \
+        "Send Index Partition Request",                               \
+        "Send Index Partition Return",                                \
+        "Send Index Partition Child Request",                         \
+        "Send Index Partition Child Response",                        \
+        "Send Field Space Node",                                      \
+        "Send Field Space Request",                                   \
+        "Send Field Space Return",                                    \
+        "Send Field Alloc Request",                                   \
+        "Send Field Alloc Notification",                              \
+        "Send Field Space Top Alloc",                                 \
+        "Send Field Free",                                            \
+        "Send Local Field Alloc Request",                             \
+        "Send Local Field Alloc Response",                            \
+        "Send Local Field Free",                                      \
+        "Send Local Field Update",                                    \
+        "Send Top Level Region Request",                              \
+        "Send Top Level Region Return",                               \
+        "Send Logical Region Node",                                   \
+        "Index Space Destruction",                                    \
+        "Index Partition Destruction",                                \
+        "Field Space Destruction",                                    \
+        "Logical Region Destruction",                                 \
+        "Logical Partition Destruction",                              \
+        "Individual Remote Mapped",                                   \
+        "Individual Remote Complete",                                 \
+        "Individual Remote Commit",                                   \
+        "Slice Remote Mapped",                                        \
+        "Slice Remote Complete",                                      \
+        "Slice Remote Commit",                                        \
+        "Distributed Remote Registration",                            \
+        "Distributed Valid Update",                                   \
+        "Distributed GC Update",                                      \
+        "Distributed Resource Update",                                \
+        "Distributed Invalidate",                                     \
+        "Distributed Deactivate",                                     \
+        "Distributed Create Add",                                     \
+        "Distributed Create Remove",                                  \
+        "Distributed Unregister",                                     \
+        "Send Atomic Reservation Request",                            \
+        "Send Atomic Reservation Response",                           \
+        "Send Back Logical State",                                    \
+        "Send Materialized View",                                     \
+        "Send Composite View",                                        \
+        "Send Fill View",                                             \
+        "Send Phi View",                                              \
+        "Send Reduction View",                                        \
+        "Send Instance Manager",                                      \
+        "Send Reduction Manager",                                     \
+        "Send Create Top View Request",                               \
+        "Send Create Top View Response",                              \
+        "Send Subview DID Request",                                   \
+        "Send Subview DID Response",                                  \
+        "Send View Request",                                          \
+        "Send View Update Request",                                   \
+        "Send View Update Response",                                  \
+        "Send View Remote Update",                                    \
+        "Send View Remote Invalidate",                                \
+        "Send View Filter Invalid Fields Request",                    \
+        "Send View Filter Invalid Fields Response",                   \
+        "Send Instance View Copy Preconditions",                      \
+        "Send Instance View Add Copy",                                \
+        "Send Instance View User Preconditions",                      \
+        "Send Instance View Add User",                                \
+        "Send Instance View Add User Fused",                          \
+        "Send Manager Request",                                       \
+        "Send Future Result",                                         \
+        "Send Future Subscription",                                   \
+        "Send Future Map Future Request",                             \
+        "Send Future Map Future Response",                            \
+        "Send Replicate Future Map Request",                          \
+        "Send Replicate Future Map Response",                         \
+        "Send Replicate Copy Request",                                \
+        "Send Replicate Reduction Request",                           \
+        "Send Replicate Top View Request",                            \
+        "Send Replicate Top View Response",                           \
+        "Send Replicate Clone Barrier",                               \
+        "Send Mapper Message",                                        \
+        "Send Mapper Broadcast",                                      \
+        "Send Task Impl Semantic Req",                                \
+        "Send Index Space Semantic Req",                              \
+        "Send Index Partition Semantic Req",                          \
+        "Send Field Space Semantic Req",                              \
+        "Send Field Semantic Req",                                    \
+        "Send Logical Region Semantic Req",                           \
+        "Send Logical Partition Semantic Req",                        \
+        "Send Task Impl Semantic Info",                               \
+        "Send Index Space Semantic Info",                             \
+        "Send Index Partition Semantic Info",                         \
+        "Send Field Space Semantic Info",                             \
+        "Send Field Semantic Info",                                   \
+        "Send Logical Region Semantic Info",                          \
+        "Send Logical Partition Semantic Info",                       \
+        "Send Remote Context Request",                                \
+        "Send Remote Context Response",                               \
+        "Send Remote Context Release",                                \
+        "Send Remote Context Free",                                   \
+        "Send Remote Context Physical Request",                       \
+        "Send Remote Context Physical Response",                      \
+        "Send Remote Context Shard Copy Request",                     \
+        "Send Remote Context Shard Reduction Request",                \
+        "Send Version Owner Request",                                 \
+        "Send Version Owner Response",                                \
+        "Send Version State Request",                                 \
+        "Send Version State Response",                                \
+        "Send Version State Update Request",                          \
+        "Send Version State Update Response",                         \
+        "Send Version State Valid Notification",                      \
+        "Send Version Manager Advance",                               \
+        "Send Version Manager Invalidate",                            \
+        "Send Version Manager Request",                               \
+        "Send Version Manager Response",                              \
+        "Send Version Manager Unversioned Request",                   \
+        "Send Version Manager Unversioned Response",                  \
+        "Send Instance Request",                                      \
+        "Send Instance Response",                                     \
+        "Send External Detach",                                       \
+        "Send GC Priority Update",                                    \
+        "Send Never GC Response",                                     \
+        "Send Acquire Request",                                       \
+        "Send Acquire Response",                                      \
+        "Send Task Variant Request",                                  \
+        "Send Task Variant Response",                                 \
+        "Send Task Variant Broadcast",                                \
+        "Send Constraint Request",                                    \
+        "Send Constraint Response",                                   \
+        "Send Constraint Release",                                    \
+        "Send Constraint Removal",                                    \
+        "Top Level Task Request",                                     \
+        "Top Level Task Complete",                                    \
+        "Send MPI Rank Exchange",                                     \
+        "Send Replication Launch",                                    \
+        "Send Replication Delete",                                    \
+        "Send Replication Post Mapped",                               \
+        "Send Replication Trigger Complete",                          \
+        "Send Replication Trigger Commit",                            \
+        "Send Control Replication Collective Message",                \
+        "Send Library Mapper Request",                                \
+        "Send Library Mapper Response",                               \
+        "Send Library Projection Request",                            \
+        "Send Library Projection Response",                           \
+        "Send Library Sharding Request",                              \
+        "Send Library Sharding Response",                             \
+        "Send Library Task Request",                                  \
+        "Send Library Task Response",                                 \
+        "Send Shutdown Notification",                                 \
+        "Send Shutdown Response",                                     \
+      };
+#else
 #define LG_MESSAGE_DESCRIPTIONS(name)                                 \
       const char *name[LAST_SEND_KIND] = {                            \
         "Task Message",                                               \
@@ -924,6 +1098,7 @@ namespace Legion {
         "Send Shutdown Notification",                                 \
         "Send Shutdown Response",                                     \
       };
+#endif
 
     enum RuntimeCallKind {
       PACK_BASE_TASK_CALL, 

@@ -7255,6 +7255,39 @@ namespace Legion {
       repl_ctx->handle_future_map_request(derez);
     }
 
+#ifdef CVOPT
+    //--------------------------------------------------------------------------
+    void ShardTask::handle_composite_view_copy_request(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(execution_context != NULL);
+      ReplicateContext *repl_ctx = 
+        dynamic_cast<ReplicateContext*>(execution_context);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = 
+        static_cast<ReplicateContext*>(execution_context);
+#endif
+      repl_ctx->handle_composite_view_copy_request(derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardTask::handle_composite_view_reduction_request(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(execution_context != NULL);
+      ReplicateContext *repl_ctx = 
+        dynamic_cast<ReplicateContext*>(execution_context);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = 
+        static_cast<ReplicateContext*>(execution_context);
+#endif
+      repl_ctx->handle_composite_view_reduction_request(derez);
+    }
+#else
     //--------------------------------------------------------------------------
     void ShardTask::handle_composite_view_request(Deserializer &derez)
     //--------------------------------------------------------------------------
@@ -7270,6 +7303,7 @@ namespace Legion {
 #endif
       repl_ctx->handle_composite_view_request(derez);
     }
+#endif
 
     //--------------------------------------------------------------------------
     void ShardTask::handle_clone_barrier_broadcast(unsigned close_index,

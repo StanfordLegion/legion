@@ -109,6 +109,18 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
+    void IndexSpaceOperationT<DIM,T>::pack_expression(Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      Realm::IndexSpace<DIM,T> temp;
+      ApEvent ready = get_realm_index_space(temp, true/*tight*/);
+      rez.serialize(type_tag);
+      rez.serialize(temp);
+      rez.serialize(ready);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
     IndexSpaceUnion<DIM,T>::IndexSpaceUnion(
                                 const std::set<IndexSpaceExpression*> &to_union,
                                 RegionTreeForest *ctx)
@@ -567,6 +579,18 @@ namespace Legion {
       if (ready.exists() && !ready.has_triggered())
         ready.wait();
       return temp.empty();
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    void IndexSpaceNodeT<DIM,T>::pack_expression(Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      Realm::IndexSpace<DIM,T> temp;
+      ApEvent ready = get_realm_index_space(temp, true/*tight*/);
+      rez.serialize(type_tag);
+      rez.serialize(temp);
+      rez.serialize(ready);
     }
 
     //--------------------------------------------------------------------------

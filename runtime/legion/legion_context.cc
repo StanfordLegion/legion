@@ -5680,6 +5680,25 @@ namespace Legion {
                    node, version_info, closed_tree, this, true/*register now*/);
     }
 
+#ifdef CVOPT
+    //--------------------------------------------------------------------------
+    void InnerContext::send_composite_view_shard_copy_request(ShardID sid,
+                                                              Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      // Should only be called by inherited classes
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::send_composite_view_shard_reduction_request(ShardID sid,
+                                                                Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      // Should only be called by inherited classes
+      assert(false);
+    }
+#else
     //--------------------------------------------------------------------------
     void InnerContext::send_composite_view_shard_request(ShardID sid,
                                                          Serializer &rez)
@@ -5688,6 +5707,7 @@ namespace Legion {
       // Should only be called by inherited classes
       assert(false);
     }
+#endif
 
     //--------------------------------------------------------------------------
     TaskPriority InnerContext::get_current_priority(void) const
@@ -10194,6 +10214,25 @@ namespace Legion {
           owner_shard->shard_id);
     }
 
+#ifdef CVOPT
+    //--------------------------------------------------------------------------
+    void ReplicateContext::send_composite_view_shard_copy_request(ShardID sid, 
+                                                                Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      // We can just forward this on to our manager
+      shard_manager->send_composite_view_copy_request(sid, rez);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplicateContext::send_composite_view_shard_reduction_request(
+                                                   ShardID sid, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      // We can just forward this on to our manager
+      shard_manager->send_composite_view_reduction_request(sid, rez);
+    }
+#else
     //--------------------------------------------------------------------------
     void ReplicateContext::send_composite_view_shard_request(ShardID sid, 
                                                              Serializer &rez)
@@ -10202,6 +10241,7 @@ namespace Legion {
       // We can just forward this on to our manager
       shard_manager->send_composite_view_request(sid, rez);
     }
+#endif
 
     //--------------------------------------------------------------------------
     InstanceView* ReplicateContext::create_instance_top_view(
@@ -10351,6 +10391,30 @@ namespace Legion {
       impl->handle_future_map_request(derez);
     }
 
+#ifdef CVOPT
+    //--------------------------------------------------------------------------
+    void ReplicateContext::handle_composite_view_copy_request(
+                                                            Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      CompositeView *view = find_or_buffer_composite_view_copy_request(derez);
+      if (view == NULL)
+        return;
+      view->handle_sharding_copy_request(derez, runtime);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplicateContext::handle_composite_view_reduction_request(
+                                                            Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      CompositeView *view = 
+        find_or_buffer_composite_view_reduction_request(derez);
+      if (view == NULL)
+        return;
+      view->handle_sharding_reduction_request(derez, runtime);
+    }
+#else
     //--------------------------------------------------------------------------
     void ReplicateContext::handle_composite_view_request(Deserializer &derez)
     //--------------------------------------------------------------------------
@@ -10360,6 +10424,7 @@ namespace Legion {
         return;
       view->handle_sharding_update_request(derez, runtime);
     }
+#endif
 
     //--------------------------------------------------------------------------
     CollectiveID ReplicateContext::get_next_collective_index(
@@ -10557,7 +10622,12 @@ namespace Legion {
                                                    RtEvent close_done)
     //--------------------------------------------------------------------------
     {
+#ifdef CVOPT
+      std::vector<std::pair<void*,size_t> > to_copy;
+      std::vector<std::pair<void*,size_t> > to_reduce;
+#else
       std::vector<std::pair<void*,size_t> > to_perform;
+#endif
       {
         AutoLock repl_lock(replication_lock);
 #ifdef DEBUG_LEGION
@@ -10565,6 +10635,22 @@ namespace Legion {
                 live_composite_views.end());
 #endif
         live_composite_views[close_done] = view;
+#ifdef CVOPT
+        // Check to see if we have any pending requests to perform
+        std::map<RtEvent,std::vector<std::pair<void*,size_t> > >::iterator
+          finder = pending_composite_view_copy_requests.find(close_done);
+        if (finder != pending_composite_view_copy_requests.end())
+        {
+          to_copy = finder->second;
+          pending_composite_view_copy_requests.erase(finder);
+        }
+        finder = pending_composite_view_reduction_requests.find(close_done);
+        if (finder != pending_composite_view_reduction_requests.end())
+        {
+          to_reduce = finder->second;
+          pending_composite_view_reduction_requests.erase(finder);
+        }
+#else
         // Check to see if we have any pending requests to perform
         std::map<RtEvent,std::vector<std::pair<void*,size_t> > >::iterator
           finder = pending_composite_view_requests.find(close_done);
@@ -10573,7 +10659,30 @@ namespace Legion {
           to_perform = finder->second;
           pending_composite_view_requests.erase(finder);
         }
+#endif
       }
+#ifdef CVOPT
+      if (!to_copy.empty())
+      {
+        for (std::vector<std::pair<void*,size_t> >::const_iterator it = 
+              to_copy.begin(); it != to_copy.end(); it++)
+        {
+          Deserializer derez(it->first, it->second);
+          view->handle_sharding_copy_request(derez, runtime);
+          free(it->first);
+        }
+      }
+      if (!to_reduce.empty())
+      {
+        for (std::vector<std::pair<void*,size_t> >::const_iterator it = 
+              to_reduce.begin(); it != to_reduce.end(); it++)
+        {
+          Deserializer derez(it->first, it->second);
+          view->handle_sharding_reduction_request(derez, runtime);
+          free(it->first);
+        }
+      }
+#else
       if (!to_perform.empty())
       {
         for (std::vector<std::pair<void*,size_t> >::const_iterator it = 
@@ -10584,8 +10693,56 @@ namespace Legion {
           free(it->first);
         }
       }
+#endif
     }
 
+#ifdef CVOPT
+    //--------------------------------------------------------------------------
+    CompositeView* ReplicateContext::find_or_buffer_composite_view_copy_request(
+                                                            Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      RtEvent composite_name;
+      derez.deserialize(composite_name);
+      AutoLock repl_lock(replication_lock);
+      // See if we already have the composite view registered 
+      std::map<RtEvent,CompositeView*>::const_iterator finder = 
+        live_composite_views.find(composite_name);
+      if (finder != live_composite_views.end())
+        return finder->second;
+      // If we couldn't find it then we have to buffer it for the future
+      const size_t remaining_bytes = derez.get_remaining_bytes();
+      void *buffer = malloc(remaining_bytes);
+      memcpy(buffer, derez.get_current_pointer(), remaining_bytes);
+      derez.advance_pointer(remaining_bytes);
+      pending_composite_view_copy_requests[composite_name].push_back(
+          std::pair<void*,size_t>(buffer, remaining_bytes));
+      return NULL;
+    }
+
+    //--------------------------------------------------------------------------
+    CompositeView* ReplicateContext::
+            find_or_buffer_composite_view_reduction_request(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      RtEvent composite_name;
+      derez.deserialize(composite_name);
+      AutoLock repl_lock(replication_lock);
+      // See if we already have the composite view registered 
+      std::map<RtEvent,CompositeView*>::const_iterator finder = 
+        live_composite_views.find(composite_name);
+      if (finder != live_composite_views.end())
+        return finder->second;
+      // If we couldn't find it then we have to buffer it for the future
+      const size_t remaining_bytes = derez.get_remaining_bytes();
+      void *buffer = malloc(remaining_bytes);
+      memcpy(buffer, derez.get_current_pointer(), remaining_bytes);
+      derez.advance_pointer(remaining_bytes);
+      pending_composite_view_reduction_requests[composite_name].push_back(
+          std::pair<void*,size_t>(buffer, remaining_bytes));
+      return NULL;
+    }
+#else
     //--------------------------------------------------------------------------
     CompositeView* ReplicateContext::find_or_buffer_composite_view_request(
                                                             Deserializer &derez)
@@ -10608,6 +10765,7 @@ namespace Legion {
           std::pair<void*,size_t>(buffer, remaining_bytes));
       return NULL;
     }
+#endif
 
     //--------------------------------------------------------------------------
     void ReplicateContext::unregister_composite_view(CompositeView *view,
@@ -11220,6 +11378,91 @@ namespace Legion {
       return result;
     }
 
+#ifdef CVOPT
+    //--------------------------------------------------------------------------
+    void RemoteContext::send_composite_view_shard_copy_request(ShardID sid, 
+                                                               Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      // If we don't have a shard manager then we have to send the message
+      // back to the owner context to deal with it, otherwise we can 
+      // just forward it on to our local shard manager
+      if (shard_manager == NULL)
+      {
+        Serializer local_rez;
+        local_rez.serialize(context_uid);
+        local_rez.serialize(sid);
+        const size_t buffer_size = rez.get_used_bytes();
+        local_rez.serialize<size_t>(buffer_size);
+        local_rez.serialize(rez.get_buffer(), buffer_size);
+        const AddressSpaceID target = runtime->get_runtime_owner(context_uid);
+        runtime->send_remote_context_shard_copy_request(target, local_rez);
+      }
+      else
+        shard_manager->send_composite_view_copy_request(sid, rez);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void RemoteContext::handle_shard_copy_request(
+                                          Deserializer &derez, Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      UniqueID context_uid;
+      derez.deserialize(context_uid);
+      ShardID sid;
+      derez.deserialize(sid);
+      size_t buffer_size;
+      derez.deserialize(buffer_size);
+      Serializer rez;
+      rez.serialize(derez.get_current_pointer(), buffer_size);
+      derez.advance_pointer(buffer_size);
+       
+      InnerContext *context = runtime->find_context(context_uid);
+      context->send_composite_view_shard_copy_request(sid, rez);
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteContext::send_composite_view_shard_reduction_request(ShardID sid,
+                                                                Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      // If we don't have a shard manager then we have to send the message
+      // back to the owner context to deal with it, otherwise we can 
+      // just forward it on to our local shard manager
+      if (shard_manager == NULL)
+      {
+        Serializer local_rez;
+        local_rez.serialize(context_uid);
+        local_rez.serialize(sid);
+        const size_t buffer_size = rez.get_used_bytes();
+        local_rez.serialize<size_t>(buffer_size);
+        local_rez.serialize(rez.get_buffer(), buffer_size);
+        const AddressSpaceID target = runtime->get_runtime_owner(context_uid);
+        runtime->send_remote_context_shard_reduction_request(target, local_rez);
+      }
+      else
+        shard_manager->send_composite_view_reduction_request(sid, rez);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void RemoteContext::handle_shard_reduction_request(
+                                          Deserializer &derez, Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      UniqueID context_uid;
+      derez.deserialize(context_uid);
+      ShardID sid;
+      derez.deserialize(sid);
+      size_t buffer_size;
+      derez.deserialize(buffer_size);
+      Serializer rez;
+      rez.serialize(derez.get_current_pointer(), buffer_size);
+      derez.advance_pointer(buffer_size);
+       
+      InnerContext *context = runtime->find_context(context_uid);
+      context->send_composite_view_shard_reduction_request(sid, rez);
+    }
+#else
     //--------------------------------------------------------------------------
     void RemoteContext::send_composite_view_shard_request(ShardID sid, 
                                                           Serializer &rez)
@@ -11261,6 +11504,7 @@ namespace Legion {
       InnerContext *context = runtime->find_context(context_uid);
       context->send_composite_view_shard_request(sid, rez);
     }
+#endif
 
     //--------------------------------------------------------------------------
     void RemoteContext::unpack_remote_context(Deserializer &derez,

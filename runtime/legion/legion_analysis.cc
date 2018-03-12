@@ -3439,6 +3439,7 @@ namespace Legion {
       }
     }
 
+#ifndef CVOPT
     //--------------------------------------------------------------------------
     void ClosedNode::find_needed_shards(FieldMask mask, RegionTreeNode *target,
                                         std::set<ShardID> &needed_shards) const
@@ -3487,6 +3488,7 @@ namespace Legion {
         it->second->find_needed_shards(mask, target, needed_shards);
       }
     }
+#endif
 
     //--------------------------------------------------------------------------
     void ClosedNode::fix_closed_tree(void)

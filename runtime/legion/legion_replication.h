@@ -1245,9 +1245,18 @@ namespace Legion {
     public:
       void send_future_map_request(ShardID target, Serializer &rez);
       void handle_future_map_request(Deserializer &derez);
+#ifdef CVOPT
+    public:
+      void send_composite_view_copy_request(ShardID target, Serializer &rez);
+      void send_composite_view_reduction_request(ShardID target, 
+                                                 Serializer &rez);
+      void handle_composite_view_copy_request(Deserializer &derez);
+      void handle_composite_view_reduction_request(Deserializer &derez);
+#else
     public:
       void send_composite_view_request(ShardID target, Serializer &rez);
       void handle_composite_view_request(Deserializer &derez);
+#endif
     public:
       void broadcast_clone_barrier(unsigned close_index,
           unsigned clone_index, RtBarrier bar, AddressSpaceID origin);
@@ -1263,8 +1272,15 @@ namespace Legion {
       static void handle_trigger_commit(Deserializer &derez, Runtime *rt);
       static void handle_collective_message(Deserializer &derez, Runtime *rt);
       static void handle_future_map_request(Deserializer &derez, Runtime *rt);
+#ifdef CVOPT
+      static void handle_composite_view_copy_request(Deserializer &derez, 
+                                                     Runtime *rt);
+      static void handle_composite_view_reduction_request(Deserializer &derez, 
+                                                     Runtime *rt);
+#else
       static void handle_composite_view_request(Deserializer &derez, 
                                                 Runtime *rt);
+#endif
       static void handle_top_view_request(Deserializer &derez, Runtime *rt,
                                           AddressSpaceID request_source);
       static void handle_top_view_response(Deserializer &derez, Runtime *rt);

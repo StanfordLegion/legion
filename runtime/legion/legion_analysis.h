@@ -23,6 +23,8 @@
 
 namespace Legion {
   namespace Internal {
+    // This is a commonly used typedef throughout the analysis
+    typedef LegionMap<IndexSpaceExpression*,FieldMask>::aligned WriteMasks;
 
     /**
      * \struct GenericUser
@@ -736,8 +738,20 @@ namespace Legion {
                               const FieldMask &closed_fields);
       void record_projection(ProjectionFunction *function,
                              IndexSpaceNode *domain, const FieldMask &mask);
+#ifdef CVOPT
+      void find_needed_shards(FieldMask mask, RegionTreeNode *target,
+                          const WriteMasks &write_masks, 
+                          std::map<ShardID,WriteMasks> &need_shards,
+                          std::map<ShardID,WriteMasks> &reduction_shards) const;
+      // Single field version of the above
+      void find_needed_shards_single(unsigned field_index, 
+          RegionTreeNode *target, IndexSpaceExpression *write_mask,
+          std::map<ShardID,IndexSpaceExpression*> &need_shards,
+          std::map<ShardID,IndexSpaceExpression*> &reduction_shards) const;
+#else
       void find_needed_shards(FieldMask mask, RegionTreeNode *target,
                               std::set<ShardID> &needed_shards) const;
+#endif
     public:
       void fix_closed_tree(void);
       void filter_dominated_fields(const ClosedNode *old_tree,

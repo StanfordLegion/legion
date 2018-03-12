@@ -1033,8 +1033,15 @@ namespace Legion {
                                       DeferredVersionInfo *version_info, 
                                       ClosedNode *closed_tree, 
                                       InterCloseOp *op, bool clone);
+#ifdef CVOPT
+      virtual void send_composite_view_shard_copy_request(ShardID sid,
+                                                          Serializer &rez);
+      virtual void send_composite_view_shard_reduction_request(ShardID sid,
+                                                          Serializer &rez);
+#else
       virtual void send_composite_view_shard_request(ShardID sid,
                                                      Serializer &rez);
+#endif
     public:
       virtual TaskPriority get_current_priority(void) const;
       virtual void set_current_priority(TaskPriority priority);
@@ -1496,8 +1503,15 @@ namespace Legion {
                                       DeferredVersionInfo *version_info, 
                                       ClosedNode *closed_tree, 
                                       InterCloseOp *op, bool clone);
+#ifdef CVOPT
+      virtual void send_composite_view_shard_copy_request(ShardID sid,
+                                                          Serializer &rez);
+      virtual void send_composite_view_shard_reduction_request(ShardID sid,
+                                                          Serializer &rez);
+#else
       virtual void send_composite_view_shard_request(ShardID sid,
                                                      Serializer &rez);
+#endif
     public:
       virtual InstanceView* create_instance_top_view(PhysicalManager *manager,
                                                      AddressSpaceID source);
@@ -1509,7 +1523,12 @@ namespace Legion {
       void exchange_common_resources(void);
       void handle_collective_message(Deserializer &derez);
       void handle_future_map_request(Deserializer &derez);
+#ifdef CVOPT
+      void handle_composite_view_copy_request(Deserializer &derez);
+      void handle_composite_view_reduction_request(Deserializer &derez);
+#else
       void handle_composite_view_request(Deserializer &derez);
+#endif
     public:
       // Collective methods
       CollectiveID get_next_collective_index(CollectiveIndexLocation loc);
@@ -1526,7 +1545,14 @@ namespace Legion {
     public:
       // Composite view methods
       void register_composite_view(CompositeView* view, RtEvent close_done);
+#ifdef CVOPT
+      CompositeView* find_or_buffer_composite_view_copy_request(
+                                                           Deserializer &derez);
+      CompositeView* find_or_buffer_composite_view_reduction_request(
+                                                           Deserializer &derez);
+#else
       CompositeView* find_or_buffer_composite_view_request(Deserializer &derez);
+#endif
       void unregister_composite_view(CompositeView *view, RtEvent close_done);
     public:
       // Clone barrier methods
@@ -1593,8 +1619,15 @@ namespace Legion {
     protected:
       // Composite views that are still valid across the shards
       std::map<RtEvent/*done event*/,CompositeView*> live_composite_views;
+#ifdef CVOPT
+      std::map<RtEvent,std::vector<
+               std::pair<void*,size_t> > > pending_composite_view_copy_requests;
+      std::map<RtEvent,std::vector<
+          std::pair<void*,size_t> > > pending_composite_view_reduction_requests;
+#else
       std::map<RtEvent,std::vector<
                 std::pair<void*,size_t> > > pending_composite_view_requests;
+#endif
     protected:
       // Different from pending_top_views as this applies to our requests
       std::map<PhysicalManager*,RtUserEvent> pending_request_views;
@@ -1689,9 +1722,19 @@ namespace Legion {
       virtual void invalidate_remote_tree_contexts(Deserializer &derez);
     public:
       virtual ShardingFunction* find_sharding_function(ShardingID sid);
+#ifdef CVOPT
+      virtual void send_composite_view_shard_copy_request(ShardID sid,
+                                                          Serializer &rez);
+      static void handle_shard_copy_request(Deserializer &derez, Runtime *rt);
+      virtual void send_composite_view_shard_reduction_request(ShardID sid,
+                                                          Serializer &rez);
+      static void handle_shard_reduction_request(Deserializer &derez, 
+                                                 Runtime *runtime);
+#else
       virtual void send_composite_view_shard_request(ShardID sid,
                                                      Serializer &rez);
       static void handle_shard_request(Deserializer &derez, Runtime *runtime);
+#endif
     public:
       void unpack_local_field_update(Deserializer &derez);
       static void handle_local_field_update(Deserializer &derez);

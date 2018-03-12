@@ -740,6 +740,7 @@ namespace Legion {
                                            bool need_tight_result) = 0;
       virtual void tighten_index_space(void) = 0;
       virtual bool check_empty(void) = 0;
+      virtual void pack_expression(Serializer &rez) = 0;
       virtual void add_expression_reference(void) = 0;
       virtual bool remove_expression_reference(void) = 0;
     public:
@@ -784,6 +785,7 @@ namespace Legion {
                                            bool need_tight_result) = 0;
       virtual void tighten_index_space(void) = 0;
       virtual bool check_empty(void) = 0;
+      virtual void pack_expression(Serializer &rez) = 0;
       virtual bool remove_operation(RegionTreeForest *forest) = 0;
       virtual void add_expression_reference(void);
       virtual bool remove_expression_reference(void);
@@ -806,6 +808,7 @@ namespace Legion {
                                            bool need_tight_result);
       virtual void tighten_index_space(void);
       virtual bool check_empty(void);
+      virtual void pack_expression(Serializer &rez);
       virtual bool remove_operation(RegionTreeForest *forest) = 0;
     public:
       ApEvent get_realm_index_space(Realm::IndexSpace<DIM,T> &space,
@@ -1174,6 +1177,7 @@ namespace Legion {
                                            bool need_tight_result) = 0;
       virtual void tighten_index_space(void) = 0;
       virtual bool check_empty(void) = 0;
+      virtual void pack_expression(Serializer &rez) = 0;
       virtual void add_expression_reference(void);
       virtual bool remove_expression_reference(void);
     public:
@@ -1396,6 +1400,7 @@ namespace Legion {
                                            bool need_tight_result);
       virtual void tighten_index_space(void);
       virtual bool check_empty(void);
+      virtual void pack_expression(Serializer &rez);
     public:
       virtual void initialize_union_space(ApUserEvent to_trigger,
               TaskOp *op, const std::vector<IndexSpace> &handles);

@@ -946,7 +946,12 @@ namespace Legion {
       void return_privilege_state(ResourceTracker *target);
       void handle_collective_message(Deserializer &derez);
       void handle_future_map_request(Deserializer &derez);
+#ifdef CVOPT
+      void handle_composite_view_copy_request(Deserializer &derez);
+      void handle_composite_view_reduction_request(Deserializer &derez);
+#else
       void handle_composite_view_request(Deserializer &derez);
+#endif
       void handle_clone_barrier_broadcast(unsigned close_index, 
                           unsigned clone_index, RtBarrier bar);
     public:
