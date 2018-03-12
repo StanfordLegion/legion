@@ -3884,7 +3884,7 @@ namespace Legion {
       }
       size_t num_reduce_projections;
       derez.deserialize(num_reduce_projections);
-      for (unsigned idx = 0; idx < num_write_projections; idx++)
+      for (unsigned idx = 0; idx < num_reduce_projections; idx++)
       {
         ProjectionSummary summary;
         ProjectionID pid;
