@@ -6538,6 +6538,8 @@ namespace Legion {
       else
       {
         // The very uncommon case where we didn't actually run
+        slice_owner->record_child_mapped(RtEvent::NO_RT_EVENT,
+                                         ApEvent::NO_AP_EVENT);
 #ifdef DEBUG_LEGION
         assert(!point_termination.has_triggered());
 #endif
