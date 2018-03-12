@@ -6521,7 +6521,6 @@ namespace Legion {
           execution_context->release_restrictions();
         // Pass back our created and deleted operations 
         slice_owner->return_privileges(execution_context);
-        slice_owner->record_child_complete();
         // Since this point is now complete we know
         // that we can trigger it. Note we don't need to do
         // this if we're a leaf task with no virtual mappings
@@ -6544,6 +6543,8 @@ namespace Legion {
 #endif
         Runtime::trigger_event(point_termination);
       }
+      // Tell our slice owner that we are done with our work
+      slice_owner->record_child_complete();
       // Mark that this operation is now complete
       complete_operation();
       if (need_commit)
