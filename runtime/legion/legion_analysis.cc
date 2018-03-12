@@ -2752,8 +2752,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LogicalState::capture_close_epochs(FieldMask capture_mask,
-                                            ClosedNode *closed_node) const
+    void LogicalState::capture_close_epochs(FieldMask capture_mask, 
+                                 OpenState state, ClosedNode *closed_node) const
     //--------------------------------------------------------------------------
     {
       for (std::list<ProjectionEpoch*>::const_iterator it = 
@@ -2762,7 +2762,7 @@ namespace Legion {
         FieldMask overlap = (*it)->valid_fields & capture_mask;
         if (!overlap)
           continue;
-        closed_node->record_projections(*it, overlap);
+        closed_node->record_projections(*it, state, overlap);
         capture_mask -= overlap;
         if (!capture_mask)
           return;
@@ -3361,8 +3361,8 @@ namespace Legion {
       assert(children.empty()); // should never have any children here
 #endif
       ClosedNode *result = new ClosedNode(child_node);
-      for (LegionMap<ProjectionSummary,FieldMask>::aligned::const_iterator 
-            pit = projections.begin(); pit != projections.end(); pit++)
+      for (LegionMap<ProjectionSummary,FieldMask>::aligned::const_iterator pit =
+            write_projections.begin(); pit != write_projections.end(); pit++)
       {
         const FieldMask overlap = pit->second & close_mask;
         if (!overlap)
@@ -3371,7 +3371,20 @@ namespace Legion {
         // Shouldn't be doing this in a control replication context
         assert(pit->first.sharding == NULL);
 #endif
-        result->record_projection(pit->first.projection, 
+        result->record_projection(pit->first.projection, OPEN_READ_WRITE_PROJ,
+                                  pit->first.domain, overlap);
+      }
+      for (LegionMap<ProjectionSummary,FieldMask>::aligned::const_iterator pit =
+            reduce_projections.begin(); pit != reduce_projections.end(); pit++)
+      {
+        const FieldMask overlap = pit->second & close_mask;
+        if (!overlap)
+          continue;
+#ifdef DEBUG_LEGION
+        // Shouldn't be doing this in a control replication context
+        assert(pit->first.sharding == NULL);
+#endif
+        result->record_projection(pit->first.projection, OPEN_REDUCE_PROJ,
                                   pit->first.domain, overlap);
       }
       return result;
@@ -3379,11 +3392,26 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ClosedNode::record_projection(ProjectionFunction *function,
-                                   IndexSpaceNode *space, const FieldMask &mask)
+                  OpenState state, IndexSpaceNode *space, const FieldMask &mask)
     //--------------------------------------------------------------------------
     {
       ProjectionSummary key(space, function, NULL);
-      projections[key] |= mask;
+      switch (state)
+      {
+        case OPEN_READ_WRITE_PROJ:
+        case OPEN_REDUCE_PROJ_DIRTY:
+          {
+            write_projections[key] |= mask;
+            break;
+          }
+        case OPEN_REDUCE_PROJ:
+          {
+            reduce_projections[key] |= mask;
+            break;
+          }
+        default:
+          assert(false); // shouldn't see any other states
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -3424,18 +3452,45 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ClosedNode::record_projections(const ProjectionEpoch *epoch,
-                                        const FieldMask &fields)
+                                        OpenState state,const FieldMask &fields)
     //--------------------------------------------------------------------------
     {
-      for (std::set<ProjectionSummary>::const_iterator pit = 
-            epoch->projections.begin(); pit != epoch->projections.end(); pit++)
+      switch (state)
       {
-        LegionMap<ProjectionSummary,FieldMask>::aligned::iterator finder = 
-          projections.find(*pit);
-        if (finder != projections.end())
-          finder->second |= fields;
-        else // Didn't exist before so we can just insert it
-          projections[*pit] = fields;
+        case OPEN_READ_WRITE_PROJ:
+        case OPEN_REDUCE_PROJ_DIRTY:
+          {
+            for (std::set<ProjectionSummary>::const_iterator pit = 
+                  epoch->projections.begin(); pit != 
+                  epoch->projections.end(); pit++)
+            {
+              LegionMap<ProjectionSummary,FieldMask>::aligned::iterator finder =
+                write_projections.find(*pit);
+              if (finder != write_projections.end())
+                finder->second |= fields;
+              else // Didn't exist before so we can just insert it
+                write_projections[*pit] = fields;
+            }
+            break;
+          }
+        case OPEN_REDUCE_PROJ:
+          {
+            for (std::set<ProjectionSummary>::const_iterator pit = 
+                  epoch->projections.begin(); pit != 
+                  epoch->projections.end(); pit++)
+            {
+              LegionMap<ProjectionSummary,FieldMask>::aligned::iterator finder =
+                reduce_projections.find(*pit);
+              if (finder != reduce_projections.end())
+                finder->second |= fields;
+              else // Didn't exist before so we can just insert it
+                reduce_projections[*pit] = fields;
+            }
+            break;
+          }
+        default:
+          assert(false); // shouldn't see any other states
+      
       }
     }
 
@@ -3450,10 +3505,41 @@ namespace Legion {
       if (!mask)
         return;
       // See if we have any projections that we need to find other shards for
-      if (!projections.empty())
+      if (!write_projections.empty())
       {
         for (LegionMap<ProjectionSummary,FieldMask>::aligned::const_iterator
-              pit = projections.begin(); pit != projections.end(); pit++)
+              pit = write_projections.begin(); 
+              pit != write_projections.end(); pit++)
+        {
+#ifdef DEBUG_LEGION
+          // Should always have a sharding function
+          assert(pit->first.sharding != NULL);
+#endif
+          if (pit->second * mask)
+            continue;
+          Domain full_space;
+          pit->first.domain->get_launch_space_domain(full_space);
+          // Invert the projection function to find the interfering points
+          std::set<DomainPoint> interfering_points;
+          pit->first.projection->find_interfering_points(target->context, node,
+            pit->first.domain->handle, full_space, target, interfering_points);
+          if (!interfering_points.empty())
+          {
+            for (std::set<DomainPoint>::const_iterator dit = 
+                  interfering_points.begin(); dit != 
+                  interfering_points.end(); dit++)
+            {
+              ShardID shard = pit->first.sharding->find_owner(*dit, full_space);
+              needed_shards.insert(shard);
+            }
+          }
+        }
+      }
+      if (!reduce_projections.empty())
+      {
+        for (LegionMap<ProjectionSummary,FieldMask>::aligned::const_iterator
+              pit = reduce_projections.begin(); 
+              pit != reduce_projections.end(); pit++)
         {
 #ifdef DEBUG_LEGION
           // Should always have a sharding function
@@ -3528,12 +3614,23 @@ namespace Legion {
           covered_fields |= child_covered;
       }
       // All our covered fields are always valid
-      valid_fields |= covered_fields;
+      if (!!covered_fields)
+        valid_fields |= covered_fields;
+      if (!!reduced_fields)
+        valid_fields |= reduced_fields;
       // Finally update our valid fields based on any projections
-      if (!projections.empty())
+      if (!write_projections.empty())
       {
         for (LegionMap<ProjectionSummary,FieldMask>::aligned::const_iterator
-              pit = projections.begin(); pit != projections.end(); pit++)
+              pit = write_projections.begin(); 
+              pit != write_projections.end(); pit++)
+          valid_fields |= pit->second;
+      }
+      if (!reduce_projections.empty())
+      {
+        for (LegionMap<ProjectionSummary,FieldMask>::aligned::const_iterator
+              pit = reduce_projections.begin(); 
+              pit != reduce_projections.end(); pit++)
           valid_fields |= pit->second;
       }
     }
@@ -3554,10 +3651,10 @@ namespace Legion {
           return;
       }
       // If we have any projections, we can also try to filter by that
-      if (!projections.empty())
+      if (!write_projections.empty())
       {
         old_tree->filter_dominated_projection_fields(non_dominated_mask, 
-                                                     projections); 
+                                                     write_projections); 
         if (!non_dominated_mask)
           return;
       }
@@ -3578,7 +3675,8 @@ namespace Legion {
       // operations, we need to find one in the new set that dominates it
       FieldMask dominated_mask = non_dominated_mask;
       for (LegionMap<ProjectionSummary,FieldMask>::aligned::const_iterator
-            pit = projections.begin(); pit != projections.end(); pit++)
+            pit = write_projections.begin(); 
+            pit != write_projections.end(); pit++)
       {
         // Find the set of fields that are still dominated for everything
         // that overlap with this projection so we can check that they
@@ -3634,7 +3732,7 @@ namespace Legion {
       for (std::map<RegionTreeNode*,ClosedNode*>::const_iterator it =
             new_children.begin(); it != new_children.end(); it++)
       {
-        if (it->first->is_region() || it->second->projections.empty()) 
+        if (it->first->is_region() || it->second->write_projections.empty()) 
           continue;
         PartitionNode *node = it->first->as_partition_node();
         if (!node->is_complete()) 
@@ -3643,8 +3741,8 @@ namespace Legion {
         // Iterate over the projections and look for anything with an 
         // identity projection function for which we can do something
         for (LegionMap<ProjectionSummary,FieldMask>::aligned::const_iterator
-              pit = it->second->projections.begin();
-              pit != it->second->projections.end(); pit++)
+              pit = it->second->write_projections.begin();
+              pit != it->second->write_projections.end(); pit++)
         {
           if (pit->first.projection != identity)
             continue;
@@ -3672,10 +3770,11 @@ namespace Legion {
       // If we have projections instead of explicitly closed children then we 
       // aren't going to directly compare them right now
       // TODO: make this analysis more precise
-      if (!projections.empty())
+      if (!write_projections.empty())
       {
         for (LegionMap<ProjectionSummary,FieldMask>::aligned::const_iterator
-              pit = projections.begin(); pit != projections.end(); pit++)
+              pit = write_projections.begin(); 
+              pit != write_projections.end(); pit++)
         {
           const FieldMask overlap = pit->second & dominated_fields;
           if (!overlap)
@@ -3719,9 +3818,24 @@ namespace Legion {
         rez.serialize(node->as_partition_node()->handle);
       rez.serialize(valid_fields);
       rez.serialize(covered_fields);
-      rez.serialize<size_t>(projections.size());
-      for (LegionMap<ProjectionSummary,FieldMask>::aligned::const_iterator
-            pit = projections.begin(); pit != projections.end(); pit++)
+      rez.serialize<size_t>(write_projections.size());
+      for (LegionMap<ProjectionSummary,FieldMask>::aligned::const_iterator pit =
+            write_projections.begin(); pit != write_projections.end(); pit++)
+      {
+        rez.serialize(pit->first.projection->projection_id);
+        if (pit->first.sharding!= NULL)
+        {
+          rez.serialize<bool>(true);
+          rez.serialize(pit->first.sharding->sharding_id);
+        }
+        else
+          rez.serialize<bool>(false);
+        rez.serialize(pit->first.domain->handle);
+        rez.serialize(pit->second);
+      }
+      rez.serialize<size_t>(reduce_projections.size());
+      for (LegionMap<ProjectionSummary,FieldMask>::aligned::const_iterator pit =
+            reduce_projections.begin(); pit != reduce_projections.end(); pit++)
       {
         rez.serialize(pit->first.projection->projection_id);
         if (pit->first.sharding!= NULL)
@@ -3747,9 +3861,9 @@ namespace Legion {
     {
       derez.deserialize(valid_fields);
       derez.deserialize(covered_fields);
-      size_t num_projections;
-      derez.deserialize(num_projections);
-      for (unsigned idx = 0; idx < num_projections; idx++)
+      size_t num_write_projections;
+      derez.deserialize(num_write_projections);
+      for (unsigned idx = 0; idx < num_write_projections; idx++)
       {
         ProjectionSummary summary;
         ProjectionID pid;
@@ -3766,7 +3880,28 @@ namespace Legion {
         IndexSpace handle;
         derez.deserialize(handle);
         summary.domain = runtime->forest->get_node(handle);
-        derez.deserialize(projections[summary]);
+        derez.deserialize(write_projections[summary]);
+      }
+      size_t num_reduce_projections;
+      derez.deserialize(num_reduce_projections);
+      for (unsigned idx = 0; idx < num_write_projections; idx++)
+      {
+        ProjectionSummary summary;
+        ProjectionID pid;
+        derez.deserialize(pid);
+        summary.projection = runtime->find_projection_function(pid);
+        bool has_sharding_function;
+        derez.deserialize(has_sharding_function);
+        if (has_sharding_function)
+        {
+          ShardingID sid;
+          derez.deserialize(sid);
+          summary.sharding = ctx->find_sharding_function(sid);
+        }
+        IndexSpace handle;
+        derez.deserialize(handle);
+        summary.domain = runtime->forest->get_node(handle);
+        derez.deserialize(reduce_projections[summary]);
       }
       size_t num_children;
       derez.deserialize(num_children);

@@ -676,7 +676,7 @@ namespace Legion {
       void advance_projection_epochs(const FieldMask &advance_mask);
       void capture_projection_epochs(FieldMask capture_mask,
                                      ProjectionInfo &info);
-      void capture_close_epochs(FieldMask capture_mask,
+      void capture_close_epochs(FieldMask capture_mask, OpenState state,
                                 ClosedNode *closed_node) const;
       void update_projection_epochs(FieldMask update_mask,
                                     const ProjectionInfo &info);
@@ -734,9 +734,9 @@ namespace Legion {
       ClosedNode* get_child_node(RegionTreeNode *child) const;
       void record_closed_fields(const FieldMask &closed_fields);
       void record_reduced_fields(const FieldMask &reduced_fields);
-      void record_projections(const ProjectionEpoch *epoch,
+      void record_projections(const ProjectionEpoch *epoch, OpenState state,
                               const FieldMask &closed_fields);
-      void record_projection(ProjectionFunction *function,
+      void record_projection(ProjectionFunction *function, OpenState state,
                              IndexSpaceNode *domain, const FieldMask &mask);
 #ifdef CVOPT
       void find_needed_shards(FieldMask mask, RegionTreeNode *target,
@@ -776,7 +776,8 @@ namespace Legion {
       FieldMask reduced_fields; // Fields purely reduced to at this node
       std::map<RegionTreeNode*,ClosedNode*> children;
       // For tracking index space projections 
-      LegionMap<ProjectionSummary,FieldMask>::aligned projections;
+      LegionMap<ProjectionSummary,FieldMask>::aligned write_projections;
+      LegionMap<ProjectionSummary,FieldMask>::aligned reduce_projections;
     };
  
     /**

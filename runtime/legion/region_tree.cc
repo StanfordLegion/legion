@@ -11195,7 +11195,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
             assert(closed_node != NULL);
 #endif
-            state.capture_close_epochs(overlap, closed_node);
+            state.capture_close_epochs(overlap, it->open_state, closed_node);
           }
           // If this is a writing or reducing 
           state.advance_projection_epochs(overlap);
@@ -11578,7 +11578,7 @@ namespace Legion {
                 else
                 {
                   closer.record_close_operation(overlap, true/*projection*/);
-                  state.capture_close_epochs(overlap,
+                  state.capture_close_epochs(overlap, it->open_state,
                                              closer.find_closed_node(this));
                 }
               }
@@ -11609,7 +11609,7 @@ namespace Legion {
                   else
                   {
                     closer.record_close_operation(overlap, true/*projection*/);
-                    state.capture_close_epochs(overlap,
+                    state.capture_close_epochs(overlap, it->open_state,
                                                closer.find_closed_node(this));
                   }
                 }
@@ -11802,7 +11802,7 @@ namespace Legion {
 #endif
                   closer.record_close_operation(overlap, true/*projection*/,
                                                 disjoint_close);
-                  state.capture_close_epochs(overlap,
+                  state.capture_close_epochs(overlap, it->open_state,
                                              closer.find_closed_node(this));
                   // If we are doing a disjoint close, update the open
                   // states with the appropriate new state
@@ -11845,7 +11845,7 @@ namespace Legion {
 #endif
                   closer.record_close_operation(overlap, true/*projection*/,
                                                 disjoint_close);
-                  state.capture_close_epochs(overlap,
+                  state.capture_close_epochs(overlap, it->open_state,
                                              closer.find_closed_node(this));
                   // If we're doing a disjoint close update the open
                   // states accordingly 
@@ -11941,7 +11941,7 @@ namespace Legion {
             ClosedNode *closed_node = closer.find_closed_node(this); 
             if (!!state.dirty_fields)
               closed_node->record_closed_fields(overlap & state.dirty_fields);
-            state.capture_close_epochs(overlap, closed_node);
+            state.capture_close_epochs(overlap, it->open_state, closed_node);
             it->valid_fields -= overlap;
             flushed_fields |= overlap;
           }
@@ -12823,7 +12823,7 @@ namespace Legion {
             {
               // Do the close here 
               closer.record_close_operation(overlap, true/*projection*/);
-              state.capture_close_epochs(overlap,
+              state.capture_close_epochs(overlap, it->open_state,
                                          closer.find_closed_node(this));
               it->valid_fields -= current_mask;
               if (!it->valid_fields)
