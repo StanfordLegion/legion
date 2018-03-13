@@ -1949,9 +1949,6 @@ namespace Legion {
     InstanceBuilder::~InstanceBuilder(void)
     //--------------------------------------------------------------------------
     {
-      // This only happens if we failed to make the instance
-      if (own_realm_layout && (realm_layout != NULL))
-        delete realm_layout;
     }
 
     //--------------------------------------------------------------------------
@@ -1973,6 +1970,7 @@ namespace Legion {
     {
       if (!valid)
         initialize(forest);
+      // If there are no fields then we are done
       if (field_sizes.empty())
       {
         REPORT_LEGION_WARNING(LEGION_WARNING_IGNORE_MEMORY_REQUEST,
@@ -1981,7 +1979,11 @@ namespace Legion {
                         memory_manager->memory.id);
         return NULL;
       }
-      // If there are no fields then we are done
+      // Construct the realm layout each time since (realm will take ownership 
+      // after every instance call, so we need a new one each time)
+      Realm::InstanceLayoutGeneric *realm_layout = 
+        instance_domain->create_layout(realm_constraints, 
+                                       constraints.ordering_constraint);
 #ifdef DEBUG_LEGION
       assert(realm_layout != NULL);
 #endif
@@ -2031,7 +2033,6 @@ namespace Legion {
       }
       // If we successfully made the instance then Realm 
       // took over ownership of the layout
-      own_realm_layout = false;
       PhysicalManager *result = NULL;
       DistributedID did = forest->runtime->get_available_distributed_id();
       AddressSpaceID local_space = forest->runtime->address_space;
@@ -2180,7 +2181,6 @@ namespace Legion {
         // Destroy the instance first so that Realm can reclaim the ID
         instance.destroy();
         instance = PhysicalInstance::NO_INST;
-        own_realm_layout = false;  // it was destroyed with the realm instance
       }
       // No matter what trigger the event
       Runtime::trigger_event(profiling_ready);
@@ -2484,14 +2484,8 @@ namespace Legion {
           assert(false); // unknown kind
       }
       // Compute the field groups for realm 
-      Realm::InstanceLayoutConstraints realm_constraints;
       convert_layout_constraints(constraints, field_set, 
                                  field_sizes, realm_constraints); 
-      // Create the layout
-#ifdef DEBUG_LEGION
-      assert(realm_layout == NULL);
-#endif
-      realm_layout = instance_domain->create_layout(realm_constraints, ord);
     }
 
     //--------------------------------------------------------------------------
