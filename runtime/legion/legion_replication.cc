@@ -2255,7 +2255,7 @@ namespace Legion {
       }
       else // singular so just do the normal thing
         return forest->create_partition_by_field(op, pid, 
-                        instances, instances_ready, shard_id, total_shards);
+                                                 instances, instances_ready);
     }
 
     //--------------------------------------------------------------------------
