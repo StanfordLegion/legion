@@ -9379,7 +9379,69 @@ namespace Legion {
       }
     }
 
-#ifndef CVOPT
+#ifdef CVOPT
+    //--------------------------------------------------------------------------
+    void ProjectionFunction::find_interfering_points(RegionTreeForest *forest,
+                                             RegionTreeNode *upper_bound,
+                                             IndexSpace launch_space,
+                                             const Domain &launch_space_domain,
+                                             IndexSpaceExpression *target,
+                           std::map<DomainPoint,IndexSpaceExpression*> &results)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(is_functional);
+      assert(results.empty());
+#endif
+      const std::pair<IndexSpaceExpression*,IndexSpace> 
+        key(target, launch_space);
+      {
+        // Check to see if we already have the interfering points
+        AutoLock p_lock(projection_reservation, 1, false/*exclusive*/);
+        std::map<std::pair<IndexSpaceExpression*,IndexSpace>,
+                  std::map<DomainPoint,IndexSpaceExpression*> >::const_iterator
+            finder = interfering_points.find(key);
+        if (finder != interfering_points.end())
+        {
+          results = finder->second;
+          return;
+        }
+      }
+      // Otherwise we fall through and compute the results directly
+      // Iterate over the points and do the projection
+      if (upper_bound->is_region())
+      {
+        const LogicalRegion upper = upper_bound->as_region_node()->handle;
+        for (Domain::DomainPointIterator itr(launch_space_domain); itr; itr++)
+        {
+          const LogicalRegion handle = functor->project(upper, itr.p);
+          IndexSpaceNode *subspace = forest->get_node(handle.get_index_space());
+          IndexSpaceExpression *intersection = 
+            forest->intersect_index_spaces(target, subspace);
+          if (intersection->is_empty())
+            continue;
+          results[itr.p] = intersection;
+        }
+      }
+      else
+      {
+        const LogicalPartition upper = upper_bound->as_partition_node()->handle;
+        for (Domain::DomainPointIterator itr(launch_space_domain); itr; itr++)
+        {
+          const LogicalRegion handle = functor->project(upper, itr.p);
+          IndexSpaceNode *subspace = forest->get_node(handle.get_index_space());
+          IndexSpaceExpression *intersection = 
+            forest->intersect_index_spaces(target, subspace);
+          if (intersection->is_empty())
+            continue;
+          results[itr.p] = intersection;
+        }
+      }
+      // Safe the results in the cache
+      AutoLock p_lock(projection_reservation);
+      interfering_points[key] = results;
+    }
+#else
     //--------------------------------------------------------------------------
     void ProjectionFunction::find_interfering_points(RegionTreeForest *forest,
                                              RegionTreeNode *upper_bound,

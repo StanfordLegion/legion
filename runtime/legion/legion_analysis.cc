@@ -3494,7 +3494,184 @@ namespace Legion {
       }
     }
 
-#ifndef CVOPT
+#ifdef CVOPT
+    //--------------------------------------------------------------------------
+    void ClosedNode::find_needed_shards(FieldMask mask, ShardID origin_shard,
+                  IndexSpaceExpression *target, const WriteMasks &write_masks,
+                  std::map<ShardID,WriteMasks> &needed_shards,
+                  std::map<ShardID,WriteMasks> &reduction_shards) const
+    //--------------------------------------------------------------------------
+    {
+      // See if we have valid fields that overlap
+      mask &= valid_fields;
+      if (!mask)
+        return;
+      // See if we have any write projections to test against first
+      if (!write_projections.empty())
+        find_interfering_shards(mask, origin_shard, target, write_masks, 
+                                write_projections, needed_shards);
+      // Then see if we have any reduction projections
+      if (!reduce_projections.empty())
+        find_interfering_shards(mask, origin_shard, target, write_masks,
+                                reduce_projections, reduction_shards);
+      // Then traverse any children
+      for (std::map<RegionTreeNode*,ClosedNode*>::const_iterator it = 
+            children.begin(); it != children.end(); it++)
+      {
+        IndexSpaceExpression *child_target_expr = 
+          node->context->intersect_index_spaces(target,
+              it->first->get_index_space_expression());
+        if (child_target_expr->is_empty())
+          continue;
+        it->second->find_needed_shards(mask, origin_shard, child_target_expr,
+                                write_masks, needed_shards, reduction_shards);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void ClosedNode::find_needed_shards_single(const unsigned field_index,
+        const ShardID origin_shard, IndexSpaceExpression *write_mask,
+        std::map<ShardID,IndexSpaceExpression*> &needed_shards,
+        std::map<ShardID,IndexSpaceExpression*> &reduction_shards) const
+    //--------------------------------------------------------------------------
+    {
+      // See if we need to consider anything at this node
+      if (!valid_fields.is_set(field_index))
+        return;
+      // See if we have any write projections first
+      if (!write_projections.empty())
+        find_interfering_shards_single(field_index, origin_shard, write_mask,
+                                       write_projections, needed_shards);
+      // Also check for any reduction projections
+      if (!reduce_projections.empty())
+        find_interfering_shards_single(field_index, origin_shard, write_mask,
+                                       reduce_projections, reduction_shards);
+      // Then traverse any children
+      for (std::map<RegionTreeNode*,ClosedNode*>::const_iterator it = 
+            children.begin(); it != children.end(); it++)
+      {
+        IndexSpaceExpression *child_write_mask = 
+          node->context->intersect_index_spaces(write_mask,
+              it->first->get_index_space_expression());
+        if (child_write_mask->is_empty())
+          continue;
+        it->second->find_needed_shards_single(field_index, origin_shard,
+                      child_write_mask, needed_shards, reduction_shards);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void ClosedNode::find_interfering_shards(const FieldMask &mask,
+            const ShardID origin_shard, IndexSpaceExpression *target_expr,
+            const WriteMasks &write_masks,
+            const LegionMap<ProjectionSummary,FieldMask>::aligned &projections,
+                  std::map<ShardID,WriteMasks> &needed_shards) const
+    //--------------------------------------------------------------------------
+    {
+      // Iterate over the write masks and find ones that we care about
+      for (WriteMasks::const_iterator wit = write_masks.begin();
+            wit != write_masks.end(); wit++)
+      {
+        const FieldMask mask_overlap = wit->second & mask;
+        if (!mask_overlap)
+          continue;
+        IndexSpaceExpression *mask_expr = 
+          node->context->intersect_index_spaces(wit->first, target_expr);
+        if (mask_expr->is_empty())
+          continue;
+        // We have an interesting write mask so find the interfering projections
+        for (LegionMap<ProjectionSummary,FieldMask>::aligned::const_iterator
+              pit = projections.begin(); pit != projections.end(); pit++)
+        {
+          // More intersection testing
+          const FieldMask overlap = pit->second & mask_overlap;
+          if (!overlap)
+            continue;
+          Domain full_space;
+          pit->first.domain->get_launch_space_domain(full_space);
+          // Invert the projection function to find the interfering points
+          std::map<DomainPoint,IndexSpaceExpression*> interfering_points;
+          pit->first.projection->find_interfering_points(node->context, node,
+                                      pit->first.domain->handle, full_space,
+                                      mask_expr, interfering_points);
+          if (!interfering_points.empty())
+          {
+            for (std::map<DomainPoint,IndexSpaceExpression*>::const_iterator 
+                  dit = interfering_points.begin(); 
+                  dit != interfering_points.end(); dit++)
+            {
+              const ShardID shard = 
+                pit->first.sharding->find_owner(dit->first, full_space);
+              // Skip our origin shard since we know about that
+              if (shard == origin_shard)
+                continue;
+              // Now we have to insert it into all the right places
+              std::map<ShardID,WriteMasks>::iterator shard_finder =
+                needed_shards.find(shard);
+              if (shard_finder != needed_shards.end())
+              {
+                WriteMasks::iterator finder = 
+                  shard_finder->second.find(dit->second);
+                if (finder != shard_finder->second.end())
+                  finder->second |= overlap;
+                else
+                  shard_finder->second[dit->second] = overlap;
+              }
+              else
+                needed_shards[shard][dit->second] = overlap;
+            }
+          }
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void ClosedNode::find_interfering_shards_single(const unsigned field_index,
+        const ShardID origin_shard, IndexSpaceExpression *target_expr,
+        const LegionMap<ProjectionSummary,FieldMask>::aligned &projections,
+        std::map<ShardID,IndexSpaceExpression*> &needed_shards) const
+    //--------------------------------------------------------------------------
+    {
+      for (LegionMap<ProjectionSummary,FieldMask>::aligned::const_iterator
+            pit = projections.begin(); pit != projections.end(); pit++)
+      {
+#ifdef DEBUG_LEGION
+        // Should always have a sharding function
+        assert(pit->first.sharding != NULL);
+#endif
+        if (!pit->second.is_set(field_index))
+          continue;
+        Domain full_space;
+        pit->first.domain->get_launch_space_domain(full_space);
+        // Invert the projection function to find the interfering points
+        std::map<DomainPoint,IndexSpaceExpression*> interfering_points;
+        pit->first.projection->find_interfering_points(node->context, node,
+                                     pit->first.domain->handle, full_space, 
+                                     target_expr, interfering_points);
+        if (!interfering_points.empty())
+        {
+          for (std::map<DomainPoint,IndexSpaceExpression*>::const_iterator 
+                dit = interfering_points.begin(); 
+                dit != interfering_points.end(); dit++)
+          {
+            const ShardID shard = 
+              pit->first.sharding->find_owner(dit->first, full_space);
+            // Skip our origin shard since we know about that
+            if (shard == origin_shard)
+              continue;
+            std::map<ShardID,IndexSpaceExpression*>::iterator finder = 
+              needed_shards.find(shard);
+            if (finder != needed_shards.end())
+              // Union the index space expressions together
+              finder->second = node->context->union_index_spaces(
+                                      finder->second, dit->second);
+            else
+              needed_shards[shard] = dit->second;
+          }
+        }
+      }
+    }
+#else
     //--------------------------------------------------------------------------
     void ClosedNode::find_needed_shards(FieldMask mask, RegionTreeNode *target,
                                         std::set<ShardID> &needed_shards) const

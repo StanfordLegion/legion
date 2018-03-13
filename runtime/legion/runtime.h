@@ -1457,7 +1457,16 @@ namespace Legion {
       void project_points(Operation *op, unsigned idx, 
                           const RegionRequirement &req, Runtime *runtime,
                           const std::vector<ProjectionPoint*> &points);
-#ifndef CVOPT
+#ifdef CVOPT
+      // For inverting the projection function and finding interfering
+      // points given a specific target in the region tree
+      void find_interfering_points(RegionTreeForest *forest,
+                                   RegionTreeNode *upper_bound,
+                                   IndexSpace launch_space,
+                                   const Domain &launch_space_domain,
+                                   IndexSpaceExpression *target,
+                 std::map<DomainPoint,IndexSpaceExpression*> &results);
+#else
       // For inverting the projection function and finding interfering
       // points given a specific target in the region tree
       void find_interfering_points(RegionTreeForest *forest,
@@ -1508,7 +1517,10 @@ namespace Legion {
       ProjectionFunctor *const functor;
     protected:
       mutable LocalLock projection_reservation;
-#ifndef CVOPT
+#ifdef CVOPT
+      std::map<std::pair<IndexSpaceExpression*,IndexSpace>,
+               std::map<DomainPoint,IndexSpaceExpression*> > interfering_points;
+#else
       std::map<std::pair<RegionTreeNode*,IndexSpace>,
                std::set<DomainPoint> > interfering_points;
 #endif

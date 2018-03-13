@@ -6593,8 +6593,9 @@ namespace Legion {
 #endif
 #ifdef CVOPT
       std::map<ShardID,WriteMasks> needed_shards, reduction_shards; 
-      closed_tree->find_needed_shards(local_copy_mask, logical_node,
-                      write_masks, needed_shards, reduction_shards);
+      closed_tree->find_needed_shards(local_copy_mask, origin_shard, 
+          logical_node->get_index_space_expression(), write_masks, 
+          needed_shards, reduction_shards);
       for (std::map<ShardID,WriteMasks>::const_iterator it = 
             needed_shards.begin(); it != needed_shards.end(); it++)
       {
@@ -6673,8 +6674,8 @@ namespace Legion {
 #endif
 #ifdef CVOPT
       std::map<ShardID,IndexSpaceExpression*> needed_shards, reduction_shards;
-      closed_tree->find_needed_shards_single(copier.field_index, logical_node,
-                                 write_mask, needed_shards, reduction_shards);
+      closed_tree->find_needed_shards_single(copier.field_index, origin_shard,
+                                  write_mask, needed_shards, reduction_shards);
       std::set<IndexSpaceExpression*> shard_writes;
       for (std::map<ShardID,IndexSpaceExpression*>::const_iterator it = 
             needed_shards.begin(); it != needed_shards.end(); it++)

@@ -739,15 +739,25 @@ namespace Legion {
       void record_projection(ProjectionFunction *function, OpenState state,
                              IndexSpaceNode *domain, const FieldMask &mask);
 #ifdef CVOPT
-      void find_needed_shards(FieldMask mask, RegionTreeNode *target,
-                          const WriteMasks &write_masks, 
-                          std::map<ShardID,WriteMasks> &need_shards,
+      void find_needed_shards(FieldMask mask, ShardID origin_shard,
+                          IndexSpaceExpression *target, 
+                          const WriteMasks &write_masks,
+                          std::map<ShardID,WriteMasks> &needed_shards,
                           std::map<ShardID,WriteMasks> &reduction_shards) const;
-      // Single field version of the above
-      void find_needed_shards_single(unsigned field_index, 
-          RegionTreeNode *target, IndexSpaceExpression *write_mask,
-          std::map<ShardID,IndexSpaceExpression*> &need_shards,
+      void find_needed_shards_single(const unsigned field_index, 
+          const ShardID origin_shard, IndexSpaceExpression *write_mask,
+          std::map<ShardID,IndexSpaceExpression*> &needed_shards,
           std::map<ShardID,IndexSpaceExpression*> &reduction_shards) const;
+    protected:
+      void find_interfering_shards(const FieldMask &mask, 
+          const ShardID origin_shard, IndexSpaceExpression *target_expr,
+          const WriteMasks &write_masks,
+          const LegionMap<ProjectionSummary,FieldMask>::aligned &projections,
+          std::map<ShardID,WriteMasks> &needed_shards) const;
+      void find_interfering_shards_single(const unsigned field_index, 
+          const ShardID origin_shard, IndexSpaceExpression *target_expr,
+          const LegionMap<ProjectionSummary,FieldMask>::aligned &projections,
+          std::map<ShardID,IndexSpaceExpression*> &needed_shards) const;
 #else
       void find_needed_shards(FieldMask mask, RegionTreeNode *target,
                               std::set<ShardID> &needed_shards) const;
