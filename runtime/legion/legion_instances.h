@@ -497,8 +497,7 @@ namespace Legion {
         : regions(regs), constraints(cons), runtime(rt), memory_manager(memory),
           creator_id(cid), instance(PhysicalInstance::NO_INST), ancestor(NULL), 
           instance_domain(NULL), own_domain(false), redop_id(0), 
-          reduction_op(NULL), realm_layout(NULL), 
-          own_realm_layout(true), valid(false) { }
+          reduction_op(NULL), valid(false) { }
       virtual ~InstanceBuilder(void);
     public:
       size_t compute_needed_size(RegionTreeForest *forest);
@@ -538,8 +537,7 @@ namespace Legion {
       FieldMask instance_mask;
       ReductionOpID redop_id;
       const ReductionOp *reduction_op;
-      Realm::InstanceLayoutGeneric *realm_layout;
-      bool own_realm_layout;
+      Realm::InstanceLayoutConstraints realm_constraints;
     public:
       bool valid;
     };
