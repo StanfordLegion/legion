@@ -909,13 +909,13 @@ namespace Legion {
       typedef std::map<ReductionView*,
                        LegionList<PendingReduction>::aligned> PendingReductions;
     public:
-      DeferredCopier(const TraversalInfo &info, 
+      DeferredCopier(const TraversalInfo *info, 
                      MaterializedView *dst, 
                      const FieldMask &copy_mask, 
                      const RestrictInfo &restrict_info,
                      bool restrict_out);
       // For handling deferred copies across
-      DeferredCopier(const TraversalInfo &info, 
+      DeferredCopier(const TraversalInfo *info, 
                      MaterializedView *dst, 
                      const FieldMask &copy_mask,
                      ApEvent precondition,
@@ -943,7 +943,7 @@ namespace Legion {
                             const FieldMask &mask,
               LegionMap<ApEvent,FieldMask>::aligned &reduction_postconditions);
     public: // const fields
-      const TraversalInfo &info;
+      const TraversalInfo *const info;
       MaterializedView *const dst;
       CopyAcrossHelper *const across_helper;
       const RestrictInfo *const restrict_info;
@@ -987,13 +987,13 @@ namespace Legion {
       };
       typedef std::map<ReductionView*,PendingReduction> PendingReductions;
     public:
-      DeferredSingleCopier(const TraversalInfo &info, 
+      DeferredSingleCopier(const TraversalInfo *info, 
                            MaterializedView *dst, 
                            const FieldMask &copy_mask,
                            const RestrictInfo &restrict_info,
                            bool restrict_out);
       // For handling deferred copies across
-      DeferredSingleCopier(const TraversalInfo &info, 
+      DeferredSingleCopier(const TraversalInfo *info, 
                            MaterializedView *dst, 
                            const FieldMask &copy_mask,
                            ApEvent precondition,
@@ -1019,7 +1019,7 @@ namespace Legion {
     public: // const fields
       const unsigned field_index;
       const FieldMask copy_mask;
-      const TraversalInfo &info;
+      const TraversalInfo *const info;
       MaterializedView *const dst;
       CopyAcrossHelper *const across_helper;
       const RestrictInfo *const restrict_info;
