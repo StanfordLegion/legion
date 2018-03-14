@@ -1251,7 +1251,7 @@ namespace Legion {
       // Deferred views never have managers
       virtual bool has_manager(void) const { return false; }
       virtual PhysicalManager* get_manager(void) const
-      { return NULL; }
+        { return NULL; }
       virtual bool has_parent(void) const = 0;
       virtual LogicalView* get_parent(void) const = 0;
       virtual LogicalView* get_subview(const LegionColor c) = 0;
@@ -1269,8 +1269,11 @@ namespace Legion {
         { assert(false); }
     public:
       virtual void send_view(AddressSpaceID target) = 0; 
+      // Should never be called directly
+      virtual InnerContext* get_context(void) const
+        { assert(false); return NULL; }
     public:
-      // Should never be called
+      // Should never be called directly
       virtual void collect_users(const std::set<ApEvent> &term_events)
         { assert(false); }
     public:
@@ -1501,6 +1504,8 @@ namespace Legion {
       virtual void notify_owner_invalid(ReferenceMutator *mutator);
     public:
       virtual void send_view(AddressSpaceID target); 
+      virtual InnerContext* get_context(void) const
+        { return owner_context; }
     public:
       void prune(ClosedNode *closed_tree, FieldMask &valid_mask,
                  NestedViewMap &replacements, unsigned prune_depth, 
@@ -1869,7 +1874,8 @@ namespace Legion {
               AddressSpaceID owner_proc,
               DeferredVersionInfo *version_info,
               RegionTreeNode *node, PredEvent true_guard,
-              PredEvent false_guard, bool register_now);
+              PredEvent false_guard, InnerContext *owner,
+              bool register_now);
       PhiView(const PhiView &rhs);
       virtual ~PhiView(void);
     public:
@@ -1884,6 +1890,8 @@ namespace Legion {
       virtual void notify_owner_invalid(ReferenceMutator *mutator);
     public:
       virtual void send_view(AddressSpaceID target);
+      virtual InnerContext* get_context(void) const
+        { return owner_context; }
     public:
       virtual bool is_upper_bound_node(RegionTreeNode *node) const;
       virtual void get_field_versions(RegionTreeNode *node, bool split_prev, 
@@ -1944,6 +1952,7 @@ namespace Legion {
       const PredEvent true_guard;
       const PredEvent false_guard;
       DeferredVersionInfo *const version_info;
+      InnerContext *const owner_context;
     protected:
       LegionMap<LogicalView*,FieldMask>::aligned true_views;
       LegionMap<LogicalView*,FieldMask>::aligned false_views;
