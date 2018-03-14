@@ -1072,7 +1072,7 @@ namespace Legion {
               LegionMap<ApEvent,FieldMask>::aligned &reduction_postconditions);
     public: // const fields
       const TraversalInfo *const info;
-      InnerContext *const context;
+      InnerContext *const shard_context;
       MaterializedView *const dst;
       CopyAcrossHelper *const across_helper;
       const RestrictInfo *const restrict_info;
@@ -1235,7 +1235,7 @@ namespace Legion {
       const unsigned field_index;
       const FieldMask copy_mask;
       const TraversalInfo *const info;
-      InnerContext *const context;
+      InnerContext *const shard_context;
       MaterializedView *const dst;
       CopyAcrossHelper *const across_helper;
       const RestrictInfo *const restrict_info;
@@ -1329,8 +1329,7 @@ namespace Legion {
     public:
       virtual void send_view(AddressSpaceID target) = 0; 
       // Should never be called directly
-      virtual InnerContext* get_context(void) const
-        { assert(false); return NULL; }
+      virtual InnerContext* get_shard_context(void) const = 0;
     public:
       // Should never be called directly
       virtual void collect_users(const std::set<ApEvent> &term_events)
@@ -1563,7 +1562,7 @@ namespace Legion {
       virtual void notify_owner_invalid(ReferenceMutator *mutator);
     public:
       virtual void send_view(AddressSpaceID target); 
-      virtual InnerContext* get_context(void) const
+      virtual InnerContext* get_shard_context(void) const
         { return owner_context; }
     public:
       void prune(ClosedNode *closed_tree, FieldMask &valid_mask,
@@ -1854,6 +1853,8 @@ namespace Legion {
       virtual void notify_invalid(ReferenceMutator *mutator);
     public:
       virtual void send_view(AddressSpaceID target); 
+      virtual InnerContext* get_shard_context(void) const
+        { return NULL; }
     public:
       virtual void issue_deferred_copies(const TraversalInfo &info,
                                          MaterializedView *dst,
@@ -1950,7 +1951,7 @@ namespace Legion {
       virtual void notify_owner_invalid(ReferenceMutator *mutator);
     public:
       virtual void send_view(AddressSpaceID target);
-      virtual InnerContext* get_context(void) const
+      virtual InnerContext* get_shard_context(void) const
         { return owner_context; }
     public:
       virtual bool is_upper_bound_node(RegionTreeNode *node) const;
