@@ -4499,19 +4499,19 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    DeferredCopier::DeferredCopier(const TraversalInfo *in, MaterializedView *d,
-                            const FieldMask &m, const RestrictInfo &res, bool r)
-      : info(in), dst(d), across_helper(NULL), restrict_info(&res), 
-        restrict_out(r), deferred_copy_mask(m), current_reduction_epoch(0), 
-        finalized(false)
+    DeferredCopier::DeferredCopier(const TraversalInfo *in, InnerContext *ctx,
+       MaterializedView *d, const FieldMask &m, const RestrictInfo &res, bool r)
+      : info(in), context(ctx), dst(d), across_helper(NULL), 
+        restrict_info(&res), restrict_out(r), deferred_copy_mask(m), 
+        current_reduction_epoch(0), finalized(false)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
-    DeferredCopier::DeferredCopier(const TraversalInfo *in, MaterializedView *d,
-       const FieldMask &m, ApEvent p, CopyAcrossHelper *h)
-      : info(in), dst(d), across_helper(h), restrict_info(NULL), 
+    DeferredCopier::DeferredCopier(const TraversalInfo *in, InnerContext *ctx,
+       MaterializedView *d, const FieldMask &m, ApEvent p, CopyAcrossHelper *h)
+      : info(in), context(ctx), dst(d), across_helper(h), restrict_info(NULL), 
         restrict_out(false), deferred_copy_mask(m), current_reduction_epoch(0),
         finalized(false)
     //--------------------------------------------------------------------------
@@ -4521,7 +4521,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     DeferredCopier::DeferredCopier(const DeferredCopier &rhs)
-      : info(rhs.info), dst(rhs.dst), across_helper(rhs.across_helper), 
+      : info(rhs.info), context(NULL), dst(rhs.dst), 
+        across_helper(rhs.across_helper), 
         restrict_info(rhs.restrict_info), restrict_out(rhs.restrict_out)
     //--------------------------------------------------------------------------
     {
@@ -4583,6 +4584,9 @@ namespace Legion {
       {
         reduction_epochs.resize(current_reduction_epoch + 1);
         reduction_epoch_masks.resize(current_reduction_epoch + 1);
+#ifdef CVOPT
+        reduction_shards.resize(current_reduction_epoch + 1);
+#endif
       }
       PendingReductions &pending_reductions = 
         reduction_epochs[current_reduction_epoch];
@@ -4623,6 +4627,42 @@ namespace Legion {
         epoch_mask |= rit->second;
       }
     }
+
+#ifdef CVOPT
+    //--------------------------------------------------------------------------
+    void DeferredCopier::buffer_reduction_shards(PredEvent pred_guard,
+        ReplicationID repl_id, RtEvent shard_invalid_barrier,
+        RegionTreeNode *intersect,
+        const std::map<ShardID,WriteMasks> &shard_reductions)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(reduction_shards.size() == reduction_epoch_masks.size());
+#endif
+      if (current_reduction_epoch >= reduction_shards.size())
+      {
+        reduction_epochs.resize(current_reduction_epoch + 1);
+        reduction_epoch_masks.resize(current_reduction_epoch + 1);
+        reduction_shards.resize(current_reduction_epoch + 1);
+      }
+      PendingReductionShards &pending_shards = 
+        reduction_shards[current_reduction_epoch];
+      FieldMask &epoch_mask = reduction_epoch_masks[current_reduction_epoch];
+      for (std::map<ShardID,WriteMasks>::const_iterator sit = 
+            shard_reductions.begin(); sit != shard_reductions.end(); sit++)
+      {
+        const ShardInfo key(sit->first, repl_id, shard_invalid_barrier);
+        LegionDeque<ReductionShard>::aligned &reductions = pending_shards[key];
+        for (WriteMasks::const_iterator it = sit->second.begin();
+              it != sit->second.end(); it++)
+        {
+          reductions.push_back(
+              ReductionShard(it->second, pred_guard, intersect, it->first));
+          epoch_mask |= it->second;
+        }
+      }
+    }
+#endif
 
     //--------------------------------------------------------------------------
     void DeferredCopier::begin_guard_protection(void)
@@ -4877,6 +4917,65 @@ namespace Legion {
         LegionMap<ApEvent,FieldMask>::aligned reduction_postconditions;
 #ifdef CVOPT
         // Send anything to remote shards first to get things in flight
+        PendingReductionShards &pending_shards = reduction_shards[epoch];
+        for (PendingReductionShards::const_iterator pit = 
+              pending_shards.begin(); pit != pending_shards.end(); pit++)
+        {
+          const LegionDeque<ReductionShard>::aligned &reductions = pit->second;
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize(pit->first.repl_id);
+            rez.serialize(pit->first.shard);
+            rez.serialize<RtEvent>(pit->first.shard_invalid_barrier);
+            rez.serialize<size_t>(reductions.size());
+            for (LegionDeque<ReductionShard>::aligned::const_iterator it =
+                  reductions.begin(); it != reductions.end(); it++)
+            {
+              rez.serialize(it->reduction_mask);
+              rez.serialize(it->pred_guard);
+              if (it->intersect != NULL)
+              {
+                if (it->intersect->is_region())
+                {
+                  rez.serialize<bool>(true); // region
+                  rez.serialize(it->intersect->as_region_node()->handle);
+                }
+                else
+                {
+                  rez.serialize<bool>(false); // partition
+                  rez.serialize(it->intersect->as_partition_node()->handle);
+                }
+              }
+              else
+              {
+                rez.serialize<bool>(true); // region
+                rez.serialize(LogicalRegion::NO_REGION);
+              }
+              it->mask->pack_expression(rez);
+              // We need one completion event for each field  
+              const size_t pop_count = it->reduction_mask.pop_count();
+              int index = it->reduction_mask.find_first_set(); 
+              for (unsigned idx = 0; idx < pop_count; idx++)
+              {
+                if (idx > 0)
+                  index = it->reduction_mask.find_next_set(index+1);
+#ifdef DEBUG_LEGION
+                assert(index >= 0);
+#endif
+                ApUserEvent field_done = Runtime::create_ap_user_event();
+                rez.serialize(field_done);
+#ifdef DEBUG_LEGION
+                assert(reduction_postconditions.find(field_done) ==
+                        reduction_postconditions.end());
+#endif
+                reduction_postconditions[field_done].set_bit(index);
+              }
+            }
+          }
+          context->send_composite_view_shard_reduction_request(
+                                          pit->first.shard, rez);
+        }
 #endif
         // Iterate over all the postconditions and issue reductions
         for (LegionMap<ApEvent,FieldMask>::aligned::const_iterator it = 
@@ -4984,21 +5083,23 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     RemoteDeferredCopier::RemoteDeferredCopier(const TraversalInfo *info,
+                                               InnerContext *ctx,
                                                MaterializedView *dst,
                                                const FieldMask &copy_mask,
                                                const RestrictInfo *res_info,
                                                bool res_out)
-      : DeferredCopier(info, dst, copy_mask, *res_info, res_out)
+      : DeferredCopier(info, ctx, dst, copy_mask, *res_info, res_out)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     RemoteDeferredCopier::RemoteDeferredCopier(const TraversalInfo *info,
+                                               InnerContext *ctx,
                                                MaterializedView *dst,
                                                const FieldMask &copy_mask,
                                                CopyAcrossHelper *helper)
-      : DeferredCopier(info, dst, copy_mask, ApEvent::NO_AP_EVENT, helper)
+      : DeferredCopier(info, ctx, dst, copy_mask, ApEvent::NO_AP_EVENT, helper)
     //--------------------------------------------------------------------------
     {
     }
@@ -5104,7 +5205,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ RemoteDeferredCopier* RemoteDeferredCopier::unpack_copier(
-              Deserializer &derez, Runtime *runtime, const FieldMask &copy_mask)
+                                  Deserializer &derez, Runtime *runtime, 
+                                  const FieldMask &copy_mask, InnerContext *ctx)
     //--------------------------------------------------------------------------
     {
       std::set<RtEvent> ready_events;
@@ -5144,8 +5246,8 @@ namespace Legion {
 #endif
       MaterializedView *dst_view = dst->as_materialized_view();
       RemoteDeferredCopier *copier = (restrict_info == NULL) ?
-        new RemoteDeferredCopier(info, dst_view, copy_mask, across_helper) :
-        new RemoteDeferredCopier(info, dst_view, copy_mask,
+        new RemoteDeferredCopier(info, ctx, dst_view, copy_mask,across_helper) :
+        new RemoteDeferredCopier(info, ctx, dst_view, copy_mask,
             restrict_info, restrict_out);
       copier->unpack(derez, copy_mask);
       return copier;
@@ -5158,9 +5260,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     DeferredSingleCopier::DeferredSingleCopier(const TraversalInfo *in,
-        MaterializedView *d, const FieldMask &m, const RestrictInfo &res,bool r)
-      : field_index(m.find_first_set()), copy_mask(m), info(in), dst(d),
-        across_helper(NULL), restrict_info(&res), restrict_out(r),
+        InnerContext *ctx, MaterializedView *d, const FieldMask &m, 
+        const RestrictInfo &res,bool r)
+      : field_index(m.find_first_set()), copy_mask(m), info(in), context(ctx),
+        dst(d), across_helper(NULL), restrict_info(&res), restrict_out(r),
         current_reduction_epoch(0),has_dst_preconditions(false),finalized(false)
     //--------------------------------------------------------------------------
     {
@@ -5168,9 +5271,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     DeferredSingleCopier::DeferredSingleCopier(const TraversalInfo *in, 
-        MaterializedView *d, const FieldMask &m, ApEvent p, CopyAcrossHelper *h)
-      : field_index(m.find_first_set()), copy_mask(m), info(in), dst(d),
-        across_helper(h), restrict_info(NULL), restrict_out(false),
+        InnerContext *ctx, MaterializedView *d, const FieldMask &m, 
+        ApEvent p, CopyAcrossHelper *h)
+      : field_index(m.find_first_set()), copy_mask(m), info(in), context(ctx),
+        dst(d), across_helper(h), restrict_info(NULL), restrict_out(false),
         current_reduction_epoch(0), has_dst_preconditions(true),finalized(false)
     //--------------------------------------------------------------------------
     {
@@ -5180,7 +5284,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     DeferredSingleCopier::DeferredSingleCopier(const DeferredSingleCopier &rhs)
       : field_index(rhs.field_index), copy_mask(rhs.copy_mask), info(rhs.info),
-        dst(rhs.dst), across_helper(rhs.across_helper), 
+        context(NULL), dst(rhs.dst), across_helper(rhs.across_helper), 
         restrict_info(rhs.restrict_info), restrict_out(rhs.restrict_out)
     //--------------------------------------------------------------------------
     {
@@ -5223,7 +5327,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (current_reduction_epoch >= reduction_epochs.size())
+      {
         reduction_epochs.resize(current_reduction_epoch + 1);
+#ifdef CVOPT
+        reduction_shards.resize(current_reduction_epoch + 1);
+#endif
+      }
       PendingReductions &pending_reductions = 
         reduction_epochs[current_reduction_epoch];
       for (std::vector<ReductionView*>::const_iterator it = 
@@ -5236,6 +5345,33 @@ namespace Legion {
           PendingReduction(tracker, pred_guard, intersect, mask);
       }
     }
+
+#ifdef CVOPT
+    //--------------------------------------------------------------------------
+    void DeferredSingleCopier::buffer_reduction_shards(PredEvent pred_guard,
+        ReplicationID repl_id, RtEvent shard_invalid_barrier, 
+        RegionTreeNode *intersect, 
+        const std::map<ShardID,IndexSpaceExpression*> &source_reductions)
+    //--------------------------------------------------------------------------
+    {
+      if (current_reduction_epoch >= reduction_epochs.size())
+      {
+        reduction_epochs.resize(current_reduction_epoch + 1);
+        reduction_shards.resize(current_reduction_epoch + 1);
+      }
+      PendingReductionShards &pending_shards = 
+        reduction_shards[current_reduction_epoch];
+      for (std::map<ShardID,IndexSpaceExpression*>::const_iterator it = 
+            source_reductions.begin(); it != source_reductions.end(); it++)
+      {
+        const ShardInfo key(it->first, repl_id, shard_invalid_barrier);
+#ifdef DEBUG_LEGION
+        assert(pending_shards.find(key) == pending_shards.end());
+#endif
+        pending_shards[key] = ReductionShard(pred_guard, intersect, it->second);
+      }
+    }
+#endif
 
     //--------------------------------------------------------------------------
     void DeferredSingleCopier::begin_guard_protection(void)
@@ -5415,7 +5551,41 @@ namespace Legion {
         for (PendingReductionShards::const_iterator it = 
               pending_shards.begin(); it != pending_shards.end(); it++)
         {
-          
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize(it->first.repl_id);
+            rez.serialize(it->first.shard);
+            rez.serialize<RtEvent>(it->first.shard_invalid_barrier);
+            rez.serialize<size_t>(1); // number of pending
+            rez.serialize(copy_mask);
+            rez.serialize(it->second.pred_guard);
+            if (it->second.intersect != NULL)
+            {
+              if (it->second.intersect->is_region())
+              {
+                rez.serialize<bool>(true); // region
+                rez.serialize(it->second.intersect->as_region_node()->handle);
+              }
+              else
+              {
+                rez.serialize<bool>(false); // partition
+                rez.serialize(
+                    it->second.intersect->as_partition_node()->handle);
+              }
+            }
+            else
+            {
+              rez.serialize<bool>(true); // region
+              rez.serialize(LogicalRegion::NO_REGION);
+            }
+            it->second.mask->pack_expression(rez);
+            ApUserEvent done_event = Runtime::create_ap_user_event();
+            rez.serialize(done_event);
+            reduction_postconditions.insert(done_event);
+          }
+          context->send_composite_view_shard_reduction_request(
+                                          it->first.shard, rez);
         }
 #endif
         PendingReductions &pending_reductions = reduction_epochs[epoch];
@@ -5452,11 +5622,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     RemoteDeferredSingleCopier::RemoteDeferredSingleCopier(
                                           const TraversalInfo *info, 
+                                          InnerContext *ctx,
                                           MaterializedView *dst, 
                                           const FieldMask &copy_mask,
                                           const RestrictInfo *res_info,
                                           bool res_out)
-      : DeferredSingleCopier(info, dst, copy_mask, *res_info, res_out)
+      : DeferredSingleCopier(info, ctx, dst, copy_mask, *res_info, res_out)
     //--------------------------------------------------------------------------
     {
     }
@@ -5464,10 +5635,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     RemoteDeferredSingleCopier::RemoteDeferredSingleCopier(
                                           const TraversalInfo *info, 
+                                          InnerContext *ctx,
                                           MaterializedView *dst, 
                                           const FieldMask &copy_mask,
                                           CopyAcrossHelper *helper)
-      : DeferredSingleCopier(info, dst, copy_mask, ApEvent::NO_AP_EVENT, helper)
+      : DeferredSingleCopier(info, ctx, dst, copy_mask, 
+                             ApEvent::NO_AP_EVENT, helper)
     //--------------------------------------------------------------------------
     {
     }
@@ -5543,7 +5716,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     /*static*/ RemoteDeferredSingleCopier* 
       RemoteDeferredSingleCopier::unpack_copier(Deserializer &derez, 
-                                   Runtime *runtime, const FieldMask &copy_mask)
+                Runtime *runtime, const FieldMask &copy_mask, InnerContext *ctx)
     //--------------------------------------------------------------------------
     {
       std::set<RtEvent> ready_events;
@@ -5583,8 +5756,9 @@ namespace Legion {
 #endif
       MaterializedView *dst_view = dst->as_materialized_view();
       RemoteDeferredSingleCopier *copier = (restrict_info == NULL) ?
-        new RemoteDeferredSingleCopier(info,dst_view,copy_mask,across_helper) :
-        new RemoteDeferredSingleCopier(info,dst_view,copy_mask,
+        new RemoteDeferredSingleCopier(info, ctx, dst_view,
+                                       copy_mask, across_helper) :
+        new RemoteDeferredSingleCopier(info, ctx, dst_view, copy_mask,
                                        restrict_info, restrict_out);
       copier->unpack(derez);
       return copier;
@@ -5699,7 +5873,8 @@ namespace Legion {
         IndexSpaceExpression *write_performed = NULL;
         if (perfect)
         {
-          DeferredSingleCopier copier(&info, dst, src_mask, precondition);
+          DeferredSingleCopier copier(&info, get_context(), dst, 
+                                      src_mask, precondition);
           issue_deferred_copies_single(copier, NULL/*write mask*/,
                                        write_performed, guard);
           copier.finalize(&postconditions);
@@ -5710,7 +5885,7 @@ namespace Legion {
           CopyAcrossHelper across_helper(src_mask);
           dst->manager->initialize_across_helper(&across_helper, dst_mask, 
                                                  src_indexes, dst_indexes);
-          DeferredSingleCopier copier(&info, dst, src_mask, 
+          DeferredSingleCopier copier(&info, get_context(), dst, src_mask, 
                                       precondition, &across_helper);
           issue_deferred_copies_single(copier, NULL/*write mask*/,
                                        write_performed, guard);
@@ -5723,7 +5898,8 @@ namespace Legion {
         LegionMap<IndexSpaceExpression*,FieldMask>::aligned performed_masks;
         if (perfect)
         {
-          DeferredCopier copier(&info, dst, src_mask, precondition);
+          DeferredCopier copier(&info, get_context(), dst, 
+                                src_mask, precondition);
           issue_deferred_copies(copier, src_mask, write_masks, 
                                 performed_masks, guard);
           copier.finalize(&postconditions);
@@ -5734,7 +5910,8 @@ namespace Legion {
           CopyAcrossHelper across_helper(src_mask);
           dst->manager->initialize_across_helper(&across_helper, dst_mask, 
                                                  src_indexes, dst_indexes);
-          DeferredCopier copier(&info,dst,src_mask,precondition,&across_helper);
+          DeferredCopier copier(&info, get_context(), dst,
+                                src_mask, precondition, &across_helper);
           issue_deferred_copies(copier, src_mask, write_masks,
                                 performed_masks, guard);
           copier.finalize(&postconditions);
@@ -6823,7 +7000,7 @@ namespace Legion {
     {
       if (copy_mask.pop_count() == 1)
       {
-        DeferredSingleCopier copier(&info, dst, copy_mask, 
+        DeferredSingleCopier copier(&info, owner_context, dst, copy_mask, 
                                     restrict_info, restrict_out);
         IndexSpaceExpression *write_performed = NULL;
         issue_deferred_copies_single(copier, NULL/*write mask*/,
@@ -6831,7 +7008,8 @@ namespace Legion {
       }
       else
       {
-        DeferredCopier copier(&info, dst, copy_mask, restrict_info,restrict_out);
+        DeferredCopier copier(&info, owner_context, dst, copy_mask, 
+                              restrict_info, restrict_out);
         LegionMap<IndexSpaceExpression*,FieldMask>::aligned write_masks;
         LegionMap<IndexSpaceExpression*,FieldMask>::aligned performed_masks;
         issue_deferred_copies(copier, copy_mask, write_masks, 
@@ -7089,9 +7267,9 @@ namespace Legion {
       }
       // Buffer up any reduction shards we might have
       if (!reduction_shards.empty())
-        copier.buffer_reduction_shards(pred_guard,
+        copier.buffer_reduction_shards(pred_guard,repl_id,shard_invalid_barrier,
             (copier.dst->logical_node == logical_node) ? NULL : logical_node,
-            write_masks, reduction_shards);
+            reduction_shards);
 #endif
     }
 
@@ -7139,9 +7317,9 @@ namespace Legion {
         owner_context->send_composite_view_shard_copy_request(it->first, rez);
       }
       if (!reduction_shards.empty())
-        copier.buffer_reduction_shards(pred_guard, 
+        copier.buffer_reduction_shards(pred_guard,repl_id,shard_invalid_barrier,
             (copier.dst->logical_node == logical_node) ? NULL : logical_node,
-            write_mask, reduction_shards);
+            reduction_shards);
       if (!shard_writes.empty())
         return context->union_index_spaces(shard_writes);
 #endif
@@ -7722,7 +7900,7 @@ namespace Legion {
 #ifdef CVOPT
     //--------------------------------------------------------------------------
     void CompositeView::handle_sharding_copy_request(Deserializer &derez,
-                                                     Runtime *runtime)
+                                                 Runtime *rt, InnerContext *ctx)
     //--------------------------------------------------------------------------
     {
       PredEvent pred_guard;
@@ -7736,7 +7914,7 @@ namespace Legion {
         FieldMask copy_mask;
         copy_mask.set_bit(field_index);
         RemoteDeferredSingleCopier *copier = 
-          RemoteDeferredSingleCopier::unpack_copier(derez, runtime, copy_mask);
+          RemoteDeferredSingleCopier::unpack_copier(derez, rt, copy_mask, ctx);
         IndexSpaceExpression *write_mask = 
           IndexSpaceExpression::unpack_expression(derez);
         write_mask->add_expression_reference();
@@ -7758,7 +7936,7 @@ namespace Legion {
         FieldMask copy_mask;
         derez.deserialize(copy_mask);
         RemoteDeferredCopier *copier = 
-          RemoteDeferredCopier::unpack_copier(derez, runtime, copy_mask);
+          RemoteDeferredCopier::unpack_copier(derez, rt, copy_mask, ctx);
         size_t write_expressions;
         derez.deserialize(write_expressions);
         WriteMasks write_masks;
@@ -9129,7 +9307,7 @@ namespace Legion {
     {
       if (copy_mask.pop_count() == 1)
       {
-        DeferredSingleCopier copier(&info, dst, copy_mask, 
+        DeferredSingleCopier copier(&info, owner_context, dst, copy_mask, 
                                     restrict_info, restrict_out);
         IndexSpaceExpression *performed_write;
         issue_deferred_copies_single(copier, NULL/*write mask*/,
@@ -9137,7 +9315,8 @@ namespace Legion {
       }
       else
       {
-        DeferredCopier copier(&info, dst, copy_mask, restrict_info,restrict_out);
+        DeferredCopier copier(&info, owner_context, dst,
+                              copy_mask, restrict_info, restrict_out);
         LegionMap<IndexSpaceExpression*,FieldMask>::aligned write_masks;
         LegionMap<IndexSpaceExpression*,FieldMask>::aligned performed_masks;
         issue_deferred_copies(copier, copy_mask, write_masks, 

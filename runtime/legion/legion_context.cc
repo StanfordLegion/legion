@@ -10400,7 +10400,7 @@ namespace Legion {
       CompositeView *view = find_or_buffer_composite_view_copy_request(derez);
       if (view == NULL)
         return;
-      view->handle_sharding_copy_request(derez, runtime);
+      view->handle_sharding_copy_request(derez, runtime, this);
     }
 
     //--------------------------------------------------------------------------
@@ -10668,7 +10668,7 @@ namespace Legion {
               to_copy.begin(); it != to_copy.end(); it++)
         {
           Deserializer derez(it->first, it->second);
-          view->handle_sharding_copy_request(derez, runtime);
+          view->handle_sharding_copy_request(derez, runtime, this);
           free(it->first);
         }
       }

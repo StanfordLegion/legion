@@ -984,6 +984,30 @@ namespace Legion {
       typedef std::map<ReductionView*,
                        LegionList<PendingReduction>::aligned> PendingReductions;
 #ifdef CVOPT
+      struct ShardInfo {
+      public:
+        ShardInfo(void) { }
+        ShardInfo(ShardID s, ReplicationID r, RtEvent b)
+          : shard(s), repl_id(r), shard_invalid_barrier(b) { }
+      public:
+        inline bool operator==(const ShardInfo &rhs) const
+        { if (shard != rhs.shard) return false;
+          if (repl_id != rhs.repl_id) return false;
+          if (shard_invalid_barrier != rhs.shard_invalid_barrier) return false;
+          return true; }
+        inline bool operator!=(const ShardInfo &rhs) const
+          { return !((*this) == rhs); }
+        inline bool operator<(const ShardInfo &rhs) const
+        { if (shard < rhs.shard) return true;
+          if (shard > rhs.shard) return false;
+          if (repl_id < rhs.repl_id) return true;
+          if (repl_id > rhs.repl_id) return false;
+          return (shard_invalid_barrier < rhs.shard_invalid_barrier); }
+      public:
+        ShardID shard;
+        ReplicationID repl_id;
+        RtEvent shard_invalid_barrier;
+      };
       struct ReductionShard {
       public:
         ReductionShard(void)
@@ -997,17 +1021,19 @@ namespace Legion {
         RegionTreeNode *intersect;
         IndexSpaceExpression *mask;
       };
-      typedef std::map<ShardID,
-                   LegionList<ReductionShard>::aligned> PendingReductionShards;
+      typedef std::map<ShardInfo,
+                   LegionDeque<ReductionShard>::aligned> PendingReductionShards;
 #endif
     public:
       DeferredCopier(const TraversalInfo *info, 
+                     InnerContext *context,
                      MaterializedView *dst, 
                      const FieldMask &copy_mask, 
                      const RestrictInfo &restrict_info,
                      bool restrict_out);
       // For handling deferred copies across
       DeferredCopier(const TraversalInfo *info, 
+                     InnerContext *context,
                      MaterializedView *dst, 
                      const FieldMask &copy_mask,
                      ApEvent precondition,
@@ -1025,8 +1051,9 @@ namespace Legion {
                LegionMap<ReductionView*,FieldMask>::aligned &source_reductions);
 #ifdef CVOPT
       void buffer_reduction_shards(PredEvent pred_guard, 
-              RegionTreeNode *intersect, const WriteMasks &write_masks,
-              std::map<ShardID,WriteMasks> &reduction_shards);
+              ReplicationID repl_id, RtEvent shard_invalid_barrier,
+              RegionTreeNode *intersect,
+              const std::map<ShardID,WriteMasks> &reduction_shards);
 #endif
       void begin_guard_protection(void);
       void end_guard_protection(void);
@@ -1045,6 +1072,7 @@ namespace Legion {
               LegionMap<ApEvent,FieldMask>::aligned &reduction_postconditions);
     public: // const fields
       const TraversalInfo *const info;
+      InnerContext *const context;
       MaterializedView *const dst;
       CopyAcrossHelper *const across_helper;
       const RestrictInfo *const restrict_info;
@@ -1078,12 +1106,14 @@ namespace Legion {
     struct RemoteDeferredCopier : public DeferredCopier {
     public:
       RemoteDeferredCopier(const TraversalInfo *info, 
+                           InnerContext *context,
                            MaterializedView *dst, 
                            const FieldMask &copy_mask, 
                            const RestrictInfo *restrict_info,
                            bool restrict_out);
       // For handling deferred copies across
       RemoteDeferredCopier(const TraversalInfo *info, 
+                           InnerContext *context,
                            MaterializedView *dst, 
                            const FieldMask &copy_mask,
                            CopyAcrossHelper *helper);
@@ -1096,7 +1126,7 @@ namespace Legion {
       void finalize(std::map<unsigned,ApUserEvent> &done_events);
     public:
       static RemoteDeferredCopier* unpack_copier(Deserializer &derez, 
-                       Runtime *runtime, const FieldMask &copy_mask);
+            Runtime *runtime, const FieldMask &copy_mask, InnerContext *ctx);
     };
 #endif
 
@@ -1122,6 +1152,30 @@ namespace Legion {
       };
       typedef std::map<ReductionView*,PendingReduction> PendingReductions;
 #ifdef CVOPT
+      struct ShardInfo {
+      public:
+        ShardInfo(void) { }
+        ShardInfo(ShardID s, ReplicationID r, RtEvent b)
+          : shard(s), repl_id(r), shard_invalid_barrier(b) { }
+      public:
+        inline bool operator==(const ShardInfo &rhs) const
+        { if (shard != rhs.shard) return false;
+          if (repl_id != rhs.repl_id) return false;
+          if (shard_invalid_barrier != rhs.shard_invalid_barrier) return false;
+          return true; }
+        inline bool operator!=(const ShardInfo &rhs) const
+          { return !((*this) == rhs); }
+        inline bool operator<(const ShardInfo &rhs) const
+        { if (shard < rhs.shard) return true;
+          if (shard > rhs.shard) return false;
+          if (repl_id < rhs.repl_id) return true;
+          if (repl_id > rhs.repl_id) return false;
+          return (shard_invalid_barrier < rhs.shard_invalid_barrier); }
+      public:
+        ShardID shard;
+        ReplicationID repl_id;
+        RtEvent shard_invalid_barrier;
+      };
       struct ReductionShard {
       public:
         ReductionShard(void)
@@ -1133,17 +1187,18 @@ namespace Legion {
         RegionTreeNode *intersect;
         IndexSpaceExpression *mask;
       };
-      typedef std::map<ShardID,
-                   LegionList<ReductionShard>::aligned> PendingReductionShards;
+      typedef std::map<ShardInfo,ReductionShard> PendingReductionShards;
 #endif
     public:
       DeferredSingleCopier(const TraversalInfo *info, 
+                           InnerContext *context,
                            MaterializedView *dst, 
                            const FieldMask &copy_mask,
                            const RestrictInfo &restrict_info,
                            bool restrict_out);
       // For handling deferred copies across
       DeferredSingleCopier(const TraversalInfo *info, 
+                           InnerContext *context,
                            MaterializedView *dst, 
                            const FieldMask &copy_mask,
                            ApEvent precondition,
@@ -1159,8 +1214,9 @@ namespace Legion {
                              std::vector<ReductionView*> &source_reductions);
 #ifdef CVOPT
       void buffer_reduction_shards(PredEvent pred_guard, 
-          RegionTreeNode *intersect, IndexSpaceExpression *mask,
-          std::map<ShardID,IndexSpaceExpression*> &source_reductions);
+          ReplicationID repl_id, RtEvent shard_invalid_barrier,
+          RegionTreeNode *intersect,
+          const std::map<ShardID,IndexSpaceExpression*> &source_reductions);
 #endif
       void begin_guard_protection(void);
       void end_guard_protection(void);
@@ -1179,6 +1235,7 @@ namespace Legion {
       const unsigned field_index;
       const FieldMask copy_mask;
       const TraversalInfo *const info;
+      InnerContext *const context;
       MaterializedView *const dst;
       CopyAcrossHelper *const across_helper;
       const RestrictInfo *const restrict_info;
@@ -1207,12 +1264,14 @@ namespace Legion {
     struct RemoteDeferredSingleCopier : public DeferredSingleCopier {
     public:
       RemoteDeferredSingleCopier(const TraversalInfo *info, 
+                                 InnerContext *context,
                                  MaterializedView *dst, 
                                  const FieldMask &copy_mask,
                                  const RestrictInfo *restrict_info,
                                  bool restrict_out);
       // For handling deferred copies across
       RemoteDeferredSingleCopier(const TraversalInfo *info, 
+                                 InnerContext *context,
                                  MaterializedView *dst, 
                                  const FieldMask &copy_mask,
                                  CopyAcrossHelper *helper);
@@ -1226,7 +1285,7 @@ namespace Legion {
       void finalize(ApUserEvent done_event);
     public:
       static RemoteDeferredSingleCopier* unpack_copier(Deserializer &derez,
-                             Runtime *runtime, const FieldMask &copy_mask);
+               Runtime *runtime, const FieldMask &copy_mask, InnerContext *ctx);
     };
 #endif
 
@@ -1591,7 +1650,8 @@ namespace Legion {
     public:
       // For control replication
 #ifdef CVOPT
-      void handle_sharding_copy_request(Deserializer &derez, Runtime *runtime);
+      void handle_sharding_copy_request(Deserializer &derez, 
+                                        Runtime *runtime, InnerContext *ctx);
       void handle_sharding_reduction_request(Deserializer &derez, Runtime *rt);
 #else
       void handle_sharding_update_request(Deserializer &derez,
