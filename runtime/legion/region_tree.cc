@@ -14824,7 +14824,7 @@ namespace Legion {
         version_info.copy_to(*view_info); 
         PhiView *phi_view = new PhiView(context, did, local_space,
                                         view_info, this, true_guard, 
-                                        false_guard,
+                                        false_guard, inner_context,
                                         true/*register now*/);
         // Record the true and false views
         phi_view->record_true_view(fill_view, fill_mask);
