@@ -7007,10 +7007,12 @@ namespace Legion {
     PhiView::PhiView(RegionTreeForest *ctx, DistributedID did, 
                      AddressSpaceID owner_space,
                      DeferredVersionInfo *info, RegionTreeNode *node, 
-                     PredEvent tguard, PredEvent fguard, bool register_now) 
+                     PredEvent tguard, PredEvent fguard, 
+                     InnerContext *owner, bool register_now) 
       : DeferredView(ctx, encode_phi_did(did), owner_space, node, 
                      register_now), CompositeBase(view_lock),
-        true_guard(tguard), false_guard(fguard), version_info(info)
+        true_guard(tguard), false_guard(fguard), version_info(info),
+        owner_context(owner)
     //--------------------------------------------------------------------------
     {
       version_info->add_reference();
@@ -7024,7 +7026,8 @@ namespace Legion {
     PhiView::PhiView(const PhiView &rhs)
       : DeferredView(NULL, 0, 0, NULL, false), CompositeBase(view_lock),
         true_guard(PredEvent::NO_PRED_EVENT), 
-        false_guard(PredEvent::NO_PRED_EVENT), version_info(NULL)
+        false_guard(PredEvent::NO_PRED_EVENT), version_info(NULL),
+        owner_context(NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -7375,6 +7378,7 @@ namespace Legion {
         rez.serialize(true_guard);
         rez.serialize(false_guard);
         version_info->pack_version_numbers(rez);
+        rez.serialize<UniqueID>(owner_context->get_context_uid());
         pack_phi_view(rez);
       }
       runtime->send_phi_view(target, rez);
@@ -7453,18 +7457,21 @@ namespace Legion {
       derez.deserialize(false_guard);
       DeferredVersionInfo *version_info = new DeferredVersionInfo();
       version_info->unpack_version_numbers(derez, runtime->forest);
+      UniqueID owner_uid;
+      derez.deserialize(owner_uid);
+      InnerContext *owner_context = runtime->find_context(owner_uid);
       // Make the phi view but don't register it yet
       void *location;
       PhiView *view = NULL;
       if (runtime->find_pending_collectable_location(did, location))
         view = new(location) PhiView(runtime->forest,
                                      did, owner, version_info, target_node, 
-                                     true_guard, false_guard, 
+                                     true_guard, false_guard, owner_context, 
                                      false/*register_now*/);
       else
         view = new PhiView(runtime->forest, did, owner,
                            version_info, target_node, true_guard, 
-                           false_guard, false/*register now*/);
+                           false_guard, owner_context, false/*register now*/);
       // Unpack all the internal data structures
       std::set<RtEvent> ready_events;
       view->unpack_phi_view(derez, ready_events);
