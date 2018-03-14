@@ -5175,6 +5175,18 @@ namespace Legion {
       parent_operations.erase(op);
     }
 
+    //--------------------------------------------------------------------------
+    /*static*/ IndexSpaceExpression* IndexSpaceExpression::unpack_expression(
+                                                            Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      TypeTag type_tag;
+      derez.deserialize(type_tag);
+      RemoteExpressionCreator creator(derez);
+      NT_TemplateHelper::demux<RemoteExpressionCreator>(type_tag, &creator);
+      return creator.result;
+    }
+
     /////////////////////////////////////////////////////////////
     // Index Space Operation 
     /////////////////////////////////////////////////////////////

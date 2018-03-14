@@ -1033,10 +1033,13 @@ namespace Legion {
       void begin_reduction_epoch(void);
       void end_reduction_epoch(void);
       void finalize(std::set<ApEvent> *postconditions = NULL);
-      void pack_copier(Serializer &rez);
+#ifdef CVOPT
+      void pack_copier(Serializer &rez, const FieldMask &copy_mask);
+#endif
     protected:
       void uniquify_copy_postconditions(void);
       void compute_dst_preconditions(const FieldMask &mask);
+      void apply_reduction_epochs(void);
       bool issue_reductions(const int epoch, ApEvent reduction_pre, 
                             const FieldMask &mask,
               LegionMap<ApEvent,FieldMask>::aligned &reduction_postconditions);
@@ -1056,7 +1059,7 @@ namespace Legion {
       // Reduction data 
       unsigned current_reduction_epoch;
       std::vector<PendingReductions> reduction_epochs;
-#ifdef CVTOP
+#ifdef CVOPT
       std::vector<PendingReductionShards> reduction_shards;
 #endif
       LegionVector<FieldMask>::aligned reduction_epoch_masks;
@@ -1065,6 +1068,37 @@ namespace Legion {
       std::vector<LegionMap<ApEvent,FieldMask>::aligned> protected_copy_posts;
       bool finalized;
     };
+
+#ifdef CVOPT
+    /**
+     * \struct RemoteDeferredCopier
+     * This is a version of the above copier that is used for
+     * handling sharded copies on remote nodes
+     */
+    struct RemoteDeferredCopier : public DeferredCopier {
+    public:
+      RemoteDeferredCopier(const TraversalInfo *info, 
+                           MaterializedView *dst, 
+                           const FieldMask &copy_mask, 
+                           const RestrictInfo *restrict_info,
+                           bool restrict_out);
+      // For handling deferred copies across
+      RemoteDeferredCopier(const TraversalInfo *info, 
+                           MaterializedView *dst, 
+                           const FieldMask &copy_mask,
+                           CopyAcrossHelper *helper);
+      RemoteDeferredCopier(const RemoteDeferredCopier &rhs);
+      ~RemoteDeferredCopier(void);
+    public:
+      RemoteDeferredCopier& operator=(const RemoteDeferredCopier &rhs);
+    public:
+      void unpack(Deserializer &derez, const FieldMask &copy_mask);
+      void finalize(std::map<unsigned,ApUserEvent> &done_events);
+    public:
+      static RemoteDeferredCopier* unpack_copier(Deserializer &derez, 
+                       Runtime *runtime, const FieldMask &copy_mask);
+    };
+#endif
 
     /**
      * \struct DeferredSingleCopier
@@ -1133,11 +1167,14 @@ namespace Legion {
       void begin_reduction_epoch(void);
       void end_reduction_epoch(void);
       void finalize(std::set<ApEvent> *postconditions = NULL);
+#ifdef CVOPT
       void pack_copier(Serializer &rez);
+#endif
       inline void record_postcondition(ApEvent post)
         { copy_postconditions.insert(post); }
     protected:
       void compute_dst_preconditions(void);
+      void apply_reduction_epochs(void);
     public: // const fields
       const unsigned field_index;
       const FieldMask copy_mask;
@@ -1160,6 +1197,38 @@ namespace Legion {
       bool has_dst_preconditions;
       bool finalized;
     };
+
+#ifdef CVOPT
+    /**
+     * \struct RemoteDeferredSingleCopier
+     * This is a version of the above copier that is used for
+     * handling sharded copies on remote nodes
+     */
+    struct RemoteDeferredSingleCopier : public DeferredSingleCopier {
+    public:
+      RemoteDeferredSingleCopier(const TraversalInfo *info, 
+                                 MaterializedView *dst, 
+                                 const FieldMask &copy_mask,
+                                 const RestrictInfo *restrict_info,
+                                 bool restrict_out);
+      // For handling deferred copies across
+      RemoteDeferredSingleCopier(const TraversalInfo *info, 
+                                 MaterializedView *dst, 
+                                 const FieldMask &copy_mask,
+                                 CopyAcrossHelper *helper);
+      RemoteDeferredSingleCopier(const RemoteDeferredSingleCopier &rhs);
+      ~RemoteDeferredSingleCopier(void);
+    public:
+      RemoteDeferredSingleCopier& operator=(
+                                 const RemoteDeferredSingleCopier &rhs);
+    public:
+      void unpack(Deserializer &derez);
+      void finalize(ApUserEvent done_event);
+    public:
+      static RemoteDeferredSingleCopier* unpack_copier(Deserializer &derez,
+                             Runtime *runtime, const FieldMask &copy_mask);
+    };
+#endif
 
     /**
      * \class DeferredView

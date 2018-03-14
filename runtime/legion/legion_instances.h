@@ -233,6 +233,9 @@ namespace Legion {
     public:
       void compute_across_offsets(const FieldMask &src_mask,
                    std::vector<CopySrcDstField> &dst_fields);
+      void pack(Serializer &rez, const FieldMask &copy_mask);
+      static CopyAcrossHelper* unpack(Deserializer &derez, 
+                                      const FieldMask &copy_mask);
     public:
       std::vector<CopySrcDstField> offsets; 
       LegionDeque<std::pair<FieldMask,FieldMask> >::aligned compressed_cache;

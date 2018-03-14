@@ -761,6 +761,8 @@ namespace Legion {
         return empty;
       }
     public:
+      static IndexSpaceExpression* unpack_expression(Deserializer &derez);
+    public:
       const TypeTag type_tag;
       const IndexSpaceExprID expr_id;
     protected:
@@ -947,6 +949,42 @@ namespace Legion {
       IndexSpaceExpression *const lhs;
       IndexSpaceExpression *const rhs;
       IndexSpaceOperation *result;
+    };
+
+    template<int DIM, typename T>
+    class RemoteExpression : public IndexSpaceExpression, public Collectable {
+    public:
+      RemoteExpression(Deserializer &derez);
+      RemoteExpression(const RemoteExpression &rhs);
+      virtual ~RemoteExpression(void);
+    public:
+      RemoteExpression& operator=(const RemoteExpression &rhs);
+    public:
+      virtual ApEvent get_expr_index_space(void *result, TypeTag tag, 
+                                           bool need_tight_result);
+      virtual void tighten_index_space(void);
+      virtual bool check_empty(void);
+      virtual void pack_expression(Serializer &rez);
+      virtual void add_expression_reference(void);
+      virtual bool remove_expression_reference(void);
+    public:
+      Realm::IndexSpace<DIM,T> realm_index_space;
+      ApEvent realm_index_space_ready;
+    };
+
+    struct RemoteExpressionCreator {
+    public:
+      RemoteExpressionCreator(Deserializer &d)
+        : derez(d) { }
+    public:
+      template<typename N, typename T>
+      static inline void demux(RemoteExpressionCreator *creator)
+      {
+        creator->result = new RemoteExpression<N::N,T>(creator->derez);
+      }
+    public:
+      Deserializer &derez;
+      IndexSpaceExpression *result;
     };
 
     /**

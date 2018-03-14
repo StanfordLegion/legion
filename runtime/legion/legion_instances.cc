@@ -98,6 +98,31 @@ namespace Legion {
       }
     }
 
+    //--------------------------------------------------------------------------
+    void CopyAcrossHelper::pack(Serializer &rez, const FieldMask &copy_mask)
+    //--------------------------------------------------------------------------
+    {
+      std::vector<CopySrcDstField> to_pack;
+      compute_across_offsets(copy_mask, to_pack);
+      rez.serialize<size_t>(to_pack.size());
+      for (unsigned idx = 0; idx < to_pack.size(); idx++)
+        rez.serialize(to_pack[idx]);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ CopyAcrossHelper* CopyAcrossHelper::unpack(Deserializer &derez,
+                                                     const FieldMask &copy_mask)
+    //--------------------------------------------------------------------------
+    {
+      CopyAcrossHelper *result = new CopyAcrossHelper(copy_mask);
+      size_t num_offsets;
+      derez.deserialize(num_offsets);
+      result->offsets.resize(num_offsets);
+      for (unsigned idx = 0; idx < num_offsets; idx++)
+        derez.deserialize(result->offsets[idx]);
+      return result;
+    }
+
     /////////////////////////////////////////////////////////////
     // Layout Description 
     /////////////////////////////////////////////////////////////

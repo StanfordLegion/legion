@@ -392,6 +392,103 @@ namespace Legion {
       return this->remove_expression_reference();
     }
 
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    RemoteExpression<DIM,T>::RemoteExpression(Deserializer &derez)
+      : IndexSpaceExpression(NT_TemplateHelper::encode_tag<DIM,T>())
+    //--------------------------------------------------------------------------
+    {
+      derez.deserialize(realm_index_space);
+      derez.deserialize(realm_index_space_ready);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    RemoteExpression<DIM,T>::RemoteExpression(const RemoteExpression &rhs)
+      : IndexSpaceExpression(NT_TemplateHelper::encode_tag<DIM,T>())
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+    
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    RemoteExpression<DIM,T>::~RemoteExpression(void)
+    //--------------------------------------------------------------------------
+    {
+      // do nothing
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    RemoteExpression<DIM,T>& RemoteExpression<DIM,T>::operator=(
+                                             const RemoteExpression<DIM,T> &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    ApEvent RemoteExpression<DIM,T>::get_expr_index_space(void *result,
+                                            TypeTag tag, bool need_tight_result)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(tag == type_tag);
+#endif
+      Realm::IndexSpace<DIM,T> *space = 
+        reinterpret_cast<Realm::IndexSpace<DIM,T>*>(result);
+      *space = realm_index_space;
+      return realm_index_space_ready;
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    void RemoteExpression<DIM,T>::tighten_index_space(void)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    bool RemoteExpression<DIM,T>::check_empty(void)
+    //--------------------------------------------------------------------------
+    {
+      return realm_index_space.empty();
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    void RemoteExpression<DIM,T>::pack_expression(Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize(type_tag);
+      rez.serialize(realm_index_space);
+      rez.serialize(realm_index_space_ready);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    void RemoteExpression<DIM,T>::add_expression_reference(void)
+    //--------------------------------------------------------------------------
+    {
+      add_reference();
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    bool RemoteExpression<DIM,T>::remove_expression_reference(void)
+    //--------------------------------------------------------------------------
+    {
+      return remove_reference();
+    }
+
     /////////////////////////////////////////////////////////////
     // Templated Index Space Node 
     /////////////////////////////////////////////////////////////

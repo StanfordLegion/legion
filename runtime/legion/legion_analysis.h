@@ -493,6 +493,8 @@ namespace Legion {
                     const FieldMask &traversal_mask, 
                     std::set<RtEvent> &map_applied_events);
     public:
+      void pack(Serializer &rez) const;
+    public:
       const ContextID ctx;
       Operation *const op;
       const unsigned index;
@@ -501,6 +503,14 @@ namespace Legion {
       const FieldMask traversal_mask;
       const UniqueID context_uid;
       std::set<RtEvent> &map_applied_events;
+    };
+    
+    /**
+     * \struct RemoteTraversalInfo
+     */
+    struct RemoteTraversalInfo : public TraversalInfo {
+    public:
+      static RemoteTraversalInfo* unpack(Deserializer &derez);
     };
 
     /**
