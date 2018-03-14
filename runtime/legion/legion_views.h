@@ -1011,14 +1011,12 @@ namespace Legion {
       struct ReductionShard {
       public:
         ReductionShard(void)
-          : intersect(NULL), mask(NULL) { }
-        ReductionShard(const FieldMask &m, PredEvent g, 
-                       RegionTreeNode *i, IndexSpaceExpression *e)
-          : reduction_mask(m), pred_guard(g), intersect(i), mask(e) { }
+          : mask(NULL) { }
+        ReductionShard(const FieldMask &m, PredEvent g, IndexSpaceExpression *e)
+          : reduction_mask(m), pred_guard(g), mask(e) { }
       public:
         FieldMask reduction_mask;
         PredEvent pred_guard;
-        RegionTreeNode *intersect;
         IndexSpaceExpression *mask;
       };
       typedef std::map<ShardInfo,
@@ -1052,7 +1050,6 @@ namespace Legion {
 #ifdef CVOPT
       void buffer_reduction_shards(PredEvent pred_guard, 
               ReplicationID repl_id, RtEvent shard_invalid_barrier,
-              RegionTreeNode *intersect,
               const std::map<ShardID,WriteMasks> &reduction_shards);
 #endif
       void begin_guard_protection(void);
@@ -1178,13 +1175,11 @@ namespace Legion {
       };
       struct ReductionShard {
       public:
-        ReductionShard(void)
-          : intersect(NULL) { }
-        ReductionShard(PredEvent g, RegionTreeNode *i, IndexSpaceExpression *e)
-          : pred_guard(g), intersect(i), mask(e) { }
+        ReductionShard(void) { }
+        ReductionShard(PredEvent g, IndexSpaceExpression *e)
+          : pred_guard(g), mask(e) { }
       public:
         PredEvent pred_guard;
-        RegionTreeNode *intersect;
         IndexSpaceExpression *mask;
       };
       typedef std::map<ShardInfo,ReductionShard> PendingReductionShards;
@@ -1215,7 +1210,6 @@ namespace Legion {
 #ifdef CVOPT
       void buffer_reduction_shards(PredEvent pred_guard, 
           ReplicationID repl_id, RtEvent shard_invalid_barrier,
-          RegionTreeNode *intersect,
           const std::map<ShardID,IndexSpaceExpression*> &source_reductions);
 #endif
       void begin_guard_protection(void);

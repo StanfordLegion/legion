@@ -4632,7 +4632,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void DeferredCopier::buffer_reduction_shards(PredEvent pred_guard,
         ReplicationID repl_id, RtEvent shard_invalid_barrier,
-        RegionTreeNode *intersect,
         const std::map<ShardID,WriteMasks> &shard_reductions)
     //--------------------------------------------------------------------------
     {
@@ -4657,7 +4656,7 @@ namespace Legion {
               it != sit->second.end(); it++)
         {
           reductions.push_back(
-              ReductionShard(it->second, pred_guard, intersect, it->first));
+              ReductionShard(it->second, pred_guard, it->first));
           epoch_mask |= it->second;
         }
       }
@@ -4937,24 +4936,6 @@ namespace Legion {
             {
               rez.serialize(it->reduction_mask);
               rez.serialize(it->pred_guard);
-              if (it->intersect != NULL)
-              {
-                if (it->intersect->is_region())
-                {
-                  rez.serialize<bool>(true); // region
-                  rez.serialize(it->intersect->as_region_node()->handle);
-                }
-                else
-                {
-                  rez.serialize<bool>(false); // partition
-                  rez.serialize(it->intersect->as_partition_node()->handle);
-                }
-              }
-              else
-              {
-                rez.serialize<bool>(true); // region
-                rez.serialize(LogicalRegion::NO_REGION);
-              }
               it->mask->pack_expression(rez);
               // We need one completion event for each field  
               const size_t pop_count = it->reduction_mask.pop_count();
@@ -4973,6 +4954,25 @@ namespace Legion {
                         reduction_postconditions.end());
 #endif
                 reduction_postconditions[field_done].set_bit(index);
+              }
+              // We also need destination preconditions for the reductions
+              LegionMap<ApEvent,FieldMask>::aligned reduce_preconditions;
+              for (LegionMap<ApEvent,FieldMask>::aligned::const_iterator pit =
+                    copy_postconditions.begin(); pit != 
+                    copy_postconditions.end(); pit++)
+              {
+                const FieldMask overlap = pit->second & it->reduction_mask;
+                if (!overlap)
+                  continue;
+                reduce_preconditions[pit->first] = overlap;
+              }
+              rez.serialize<size_t>(reduce_preconditions.size());
+              for (LegionMap<ApEvent,FieldMask>::aligned::const_iterator rit =
+                    reduce_preconditions.begin(); rit != 
+                    reduce_preconditions.end(); rit++)
+              {
+                rez.serialize(rit->first);
+                rez.serialize(rit->second);
               }
             }
           }
@@ -5355,7 +5355,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void DeferredSingleCopier::buffer_reduction_shards(PredEvent pred_guard,
         ReplicationID repl_id, RtEvent shard_invalid_barrier, 
-        RegionTreeNode *intersect, 
         const std::map<ShardID,IndexSpaceExpression*> &source_reductions)
     //--------------------------------------------------------------------------
     {
@@ -5373,7 +5372,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(pending_shards.find(key) == pending_shards.end());
 #endif
-        pending_shards[key] = ReductionShard(pred_guard, intersect, it->second);
+        pending_shards[key] = ReductionShard(pred_guard, it->second);
       }
     }
 #endif
@@ -5568,29 +5567,12 @@ namespace Legion {
             rez.serialize<size_t>(1); // number of pending
             rez.serialize(copy_mask);
             rez.serialize(it->second.pred_guard);
-            if (it->second.intersect != NULL)
-            {
-              if (it->second.intersect->is_region())
-              {
-                rez.serialize<bool>(true); // region
-                rez.serialize(it->second.intersect->as_region_node()->handle);
-              }
-              else
-              {
-                rez.serialize<bool>(false); // partition
-                rez.serialize(
-                    it->second.intersect->as_partition_node()->handle);
-              }
-            }
-            else
-            {
-              rez.serialize<bool>(true); // region
-              rez.serialize(LogicalRegion::NO_REGION);
-            }
             it->second.mask->pack_expression(rez);
             ApUserEvent done_event = Runtime::create_ap_user_event();
             rez.serialize(done_event);
             reduction_postconditions.insert(done_event);
+            // Also need to send the preconditions for the reductions
+            rez.serialize(reduction_pre);
           }
           shard_context->send_composite_view_shard_reduction_request(
                                                 it->first.shard, rez);
@@ -7275,9 +7257,8 @@ namespace Legion {
       }
       // Buffer up any reduction shards we might have
       if (!reduction_shards.empty())
-        copier.buffer_reduction_shards(pred_guard,repl_id,shard_invalid_barrier,
-            (copier.dst->logical_node == logical_node) ? NULL : logical_node,
-            reduction_shards);
+        copier.buffer_reduction_shards(pred_guard, repl_id,
+            shard_invalid_barrier, reduction_shards);
 #endif
     }
 
@@ -7325,9 +7306,8 @@ namespace Legion {
         owner_context->send_composite_view_shard_copy_request(it->first, rez);
       }
       if (!reduction_shards.empty())
-        copier.buffer_reduction_shards(pred_guard,repl_id,shard_invalid_barrier,
-            (copier.dst->logical_node == logical_node) ? NULL : logical_node,
-            reduction_shards);
+        copier.buffer_reduction_shards(pred_guard, repl_id,
+            shard_invalid_barrier, reduction_shards);
       if (!shard_writes.empty())
         return context->union_index_spaces(shard_writes);
 #endif
