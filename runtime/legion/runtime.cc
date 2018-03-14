@@ -7315,14 +7315,15 @@ namespace Legion {
     void PendingVariantRegistration::perform_registration(Runtime *runtime)
     //--------------------------------------------------------------------------
     {
-      runtime->register_variant(registrar, user_data, user_data_size,
-                    realm_desc, has_return, vid, false/*check task*/);
       // If we have a logical task name, attach the name info
+      // Do this first before any logging for the variant
       if (logical_task_name != NULL)
         runtime->attach_semantic_information(registrar.task_id, 
                           NAME_SEMANTIC_TAG, logical_task_name, 
                           strlen(logical_task_name)+1, 
                           false/*mutable*/, false/*send to owner*/);
+      runtime->register_variant(registrar, user_data, user_data_size,
+                    realm_desc, has_return, vid, false/*check task*/);
     }
 
     /////////////////////////////////////////////////////////////
