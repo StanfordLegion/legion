@@ -10412,7 +10412,7 @@ namespace Legion {
         find_or_buffer_composite_view_reduction_request(derez);
       if (view == NULL)
         return;
-      view->handle_sharding_reduction_request(derez, runtime);
+      view->handle_sharding_reduction_request(derez, runtime, this);
     }
 #else
     //--------------------------------------------------------------------------
@@ -10678,7 +10678,7 @@ namespace Legion {
               to_reduce.begin(); it != to_reduce.end(); it++)
         {
           Deserializer derez(it->first, it->second);
-          view->handle_sharding_reduction_request(derez, runtime);
+          view->handle_sharding_reduction_request(derez, runtime, this);
           free(it->first);
         }
       }

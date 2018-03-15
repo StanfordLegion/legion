@@ -1105,13 +1105,6 @@ namespace Legion {
       RemoteDeferredCopier(const TraversalInfo *info, 
                            InnerContext *context,
                            MaterializedView *dst, 
-                           const FieldMask &copy_mask, 
-                           const RestrictInfo *restrict_info,
-                           bool restrict_out);
-      // For handling deferred copies across
-      RemoteDeferredCopier(const TraversalInfo *info, 
-                           InnerContext *context,
-                           MaterializedView *dst, 
                            const FieldMask &copy_mask,
                            CopyAcrossHelper *helper);
       RemoteDeferredCopier(const RemoteDeferredCopier &rhs);
@@ -1261,13 +1254,6 @@ namespace Legion {
                                  InnerContext *context,
                                  MaterializedView *dst, 
                                  const FieldMask &copy_mask,
-                                 const RestrictInfo *restrict_info,
-                                 bool restrict_out);
-      // For handling deferred copies across
-      RemoteDeferredSingleCopier(const TraversalInfo *info, 
-                                 InnerContext *context,
-                                 MaterializedView *dst, 
-                                 const FieldMask &copy_mask,
                                  CopyAcrossHelper *helper);
       RemoteDeferredSingleCopier(const RemoteDeferredSingleCopier &rhs);
       ~RemoteDeferredSingleCopier(void);
@@ -1374,6 +1360,70 @@ namespace Legion {
     };
 
     /**
+     * \struct CompositeReducer
+     * A helper class for issuing reductions from a composite view
+     */
+    struct CompositeReducer {
+    public:
+      CompositeReducer(TraversalInfo *info, 
+                       InnerContext *context,
+                       MaterializedView *dst, 
+                       const FieldMask &reduce_mask,
+                       CopyAcrossHelper *helper);
+      CompositeReducer(const CompositeReducer &rhs);
+      ~CompositeReducer(void);
+    public:
+      CompositeReducer& operator=(const CompositeReducer &rhs);
+    public:
+      void unpack(Deserializer &derez);
+      ApEvent find_precondition(const FieldMask &mask) const;
+      void record_postcondition(ApEvent done, const FieldMask &mask);
+      void finalize(std::map<unsigned,ApUserEvent> &done_events);
+    public:
+      TraversalInfo *const info;
+      InnerContext *const context;
+      MaterializedView *const dst;
+      const FieldMask reduction_mask;
+      CopyAcrossHelper *const across_helper;
+    protected:
+      LegionMap<ApEvent,FieldMask>::aligned reduce_preconditions;
+      LegionMap<ApEvent,FieldMask>::aligned reduce_postconditions;
+    };
+
+    /**
+     * \struct CompositeSingleReducer
+     * A helper class for issuing reductions from a composite view
+     * for only a single field
+     */
+    struct CompositeSingleReducer {
+    public:
+      CompositeSingleReducer(TraversalInfo *info, 
+                             InnerContext *context,
+                             MaterializedView *dst, 
+                             const FieldMask &reduce_mask,
+                             ApEvent reduce_pre,
+                             CopyAcrossHelper *helper);
+      CompositeSingleReducer(const CompositeSingleReducer &rhs);
+      ~CompositeSingleReducer(void);
+    public:
+      CompositeSingleReducer& operator=(const CompositeSingleReducer &rhs);
+    public:
+      void finalize(ApUserEvent done_event);
+      inline void record_postcondition(ApEvent post)
+        { reduce_postconditions.insert(post); }
+    public:
+      TraversalInfo *const info;
+      InnerContext *const context;
+      MaterializedView *const dst;
+      const FieldMask reduction_mask;
+      const unsigned field_index;
+      const ApEvent reduce_pre;
+      CopyAcrossHelper *const across_helper;
+    protected:
+      std::set<ApEvent> reduce_postconditions;
+    };
+
+    /**
      * \class CompositeBase
      * A small helper class that provides some base functionality
      * for both the CompositeView and CompositeNode classes
@@ -1400,6 +1450,17 @@ namespace Legion {
                                    // Only valid if !done
                                    IndexSpaceExpression *&performed,
                                    bool need_shard_check = true);
+    protected:
+      void issue_composite_reductions(CompositeReducer &reducer,
+                                      const FieldMask &local_mask,
+                                      const WriteMasks &reduce_masks,
+                                      PredEvent pred_guard,
+                                      VersionTracker *src_version_tracker);
+      // Single field version of the method above
+      void issue_composite_reductions_single(CompositeSingleReducer &reducer,
+                                             IndexSpaceExpression *reduce_mask,
+                                             PredEvent pred_guard,
+                                             VersionTracker *version_tracker);
     public:
       static void issue_update_copies(DeferredCopier &copier, 
                                RegionTreeNode *logical_node,FieldMask copy_mask,
@@ -1432,8 +1493,12 @@ namespace Legion {
     public:
       virtual InnerContext* get_owner_context(void) const = 0;
       virtual DistributedID get_owner_did(void) const = 0;
+#ifdef CVOPT
+      virtual void perform_ready_check(FieldMask mask) = 0;
+#else
       virtual void perform_ready_check(FieldMask mask,
                                        RegionTreeNode *target) = 0;
+#endif
       virtual void find_valid_views(const FieldMask &update_mask,
                   LegionMap<LogicalView*,FieldMask>::aligned &valid_views, 
                                     bool needs_lock = true) = 0;
@@ -1463,7 +1528,7 @@ namespace Legion {
       LegionMap<CompositeNode*,FieldMask>::aligned children;
       LegionMap<LogicalView*,FieldMask>::aligned valid_views;
       LegionMap<ReductionView*,FieldMask>::aligned reduction_views; 
-    };
+    }; 
 
     /**
      * \class CompositeView
@@ -1591,15 +1656,24 @@ namespace Legion {
       virtual void pack_writing_version_numbers(Serializer &rez) const;
       virtual void pack_upper_bound_node(Serializer &rez) const;
     protected:
+#ifdef CVOPT
+      CompositeNode* capture_above(RegionTreeNode *node,
+                                   const FieldMask &needed_fields);
+#else
       CompositeNode* capture_above(RegionTreeNode *node,
                                    const FieldMask &needed_fields,
                                    RegionTreeNode *target);
+#endif
     public:
       // From CompositeBase
       virtual InnerContext* get_owner_context(void) const;
       virtual DistributedID get_owner_did(void) const { return did; }
+#ifdef CVOPT
+      virtual void perform_ready_check(FieldMask mask);
+#else
       virtual void perform_ready_check(FieldMask mask,
                                        RegionTreeNode *target);
+#endif
       virtual void find_valid_views(const FieldMask &update_mask,
                   LegionMap<LogicalView*,FieldMask>::aligned &valid_views,
                                     bool need_lock = true);
@@ -1616,7 +1690,7 @@ namespace Legion {
                                               DeferredSingleCopier &copier,
                                               RegionTreeNode *logical_node,
                                               PredEvent pred_guard,
-                                              IndexSpaceExpression *write_mask);
+                                              IndexSpaceExpression *write_mask); 
     public:
       static void handle_send_composite_view(Runtime *runtime, 
                               Deserializer &derez, AddressSpaceID source);
@@ -1645,7 +1719,8 @@ namespace Legion {
 #ifdef CVOPT
       void handle_sharding_copy_request(Deserializer &derez, 
                                         Runtime *runtime, InnerContext *ctx);
-      void handle_sharding_reduction_request(Deserializer &derez, Runtime *rt);
+      void handle_sharding_reduction_request(Deserializer &derez, 
+                                        Runtime *rt, InnerContext *ctx);
 #else
       void handle_sharding_update_request(Deserializer &derez,
                                           Runtime *runtime);
@@ -1725,8 +1800,12 @@ namespace Legion {
       // From CompositeBase
       virtual InnerContext* get_owner_context(void) const;
       virtual DistributedID get_owner_did(void) const { return owner_did; }
+#ifdef CVOPT
+      virtual void perform_ready_check(FieldMask mask);
+#else
       virtual void perform_ready_check(FieldMask mask,
                                        RegionTreeNode *target);
+#endif
       virtual void find_valid_views(const FieldMask &update_mask,
                   LegionMap<LogicalView*,FieldMask>::aligned &valid_views, 
                                     bool needs_lock = true);
@@ -1980,7 +2059,11 @@ namespace Legion {
         { assert(false); return NULL; }
       virtual DistributedID get_owner_did(void) const
         { assert(false); return 0; }
+#ifdef CVOPT
+      virtual void perform_ready_check(FieldMask mask)
+#else
       virtual void perform_ready_check(FieldMask mask, RegionTreeNode *target)
+#endif
         { assert(false); }
       virtual void find_valid_views(const FieldMask &update_mask,
                   LegionMap<LogicalView*,FieldMask>::aligned &valid_views, 

@@ -4778,14 +4778,6 @@ namespace Legion {
       }
       else
         rez.serialize<bool>(false); // across
-      if (restrict_info != NULL)
-      {
-        rez.serialize<bool>(true); // restrict
-        restrict_info->pack_info(rez);
-        rez.serialize<bool>(restrict_out);
-      }
-      else
-        rez.serialize<bool>(false); // restrict
       // Compute preconditions for any fields we might need
       const FieldMask needed_fields = copy_mask - dst_precondition_mask;
       if (!!needed_fields)
@@ -4930,6 +4922,16 @@ namespace Legion {
             rez.serialize(pit->first.repl_id);
             rez.serialize(pit->first.shard);
             rez.serialize<RtEvent>(pit->first.shard_invalid_barrier);
+            rez.serialize(dst->did);
+            info->pack(rez);
+            if (across_helper != NULL)
+            {
+              rez.serialize<bool>(true);
+              rez.serialize(epoch_mask);
+              across_helper->pack(rez, epoch_mask);
+            }
+            else
+              rez.serialize<bool>(false);
             rez.serialize<size_t>(reductions.size());
             for (LegionDeque<ReductionShard>::aligned::const_iterator it =
                   reductions.begin(); it != reductions.end(); it++)
@@ -4939,6 +4941,9 @@ namespace Legion {
               it->mask->pack_expression(rez);
               // We need one completion event for each field  
               const size_t pop_count = it->reduction_mask.pop_count();
+#ifdef DEBUG_LEGION
+              assert(pop_count > 0);
+#endif
               int index = it->reduction_mask.find_first_set(); 
               for (unsigned idx = 0; idx < pop_count; idx++)
               {
@@ -4948,6 +4953,8 @@ namespace Legion {
                 assert(index >= 0);
 #endif
                 ApUserEvent field_done = Runtime::create_ap_user_event();
+                if (pop_count > 1)
+                  rez.serialize<unsigned>(index);
                 rez.serialize(field_done);
 #ifdef DEBUG_LEGION
                 assert(reduction_postconditions.find(field_done) ==
@@ -4956,23 +4963,46 @@ namespace Legion {
                 reduction_postconditions[field_done].set_bit(index);
               }
               // We also need destination preconditions for the reductions
-              LegionMap<ApEvent,FieldMask>::aligned reduce_preconditions;
-              for (LegionMap<ApEvent,FieldMask>::aligned::const_iterator pit =
-                    copy_postconditions.begin(); pit != 
-                    copy_postconditions.end(); pit++)
+              if (pop_count > 1)
               {
-                const FieldMask overlap = pit->second & it->reduction_mask;
-                if (!overlap)
-                  continue;
-                reduce_preconditions[pit->first] = overlap;
+                LegionMap<ApEvent,FieldMask>::aligned reduce_preconditions;
+                for (LegionMap<ApEvent,FieldMask>::aligned::const_iterator pit =
+                      copy_postconditions.begin(); pit != 
+                      copy_postconditions.end(); pit++)
+                {
+                  const FieldMask overlap = pit->second & it->reduction_mask;
+                  if (!overlap)
+                    continue;
+                  reduce_preconditions[pit->first] = overlap;
+                }
+                rez.serialize<size_t>(reduce_preconditions.size());
+                for (LegionMap<ApEvent,FieldMask>::aligned::const_iterator rit =
+                      reduce_preconditions.begin(); rit != 
+                      reduce_preconditions.end(); rit++)
+                {
+                  rez.serialize(rit->first);
+                  rez.serialize(rit->second);
+                }
               }
-              rez.serialize<size_t>(reduce_preconditions.size());
-              for (LegionMap<ApEvent,FieldMask>::aligned::const_iterator rit =
-                    reduce_preconditions.begin(); rit != 
-                    reduce_preconditions.end(); rit++)
+              else
               {
-                rez.serialize(rit->first);
-                rez.serialize(rit->second);
+                // Special case where we only have a single field
+                std::set<ApEvent> reduce_preconditions;
+                for (LegionMap<ApEvent,FieldMask>::aligned::const_iterator pit =
+                      copy_postconditions.begin(); pit != 
+                      copy_postconditions.end(); pit++)
+                {
+                  if (pit->second * it->reduction_mask)
+                    continue;
+                  reduce_preconditions.insert(pit->first);
+                }
+                if (!reduce_preconditions.empty())
+                {
+                  ApEvent pre = Runtime::merge_events(reduce_preconditions);
+                  rez.serialize(pre);
+                }
+                else
+                  rez.serialize(ApEvent::NO_AP_EVENT);
               }
             }
           }
@@ -5089,18 +5119,6 @@ namespace Legion {
                                                InnerContext *ctx,
                                                MaterializedView *dst,
                                                const FieldMask &copy_mask,
-                                               const RestrictInfo *res_info,
-                                               bool res_out)
-      : DeferredCopier(info, ctx, dst, copy_mask, *res_info, res_out)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    RemoteDeferredCopier::RemoteDeferredCopier(const TraversalInfo *info,
-                                               InnerContext *ctx,
-                                               MaterializedView *dst,
-                                               const FieldMask &copy_mask,
                                                CopyAcrossHelper *helper)
       : DeferredCopier(info, ctx, dst, copy_mask, ApEvent::NO_AP_EVENT, helper)
     //--------------------------------------------------------------------------
@@ -5122,13 +5140,12 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(finalized); // we should already have been finalized
+      assert(restrict_info == NULL);
 #endif
       // clean up the things that we own
       delete info;
       if (across_helper != NULL)
         delete across_helper;
-      if (restrict_info != NULL)
-        delete restrict_info;
     }
 
     //--------------------------------------------------------------------------
@@ -5212,46 +5229,25 @@ namespace Legion {
                                   const FieldMask &copy_mask, InnerContext *ctx)
     //--------------------------------------------------------------------------
     {
-      std::set<RtEvent> ready_events;
       DistributedID dst_did;
       derez.deserialize(dst_did);
       RtEvent dst_ready;
       LogicalView *dst = 
         runtime->find_or_request_logical_view(dst_did, dst_ready);
-      if (dst_ready.exists())
-        ready_events.insert(dst_ready);
       TraversalInfo *info = RemoteTraversalInfo::unpack(derez); 
       bool across;
       derez.deserialize(across);
       CopyAcrossHelper *across_helper = NULL;
       if (across)
         across_helper = CopyAcrossHelper::unpack(derez, copy_mask); 
-      bool restrict;
-      derez.deserialize(restrict);
-      RestrictInfo *restrict_info = NULL;
-      bool restrict_out = false;
-      if (restrict)
-      {
-        restrict_info = new RestrictInfo();
-        restrict_info->unpack_info(derez, runtime, ready_events);
-        derez.deserialize<bool>(restrict_out);
-      }
-#ifdef DEBUG_LEGION
-      assert((across_helper == NULL) || (restrict_info == NULL));
-#endif
-      if (!ready_events.empty())
-      {
-        RtEvent ready = Runtime::merge_events(ready_events);
-        ready.wait();
-      }
+      if (dst_ready.exists() && !dst_ready.has_triggered())
+        dst_ready.wait();
 #ifdef DEBUG_LEGION
       assert(dst->is_materialized_view());
 #endif
       MaterializedView *dst_view = dst->as_materialized_view();
-      RemoteDeferredCopier *copier = (restrict_info == NULL) ?
-        new RemoteDeferredCopier(info, ctx, dst_view, copy_mask,across_helper) :
-        new RemoteDeferredCopier(info, ctx, dst_view, copy_mask,
-            restrict_info, restrict_out);
+      RemoteDeferredCopier *copier =
+        new RemoteDeferredCopier(info, ctx, dst_view, copy_mask, across_helper);
       copier->unpack(derez, copy_mask);
       return copier;
     }
@@ -5482,14 +5478,6 @@ namespace Legion {
       }
       else
         rez.serialize<bool>(false); // across
-      if (restrict_info != NULL)
-      {
-        rez.serialize<bool>(true); // restrict
-        restrict_info->pack_info(rez);
-        rez.serialize<bool>(restrict_out);
-      }
-      else
-        rez.serialize<bool>(false); // restrict
       if (!has_dst_preconditions)
         compute_dst_preconditions();
       rez.serialize<size_t>(dst_preconditions.size());
@@ -5564,7 +5552,20 @@ namespace Legion {
             rez.serialize(it->first.repl_id);
             rez.serialize(it->first.shard);
             rez.serialize<RtEvent>(it->first.shard_invalid_barrier);
+            rez.serialize(dst->did);
+            info->pack(rez);
+            if (across_helper != NULL)
+            {
+              rez.serialize<bool>(true);
+              rez.serialize(copy_mask);
+              across_helper->pack(rez, copy_mask);
+            }
+            else
+              rez.serialize<bool>(false);
             rez.serialize<size_t>(1); // number of pending
+#ifdef DEBUG_LEGION
+            assert(copy_mask.pop_count() == 1);
+#endif
             rez.serialize(copy_mask);
             rez.serialize(it->second.pred_guard);
             it->second.mask->pack_expression(rez);
@@ -5615,19 +5616,6 @@ namespace Legion {
                                           InnerContext *ctx,
                                           MaterializedView *dst, 
                                           const FieldMask &copy_mask,
-                                          const RestrictInfo *res_info,
-                                          bool res_out)
-      : DeferredSingleCopier(info, ctx, dst, copy_mask, *res_info, res_out)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    RemoteDeferredSingleCopier::RemoteDeferredSingleCopier(
-                                          const TraversalInfo *info, 
-                                          InnerContext *ctx,
-                                          MaterializedView *dst, 
-                                          const FieldMask &copy_mask,
                                           CopyAcrossHelper *helper)
       : DeferredSingleCopier(info, ctx, dst, copy_mask, 
                              ApEvent::NO_AP_EVENT, helper)
@@ -5651,13 +5639,12 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(finalized); // we should already have been finalized
+      assert(restrict_info == NULL);
 #endif
       // clean up the things we own
       delete info;
       if (across_helper != NULL)
         delete across_helper;
-      if (restrict_info != NULL)
-        delete restrict_info;
     }
 
     //--------------------------------------------------------------------------
@@ -5709,47 +5696,26 @@ namespace Legion {
                 Runtime *runtime, const FieldMask &copy_mask, InnerContext *ctx)
     //--------------------------------------------------------------------------
     {
-      std::set<RtEvent> ready_events;
       DistributedID dst_did;
       derez.deserialize(dst_did);
       RtEvent dst_ready;
       LogicalView *dst = 
         runtime->find_or_request_logical_view(dst_did, dst_ready);
-      if (dst_ready.exists())
-        ready_events.insert(dst_ready);
       TraversalInfo *info = RemoteTraversalInfo::unpack(derez); 
       bool across;
       derez.deserialize(across);
       CopyAcrossHelper *across_helper = NULL;
       if (across)
         across_helper = CopyAcrossHelper::unpack(derez, copy_mask); 
-      bool restrict;
-      derez.deserialize(restrict);
-      RestrictInfo *restrict_info = NULL;
-      bool restrict_out = false;
-      if (restrict)
-      {
-        restrict_info = new RestrictInfo();
-        restrict_info->unpack_info(derez, runtime, ready_events);
-        derez.deserialize<bool>(restrict_out);
-      }
-#ifdef DEBUG_LEGION
-      assert((across_helper == NULL) || (restrict_info == NULL));
-#endif
-      if (!ready_events.empty())
-      {
-        RtEvent ready = Runtime::merge_events(ready_events);
-        ready.wait();
-      }
+      if (dst_ready.exists() && !dst_ready.has_triggered())
+        dst_ready.wait();
 #ifdef DEBUG_LEGION
       assert(dst->is_materialized_view());
 #endif
       MaterializedView *dst_view = dst->as_materialized_view();
-      RemoteDeferredSingleCopier *copier = (restrict_info == NULL) ?
+      RemoteDeferredSingleCopier *copier =
         new RemoteDeferredSingleCopier(info, ctx, dst_view,
-                                       copy_mask, across_helper) :
-        new RemoteDeferredSingleCopier(info, ctx, dst_view, copy_mask,
-                                       restrict_info, restrict_out);
+                                       copy_mask, across_helper);
       copier->unpack(derez);
       return copier;
     }
@@ -5944,6 +5910,184 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
+    // CompositeReducer
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    CompositeReducer::CompositeReducer(TraversalInfo *in, InnerContext *ctx,
+                                       MaterializedView *d, const FieldMask &r,
+                                       CopyAcrossHelper *h)
+      : info(in), context(ctx), dst(d), reduction_mask(r), across_helper(h)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    CompositeReducer::CompositeReducer(const CompositeReducer &rhs)
+      : info(rhs.info), context(rhs.context), dst(rhs.dst), 
+        reduction_mask(rhs.reduction_mask), across_helper(rhs.across_helper)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    CompositeReducer::~CompositeReducer(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    CompositeReducer& CompositeReducer::operator=(const CompositeReducer &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void CompositeReducer::unpack(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      size_t num_preconditions;
+      derez.deserialize(num_preconditions);
+      for (unsigned idx = 0; idx < num_preconditions; idx++)
+      {
+        ApEvent pre;
+        derez.deserialize(pre);
+        derez.deserialize(reduce_preconditions[pre]);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    ApEvent CompositeReducer::find_precondition(const FieldMask &mask) const
+    //--------------------------------------------------------------------------
+    {
+      std::set<ApEvent> preconditions;
+      for (LegionMap<ApEvent,FieldMask>::aligned::const_iterator it = 
+           reduce_preconditions.begin(); it != reduce_preconditions.end(); it++)
+      {
+        if (it->second * mask)
+          continue;
+        preconditions.insert(it->first);
+      }
+      if (preconditions.empty())
+        return ApEvent::NO_AP_EVENT;
+      return Runtime::merge_events(preconditions);
+    }
+
+    //--------------------------------------------------------------------------
+    void CompositeReducer::record_postcondition(ApEvent done, 
+                                                const FieldMask &mask)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(reduce_postconditions.find(done) == reduce_postconditions.end());
+#endif
+      reduce_postconditions[done] = mask;
+    }
+
+    //--------------------------------------------------------------------------
+    void CompositeReducer::finalize(std::map<unsigned,ApUserEvent> &done_events)
+    //--------------------------------------------------------------------------
+    {
+      // Short our postconditions into event sets
+      if (!reduce_postconditions.empty())
+      {
+        LegionList<FieldSet<ApEvent> >::aligned event_sets;
+        compute_field_sets<ApEvent>(reduction_mask, 
+                                    reduce_postconditions, event_sets);
+        for (LegionList<FieldSet<ApEvent> >::aligned::const_iterator it =
+              event_sets.begin(); it != event_sets.end(); it++)
+        {
+          ApEvent done = Runtime::merge_events(it->elements);
+          // Iterate through the field indexes
+          int next_start = 0;
+          const size_t pop_count = it->set_mask.pop_count();
+          for (unsigned idx = 0; idx < pop_count; idx++)
+          {
+            int field_index = it->set_mask.find_next_set(next_start);
+#ifdef DEBUG_LEGION
+            assert(field_index >= 0);
+#endif
+            std::map<unsigned,ApUserEvent>::iterator finder = 
+              done_events.find(field_index);
+#ifdef DEBUG_LEGION
+            assert(finder != done_events.end());
+#endif
+            Runtime::trigger_event(finder->second, done);
+            done_events.erase(finder);
+            next_start = field_index + 1;
+          }
+        }
+      }
+      // Trigger any remaining events
+      if (!done_events.empty())
+      {
+        for (std::map<unsigned,ApUserEvent>::const_iterator it = 
+              done_events.begin(); it != done_events.end(); it++)
+          Runtime::trigger_event(it->second);
+        done_events.clear();
+      }
+    }
+
+    /////////////////////////////////////////////////////////////
+    // CompositeSingleReducer
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    CompositeSingleReducer::CompositeSingleReducer(TraversalInfo *in, 
+                                       InnerContext *ctx, MaterializedView *d,
+                                       const FieldMask &r, ApEvent p,
+                                       CopyAcrossHelper *h)
+      : info(in), context(ctx), dst(d), reduction_mask(r), 
+        field_index(r.find_first_set()), reduce_pre(p), across_helper(h)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    CompositeSingleReducer::CompositeSingleReducer(
+                                              const CompositeSingleReducer &rhs)
+      : info(rhs.info), context(rhs.context), dst(rhs.dst), 
+        reduction_mask(rhs.reduction_mask), field_index(rhs.field_index),
+        reduce_pre(rhs.reduce_pre), across_helper(rhs.across_helper)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    CompositeSingleReducer::~CompositeSingleReducer(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    CompositeSingleReducer& CompositeSingleReducer::operator=(
+                                              const CompositeSingleReducer &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void CompositeSingleReducer::finalize(ApUserEvent done_event)
+    //--------------------------------------------------------------------------
+    {
+      if (!reduce_postconditions.empty())
+        Runtime::trigger_event(done_event, 
+            Runtime::merge_events(reduce_postconditions));
+      else
+        Runtime::trigger_event(done_event);
+    }
+
+    /////////////////////////////////////////////////////////////
     // CompositeBase 
     /////////////////////////////////////////////////////////////
 
@@ -6005,7 +6149,11 @@ namespace Legion {
         // Otherwise we can fall through and keep going
       }
       // First check to see if we have all the valid meta-data
+#ifdef CVOPT
+      perform_ready_check(local_copy_mask);
+#else
       perform_ready_check(local_copy_mask, logical_node);
+#endif
       // Find any children that need to be traversed as well as any instances
       // or reduction views that we may need to issue copies from
       LegionMap<CompositeNode*,FieldMask>::aligned children_to_traverse;
@@ -6194,7 +6342,11 @@ namespace Legion {
         // shard writes on remote nodes
       }
       // First check to see if we have all the valid meta-data
+#ifdef CVOPT
+      perform_ready_check(copier.copy_mask);
+#else
       perform_ready_check(copier.copy_mask, logical_node);
+#endif
       // Find any children that need to be traversed as well as any instances
       // or reduction views that we may need to issue copies from
       std::vector<CompositeNode*> children_to_traverse;
@@ -6299,6 +6451,176 @@ namespace Legion {
       if (!done && (performed_write != NULL))
         done = test_done(copier, performed_write, write_mask);
       return done;
+    }
+
+    //--------------------------------------------------------------------------
+    void CompositeBase::issue_composite_reductions(CompositeReducer &reducer,
+                                            const FieldMask &local_mask,
+                                            const WriteMasks &reduce_masks,
+                                            PredEvent pred_guard,
+                                            VersionTracker *src_version_tracker)
+    //--------------------------------------------------------------------------
+    {
+      // Issue any reductions at this level and then traverse the children
+#ifdef CVOPT
+      perform_ready_check(local_mask);
+#else
+      perform_ready_check(local_mask, reducer.dst->logical_node);
+#endif
+      LegionMap<ReductionView*,FieldMask>::aligned to_perform;
+      LegionMap<CompositeNode*,FieldMask>::aligned to_traverse;
+      {
+        AutoLock b_lock(base_lock,1,false/*exclusive*/);
+        if (!(reduction_mask * reducer.reduction_mask))
+        {
+          for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it =
+                reduction_views.begin(); it != reduction_views.end(); it++)
+          {
+            const FieldMask overlap = it->second & local_mask;
+            if (!overlap)
+              continue;
+            to_perform[it->first] = overlap;
+          }
+        }
+        if (!children.empty())
+        {
+          for (LegionMap<CompositeNode*,FieldMask>::aligned::const_iterator 
+                it = children.begin(); it != children.end(); it++)
+          {
+            const FieldMask overlap = it->second & local_mask;
+            if (!overlap)
+              continue;
+            to_traverse[it->first] = overlap;
+          }
+        }
+      }
+      // Issue our reductions
+      if (!to_perform.empty())
+      {
+        for (LegionMap<ReductionView*,FieldMask>::aligned::iterator it =
+              to_perform.begin(); it != to_perform.end(); it++)
+        {
+          // Iterate over the write masks and find the interfering ones
+          for (WriteMasks::const_iterator mit = reduce_masks.begin();
+                mit != reduce_masks.end(); mit++)
+          {
+            const FieldMask overlap = it->second & mit->second;
+            if (!overlap)
+              continue;
+            const ApEvent reduce_pre = reducer.find_precondition(overlap);
+            ApEvent reduce_done = it->first->perform_deferred_reduction(
+                reducer.dst, overlap, src_version_tracker,
+                reduce_pre, reducer.info->op, reducer.info->index,
+                pred_guard, reducer.across_helper, NULL/*intersect*/,
+                mit->first, reducer.info->map_applied_events);
+            if (reduce_done.exists())
+              reducer.record_postcondition(reduce_done, overlap);
+            // Can remove these fields from the set
+            it->second -= overlap;
+            // Once we've done all the fields then we are done
+            if (!it->second)
+              break;
+          }
+        }
+      }
+      // Then traverse our children
+      if (to_traverse.empty())
+        return;
+      RegionTreeForest *context = reducer.dst->logical_node->context;
+      for (LegionMap<CompositeNode*,FieldMask>::aligned::const_iterator it = 
+            to_traverse.begin(); it != to_traverse.end(); it++)
+      {
+        // Build the reduce masks for the child
+        WriteMasks child_reduce_masks;
+        for (WriteMasks::const_iterator mit = reduce_masks.begin();
+              mit != reduce_masks.end(); mit++)
+        {
+          const FieldMask overlap = mit->second & it->second;
+          if (!overlap)
+            continue;
+          IndexSpaceExpression *child_mask = 
+            context->intersect_index_spaces(mit->first, 
+              it->first->logical_node->get_index_space_expression());
+          if (child_mask->is_empty())
+            continue;
+#ifdef DEBUG_LEGION
+          assert(child_reduce_masks.find(child_mask) == 
+                  child_reduce_masks.end());
+#endif
+          child_reduce_masks[child_mask] = overlap;
+        }
+        it->first->issue_composite_reductions(reducer, it->second,
+              child_reduce_masks, pred_guard, src_version_tracker);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void CompositeBase::issue_composite_reductions_single(
+                                          CompositeSingleReducer &reducer,
+                                          IndexSpaceExpression *reduce_mask,
+                                          PredEvent pred_guard,
+                                          VersionTracker *src_version_tracker)
+    //--------------------------------------------------------------------------
+    {
+      // Issue any reductions at this level and then traverse the children
+#ifdef CVOPT
+      perform_ready_check(reducer.reduction_mask);
+#else
+      perform_ready_check(reducer.reduction_mask, reducer.dst->logical_node);
+#endif
+      std::vector<ReductionView*> to_perform;
+      std::vector<CompositeNode*> to_traverse;
+      {
+        AutoLock b_lock(base_lock,1,false/*exclusive*/);
+        if (reduction_mask.is_set(reducer.field_index))
+        {
+          for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it =
+                reduction_views.begin(); it != reduction_views.end(); it++)
+          {
+            if (it->second.is_set(reducer.field_index))
+              to_perform.push_back(it->first);
+          }
+        }
+        if (!children.empty())
+        {
+          for (LegionMap<CompositeNode*,FieldMask>::aligned::const_iterator 
+                it = children.begin(); it != children.end(); it++)
+          {
+            if (it->second.is_set(reducer.field_index))
+              to_traverse.push_back(it->first);
+          }
+        }
+      }
+      // Issue our reductions
+      if (!to_perform.empty())
+      {
+        for (std::vector<ReductionView*>::const_iterator it = 
+              to_perform.begin(); it != to_perform.end(); it++)
+        {
+          ApEvent reduce_done = (*it)->perform_deferred_reduction(
+              reducer.dst, reducer.reduction_mask, src_version_tracker,
+              reducer.reduce_pre, reducer.info->op, reducer.info->index,
+              pred_guard, reducer.across_helper, NULL/*intersect*/,
+              reduce_mask, reducer.info->map_applied_events);
+          if (reduce_done.exists())
+            reducer.record_postcondition(reduce_done);
+        }
+      }
+      // Then traverse our children
+      if (to_traverse.empty())
+        return;
+      RegionTreeForest *context = reducer.dst->logical_node->context;
+      for (std::vector<CompositeNode*>::const_iterator it = 
+            to_traverse.begin(); it != to_traverse.end(); it++)
+      {
+        IndexSpaceExpression *child_mask = 
+          context->intersect_index_spaces(reduce_mask, 
+              (*it)->logical_node->get_index_space_expression());
+        if (child_mask->is_empty())
+          continue;
+        (*it)->issue_composite_reductions_single(reducer, child_mask,
+                                    pred_guard, src_version_tracker);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -6600,7 +6922,7 @@ namespace Legion {
       // should never get here
       assert(false);
       return NULL;
-    }
+    } 
 
     /////////////////////////////////////////////////////////////
     // CompositeView
@@ -7078,7 +7400,11 @@ namespace Legion {
         else
           still_needed = needed_fields; // we still need all the fields
       }
+#ifdef CVOPT
+      CompositeNode *capture_node = capture_above(node, still_needed);
+#else
       CompositeNode *capture_node = capture_above(node, still_needed, node);
+#endif
       // Result wasn't cached, retake the lock in exclusive mode and compute it
       AutoLock v_lock(view_lock);
       NodeVersionInfo &result = node_versions[node];
@@ -7126,6 +7452,30 @@ namespace Legion {
       version_info->pack_upper_bound_node(rez);
     }
 
+#ifdef CVOPT
+    //--------------------------------------------------------------------------
+    CompositeNode* CompositeView::capture_above(RegionTreeNode *node,
+                                                const FieldMask &needed_fields)
+    //--------------------------------------------------------------------------
+    {
+      // Recurse up the tree to get the parent version state
+      RegionTreeNode *parent = node->get_parent();
+#ifdef DEBUG_LEGION
+      assert(parent != NULL);
+#endif
+      if (parent == logical_node)
+      {
+        perform_ready_check(needed_fields);
+        return find_child_node(node);
+      }
+      // Otherwise continue up the tree 
+      CompositeNode *parent_node = capture_above(parent, needed_fields);
+      // Now make sure that this node has captured for all subregions
+      // Do this on the way back down to know that the parent node is good
+      parent_node->perform_ready_check(needed_fields);
+      return parent_node->find_child_node(node);
+    }
+#else
     //--------------------------------------------------------------------------
     CompositeNode* CompositeView::capture_above(RegionTreeNode *node,
                                                 const FieldMask &needed_fields,
@@ -7149,6 +7499,7 @@ namespace Legion {
       parent_node->perform_ready_check(needed_fields, target);
       return parent_node->find_child_node(node);
     }
+#endif
 
     //--------------------------------------------------------------------------
     void CompositeView::unpack_composite_view_response(Deserializer &derez,
@@ -7322,8 +7673,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+#ifdef CVOPT
+    void CompositeView::perform_ready_check(FieldMask check_mask)
+#else
     void CompositeView::perform_ready_check(FieldMask check_mask, 
                                             RegionTreeNode *target)
+#endif
     //--------------------------------------------------------------------------
     {
 #ifndef CVOPT
@@ -7964,6 +8319,96 @@ namespace Legion {
             delete it->first;
       }
     }
+
+    //--------------------------------------------------------------------------
+    void CompositeView::handle_sharding_reduction_request(Deserializer &derez,
+                                            Runtime *runtime, InnerContext *ctx)
+    //--------------------------------------------------------------------------
+    {
+      DistributedID dst_did;
+      derez.deserialize(dst_did);
+      RtEvent dst_ready;
+      LogicalView *dst = 
+        runtime->find_or_request_logical_view(dst_did, dst_ready);
+      MaterializedView *dst_view = NULL;
+      TraversalInfo *info = RemoteTraversalInfo::unpack(derez); 
+      bool across;
+      derez.deserialize(across);
+      CopyAcrossHelper *across_helper = NULL;
+      if (across)
+      {
+        FieldMask reduce_mask;
+        derez.deserialize(reduce_mask);
+        across_helper = CopyAcrossHelper::unpack(derez, reduce_mask);
+      }
+      size_t num_reductions;
+      derez.deserialize(num_reductions);
+      for (unsigned idx = 0; idx < num_reductions; idx++)
+      {
+        FieldMask reduction_mask;
+        derez.deserialize(reduction_mask);
+        PredEvent pred_guard;
+        derez.deserialize(pred_guard);
+        IndexSpaceExpression *expression = 
+          IndexSpaceExpression::unpack_expression(derez);
+        const size_t pop_count = reduction_mask.pop_count();
+        if (pop_count == 1)
+        {
+          ApUserEvent done_event;
+          derez.deserialize(done_event);
+          ApEvent reduce_pre;
+          derez.deserialize(reduce_pre);
+          if (dst_view == NULL)
+          {
+            if (!dst_ready.has_triggered())
+              dst_ready.wait();
+#ifdef DEBUG_LEGION
+            assert(dst->is_materialized_view());
+#endif
+            dst_view = dst->as_materialized_view();
+          }
+          CompositeSingleReducer reducer(info, ctx, dst_view, reduction_mask,
+                                         reduce_pre,across_helper);
+          issue_composite_reductions_single(reducer, expression, 
+                                            pred_guard, this);
+          reducer.finalize(done_event);
+        }
+        else
+        {
+          std::map<unsigned,ApUserEvent> done_events;
+          for (unsigned idx = 0; idx < pop_count; idx++)
+          {
+            unsigned index;
+            derez.deserialize(index);
+#ifdef DEBUG_LEGION
+            assert(done_events.find(index) == done_events.end());
+#endif
+            derez.deserialize(done_events[index]);
+          }
+          if (dst_view == NULL)
+          {
+            if (!dst_ready.has_triggered())
+              dst_ready.wait();
+#ifdef DEBUG_LEGION
+            assert(dst->is_materialized_view());
+#endif
+            dst_view = dst->as_materialized_view();
+          }
+          CompositeReducer reducer(info, ctx, dst_view,
+                                   reduction_mask, across_helper);
+          reducer.unpack(derez);
+          WriteMasks reduce_masks;
+          reduce_masks[expression] = reduction_mask;
+          issue_composite_reductions(reducer, reduction_mask,
+                                     reduce_masks, pred_guard, this);
+          reducer.finalize(done_events);
+        }
+      }
+      // Cleanup the resources that we own
+      delete info;
+      if (across_helper != NULL)
+        delete across_helper;
+    }
 #else
     //--------------------------------------------------------------------------
     void CompositeView::handle_sharding_update_request(Deserializer &derez,
@@ -8121,8 +8566,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+#ifdef CVOPT
+    void CompositeNode::perform_ready_check(FieldMask mask)
+#else
     void CompositeNode::perform_ready_check(FieldMask mask,
                                             RegionTreeNode *target)
+#endif
     //--------------------------------------------------------------------------
     {
       RtUserEvent capture_event;
