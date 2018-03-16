@@ -107,9 +107,14 @@
 #ifndef DEFAULT_TASK_WINDOW_HYSTERESIS
 #define DEFAULT_TASK_WINDOW_HYSTERESIS  75
 #endif
-// How many tasks to group together for runtime operations
+// Default number of tasks to have in flight before applying 
+// back pressure to the mapping process for a context
 #ifndef DEFAULT_MIN_TASKS_TO_SCHEDULE
 #define DEFAULT_MIN_TASKS_TO_SCHEDULE   32
+#endif
+// How many tasks to group together for runtime operations
+#ifndef DEFAULT_META_TASK_VECTOR_WIDTH
+#define DEFAULT_META_TASK_VECTOR_WIDTH  16
 #endif
 // The maximum size of active messages sent by the runtime in bytes
 // Note this value was picked based on making a tradeoff between

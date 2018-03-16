@@ -105,16 +105,6 @@ namespace Legion {
         "Task",                     \
       }
     public:
-      struct PrepipelineArgs : public LgTaskArgs<PrepipelineArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_PRE_PIPELINE_ID;
-      public:
-        PrepipelineArgs(Operation *op)
-          : LgTaskArgs<PrepipelineArgs>(op->get_unique_op_id()),
-            proxy_this(op) { }
-      public:
-        Operation *const proxy_this;
-      };
       struct TriggerOpArgs : public LgTaskArgs<TriggerOpArgs> {
       public:
         static const LgTaskID TASK_ID = LG_TRIGGER_OP_ID;
@@ -310,11 +300,12 @@ namespace Legion {
       // Inherited from ReferenceMutator
       virtual void record_reference_mutation_effect(RtEvent event);
     public:
+      RtEvent execute_prepipeline_stage(GenerationID gen,
+                                        bool from_logical_analysis);
       // This is a virtual method because SpeculativeOp overrides
       // it to check for handling speculation before proceeding
       // with the analysis
       virtual void execute_dependence_analysis(void);
-      RtEvent issue_prepipeline_stage(void); 
     public:
       // The following calls may be implemented
       // differently depending on the operation, but we
@@ -529,6 +520,8 @@ namespace Legion {
       // For each of our regions, a map of operations to the regions
       // which we can verify for each operation
       std::map<Operation*,std::set<unsigned> > verify_regions;
+      // Whether this operation has executed its prepipeline stage yet
+      bool prepipelined;
 #ifdef DEBUG_LEGION
       // Whether this operation has mapped, once it has mapped then
       // the set of incoming dependences is fixed
@@ -560,6 +553,8 @@ namespace Legion {
       bool track_parent;
       // The enclosing context for this operation
       TaskContext *parent_ctx;
+      // The prepipeline event for this operation
+      RtUserEvent prepipelined_event;
       // The mapped event for this operation
       RtUserEvent mapped_event;
       // The resolved event for this operation
@@ -1850,8 +1845,6 @@ namespace Legion {
       virtual size_t get_region_count(void) const;
       virtual OpKind get_operation_kind(void) const;
     public:
-      virtual bool has_prepipeline_stage(void) const { return true; }
-      virtual void trigger_prepipeline_stage(void);
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_mapping(void);
       virtual void trigger_complete(void);
