@@ -6806,6 +6806,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void TopLevelContext::add_to_post_task_queue(TaskContext *ctx, 
+        RtEvent wait_on, const void *result, size_t size, PhysicalInstance inst)
+    //--------------------------------------------------------------------------
+    {
+      // Since we're the top-level task we should just handle this here
+#ifdef DEBUG_LEGION
+      assert(!inst.exists()); // This makes it safe to wait now
+#endif
+      if (wait_on.exists() && !wait_on.has_triggered())
+        wait_on.wait();
+      ctx->post_end_task(result, size, true/*owned*/);
+    }
+
+    //--------------------------------------------------------------------------
     AddressSpaceID TopLevelContext::get_version_owner(RegionTreeNode *node, 
                                                       AddressSpaceID source)
     //--------------------------------------------------------------------------
