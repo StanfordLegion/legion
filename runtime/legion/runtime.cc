@@ -9117,10 +9117,12 @@ namespace Legion {
         total_address_spaces(address_spaces.size()),
         runtime_stride(address_spaces.size()), profiler(NULL),
         forest(new RegionTreeForest(this)), virtual_manager(NULL), 
-        has_explicit_utility_procs(!local_utilities.empty()), input_args(args),
+        num_utility_procs(local_utilities.empty() ? locals.size() : 
+                          local_utilities.size()), input_args(args),
         initial_task_window_size(config.initial_task_window_size),
         initial_task_window_hysteresis(config.initial_task_window_hysteresis),
         initial_tasks_to_schedule(config.initial_tasks_to_schedule),
+        initial_meta_task_vector_width(config.initial_meta_task_vector_width),
         max_message_size(config.max_message_size),
         gc_epoch_size(config.gc_epoch_size),
         max_local_fields(config.max_local_fields),
@@ -9302,11 +9304,12 @@ namespace Legion {
     Runtime::Runtime(const Runtime &rhs)
       : external(NULL), mapper_runtime(NULL), machine(rhs.machine), 
         address_space(0), total_address_spaces(0), runtime_stride(0), 
-        profiler(NULL), forest(NULL),
-        has_explicit_utility_procs(false), input_args(rhs.input_args), 
+        profiler(NULL), forest(NULL), 
+        num_utility_procs(rhs.num_utility_procs), input_args(rhs.input_args),
         initial_task_window_size(rhs.initial_task_window_size),
         initial_task_window_hysteresis(rhs.initial_task_window_hysteresis),
         initial_tasks_to_schedule(rhs.initial_tasks_to_schedule),
+        initial_meta_task_vector_width(rhs.initial_meta_task_vector_width),
         max_message_size(rhs.max_message_size),
         gc_epoch_size(rhs.gc_epoch_size), 
         max_local_fields(rhs.max_local_fields),
@@ -16186,17 +16189,18 @@ namespace Legion {
       assert(p.kind() != Processor::UTIL_PROC);
 #endif
       // Launch the task to perform the prepipeline stage for the operation
-      RtEvent precondition = op->issue_prepipeline_stage();
+      if (op->has_prepipeline_stage())
+        ctx->add_to_prepipeline_queue(op);
       if (program_order_execution)
       {
         ApEvent term_event = op->get_completion_event();
-        ctx->add_to_dependence_queue(op, precondition);
+        ctx->add_to_dependence_queue(op);
         ctx->begin_task_wait(true/*from runtime*/);
         term_event.wait();
         ctx->end_task_wait();
       }
       else
-        ctx->add_to_dependence_queue(op, precondition);
+        ctx->add_to_dependence_queue(op);
     }
     
     //--------------------------------------------------------------------------
@@ -18947,6 +18951,7 @@ namespace Legion {
         INT_ARG("-lg:window", config.initial_task_window_size);
         INT_ARG("-lg:hysteresis", config.initial_task_window_hysteresis);
         INT_ARG("-lg:sched", config.initial_tasks_to_schedule);
+        INT_ARG("-lg:vector", config.initial_meta_task_vector_width);
         INT_ARG("-lg:message",config.max_message_size);
         INT_ARG("-lg:epoch", config.gc_epoch_size);
         INT_ARG("-lg:local", config.max_local_fields);
@@ -19800,7 +19805,9 @@ namespace Legion {
       Runtime *runtime = *((Runtime**)userdata);
 #ifdef DEBUG_LEGION
       assert(userlen == sizeof(Runtime**));
-      if (!runtime->separate_runtime_instances)
+      // Meta-tasks can run on application processors only when there
+      // are no utility processors for us to use
+      if (!runtime->local_utils.empty())
         assert(implicit_context == NULL); // this better hold
 #endif
       implicit_runtime = runtime;
@@ -19830,7 +19837,7 @@ namespace Legion {
           }
         case LG_POST_END_ID:
           {
-            TaskContext::handle_post_end_task(args); 
+            InnerContext::handle_post_end_task(args); 
             break;
           }
         case LG_DEFERRED_READY_TRIGGER_ID:
@@ -19902,16 +19909,12 @@ namespace Legion {
           }
         case LG_PRE_PIPELINE_ID:
           {
-            const Operation::PrepipelineArgs *pargs = 
-              (const Operation::PrepipelineArgs*)args;
-            pargs->proxy_this->trigger_prepipeline_stage();
+            InnerContext::handle_prepipeline_stage(args);
             break;
           }
         case LG_TRIGGER_DEPENDENCE_ID:
           {
-            const InnerContext::DeferredDependenceArgs *deferred_trigger_args =
-              (const InnerContext::DeferredDependenceArgs*)args;
-            deferred_trigger_args->op->execute_dependence_analysis();
+            InnerContext::handle_dependence_stage(args);
             break;
           }
         case LG_TRIGGER_COMPLETE_ID:

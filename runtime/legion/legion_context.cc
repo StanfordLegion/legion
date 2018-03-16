@@ -1900,24 +1900,6 @@ namespace Legion {
           std::pair<void*,void (*)(void*)>(const_cast<void*>(value),destructor);
     }
 
-    //--------------------------------------------------------------------------
-    /*static*/ void TaskContext::handle_post_end_task(const void *args)
-    //--------------------------------------------------------------------------
-    {
-      const PostEndArgs *pargs = (const PostEndArgs*)args;
-      if (pargs->instance.exists())
-      {
-        // We don't own it since this is in the instance
-        pargs->proxy_this->post_end_task(pargs->result, 
-                                         pargs->result_size, false/*owner*/);
-        // Once we've read the data then we can delete the instance
-        pargs->instance.destroy();
-      }
-      else
-        pargs->proxy_this->post_end_task(pargs->result, 
-                                         pargs->result_size, true/*owned*/);
-    }
-
 #ifdef LEGION_SPY
     //--------------------------------------------------------------------------
     RtEvent TaskContext::update_previous_mapped_event(RtEvent next)
@@ -1944,9 +1926,10 @@ namespace Legion {
         remote_context(remote), full_inner_context(full_inner),
         parent_req_indexes(parent_indexes), virtual_mapped(virt_mapped), 
         total_children_count(0), total_close_count(0), 
-        outstanding_children_count(0), current_trace(NULL), 
-        valid_wait_event(false), outstanding_subtasks(0), pending_subtasks(0), 
-        pending_frames(0), currently_active_context(false),
+        outstanding_children_count(0), outstanding_prepipeline(0),
+        outstanding_dependence(false), outstanding_post_task(0),
+        current_trace(NULL), valid_wait_event(false), outstanding_subtasks(0),
+        pending_subtasks(0), pending_frames(0), currently_active_context(false),
         current_mapping_fence(NULL), mapping_fence_gen(0), 
         current_mapping_fence_index(0), current_execution_fence_index(0) 
     //--------------------------------------------------------------------------
@@ -1960,6 +1943,8 @@ namespace Legion {
       context_configuration.min_tasks_to_schedule = 
         runtime->initial_tasks_to_schedule;
       context_configuration.min_frames_to_schedule = 0;
+      context_configuration.meta_task_vector_width = 
+        runtime->initial_meta_task_vector_width;
       context_configuration.mutable_priority = false;
 #ifdef DEBUG_LEGION
       assert(tree_context.exists());
@@ -4510,14 +4495,92 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InnerContext::add_to_dependence_queue(Operation *op,
-                                               RtEvent op_precondition)
+    void InnerContext::add_to_prepipeline_queue(Operation *op)
     //--------------------------------------------------------------------------
     {
-      AutoLock child_lock(child_op_lock);
-      // We have the lock
+      bool issue_task = false;
+      const GenerationID gen = op->get_generation();
+      {
+        AutoLock p_lock(prepipeline_lock);
+        prepipeline_queue.push_back(std::pair<Operation*,GenerationID>(op,gen));
+        // No need to have more outstanding tasks than there are processors
+        if (outstanding_prepipeline < runtime->num_utility_procs)
+        {
+          const size_t needed_in_flight = 
+            (prepipeline_queue.size() + 
+             context_configuration.meta_task_vector_width - 1) / 
+              context_configuration.meta_task_vector_width;
+          if (outstanding_prepipeline < needed_in_flight)
+          {
+            outstanding_prepipeline++;
+            issue_task = true;
+          }
+        }
+      }
+      if (issue_task)
+      {
+        PrepipelineArgs args(op, this);
+        runtime->issue_runtime_meta_task(args, LG_THROUGHPUT_WORK_PRIORITY);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::process_prepipeline_stage(void)
+    //--------------------------------------------------------------------------
+    {
+      std::vector<std::pair<Operation*,GenerationID> > to_perform;
+      to_perform.reserve(context_configuration.meta_task_vector_width);
+      Operation *launch_next_op = NULL;
+      {
+        AutoLock p_lock(prepipeline_lock);
+        for (unsigned idx = 0; idx < 
+              context_configuration.meta_task_vector_width; idx++)
+        {
+          if (prepipeline_queue.empty())
+            break;
+          to_perform.push_back(prepipeline_queue.front());
+          prepipeline_queue.pop_front();
+        }
+#ifdef DEBUG_LEGION
+        assert(outstanding_prepipeline > 0);
+        assert(outstanding_prepipeline <= runtime->num_utility_procs);
+#endif
+        if (!prepipeline_queue.empty())
+        {
+          const size_t needed_in_flight = 
+            (prepipeline_queue.size() + 
+             context_configuration.meta_task_vector_width - 1) / 
+              context_configuration.meta_task_vector_width;
+          if (outstanding_prepipeline < needed_in_flight)
+            launch_next_op = prepipeline_queue.back().first; 
+          else
+            outstanding_prepipeline--;
+        }
+        else
+          outstanding_prepipeline--;
+      }
+      // Perform our prepipeline tasks
+      for (std::vector<std::pair<Operation*,GenerationID> >::const_iterator it =
+            to_perform.begin(); it != to_perform.end(); it++)
+        it->first->execute_prepipeline_stage(it->second, false/*need wait*/);
+      if (launch_next_op != NULL)
+      {
+        // This could maybe give a bad op ID for profiling, but it
+        // will not impact the correctness of the code
+        PrepipelineArgs args(launch_next_op, this);
+        runtime->issue_runtime_meta_task(args, LG_THROUGHPUT_WORK_PRIORITY);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::add_to_dependence_queue(Operation *op)
+    //--------------------------------------------------------------------------
+    {
+      LgPriority priority = LG_THROUGHPUT_WORK_PRIORITY;
+      // If this is tracking, add it to our data structure first
       if (op->is_tracking_parent())
       {
+        AutoLock child_lock(child_op_lock);
 #ifdef DEBUG_LEGION
         assert(executing_children.find(op) == executing_children.end());
         assert(executed_children.find(op) == executed_children.end());
@@ -4525,31 +4588,167 @@ namespace Legion {
         outstanding_children[op->get_ctx_index()] = op;
 #endif       
         executing_children[op] = op->get_generation();
+        // Bump our priority if the context is not active as it means
+        // that the runtime is currently not ahead of execution
+        if (!currently_active_context)
+          priority = LG_THROUGHPUT_DEFERRED_PRIORITY;
       }
-      // Issue the next dependence analysis task
-      DeferredDependenceArgs args(op);
-      // If we're ahead we give extra priority to the logical analysis
-      // since it is on the critical path, but if not we give it the 
-      // normal priority so that we can balance doing logical analysis
-      // and actually mapping and running tasks
-      if (op_precondition.exists())
+      bool issue_task = false;
+      RtEvent precondition;
       {
-        RtEvent pre = Runtime::merge_events(op_precondition, 
-                                            dependence_precondition);
-        RtEvent next = runtime->issue_runtime_meta_task(args,
-                                        currently_active_context ? 
-                                          LG_THROUGHPUT_WORK_PRIORITY :
-                                          LG_THROUGHPUT_DEFERRED_PRIORITY, pre);
-        dependence_precondition = next;
+        AutoLock d_lock(dependence_lock);
+        if (!outstanding_dependence)
+        {
+#ifdef DEBUG_LEGION
+          assert(dependence_queue.empty());
+#endif
+          issue_task = true;
+          outstanding_dependence = true;
+          precondition = dependence_precondition;
+          dependence_precondition = RtEvent::NO_RT_EVENT;
+        }
+        dependence_queue.push_back(op);
       }
-      else
+      if (issue_task)
       {
-        RtEvent next = runtime->issue_runtime_meta_task(args,
-                                        currently_active_context ? 
-                                          LG_THROUGHPUT_WORK_PRIORITY :
-                                          LG_THROUGHPUT_DEFERRED_PRIORITY,
-                                        dependence_precondition);
-        dependence_precondition = next;
+        DependenceArgs args(op, this);
+        runtime->issue_runtime_meta_task(args, priority, precondition); 
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::process_dependence_stage(void)
+    //--------------------------------------------------------------------------
+    {
+      std::vector<Operation*> to_perform;
+      to_perform.reserve(context_configuration.meta_task_vector_width);
+      Operation *launch_next_op = NULL;
+      {
+        AutoLock d_lock(dependence_lock);
+        for (unsigned idx = 0; idx < 
+              context_configuration.meta_task_vector_width; idx++)
+        {
+          if (dependence_queue.empty())
+            break;
+          to_perform.push_back(dependence_queue.front());
+          dependence_queue.pop_front();
+        }
+#ifdef DEBUG_LEGION
+        assert(outstanding_dependence);
+#endif
+        if (dependence_queue.empty())
+        {
+          outstanding_dependence = false;
+          // Guard ourselves against tasks running after us
+          dependence_precondition = 
+            RtEvent(Processor::get_current_finish_event());
+        }
+        else
+          launch_next_op = dependence_queue.front();
+      }
+      // Perform our operations
+      for (std::vector<Operation*>::const_iterator it = 
+            to_perform.begin(); it != to_perform.end(); it++)
+        (*it)->execute_dependence_analysis();
+      // Then launch the next task if needed
+      if (launch_next_op != NULL)
+      {
+        DependenceArgs args(launch_next_op, this);
+        // Sample currently_active without the lock to try to get our priority
+        runtime->issue_runtime_meta_task(args, !currently_active_context ? 
+              LG_THROUGHPUT_DEFERRED_PRIORITY : LG_THROUGHPUT_WORK_PRIORITY);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::add_to_post_task_queue(TaskContext *ctx, RtEvent wait_on,
+                         const void *result, size_t size, PhysicalInstance inst)
+    //--------------------------------------------------------------------------
+    {
+      bool issue_task = false;
+      {
+        AutoLock p_lock(post_task_lock);
+        post_task_queue.push_back(PostTaskArgs(ctx, result, size,inst,wait_on));
+        // No need to have more outstanding tasks than there are processors
+        if (outstanding_post_task < runtime->num_utility_procs)
+        {
+          const size_t needed_in_flight = 
+            (post_task_queue.size() + 
+             context_configuration.meta_task_vector_width - 1) /
+              context_configuration.meta_task_vector_width;
+          if (outstanding_post_task < needed_in_flight)
+          {
+            outstanding_post_task++;
+            issue_task = true;
+          }
+        }
+      }
+      if (issue_task)
+      {
+        PostEndArgs args(ctx->owner_task, this);
+        runtime->issue_runtime_meta_task(args, LG_THROUGHPUT_WORK_PRIORITY);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::process_post_end_tasks(void)
+    //--------------------------------------------------------------------------
+    {
+      std::vector<PostTaskArgs> to_perform;
+      to_perform.reserve(context_configuration.meta_task_vector_width);
+      TaskOp *launch_next_op = NULL;
+      {
+        AutoLock p_lock(post_task_lock);
+        for (std::list<PostTaskArgs>::iterator it = 
+              post_task_queue.begin(); it != post_task_queue.end(); /*nothing*/)
+        {
+          if (!it->wait_on.exists() || it->wait_on.has_triggered())
+          {
+            to_perform.push_back(*it);
+            it = post_task_queue.erase(it);
+            if (to_perform.size() == 
+                context_configuration.meta_task_vector_width)
+              break;
+          }
+          else
+            it++;
+        }
+#ifdef DEBUG_LEGION
+        assert(outstanding_post_task > 0);
+#endif
+        if (!post_task_queue.empty())
+        {
+          const size_t needed_in_flight = 
+            (post_task_queue.size() + 
+             context_configuration.meta_task_vector_width - 1) /
+              context_configuration.meta_task_vector_width;
+          if (outstanding_post_task < needed_in_flight)
+            launch_next_op = post_task_queue.front().context->owner_task;
+          else
+            outstanding_post_task--;
+        }
+        else
+          outstanding_post_task--;
+      }
+      if (!to_perform.empty())
+      {
+        for (std::vector<PostTaskArgs>::const_iterator it = 
+              to_perform.begin(); it != to_perform.end(); it++)
+        {
+          if (it->instance.exists())
+          {
+            it->context->post_end_task(it->result, it->size, false/*owned*/);
+            // Once we've copied the data then we can destroy the instance
+            it->instance.destroy();
+          }
+          else
+            it->context->post_end_task(it->result, it->size, true/*owned*/);
+        }
+      }
+      if (launch_next_op != NULL)
+      {
+        PostEndArgs args(launch_next_op, this);
+        runtime->issue_runtime_meta_task(args, LG_THROUGHPUT_WORK_PRIORITY);
       }
     }
 
@@ -5532,6 +5731,13 @@ namespace Legion {
                       mapper->get_mapper_name(), 
                       context_configuration.hysteresis_percentage,
                       get_task_name(), get_unique_id())
+      if (context_configuration.meta_task_vector_width == 0)
+        REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                      "Invalid mapper output from call 'configure context' "
+                      "on mapper %s for task %s (ID %lld). The "
+                      "'meta_task_vector_width' must be a non-zero value.",
+                      mapper->get_mapper_name(),
+                      get_task_name(), get_unique_id())
 
       // If we're counting by frames set min_tasks_to_schedule to zero
       if (context_configuration.min_frames_to_schedule > 0)
@@ -6080,48 +6286,30 @@ namespace Legion {
       const TaskID owner_task_id = owner_task->task_id;
 #endif
       Runtime *runtime_ptr = runtime;
-      // See if we want to move the rest of this computation onto
-      // the utility processor. We also need to be sure that we have 
-      // registered all of our operations before we can do the post end task
+      // Tell the parent context that we are ready for post-end
+      // Make a copy of the results if necessary
+      TaskContext *parent_ctx = owner_task->get_context();
       if (deferred_result_instance.exists())
       {
-        // If we have a defered result instance then we definitely
-        // need to postpone doing the post-end until the results
-        // are actually ready
-        PostEndArgs post_end_args(owner_task, this);
-        post_end_args.result = const_cast<void*>(res);
-        post_end_args.result_size = res_size;
-        post_end_args.instance = deferred_result_instance;
         RtEvent result_ready(Processor::get_current_finish_event());
-        if (!last_registration.has_triggered())
-          runtime->issue_runtime_meta_task(post_end_args,
-              LG_THROUGHPUT_DEFERRED_PRIORITY, 
-              Runtime::merge_events(last_registration, result_ready));
+        if (last_registration.exists() && !last_registration.has_triggered())
+          parent_ctx->add_to_post_task_queue(this, 
+              Runtime::merge_events(result_ready, last_registration),
+              res, res_size, deferred_result_instance);
         else
-          runtime->issue_runtime_meta_task(post_end_args,
-              LG_THROUGHPUT_DEFERRED_PRIORITY, result_ready);
+          parent_ctx->add_to_post_task_queue(this, result_ready,
+                          res, res_size, deferred_result_instance);
       }
-      else if (runtime->has_explicit_utility_procs || 
-          !last_registration.has_triggered())
+      else if (!owned)
       {
-        PostEndArgs post_end_args(owner_task, this);
-        post_end_args.result_size = res_size;
-        // If it is not owned make a copy
-        if (!owned)
-        {
-          post_end_args.result = malloc(res_size);
-          memcpy(post_end_args.result, res, res_size);
-        }
-        else
-          post_end_args.result = const_cast<void*>(res);
-        post_end_args.instance = PhysicalInstance::NO_INST;
-        // Give these slightly higher priority too since they are cleaning up 
-        // and will allow other tasks to run
-        runtime->issue_runtime_meta_task(post_end_args,
-           LG_THROUGHPUT_DEFERRED_PRIORITY, last_registration);
+        void *result_copy = malloc(res_size);
+        memcpy(result_copy, res, res_size);
+        parent_ctx->add_to_post_task_queue(this, last_registration,
+                  result_copy, res_size, PhysicalInstance::NO_INST);
       }
       else
-        post_end_task(res, res_size, owned);
+        parent_ctx->add_to_post_task_queue(this, last_registration,
+                          res, res_size, PhysicalInstance::NO_INST);
 #ifdef DEBUG_LEGION
       runtime_ptr->decrement_total_outstanding_tasks(owner_task_id, 
                                                      false/*meta*/);
@@ -6338,6 +6526,30 @@ namespace Legion {
         RegionTreeNode *node = runtime->forest->get_node(handle);
         ctx->process_version_owner_response(node, result);
       }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void InnerContext::handle_prepipeline_stage(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const PrepipelineArgs *pargs = (const PrepipelineArgs*)args;
+      pargs->context->process_prepipeline_stage();
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void InnerContext::handle_dependence_stage(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const DependenceArgs *dargs = (const DependenceArgs*)args;
+      dargs->context->process_dependence_stage();
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void InnerContext::handle_post_end_task(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const PostEndArgs *pargs = (const PostEndArgs*)args;
+      pargs->proxy_this->process_post_end_tasks();
     }
 
     //--------------------------------------------------------------------------
@@ -8182,8 +8394,22 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LeafContext::add_to_dependence_queue(Operation *op,
-                                              RtEvent op_precondition)
+    void LeafContext::add_to_prepipeline_queue(Operation *op)
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void LeafContext::add_to_dependence_queue(Operation *op)
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void LeafContext::add_to_post_task_queue(TaskContext *ctx, RtEvent wait_on,
+        const void *result, size_t size, PhysicalInstance instance)
     //--------------------------------------------------------------------------
     {
       assert(false);
@@ -8443,39 +8669,25 @@ namespace Legion {
       const TaskID owner_task_id = owner_task->task_id;
 #endif
       Runtime *runtime_ptr = runtime;
+      // Tell the parent context that we are ready for post-end
+      // Make a copy of the results if necessary
+      TaskContext *parent_ctx = owner_task->get_context();
       if (deferred_result_instance.exists())
       {
-        // If we have a defered result instance then we definitely
-        // need to postpone doing the post-end until the results
-        // are actually ready
-        PostEndArgs post_end_args(owner_task, this);
-        post_end_args.result = const_cast<void*>(res);
-        post_end_args.result_size = res_size;
-        post_end_args.instance = deferred_result_instance;
         RtEvent result_ready(Processor::get_current_finish_event());
-        runtime->issue_runtime_meta_task(post_end_args,
-              LG_THROUGHPUT_DEFERRED_PRIORITY, result_ready);
+        parent_ctx->add_to_post_task_queue(this, result_ready,
+                      res, res_size, deferred_result_instance);
       }
-      else if (runtime->has_explicit_utility_procs)
+      else if (!owned)
       {
-        PostEndArgs post_end_args(owner_task, this);
-        post_end_args.result_size = res_size;
-        // If it is not owned make a copy
-        if (!owned)
-        {
-          post_end_args.result = malloc(res_size);
-          memcpy(post_end_args.result, res, res_size);
-        }
-        else
-          post_end_args.result = const_cast<void*>(res);
-        post_end_args.instance = PhysicalInstance::NO_INST;
-        // Give these slightly higher priority too since they are 
-        // cleaning up and will allow other tasks to run
-        runtime->issue_runtime_meta_task(post_end_args, 
-                      LG_THROUGHPUT_DEFERRED_PRIORITY);
+        void *result_copy = malloc(res_size);
+        memcpy(result_copy, res, res_size);
+        parent_ctx->add_to_post_task_queue(this, RtEvent::NO_RT_EVENT,
+                  result_copy, res_size, PhysicalInstance::NO_INST);
       }
       else
-        post_end_task(res, res_size, owned);
+        parent_ctx->add_to_post_task_queue(this, RtEvent::NO_RT_EVENT,
+                          res, res_size, PhysicalInstance::NO_INST);
 #ifdef DEBUG_LEGION
       runtime_ptr->decrement_total_outstanding_tasks(owner_task_id, 
                                                      false/*meta*/);
@@ -9330,11 +9542,25 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InlineContext::add_to_dependence_queue(Operation *op,
-                                                RtEvent op_precondition)
+    void InlineContext::add_to_prepipeline_queue(Operation *op)
     //--------------------------------------------------------------------------
     {
-      enclosing->add_to_dependence_queue(op, op_precondition);
+      enclosing->add_to_prepipeline_queue(op);
+    }
+
+    //--------------------------------------------------------------------------
+    void InlineContext::add_to_dependence_queue(Operation *op)
+    //--------------------------------------------------------------------------
+    {
+      enclosing->add_to_dependence_queue(op);
+    }
+
+    //--------------------------------------------------------------------------
+    void InlineContext::add_to_post_task_queue(TaskContext *ctx, 
+        RtEvent wait_on, const void *result, size_t size, PhysicalInstance inst)
+    //--------------------------------------------------------------------------
+    {
+      enclosing->add_to_post_task_queue(ctx, wait_on, result, size, inst);
     }
 
     //--------------------------------------------------------------------------

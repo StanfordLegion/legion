@@ -6279,6 +6279,9 @@ namespace Legion {
        * -lg:sched <int> The run-ahead factor for the runtime.  How many
        *              outstanding tasks ready to run should be on each
        *              processor before backing off the mapping procedure.
+       * -lg:vector <int> Set the initial vectorization option for fusing
+       *              together important runtime meta tasks in the mapper.
+       *              The default is 16.
        * -lg:inorder  Execute operations in strict propgram order. This
        *              flag will actually run the entire operation through
        *              the pipeline and wait for it to complete before
