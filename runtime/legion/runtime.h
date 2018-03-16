@@ -1597,6 +1597,7 @@ namespace Legion {
             initial_task_window_size(DEFAULT_MAX_TASK_WINDOW),
             initial_task_window_hysteresis(DEFAULT_TASK_WINDOW_HYSTERESIS),
             initial_tasks_to_schedule(DEFAULT_MIN_TASKS_TO_SCHEDULE),
+            initial_meta_task_vector_width(DEFAULT_META_TASK_VECTOR_WIDTH),
             max_message_size(DEFAULT_MAX_MESSAGE_SIZE),
             gc_epoch_size(DEFAULT_GC_EPOCH_SIZE),
             max_control_replication_contexts(
@@ -1639,6 +1640,7 @@ namespace Legion {
         int initial_task_window_size;
         unsigned initial_task_window_hysteresis;
         unsigned initial_tasks_to_schedule;
+        unsigned initial_meta_task_vector_width;
         unsigned max_message_size;
         unsigned gc_epoch_size;
         unsigned max_control_replication_contexts;
@@ -1748,12 +1750,13 @@ namespace Legion {
       RegionTreeForest *const forest;
       VirtualManager *virtual_manager;
       Processor utility_group;
-      const bool has_explicit_utility_procs;
+      const size_t num_utility_procs;
     public:
       const InputArgs input_args;
       const int initial_task_window_size;
       const unsigned initial_task_window_hysteresis;
       const unsigned initial_tasks_to_schedule;
+      const unsigned initial_meta_task_vector_width;
       const unsigned max_message_size;
       const unsigned gc_epoch_size;
       const unsigned max_control_replication_contexts;

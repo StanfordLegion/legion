@@ -34,19 +34,6 @@ namespace Legion {
     class TaskContext : public ContextInterface, 
                         public ResourceTracker, public Collectable {
     public:
-      struct PostEndArgs : public LgTaskArgs<PostEndArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_POST_END_ID;
-      public:
-        PostEndArgs(TaskOp *owner, TaskContext *ctx)
-          : LgTaskArgs<PostEndArgs>(owner->get_unique_op_id()),
-            proxy_this(ctx) { }
-      public:
-        TaskContext *const proxy_this;
-        void *result;
-        size_t result_size;
-        PhysicalInstance instance;
-      };
       class AutoRuntimeCall {
       public:
         AutoRuntimeCall(TaskContext *c) : ctx(c) { ctx->begin_runtime_call(); }
@@ -325,8 +312,10 @@ namespace Legion {
                const std::vector<StaticDependence> *dependences) = 0;
       virtual void register_new_internal_operation(InternalOp *op) = 0;
       virtual unsigned register_new_close_operation(CloseOp *op) = 0;
-      virtual void add_to_dependence_queue(Operation *op,
-                                           RtEvent op_precondition) = 0;
+      virtual void add_to_prepipeline_queue(Operation *op) = 0;
+      virtual void add_to_dependence_queue(Operation *op) = 0;
+      virtual void add_to_post_task_queue(TaskContext *ctx, RtEvent wait_on,
+          const void *result, size_t size, PhysicalInstance instance) = 0;
       virtual void register_child_executed(Operation *op) = 0;
       virtual void register_child_complete(Operation *op) = 0;
       virtual void register_child_commit(Operation *op) = 0; 
@@ -561,8 +550,6 @@ namespace Legion {
       void set_local_task_variable(LocalVariableID id, const void *value,
                                    void (*destructor)(void*));
     public:
-      static void handle_post_end_task(const void *args);
-    public:
       Runtime *const runtime;
       TaskOp *const owner_task;
       const std::vector<RegionRequirement> &regions;
@@ -621,16 +608,48 @@ namespace Legion {
 
     class InnerContext : public TaskContext {
     public:
-      struct DeferredDependenceArgs : 
-        public LgTaskArgs<DeferredDependenceArgs> {
+      struct PrepipelineArgs : public LgTaskArgs<PrepipelineArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_PRE_PIPELINE_ID;
+      public:
+        PrepipelineArgs(Operation *op, InnerContext *ctx)
+          : LgTaskArgs<PrepipelineArgs>(op->get_unique_op_id()),
+            context(ctx) { }
+      public:
+        InnerContext *const context;
+      };
+      struct DependenceArgs : public LgTaskArgs<DependenceArgs> {
       public:
         static const LgTaskID TASK_ID = LG_TRIGGER_DEPENDENCE_ID;
       public:
-        DeferredDependenceArgs(Operation *o)
-          : LgTaskArgs<DeferredDependenceArgs>(o->get_unique_op_id()), op(o) { }
+        DependenceArgs(Operation *op, InnerContext *ctx)
+          : LgTaskArgs<DependenceArgs>(op->get_unique_op_id()), 
+            context(ctx) { }
       public:
-        Operation *const op;
-      }; 
+        InnerContext *const context;
+      };
+      struct PostEndArgs : public LgTaskArgs<PostEndArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_POST_END_ID;
+      public:
+        PostEndArgs(TaskOp *owner, InnerContext *ctx)
+          : LgTaskArgs<PostEndArgs>(owner->get_unique_op_id()),
+            proxy_this(ctx) { }
+      public:
+        InnerContext *const proxy_this;
+      };
+      struct PostTaskArgs {
+      public:
+        PostTaskArgs(TaskContext *ctx, const void *r, size_t s, 
+                     PhysicalInstance i, RtEvent w)
+          : context(ctx), result(r), size(s), instance(i), wait_on(w) { }
+      public:
+        TaskContext *context;
+        const void *result;
+        size_t size;
+        PhysicalInstance instance;
+        RtEvent wait_on;
+      };
       struct PostDecrementArgs : public LgTaskArgs<PostDecrementArgs> {
       public:
         static const LgTaskID TASK_ID = LG_POST_DECREMENT_TASK_ID;
@@ -929,8 +948,13 @@ namespace Legion {
                 const std::vector<StaticDependence> *dependences);
       virtual void register_new_internal_operation(InternalOp *op);
       virtual unsigned register_new_close_operation(CloseOp *op);
-      virtual void add_to_dependence_queue(Operation *op,
-                                           RtEvent op_precondition);
+      virtual void add_to_prepipeline_queue(Operation *op);
+      void process_prepipeline_stage(void);
+      virtual void add_to_dependence_queue(Operation *op);
+      void process_dependence_stage(void);
+      virtual void add_to_post_task_queue(TaskContext *ctx, RtEvent wait_on,
+          const void *result, size_t size, PhysicalInstance instance);
+      void process_post_end_tasks(void);
       virtual void register_child_executed(Operation *op);
       virtual void register_child_complete(Operation *op);
       virtual void register_child_commit(Operation *op); 
@@ -1054,7 +1078,8 @@ namespace Legion {
                                                 Runtime *runtime);
     public:
       void invalidate_remote_contexts(void);
-      void clear_instance_top_views(void);
+      void clear_instance_top_views(void); 
+    public:
       void free_remote_contexts(void);
       void send_remote_context(AddressSpaceID remote_instance, 
                                RemoteContext *target);
@@ -1065,6 +1090,10 @@ namespace Legion {
     public:
       void clone_local_fields(
           std::map<FieldSpace,std::vector<LocalFieldInfo> > &child_local) const;
+    public:
+      static void handle_prepipeline_stage(const void *args);
+      static void handle_dependence_stage(const void *args);
+      static void handle_post_end_task(const void *args);
     public:
       const RegionTreeContext tree_context; 
       const UniqueID context_uid;
@@ -1098,6 +1127,20 @@ namespace Legion {
       std::deque<UniqueID> ops_since_last_fence;
       std::set<ApEvent> previous_completion_events;
 #endif
+    protected: // Queues for fusing together small meta-tasks
+      mutable LocalLock                               prepipeline_lock;
+      std::deque<std::pair<Operation*,GenerationID> > prepipeline_queue;
+      unsigned                                        outstanding_prepipeline;
+    protected:
+      mutable LocalLock                               dependence_lock;
+      std::deque<Operation*>                          dependence_queue;
+      RtEvent                                         dependence_precondition;
+      // Only one of these ever to keep things in order
+      bool                                            outstanding_dependence;
+    protected:
+      mutable LocalLock                               post_task_lock;
+      std::list<PostTaskArgs>                         post_task_queue;
+      unsigned                                        outstanding_post_task;
     protected:
       // Traces for this task's execution
       LegionMap<TraceID,DynamicTrace*,TASK_TRACES_ALLOC>::tracked traces;
@@ -1109,7 +1152,6 @@ namespace Legion {
       RtUserEvent window_wait;
       std::deque<ApEvent> frame_events;
       RtEvent last_registration;
-      RtEvent dependence_precondition;
     protected:
       // Our cached set of index spaces for immediate domains
       std::map<Domain,IndexSpace> index_launch_spaces;
@@ -1185,6 +1227,9 @@ namespace Legion {
       virtual InnerContext* find_outermost_local_context(
                           InnerContext *previous = NULL);
       virtual InnerContext* find_top_context(void);
+      // Have a special implementation here to avoid a shutdown race
+      virtual void add_to_post_task_queue(TaskContext *ctx, RtEvent wait_on,
+                     const void *result, size_t size, PhysicalInstance inst);
     public:
       virtual VersionInfo& get_version_info(unsigned idx);
       virtual const std::vector<VersionInfo>* get_version_infos(void);
@@ -2018,8 +2063,10 @@ namespace Legion {
                 const std::vector<StaticDependence> *dependences);
       virtual void register_new_internal_operation(InternalOp *op);
       virtual unsigned register_new_close_operation(CloseOp *op);
-      virtual void add_to_dependence_queue(Operation *op,
-                                           RtEvent op_precondition);
+      virtual void add_to_prepipeline_queue(Operation *op);
+      virtual void add_to_dependence_queue(Operation *op);
+      virtual void add_to_post_task_queue(TaskContext *ctx, RtEvent wait_on,
+          const void *result, size_t size, PhysicalInstance instance);
       virtual void register_child_executed(Operation *op);
       virtual void register_child_complete(Operation *op);
       virtual void register_child_commit(Operation *op); 
@@ -2357,8 +2404,10 @@ namespace Legion {
                 const std::vector<StaticDependence> *dependences);
       virtual void register_new_internal_operation(InternalOp *op);
       virtual unsigned register_new_close_operation(CloseOp *op);
-      virtual void add_to_dependence_queue(Operation *op,
-                                           RtEvent op_precondition);
+      virtual void add_to_prepipeline_queue(Operation *op);
+      virtual void add_to_dependence_queue(Operation *op);
+      virtual void add_to_post_task_queue(TaskContext *ctx, RtEvent wait_on,
+          const void *result, size_t size, PhysicalInstance instance);
       virtual void register_child_executed(Operation *op);
       virtual void register_child_complete(Operation *op);
       virtual void register_child_commit(Operation *op); 

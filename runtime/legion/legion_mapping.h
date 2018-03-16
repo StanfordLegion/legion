@@ -1416,6 +1416,13 @@ namespace Legion {
        * enough ahead that it can be halted for this context by setting
        * the 'min_tasks_to_schedule' parameter.
        *
+       * the mapper can control the granularity of Legion meta-tasks
+       * for this context with the 'meta_task_vector_width' parameter
+       * which control how many meta-tasks get batched together for 
+       * certain stages of the execution pipeline. This is useful to 
+       * avoid the overheads of Realm tasks which often do not deal
+       * with very small meta-tasks (e.g. those that take 20us or less).
+       *
        * The 'mutable_priority' parameter allows the mapper to specify
        * whether child operations launched in this context are permitted
        * to alter the priority of parent task. See the 'update_parent_priority'
@@ -1429,6 +1436,7 @@ namespace Legion {
         unsigned                                max_outstanding_frames; // = 2
         unsigned                                min_tasks_to_schedule; // = 64
         unsigned                                min_frames_to_schedule; // = 0 
+        unsigned                                meta_task_vector_width; // = 16
         bool                                    mutable_priority; // = false
       };
       //------------------------------------------------------------------------

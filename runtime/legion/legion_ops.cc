@@ -68,6 +68,7 @@ namespace Legion {
       unique_op_id = runtime->get_unique_operation_id();
       context_index = 0;
       outstanding_mapping_references = 0;
+      prepipelined = false;
 #ifdef DEBUG_LEGION
       mapped = false;
       executed = false;
@@ -292,29 +293,70 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    RtEvent Operation::execute_prepipeline_stage(GenerationID generation, 
+                                                 bool from_logical_analysis)
+    //--------------------------------------------------------------------------
+    {
+      {
+        AutoLock op(op_lock);
+#ifdef DEBUG_LEGION
+        assert(generation <= gen);
+#endif
+        if (generation < gen)
+          return RtEvent::NO_RT_EVENT;
+        // Check to see if we've already started the analysis
+        if (prepipelined)
+        {
+          // Someone else already started, figure out if we need to wait
+          if (from_logical_analysis)
+            return prepipelined_event;
+          else
+            return RtEvent::NO_RT_EVENT;
+        }
+        else
+        {
+          // We got here first, mark that we're doing it
+          prepipelined = true;
+          // If we're not the logical analysis, make a wait event in
+          // case the logical analysis comes along and needs to wait
+          if (!from_logical_analysis)
+          {
+#ifdef DEBUG_LEGION
+            assert(!prepipelined_event.exists());
+#endif
+            prepipelined_event = Runtime::create_rt_user_event(); 
+          }
+        }
+      }
+      trigger_prepipeline_stage();
+      // Trigger any guard events we might have
+      if (!from_logical_analysis)
+      {
+        AutoLock op(op_lock);
+#ifdef DEBUG_LEGION
+        assert(prepipelined_event.exists());
+#endif
+        Runtime::trigger_event(prepipelined_event);
+        prepipelined_event = RtUserEvent::NO_RT_USER_EVENT;
+      }
+      return RtEvent::NO_RT_EVENT;
+    }
+
+    //--------------------------------------------------------------------------
     void Operation::execute_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
+      // Check to make sure our prepipeline stage is done if we have one
+      if (has_prepipeline_stage())
+      {
+        RtEvent wait_on = execute_prepipeline_stage(gen, true/*need wait*/);
+        if (wait_on.exists() && !wait_on.has_triggered())
+          wait_on.wait();
+      }
       // Always wrap this call with calls to begin/end dependence analysis
       begin_dependence_analysis();
       trigger_dependence_analysis();
       end_dependence_analysis();
-    }
-
-    //--------------------------------------------------------------------------
-    RtEvent Operation::issue_prepipeline_stage(void)
-    //--------------------------------------------------------------------------
-    {
-      if (has_prepipeline_stage())
-      {
-        PrepipelineArgs args(this);
-        // Give this deferred throughput priority so that it is always
-        // ahead of the logical analysis
-        return runtime->issue_runtime_meta_task(args, 
-                      LG_THROUGHPUT_DEFERRED_PRIORITY);
-      }
-      else
-        return RtEvent::NO_RT_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -10043,18 +10085,6 @@ namespace Legion {
         result += (*it)->get_region_count();
       }
       return result;
-    }
-
-    //--------------------------------------------------------------------------
-    void MustEpochOp::trigger_prepipeline_stage(void)
-    //--------------------------------------------------------------------------
-    {
-      for (unsigned idx = 0; idx < indiv_tasks.size(); idx++)
-        if (indiv_tasks[idx]->has_prepipeline_stage())
-          indiv_tasks[idx]->trigger_prepipeline_stage();
-      for (unsigned idx = 0; idx < index_tasks.size(); idx++)
-        if (index_tasks[idx]->has_prepipeline_stage())
-          index_tasks[idx]->trigger_prepipeline_stage();
     }
 
     //--------------------------------------------------------------------------
