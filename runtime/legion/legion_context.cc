@@ -4551,7 +4551,7 @@ namespace Legion {
             (prepipeline_queue.size() + 
              context_configuration.meta_task_vector_width - 1) / 
               context_configuration.meta_task_vector_width;
-          if (outstanding_prepipeline < needed_in_flight)
+          if (outstanding_prepipeline <= needed_in_flight)
             launch_next_op = prepipeline_queue.back().first; 
           else
             outstanding_prepipeline--;
@@ -4722,7 +4722,7 @@ namespace Legion {
             (post_task_queue.size() + 
              context_configuration.meta_task_vector_width - 1) /
               context_configuration.meta_task_vector_width;
-          if (outstanding_post_task < needed_in_flight)
+          if (outstanding_post_task <= needed_in_flight)
             launch_next_op = post_task_queue.front().context->owner_task;
           else
             outstanding_post_task--;
