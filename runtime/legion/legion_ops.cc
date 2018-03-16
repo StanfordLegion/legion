@@ -10076,18 +10076,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MustEpochOp::trigger_prepipeline_stage(void)
-    //--------------------------------------------------------------------------
-    {
-      for (unsigned idx = 0; idx < indiv_tasks.size(); idx++)
-        if (indiv_tasks[idx]->has_prepipeline_stage())
-          indiv_tasks[idx]->trigger_prepipeline_stage();
-      for (unsigned idx = 0; idx < index_tasks.size(); idx++)
-        if (index_tasks[idx]->has_prepipeline_stage())
-          index_tasks[idx]->trigger_prepipeline_stage();
-    }
-
-    //--------------------------------------------------------------------------
     void MustEpochOp::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {

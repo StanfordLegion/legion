@@ -1870,8 +1870,6 @@ namespace Legion {
       virtual size_t get_region_count(void) const;
       virtual OpKind get_operation_kind(void) const;
     public:
-      virtual bool has_prepipeline_stage(void) const { return true; }
-      virtual void trigger_prepipeline_stage(void);
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_mapping(void);
       virtual void trigger_complete(void);
