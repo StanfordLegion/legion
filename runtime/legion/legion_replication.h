@@ -1063,6 +1063,7 @@ namespace Legion {
       virtual MapperManager* invoke_mapper(void);
       virtual void map_and_distribute(std::set<RtEvent> &tasks_mapped,
                                       std::set<ApEvent> &tasks_complete);
+      virtual bool has_prepipeline_stage(void) const { return true; }
       virtual void trigger_prepipeline_stage(void);
       virtual void trigger_commit(void);
       void map_replicate_tasks(void) const;

@@ -2766,8 +2766,6 @@ namespace Legion {
         ReplIndexTask *task = static_cast<ReplIndexTask*>(index_tasks[idx]);
         task->set_sharding_function(sharding_functor, sharding_function);
       }
-      // Then we can do the normal prepipeline stage
-      MustEpochOp::trigger_prepipeline_stage();
     }
 
     //--------------------------------------------------------------------------
