@@ -1976,6 +1976,14 @@ extern "C" {
   // -----------------------------------------------------------------------
 
   /**
+   * @return Caller takes ownership of return value.
+   *
+   * @see Legion::FutureMap::FutureMap()
+   */
+  legion_future_map_t
+  legion_future_map_copy(legion_future_map_t handle);
+
+  /**
    * @param handle Caller must have ownership of parameter `handle`.
    *
    * @see Legion::FutureMap::~FutureMap()
