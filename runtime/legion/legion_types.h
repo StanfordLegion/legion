@@ -1611,6 +1611,7 @@ namespace Legion {
     class AttachOp;
     class DetachOp;
     class TimingOp;
+    class RemoteOp;
     class TaskOp;
 
     // legion_tasks.h

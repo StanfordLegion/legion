@@ -510,7 +510,16 @@ namespace Legion {
      */
     struct RemoteTraversalInfo : public TraversalInfo {
     public:
-      static RemoteTraversalInfo* unpack(Deserializer &derez);
+      RemoteTraversalInfo(RemoteOp *remote_op, unsigned idx,
+          const RegionRequirement &r, const FieldMask &mask,
+          UniqueID ctx_uid, RtUserEvent remote_applied);
+      ~RemoteTraversalInfo(void);
+    protected:
+      const RtUserEvent remote_applied;
+      VersionInfo dummy_version_info;
+      std::set<RtEvent> applied_events;
+    public:
+      static RemoteTraversalInfo* unpack(Deserializer &derez, Runtime *runtime);
     };
 
     /**

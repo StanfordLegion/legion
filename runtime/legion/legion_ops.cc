@@ -1361,6 +1361,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Operation::pack_remote_operation(Serializer &rez) const
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize(this);
+      rez.serialize(runtime->address_space);
+      rez.serialize(unique_op_id);
+      rez.serialize(execution_fence_event);
+      rez.serialize<bool>(tracing);
+    }
+
+    //--------------------------------------------------------------------------
     void Operation::MappingDependenceTracker::issue_stage_triggers(
                       Operation *op, Runtime *runtime, MustEpochOp *must_epoch)
     //--------------------------------------------------------------------------
@@ -14639,6 +14650,104 @@ namespace Legion {
     {
       result.impl->complete_future(); 
       complete_operation();
+    }
+
+    ///////////////////////////////////////////////////////////// 
+    // Remote Op 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    RemoteOp::RemoteOp(Runtime *rt, Operation *ptr, AddressSpaceID src)
+      : Operation(rt), remote_ptr(ptr), source(src)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    RemoteOp::RemoteOp(const RemoteOp &rhs)
+      : Operation(rhs), remote_ptr(NULL), source(0)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    RemoteOp::~RemoteOp(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    RemoteOp& RemoteOp::operator=(const RemoteOp &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteOp::unpack(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      derez.deserialize(unique_op_id);
+      derez.deserialize(execution_fence_event);
+      derez.deserialize<bool>(tracing);
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteOp::activate(void)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteOp::deactivate(void)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    const char* RemoteOp::get_logging_name(void) const
+    //--------------------------------------------------------------------------
+    {
+      return op_names[REMOTE_OP_KIND];
+    }
+
+    //--------------------------------------------------------------------------
+    Operation::OpKind RemoteOp::get_operation_kind(void) const
+    //--------------------------------------------------------------------------
+    {
+      return REMOTE_OP_KIND;
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteOp::select_sources(const InstanceRef &target,
+                                  const InstanceSet &sources,
+                                  std::vector<unsigned> &ranking)
+    //--------------------------------------------------------------------------
+    {
+      // TODO: Implement this when someone hits it
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ RemoteOp* RemoteOp::unpack_remote_operation(Deserializer &derez,
+                                                           Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      Operation *remote_ptr;
+      derez.deserialize(remote_ptr);
+      AddressSpaceID source;
+      derez.deserialize(source);
+      RemoteOp *result = new RemoteOp(runtime, remote_ptr, source);
+      result->unpack(derez);
+      return result;
     }
  
   }; // namespace Internal 

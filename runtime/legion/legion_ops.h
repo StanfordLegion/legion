@@ -67,6 +67,7 @@ namespace Legion {
         ATTACH_OP_KIND,
         DETACH_OP_KIND,
         TIMING_OP_KIND,
+        REMOTE_OP_KIND,
         TRACE_CAPTURE_OP_KIND,
         TRACE_COMPLETE_OP_KIND,
         TASK_OP_KIND,
@@ -100,6 +101,7 @@ namespace Legion {
         "Attach",                   \
         "Detach",                   \
         "Timing",                   \
+        "Remote",                   \
         "Trace Capture",            \
         "Trace Complete",           \
         "Task",                     \
@@ -500,6 +502,9 @@ namespace Legion {
                                       const UniqueID logical_context_uid,
                                       VersionInfo &version_info,
                                       std::set<RtEvent> &ready_events);
+    public:
+      // Pack the needed parts of this operation for a remote operation
+      void pack_remote_operation(Serializer &rez) const;
     public:
       Runtime *const runtime;
     protected:
@@ -2879,6 +2884,40 @@ namespace Legion {
       TimingMeasurement measurement;
       std::set<Future> preconditions;
       Future result;
+    };
+
+    /**
+     * \class RemoteOp
+     * This operation is a shim for operations on remote nodes
+     * and is used by remote composite view traversals to handle
+     * any requests they might have of the original operation.
+     */
+    class RemoteOp : public Operation {
+    public:
+      RemoteOp(Runtime *rt, Operation *ptr, AddressSpaceID src);
+      RemoteOp(const RemoteOp &rhs);
+      virtual ~RemoteOp(void);
+    public:
+      RemoteOp& operator=(const RemoteOp &rhs);
+    public:
+      void unpack(Deserializer &derez);
+    public:
+      virtual void activate(void);
+      virtual void deactivate(void);
+      virtual const char* get_logging_name(void) const;
+      virtual OpKind get_operation_kind(void) const;
+      // This should be the only mapper call that we need to handle
+      virtual void select_sources(const InstanceRef &target,
+                                  const InstanceSet &sources,
+                                  std::vector<unsigned> &ranking);
+    public:
+      static RemoteOp* unpack_remote_operation(Deserializer &derez,
+                                               Runtime *runtime);
+    public:
+      // This is a pointer to an operation on a remote node
+      // it should never be dereferenced
+      Operation *const remote_ptr;
+      const AddressSpaceID source;
     };
 
   }; //namespace Internal 

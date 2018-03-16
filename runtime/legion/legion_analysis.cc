@@ -143,6 +143,10 @@ namespace Legion {
       return result;
     }
 
+    /////////////////////////////////////////////////////////////
+    // TraversalInfo
+    /////////////////////////////////////////////////////////////
+
     //--------------------------------------------------------------------------
     TraversalInfo::TraversalInfo(ContextID c, Operation *o, unsigned idx,
                                  const RegionRequirement &r, VersionInfo &info, 
@@ -152,6 +156,70 @@ namespace Legion {
         map_applied_events(e)
     //--------------------------------------------------------------------------
     {
+    }
+
+    //--------------------------------------------------------------------------
+    void TraversalInfo::pack(Serializer &rez) const
+    //--------------------------------------------------------------------------
+    {
+      // No need to pack the ContextID, won't be used remotely
+      op->pack_remote_operation(rez);
+      rez.serialize(index);
+      ExternalTask::pack_region_requirement(req, rez);
+      // No need to pack any version information since this
+      // version information is for the destination and we've
+      // already got the destination preconditions
+      rez.serialize(traversal_mask);
+      rez.serialize(context_uid);
+      // Make a user event to trigger when the remote applied events are done
+      RtUserEvent remote_applied = Runtime::create_rt_user_event();
+      rez.serialize(remote_applied);
+      map_applied_events.insert(remote_applied);
+    }
+
+    //--------------------------------------------------------------------------
+    RemoteTraversalInfo::RemoteTraversalInfo(RemoteOp *remote_op,
+        unsigned idx, const RegionRequirement &r, const FieldMask &mask,
+        UniqueID ctx_uid, RtUserEvent remote)
+      : TraversalInfo(0/*dummy ctx*/, remote_op, idx, r, dummy_version_info,
+                      mask, applied_events),
+        remote_applied(remote) 
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    RemoteTraversalInfo::~RemoteTraversalInfo(void)
+    //--------------------------------------------------------------------------
+    {
+      // Hook up the map applied events
+      if (!applied_events.empty())
+        Runtime::trigger_event(remote_applied, 
+            Runtime::merge_events(applied_events));
+      else
+        Runtime::trigger_event(remote_applied);
+      // We also own the Remote operation so we need to delete it
+      delete op;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ RemoteTraversalInfo* RemoteTraversalInfo::unpack(
+                                          Deserializer &derez, Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      RemoteOp *remote_op = RemoteOp::unpack_remote_operation(derez, runtime);
+      unsigned index;
+      derez.deserialize(index);
+      RegionRequirement req;
+      ExternalTask::unpack_region_requirement(req, derez); 
+      FieldMask traversal_mask;
+      derez.deserialize(traversal_mask);
+      UniqueID context_uid;
+      derez.deserialize(context_uid);
+      RtUserEvent remote_applied;
+      derez.deserialize(remote_applied);
+      return new RemoteTraversalInfo(remote_op, index, req, traversal_mask,
+                                     context_uid, remote_applied);
     }
 
     /////////////////////////////////////////////////////////////
