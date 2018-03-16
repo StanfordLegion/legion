@@ -9250,13 +9250,13 @@ namespace Legion {
       // Do some mixing
       for (int i = 0; i < 256; i++)
         nrand48(random_state);
+      // Initialize our profiling instance
+      if (address_space < num_profiling_nodes)
+        initialize_legion_prof(config);
       // Pull in any static registrations that were done
       register_static_variants();
       register_static_constraints();
       register_static_projections();
-      // Initialize our profiling instance
-      if (address_space < num_profiling_nodes)
-        initialize_legion_prof(config);
 #ifdef DEBUG_LEGION
       if (logging_region_tree_state)
       {
