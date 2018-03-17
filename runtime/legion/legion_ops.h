@@ -239,7 +239,7 @@ namespace Legion {
       virtual void activate(void) = 0;
       virtual void deactivate(void) = 0; 
       virtual const char* get_logging_name(void) const = 0;
-      virtual OpKind get_operation_kind(void) const  = 0;
+      virtual OpKind get_operation_kind(void) const = 0;
       virtual size_t get_region_count(void) const;
       virtual Mappable* get_mappable(void);
     protected:
@@ -574,8 +574,6 @@ namespace Legion {
       RtUserEvent mapped_event;
       // The resolved event for this operation
       RtUserEvent resolved_event;
-      // The event for when any children this operation has are mapped
-      //Event children_mapped;
       // The completion event for this operation
       ApUserEvent completion_event;
       // The commit event for this operation
