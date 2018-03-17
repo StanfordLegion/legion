@@ -764,11 +764,11 @@ namespace Legion {
                           std::map<ShardID,WriteMasks> &needed_shards,
                           std::map<ShardID,WriteMasks> &reduction_shards) const;
       void find_needed_shards_single(const unsigned field_index, 
-          const ShardID origin_shard, IndexSpaceExpression *write_mask,
+          const ShardID origin_shard, IndexSpaceExpression *target_expr,
           std::map<ShardID,IndexSpaceExpression*> &needed_shards,
           std::map<ShardID,IndexSpaceExpression*> &reduction_shards) const;
     protected:
-      void find_interfering_shards(const FieldMask &mask, 
+      void find_interfering_shards(FieldMask mask, 
           const ShardID origin_shard, IndexSpaceExpression *target_expr,
           const WriteMasks &write_masks,
           const LegionMap<ProjectionSummary,FieldMask>::aligned &projections,

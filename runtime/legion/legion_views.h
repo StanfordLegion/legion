@@ -1037,9 +1037,11 @@ namespace Legion {
                      ApEvent precondition,
                      CopyAcrossHelper *helper = NULL);
       DeferredCopier(const DeferredCopier &rhs);
-      ~DeferredCopier(void);
+      virtual ~DeferredCopier(void);
     public:
       DeferredCopier& operator=(const DeferredCopier &rhs);
+    public:
+      virtual bool is_remote(void) const { return false; }
     public:
       void merge_destination_preconditions(const FieldMask &copy_mask,
                 LegionMap<ApEvent,FieldMask>::aligned &preconditions);
@@ -1108,9 +1110,11 @@ namespace Legion {
                            const FieldMask &copy_mask,
                            CopyAcrossHelper *helper);
       RemoteDeferredCopier(const RemoteDeferredCopier &rhs);
-      ~RemoteDeferredCopier(void);
+      virtual ~RemoteDeferredCopier(void);
     public:
       RemoteDeferredCopier& operator=(const RemoteDeferredCopier &rhs);
+    public:
+      virtual bool is_remote(void) const { return true; }
     public:
       void unpack(Deserializer &derez, const FieldMask &copy_mask);
       void finalize(std::map<unsigned,ApUserEvent> &done_events);
@@ -1192,9 +1196,11 @@ namespace Legion {
                            ApEvent precondition,
                            CopyAcrossHelper *helper = NULL);
       DeferredSingleCopier(const DeferredSingleCopier &rhs);
-      ~DeferredSingleCopier(void);
+      virtual ~DeferredSingleCopier(void);
     public:
       DeferredSingleCopier& operator=(const DeferredSingleCopier &rhs);
+    public:
+      virtual bool is_remote(void) const { return false; }
     public:
       void merge_destination_preconditions(std::set<ApEvent> &preconditions);
       void buffer_reductions(VersionTracker *tracker, PredEvent pred_guard,
@@ -1256,10 +1262,12 @@ namespace Legion {
                                  const FieldMask &copy_mask,
                                  CopyAcrossHelper *helper);
       RemoteDeferredSingleCopier(const RemoteDeferredSingleCopier &rhs);
-      ~RemoteDeferredSingleCopier(void);
+      virtual ~RemoteDeferredSingleCopier(void);
     public:
       RemoteDeferredSingleCopier& operator=(
                                  const RemoteDeferredSingleCopier &rhs);
+    public:
+      virtual bool is_remote(void) const { return true; }
     public:
       void unpack(Deserializer &derez);
       void finalize(ApUserEvent done_event);

@@ -6120,8 +6120,9 @@ namespace Legion {
       assert(!(local_copy_mask - global_copy_mask)); // only true at beginning
 #endif
       // If this is a composite shard, check to see if we need to issue any
-      // updates from shards on remote nodes
-      if (need_shard_check && composite_shard)
+      // updates from shards on remote nodes, no need to do this if we are
+      // already on a remote node as someone else already did the check
+      if (need_shard_check && composite_shard && !copier.is_remote()) 
       {
         WriteMasks shard_writes;
         // Perform any shard writes and then update our write masks if necessary
@@ -6307,7 +6308,10 @@ namespace Legion {
       assert(performed_write == NULL); // should be NULL on the way in
 #endif
       RegionTreeForest *context = copier.dst->logical_node->context;
-      if (need_shard_check && composite_shard)
+      // If this is a composite shard, check to see if we need to issue any
+      // updates from shards on remote nodes, no need to do this if we are
+      // already on a remote node as someone else already did the check
+      if (need_shard_check && composite_shard && !copier.is_remote())
       {
         IndexSpaceExpression *shard_write = issue_shard_updates_single(copier,
                                         logical_node, pred_guard, write_mask);
@@ -7544,10 +7548,11 @@ namespace Legion {
 #endif
 #ifdef CVOPT
       std::map<ShardID,WriteMasks> needed_shards, reduction_shards; 
+      IndexSpaceExpression *dst_expr = 
+        logical_node->get_index_space_expression();
       closed_tree->find_needed_shards(local_copy_mask, origin_shard, 
-          logical_node->get_index_space_expression(), write_masks, 
-          needed_shards, reduction_shards);
-      for (std::map<ShardID,WriteMasks>::const_iterator it = 
+          dst_expr, write_masks, needed_shards, reduction_shards);
+      for (std::map<ShardID,WriteMasks>::iterator it = 
             needed_shards.begin(); it != needed_shards.end(); it++)
       {
         Serializer rez;
@@ -7563,11 +7568,19 @@ namespace Legion {
 #ifdef DEBUG_LEGION
           assert(!it->second.empty());
 #endif
+          // Before doing anything, write combine so we get
+          // exactly one expression for each field
+          combine_writes(it->second, copier, false/*prune global*/);
           rez.serialize<size_t>(it->second.size());
           for (WriteMasks::const_iterator wit = it->second.begin();
                 wit != it->second.end(); wit++)
           {
-            wit->first->pack_expression(rez);
+            // The expression we actually want to pack are the
+            // write masks and not the writes that are going to
+            // be performed so do the difference
+            IndexSpaceExpression *write_mask = 
+              logical_node->context->subtract_index_spaces(dst_expr,wit->first);
+            write_mask->pack_expression(rez);
             // We need a separate completion event for each field
             // in order to avoid unnecessary serialization, we don't
             // know which fields are going to be grouped together or
@@ -7625,9 +7638,18 @@ namespace Legion {
       assert(shard_invalid_barrier.exists());
 #endif
 #ifdef CVOPT
+      IndexSpaceExpression *target_expr = 
+        logical_node->get_index_space_expression();
+      if (write_mask != NULL)
+      {
+        target_expr = 
+          logical_node->context->subtract_index_spaces(target_expr, write_mask);
+        if (target_expr->is_empty())
+          return NULL;
+      }
       std::map<ShardID,IndexSpaceExpression*> needed_shards, reduction_shards;
       closed_tree->find_needed_shards_single(copier.field_index, origin_shard,
-                                  write_mask, needed_shards, reduction_shards);
+                                target_expr, needed_shards, reduction_shards);
       std::set<IndexSpaceExpression*> shard_writes;
       for (std::map<ShardID,IndexSpaceExpression*>::const_iterator it = 
             needed_shards.begin(); it != needed_shards.end(); it++)
@@ -7642,7 +7664,12 @@ namespace Legion {
           rez.serialize<bool>(true); // single
           rez.serialize<unsigned>(copier.field_index);
           copier.pack_copier(rez);
-          it->second->pack_expression(rez);
+          // The expression that we actually want to pack is the mask
+          // which is the difference between the destination and the
+          // write that we are going to perform
+          IndexSpaceExpression *mask = 
+           logical_node->context->subtract_index_spaces(target_expr,it->second);
+          mask->pack_expression(rez);
           // Save the write expression in the shard writes
           shard_writes.insert(it->second);
           ApUserEvent field_done = Runtime::create_ap_user_event();

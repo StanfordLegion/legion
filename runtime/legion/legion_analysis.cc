@@ -3629,7 +3629,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ClosedNode::find_interfering_shards(const FieldMask &mask,
+    void ClosedNode::find_interfering_shards(FieldMask mask,
             const ShardID origin_shard, IndexSpaceExpression *target_expr,
             const WriteMasks &write_masks,
             const LegionMap<ProjectionSummary,FieldMask>::aligned &projections,
@@ -3643,10 +3643,15 @@ namespace Legion {
         const FieldMask mask_overlap = wit->second & mask;
         if (!mask_overlap)
           continue;
+        mask -= mask_overlap;
         IndexSpaceExpression *mask_expr = 
-          node->context->intersect_index_spaces(wit->first, target_expr);
+          node->context->subtract_index_spaces(target_expr, wit->first);
         if (mask_expr->is_empty())
+        {
+          if (!mask)
+            return;
           continue;
+        }
         // We have an interesting write mask so find the interfering projections
         for (LegionMap<ProjectionSummary,FieldMask>::aligned::const_iterator
               pit = projections.begin(); pit != projections.end(); pit++)
@@ -3688,6 +3693,56 @@ namespace Legion {
               else
                 needed_shards[shard][dit->second] = overlap;
             }
+          }
+        }
+        // If we did all the fields we are done
+        if (!mask)
+          return;
+      }
+      // should only get here if we still have fields to do
+#ifdef DEBUG_LEGION
+      assert(!!mask);
+#endif
+      // We have an interesting write mask so find the interfering projections
+      for (LegionMap<ProjectionSummary,FieldMask>::aligned::const_iterator
+            pit = projections.begin(); pit != projections.end(); pit++)
+      {
+        // More intersection testing
+        const FieldMask overlap = pit->second & mask;
+        if (!overlap)
+          continue;
+        Domain full_space;
+        pit->first.domain->get_launch_space_domain(full_space);
+        // Invert the projection function to find the interfering points
+        std::map<DomainPoint,IndexSpaceExpression*> interfering_points;
+        pit->first.projection->find_interfering_points(node->context, node,
+                                    pit->first.domain->handle, full_space,
+                                    target_expr, interfering_points);
+        if (!interfering_points.empty())
+        {
+          for (std::map<DomainPoint,IndexSpaceExpression*>::const_iterator 
+                dit = interfering_points.begin(); 
+                dit != interfering_points.end(); dit++)
+          {
+            const ShardID shard = 
+              pit->first.sharding->find_owner(dit->first, full_space);
+            // Skip our origin shard since we know about that
+            if (shard == origin_shard)
+              continue;
+            // Now we have to insert it into all the right places
+            std::map<ShardID,WriteMasks>::iterator shard_finder =
+              needed_shards.find(shard);
+            if (shard_finder != needed_shards.end())
+            {
+              WriteMasks::iterator finder = 
+                shard_finder->second.find(dit->second);
+              if (finder != shard_finder->second.end())
+                finder->second |= overlap;
+              else
+                shard_finder->second[dit->second] = overlap;
+            }
+            else
+              needed_shards[shard][dit->second] = overlap;
           }
         }
       }
