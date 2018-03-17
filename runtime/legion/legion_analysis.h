@@ -508,7 +508,8 @@ namespace Legion {
     /**
      * \struct RemoteTraversalInfo
      */
-    struct RemoteTraversalInfo : public TraversalInfo {
+    struct RemoteTraversalInfo : public TraversalInfo, 
+      public LegionHeapify<RemoteTraversalInfo> {
     public:
       RemoteTraversalInfo(RemoteOp *remote_op, unsigned idx,
           const RegionRequirement &r, const FieldMask &mask,
