@@ -5841,6 +5841,11 @@ namespace Legion {
       }
       if ((parent != NULL) && parent->remove_nested_resource_ref(did))
         delete parent;
+      // Clean-up any untriggered events
+      if (!realm_index_space_set.has_triggered())
+        Runtime::trigger_event(realm_index_space_set);
+      if (!tight_index_space_set.has_triggered())
+        Runtime::trigger_event(tight_index_space_set);
     }
 
     //--------------------------------------------------------------------------
