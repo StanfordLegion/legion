@@ -415,9 +415,9 @@ namespace Legion {
     IndexSpaceNodeT<DIM,T>::~IndexSpaceNodeT(void)
     //--------------------------------------------------------------------------
     { 
-      Realm::IndexSpace<DIM,T> local_space;
-      get_realm_index_space(local_space, true/*tight*/);
-      local_space.destroy();
+      // Destory our index space if we are the owner and it has been set
+      if (is_owner() && realm_index_space_set.has_triggered())
+        realm_index_space.destroy();
     }
 
     //--------------------------------------------------------------------------
