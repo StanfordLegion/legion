@@ -1334,7 +1334,6 @@ int main(int argc, char **argv)
   {
     TaskVariantRegistrar tvr(TOP_LEVEL_TASK_ID, "top_level_task");
     tvr.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
-    tvr.set_idempotent();
     tvr.set_replicable();
     Runtime::preregister_task_variant<top_level_task>(tvr, "top_level_task");
     Runtime::set_top_level_task_id(TOP_LEVEL_TASK_ID);
