@@ -2900,7 +2900,7 @@ namespace Legion {
     public:
       RemoteOp& operator=(const RemoteOp &rhs);
     public:
-      void unpack(Deserializer &derez);
+      void unpack(Deserializer &derez, Runtime *runtime);
     public:
       virtual void activate(void);
       virtual void deactivate(void);

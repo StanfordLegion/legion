@@ -1364,9 +1364,13 @@ namespace Legion {
     void Operation::pack_remote_operation(Serializer &rez) const
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(parent_ctx != NULL);
+#endif
       rez.serialize(this);
       rez.serialize(runtime->address_space);
       rez.serialize(unique_op_id);
+      rez.serialize(parent_ctx->get_unique_id());
       rez.serialize(execution_fence_event);
       rez.serialize<bool>(tracing);
     }
@@ -14688,10 +14692,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RemoteOp::unpack(Deserializer &derez)
+    void RemoteOp::unpack(Deserializer &derez, Runtime *runtime)
     //--------------------------------------------------------------------------
     {
       derez.deserialize(unique_op_id);
+      UniqueID parent_uid;
+      derez.deserialize(parent_uid);
+      parent_ctx = runtime->find_context(parent_uid);
       derez.deserialize(execution_fence_event);
       derez.deserialize<bool>(tracing);
     }
@@ -14746,7 +14753,7 @@ namespace Legion {
       AddressSpaceID source;
       derez.deserialize(source);
       RemoteOp *result = new RemoteOp(runtime, remote_ptr, source);
-      result->unpack(derez);
+      result->unpack(derez, runtime);
       return result;
     }
  
