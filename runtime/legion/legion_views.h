@@ -1102,7 +1102,8 @@ namespace Legion {
      * This is a version of the above copier that is used for
      * handling sharded copies on remote nodes
      */
-    struct RemoteDeferredCopier : public DeferredCopier {
+    struct RemoteDeferredCopier : public DeferredCopier, 
+      public LegionHeapify<RemoteDeferredCopier> {
     public:
       RemoteDeferredCopier(const TraversalInfo *info, 
                            InnerContext *context,
@@ -1254,7 +1255,8 @@ namespace Legion {
      * This is a version of the above copier that is used for
      * handling sharded copies on remote nodes
      */
-    struct RemoteDeferredSingleCopier : public DeferredSingleCopier {
+    struct RemoteDeferredSingleCopier : public DeferredSingleCopier,
+      public LegionHeapify<RemoteDeferredSingleCopier> {
     public:
       RemoteDeferredSingleCopier(const TraversalInfo *info, 
                                  InnerContext *context,
