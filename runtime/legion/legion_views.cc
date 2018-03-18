@@ -8291,7 +8291,7 @@ namespace Legion {
         ApUserEvent done_event;
         derez.deserialize(done_event);
         // Now we can perform the copies
-        IndexSpaceExpression *performed_write;
+        IndexSpaceExpression *performed_write = NULL;
         issue_deferred_copies_single(*copier, write_mask, 
                                      performed_write, pred_guard);
         // Do the finalization for the copy
