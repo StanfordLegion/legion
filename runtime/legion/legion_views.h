@@ -1731,10 +1731,10 @@ namespace Legion {
     public:
       // For control replication
 #ifdef CVOPT
-      void handle_sharding_copy_request(Deserializer &derez, 
-                                        Runtime *runtime, InnerContext *ctx);
+      void handle_sharding_copy_request(Deserializer &derez, Runtime *runtime,
+                                  InnerContext *ctx, AddressSpaceID source);
       void handle_sharding_reduction_request(Deserializer &derez, 
-                                        Runtime *rt, InnerContext *ctx);
+                      Runtime *rt, InnerContext *ctx, AddressSpaceID source);
 #else
       void handle_sharding_update_request(Deserializer &derez,
                                           Runtime *runtime);

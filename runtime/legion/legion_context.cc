@@ -10636,25 +10636,26 @@ namespace Legion {
 #ifdef CVOPT
     //--------------------------------------------------------------------------
     void ReplicateContext::handle_composite_view_copy_request(
-                                                            Deserializer &derez)
+                                     Deserializer &derez, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      CompositeView *view = find_or_buffer_composite_view_copy_request(derez);
+      CompositeView *view = 
+        find_or_buffer_composite_view_copy_request(derez, source);
       if (view == NULL)
         return;
-      view->handle_sharding_copy_request(derez, runtime, this);
+      view->handle_sharding_copy_request(derez, runtime, this, source);
     }
 
     //--------------------------------------------------------------------------
     void ReplicateContext::handle_composite_view_reduction_request(
-                                                            Deserializer &derez)
+                                     Deserializer &derez, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
       CompositeView *view = 
-        find_or_buffer_composite_view_reduction_request(derez);
+        find_or_buffer_composite_view_reduction_request(derez, source);
       if (view == NULL)
         return;
-      view->handle_sharding_reduction_request(derez, runtime, this);
+      view->handle_sharding_reduction_request(derez, runtime, this, source);
     }
 #else
     //--------------------------------------------------------------------------
@@ -10865,8 +10866,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef CVOPT
-      std::vector<std::pair<void*,size_t> > to_copy;
-      std::vector<std::pair<void*,size_t> > to_reduce;
+      std::vector<PendingCopy> to_copy;
+      std::vector<PendingCopy> to_reduce;
 #else
       std::vector<std::pair<void*,size_t> > to_perform;
 #endif
@@ -10879,7 +10880,7 @@ namespace Legion {
         live_composite_views[close_done] = view;
 #ifdef CVOPT
         // Check to see if we have any pending requests to perform
-        std::map<RtEvent,std::vector<std::pair<void*,size_t> > >::iterator
+        std::map<RtEvent,std::vector<PendingCopy> >::iterator
           finder = pending_composite_view_copy_requests.find(close_done);
         if (finder != pending_composite_view_copy_requests.end())
         {
@@ -10906,22 +10907,23 @@ namespace Legion {
 #ifdef CVOPT
       if (!to_copy.empty())
       {
-        for (std::vector<std::pair<void*,size_t> >::const_iterator it = 
+        for (std::vector<PendingCopy>::const_iterator it = 
               to_copy.begin(); it != to_copy.end(); it++)
         {
-          Deserializer derez(it->first, it->second);
-          view->handle_sharding_copy_request(derez, runtime, this);
-          free(it->first);
+          Deserializer derez(it->buffer, it->buffer_size);
+          view->handle_sharding_copy_request(derez, runtime, this, it->source);
+          free(it->buffer);
         }
       }
       if (!to_reduce.empty())
       {
-        for (std::vector<std::pair<void*,size_t> >::const_iterator it = 
+        for (std::vector<PendingCopy>::const_iterator it = 
               to_reduce.begin(); it != to_reduce.end(); it++)
         {
-          Deserializer derez(it->first, it->second);
-          view->handle_sharding_reduction_request(derez, runtime, this);
-          free(it->first);
+          Deserializer derez(it->buffer, it->buffer_size);
+          view->handle_sharding_reduction_request(derez, runtime, 
+                                                  this, it->source);
+          free(it->buffer);
         }
       }
 #else
@@ -10941,7 +10943,7 @@ namespace Legion {
 #ifdef CVOPT
     //--------------------------------------------------------------------------
     CompositeView* ReplicateContext::find_or_buffer_composite_view_copy_request(
-                                                            Deserializer &derez)
+                                     Deserializer &derez, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
       RtEvent composite_name;
@@ -10958,13 +10960,14 @@ namespace Legion {
       memcpy(buffer, derez.get_current_pointer(), remaining_bytes);
       derez.advance_pointer(remaining_bytes);
       pending_composite_view_copy_requests[composite_name].push_back(
-          std::pair<void*,size_t>(buffer, remaining_bytes));
+          PendingCopy(buffer, remaining_bytes, source));
       return NULL;
     }
 
     //--------------------------------------------------------------------------
     CompositeView* ReplicateContext::
-            find_or_buffer_composite_view_reduction_request(Deserializer &derez)
+            find_or_buffer_composite_view_reduction_request(Deserializer &derez,
+                                                          AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
       RtEvent composite_name;
@@ -10981,7 +10984,7 @@ namespace Legion {
       memcpy(buffer, derez.get_current_pointer(), remaining_bytes);
       derez.advance_pointer(remaining_bytes);
       pending_composite_view_reduction_requests[composite_name].push_back(
-          std::pair<void*,size_t>(buffer, remaining_bytes));
+          PendingCopy(buffer, remaining_bytes, source));
       return NULL;
     }
 #else

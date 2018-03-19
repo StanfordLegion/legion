@@ -4029,7 +4029,7 @@ namespace Legion {
         // Have to unpack the preample we already know
         ReplicationID local_repl;
         derez.deserialize(local_repl);
-        handle_composite_view_copy_request(derez);
+        handle_composite_view_copy_request(derez, target_space);
       }
       else
         runtime->send_control_replicate_composite_view_copy_request(
@@ -4037,7 +4037,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ShardManager::handle_composite_view_copy_request(Deserializer &derez)
+    void ShardManager::handle_composite_view_copy_request(Deserializer &derez,
+                                                          AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
       // Figure out which shard we are going to
@@ -4048,7 +4049,7 @@ namespace Legion {
       {
         if ((*it)->shard_id == target)
         {
-          (*it)->handle_composite_view_copy_request(derez);
+          (*it)->handle_composite_view_copy_request(derez, source);
           return;
         }
       }
@@ -4072,7 +4073,7 @@ namespace Legion {
         // Have to unpack the preample we already know
         ReplicationID local_repl;
         derez.deserialize(local_repl);
-        handle_composite_view_reduction_request(derez);
+        handle_composite_view_reduction_request(derez, target_space);
       }
       else
         runtime->send_control_replicate_composite_view_reduction_request(
@@ -4081,7 +4082,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ShardManager::handle_composite_view_reduction_request(
-                                                            Deserializer &derez)
+                                     Deserializer &derez, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
       // Figure out which shard we are going to
@@ -4092,7 +4093,7 @@ namespace Legion {
       {
         if ((*it)->shard_id == target)
         {
-          (*it)->handle_composite_view_reduction_request(derez);
+          (*it)->handle_composite_view_reduction_request(derez, source);
           return;
         }
       }
@@ -4284,26 +4285,26 @@ namespace Legion {
 #ifdef CVOPT
     //--------------------------------------------------------------------------
     /*static*/ void ShardManager::handle_composite_view_copy_request(
-                                          Deserializer &derez, Runtime *runtime)
+                   Deserializer &derez, Runtime *runtime, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
       ReplicationID repl_id;
       derez.deserialize(repl_id);
       ShardManager *manager = runtime->find_shard_manager(repl_id);
-      manager->handle_composite_view_copy_request(derez);
+      manager->handle_composite_view_copy_request(derez, source);
     }
 
     //--------------------------------------------------------------------------
     /*static*/ void ShardManager::handle_composite_view_reduction_request(
-                                          Deserializer &derez, Runtime *runtime)
+                   Deserializer &derez, Runtime *runtime, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
       ReplicationID repl_id;
       derez.deserialize(repl_id);
       ShardManager *manager = runtime->find_shard_manager(repl_id);
-      manager->handle_composite_view_reduction_request(derez);
+      manager->handle_composite_view_reduction_request(derez, source);
     }
 #else
     //--------------------------------------------------------------------------

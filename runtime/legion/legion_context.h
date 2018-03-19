@@ -1571,8 +1571,10 @@ namespace Legion {
       void handle_collective_message(Deserializer &derez);
       void handle_future_map_request(Deserializer &derez);
 #ifdef CVOPT
-      void handle_composite_view_copy_request(Deserializer &derez);
-      void handle_composite_view_reduction_request(Deserializer &derez);
+      void handle_composite_view_copy_request(Deserializer &derez,
+                                              AddressSpaceID source);
+      void handle_composite_view_reduction_request(Deserializer &derez,
+                                              AddressSpaceID source);
 #else
       void handle_composite_view_request(Deserializer &derez);
 #endif
@@ -1594,9 +1596,9 @@ namespace Legion {
       void register_composite_view(CompositeView* view, RtEvent close_done);
 #ifdef CVOPT
       CompositeView* find_or_buffer_composite_view_copy_request(
-                                                           Deserializer &derez);
+                                    Deserializer &derez, AddressSpaceID source);
       CompositeView* find_or_buffer_composite_view_reduction_request(
-                                                           Deserializer &derez);
+                                    Deserializer &derez, AddressSpaceID source);
 #else
       CompositeView* find_or_buffer_composite_view_request(Deserializer &derez);
 #endif
@@ -1667,10 +1669,19 @@ namespace Legion {
       // Composite views that are still valid across the shards
       std::map<RtEvent/*done event*/,CompositeView*> live_composite_views;
 #ifdef CVOPT
-      std::map<RtEvent,std::vector<
-               std::pair<void*,size_t> > > pending_composite_view_copy_requests;
-      std::map<RtEvent,std::vector<
-          std::pair<void*,size_t> > > pending_composite_view_reduction_requests;
+      struct PendingCopy {
+      public:
+        PendingCopy(void *buf, size_t size, AddressSpaceID src)
+          : buffer(buf), buffer_size(size), source(src) { }
+      public:
+        void *buffer;
+        size_t buffer_size;
+        AddressSpaceID source;
+      };
+      std::map<RtEvent,std::vector<PendingCopy> > 
+                                    pending_composite_view_copy_requests;
+      std::map<RtEvent,std::vector<PendingCopy> >
+                                    pending_composite_view_reduction_requests;
 #else
       std::map<RtEvent,std::vector<
                 std::pair<void*,size_t> > > pending_composite_view_requests;

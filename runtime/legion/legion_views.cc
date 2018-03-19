@@ -8263,7 +8263,7 @@ namespace Legion {
 #ifdef CVOPT
     //--------------------------------------------------------------------------
     void CompositeView::handle_sharding_copy_request(Deserializer &derez,
-                                                 Runtime *rt, InnerContext *ctx)
+                          Runtime *rt, InnerContext *ctx, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
       PredEvent pred_guard;
@@ -8279,7 +8279,7 @@ namespace Legion {
         RemoteDeferredSingleCopier *copier = 
           RemoteDeferredSingleCopier::unpack_copier(derez, rt, copy_mask, ctx);
         IndexSpaceExpression *write_mask = 
-          IndexSpaceExpression::unpack_expression(derez, runtime->forest);
+          IndexSpaceExpression::unpack_expression(derez,runtime->forest,source);
         write_mask->add_expression_reference();
         ApUserEvent done_event;
         derez.deserialize(done_event);
@@ -8307,7 +8307,8 @@ namespace Legion {
         for (unsigned idx = 0; idx < write_expressions; idx++)
         {
           IndexSpaceExpression *expression = 
-            IndexSpaceExpression::unpack_expression(derez, runtime->forest);
+            IndexSpaceExpression::unpack_expression(derez, 
+                                  runtime->forest, source);
           expression->add_expression_reference();
           FieldMask &expr_mask = write_masks[expression];
           size_t field_count;
@@ -8342,7 +8343,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void CompositeView::handle_sharding_reduction_request(Deserializer &derez,
-                                            Runtime *runtime, InnerContext *ctx)
+                     Runtime *runtime, InnerContext *ctx, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
       DistributedID dst_did;
@@ -8370,7 +8371,7 @@ namespace Legion {
         PredEvent pred_guard;
         derez.deserialize(pred_guard);
         IndexSpaceExpression *expression = 
-          IndexSpaceExpression::unpack_expression(derez);
+          IndexSpaceExpression::unpack_expression(derez,runtime->forest,source);
         const size_t pop_count = reduction_mask.pop_count();
         if (pop_count == 1)
         {

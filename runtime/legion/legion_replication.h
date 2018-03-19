@@ -1253,8 +1253,10 @@ namespace Legion {
       void send_composite_view_copy_request(ShardID target, Serializer &rez);
       void send_composite_view_reduction_request(ShardID target, 
                                                  Serializer &rez);
-      void handle_composite_view_copy_request(Deserializer &derez);
-      void handle_composite_view_reduction_request(Deserializer &derez);
+      void handle_composite_view_copy_request(Deserializer &derez,
+                                              AddressSpaceID source);
+      void handle_composite_view_reduction_request(Deserializer &derez,
+                                                   AddressSpaceID source);
 #else
     public:
       void send_composite_view_request(ShardID target, Serializer &rez);
@@ -1277,9 +1279,9 @@ namespace Legion {
       static void handle_future_map_request(Deserializer &derez, Runtime *rt);
 #ifdef CVOPT
       static void handle_composite_view_copy_request(Deserializer &derez, 
-                                                     Runtime *rt);
+                                     Runtime *rt, AddressSpaceID source);
       static void handle_composite_view_reduction_request(Deserializer &derez, 
-                                                     Runtime *rt);
+                                           Runtime *rt, AddressSpaceID source);
 #else
       static void handle_composite_view_request(Deserializer &derez, 
                                                 Runtime *rt);

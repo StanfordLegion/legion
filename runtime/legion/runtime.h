@@ -2638,9 +2638,9 @@ namespace Legion {
       void handle_control_replicate_future_map_response(Deserializer &derez);
 #ifdef CVOPT
       void handle_control_replicate_composite_view_copy_request(
-                                                        Deserializer &derez);
+                                Deserializer &derez, AddressSpaceID source);
       void handle_control_replicate_composite_view_reduction_request(
-                                                        Deserializer &derez);
+                                Deserializer &derez, AddressSpaceID source);
 #else
       void handle_control_replicate_composite_view_request(Deserializer &derez);
       void handle_control_replicate_composite_view_response(Deserializer &derez);

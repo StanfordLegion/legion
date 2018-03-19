@@ -6714,13 +6714,14 @@ namespace Legion {
           case SEND_REPL_COMPOSITE_VIEW_COPY_REQUEST:
             {
               runtime->handle_control_replicate_composite_view_copy_request(
-                                                                      derez);
+                                                derez, remote_address_space);
               break;
             }
           case SEND_REPL_COMPOSITE_VIEW_REDUCTION_REQUEST:
             {
               runtime->
-               handle_control_replicate_composite_view_reduction_request(derez);
+               handle_control_replicate_composite_view_reduction_request(derez,
+                                                          remote_address_space);
               break;
             }
 #else
@@ -16952,18 +16953,18 @@ namespace Legion {
 #ifdef CVOPT
     //--------------------------------------------------------------------------
     void Runtime::handle_control_replicate_composite_view_copy_request(
-                                                            Deserializer &derez)
+                                     Deserializer &derez, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      ShardManager::handle_composite_view_copy_request(derez, this);
+      ShardManager::handle_composite_view_copy_request(derez, this, source);
     }
 
     //--------------------------------------------------------------------------
     void Runtime::handle_control_replicate_composite_view_reduction_request(
-                                                            Deserializer &derez)
+                                     Deserializer &derez, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      ShardManager::handle_composite_view_reduction_request(derez, this);
+      ShardManager::handle_composite_view_reduction_request(derez, this,source);
     }
 #else
     //--------------------------------------------------------------------------

@@ -7260,7 +7260,8 @@ namespace Legion {
 
 #ifdef CVOPT
     //--------------------------------------------------------------------------
-    void ShardTask::handle_composite_view_copy_request(Deserializer &derez)
+    void ShardTask::handle_composite_view_copy_request(Deserializer &derez,
+                                                       AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -7272,11 +7273,12 @@ namespace Legion {
       ReplicateContext *repl_ctx = 
         static_cast<ReplicateContext*>(execution_context);
 #endif
-      repl_ctx->handle_composite_view_copy_request(derez);
+      repl_ctx->handle_composite_view_copy_request(derez, source);
     }
 
     //--------------------------------------------------------------------------
-    void ShardTask::handle_composite_view_reduction_request(Deserializer &derez)
+    void ShardTask::handle_composite_view_reduction_request(Deserializer &derez,
+                                                          AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -7288,7 +7290,7 @@ namespace Legion {
       ReplicateContext *repl_ctx = 
         static_cast<ReplicateContext*>(execution_context);
 #endif
-      repl_ctx->handle_composite_view_reduction_request(derez);
+      repl_ctx->handle_composite_view_reduction_request(derez, source);
     }
 #else
     //--------------------------------------------------------------------------
