@@ -424,6 +424,33 @@ namespace Legion {
       // rest of the operations in the graph
       void quash_operation(GenerationID gen, bool restart);
     public:
+      // For operations that wish to complete early they can do so
+      // using this method which will allow them to immediately 
+      // chain an event to directly trigger the completion event
+      // Note that we don't support early completion if we're doing
+      // inorder program execution
+      inline bool request_early_complete(ApEvent chain_event) 
+        {
+          if (!runtime->program_order_execution)
+          {
+            need_completion_trigger = false;
+            Runtime::trigger_event(completion_event, chain_event);
+            return true;
+          }
+          else
+            return false;
+        }
+      inline bool request_early_complete_no_trigger(ApUserEvent &to_trigger)
+        {
+          if (!runtime->program_order_execution)
+          {
+            need_completion_trigger = false;
+            to_trigger = completion_event;
+            return true;
+          }
+          else
+            return false;
+        }
       // For operations that need to trigger commit early,
       // then they should use this call to avoid races
       // which could result in trigger commit being

@@ -2549,8 +2549,7 @@ namespace Legion {
         // Issue a deferred trigger on our completion event
         // and mark that we are no longer responsible for 
         // triggering our completion event
-        Runtime::trigger_event(completion_event, map_complete_event);
-        need_completion_trigger = false;
+        request_early_complete(map_complete_event);
         DeferredExecuteArgs deferred_execute_args(this);
         runtime->issue_runtime_meta_task(deferred_execute_args,
                                          LG_THROUGHPUT_DEFERRED_PRIORITY,
@@ -3896,8 +3895,7 @@ namespace Legion {
       if (!acquired_instances.empty())
         release_acquired_instances(acquired_instances);
       // Handle the case for marking when the copy completes
-      Runtime::trigger_event(completion_event, copy_complete_event);
-      need_completion_trigger = false;
+      request_early_complete(copy_complete_event);
       complete_execution(Runtime::protect_event(copy_complete_event));
     }
 
@@ -4952,8 +4950,7 @@ namespace Legion {
       // and we are executed when all our points are executed
       complete_mapping(Runtime::merge_events(mapped_preconditions));
       ApEvent done = Runtime::merge_events(executed_preconditions);
-      Runtime::trigger_event(completion_event, done); 
-      need_completion_trigger = false;
+      request_early_complete(done);
       complete_execution(Runtime::protect_event(done));
     }
 
@@ -5506,8 +5503,7 @@ namespace Legion {
         case EXECUTION_FENCE:
           {
             // We can always trigger the completion event when these are done
-            need_completion_trigger = false;
-            Runtime::trigger_event(completion_event, execution_precondition);
+            request_early_complete(execution_precondition);
             if (!execution_precondition.has_triggered())
             {
               RtEvent wait_on = Runtime::protect_event(execution_precondition);
@@ -5643,8 +5639,7 @@ namespace Legion {
 #endif
       ApEvent done = Runtime::merge_events(trigger_events);
       // We can always trigger the completion event when these are done
-      Runtime::trigger_event(completion_event, done);
-      need_completion_trigger = false;
+      request_early_complete(done);
       if (!done.has_triggered())
       {
         RtEvent wait_on = Runtime::protect_event(done);
@@ -7535,8 +7530,7 @@ namespace Legion {
         complete_mapping();
       if (!acquired_instances.empty())
         release_acquired_instances(acquired_instances);
-      Runtime::trigger_event(completion_event, close_event);
-      need_completion_trigger = false;
+      request_early_complete(close_event);
       complete_execution(Runtime::protect_event(close_event));
     }
 
@@ -8128,8 +8122,7 @@ namespace Legion {
         complete_mapping();
       if (!acquired_instances.empty())
         release_acquired_instances(acquired_instances);
-      Runtime::trigger_event(completion_event, acquire_complete);
-      need_completion_trigger = false;
+      request_early_complete(acquire_complete);
       complete_execution(Runtime::protect_event(acquire_complete));
     }
 
@@ -8744,8 +8737,7 @@ namespace Legion {
         complete_mapping();
       if (!acquired_instances.empty())
         release_acquired_instances(acquired_instances);
-      Runtime::trigger_event(completion_event, release_complete);
-      need_completion_trigger = false;
+      request_early_complete(release_complete);
       complete_execution(Runtime::protect_event(release_complete));
     }
 
@@ -11178,8 +11170,7 @@ namespace Legion {
       // Perform the partitioning operation
       ApEvent ready_event = thunk->perform(this, runtime->forest);
       complete_mapping();
-      Runtime::trigger_event(completion_event, ready_event);
-      need_completion_trigger = false;
+      request_early_complete(ready_event);
       complete_execution(Runtime::protect_event(ready_event));
     }
 
@@ -11787,8 +11778,7 @@ namespace Legion {
         LegionSpy::log_operation_events(unique_op_id, done_event,
                                         completion_event);
 #endif
-      Runtime::trigger_event(completion_event, done_event);
-      need_completion_trigger = false;
+      request_early_complete(done_event);
       complete_execution(Runtime::protect_event(done_event));
     }
 
@@ -11826,8 +11816,7 @@ namespace Legion {
         {
           ApEvent done_event = thunk->perform(this, runtime->forest,
               Runtime::merge_events(index_preconditions), instances);
-          Runtime::trigger_event(completion_event, done_event);
-          need_completion_trigger = false;
+          request_early_complete(done_event);
 #ifdef LEGION_SPY
           Runtime::trigger_event(intermediate_index_event, done_event);
 #endif
@@ -13418,8 +13407,7 @@ namespace Legion {
       // and we are executed when all our points are executed
       complete_mapping(Runtime::merge_events(mapped_preconditions));
       ApEvent done = Runtime::merge_events(executed_preconditions);
-      Runtime::trigger_event(completion_event, done);
-      need_completion_trigger = false;
+      request_early_complete(done);
       complete_execution(Runtime::protect_event(done));
     }
 
@@ -13989,8 +13977,7 @@ namespace Legion {
       else
         complete_mapping();
       ApEvent attach_event = result.get_ready_event();
-      Runtime::trigger_event(completion_event, attach_event);
-      need_completion_trigger = false;
+      request_early_complete(attach_event);
       complete_execution(Runtime::protect_event(attach_event));
     }
 
@@ -14477,8 +14464,7 @@ namespace Legion {
       else
         complete_mapping();
 
-      Runtime::trigger_event(completion_event, detach_event);
-      need_completion_trigger = false;
+      request_early_complete(detach_event);
       complete_execution(Runtime::protect_event(detach_event));
     }
 

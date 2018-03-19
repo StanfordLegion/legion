@@ -5135,12 +5135,12 @@ namespace Legion {
         return false;
       if (!restrict_postconditions.empty())
         return false;
+      if (runtime->program_order_execution)
+        return false;
       // Otherwise we're going to do it mark that we
       // don't need to trigger the underlying completion event.
       // Note we need to do this now to avoid any race condition.
-      need_completion_trigger = false;
-      chain_event = completion_event;
-      return true;
+      return request_early_complete_no_trigger(chain_event);
     }
 
     //--------------------------------------------------------------------------
@@ -7118,8 +7118,7 @@ namespace Legion {
       if (!completion_preconditions.empty())
       {
         ApEvent done = Runtime::merge_events(completion_preconditions);
-        need_completion_trigger = false;
-        Runtime::trigger_event(completion_event, done);
+        request_early_complete(done);
       }
       complete_operation();
 #ifdef LEGION_SPY
