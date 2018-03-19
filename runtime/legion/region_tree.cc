@@ -5105,16 +5105,44 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeForest::register_remote_expression(AddressSpaceID source,
-             IndexSpaceExprID remote_expr_id, IndexSpaceExpression *remote_expr)
+    IndexSpaceExpression* RegionTreeForest::find_or_create_remote_expression(
+    AddressSpaceID source, IndexSpaceExprID remote_expr_id, Deserializer &derez)
     //--------------------------------------------------------------------------
     {
+      size_t unpack_size;
+      derez.deserialize(unpack_size);
       std::pair<AddressSpaceID,IndexSpaceExprID> key(source, remote_expr_id);
+      // See if we can find it with the read-only lock first
+      {
+        AutoLock l_lock(lookup_is_op_lock, 1, false/*exclusive*/);
+        std::map<std::pair<AddressSpaceID,IndexSpaceExprID>,
+          IndexSpaceExpression*>::const_iterator finder = 
+            remote_expressions.find(key);
+        if (finder != remote_expressions.end())
+        {
+          // Didn't unpack anything else so just skip the bytes
+          derez.advance_pointer(unpack_size);
+          return finder->second;
+        }
+      }
+      // Retake the lock in exclusive mode and see if we lost the race
       AutoLock l_lock(lookup_is_op_lock);
-#ifdef DEBUG_LEGION
-      assert(remote_expressions.find(key) == remote_expressions.end());
-#endif
-      remote_expressions[key] = remote_expr;
+      std::map<std::pair<AddressSpaceID,IndexSpaceExprID>,
+          IndexSpaceExpression*>::const_iterator finder = 
+            remote_expressions.find(key);
+      if (finder != remote_expressions.end())
+      {
+        // Didn't unpack anything else so just skip the bytes
+        derez.advance_pointer(unpack_size);
+        return finder->second;
+      }
+      // We get to make the object
+      TypeTag type_tag;
+      derez.deserialize(type_tag);
+      RemoteExpressionCreator creator(derez, this, source, remote_expr_id);
+      NT_TemplateHelper::demux<RemoteExpressionCreator>(type_tag, &creator);
+      remote_expressions[key] = creator.result;
+      return creator.result;
     }
 
     //--------------------------------------------------------------------------
@@ -5149,14 +5177,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool RegionTreeForest::need_remote_expression_creation(
+    void RegionTreeForest::record_remote_expression(
                               IndexSpaceExpression *expr, AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
       // We are just bouncing this off here to use the lock to serialize
       // access to the node set data structures for the index space expressions
       AutoLock l_lock(lookup_is_op_lock);
-      return expr->find_or_create_remote_instance(target);
+      expr->record_remote_instance(target);
     }
 
     /////////////////////////////////////////////////////////////
@@ -5246,20 +5274,8 @@ namespace Legion {
       }
       IndexSpaceExprID remote_expr_id;
       derez.deserialize(remote_expr_id);
-      // Figure out if we are making this for the first time or
-      // we should just be able to find it
-      bool create;
-      derez.deserialize(create);
-      if (create)
-      {
-        TypeTag type_tag;
-        derez.deserialize(type_tag);
-        RemoteExpressionCreator creator(derez, forest, source, remote_expr_id);
-        NT_TemplateHelper::demux<RemoteExpressionCreator>(type_tag, &creator);
-        return creator.result;  
-      }
-      else
-        return forest->find_remote_expression(source, remote_expr_id);
+      return forest->find_or_create_remote_expression(source, 
+                                        remote_expr_id, derez);
     }
 
     /////////////////////////////////////////////////////////////
@@ -5312,15 +5328,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool IntermediateExpression::find_or_create_remote_instance( 
-                                                          AddressSpaceID target)
+    void IntermediateExpression::record_remote_instance(AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
       // Lock for synchronization held by caller
-      if (remote_instances.contains(target))
-        return false;
       remote_instances.add(target);
-      return true;
     }
 
     //--------------------------------------------------------------------------

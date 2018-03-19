@@ -686,14 +686,15 @@ namespace Legion {
                        IndexSpaceExpression *lhs, IndexSpaceExpression *rhs);
     public:
       // Remote expression methods
-      void register_remote_expression(AddressSpaceID source, 
-          IndexSpaceExprID remote_expr_id, IndexSpaceExpression *expr);
-      IndexSpaceExpression* find_remote_expression(AddressSpaceID source,
-                                         IndexSpaceExprID remote_expr_id);
+      IndexSpaceExpression* find_or_create_remote_expression(
+              AddressSpaceID source, IndexSpaceExprID remote_expr_id, 
+              Deserializer &derez);
+      IndexSpaceExpression* find_remote_expression(
+              AddressSpaceID source, IndexSpaceExprID remote_expr_id);
       void unregister_remote_expression(AddressSpaceID source,
                                         IndexSpaceExprID remote_expr_id);
-      bool need_remote_expression_creation(IndexSpaceExpression *expr,
-                                           AddressSpaceID target);
+      void record_remote_expression(IndexSpaceExpression *expr,
+                                    AddressSpaceID target);
     public:
       Runtime *const runtime;
     protected:
@@ -755,8 +756,8 @@ namespace Legion {
       virtual bool check_empty(void) = 0;
       virtual void pack_expression(Serializer &rez, AddressSpaceID target) = 0;
       // Should only be called on inherited types
-      virtual bool find_or_create_remote_instance(AddressSpaceID target) 
-        { assert(false); return false; }
+      virtual void record_remote_instance(AddressSpaceID target) 
+        { assert(false); }
       virtual void add_expression_reference(void) = 0;
       virtual bool remove_expression_reference(void) = 0;
     public:
@@ -811,7 +812,7 @@ namespace Legion {
       virtual void tighten_index_space(void) = 0;
       virtual bool check_empty(void) = 0;
       virtual void pack_expression(Serializer &rez, AddressSpaceID target) = 0; 
-      virtual bool find_or_create_remote_instance(AddressSpaceID target);
+      virtual void record_remote_instance(AddressSpaceID target);
       virtual void add_expression_reference(void);
       virtual bool remove_expression_reference(void);
     public:

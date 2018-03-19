@@ -113,20 +113,16 @@ namespace Legion {
                                                       AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
+      Realm::IndexSpace<DIM,T> temp;
+      ApEvent ready = get_realm_index_space(temp, true/*tight*/);
       rez.serialize<bool>(false); // not an index space
       rez.serialize(expr_id);
-      // Check to see if we need to create this on the remote node
-      if (context->need_remote_expression_creation(this, target))
-      {
-        Realm::IndexSpace<DIM,T> temp;
-        ApEvent ready = get_realm_index_space(temp, true/*tight*/);
-        rez.serialize<bool>(true); // need creation
-        rez.serialize(type_tag);
-        rez.serialize(temp);
-        rez.serialize(ready);
-      }
-      else
-        rez.serialize<bool>(false); // don't need creation
+      rez.serialize<size_t>(sizeof(type_tag) + sizeof(temp) + sizeof(ready));
+      rez.serialize(type_tag);
+      rez.serialize(temp);
+      rez.serialize(ready);
+      // Record that we are sending this expression remotely
+      context->record_remote_expression(this, target);
     }
 
     //--------------------------------------------------------------------------
@@ -415,8 +411,6 @@ namespace Legion {
       // Always add a reference from our owner node that will be removed
       // when we can be deleted
       add_reference();
-      // Now we can tell the forest that we exists
-      context->register_remote_expression(source, remote_expr_id, this);
     }
 
     //--------------------------------------------------------------------------
@@ -490,16 +484,13 @@ namespace Legion {
     {
       rez.serialize<bool>(false); // not an index space
       rez.serialize(expr_id);
-      // Check to see if we need to create this on the remote node
-      if (context->need_remote_expression_creation(this, target))
-      {
-        rez.serialize<bool>(true); // need_creation
-        rez.serialize(type_tag);
-        rez.serialize(realm_index_space);
-        rez.serialize(realm_index_space_ready);
-      }
-      else
-        rez.serialize<bool>(false); // don't need creation
+      rez.serialize<size_t>(sizeof(type_tag) + sizeof(realm_index_space) + 
+                            sizeof(realm_index_space_ready));
+      rez.serialize(type_tag);
+      rez.serialize(realm_index_space);
+      rez.serialize(realm_index_space_ready);
+      // Record that we are sending this expression remotely
+      context->record_remote_expression(this, target);
     }
 
     /////////////////////////////////////////////////////////////
