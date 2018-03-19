@@ -239,7 +239,7 @@ namespace Legion {
       virtual void activate(void) = 0;
       virtual void deactivate(void) = 0; 
       virtual const char* get_logging_name(void) const = 0;
-      virtual OpKind get_operation_kind(void) const  = 0;
+      virtual OpKind get_operation_kind(void) const = 0;
       virtual size_t get_region_count(void) const;
       virtual Mappable* get_mappable(void);
     protected:
@@ -409,6 +409,33 @@ namespace Legion {
       // rest of the operations in the graph
       void quash_operation(GenerationID gen, bool restart);
     public:
+      // For operations that wish to complete early they can do so
+      // using this method which will allow them to immediately 
+      // chain an event to directly trigger the completion event
+      // Note that we don't support early completion if we're doing
+      // inorder program execution
+      inline bool request_early_complete(ApEvent chain_event) 
+        {
+          if (!runtime->program_order_execution)
+          {
+            need_completion_trigger = false;
+            Runtime::trigger_event(completion_event, chain_event);
+            return true;
+          }
+          else
+            return false;
+        }
+      inline bool request_early_complete_no_trigger(ApUserEvent &to_trigger)
+        {
+          if (!runtime->program_order_execution)
+          {
+            need_completion_trigger = false;
+            to_trigger = completion_event;
+            return true;
+          }
+          else
+            return false;
+        }
       // For operations that need to trigger commit early,
       // then they should use this call to avoid races
       // which could result in trigger commit being
@@ -559,8 +586,6 @@ namespace Legion {
       RtUserEvent mapped_event;
       // The resolved event for this operation
       RtUserEvent resolved_event;
-      // The event for when any children this operation has are mapped
-      //Event children_mapped;
       // The completion event for this operation
       ApUserEvent completion_event;
       // The commit event for this operation
