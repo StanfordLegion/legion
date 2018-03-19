@@ -5881,6 +5881,15 @@ namespace Legion {
 
 #ifdef CVOPT
     //--------------------------------------------------------------------------
+    AddressSpaceID InnerContext::find_shard_space(ShardID sid) const
+    //--------------------------------------------------------------------------
+    {
+      // Should only be called by inherited classes
+      assert(false);
+      return 0;
+    }
+
+    //--------------------------------------------------------------------------
     void InnerContext::send_composite_view_shard_copy_request(ShardID sid,
                                                               Serializer &rez)
     //--------------------------------------------------------------------------
@@ -10441,6 +10450,13 @@ namespace Legion {
     }
 
 #ifdef CVOPT
+    //--------------------------------------------------------------------------
+    AddressSpaceID ReplicateContext::find_shard_space(ShardID sid) const
+    //--------------------------------------------------------------------------
+    {
+      return shard_manager->get_shard_space(sid);
+    }
+
     //--------------------------------------------------------------------------
     void ReplicateContext::send_composite_view_shard_copy_request(ShardID sid, 
                                                                 Serializer &rez)

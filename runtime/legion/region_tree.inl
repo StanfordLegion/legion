@@ -109,14 +109,24 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    void IndexSpaceOperationT<DIM,T>::pack_expression(Serializer &rez)
+    void IndexSpaceOperationT<DIM,T>::pack_expression(Serializer &rez,
+                                                      AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
-      Realm::IndexSpace<DIM,T> temp;
-      ApEvent ready = get_realm_index_space(temp, true/*tight*/);
-      rez.serialize(type_tag);
-      rez.serialize(temp);
-      rez.serialize(ready);
+      rez.serialize<bool>(false); // not an index space
+      rez.serialize(expr_id);
+      // Check to see if we need to create this on the remote node
+      if (context->need_remote_expression_creation(this, target))
+      {
+        Realm::IndexSpace<DIM,T> temp;
+        ApEvent ready = get_realm_index_space(temp, true/*tight*/);
+        rez.serialize<bool>(true); // need creation
+        rez.serialize(type_tag);
+        rez.serialize(temp);
+        rez.serialize(ready);
+      }
+      else
+        rez.serialize<bool>(false); // don't need creation
     }
 
     //--------------------------------------------------------------------------
@@ -394,18 +404,26 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    RemoteExpression<DIM,T>::RemoteExpression(Deserializer &derez)
-      : IndexSpaceExpression(NT_TemplateHelper::encode_tag<DIM,T>())
+    RemoteExpression<DIM,T>::RemoteExpression(Deserializer &derez, 
+        RegionTreeForest *ctx, AddressSpaceID src, IndexSpaceExprID id)
+      : IntermediateExpression(NT_TemplateHelper::encode_tag<DIM,T>(), ctx),
+        source(src), remote_expr_id(id)
     //--------------------------------------------------------------------------
     {
       derez.deserialize(realm_index_space);
       derez.deserialize(realm_index_space_ready);
+      // Always add a reference from our owner node that will be removed
+      // when we can be deleted
+      add_reference();
+      // Now we can tell the forest that we exists
+      context->register_remote_expression(source, remote_expr_id, this);
     }
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     RemoteExpression<DIM,T>::RemoteExpression(const RemoteExpression &rhs)
-      : IndexSpaceExpression(NT_TemplateHelper::encode_tag<DIM,T>())
+      : IndexSpaceExpression(NT_TemplateHelper::encode_tag<DIM,T>(), NULL),
+        source(0), remote_expr_id(0)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -417,7 +435,8 @@ namespace Legion {
     RemoteExpression<DIM,T>::~RemoteExpression(void)
     //--------------------------------------------------------------------------
     {
-      // do nothing
+      // Tell the forest that we no longer exist
+      context->unregister_remote_expression(source, remote_expr_id);
     }
 
     //--------------------------------------------------------------------------
@@ -465,28 +484,22 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    void RemoteExpression<DIM,T>::pack_expression(Serializer &rez)
+    void RemoteExpression<DIM,T>::pack_expression(Serializer &rez,
+                                                  AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
-      rez.serialize(type_tag);
-      rez.serialize(realm_index_space);
-      rez.serialize(realm_index_space_ready);
-    }
-
-    //--------------------------------------------------------------------------
-    template<int DIM, typename T>
-    void RemoteExpression<DIM,T>::add_expression_reference(void)
-    //--------------------------------------------------------------------------
-    {
-      add_reference();
-    }
-
-    //--------------------------------------------------------------------------
-    template<int DIM, typename T>
-    bool RemoteExpression<DIM,T>::remove_expression_reference(void)
-    //--------------------------------------------------------------------------
-    {
-      return remove_reference();
+      rez.serialize<bool>(false); // not an index space
+      rez.serialize(expr_id);
+      // Check to see if we need to create this on the remote node
+      if (context->need_remote_expression_creation(this, target))
+      {
+        rez.serialize<bool>(true); // need_creation
+        rez.serialize(type_tag);
+        rez.serialize(realm_index_space);
+        rez.serialize(realm_index_space_ready);
+      }
+      else
+        rez.serialize<bool>(false); // don't need creation
     }
 
     /////////////////////////////////////////////////////////////
@@ -680,14 +693,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    void IndexSpaceNodeT<DIM,T>::pack_expression(Serializer &rez)
+    void IndexSpaceNodeT<DIM,T>::pack_expression(Serializer &rez, 
+                                                 AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
-      Realm::IndexSpace<DIM,T> temp;
-      ApEvent ready = get_realm_index_space(temp, true/*tight*/);
-      rez.serialize(type_tag);
-      rez.serialize(temp);
-      rez.serialize(ready);
+      rez.serialize<bool>(true/*index space*/);
+      rez.serialize(handle);
     }
 
     //--------------------------------------------------------------------------

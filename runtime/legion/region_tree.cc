@@ -5104,6 +5104,61 @@ namespace Legion {
       }
     }
 
+    //--------------------------------------------------------------------------
+    void RegionTreeForest::register_remote_expression(AddressSpaceID source,
+             IndexSpaceExprID remote_expr_id, IndexSpaceExpression *remote_expr)
+    //--------------------------------------------------------------------------
+    {
+      std::pair<AddressSpaceID,IndexSpaceExprID> key(source, remote_expr_id);
+      AutoLock l_lock(lookup_is_op_lock);
+#ifdef DEBUG_LEGION
+      assert(remote_expressions.find(key) == remote_expressions.end());
+#endif
+      remote_expressions[key] = remote_expr;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpaceExpression* RegionTreeForest::find_remote_expression(
+                         AddressSpaceID source, IndexSpaceExprID remote_expr_id)
+    //--------------------------------------------------------------------------
+    {
+      std::pair<AddressSpaceID,IndexSpaceExprID> key(source, remote_expr_id);
+      AutoLock l_lock(lookup_is_op_lock, 1, false/*exclusive*/);
+      std::map<std::pair<AddressSpaceID,IndexSpaceExprID>,
+        IndexSpaceExpression*>::const_iterator finder = 
+          remote_expressions.find(key);
+#ifdef DEBUG_LEGION
+      assert(finder != remote_expressions.end());
+#endif
+      return finder->second;
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeForest::unregister_remote_expression(AddressSpaceID source, 
+                                                IndexSpaceExprID remote_expr_id)
+    //--------------------------------------------------------------------------
+    {
+      std::pair<AddressSpaceID,IndexSpaceExprID> key(source, remote_expr_id);
+      AutoLock l_lock(lookup_is_op_lock);
+      std::map<std::pair<AddressSpaceID,IndexSpaceExprID>,
+        IndexSpaceExpression*>::iterator finder = remote_expressions.find(key);
+#ifdef DEBUG_LEGION
+      assert(finder != remote_expressions.end());
+#endif
+      remote_expressions.erase(finder);
+    }
+
+    //--------------------------------------------------------------------------
+    bool RegionTreeForest::need_remote_expression_creation(
+                              IndexSpaceExpression *expr, AddressSpaceID target)
+    //--------------------------------------------------------------------------
+    {
+      // We are just bouncing this off here to use the lock to serialize
+      // access to the node set data structures for the index space expressions
+      AutoLock l_lock(lookup_is_op_lock);
+      return expr->find_or_create_remote_instance(target);
+    }
+
     /////////////////////////////////////////////////////////////
     // Index Space Expression 
     /////////////////////////////////////////////////////////////
@@ -5177,14 +5232,108 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ IndexSpaceExpression* IndexSpaceExpression::unpack_expression(
-                                                            Deserializer &derez)
+           Deserializer &derez, RegionTreeForest *forest, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      TypeTag type_tag;
-      derez.deserialize(type_tag);
-      RemoteExpressionCreator creator(derez);
-      NT_TemplateHelper::demux<RemoteExpressionCreator>(type_tag, &creator);
-      return creator.result;
+      bool is_index_space;
+      derez.deserialize(is_index_space);
+      // If this is an index space it is easy
+      if (is_index_space)
+      {
+        IndexSpace handle;
+        derez.deserialize(handle);
+        return forest->get_node(handle);
+      }
+      IndexSpaceExprID remote_expr_id;
+      derez.deserialize(remote_expr_id);
+      // Figure out if we are making this for the first time or
+      // we should just be able to find it
+      bool create;
+      derez.deserialize(create);
+      if (create)
+      {
+        TypeTag type_tag;
+        derez.deserialize(type_tag);
+        RemoteExpressionCreator creator(derez, forest, source, remote_expr_id);
+        NT_TemplateHelper::demux<RemoteExpressionCreator>(type_tag, &creator);
+        return creator.result;  
+      }
+      else
+        return forest->find_remote_expression(source, remote_expr_id);
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Intermediate Expression
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    IntermediateExpression::IntermediateExpression(TypeTag tag,
+                                                   RegionTreeForest *ctx)
+      : IndexSpaceExpression(tag), context(ctx)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    void IntermediateExpression::DestructionFunctor::apply(
+                                                          AddressSpaceID target)
+    //--------------------------------------------------------------------------
+    {
+      runtime->send_remote_expression_invalidation(target, rez);
+    }
+
+    //--------------------------------------------------------------------------
+    IntermediateExpression::~IntermediateExpression(void)
+    //--------------------------------------------------------------------------
+    {
+      // If we have any remote instances then we need to send messages
+      // to them to remove their references and possibly collect them
+      if (!remote_instances.empty())
+      {
+        Serializer rez;
+        rez.serialize(expr_id);
+        DestructionFunctor functor(context->runtime, rez);
+        remote_instances.map(functor);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void IntermediateExpression::add_expression_reference(void)
+    //--------------------------------------------------------------------------
+    {
+      add_reference();
+    }
+
+    //--------------------------------------------------------------------------
+    bool IntermediateExpression::remove_expression_reference(void)
+    //--------------------------------------------------------------------------
+    {
+      return remove_reference();
+    }
+
+    //--------------------------------------------------------------------------
+    bool IntermediateExpression::find_or_create_remote_instance( 
+                                                          AddressSpaceID target)
+    //--------------------------------------------------------------------------
+    {
+      // Lock for synchronization held by caller
+      if (remote_instances.contains(target))
+        return false;
+      remote_instances.add(target);
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void IntermediateExpression::handle_expression_invalidation(
+           Deserializer &derez, RegionTreeForest *forest, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      IndexSpaceExprID remote_expr_id;
+      derez.deserialize(remote_expr_id);
+      IndexSpaceExpression *remote_expr = 
+        forest->find_remote_expression(source, remote_expr_id);
+      if (remote_expr->remove_expression_reference())
+        delete remote_expr;
     }
 
     /////////////////////////////////////////////////////////////
@@ -5194,7 +5343,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     IndexSpaceOperation::IndexSpaceOperation(TypeTag tag, OperationKind kind,
                                              RegionTreeForest *ctx)
-      : IndexSpaceExpression(tag), op_kind(kind), context(ctx), invalidated(0)
+      : IntermediateExpression(tag, ctx), op_kind(kind), invalidated(0)
     //--------------------------------------------------------------------------
     {
     }
@@ -5206,14 +5355,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(invalidated > 0);
 #endif
-    }
-
-    //--------------------------------------------------------------------------
-    void IndexSpaceOperation::add_expression_reference(void)
-    //--------------------------------------------------------------------------
-    {
-      add_reference();
-    }
+    } 
 
     //--------------------------------------------------------------------------
     bool IndexSpaceOperation::remove_expression_reference(void)
@@ -5242,7 +5384,7 @@ namespace Legion {
       for (std::set<IndexSpaceOperation*>::const_iterator it = 
             parent_operations.begin(); it != parent_operations.end(); it++)
         (*it)->invalidate_operation(to_remove);
-    }
+    } 
 
     /////////////////////////////////////////////////////////////
     // Expression Trie Node 

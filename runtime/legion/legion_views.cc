@@ -4938,7 +4938,8 @@ namespace Legion {
             {
               rez.serialize(it->reduction_mask);
               rez.serialize(it->pred_guard);
-              it->mask->pack_expression(rez);
+              it->mask->pack_expression(rez,
+                  shard_context->find_shard_space(pit->first.shard));
               // We need one completion event for each field  
               const size_t pop_count = it->reduction_mask.pop_count();
 #ifdef DEBUG_LEGION
@@ -5569,7 +5570,8 @@ namespace Legion {
 #endif
             rez.serialize(copy_mask);
             rez.serialize(it->second.pred_guard);
-            it->second.mask->pack_expression(rez);
+            it->second.mask->pack_expression(rez,
+                shard_context->find_shard_space(it->first.shard));
             ApUserEvent done_event = Runtime::create_ap_user_event();
             rez.serialize(done_event);
             reduction_postconditions.insert(done_event);
@@ -7581,7 +7583,8 @@ namespace Legion {
             // be performed so do the difference
             IndexSpaceExpression *write_mask = 
               logical_node->context->subtract_index_spaces(dst_expr,wit->first);
-            write_mask->pack_expression(rez);
+            write_mask->pack_expression(rez,
+                owner_context->find_shard_space(it->first));
             // We need a separate completion event for each field
             // in order to avoid unnecessary serialization, we don't
             // know which fields are going to be grouped together or
@@ -7670,7 +7673,8 @@ namespace Legion {
           // write that we are going to perform
           IndexSpaceExpression *mask = 
            logical_node->context->subtract_index_spaces(target_expr,it->second);
-          mask->pack_expression(rez);
+          mask->pack_expression(rez,
+              owner_context->find_shard_space(it->first));
           // Save the write expression in the shard writes
           shard_writes.insert(it->second);
           ApUserEvent field_done = Runtime::create_ap_user_event();
@@ -8287,7 +8291,7 @@ namespace Legion {
         RemoteDeferredSingleCopier *copier = 
           RemoteDeferredSingleCopier::unpack_copier(derez, rt, copy_mask, ctx);
         IndexSpaceExpression *write_mask = 
-          IndexSpaceExpression::unpack_expression(derez);
+          IndexSpaceExpression::unpack_expression(derez, runtime->forest);
         write_mask->add_expression_reference();
         ApUserEvent done_event;
         derez.deserialize(done_event);
@@ -8315,7 +8319,7 @@ namespace Legion {
         for (unsigned idx = 0; idx < write_expressions; idx++)
         {
           IndexSpaceExpression *expression = 
-            IndexSpaceExpression::unpack_expression(derez);
+            IndexSpaceExpression::unpack_expression(derez, runtime->forest);
           expression->add_expression_reference();
           FieldMask &expr_mask = write_masks[expression];
           size_t field_count;

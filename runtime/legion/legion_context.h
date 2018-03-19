@@ -1058,6 +1058,7 @@ namespace Legion {
                                       ClosedNode *closed_tree, 
                                       InterCloseOp *op, bool clone);
 #ifdef CVOPT
+      virtual AddressSpaceID find_shard_space(ShardID sid) const;
       virtual void send_composite_view_shard_copy_request(ShardID sid,
                                                           Serializer &rez);
       virtual void send_composite_view_shard_reduction_request(ShardID sid,
@@ -1549,6 +1550,7 @@ namespace Legion {
                                       ClosedNode *closed_tree, 
                                       InterCloseOp *op, bool clone);
 #ifdef CVOPT
+      virtual AddressSpaceID find_shard_space(ShardID sid) const;
       virtual void send_composite_view_shard_copy_request(ShardID sid,
                                                           Serializer &rez);
       virtual void send_composite_view_shard_reduction_request(ShardID sid,
