@@ -4917,94 +4917,91 @@ namespace Legion {
 #endif
           const LegionDeque<ReductionShard>::aligned &reductions = pit->second;
           Serializer rez;
+          rez.serialize(pit->first.repl_id);
+          rez.serialize(pit->first.shard);
+          rez.serialize<RtEvent>(pit->first.shard_invalid_barrier);
+          rez.serialize(dst->did);
+          info->pack(rez);
+          if (across_helper != NULL)
           {
-            RezCheck z(rez);
-            rez.serialize(pit->first.repl_id);
-            rez.serialize(pit->first.shard);
-            rez.serialize<RtEvent>(pit->first.shard_invalid_barrier);
-            rez.serialize(dst->did);
-            info->pack(rez);
-            if (across_helper != NULL)
+            rez.serialize<bool>(true);
+            rez.serialize(epoch_mask);
+            across_helper->pack(rez, epoch_mask);
+          }
+          else
+            rez.serialize<bool>(false);
+          rez.serialize<size_t>(reductions.size());
+          for (LegionDeque<ReductionShard>::aligned::const_iterator it =
+                reductions.begin(); it != reductions.end(); it++)
+          {
+            rez.serialize(it->reduction_mask);
+            rez.serialize(it->pred_guard);
+            it->mask->pack_expression(rez,
+                shard_context->find_shard_space(pit->first.shard));
+            // We need one completion event for each field  
+            const size_t pop_count = it->reduction_mask.pop_count();
+#ifdef DEBUG_LEGION
+            assert(pop_count > 0);
+#endif
+            int index = it->reduction_mask.find_first_set(); 
+            for (unsigned idx = 0; idx < pop_count; idx++)
             {
-              rez.serialize<bool>(true);
-              rez.serialize(epoch_mask);
-              across_helper->pack(rez, epoch_mask);
+              if (idx > 0)
+                index = it->reduction_mask.find_next_set(index+1);
+#ifdef DEBUG_LEGION
+              assert(index >= 0);
+#endif
+              ApUserEvent field_done = Runtime::create_ap_user_event();
+              if (pop_count > 1)
+                rez.serialize<unsigned>(index);
+              rez.serialize(field_done);
+#ifdef DEBUG_LEGION
+              assert(reduction_postconditions.find(field_done) ==
+                      reduction_postconditions.end());
+#endif
+              reduction_postconditions[field_done].set_bit(index);
+            }
+            // We also need destination preconditions for the reductions
+            if (pop_count > 1)
+            {
+              LegionMap<ApEvent,FieldMask>::aligned reduce_preconditions;
+              for (LegionMap<ApEvent,FieldMask>::aligned::const_iterator pit =
+                    copy_postconditions.begin(); pit != 
+                    copy_postconditions.end(); pit++)
+              {
+                const FieldMask overlap = pit->second & it->reduction_mask;
+                if (!overlap)
+                  continue;
+                reduce_preconditions[pit->first] = overlap;
+              }
+              rez.serialize<size_t>(reduce_preconditions.size());
+              for (LegionMap<ApEvent,FieldMask>::aligned::const_iterator rit =
+                    reduce_preconditions.begin(); rit != 
+                    reduce_preconditions.end(); rit++)
+              {
+                rez.serialize(rit->first);
+                rez.serialize(rit->second);
+              }
             }
             else
-              rez.serialize<bool>(false);
-            rez.serialize<size_t>(reductions.size());
-            for (LegionDeque<ReductionShard>::aligned::const_iterator it =
-                  reductions.begin(); it != reductions.end(); it++)
             {
-              rez.serialize(it->reduction_mask);
-              rez.serialize(it->pred_guard);
-              it->mask->pack_expression(rez,
-                  shard_context->find_shard_space(pit->first.shard));
-              // We need one completion event for each field  
-              const size_t pop_count = it->reduction_mask.pop_count();
-#ifdef DEBUG_LEGION
-              assert(pop_count > 0);
-#endif
-              int index = it->reduction_mask.find_first_set(); 
-              for (unsigned idx = 0; idx < pop_count; idx++)
+              // Special case where we only have a single field
+              std::set<ApEvent> reduce_preconditions;
+              for (LegionMap<ApEvent,FieldMask>::aligned::const_iterator pit =
+                    copy_postconditions.begin(); pit != 
+                    copy_postconditions.end(); pit++)
               {
-                if (idx > 0)
-                  index = it->reduction_mask.find_next_set(index+1);
-#ifdef DEBUG_LEGION
-                assert(index >= 0);
-#endif
-                ApUserEvent field_done = Runtime::create_ap_user_event();
-                if (pop_count > 1)
-                  rez.serialize<unsigned>(index);
-                rez.serialize(field_done);
-#ifdef DEBUG_LEGION
-                assert(reduction_postconditions.find(field_done) ==
-                        reduction_postconditions.end());
-#endif
-                reduction_postconditions[field_done].set_bit(index);
+                if (pit->second * it->reduction_mask)
+                  continue;
+                reduce_preconditions.insert(pit->first);
               }
-              // We also need destination preconditions for the reductions
-              if (pop_count > 1)
+              if (!reduce_preconditions.empty())
               {
-                LegionMap<ApEvent,FieldMask>::aligned reduce_preconditions;
-                for (LegionMap<ApEvent,FieldMask>::aligned::const_iterator pit =
-                      copy_postconditions.begin(); pit != 
-                      copy_postconditions.end(); pit++)
-                {
-                  const FieldMask overlap = pit->second & it->reduction_mask;
-                  if (!overlap)
-                    continue;
-                  reduce_preconditions[pit->first] = overlap;
-                }
-                rez.serialize<size_t>(reduce_preconditions.size());
-                for (LegionMap<ApEvent,FieldMask>::aligned::const_iterator rit =
-                      reduce_preconditions.begin(); rit != 
-                      reduce_preconditions.end(); rit++)
-                {
-                  rez.serialize(rit->first);
-                  rez.serialize(rit->second);
-                }
+                ApEvent pre = Runtime::merge_events(reduce_preconditions);
+                rez.serialize(pre);
               }
               else
-              {
-                // Special case where we only have a single field
-                std::set<ApEvent> reduce_preconditions;
-                for (LegionMap<ApEvent,FieldMask>::aligned::const_iterator pit =
-                      copy_postconditions.begin(); pit != 
-                      copy_postconditions.end(); pit++)
-                {
-                  if (pit->second * it->reduction_mask)
-                    continue;
-                  reduce_preconditions.insert(pit->first);
-                }
-                if (!reduce_preconditions.empty())
-                {
-                  ApEvent pre = Runtime::merge_events(reduce_preconditions);
-                  rez.serialize(pre);
-                }
-                else
-                  rez.serialize(ApEvent::NO_AP_EVENT);
-              }
+                rez.serialize(ApEvent::NO_AP_EVENT);
             }
           }
           shard_context->send_composite_view_shard_reduction_request(
@@ -5549,35 +5546,32 @@ namespace Legion {
           assert(shard_context != NULL);
 #endif
           Serializer rez;
+          rez.serialize(it->first.repl_id);
+          rez.serialize(it->first.shard);
+          rez.serialize<RtEvent>(it->first.shard_invalid_barrier);
+          rez.serialize(dst->did);
+          info->pack(rez);
+          if (across_helper != NULL)
           {
-            RezCheck z(rez);
-            rez.serialize(it->first.repl_id);
-            rez.serialize(it->first.shard);
-            rez.serialize<RtEvent>(it->first.shard_invalid_barrier);
-            rez.serialize(dst->did);
-            info->pack(rez);
-            if (across_helper != NULL)
-            {
-              rez.serialize<bool>(true);
-              rez.serialize(copy_mask);
-              across_helper->pack(rez, copy_mask);
-            }
-            else
-              rez.serialize<bool>(false);
-            rez.serialize<size_t>(1); // number of pending
-#ifdef DEBUG_LEGION
-            assert(copy_mask.pop_count() == 1);
-#endif
+            rez.serialize<bool>(true);
             rez.serialize(copy_mask);
-            rez.serialize(it->second.pred_guard);
-            it->second.mask->pack_expression(rez,
-                shard_context->find_shard_space(it->first.shard));
-            ApUserEvent done_event = Runtime::create_ap_user_event();
-            rez.serialize(done_event);
-            reduction_postconditions.insert(done_event);
-            // Also need to send the preconditions for the reductions
-            rez.serialize(reduction_pre);
+            across_helper->pack(rez, copy_mask);
           }
+          else
+            rez.serialize<bool>(false);
+          rez.serialize<size_t>(1); // number of pending
+#ifdef DEBUG_LEGION
+          assert(copy_mask.pop_count() == 1);
+#endif
+          rez.serialize(copy_mask);
+          rez.serialize(it->second.pred_guard);
+          it->second.mask->pack_expression(rez,
+              shard_context->find_shard_space(it->first.shard));
+          ApUserEvent done_event = Runtime::create_ap_user_event();
+          rez.serialize(done_event);
+          reduction_postconditions.insert(done_event);
+          // Also need to send the preconditions for the reductions
+          rez.serialize(reduction_pre);
           shard_context->send_composite_view_shard_reduction_request(
                                                 it->first.shard, rez);
         }
@@ -7559,66 +7553,63 @@ namespace Legion {
             needed_shards.begin(); it != needed_shards.end(); it++)
       {
         Serializer rez;
+        rez.serialize(repl_id);
+        rez.serialize(it->first);
+        rez.serialize<RtEvent>(shard_invalid_barrier);
+        rez.serialize(pred_guard);
+        rez.serialize<bool>(false); // single
+        rez.serialize(local_copy_mask);
+        copier.pack_copier(rez, local_copy_mask);
+#ifdef DEBUG_LEGION
+        assert(!it->second.empty());
+#endif
+        // Before doing anything, write combine so we get
+        // exactly one expression for each field
+        combine_writes(it->second, copier, false/*prune global*/);
+        rez.serialize<size_t>(it->second.size());
+        for (WriteMasks::const_iterator wit = it->second.begin();
+              wit != it->second.end(); wit++)
         {
-          RezCheck z(rez);
-          rez.serialize(repl_id);
-          rez.serialize(it->first);
-          rez.serialize<RtEvent>(shard_invalid_barrier);
-          rez.serialize(pred_guard);
-          rez.serialize<bool>(false); // single
-          rez.serialize(local_copy_mask);
-          copier.pack_copier(rez, local_copy_mask);
+          // The expression we actually want to pack are the
+          // write masks and not the writes that are going to
+          // be performed so do the difference
+          IndexSpaceExpression *write_mask = 
+            logical_node->context->subtract_index_spaces(dst_expr,wit->first);
+          write_mask->pack_expression(rez,
+              owner_context->find_shard_space(it->first));
+          // We need a separate completion event for each field
+          // in order to avoid unnecessary serialization, we don't
+          // know which fields are going to be grouped together or
+          // not yet
+          const size_t pop_count = wit->second.pop_count();
 #ifdef DEBUG_LEGION
-          assert(!it->second.empty());
+          assert(pop_count > 0);
 #endif
-          // Before doing anything, write combine so we get
-          // exactly one expression for each field
-          combine_writes(it->second, copier, false/*prune global*/);
-          rez.serialize<size_t>(it->second.size());
-          for (WriteMasks::const_iterator wit = it->second.begin();
-                wit != it->second.end(); wit++)
+          rez.serialize(pop_count);
+          int index = wit->second.find_first_set(); 
+          for (unsigned idx = 0; idx < pop_count; idx++)
           {
-            // The expression we actually want to pack are the
-            // write masks and not the writes that are going to
-            // be performed so do the difference
-            IndexSpaceExpression *write_mask = 
-              logical_node->context->subtract_index_spaces(dst_expr,wit->first);
-            write_mask->pack_expression(rez,
-                owner_context->find_shard_space(it->first));
-            // We need a separate completion event for each field
-            // in order to avoid unnecessary serialization, we don't
-            // know which fields are going to be grouped together or
-            // not yet
-            const size_t pop_count = wit->second.pop_count();
+            if (idx > 0)
+              index = wit->second.find_next_set(index+1);
 #ifdef DEBUG_LEGION
-            assert(pop_count > 0);
+            assert(index >= 0);
 #endif
-            rez.serialize(pop_count);
-            int index = wit->second.find_first_set(); 
-            for (unsigned idx = 0; idx < pop_count; idx++)
-            {
-              if (idx > 0)
-                index = wit->second.find_next_set(index+1);
+            rez.serialize<unsigned>(index);
+            ApUserEvent field_done = Runtime::create_ap_user_event();
+            rez.serialize(field_done);
 #ifdef DEBUG_LEGION
-              assert(index >= 0);
+            assert(copier.copy_postconditions.find(field_done) ==
+                    copier.copy_postconditions.end());
 #endif
-              rez.serialize<unsigned>(index);
-              ApUserEvent field_done = Runtime::create_ap_user_event();
-              rez.serialize(field_done);
-#ifdef DEBUG_LEGION
-              assert(copier.copy_postconditions.find(field_done) ==
-                      copier.copy_postconditions.end());
-#endif
-              // This puts the event in the set and sets the bit for the field
-              copier.copy_postconditions[field_done].set_bit(index);
-            }
-            // Also update the performed writes set here
-            WriteMasks::iterator finder = performed_writes.find(wit->first);
-            if (finder != performed_writes.end())
-              finder->second |= wit->second;
-            else
-              performed_writes.insert(*wit);
+            // This puts the event in the set and sets the bit for the field
+            copier.copy_postconditions[field_done].set_bit(index);
           }
+          // Also update the performed writes set here
+          WriteMasks::iterator finder = performed_writes.find(wit->first);
+          if (finder != performed_writes.end())
+            finder->second |= wit->second;
+          else
+            performed_writes.insert(*wit);
         }
         // Now we can send the copy message to the remote node
         owner_context->send_composite_view_shard_copy_request(it->first, rez);
@@ -7659,32 +7650,29 @@ namespace Legion {
             needed_shards.begin(); it != needed_shards.end(); it++)
       {
         Serializer rez;
-        {
-          RezCheck z(rez);
-          rez.serialize(repl_id);
-          rez.serialize(it->first);
-          rez.serialize<RtEvent>(shard_invalid_barrier);
-          rez.serialize(pred_guard);
-          rez.serialize<bool>(true); // single
-          rez.serialize<unsigned>(copier.field_index);
-          copier.pack_copier(rez);
-          // The expression that we actually want to pack is the mask
-          // which is the difference between the destination and the
-          // write that we are going to perform
-          IndexSpaceExpression *mask = 
-           logical_node->context->subtract_index_spaces(target_expr,it->second);
-          mask->pack_expression(rez,
-              owner_context->find_shard_space(it->first));
-          // Save the write expression in the shard writes
-          shard_writes.insert(it->second);
-          ApUserEvent field_done = Runtime::create_ap_user_event();
-          rez.serialize(field_done);
+        rez.serialize(repl_id);
+        rez.serialize(it->first);
+        rez.serialize<RtEvent>(shard_invalid_barrier);
+        rez.serialize(pred_guard);
+        rez.serialize<bool>(true); // single
+        rez.serialize<unsigned>(copier.field_index);
+        copier.pack_copier(rez);
+        // The expression that we actually want to pack is the mask
+        // which is the difference between the destination and the
+        // write that we are going to perform
+        IndexSpaceExpression *mask = 
+         logical_node->context->subtract_index_spaces(target_expr,it->second);
+        mask->pack_expression(rez,
+            owner_context->find_shard_space(it->first));
+        // Save the write expression in the shard writes
+        shard_writes.insert(it->second);
+        ApUserEvent field_done = Runtime::create_ap_user_event();
+        rez.serialize(field_done);
 #ifdef DEBUG_LEGION
-          assert(copier.copy_postconditions.find(field_done) ==
-                  copier.copy_postconditions.end());
+        assert(copier.copy_postconditions.find(field_done) ==
+                copier.copy_postconditions.end());
 #endif
-          copier.record_postcondition(field_done);
-        }
+        copier.record_postcondition(field_done);
         // Now we can send the copy message to the remote node
         owner_context->send_composite_view_shard_copy_request(it->first, rez);
       }
