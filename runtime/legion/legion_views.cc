@@ -5115,19 +5115,20 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    RemoteDeferredCopier::RemoteDeferredCopier(const TraversalInfo *info,
+    RemoteDeferredCopier::RemoteDeferredCopier(const RemoteTraversalInfo *info,
                                                InnerContext *ctx,
                                                MaterializedView *dst,
                                                const FieldMask &copy_mask,
                                                CopyAcrossHelper *helper)
-      : DeferredCopier(info, ctx, dst, copy_mask, ApEvent::NO_AP_EVENT, helper)
+      : DeferredCopier(info, ctx, dst, copy_mask, ApEvent::NO_AP_EVENT, helper),
+        remote_info(info)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     RemoteDeferredCopier::RemoteDeferredCopier(const RemoteDeferredCopier &rhs)
-      : DeferredCopier(rhs)
+      : DeferredCopier(rhs), remote_info(NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -5143,7 +5144,7 @@ namespace Legion {
       assert(restrict_info == NULL);
 #endif
       // clean up the things that we own
-      delete info;
+      delete remote_info;
       if (across_helper != NULL)
         delete across_helper;
     }
@@ -5612,13 +5613,13 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     RemoteDeferredSingleCopier::RemoteDeferredSingleCopier(
-                                          const TraversalInfo *info, 
+                                          const RemoteTraversalInfo *info, 
                                           InnerContext *ctx,
                                           MaterializedView *dst, 
                                           const FieldMask &copy_mask,
                                           CopyAcrossHelper *helper)
       : DeferredSingleCopier(info, ctx, dst, copy_mask, 
-                             ApEvent::NO_AP_EVENT, helper)
+                             ApEvent::NO_AP_EVENT, helper), remote_info(info)
     //--------------------------------------------------------------------------
     {
     }
@@ -5626,7 +5627,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     RemoteDeferredSingleCopier::RemoteDeferredSingleCopier(
                                           const RemoteDeferredSingleCopier &rhs)
-      : DeferredSingleCopier(rhs)
+      : DeferredSingleCopier(rhs), remote_info(NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -5642,7 +5643,7 @@ namespace Legion {
       assert(restrict_info == NULL);
 #endif
       // clean up the things we own
-      delete info;
+      delete remote_info;
       if (across_helper != NULL)
         delete across_helper;
     }
