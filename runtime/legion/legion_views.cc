@@ -5111,11 +5111,11 @@ namespace Legion {
 
 #ifdef CVOPT
     /////////////////////////////////////////////////////////////
-    // RemoteDeferredSingleCopier
+    // RemoteDeferredCopier
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    RemoteDeferredCopier::RemoteDeferredCopier(const RemoteTraversalInfo *info,
+    RemoteDeferredCopier::RemoteDeferredCopier(RemoteTraversalInfo *info,
                                                InnerContext *ctx,
                                                MaterializedView *dst,
                                                const FieldMask &copy_mask,
@@ -5235,7 +5235,7 @@ namespace Legion {
       RtEvent dst_ready;
       LogicalView *dst = 
         runtime->find_or_request_logical_view(dst_did, dst_ready);
-      TraversalInfo *info = RemoteTraversalInfo::unpack(derez, runtime); 
+      RemoteTraversalInfo *info = RemoteTraversalInfo::unpack(derez, runtime); 
       bool across;
       derez.deserialize(across);
       CopyAcrossHelper *across_helper = NULL;
@@ -5613,7 +5613,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     RemoteDeferredSingleCopier::RemoteDeferredSingleCopier(
-                                          const RemoteTraversalInfo *info, 
+                                          RemoteTraversalInfo *info, 
                                           InnerContext *ctx,
                                           MaterializedView *dst, 
                                           const FieldMask &copy_mask,
@@ -5702,7 +5702,7 @@ namespace Legion {
       RtEvent dst_ready;
       LogicalView *dst = 
         runtime->find_or_request_logical_view(dst_did, dst_ready);
-      TraversalInfo *info = RemoteTraversalInfo::unpack(derez, runtime); 
+      RemoteTraversalInfo *info = RemoteTraversalInfo::unpack(derez, runtime);
       bool across;
       derez.deserialize(across);
       CopyAcrossHelper *across_helper = NULL;

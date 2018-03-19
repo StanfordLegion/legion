@@ -1105,7 +1105,7 @@ namespace Legion {
     struct RemoteDeferredCopier : public DeferredCopier, 
       public LegionHeapify<RemoteDeferredCopier> {
     public:
-      RemoteDeferredCopier(const RemoteTraversalInfo *info, 
+      RemoteDeferredCopier(RemoteTraversalInfo *info, 
                            InnerContext *context,
                            MaterializedView *dst, 
                            const FieldMask &copy_mask,
@@ -1260,7 +1260,7 @@ namespace Legion {
     struct RemoteDeferredSingleCopier : public DeferredSingleCopier,
       public LegionHeapify<RemoteDeferredSingleCopier> {
     public:
-      RemoteDeferredSingleCopier(const RemoteTraversalInfo *info, 
+      RemoteDeferredSingleCopier(RemoteTraversalInfo *info, 
                                  InnerContext *context,
                                  MaterializedView *dst, 
                                  const FieldMask &copy_mask,
