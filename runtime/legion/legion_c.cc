@@ -2263,6 +2263,15 @@ legion_future_get_untyped_size(legion_future_t handle_)
 // Future Map Operations
 // -----------------------------------------------------------------------
 
+legion_future_map_t
+legion_future_map_copy(legion_future_map_t handle_)
+{
+  FutureMap *handle = CObjectWrapper::unwrap(handle_);
+
+  FutureMap *result = new FutureMap(*handle);
+  return CObjectWrapper::wrap(result);
+}
+
 void
 legion_future_map_destroy(legion_future_map_t fm_)
 {
