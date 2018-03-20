@@ -6304,7 +6304,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(performed_write == NULL); // should be NULL on the way in
 #endif
-      RegionTreeForest *context = copier.dst->logical_node->context;
+      RegionTreeForest *context = logical_node->context;
       // If this is a composite shard, check to see if we need to issue any
       // updates from shards on remote nodes, no need to do this if we are
       // already on a remote node as someone else already did the check
@@ -7544,9 +7544,14 @@ namespace Legion {
       assert(shard_invalid_barrier.exists());
 #endif
 #ifdef CVOPT
+      RegionTreeForest *context = logical_node->context;
       std::map<ShardID,WriteMasks> needed_shards, reduction_shards; 
-      IndexSpaceExpression *dst_expr = 
-        logical_node->get_index_space_expression();
+      IndexSpaceExpression *dst_expr = context->intersect_index_spaces(
+          logical_node->get_index_space_expression(),
+          copier.dst->logical_node->get_index_space_expression());
+#ifdef DEBUG_LEGION
+      assert(!dst_expr->is_empty());
+#endif
       closed_tree->find_needed_shards(local_copy_mask, origin_shard, 
           dst_expr, write_masks, needed_shards, reduction_shards);
       for (std::map<ShardID,WriteMasks>::iterator it = 
@@ -7574,7 +7579,7 @@ namespace Legion {
           // write masks and not the writes that are going to
           // be performed so do the difference
           IndexSpaceExpression *write_mask = 
-            logical_node->context->subtract_index_spaces(dst_expr,wit->first);
+            context->subtract_index_spaces(dst_expr,wit->first);
           write_mask->pack_expression(rez,
               owner_context->find_shard_space(it->first));
           // We need a separate completion event for each field
@@ -7633,12 +7638,16 @@ namespace Legion {
       assert(shard_invalid_barrier.exists());
 #endif
 #ifdef CVOPT
-      IndexSpaceExpression *target_expr = 
-        logical_node->get_index_space_expression();
+      RegionTreeForest *context = logical_node->context;
+      IndexSpaceExpression *target_expr = context->intersect_index_spaces(
+        logical_node->get_index_space_expression(), 
+        copier.dst->logical_node->get_index_space_expression();
+#ifdef DEBUG_LEGION
+      assert(!target_expr->is_empty());
+#endif
       if (write_mask != NULL)
       {
-        target_expr = 
-          logical_node->context->subtract_index_spaces(target_expr, write_mask);
+        target_expr = context->subtract_index_spaces(target_expr, write_mask);
         if (target_expr->is_empty())
           return NULL;
       }
