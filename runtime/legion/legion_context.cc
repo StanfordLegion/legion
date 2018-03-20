@@ -6534,6 +6534,8 @@ namespace Legion {
     {
       const PrepipelineArgs *pargs = (const PrepipelineArgs*)args;
       pargs->context->process_prepipeline_stage();
+      if (pargs->context->remove_reference())
+        delete pargs->context;
     }
 
     //--------------------------------------------------------------------------

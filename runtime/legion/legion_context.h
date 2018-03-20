@@ -567,13 +567,15 @@ namespace Legion {
 
     class InnerContext : public TaskContext {
     public:
+      // Prepipeline stages need to hold a reference since the
+      // logical analysis could clean the context up before it runs
       struct PrepipelineArgs : public LgTaskArgs<PrepipelineArgs> {
       public:
         static const LgTaskID TASK_ID = LG_PRE_PIPELINE_ID;
       public:
         PrepipelineArgs(Operation *op, InnerContext *ctx)
           : LgTaskArgs<PrepipelineArgs>(op->get_unique_op_id()),
-            context(ctx) { }
+            context(ctx) { ctx->add_reference(); }
       public:
         InnerContext *const context;
       };
