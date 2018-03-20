@@ -6279,6 +6279,13 @@ namespace Legion {
           runtime->add_to_dependence_queue(this, executing_processor, close_op);
         }
       }
+      // Mark that we are done executing this operation
+      // We're not actually done until we have registered our pending
+      // decrement of our parent task and recorded any profiling
+      if (!pending_done.has_triggered())
+        owner_task->complete_execution(pending_done);
+      else
+        owner_task->complete_execution();
       // Grab some information before doing the next step in case it
       // results in the deletion of 'this'
 #ifdef DEBUG_LEGION
@@ -6381,14 +6388,7 @@ namespace Legion {
           single_task->handle_post_mapped(Runtime::merge_events(preconditions));
         else
           single_task->handle_post_mapped();
-      }
-      // Mark that we are done executing this operation
-      // We're not actually done until we have registered our pending
-      // decrement of our parent task and recorded any profiling
-      if (!pending_done.has_triggered())
-        owner_task->complete_execution(pending_done);
-      else
-        owner_task->complete_execution();
+      } 
       if (need_complete)
         owner_task->trigger_children_complete();
       if (need_commit)
@@ -8678,6 +8678,20 @@ namespace Legion {
         const long long diff = current - previous_profiling_time;
         overhead_tracker->application_time += diff;
       }
+      // Unmap any physical regions that we mapped
+      for (std::vector<PhysicalRegion>::const_iterator it = 
+            physical_regions.begin(); it != physical_regions.end(); it++)
+      {
+        if (it->is_mapped())
+          it->impl->unmap_region();
+      }
+      // Mark that we are done executing this operation
+      // We're not actually done until we have registered our pending
+      // decrement of our parent task and recorded any profiling
+      if (!pending_done.has_triggered())
+        owner_task->complete_execution(pending_done);
+      else
+        owner_task->complete_execution();
       // Grab some information before doing the next step in case it
       // results in the deletion of 'this'
 #ifdef DEBUG_LEGION
@@ -8746,21 +8760,7 @@ namespace Legion {
           need_commit = true;
           children_commit_invoked = true;
         }
-      }
-      // Finally unmap any physical regions that we mapped
-      for (std::vector<PhysicalRegion>::const_iterator it = 
-            physical_regions.begin(); it != physical_regions.end(); it++)
-      {
-        if (it->is_mapped())
-          it->impl->unmap_region();
-      }
-      // Mark that we are done executing this operation
-      // We're not actually done until we have registered our pending
-      // decrement of our parent task and recorded any profiling
-      if (!pending_done.has_triggered())
-        owner_task->complete_execution(pending_done);
-      else
-        owner_task->complete_execution();
+      } 
       if (need_complete)
         owner_task->trigger_children_complete();
       if (need_commit)
