@@ -75,7 +75,7 @@ namespace Realm {
     virtual Event request_metadata(void);
 
     virtual void reset(void);
-    virtual bool done(void) const;
+    virtual bool done(void);
     virtual size_t step(size_t max_bytes, AddressInfo& info,
 			unsigned flags,
 			bool tentative = false);
@@ -230,7 +230,7 @@ namespace Realm {
     enumerator = 0;
   }
 
-  bool TransferIteratorIndexSpace::done(void) const
+  bool TransferIteratorIndexSpace::done(void)
   {
     return(field_idx == field_offsets.size());
   }
@@ -419,7 +419,7 @@ namespace Realm {
     static TransferIterator *deserialize_new(S& deserializer);
       
     virtual void reset(void);
-    virtual bool done(void) const;
+    virtual bool done(void);
     virtual size_t step(size_t max_bytes, AddressInfo& info,
 			unsigned flags,
 			bool tentative = false);
@@ -533,7 +533,7 @@ namespace Realm {
   }
 
   template <unsigned DIM>
-  bool TransferIteratorRect<DIM>::done(void) const
+  bool TransferIteratorRect<DIM>::done(void)
   {
     return(field_idx == field_offsets.size());
   }
@@ -790,7 +790,7 @@ namespace Realm {
     //  can't move away from the process that called H5Fopen
 
     virtual void reset(void);
-    virtual bool done(void) const;
+    virtual bool done(void);
     virtual size_t step(size_t max_bytes, AddressInfo& info,
 			unsigned flags,
 			bool tentative = false);
@@ -846,7 +846,7 @@ namespace Realm {
   }
 
   template <unsigned DIM>
-  bool TransferIteratorHDF5<DIM>::done(void) const
+  bool TransferIteratorHDF5<DIM>::done(void)
   {
     return (field_idx == dset_ids.size());
   }
@@ -993,7 +993,7 @@ namespace Realm {
     virtual Event request_metadata(void);
 
     virtual void reset(void);
-    virtual bool done(void) const;
+    virtual bool done(void);
     virtual size_t step(size_t max_bytes, AddressInfo& info,
 			unsigned flags,
 			bool tentative = false);
@@ -1010,7 +1010,9 @@ namespace Realm {
     bool serialize(S& serializer) const;
 
   protected:
+    IndexSpace<N,T> is;
     IndexSpaceIterator<N,T> iter;
+    bool iter_init_deferred;
     Point<N,T> cur_point, next_point;
     bool carry;
     RegionInstanceImpl *inst_impl;
@@ -1026,10 +1028,16 @@ namespace Realm {
 								RegionInstance inst,
 								const std::vector<FieldID>& _fields,
 								size_t _extra_elems)
-    : iter(_is), field_idx(0), extra_elems(_extra_elems), tentative_valid(false)
+    : is(_is), field_idx(0), extra_elems(_extra_elems), tentative_valid(false)
   {
-    // special case - skip a lot of the init if the space is empty
-    if(!iter.valid) {
+    if(is.is_valid()) {
+      iter.reset(is);
+      iter_init_deferred = false;
+    } else
+      iter_init_deferred = true;
+
+    // special case - skip a lot of the init if we know the space is empty
+    if(!iter_init_deferred && !iter.valid) {
       inst_impl = 0;
       inst_layout = 0;
     } else {
@@ -1043,7 +1051,8 @@ namespace Realm {
 
   template <int N, typename T>
   TransferIteratorIndexSpace<N,T>::TransferIteratorIndexSpace(void)
-    : field_idx(0)
+    : iter_init_deferred(false)
+    , field_idx(0)
     , tentative_valid(false)
   {}
 
@@ -1062,21 +1071,10 @@ namespace Realm {
 	 (deserializer >> extra_elems)))
       return 0;
 
-    TransferIteratorIndexSpace<N,T> *tiis = new TransferIteratorIndexSpace<N,T>;
-    tiis->iter.reset(is);
-
-    if(tiis->iter.valid && inst.exists() && !fields.empty()) {
-      tiis->cur_point = tiis->iter.rect.lo;
-      tiis->fields.swap(fields);
-
-      tiis->inst_impl = get_runtime()->get_instance_impl(inst);
-      tiis->inst_layout = dynamic_cast<const InstanceLayout<N,T> *>(inst.get_layout());
-      assert(tiis->inst_layout != 0);
-    } else {
-      // no iterating to do - clear out some things
-      tiis->inst_impl = 0;
-      tiis->inst_layout = 0;
-    }
+    TransferIteratorIndexSpace<N,T> *tiis = new TransferIteratorIndexSpace<N,T>(is,
+										inst,
+										fields,
+										extra_elems);
 
     return tiis;
   }
@@ -1088,23 +1086,39 @@ namespace Realm {
   template <int N, typename T>
   Event TransferIteratorIndexSpace<N,T>::request_metadata(void)
   {
-    if(inst_impl && !inst_impl->metadata.is_valid())
-      return inst_impl->request_metadata();
+    std::set<Event> events;
 
-    return Event::NO_EVENT;
+    if(iter_init_deferred)
+      events.insert(is.make_valid());
+
+    if(inst_impl && !inst_impl->metadata.is_valid())
+      events.insert(inst_impl->request_metadata());
+
+    return Event::merge_events(events);
   }
 
   template <int N, typename T>
   void TransferIteratorIndexSpace<N,T>::reset(void)
   {
     field_idx = 0;
+    assert(!iter_init_deferred);
     iter.reset(iter.space);
     cur_point = iter.rect.lo;
   }
 
   template <int N, typename T>
-  bool TransferIteratorIndexSpace<N,T>::done(void) const
+  bool TransferIteratorIndexSpace<N,T>::done(void)
   {
+    if(iter_init_deferred) {
+      // index space must be valid now (i.e. somebody should have waited)
+      assert(is.is_valid());
+      iter.reset(is);
+      if(iter.valid)
+	cur_point = iter.rect.lo;
+      else
+	fields.clear();
+      iter_init_deferred = false;
+    }
     return(field_idx == fields.size());
   }
 
@@ -1252,6 +1266,13 @@ namespace Realm {
   size_t TransferIteratorIndexSpace<N,T>::step(size_t max_bytes, AddressInfoHDF5& info,
 						bool tentative /*= false*/)
   {
+    if(iter_init_deferred) {
+      // index space must be valid now (i.e. somebody should have waited)
+      assert(is.is_valid());
+      iter.reset(is);
+      if(!iter.valid) fields.clear();
+      iter_init_deferred = false;
+    }
     assert(!done());
     assert(!tentative_valid);
 
