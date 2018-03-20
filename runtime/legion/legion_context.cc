@@ -11625,6 +11625,15 @@ namespace Legion {
 
 #ifdef CVOPT
     //--------------------------------------------------------------------------
+    AddressSpaceID RemoteContext::find_shard_space(ShardID sid) const
+    //--------------------------------------------------------------------------
+    {
+      if (shard_manager == NULL)
+        assert(false); // TODO: handle this case properly
+      return shard_manager->get_shard_space(sid);
+    }
+
+    //--------------------------------------------------------------------------
     void RemoteContext::send_composite_view_shard_copy_request(ShardID sid, 
                                                                Serializer &rez)
     //--------------------------------------------------------------------------

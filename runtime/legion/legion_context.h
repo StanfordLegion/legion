@@ -1781,6 +1781,7 @@ namespace Legion {
     public:
       virtual ShardingFunction* find_sharding_function(ShardingID sid);
 #ifdef CVOPT
+      virtual AddressSpaceID find_shard_space(ShardID sid) const;
       virtual void send_composite_view_shard_copy_request(ShardID sid,
                                                           Serializer &rez);
       static void handle_shard_copy_request(Deserializer &derez, Runtime *rt);
