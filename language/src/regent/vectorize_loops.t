@@ -43,7 +43,7 @@ else
     SIMD_REG_SIZE = 32
   elseif os.execute("grep sse /proc/cpuinfo > /dev/null") == 0 then
     SIMD_REG_SIZE = 16
-  elseif os.execute("grep POWER8 /proc/cpuinfo > /dev/null") == 0 then
+  elseif os.execute("grep altivec /proc/cpuinfo > /dev/null") == 0 then
     SIMD_REG_SIZE = 16
   else
     error("Unable to determine CPU architecture")

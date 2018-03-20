@@ -3902,7 +3902,7 @@ end
 do
   local intrinsic_names = {}
   if os.execute("bash -c \"[ `uname` == 'Linux' ]\"") == 0 and
-    os.execute("grep POWER8 /proc/cpuinfo > /dev/null") == 0
+    os.execute("grep altivec /proc/cpuinfo > /dev/null") == 0
   then
     intrinsic_names[vector(float,  4)] = "llvm.ppc.altivec.v%sfp"
     intrinsic_names[vector(double, 2)] = "llvm.ppc.vsx.xv%sdp"

@@ -43,7 +43,7 @@ namespace Realm {
     virtual Event request_metadata(void);
 
     virtual void reset(void) = 0;
-    virtual bool done(void) const = 0;
+    virtual bool done(void) = 0;
 
     // flag bits to control iterators
     enum {
