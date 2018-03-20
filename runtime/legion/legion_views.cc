@@ -7641,7 +7641,7 @@ namespace Legion {
       RegionTreeForest *context = logical_node->context;
       IndexSpaceExpression *target_expr = context->intersect_index_spaces(
         logical_node->get_index_space_expression(), 
-        copier.dst->logical_node->get_index_space_expression();
+        copier.dst->logical_node->get_index_space_expression());
 #ifdef DEBUG_LEGION
       assert(!target_expr->is_empty());
 #endif
