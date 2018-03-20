@@ -13448,6 +13448,7 @@ namespace Legion {
             request_event = Runtime::create_rt_user_event();
             record.ready = request_event;
             record.result_set = false;
+            wait_on = request_event;
           }
         }
       }
@@ -13873,6 +13874,7 @@ namespace Legion {
             request_event = Runtime::create_rt_user_event();
             record.ready = request_event;
             record.result_set = false;
+            wait_on = request_event;
           }
         }
       }
@@ -14288,6 +14290,7 @@ namespace Legion {
             request_event = Runtime::create_rt_user_event();
             record.ready = request_event;
             record.result_set = false;
+            wait_on = request_event;
           }
         }
       }
