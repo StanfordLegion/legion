@@ -13605,7 +13605,11 @@ namespace Legion {
       // We better have space for all the fields in the request
       assert(!(copy_mask - dst->get_space_mask()));
 #endif
-      // Quick check to see if we are done early
+      // Quick checks to see if we are done early
+      // If the logical region of the destination is empty nothing to do
+      if (dst->logical_node->get_index_space_expression()->is_empty())
+        return;
+      // If we are already valid for all our fields then we are also done
       {
         LegionMap<LogicalView*,FieldMask>::aligned::const_iterator finder = 
           valid_instances.find(dst);
