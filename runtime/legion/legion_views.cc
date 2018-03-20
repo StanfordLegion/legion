@@ -8979,18 +8979,46 @@ namespace Legion {
           runtime->find_or_request_version_state(did, ready); 
         std::map<VersionState*,FieldMask>::iterator finder = 
           version_states.find(state);
+#ifdef CVOPT
         if (finder != version_states.end())
         {
           FieldMask state_mask;
           derez.deserialize(state_mask);
-#ifndef CVOPT
+          finder->second |= state_mask;
+        }
+        else
+          derez.deserialize(version_states[state]);
+        if (ready.exists() && !ready.has_triggered())
+        {
+          DeferCompositeNodeStateArgs args;
+          args.proxy_this = this;
+          args.state = state;
+          args.owner_did = owner_did;
+          args.root_owner = root_owner;
+          RtEvent precondition = 
+            runtime->issue_runtime_meta_task(args, 
+                LG_LATENCY_DEFERRED_PRIORITY, ready);
+          preconditions.insert(precondition);
+        }
+        else
+        {
+          state->add_nested_resource_ref(owner_did);
+          // If we're the root owner then we also have to add our
+          // gc ref, but no valid ref since we don't own it
+          if (root_owner)
+            state->add_nested_gc_ref(owner_did, &mutator);
+        }
+#else
+        if (finder != version_states.end())
+        {
+          FieldMask state_mask;
+          derez.deserialize(state_mask);
           const FieldMask diff_mask = state_mask - finder->second;
           if (!!diff_mask)
           {
             uncaptured_states[state] |= diff_mask;
             uncaptured_fields |= diff_mask;
           }
-#endif
           finder->second |= state_mask;
           // No need to add any references since it was already captured
 #ifdef DEBUG_LEGION
@@ -9017,22 +9045,20 @@ namespace Legion {
             preconditions.insert(precondition);
           }
           else
-          {
+          { 
             // Version State is ready now, so we can unpack it directly
             FieldMask &state_mask = version_states[state];
             derez.deserialize(state_mask);
-#ifndef CVOPT
             uncaptured_states[state] = state_mask;
             uncaptured_fields |= state_mask;
-#endif
             state->add_nested_resource_ref(owner_did);
             // If we're the root owner then we also have to add our
             // gc ref, but no valid ref since we don't own it
             if (root_owner)
               state->add_nested_gc_ref(owner_did, &mutator);
           }
-          
         }
+#endif
       }
     }
 
@@ -9078,9 +9104,9 @@ namespace Legion {
 #ifndef CVOPT
       // Add the state to the view
       nargs->proxy_this->add_uncaptured_state(nargs->state, *nargs->mask);
-#endif
       // Free up the mask that we allocated
       delete nargs->mask;
+#endif
     }
 
     //--------------------------------------------------------------------------

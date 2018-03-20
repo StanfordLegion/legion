@@ -1792,7 +1792,9 @@ namespace Legion {
         CompositeNode *proxy_this;
         VersionState *state;
         DistributedID owner_did;
+#ifndef CVOPT
         FieldMask *mask;
+#endif
         bool root_owner;
       };
       struct DeferCaptureArgs : public LgTaskArgs<DeferCaptureArgs> {
