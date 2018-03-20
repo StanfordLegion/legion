@@ -5263,6 +5263,13 @@ namespace Legion {
            Deserializer &derez, RegionTreeForest *forest, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
+      // Handle the special case where we are the same node where we were packed
+      if (source == forest->runtime->address_space)
+      {
+        IndexSpaceExpression *result;
+        derez.deserialize(result);
+        return result;
+      }
       bool is_index_space;
       derez.deserialize(is_index_space);
       // If this is an index space it is easy

@@ -113,6 +113,12 @@ namespace Legion {
                                                       AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
+      // Handle a special case where we are going to the same node
+      if (target == context->runtime->address_space)
+      {
+        rez.serialize<IndexSpaceExpression*>(this);
+        return;
+      }
       Realm::IndexSpace<DIM,T> temp;
       ApEvent ready = get_realm_index_space(temp, true/*tight*/);
       rez.serialize<bool>(false); // not an index space
@@ -482,6 +488,12 @@ namespace Legion {
                                                   AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
+      // Handle a special case where we are going to the same node
+      if (target == context->runtime->address_space)
+      {
+        rez.serialize<IndexSpaceExpression*>(this);
+        return;
+      }
       rez.serialize<bool>(false); // not an index space
       rez.serialize(expr_id);
       rez.serialize<size_t>(sizeof(type_tag) + sizeof(realm_index_space) + 
@@ -688,8 +700,13 @@ namespace Legion {
                                                  AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
-      rez.serialize<bool>(true/*index space*/);
-      rez.serialize(handle);
+      if (target != context->runtime->address_space)
+      {
+        rez.serialize<bool>(true/*index space*/);
+        rez.serialize(handle);
+      }
+      else
+        rez.serialize<IndexSpaceExpression*>(this);
     }
 
     //--------------------------------------------------------------------------
