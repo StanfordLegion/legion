@@ -316,6 +316,7 @@ end
 -- ## Main simulation loop
 -- #################
 
+__demand(__cuda)
 task adv_pos_half(rp : region(point),
                   rp_spans : region(span),
                   dt : double,
@@ -385,6 +386,7 @@ do
   end
 end
 
+__demand(__cuda)
 task calc_everything(rz : region(zone), rpp : region(point), rpg : region(point),
                      rs : region(side(rz, rpp, rpg, rs)),
                      rz_spans : region(span),
@@ -1091,6 +1093,7 @@ do
   end
 end
 
+__demand(__cuda)
 task adv_pos_full(rp : region(point),
                   rp_spans : region(span),
                   dt : double,
@@ -1151,6 +1154,7 @@ do
   end
 end
 
+__demand(__cuda)
 task calc_everything_full(rz : region(zone), rpp : region(point), rpg : region(point),
                           rs : region(side(rz, rpp, rpg, rs)),
                           rz_spans : region(span),
@@ -1400,6 +1404,7 @@ end
 -- 9. Compute timstep for next cycle.
 --
 
+__demand(__cuda)
 task calc_dt_hydro(rz : region(zone),
                    rz_spans : region(span),
                    dtlast : double, dtmax : double,
