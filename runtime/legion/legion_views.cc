@@ -8385,7 +8385,7 @@ namespace Legion {
       LogicalView *dst = 
         runtime->find_or_request_logical_view(dst_did, dst_ready);
       MaterializedView *dst_view = NULL;
-      TraversalInfo *info = RemoteTraversalInfo::unpack(derez, runtime); 
+      RemoteTraversalInfo *info = RemoteTraversalInfo::unpack(derez, runtime); 
       bool across;
       derez.deserialize(across);
       CopyAcrossHelper *across_helper = NULL;
