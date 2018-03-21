@@ -82,8 +82,8 @@ local terra has_symbol(symbol : rawstring)
 end
 
 do
-  if has_symbol("cuInit") then
-    if not config["cuda-offline"]  then
+  if not config["cuda-offline"] then
+    if has_symbol("cuInit") then
       local r = DriverAPI.cuInit(0)
       assert(r == 0)
       terra cudahelper.check_cuda_available()
@@ -91,12 +91,12 @@ do
       end
     else
       terra cudahelper.check_cuda_available()
-        return true
+        return false
       end
     end
   else
     terra cudahelper.check_cuda_available()
-      return false
+      return true
     end
   end
 end

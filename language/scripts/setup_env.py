@@ -21,6 +21,8 @@ import argparse, hashlib, multiprocessing, os, platform, re, subprocess, sys, tr
 def discover_llvm_version():
     if platform.node().startswith('titan'):
         return '38'
+    elif os.environ.get('LMOD_SYSTEM_NAME') == 'summit': # Summit doesn't set hostname
+        return '38'
     else:
         return '39'
 
@@ -43,6 +45,8 @@ def discover_conduit():
         return 'psm'
     elif platform.node().startswith('titan'):
         return 'gemini'
+    elif os.environ.get('LMOD_SYSTEM_NAME') == 'summit': # Summit doesn't set hostname
+        return 'ibv'
     else:
         raise Exception('Please set CONDUIT in your environment')
 
