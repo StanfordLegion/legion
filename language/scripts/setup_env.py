@@ -162,7 +162,6 @@ def build_regent(root_dir, use_cmake, cmake_exe,
         ('GASNET', gasnet_dir),
         ('USE_GASNET', os.environ['USE_GASNET'] if 'USE_GASNET' in os.environ else '1'),
         ('LLVM_CONFIG', os.path.join(llvm_dir, 'bin', 'llvm-config')),
-        ('USE_HDF', os.environ['USE_HDF'] if 'USE_HDF' in os.environ else '1'),
         ('HDF_ROOT', hdf_dir),
     ])
 
