@@ -224,7 +224,7 @@ def install_hdf(hdf_dir, hdf_install_dir, thread_count, cache, is_cray, insecure
     assert(os.path.isdir(hdf_dir))
     hdf_tarball = os.path.join(hdf_dir, 'hdf5-1.10.1.tar.gz')
     hdf_source_dir = os.path.join(hdf_dir, 'hdf5-1.10.1')
-    download(hdf_tarball, 'https://support.hdfgroup.org/ftp/HDF5/releases/hdf5-1.10/hdf5-1.10.1/src/hdf5-1.10.1.tar.gz', '73b77a23ca099ac47d8241f633bf67430007c430', insecure=insecure)
+    download(hdf_tarball, 'http://sapling.stanford.edu/~manolis/hdf/hdf5-1.10.1.tar.gz', '73b77a23ca099ac47d8241f633bf67430007c430', insecure=insecure)
     if not cache:
         extract(hdf_dir, hdf_tarball, 'gz')
         build_hdf(hdf_source_dir, hdf_install_dir, thread_count, is_cray)
