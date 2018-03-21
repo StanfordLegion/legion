@@ -105,7 +105,7 @@
 // Default amount of hysteresis on the task window in the
 // form of a percentage (must be between 0 and 100)
 #ifndef DEFAULT_TASK_WINDOW_HYSTERESIS
-#define DEFAULT_TASK_WINDOW_HYSTERESIS  75
+#define DEFAULT_TASK_WINDOW_HYSTERESIS  25
 #endif
 // Default number of tasks to have in flight before applying 
 // back pressure to the mapping process for a context

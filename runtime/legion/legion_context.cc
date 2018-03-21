@@ -4466,7 +4466,7 @@ namespace Legion {
       RtEvent wait_event;
       // Take the context lock in exclusive mode
       {
-        AutoLock win_lock(window_lock);
+        AutoLock child_lock(child_op_lock);
         // We already hold our lock from the callsite above
         // Outstanding children count has already been incremented for the
         // operation being launched so decrement it in case we wait and then
