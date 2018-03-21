@@ -1565,7 +1565,7 @@ namespace Realm {
     static TransferIterator *deserialize_new(S& deserializer);
       
     virtual void reset(void);
-    virtual bool done(void) const;
+    virtual bool done(void);
 
     virtual size_t step(size_t max_bytes, AddressInfo& info,
 			unsigned flags,
@@ -1614,7 +1614,7 @@ namespace Realm {
     offset = 0;
   }
 
-  bool WrappingFIFOIterator::done(void) const
+  bool WrappingFIFOIterator::done(void)
   {
     // we never know when we're done
     return false;

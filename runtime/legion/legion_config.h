@@ -105,11 +105,16 @@
 // Default amount of hysteresis on the task window in the
 // form of a percentage (must be between 0 and 100)
 #ifndef DEFAULT_TASK_WINDOW_HYSTERESIS
-#define DEFAULT_TASK_WINDOW_HYSTERESIS  75
+#define DEFAULT_TASK_WINDOW_HYSTERESIS  25
 #endif
-// How many tasks to group together for runtime operations
+// Default number of tasks to have in flight before applying 
+// back pressure to the mapping process for a context
 #ifndef DEFAULT_MIN_TASKS_TO_SCHEDULE
 #define DEFAULT_MIN_TASKS_TO_SCHEDULE   32
+#endif
+// How many tasks to group together for runtime operations
+#ifndef DEFAULT_META_TASK_VECTOR_WIDTH
+#define DEFAULT_META_TASK_VECTOR_WIDTH  16
 #endif
 // The maximum size of active messages sent by the runtime in bytes
 // Note this value was picked based on making a tradeoff between
@@ -182,6 +187,12 @@
 // Maximum number of non-replayable templates before warnings
 #ifndef LEGION_NON_REPLAYABLE_WARNING
 #define LEGION_NON_REPLAYABLE_WARNING     5
+#endif
+
+// Initial offset for library IDs
+// Controls how many IDs are available for dynamic use
+#ifndef LEGION_INITIAL_LIBRARY_ID_OFFSET
+#define LEGION_INITIAL_LIBRARY_ID_OFFSET (1 << 30)
 #endif
 
 // Some helper macros
@@ -556,7 +567,8 @@ typedef enum legion_error_t {
   ERROR_ATTACH_OPERATION_MISSING_POINTER = 546,
   ERROR_RESERVED_VARIANT_ID = 547,
   ERROR_NON_DENSE_RECTANGLE = 548,
-  
+  ERROR_LIBRARY_COUNT_MISMATCH = 549, 
+  ERROR_MPI_INTEROP_MISCONFIGURATION = 550,
   
 
   LEGION_WARNING_FUTURE_NONLEAF = 1000,
@@ -617,6 +629,7 @@ typedef enum legion_error_t {
   LEGION_FATAL_SHIM_MAPPER_SUPPORT = 2006,
   LEGION_FATAL_UNKNOWN_FIELD_ID = 2007,
   LEGION_FATAL_RESTRICTED_SIMULTANEOUS = 2008,
+  LEGION_FATAL_EXCEEDED_LIBRARY_ID_OFFSET = 2009,
   
   
 }  legion_error_t;

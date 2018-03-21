@@ -6425,6 +6425,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    MapperID Runtime::generate_library_mapper_ids(const char *name, size_t cnt)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->generate_library_mapper_ids(name, cnt);
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ MapperID Runtime::generate_static_mapper_id(void)
     //--------------------------------------------------------------------------
     {
@@ -6451,6 +6458,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return runtime->generate_dynamic_projection_id();
+    }
+
+    //--------------------------------------------------------------------------
+    ProjectionID Runtime::generate_library_projection_ids(const char *name,
+                                                          size_t count)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->generate_library_projection_ids(name, count);
     }
 
     //--------------------------------------------------------------------------
@@ -6902,7 +6917,11 @@ namespace Legion {
     /*static*/ Runtime* Runtime::get_runtime(Processor p)
     //--------------------------------------------------------------------------
     {
-      return Internal::implicit_runtime->external;
+      // If we have an implicit runtime we use that
+      if (Internal::implicit_runtime != NULL)
+        return Internal::implicit_runtime->external;
+      // Otherwise this is not from a Legion task, so fallback to the_runtime
+      return Internal::Runtime::the_runtime->external;
     }
 
     //--------------------------------------------------------------------------
@@ -6937,6 +6956,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return runtime->generate_dynamic_task_id();
+    }
+
+    //--------------------------------------------------------------------------
+    TaskID Runtime::generate_library_task_ids(const char *name, size_t count)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->generate_library_task_ids(name, count);
     }
 
     //--------------------------------------------------------------------------
@@ -6976,31 +7002,6 @@ namespace Legion {
       return preregister_variant(registrar, user_data, user_len,
 				 realm_desc, has_return, task_name,
                                  AUTO_GENERATE_ID);
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void Runtime::preregister_initialization_function(
-                                         Processor::Kind proc_kind,
-                                         const CodeDescriptor &codedesc,
-                                         const void *user_data, size_t user_len)
-    //--------------------------------------------------------------------------
-    {
-      CodeDescriptor *realm_desc = new CodeDescriptor(codedesc);
-      Internal::Runtime::preregister_initialization_function(proc_kind, 
-                                      realm_desc, user_data, user_len);
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void Runtime::initialization_function_preamble(
-                            const void *data, size_t datalen, Runtime *&runtime)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(datalen == sizeof(Internal::Runtime*));
-#endif
-      Internal::Runtime *rt = *((Internal::Runtime**)data); 
-      Internal::implicit_runtime = rt;
-      runtime = rt->external;
     }
 
     //--------------------------------------------------------------------------

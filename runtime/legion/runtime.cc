@@ -6709,6 +6709,38 @@ namespace Legion {
               runtime->handle_mpi_rank_exchange(derez);
               break;
             }
+          case SEND_LIBRARY_MAPPER_REQUEST:
+            {
+              runtime->handle_library_mapper_request(derez, 
+                                      remote_address_space);
+              break;
+            }
+          case SEND_LIBRARY_MAPPER_RESPONSE:
+            {
+              runtime->handle_library_mapper_response(derez);
+              break;
+            }
+          case SEND_LIBRARY_PROJECTION_REQUEST:
+            {
+              runtime->handle_library_projection_request(derez,
+                                          remote_address_space);
+              break;
+            }
+          case SEND_LIBRARY_PROJECTION_RESPONSE:
+            {
+              runtime->handle_library_projection_response(derez);
+              break;
+            }
+          case SEND_LIBRARY_TASK_REQUEST:
+            {
+              runtime->handle_library_task_request(derez, remote_address_space);
+              break;
+            }
+          case SEND_LIBRARY_TASK_RESPONSE:
+            {
+              runtime->handle_library_task_response(derez);
+              break;
+            }
           case SEND_SHUTDOWN_NOTIFICATION:
             {
               // If we have a profiler, we shouldn't have incremented the
@@ -7226,84 +7258,6 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
-    // Pending Initializations
-    /////////////////////////////////////////////////////////////
-
-    //--------------------------------------------------------------------------
-    PendingInitializationFunction::PendingInitializationFunction(
-                                          Processor::TaskFuncID fid,
-                                          Processor::Kind kind,
-                                          CodeDescriptor *desc,
-                                          const void *udata, size_t udata_size)
-      : func_id(fid), proc_kind(kind), realm_desc(desc)
-    //--------------------------------------------------------------------------
-    {
-      if (udata != NULL)
-      {
-        user_data_size = udata_size;
-        user_data = malloc(user_data_size);
-        memcpy(user_data,udata,user_data_size);
-      }
-      else
-      {
-        user_data_size = 0;
-        user_data = NULL;
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    PendingInitializationFunction::PendingInitializationFunction(
-                                       const PendingInitializationFunction &rhs)
-      : func_id(rhs.func_id), proc_kind(rhs.proc_kind)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    PendingInitializationFunction::~PendingInitializationFunction(void)
-    //--------------------------------------------------------------------------
-    {
-      if (user_data != NULL)
-        free(user_data);
-      if (realm_desc)
-        delete realm_desc;
-    }
-
-    //--------------------------------------------------------------------------
-    PendingInitializationFunction& PendingInitializationFunction::operator=(
-                                       const PendingInitializationFunction &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
-    }
-
-    //--------------------------------------------------------------------------
-    RtEvent PendingInitializationFunction::register_function(Processor proc,
-                                                             Runtime *runtime)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(proc.kind() == proc_kind);
-#endif
-      Realm::ProfilingRequestSet no_requests;
-      return RtEvent(proc.register_task(func_id, *realm_desc, no_requests,
-                      &runtime, sizeof(runtime)));
-    }
-
-    //--------------------------------------------------------------------------
-    RtEvent PendingInitializationFunction::perform_function(
-                                      RealmRuntime &realm, RtEvent precondition)
-    //--------------------------------------------------------------------------
-    {
-      return RtEvent(realm.collective_spawn_by_kind(proc_kind, func_id,
-            user_data, user_data_size, false/*one per node*/, precondition));
-    }
-
-    /////////////////////////////////////////////////////////////
     // Pending Registrations 
     /////////////////////////////////////////////////////////////
 
@@ -7373,14 +7327,15 @@ namespace Legion {
     void PendingVariantRegistration::perform_registration(Runtime *runtime)
     //--------------------------------------------------------------------------
     {
-      runtime->register_variant(registrar, user_data, user_data_size,
-                    realm_desc, has_return, vid, false/*check task*/);
       // If we have a logical task name, attach the name info
+      // Do this first before any logging for the variant
       if (logical_task_name != NULL)
         runtime->attach_semantic_information(registrar.task_id, 
                           NAME_SEMANTIC_TAG, logical_task_name, 
                           strlen(logical_task_name)+1, 
                           false/*mutable*/, false/*send to owner*/);
+      runtime->register_variant(registrar, user_data, user_data_size,
+                    realm_desc, has_return, vid, false/*check task*/);
     }
 
     /////////////////////////////////////////////////////////////
@@ -9174,10 +9129,12 @@ namespace Legion {
         total_address_spaces(address_spaces.size()),
         runtime_stride(address_spaces.size()), profiler(NULL),
         forest(new RegionTreeForest(this)), virtual_manager(NULL), 
-        has_explicit_utility_procs(!local_utilities.empty()), input_args(args),
+        num_utility_procs(local_utilities.empty() ? locals.size() : 
+                          local_utilities.size()), input_args(args),
         initial_task_window_size(config.initial_task_window_size),
         initial_task_window_hysteresis(config.initial_task_window_hysteresis),
         initial_tasks_to_schedule(config.initial_tasks_to_schedule),
+        initial_meta_task_vector_width(config.initial_meta_task_vector_width),
         max_message_size(config.max_message_size),
         gc_epoch_size(config.gc_epoch_size),
         max_local_fields(config.max_local_fields),
@@ -9232,12 +9189,14 @@ namespace Legion {
         unique_field_id(MAX_APPLICATION_FIELD_ID + 
                         ((unique == 0) ? runtime_stride : unique)),
         unique_code_descriptor_id(LG_TASK_ID_AVAILABLE +
-            get_pending_initialization_table().size() + 
                         ((unique == 0) ? runtime_stride : unique)),
         unique_constraint_id((unique == 0) ? runtime_stride : unique),
         unique_task_id(get_current_static_task_id()+unique),
         unique_mapper_id(get_current_static_mapper_id()+unique),
         unique_projection_id(get_current_static_projection_id()+unique),
+        unique_library_mapper_id(LEGION_INITIAL_LIBRARY_ID_OFFSET),
+        unique_library_projection_id(LEGION_INITIAL_LIBRARY_ID_OFFSET),
+        unique_library_task_id(LEGION_INITIAL_LIBRARY_ID_OFFSET),
         unique_distributed_id((unique == 0) ? runtime_stride : unique),
         gc_epoch_counter(0)
     //--------------------------------------------------------------------------
@@ -9306,8 +9265,13 @@ namespace Legion {
       // Do some mixing
       for (int i = 0; i < 256; i++)
         nrand48(random_state);
+      // Initialize our profiling instance
       if (address_space < num_profiling_nodes)
         initialize_legion_prof(config);
+      // Pull in any static registrations that were done
+      register_static_variants();
+      register_static_constraints();
+      register_static_projections();
 #ifdef DEBUG_LEGION
       if (logging_region_tree_state)
       {
@@ -9355,11 +9319,12 @@ namespace Legion {
     Runtime::Runtime(const Runtime &rhs)
       : external(NULL), mapper_runtime(NULL), machine(rhs.machine), 
         address_space(0), total_address_spaces(0), runtime_stride(0), 
-        profiler(NULL), forest(NULL),
-        has_explicit_utility_procs(false), input_args(rhs.input_args), 
+        profiler(NULL), forest(NULL), 
+        num_utility_procs(rhs.num_utility_procs), input_args(rhs.input_args),
         initial_task_window_size(rhs.initial_task_window_size),
         initial_task_window_hysteresis(rhs.initial_task_window_hysteresis),
         initial_tasks_to_schedule(rhs.initial_tasks_to_schedule),
+        initial_meta_task_vector_width(rhs.initial_meta_task_vector_width),
         max_message_size(rhs.max_message_size),
         gc_epoch_size(rhs.gc_epoch_size), 
         max_local_fields(rhs.max_local_fields),
@@ -9425,8 +9390,6 @@ namespace Legion {
       delete forest;
       delete external;
       delete mapper_runtime;
-      if (mpi_rank_table != NULL)
-        delete mpi_rank_table;
       for (std::map<Processor,ProcessorManager*>::const_iterator it = 
             proc_managers.begin(); it != proc_managers.end(); it++)
       {
@@ -9723,7 +9686,7 @@ namespace Legion {
               pending_variants.begin(); it != pending_variants.end(); it++)
         {
           (*it)->perform_registration(this);
-          // avoid races on seaparte runtime instances
+          // avoid races on separate runtime instances
           if (!separate_runtime_instances)
             delete *it;
         }
@@ -10111,21 +10074,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void Runtime::initialize_runtime(void)
     //--------------------------------------------------------------------------
-    {
-      register_static_variants();
-      register_static_constraints();
-      register_static_projections(); 
+    {  
+      // Initialize our virtual manager and our mappers
       initialize_virtual_manager();
-      // Before doing the mapper initialization we have to construct
-      // any MPI rank tables that we have
-      if (mpi_rank_table != 0)
-      {
-#ifdef DEBUG_LEGION
-        assert(!separate_runtime_instances);
-#endif
+      // If we have an MPI rank table do the exchanges before initializing
+      // the mappers as they may want to look at the rank table
+      if (mpi_rank_table != NULL)
         mpi_rank_table->perform_rank_exchange();
-      }
-      initialize_mappers();
+      initialize_mappers(); 
     }
 
     //--------------------------------------------------------------------------
@@ -12415,11 +12371,121 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       MapperID result = __sync_fetch_and_add(&unique_mapper_id, runtime_stride);
-#ifdef DEBUG_LEGION
-      // Check for overflow
-      assert(result <= unique_mapper_id);
-#endif
+      // Check for hitting the library limit
+      if (result >= LEGION_INITIAL_LIBRARY_ID_OFFSET)
+        REPORT_LEGION_FATAL(LEGION_FATAL_EXCEEDED_LIBRARY_ID_OFFSET,
+            "Dynamic Mapper IDs exceeded library ID offset %d",
+            LEGION_INITIAL_LIBRARY_ID_OFFSET)
       return result;
+    }
+
+    //--------------------------------------------------------------------------
+    MapperID Runtime::generate_library_mapper_ids(const char *name, size_t cnt)
+    //--------------------------------------------------------------------------
+    {
+      // Easy case if the user asks for no IDs
+      if (cnt == 0)
+        return AUTO_GENERATE_ID;
+      const std::string library_name(name); 
+      // Take the lock in read only mode and see if we can find the result
+      RtEvent wait_on;
+      {
+        AutoLock l_lock(library_lock,1,false/*exclusive*/);
+        std::map<std::string,LibraryMapperIDs>::const_iterator finder = 
+          library_mapper_ids.find(library_name);
+        if (finder != library_mapper_ids.end())
+        {
+          // First do a check to see if the counts match
+          if (finder->second.count != cnt)
+            REPORT_LEGION_ERROR(ERROR_LIBRARY_COUNT_MISMATCH,
+                "MapperID generation counts %zd and %zd differ for library %s",
+                finder->second.count, cnt, name)
+          if (finder->second.result_set)
+            return finder->second.result;
+          // This should never happen unless we are on a node other than 0
+#ifdef DEBUG_LEGION
+          assert(address_space > 0);
+#endif
+          wait_on = finder->second.ready;
+        }
+      }
+      RtUserEvent request_event;
+      if (!wait_on.exists())
+      {
+        AutoLock l_lock(library_lock);
+        // Check to make sure we didn't lose the race
+        std::map<std::string,LibraryMapperIDs>::const_iterator finder = 
+          library_mapper_ids.find(library_name);
+        if (finder != library_mapper_ids.end())
+        {
+          // First do a check to see if the counts match
+          if (finder->second.count != cnt)
+            REPORT_LEGION_ERROR(ERROR_LIBRARY_COUNT_MISMATCH,
+                "MapperID generation counts %zd and %zd differ for library %s",
+                finder->second.count, cnt, name)
+          if (finder->second.result_set)
+            return finder->second.result;
+          // This should never happen unless we are on a node other than 0
+#ifdef DEBUG_LEGION
+          assert(address_space > 0);
+#endif
+          wait_on = finder->second.ready;
+        }
+        if (!wait_on.exists())
+        {
+          LibraryMapperIDs &record = library_mapper_ids[library_name];
+          record.count = cnt;
+          if (address_space == 0)
+          {
+            // We're going to make the result
+            record.result = unique_library_mapper_id;
+            unique_library_mapper_id += cnt;
+#ifdef DEBUG_LEGION
+            assert(unique_library_mapper_id > record.result);
+#endif
+            record.result_set = true;
+            return record.result;
+          }
+          else
+          {
+            // We're going to request the result
+            request_event = Runtime::create_rt_user_event();
+            record.ready = request_event;
+            record.result_set = false;
+            wait_on = request_event;
+          }
+        }
+      }
+      // Should only get here on nodes other than 0
+#ifdef DEBUG_LEGION
+      assert(address_space > 0);
+      assert(wait_on.exists());
+#endif
+      if (request_event.exists())
+      {
+        // Include the null terminator in length
+        const size_t string_length = strlen(name) + 1;
+        // Send the request to node 0 for the result
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize<size_t>(string_length);
+          rez.serialize(name, string_length);
+          rez.serialize<size_t>(cnt);
+          rez.serialize(request_event);
+        }
+        send_library_mapper_request(0/*target*/, rez);
+      }
+      wait_on.wait();
+      // When we wake up we should be able to find the result
+      AutoLock l_lock(library_lock,1,false/*exclusive*/);
+      std::map<std::string,LibraryMapperIDs>::const_iterator finder = 
+          library_mapper_ids.find(library_name);
+#ifdef DEBUG_LEGION
+      assert(finder != library_mapper_ids.end());
+      assert(finder->second.result_set);
+#endif
+      return finder->second.result;
     }
 
     //--------------------------------------------------------------------------
@@ -12520,11 +12586,122 @@ namespace Legion {
     {
       ProjectionID result = 
         __sync_fetch_and_add(&unique_projection_id, runtime_stride);
-#ifdef DEBUG_LEGION
-      // Check for overflow
-      assert(result <= unique_projection_id);
-#endif
+      // Check for hitting the library limit
+      if (result >= LEGION_INITIAL_LIBRARY_ID_OFFSET)
+        REPORT_LEGION_FATAL(LEGION_FATAL_EXCEEDED_LIBRARY_ID_OFFSET,
+            "Dynamic Projection IDs exceeded library ID offset %d",
+            LEGION_INITIAL_LIBRARY_ID_OFFSET)
       return result;
+    }
+
+    //--------------------------------------------------------------------------
+    ProjectionID Runtime::generate_library_projection_ids(const char *name, 
+                                                          size_t cnt)
+    //--------------------------------------------------------------------------
+    {
+      // Easy case if the user asks for no IDs
+      if (cnt == 0)
+        return AUTO_GENERATE_ID;
+      const std::string library_name(name); 
+      // Take the lock in read only mode and see if we can find the result
+      RtEvent wait_on;
+      {
+        AutoLock l_lock(library_lock,1,false/*exclusive*/);
+        std::map<std::string,LibraryProjectionIDs>::const_iterator finder = 
+          library_projection_ids.find(library_name);
+        if (finder != library_projection_ids.end())
+        {
+          // First do a check to see if the counts match
+          if (finder->second.count != cnt)
+            REPORT_LEGION_ERROR(ERROR_LIBRARY_COUNT_MISMATCH,
+                "ProjectionID generation counts %zd and %zd differ for "
+                "library %s", finder->second.count, cnt, name)
+          if (finder->second.result_set)
+            return finder->second.result;
+          // This should never happen unless we are on a node other than 0
+#ifdef DEBUG_LEGION
+          assert(address_space > 0);
+#endif
+          wait_on = finder->second.ready;
+        }
+      }
+      RtUserEvent request_event;
+      if (!wait_on.exists())
+      {
+        AutoLock l_lock(library_lock);
+        // Check to make sure we didn't lose the race
+        std::map<std::string,LibraryProjectionIDs>::const_iterator finder = 
+          library_projection_ids.find(library_name);
+        if (finder != library_projection_ids.end())
+        {
+          // First do a check to see if the counts match
+          if (finder->second.count != cnt)
+            REPORT_LEGION_ERROR(ERROR_LIBRARY_COUNT_MISMATCH,
+                "ProjectionID generation counts %zd and %zd differ for "
+                "library %s", finder->second.count, cnt, name)
+          if (finder->second.result_set)
+            return finder->second.result;
+          // This should never happen unless we are on a node other than 0
+#ifdef DEBUG_LEGION
+          assert(address_space > 0);
+#endif
+          wait_on = finder->second.ready;
+        }
+        if (!wait_on.exists())
+        {
+          LibraryProjectionIDs &record = library_projection_ids[library_name];
+          record.count = cnt;
+          if (address_space == 0)
+          {
+            // We're going to make the result
+            record.result = unique_library_projection_id;
+            unique_library_projection_id += cnt;
+#ifdef DEBUG_LEGION
+            assert(unique_library_projection_id > record.result);
+#endif
+            record.result_set = true;
+            return record.result;
+          }
+          else
+          {
+            // We're going to request the result
+            request_event = Runtime::create_rt_user_event();
+            record.ready = request_event;
+            record.result_set = false;
+            wait_on = request_event;
+          }
+        }
+      }
+      // Should only get here on nodes other than 0
+#ifdef DEBUG_LEGION
+      assert(address_space > 0);
+      assert(wait_on.exists());
+#endif
+      if (request_event.exists())
+      {
+        // Include the null terminator in length
+        const size_t string_length = strlen(name) + 1;
+        // Send the request to node 0 for the result
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize<size_t>(string_length);
+          rez.serialize(name, string_length);
+          rez.serialize<size_t>(cnt);
+          rez.serialize(request_event);
+        }
+        send_library_projection_request(0/*target*/, rez);
+      }
+      wait_on.wait();
+      // When we wake up we should be able to find the result
+      AutoLock l_lock(library_lock,1,false/*exclusive*/);
+      std::map<std::string,LibraryProjectionIDs>::const_iterator finder = 
+          library_projection_ids.find(library_name);
+#ifdef DEBUG_LEGION
+      assert(finder != library_projection_ids.end());
+      assert(finder->second.result_set);
+#endif
+      return finder->second.result;
     }
     
     //--------------------------------------------------------------------------
@@ -12826,11 +13003,121 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       TaskID result = __sync_fetch_and_add(&unique_task_id, runtime_stride);
-#ifdef DEBUG_LEGION
-      // Check for overflow
-      assert(result <= unique_task_id);
-#endif
+      // Check for hitting the library limit
+      if (result >= LEGION_INITIAL_LIBRARY_ID_OFFSET)
+        REPORT_LEGION_FATAL(LEGION_FATAL_EXCEEDED_LIBRARY_ID_OFFSET,
+            "Dynamic Task IDs exceeded library ID offset %d",
+            LEGION_INITIAL_LIBRARY_ID_OFFSET)
       return result;
+    }
+
+    //--------------------------------------------------------------------------
+    TaskID Runtime::generate_library_task_ids(const char *name, size_t cnt)
+    //--------------------------------------------------------------------------
+    {
+      // Easy case if the user asks for no IDs
+      if (cnt == 0)
+        return AUTO_GENERATE_ID;
+      const std::string library_name(name); 
+      // Take the lock in read only mode and see if we can find the result
+      RtEvent wait_on;
+      {
+        AutoLock l_lock(library_lock,1,false/*exclusive*/);
+        std::map<std::string,LibraryTaskIDs>::const_iterator finder = 
+          library_task_ids.find(library_name);
+        if (finder != library_task_ids.end())
+        {
+          // First do a check to see if the counts match
+          if (finder->second.count != cnt)
+            REPORT_LEGION_ERROR(ERROR_LIBRARY_COUNT_MISMATCH,
+                "TaskID generation counts %zd and %zd differ for library %s",
+                finder->second.count, cnt, name)
+          if (finder->second.result_set)
+            return finder->second.result;
+          // This should never happen unless we are on a node other than 0
+#ifdef DEBUG_LEGION
+          assert(address_space > 0);
+#endif
+          wait_on = finder->second.ready;
+        }
+      }
+      RtUserEvent request_event;
+      if (!wait_on.exists())
+      {
+        AutoLock l_lock(library_lock);
+        // Check to make sure we didn't lose the race
+        std::map<std::string,LibraryTaskIDs>::const_iterator finder = 
+          library_task_ids.find(library_name);
+        if (finder != library_task_ids.end())
+        {
+          // First do a check to see if the counts match
+          if (finder->second.count != cnt)
+            REPORT_LEGION_ERROR(ERROR_LIBRARY_COUNT_MISMATCH,
+                "TaskID generation counts %zd and %zd differ for library %s",
+                finder->second.count, cnt, name)
+          if (finder->second.result_set)
+            return finder->second.result;
+          // This should never happen unless we are on a node other than 0
+#ifdef DEBUG_LEGION
+          assert(address_space > 0);
+#endif
+          wait_on = finder->second.ready;
+        }
+        if (!wait_on.exists())
+        {
+          LibraryTaskIDs &record = library_task_ids[library_name];
+          record.count = cnt;
+          if (address_space == 0)
+          {
+            // We're going to make the result
+            record.result = unique_library_task_id;
+            unique_library_task_id += cnt;
+#ifdef DEBUG_LEGION
+            assert(unique_library_task_id > record.result);
+#endif
+            record.result_set = true;
+            return record.result;
+          }
+          else
+          {
+            // We're going to request the result
+            request_event = Runtime::create_rt_user_event();
+            record.ready = request_event;
+            record.result_set = false;
+            wait_on = request_event;
+          }
+        }
+      }
+      // Should only get here on nodes other than 0
+#ifdef DEBUG_LEGION
+      assert(address_space > 0);
+      assert(wait_on.exists());
+#endif
+      if (request_event.exists())
+      {
+        // Include the null terminator in length
+        const size_t string_length = strlen(name) + 1;
+        // Send the request to node 0 for the result
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize<size_t>(string_length);
+          rez.serialize(name, string_length);
+          rez.serialize<size_t>(cnt);
+          rez.serialize(request_event);
+        }
+        send_library_task_request(0/*target*/, rez);
+      }
+      wait_on.wait();
+      // When we wake up we should be able to find the result
+      AutoLock l_lock(library_lock,1,false/*exclusive*/);
+      std::map<std::string,LibraryTaskIDs>::const_iterator finder = 
+          library_task_ids.find(library_name);
+#ifdef DEBUG_LEGION
+      assert(finder != library_task_ids.end());
+      assert(finder->second.result_set);
+#endif
+      return finder->second.result;
     }
 
     //--------------------------------------------------------------------------
@@ -14394,6 +14681,60 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_library_mapper_request(AddressSpaceID target, 
+                                              Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_LIBRARY_MAPPER_REQUEST,
+                                     DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_library_mapper_response(AddressSpaceID target,
+                                               Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_LIBRARY_MAPPER_RESPONSE,
+                   DEFAULT_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_library_projection_request(AddressSpaceID target, 
+                                                  Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_LIBRARY_PROJECTION_REQUEST,
+                                     DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_library_projection_response(AddressSpaceID target,
+                                               Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez,SEND_LIBRARY_PROJECTION_RESPONSE,
+                   DEFAULT_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_library_task_request(AddressSpaceID target, 
+                                            Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_LIBRARY_TASK_REQUEST,
+                                     DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_library_task_response(AddressSpaceID target,
+                                             Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_LIBRARY_TASK_RESPONSE,
+                   DEFAULT_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_shutdown_notification(AddressSpaceID target, 
                                              Serializer &rez)
     //--------------------------------------------------------------------------
@@ -15513,9 +15854,180 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(Runtime::mpi_rank_table != NULL);
+      assert(mpi_rank_table != NULL);
 #endif
-      Runtime::mpi_rank_table->handle_mpi_rank_exchange(derez);
+      mpi_rank_table->handle_mpi_rank_exchange(derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_library_mapper_request(Deserializer &derez,
+                                                AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      size_t string_length;
+      derez.deserialize(string_length);
+      const char *name = (const char*)derez.get_current_pointer();
+      derez.advance_pointer(string_length);
+      size_t count;
+      derez.deserialize(count);
+      RtUserEvent done;
+      derez.deserialize(done);
+      
+      MapperID result = generate_library_mapper_ids(name, count);
+      Serializer rez;
+      {
+        RezCheck z2(rez);
+        rez.serialize(string_length);
+        rez.serialize(name, string_length);
+        rez.serialize(result);
+        rez.serialize(done);
+      }
+      send_library_mapper_response(source, rez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_library_mapper_response(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      size_t string_length;
+      derez.deserialize(string_length);
+      const char *name = (const char*)derez.get_current_pointer();
+      derez.advance_pointer(string_length);
+      MapperID result;
+      derez.deserialize(result);
+      RtUserEvent done;
+      derez.deserialize(done);
+
+      const std::string library_name(name);
+      {
+        AutoLock l_lock(library_lock); 
+        std::map<std::string,LibraryMapperIDs>::iterator finder = 
+          library_mapper_ids.find(library_name);
+#ifdef DEBUG_LEGION
+        assert(finder != library_mapper_ids.end());
+        assert(!finder->second.result_set);
+        assert(finder->second.ready == done);
+#endif
+        finder->second.result = result;
+        finder->second.result_set = true;
+      }
+      Runtime::trigger_event(done);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_library_projection_request(Deserializer &derez,
+                                                    AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      size_t string_length;
+      derez.deserialize(string_length);
+      const char *name = (const char*)derez.get_current_pointer();
+      derez.advance_pointer(string_length);
+      size_t count;
+      derez.deserialize(count);
+      RtUserEvent done;
+      derez.deserialize(done);
+      
+      ProjectionID result = generate_library_projection_ids(name, count);
+      Serializer rez;
+      {
+        RezCheck z2(rez);
+        rez.serialize(string_length);
+        rez.serialize(name, string_length);
+        rez.serialize(result);
+        rez.serialize(done);
+      }
+      send_library_projection_response(source, rez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_library_projection_response(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      size_t string_length;
+      derez.deserialize(string_length);
+      const char *name = (const char*)derez.get_current_pointer();
+      derez.advance_pointer(string_length);
+      ProjectionID result;
+      derez.deserialize(result);
+      RtUserEvent done;
+      derez.deserialize(done);
+
+      const std::string library_name(name);
+      {
+        AutoLock l_lock(library_lock); 
+        std::map<std::string,LibraryProjectionIDs>::iterator finder = 
+          library_projection_ids.find(library_name);
+#ifdef DEBUG_LEGION
+        assert(finder != library_projection_ids.end());
+        assert(!finder->second.result_set);
+        assert(finder->second.ready == done);
+#endif
+        finder->second.result = result;
+        finder->second.result_set = true;
+      }
+      Runtime::trigger_event(done);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_library_task_request(Deserializer &derez,
+                                              AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      size_t string_length;
+      derez.deserialize(string_length);
+      const char *name = (const char*)derez.get_current_pointer();
+      derez.advance_pointer(string_length);
+      size_t count;
+      derez.deserialize(count);
+      RtUserEvent done;
+      derez.deserialize(done);
+      
+      TaskID result = generate_library_task_ids(name, count);
+      Serializer rez;
+      {
+        RezCheck z2(rez);
+        rez.serialize(string_length);
+        rez.serialize(name, string_length);
+        rez.serialize(result);
+        rez.serialize(done);
+      }
+      send_library_task_response(source, rez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_library_task_response(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      size_t string_length;
+      derez.deserialize(string_length);
+      const char *name = (const char*)derez.get_current_pointer();
+      derez.advance_pointer(string_length);
+      TaskID result;
+      derez.deserialize(result);
+      RtUserEvent done;
+      derez.deserialize(done);
+
+      const std::string library_name(name);
+      {
+        AutoLock l_lock(library_lock); 
+        std::map<std::string,LibraryTaskIDs>::iterator finder = 
+          library_task_ids.find(library_name);
+#ifdef DEBUG_LEGION
+        assert(finder != library_task_ids.end());
+        assert(!finder->second.result_set);
+        assert(finder->second.ready == done);
+#endif
+        finder->second.result = result;
+        finder->second.result_set = true;
+      }
+      Runtime::trigger_event(done);
     }
 
     //--------------------------------------------------------------------------
@@ -15698,17 +16210,18 @@ namespace Legion {
       assert(p.kind() != Processor::UTIL_PROC);
 #endif
       // Launch the task to perform the prepipeline stage for the operation
-      RtEvent precondition = op->issue_prepipeline_stage();
+      if (op->has_prepipeline_stage())
+        ctx->add_to_prepipeline_queue(op);
       if (program_order_execution)
       {
         ApEvent term_event = op->get_completion_event();
-        ctx->add_to_dependence_queue(op, precondition);
+        ctx->add_to_dependence_queue(op);
         ctx->begin_task_wait(true/*from runtime*/);
         term_event.wait();
         ctx->end_task_wait();
       }
       else
-        ctx->add_to_dependence_queue(op, precondition);
+        ctx->add_to_dependence_queue(op);
     }
     
     //--------------------------------------------------------------------------
@@ -18334,14 +18847,10 @@ namespace Legion {
                                              Runtime::registration_callbacks;
     /*static*/ bool Runtime::runtime_started = false;
     /*static*/ bool Runtime::runtime_backgrounded = false;
+    /*static*/ Runtime* Runtime::the_runtime = NULL;
     /*static*/ int Runtime::mpi_rank = -1;
     /*static*/ std::vector<MPILegionHandshake>* 
                       Runtime::pending_handshakes = NULL;
-#ifdef DEBUG_LEGION
-#ifndef REALM_USE_SUBPROCESS
-    /*static*/ Runtime* Runtime::the_runtime = NULL;
-#endif
-#endif
 
     //--------------------------------------------------------------------------
     /*static*/ int Runtime::start(int argc, char **argv, bool background)
@@ -18372,21 +18881,6 @@ namespace Legion {
       PartitionShim::ColorRects<3,3>::register_task();
 #endif
 
-      // We have to set these prior to starting Realm as once we start
-      // Realm it might fork child processes so they all need to see
-      // the same values for these static variables
-      runtime_started = true;
-      runtime_backgrounded = background;
-      // Make a copy of this here so we can delete the data
-      // structure before Realm does its subprocess stuff
-      std::vector<MPILegionHandshake> local_handshakes;
-      if (pending_handshakes != NULL)
-      {
-        local_handshakes.swap(*pending_handshakes);
-        delete pending_handshakes;
-        pending_handshakes = NULL;
-      }
-
       // Need to pass argc and argv to low-level runtime before we can record 
       // their values as they might be changed by GASNet or MPI or whatever.
       // Note that the logger isn't initialized until after this call returns 
@@ -18395,16 +18889,16 @@ namespace Legion {
 #ifndef NDEBUG
       bool ok = 
 #endif
-        realm.init(&argc, &argv);
-      assert(ok); 
+        realm.network_init(&argc, &argv);
+      assert(ok);
 
-      // If we have any pending MPI handshakes, we can initialize them now
-      if (!local_handshakes.empty())
-      {
-        for (std::vector<MPILegionHandshake>::const_iterator it = 
-              local_handshakes.begin(); it != local_handshakes.end(); it++)
-          it->impl->initialize();
-      }
+      // Next we configure the realm runtime after which we can access the
+      // machine model and make events and reservations and do reigstrations
+#ifndef NDEBUG
+      ok = 
+#endif
+        realm.configure_from_command_line(argc, argv);
+      assert(ok);
 
       // Parse the command line arguments
       const LegionConfiguration config = parse_arguments(argc, argv);
@@ -18417,6 +18911,9 @@ namespace Legion {
       // Configure legion spy if necessary
       if (config.legion_spy_enabled)
         LegionSpy::log_legion_spy_config();
+      // Configure MPI Interoperability
+      if ((mpi_rank >= 0) || (pending_handshakes != NULL))
+        configure_mpi_interoperability(config.separate_runtime_instances);
       // Construct our runtime objects 
       Processor::Kind startup_kind = Processor::NO_KIND;
       const RtEvent tasks_registered = configure_runtime(argc, argv,
@@ -18426,44 +18923,44 @@ namespace Legion {
       assert((startup_kind == Processor::LOC_PROC) ||
               (startup_kind == Processor::UTIL_PROC));
 #endif
-      // Need a barrier across all the processors to make sure that
-      // they have done all their startup code for now
-      // TODO: Remove this when realm gives us back a startup event
-      const RtEvent startup_barrier(realm.collective_spawn_by_kind(
-            Processor::NO_KIND, Processor::TASK_ID_PROCESSOR_NOP, NULL, 0,
-            false/*one per node*/, tasks_registered));
-      // Then perform the initialization task that will initialize
-      // all the runtime objects across the machine
-      RtEvent startup_precondition(realm.collective_spawn_by_kind(
+      // We have to set these prior to starting Realm as once we start
+      // Realm it might fork child processes so they all need to see
+      // the same values for these static variables
+      runtime_started = true;
+      runtime_backgrounded = background;
+
+      // Now that we have everything setup we can tell Realm to
+      // start the processors. It is at this point which fork
+      // can be called to spawn subprocesses.
+      realm.start();
+
+      // First we issue a "barrier" NOP task that runs on all the
+      // Realm processors to make sure that Realm is initialized
+      const RtEvent realm_initialized(realm.collective_spawn_by_kind(
+            Processor::NO_KIND, 0/*NOP*/, NULL, 0, false/*one per node*/));
+
+      // Now we initialize all the runtimes so that they are ready
+      // to begin execution. Note this also acts as a barrier across
+      // the machine to ensure that nobody does anything related to
+      // startup until all the runtimes are initialized everywhere
+      const RtEvent legion_initialized(realm.collective_spawn_by_kind(
             (config.separate_runtime_instances ? Processor::NO_KIND :
              startup_kind), LG_INITIALIZE_TASK_ID, NULL, 0,
-            !config.separate_runtime_instances, startup_barrier)); 
-      // See if we have any initialization functions we need to do
-      const std::deque<PendingInitializationFunction*> &pending_table = 
-        get_pending_initialization_table();
-      if (!pending_table.empty())
-      {
-        for (std::deque<PendingInitializationFunction*>::const_iterator it = 
-              pending_table.begin(); it != pending_table.end(); it++)
-        {
-          startup_precondition = 
-            (*it)->perform_function(realm, startup_precondition);
-          delete (*it);
-        }
-      }
+            !config.separate_runtime_instances, tasks_registered)); 
       // Make a user event that we will trigger once we the 
       // startup task is done. If we're node 0 then we will use this
       // as the precondition for launching the top-level task
       RtUserEvent start_event = Runtime::create_rt_user_event();
       // Now we can do one more spawn call to startup the runtime 
       // across the machine since we know everything is initialized
-      const RtEvent runtime_ready(realm.collective_spawn_by_kind(
+      const RtEvent runtime_started(realm.collective_spawn_by_kind(
               (config.separate_runtime_instances ? Processor::NO_KIND : 
                startup_kind), LG_STARTUP_TASK_ID, 
               &start_event, sizeof(start_event),
-              !config.separate_runtime_instances, startup_precondition));
+              !config.separate_runtime_instances, 
+              Runtime::merge_events(realm_initialized, legion_initialized)));
       // Trigger the start event when the runtime is ready
-      Runtime::trigger_event(start_event, runtime_ready);
+      Runtime::trigger_event(start_event, runtime_started);
       // If we are supposed to background this thread, then we wait
       // for the runtime to shutdown, otherwise we can now return
       if (!background)
@@ -18507,6 +19004,7 @@ namespace Legion {
         INT_ARG("-lg:window", config.initial_task_window_size);
         INT_ARG("-lg:hysteresis", config.initial_task_window_hysteresis);
         INT_ARG("-lg:sched", config.initial_tasks_to_schedule);
+        INT_ARG("-lg:vector", config.initial_meta_task_vector_width);
         INT_ARG("-lg:message",config.max_message_size);
         INT_ARG("-lg:epoch", config.gc_epoch_size);
         INT_ARG("-lg:local", config.max_local_fields);
@@ -18773,6 +19271,30 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    /*static*/ void Runtime::configure_mpi_interoperability(
+                                                bool separate_runtime_instances)
+    //--------------------------------------------------------------------------
+    {
+      if (separate_runtime_instances)
+        REPORT_LEGION_ERROR(ERROR_MPI_INTEROP_MISCONFIGURATION,
+            "Legion-MPI Interoperability is not supported when running "
+            "with separate runtime instances for each processor")
+      if (mpi_rank < 0)
+        REPORT_LEGION_ERROR(ERROR_MPI_INTEROP_MISCONFIGURATION,
+            "Legion detected the presence of Legion-MPI handshake objects "
+            "without a set MPI rank. An MPI rank must be set to use any "
+            "Legion-MPI handhshake objects")
+      if (pending_handshakes != NULL)
+      {
+        for (std::vector<MPILegionHandshake>::const_iterator it = 
+             pending_handshakes->begin(); it != pending_handshakes->end(); it++)
+          it->impl->initialize();
+        delete pending_handshakes;
+        pending_handshakes = NULL;
+      }
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ RtEvent Runtime::configure_runtime(int argc, char **argv,
                              const LegionConfiguration &config,
                              RealmRuntime &realm, Processor::Kind &startup_kind)
@@ -18865,6 +19387,10 @@ namespace Legion {
                                          fake_local_procs, local_util_procs,
                                          address_spaces, proc_spaces);
           processor_mapping[*it] = runtime;
+          // Save the the_runtime as the first one we make
+          // just so that things will work in the multi-processor case
+          if (the_runtime == NULL)
+            the_runtime = runtime;
         }
       }
       else
@@ -18891,11 +19417,8 @@ namespace Legion {
                                        input_args, local_space,
                                        local_procs, local_util_procs,
                                        address_spaces, proc_spaces);
-#ifdef DEBUG_LEGION
-#ifndef REALM_USE_SUBPROCESS
+        // Save THE runtime 
         the_runtime = runtime;
-#endif
-#endif
         for (std::set<Processor>::const_iterator it = 
               local_procs.begin(); it != local_procs.end(); it++)
           processor_mapping[*it] = runtime;
@@ -18910,8 +19433,6 @@ namespace Legion {
       CodeDescriptor rt_profiling_task(Runtime::profiling_runtime_task);
       CodeDescriptor startup_task(Runtime::startup_runtime_task);
       Realm::ProfilingRequestSet no_requests;
-      const std::deque<PendingInitializationFunction*> &pending_table = 
-        get_pending_initialization_table();
       // Keep track of all the registration events
       std::set<RtEvent> registered_events;
       for (std::map<Processor,Runtime*>::const_iterator it = 
@@ -18947,13 +19468,6 @@ namespace Legion {
           registered_events.insert(RtEvent(
               it->first.register_task(LG_LEGION_PROFILING_ID, rt_profiling_task,
                 no_requests, &it->second, sizeof(it->second))));
-        for (std::deque<PendingInitializationFunction*>::const_iterator pit =
-              pending_table.begin(); pit != pending_table.end(); pit++)
-        {
-          if (it->first.kind() == (*pit)->proc_kind)
-            registered_events.insert(
-                (*pit)->register_function(it->first, it->second));
-        }
       }
 
       // Lastly do any other registrations we might have
@@ -19154,16 +19668,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ std::deque<PendingInitializationFunction*>&
-                                 Runtime::get_pending_initialization_table(void)
-    //--------------------------------------------------------------------------
-    {
-      static std::deque<PendingInitializationFunction*> 
-                                                pending_initialization_table;
-      return pending_initialization_table;
-    }
-
-    //--------------------------------------------------------------------------
     /*static*/ TaskID& Runtime::get_current_static_task_id(void)
     //--------------------------------------------------------------------------
     {
@@ -19218,20 +19722,6 @@ namespace Legion {
                               registrar, user_data, user_data_size, 
                               code_desc, task_name));
       return vid;
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void Runtime::preregister_initialization_function(
-                                        Processor::Kind proc_kind,
-                                        CodeDescriptor *realm_desc,
-                                        const void *user_data, size_t user_len)
-    //--------------------------------------------------------------------------
-    {
-      std::deque<PendingInitializationFunction*> &pending_table = 
-        get_pending_initialization_table();
-      pending_table.push_back(new PendingInitializationFunction(
-            LG_TASK_ID_AVAILABLE + pending_table.size(), proc_kind,
-            realm_desc, user_data, user_len));
     }
 
     //--------------------------------------------------------------------------
@@ -19368,7 +19858,9 @@ namespace Legion {
       Runtime *runtime = *((Runtime**)userdata);
 #ifdef DEBUG_LEGION
       assert(userlen == sizeof(Runtime**));
-      if (!runtime->separate_runtime_instances)
+      // Meta-tasks can run on application processors only when there
+      // are no utility processors for us to use
+      if (!runtime->local_utils.empty())
         assert(implicit_context == NULL); // this better hold
 #endif
       implicit_runtime = runtime;
@@ -19398,7 +19890,7 @@ namespace Legion {
           }
         case LG_POST_END_ID:
           {
-            TaskContext::handle_post_end_task(args); 
+            InnerContext::handle_post_end_task(args); 
             break;
           }
         case LG_DEFERRED_READY_TRIGGER_ID:
@@ -19470,16 +19962,12 @@ namespace Legion {
           }
         case LG_PRE_PIPELINE_ID:
           {
-            const Operation::PrepipelineArgs *pargs = 
-              (const Operation::PrepipelineArgs*)args;
-            pargs->proxy_this->trigger_prepipeline_stage();
+            InnerContext::handle_prepipeline_stage(args);
             break;
           }
         case LG_TRIGGER_DEPENDENCE_ID:
           {
-            const InnerContext::DeferredDependenceArgs *deferred_trigger_args =
-              (const InnerContext::DeferredDependenceArgs*)args;
-            deferred_trigger_args->op->execute_dependence_analysis();
+            InnerContext::handle_dependence_stage(args);
             break;
           }
         case LG_TRIGGER_COMPLETE_ID:

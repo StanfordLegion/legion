@@ -68,6 +68,7 @@ namespace Legion {
       unique_op_id = runtime->get_unique_operation_id();
       context_index = 0;
       outstanding_mapping_references = 0;
+      prepipelined = false;
 #ifdef DEBUG_LEGION
       mapped = false;
       executed = false;
@@ -297,29 +298,70 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    RtEvent Operation::execute_prepipeline_stage(GenerationID generation, 
+                                                 bool from_logical_analysis)
+    //--------------------------------------------------------------------------
+    {
+      {
+        AutoLock op(op_lock);
+#ifdef DEBUG_LEGION
+        assert(generation <= gen);
+#endif
+        if (generation < gen)
+          return RtEvent::NO_RT_EVENT;
+        // Check to see if we've already started the analysis
+        if (prepipelined)
+        {
+          // Someone else already started, figure out if we need to wait
+          if (from_logical_analysis)
+            return prepipelined_event;
+          else
+            return RtEvent::NO_RT_EVENT;
+        }
+        else
+        {
+          // We got here first, mark that we're doing it
+          prepipelined = true;
+          // If we're not the logical analysis, make a wait event in
+          // case the logical analysis comes along and needs to wait
+          if (!from_logical_analysis)
+          {
+#ifdef DEBUG_LEGION
+            assert(!prepipelined_event.exists());
+#endif
+            prepipelined_event = Runtime::create_rt_user_event(); 
+          }
+        }
+      }
+      trigger_prepipeline_stage();
+      // Trigger any guard events we might have
+      if (!from_logical_analysis)
+      {
+        AutoLock op(op_lock);
+#ifdef DEBUG_LEGION
+        assert(prepipelined_event.exists());
+#endif
+        Runtime::trigger_event(prepipelined_event);
+        prepipelined_event = RtUserEvent::NO_RT_USER_EVENT;
+      }
+      return RtEvent::NO_RT_EVENT;
+    }
+
+    //--------------------------------------------------------------------------
     void Operation::execute_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
+      // Check to make sure our prepipeline stage is done if we have one
+      if (has_prepipeline_stage())
+      {
+        RtEvent wait_on = execute_prepipeline_stage(gen, true/*need wait*/);
+        if (wait_on.exists() && !wait_on.has_triggered())
+          wait_on.wait();
+      }
       // Always wrap this call with calls to begin/end dependence analysis
       begin_dependence_analysis();
       trigger_dependence_analysis();
       end_dependence_analysis();
-    }
-
-    //--------------------------------------------------------------------------
-    RtEvent Operation::issue_prepipeline_stage(void)
-    //--------------------------------------------------------------------------
-    {
-      if (has_prepipeline_stage())
-      {
-        PrepipelineArgs args(this);
-        // Give this deferred throughput priority so that it is always
-        // ahead of the logical analysis
-        return runtime->issue_runtime_meta_task(args, 
-                      LG_THROUGHPUT_DEFERRED_PRIORITY);
-      }
-      else
-        return RtEvent::NO_RT_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -2548,8 +2590,7 @@ namespace Legion {
         // Issue a deferred trigger on our completion event
         // and mark that we are no longer responsible for 
         // triggering our completion event
-        Runtime::trigger_event(completion_event, map_complete_event);
-        need_completion_trigger = false;
+        request_early_complete(map_complete_event);
         DeferredExecuteArgs deferred_execute_args(this);
         runtime->issue_runtime_meta_task(deferred_execute_args,
                                          LG_THROUGHPUT_DEFERRED_PRIORITY,
@@ -3946,8 +3987,7 @@ namespace Legion {
       if (is_recording())
         tpl->record_trigger_copy_completion(this, copy_complete_event);
       // Handle the case for marking when the copy completes
-      Runtime::trigger_event(completion_event, copy_complete_event);
-      need_completion_trigger = false;
+      request_early_complete(copy_complete_event);
       complete_execution(Runtime::protect_event(copy_complete_event));
     }
 
@@ -5069,8 +5109,7 @@ namespace Legion {
       // and we are executed when all our points are executed
       complete_mapping(Runtime::merge_events(mapped_preconditions));
       ApEvent done = Runtime::merge_events(executed_preconditions);
-      Runtime::trigger_event(completion_event, done); 
-      need_completion_trigger = false;
+      request_early_complete(done);
       complete_execution(Runtime::protect_event(done));
     }
 
@@ -5602,8 +5641,7 @@ namespace Legion {
         case EXECUTION_FENCE:
           {
             // We can always trigger the completion event when these are done
-            need_completion_trigger = false;
-            Runtime::trigger_event(completion_event, execution_precondition);
+            request_early_complete(execution_precondition);
             if (!execution_precondition.has_triggered())
             {
               RtEvent wait_on = Runtime::protect_event(execution_precondition);
@@ -5799,8 +5837,7 @@ namespace Legion {
 #endif
       ApEvent done = Runtime::merge_events(trigger_events);
       // We can always trigger the completion event when these are done
-      Runtime::trigger_event(completion_event, done);
-      need_completion_trigger = false;
+      request_early_complete(done);
       if (!done.has_triggered())
       {
         RtEvent wait_on = Runtime::protect_event(done);
@@ -7697,8 +7734,7 @@ namespace Legion {
         complete_mapping();
       if (!acquired_instances.empty())
         release_acquired_instances(acquired_instances);
-      Runtime::trigger_event(completion_event, close_event);
-      need_completion_trigger = false;
+      request_early_complete(close_event);
       complete_execution(Runtime::protect_event(close_event));
     }
 
@@ -8296,8 +8332,7 @@ namespace Legion {
         complete_mapping();
       if (!acquired_instances.empty())
         release_acquired_instances(acquired_instances);
-      Runtime::trigger_event(completion_event, acquire_complete);
-      need_completion_trigger = false;
+      request_early_complete(acquire_complete);
       complete_execution(Runtime::protect_event(acquire_complete));
     }
 
@@ -8918,8 +8953,7 @@ namespace Legion {
         complete_mapping();
       if (!acquired_instances.empty())
         release_acquired_instances(acquired_instances);
-      Runtime::trigger_event(completion_event, release_complete);
-      need_completion_trigger = false;
+      request_early_complete(release_complete);
       complete_execution(Runtime::protect_event(release_complete));
     }
 
@@ -10276,18 +10310,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MustEpochOp::trigger_prepipeline_stage(void)
-    //--------------------------------------------------------------------------
-    {
-      for (unsigned idx = 0; idx < indiv_tasks.size(); idx++)
-        if (indiv_tasks[idx]->has_prepipeline_stage())
-          indiv_tasks[idx]->trigger_prepipeline_stage();
-      for (unsigned idx = 0; idx < index_tasks.size(); idx++)
-        if (index_tasks[idx]->has_prepipeline_stage())
-          index_tasks[idx]->trigger_prepipeline_stage();
-    }
-
-    //--------------------------------------------------------------------------
     void MustEpochOp::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
@@ -11390,8 +11412,7 @@ namespace Legion {
       // Perform the partitioning operation
       ApEvent ready_event = thunk->perform(this, runtime->forest);
       complete_mapping();
-      Runtime::trigger_event(completion_event, ready_event);
-      need_completion_trigger = false;
+      request_early_complete(ready_event);
       complete_execution(Runtime::protect_event(ready_event));
     }
 
@@ -12001,8 +12022,7 @@ namespace Legion {
         LegionSpy::log_operation_events(unique_op_id, done_event,
                                         completion_event);
 #endif
-      Runtime::trigger_event(completion_event, done_event);
-      need_completion_trigger = false;
+      request_early_complete(done_event);
       complete_execution(Runtime::protect_event(done_event));
     }
 
@@ -12040,8 +12060,7 @@ namespace Legion {
         {
           ApEvent done_event = thunk->perform(this, runtime->forest,
               Runtime::merge_events(index_preconditions), instances);
-          Runtime::trigger_event(completion_event, done_event);
-          need_completion_trigger = false;
+          request_early_complete(done_event);
 #ifdef LEGION_SPY
           Runtime::trigger_event(intermediate_index_event, done_event);
 #endif
@@ -13671,8 +13690,7 @@ namespace Legion {
       // and we are executed when all our points are executed
       complete_mapping(Runtime::merge_events(mapped_preconditions));
       ApEvent done = Runtime::merge_events(executed_preconditions);
-      Runtime::trigger_event(completion_event, done);
-      need_completion_trigger = false;
+      request_early_complete(done);
       complete_execution(Runtime::protect_event(done));
     }
 
@@ -14242,8 +14260,7 @@ namespace Legion {
       else
         complete_mapping();
       ApEvent attach_event = result.get_ready_event();
-      Runtime::trigger_event(completion_event, attach_event);
-      need_completion_trigger = false;
+      request_early_complete(attach_event);
       complete_execution(Runtime::protect_event(attach_event));
     }
 
@@ -14730,8 +14747,7 @@ namespace Legion {
       else
         complete_mapping();
 
-      Runtime::trigger_event(completion_event, detach_event);
-      need_completion_trigger = false;
+      request_early_complete(detach_event);
       complete_execution(Runtime::protect_event(detach_event));
     }
 

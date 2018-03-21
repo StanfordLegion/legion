@@ -320,6 +320,10 @@ ifeq ($(strip $(GPU_ARCH)),k20)
 NVCC_FLAGS	+= -arch=compute_35 -code=sm_35
 NVCC_FLAGS	+= -DK20_ARCH
 endif
+ifeq ($(strip $(GPU_ARCH)),k80)
+NVCC_FLAGS	+= -arch=compute_37 -code=sm_37
+NVCC_FLAGS	+= -DK80_ARCH
+endif
 ifeq ($(strip $(GPU_ARCH)),maxwell)
 NVCC_FLAGS	+= -arch=compute_52 -code=sm_52
 NVCC_FLAGS	+= -DMAXWELL_ARCH

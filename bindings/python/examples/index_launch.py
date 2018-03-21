@@ -17,8 +17,18 @@
 
 from __future__ import print_function
 
+import legion
 from legion import task
+
+@task
+def hi(i):
+    print("hello %s" % i)
+    return i
 
 @task(top_level=True)
 def main():
-    print("Hello, Legion!")
+    futures = []
+    for i in legion.IndexLaunch([10]):
+        futures.append(hi(i))
+    for future in futures:
+        print("got %s" % future.get())
