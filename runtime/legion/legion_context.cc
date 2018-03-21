@@ -1798,6 +1798,8 @@ namespace Legion {
     void TaskContext::end_misspeculation(const void *result, size_t result_size)
     //--------------------------------------------------------------------------
     {
+      // Mark that we are done executing this operation
+      owner_task->complete_execution();
       // Grab some information before doing the next step in case it
       // results in the deletion of 'this'
 #ifdef DEBUG_LEGION
@@ -4600,7 +4602,7 @@ namespace Legion {
       RtEvent wait_event;
       // Take the context lock in exclusive mode
       {
-        AutoLock win_lock(window_lock);
+        AutoLock child_lock(child_op_lock);
         // We already hold our lock from the callsite above
         // Outstanding children count has already been incremented for the
         // operation being launched so decrement it in case we wait and then

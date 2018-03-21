@@ -1148,9 +1148,6 @@ namespace Legion {
       // Traces for this task's execution
       LegionMap<TraceID,DynamicTrace*,TASK_TRACES_ALLOC>::tracked traces;
       LegionTrace *current_trace;
-      // Event for waiting when the number of mapping+executing
-      // child operations has grown too large.
-      mutable LocalLock window_lock;
       bool valid_wait_event;
       RtUserEvent window_wait;
       std::deque<ApEvent> frame_events;
