@@ -1319,10 +1319,11 @@ namespace Realm {
 	  break;
 	}
 
-	// consume lhs rectangles until we get one that overlaps
-	while(it_lhs.rect.hi.x < it_rhs.rect.lo.x) {
+	// an lhs rectangle that is entirely below the first rhs is taken as is
+	if(it_lhs.rect.hi.x < it_rhs.rect.lo.x) {
 	  bitmask.add_rect(it_lhs.rect);
-	  if(!it_lhs.step()) break;
+	  it_lhs.step();
+	  continue;
 	}
 
 	// last case - partial overlap - subtract out rhs rect(s)
