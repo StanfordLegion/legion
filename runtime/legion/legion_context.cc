@@ -1771,6 +1771,8 @@ namespace Legion {
     void TaskContext::end_misspeculation(const void *result, size_t result_size)
     //--------------------------------------------------------------------------
     {
+      // Mark that we are done executing this operation
+      owner_task->complete_execution();
       // Grab some information before doing the next step in case it
       // results in the deletion of 'this'
 #ifdef DEBUG_LEGION
