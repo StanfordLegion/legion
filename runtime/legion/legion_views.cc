@@ -6457,7 +6457,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void CompositeBase::issue_composite_reductions(CompositeReducer &reducer,
                                             const FieldMask &local_mask,
-                                            const WriteMasks &reduce_masks,
+                                            const WriteMasks &needed_exprs,
+                                            RegionTreeNode *logical_node,
                                             PredEvent pred_guard,
                                             VersionTracker *src_version_tracker)
     //--------------------------------------------------------------------------
@@ -6498,22 +6499,38 @@ namespace Legion {
       // Issue our reductions
       if (!to_perform.empty())
       {
+        RegionTreeForest *context = logical_node->context;
+        std::map<IndexSpaceExpression*,IndexSpaceExpression*> masks;
         for (LegionMap<ReductionView*,FieldMask>::aligned::iterator it =
               to_perform.begin(); it != to_perform.end(); it++)
         {
-          // Iterate over the write masks and find the interfering ones
-          for (WriteMasks::const_iterator mit = reduce_masks.begin();
-                mit != reduce_masks.end(); mit++)
+          // Iterate over the needed exprs and find the interfering ones
+          for (WriteMasks::const_iterator mit = needed_exprs.begin();
+                mit != needed_exprs.end(); mit++)
           {
             const FieldMask overlap = it->second & mit->second;
             if (!overlap)
               continue;
             const ApEvent reduce_pre = reducer.find_precondition(overlap);
+            // See if we already computed the mask
+            std::map<IndexSpaceExpression*,IndexSpaceExpression*>::
+              const_iterator finder = masks.find(mit->first);
+            IndexSpaceExpression *mask = NULL;
+            if (finder == masks.end())
+            {
+              // Compute the mask for this needed reduction
+              mask = context->subtract_index_spaces(
+                  reducer.dst->logical_node->get_index_space_expression(), 
+                  mit->first);
+              masks[mit->first] = mask;
+            }
+            else
+              mask = finder->second;
             ApEvent reduce_done = it->first->perform_deferred_reduction(
                 reducer.dst, overlap, src_version_tracker,
                 reduce_pre, reducer.info->op, reducer.info->index,
-                pred_guard, reducer.across_helper, NULL/*intersect*/,
-                mit->first, reducer.info->map_applied_events);
+                pred_guard, reducer.across_helper, logical_node,
+                mask, reducer.info->map_applied_events);
             if (reduce_done.exists())
               reducer.record_postcondition(reduce_done, overlap);
             // Can remove these fields from the set
@@ -6531,10 +6548,10 @@ namespace Legion {
       for (LegionMap<CompositeNode*,FieldMask>::aligned::const_iterator it = 
             to_traverse.begin(); it != to_traverse.end(); it++)
       {
-        // Build the reduce masks for the child
-        WriteMasks child_reduce_masks;
-        for (WriteMasks::const_iterator mit = reduce_masks.begin();
-              mit != reduce_masks.end(); mit++)
+        // Build the needed reduction expressions for the child
+        WriteMasks needed_child_reductions;
+        for (WriteMasks::const_iterator mit = needed_exprs.begin();
+              mit != needed_exprs.end(); mit++)
         {
           const FieldMask overlap = mit->second & it->second;
           if (!overlap)
@@ -6545,20 +6562,22 @@ namespace Legion {
           if (child_mask->is_empty())
             continue;
 #ifdef DEBUG_LEGION
-          assert(child_reduce_masks.find(child_mask) == 
-                  child_reduce_masks.end());
+          assert(needed_child_reductions.find(child_mask) == 
+                  needed_child_reductions.end());
 #endif
-          child_reduce_masks[child_mask] = overlap;
+          needed_child_reductions[child_mask] = overlap;
         }
         it->first->issue_composite_reductions(reducer, it->second,
-              child_reduce_masks, pred_guard, src_version_tracker);
+              needed_child_reductions, it->first->logical_node,
+              pred_guard, src_version_tracker);
       }
     }
 
     //--------------------------------------------------------------------------
     void CompositeBase::issue_composite_reductions_single(
                                           CompositeSingleReducer &reducer,
-                                          IndexSpaceExpression *reduce_mask,
+                                          IndexSpaceExpression *needed_expr,
+                                          RegionTreeNode *logical_node,
                                           PredEvent pred_guard,
                                           VersionTracker *src_version_tracker)
     //--------------------------------------------------------------------------
@@ -6595,13 +6614,18 @@ namespace Legion {
       // Issue our reductions
       if (!to_perform.empty())
       {
+        // Compute our mask since that is what is needed to apply the reductions
+        RegionTreeForest *context = logical_node->context;
+        IndexSpaceExpression *reduce_mask = context->subtract_index_spaces(
+            reducer.dst->logical_node->get_index_space_expression(),
+            needed_expr);
         for (std::vector<ReductionView*>::const_iterator it = 
               to_perform.begin(); it != to_perform.end(); it++)
         {
           ApEvent reduce_done = (*it)->perform_deferred_reduction(
               reducer.dst, reducer.reduction_mask, src_version_tracker,
               reducer.reduce_pre, reducer.info->op, reducer.info->index,
-              pred_guard, reducer.across_helper, NULL/*intersect*/,
+              pred_guard, reducer.across_helper, logical_node,
               reduce_mask, reducer.info->map_applied_events);
           if (reduce_done.exists())
             reducer.record_postcondition(reduce_done);
@@ -6614,13 +6638,13 @@ namespace Legion {
       for (std::vector<CompositeNode*>::const_iterator it = 
             to_traverse.begin(); it != to_traverse.end(); it++)
       {
-        IndexSpaceExpression *child_mask = 
-          context->intersect_index_spaces(reduce_mask, 
+        IndexSpaceExpression *needed_child = 
+          context->intersect_index_spaces(needed_expr, 
               (*it)->logical_node->get_index_space_expression());
-        if (child_mask->is_empty())
+        if (needed_child->is_empty())
           continue;
-        (*it)->issue_composite_reductions_single(reducer, child_mask,
-                                    pred_guard, src_version_tracker);
+        (*it)->issue_composite_reductions_single(reducer, needed_child,
+                  (*it)->logical_node, pred_guard, src_version_tracker);
       }
     }
 
@@ -8399,7 +8423,7 @@ namespace Legion {
           }
           CompositeSingleReducer reducer(info, ctx, dst_view, reduction_mask,
                                          reduce_pre,across_helper);
-          issue_composite_reductions_single(reducer, expression, 
+          issue_composite_reductions_single(reducer, expression, logical_node, 
                                             pred_guard, this);
           reducer.finalize(done_event);
         }
@@ -8429,8 +8453,8 @@ namespace Legion {
           reducer.unpack(derez);
           WriteMasks reduce_masks;
           reduce_masks[expression] = reduction_mask;
-          issue_composite_reductions(reducer, reduction_mask,
-                                     reduce_masks, pred_guard, this);
+          issue_composite_reductions(reducer, reduction_mask, reduce_masks, 
+                                     logical_node, pred_guard, this);
           reducer.finalize(done_events);
         }
       }

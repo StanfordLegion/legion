@@ -1467,12 +1467,14 @@ namespace Legion {
     protected:
       void issue_composite_reductions(CompositeReducer &reducer,
                                       const FieldMask &local_mask,
-                                      const WriteMasks &reduce_masks,
+                                      const WriteMasks &needed_expressions,
+                                      RegionTreeNode *logical_node,
                                       PredEvent pred_guard,
                                       VersionTracker *src_version_tracker);
       // Single field version of the method above
       void issue_composite_reductions_single(CompositeSingleReducer &reducer,
-                                             IndexSpaceExpression *reduce_mask,
+                                             IndexSpaceExpression *needed_expr,
+                                             RegionTreeNode *logical_node,
                                              PredEvent pred_guard,
                                              VersionTracker *version_tracker);
     public:
