@@ -426,6 +426,9 @@ namespace Realm {
       metadata.inst_offset = (size_t)-1;
       metadata.ready_event = Event::NO_EVENT;
       metadata.layout = 0;
+      
+      // Initialize this in case the user asks for profiling information
+      timeline.instance = _me;
     }
 
     RegionInstanceImpl::~RegionInstanceImpl(void)

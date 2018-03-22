@@ -275,6 +275,7 @@ namespace Realm {
 						       CoreReservation& _core_rsrv)
     : KernelThreadTaskScheduler(_pyproc->me, _core_rsrv)
     , pyproc(_pyproc)
+    , interpreter_ready(false)
   {}
 
   void PythonThreadTaskScheduler::enqueue_taskreg(LocalPythonProcessor::TaskRegistration *treg)
@@ -288,9 +289,10 @@ namespace Realm {
   void PythonThreadTaskScheduler::python_scheduler_loop(void)
   {
     // global startup of python interpreter if needed
-    if(pyproc->interpreter == 0) {
+    if(!interpreter_ready) {
       log_py.info() << "creating interpreter";
       pyproc->create_interpreter();
+      interpreter_ready = true;
     }
 
     // always create and remember our own python thread - does NOT require GIL
@@ -487,6 +489,31 @@ namespace Realm {
   //   should release the GIL)
   void PythonThreadTaskScheduler::thread_blocking(Thread *thread)
   {
+    // if this gets called before we're done initializing the interpreter,
+    //  we need a simple blocking wait
+    if(!interpreter_ready) {
+      AutoHSLLock al(lock);
+
+      log_py.debug() << "waiting during initialization";
+      bool really_blocked = try_update_thread_state(thread,
+						    Thread::STATE_BLOCKING,
+						    Thread::STATE_BLOCKED);
+      if(!really_blocked) return;
+
+      while(true) {
+	long long old_work_counter = work_counter.read_counter();
+
+	if(!resumable_workers.empty()) {
+	  Thread *t = resumable_workers.get(0);
+	  assert(t == thread);
+	  log_py.debug() << "awake again";
+	  return;
+	}
+
+	wait_for_work(old_work_counter);
+      }
+    }
+
     // if we got here through a cffi call, the GIL has already been released,
     //  so try to handle that case here - a call PyEval_SaveThread
     //  if the GIL is not held will assert-fail, and while a call to
@@ -512,6 +539,17 @@ namespace Realm {
       (pyproc->interpreter->api->PyEval_RestoreThread)(saved);
     } else
       log_py.info() << "python worker awake - not acquiring GIL";
+  }
+
+  void PythonThreadTaskScheduler::thread_ready(Thread *thread)
+  {
+    // handle the wakening of the initialization thread specially
+    if(!interpreter_ready) {
+      AutoHSLLock al(lock);
+      resumable_workers.put(thread, 0);
+    } else {
+      KernelThreadTaskScheduler::thread_ready(thread);
+    }
   }
 
   void PythonThreadTaskScheduler::worker_terminate(Thread *switch_to)
