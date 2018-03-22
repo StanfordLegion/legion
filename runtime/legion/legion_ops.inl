@@ -75,6 +75,7 @@ namespace Legion {
     void MemoizableOp<OP>::execute_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
+      invoke_memoize_operation(OP::get_mappable()->map_id);
 #ifdef DEBUG_LEGION
       assert(memo_state == NO_MEMO || memo_state == MEMO_REQ);
 #endif
@@ -96,6 +97,7 @@ namespace Legion {
         {
           OP::trace->set_state_record();
           tpl = physical_trace->start_new_template();
+          assert(tpl != NULL);
         }
 
         if (tpl->is_replaying())

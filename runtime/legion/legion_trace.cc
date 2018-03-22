@@ -4045,6 +4045,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(task->is_leaf() && !task->has_virtual_instances());
 #endif
+      task->update_no_access_regions();
       task->launch_task();
       task->remove_mapping_reference(task->get_generation());
     }

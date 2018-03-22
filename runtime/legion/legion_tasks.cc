@@ -746,7 +746,6 @@ namespace Legion {
       children_commit = false;
       stealable = false;
       options_selected = false;
-      memoize_selected = false;
       map_origin = false;
       true_guard = PredEvent::NO_PRED_EVENT;
       false_guard = PredEvent::NO_PRED_EVENT;
@@ -4872,11 +4871,6 @@ namespace Legion {
           perform_intra_task_alias_analysis(false/*tracing*/, NULL/*trace*/,
                                             privilege_paths);
       }
-      if (!memoize_selected)
-      {
-        invoke_memoize_operation(map_id);
-        memoize_selected = true;
-      }
       if (runtime->legion_spy_enabled)
       {
         for (unsigned idx = 0; idx < regions.size(); idx++)
@@ -4891,6 +4885,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
+      assert(memo_state != MEMO_REQ);
       assert(privilege_paths.size() == regions.size());
 #endif
       // If we have a trace we do our alias analysis now
@@ -6897,11 +6892,6 @@ namespace Legion {
           perform_intra_task_alias_analysis(false/*tracing*/, NULL/*trace*/,
                                             privilege_paths);
       }
-      if (!memoize_selected)
-      {
-        invoke_memoize_operation(map_id);
-        memoize_selected = true;
-      }
       if (runtime->legion_spy_enabled)
       { 
         for (unsigned idx = 0; idx < regions.size(); idx++)
@@ -6915,6 +6905,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
+      assert(memo_state != MEMO_REQ);
       assert(privilege_paths.size() == regions.size());
 #endif 
       if (need_intra_task_alias_analysis)

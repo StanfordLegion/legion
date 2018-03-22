@@ -3241,7 +3241,6 @@ namespace Legion {
                              launcher.static_dependences,
                              launcher.predicate);
       initialize_memoizable();
-      invoke_memoize_operation(map_id);
       src_requirements.resize(launcher.src_requirements.size());
       dst_requirements.resize(launcher.dst_requirements.size());
       src_versions.resize(launcher.src_requirements.size());
@@ -9329,7 +9328,6 @@ namespace Legion {
     {
       initialize_operation(ctx, true/*track*/);
       initialize_memoizable();
-      invoke_memoize_operation(ctx->owner_task->map_id);
       future = Future(new FutureImpl(runtime, true/*register*/,
             runtime->get_available_distributed_id(), 
             runtime->address_space, this));
@@ -12790,7 +12788,6 @@ namespace Legion {
       initialize_speculation(ctx, true/*track*/, 1, 
                              launcher.static_dependences, launcher.predicate);
       initialize_memoizable();
-      invoke_memoize_operation(map_id);
       requirement = RegionRequirement(launcher.handle, WRITE_DISCARD,
                                       EXCLUSIVE, launcher.parent);
       requirement.privilege_fields = launcher.fields;
