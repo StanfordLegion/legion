@@ -5650,7 +5650,7 @@ namespace Legion {
       rez.serialize(applied_condition);
       // Special case for control replication when we have to 
       // also return the version numbers for broadcast
-      if (remote_replicate)
+      if (remote_replicate && !is_origin_mapped())
         pack_remote_versions(rez);
       runtime->send_individual_remote_mapped(orig_proc, rez);
       // Now we can complete this task
@@ -5962,7 +5962,8 @@ namespace Legion {
         map_applied_conditions.insert(applied);
       // Only have remote versions if we were replicated 
       // and not part of a must epoch launch
-      if (is_repl_individual_task() && (must_epoch == NULL))
+      if (is_repl_individual_task() && (must_epoch == NULL) && 
+          !is_origin_mapped())
         unpack_remote_versions(derez);
       if (!map_applied_conditions.empty())
         complete_mapping(Runtime::merge_events(map_applied_conditions));
