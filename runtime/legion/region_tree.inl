@@ -3118,13 +3118,7 @@ namespace Legion {
                       const FieldMask *performed_mask/*=NULL*/)
     //--------------------------------------------------------------------------
     {
-      DETAILED_PROFILER(context->runtime, REALM_ISSUE_COPY_CALL);
-      Realm::ProfilingRequestSet requests;
-      if (op != NULL)
-        op->add_copy_profiling_request(requests); 
-      if (op->has_execution_fence_event())
-        precondition = Runtime::merge_events(precondition,
-                        op->get_execution_fence_event());
+      DETAILED_PROFILER(context->runtime, REALM_ISSUE_COPY_CALL); 
       // Compute the Index space to use for the copy
       IndexSpaceExpression *copy_expr = this;
       // Do the intersection first if we need it
@@ -3136,42 +3130,21 @@ namespace Legion {
         else
           copy_expr = context->intersect_index_spaces(copy_expr,
               intersect->as_index_part_node()->get_union_expression());
-        // Check to see if the index space is empty in which
-        // case there is nothing that we need to do
-        if (copy_expr->is_empty())
-        {
-#ifdef LEGION_SPY
-          ApUserEvent result = Runtime::create_ap_user_event();
-          Runtime::trigger_event(result);
-          return result;
-#else
-          return ApEvent::NO_AP_EVENT;
-#endif
-        }
       }
       // Then remove any mask from the copy
       if (mask != NULL)
-      {
         copy_expr = context->subtract_index_spaces(copy_expr, mask);
-        // Check to see if the index space is empty
-        if (copy_expr->is_empty())
-        {
-#ifdef LEGION_SPY
-          ApUserEvent result = Runtime::create_ap_user_event();
-          Runtime::trigger_event(result);
-          return result;
-#else
-          return ApEvent::NO_AP_EVENT;
-#endif
-        }
-      }
-      if (context->runtime->profiler != NULL)
-        context->runtime->profiler->add_copy_request(requests, op);
       Realm::IndexSpace<DIM,T> local_space;
       ApEvent local_space_ready = copy_expr->get_expr_index_space(&local_space,
                              handle.get_type_tag(), true/*need tight result*/);
       if (local_space_ready.exists() && !local_space_ready.has_triggered())
-        precondition = Runtime::merge_events(precondition, local_space_ready);
+      {
+        if ((op != NULL) && op->has_execution_fence_event())
+          precondition = Runtime::merge_events(precondition, local_space_ready,
+                                               op->get_execution_fence_event());
+        else
+          precondition = Runtime::merge_events(precondition, local_space_ready);
+      }
       else if (local_space.empty())
       {
         // Quick out if the space is actually empty
@@ -3197,6 +3170,12 @@ namespace Legion {
           finder->second |= *performed_mask;
       }
       ApEvent result;
+      // Now that we know we're going to do this copy add any profling requests
+      Realm::ProfilingRequestSet requests;
+      if (op != NULL)
+        op->add_copy_profiling_request(requests);
+      if (context->runtime->profiler != NULL)
+        context->runtime->profiler->add_copy_request(requests, op);
       // Have to protect against misspeculation
       if (predicate_guard.exists())
       {
@@ -3234,13 +3213,7 @@ namespace Legion {
                       const FieldMask *performed_mask/*=NULL*/)
     //--------------------------------------------------------------------------
     {
-      DETAILED_PROFILER(context->runtime, REALM_ISSUE_FILL_CALL);
-      Realm::ProfilingRequestSet requests;
-      if (op != NULL)
-        op->add_copy_profiling_request(requests); 
-      if ((op != NULL) && op->has_execution_fence_event())
-        precondition = Runtime::merge_events(precondition,
-                        op->get_execution_fence_event());
+      DETAILED_PROFILER(context->runtime, REALM_ISSUE_FILL_CALL); 
       // Compute the Index space to use for the fill
       IndexSpaceExpression *fill_expr = this;
       // Do the intersection first if we need it
@@ -3252,40 +3225,21 @@ namespace Legion {
         else
           fill_expr = context->intersect_index_spaces(fill_expr,
               intersect->as_index_part_node()->get_union_expression());
-        // Check to see if the index space is empty 
-        if (fill_expr->is_empty())
-        {
-#ifdef LEGION_SPY
-          ApUserEvent result = Runtime::create_ap_user_event();
-          Runtime::trigger_event(result);
-          return result;
-#else
-          return ApEvent::NO_AP_EVENT;
-#endif
-        }
       }
       // Then remove any mask from the fill 
       if (mask != NULL)
-      {
-        fill_expr = context->subtract_index_spaces(fill_expr, mask);
-        if (fill_expr->is_empty())
-        {
-#ifdef LEGION_SPY
-          ApUserEvent result = Runtime::create_ap_user_event();
-          Runtime::trigger_event(result);
-          return result;
-#else
-          return ApEvent::NO_AP_EVENT;
-#endif
-        }
-      }
-      if (context->runtime->profiler != NULL)
-        context->runtime->profiler->add_fill_request(requests, op);
+        fill_expr = context->subtract_index_spaces(fill_expr, mask); 
       Realm::IndexSpace<DIM,T> local_space;
       ApEvent local_space_ready = fill_expr->get_expr_index_space(&local_space,
                              handle.get_type_tag(), true/*need tight result*/);
       if (local_space_ready.exists() && !local_space_ready.has_triggered())
-        precondition = Runtime::merge_events(precondition, local_space_ready);
+      {
+        if ((op != NULL) && op->has_execution_fence_event())
+          precondition = Runtime::merge_events(precondition, local_space_ready,
+                                               op->get_execution_fence_event());
+        else
+          precondition = Runtime::merge_events(precondition, local_space_ready);
+      }
       else if (local_space.empty())
       {
         // Quick out if the space is actually empty
@@ -3311,6 +3265,12 @@ namespace Legion {
           finder->second |= *performed_mask;
       }
       ApEvent result;
+      // Now that we know we're going to do this fill add any profiling requests
+      Realm::ProfilingRequestSet requests;
+      if (op != NULL)
+        op->add_copy_profiling_request(requests);
+      if (context->runtime->profiler != NULL)
+        context->runtime->profiler->add_fill_request(requests, op);
       // Have to protect against misspeculation
       if (predicate_guard.exists())
       {
