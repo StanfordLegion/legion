@@ -7595,6 +7595,10 @@ namespace Legion {
         // Before doing anything, write combine so we get
         // exactly one expression for each field
         combine_writes(it->second, copier, false/*prune global*/);
+        // Handle the case where we detect that there is no 
+        // interference with our local write set
+        if (it->second.empty())
+          continue;
         rez.serialize<size_t>(it->second.size());
         for (WriteMasks::const_iterator wit = it->second.begin();
               wit != it->second.end(); wit++)
