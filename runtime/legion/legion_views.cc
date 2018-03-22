@@ -7625,9 +7625,6 @@ namespace Legion {
           // be performed so do the difference
           IndexSpaceExpression *write_mask = 
             context->subtract_index_spaces(dst_expr,wit->first);
-#ifdef DEBUG_LEGION
-          assert(!write_mask->is_empty());
-#endif
           write_mask->pack_expression(rez,
               owner_context->find_shard_space(it->first));
           // We need a separate completion event for each field
