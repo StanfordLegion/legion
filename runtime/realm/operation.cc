@@ -607,7 +607,7 @@ namespace Realm {
       }
     }
 
-    os << "}";
+    os << "}\n";
 #endif
   }
 
