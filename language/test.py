@@ -414,7 +414,6 @@ def test_driver(argv):
                         dest='openmp')
     parser.add_argument('--extra',
                         action='append',
-                        required=False,
                         default=[],
                         help='extra flags to use for each test',
                         dest='extra_flags')
