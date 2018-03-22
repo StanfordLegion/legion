@@ -16,5 +16,5 @@ cp $root_dir/../../../bindings/regent/libregent.so .
 cp $root_dir/../../examples/libstencil.so .
 cp $root_dir/../../examples/libstencil_mapper.so .
 
-cp $root_dir/../../scripts/*_stencil*.sh .
-cp $root_dir/../../scripts/summarize.py .
+cp $root_dir/*_stencil*.sh .
+cp $root_dir/../summarize.py .

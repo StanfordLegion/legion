@@ -24,4 +24,4 @@ wait
 cp $root_dir/../../../bindings/regent/libregent.so .
 cp $root_dir/../../soleil-x/src/libsoleil_mapper.so .
 
-cp $root_dir/../../scripts/*_soleil*.sh .
+cp $root_dir/*_soleil*.sh .

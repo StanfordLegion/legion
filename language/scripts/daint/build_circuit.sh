@@ -15,5 +15,5 @@ done
 cp $root_dir/../../../bindings/regent/libregent.so .
 cp $root_dir/../../examples/libcircuit.so .
 
-cp $root_dir/../../scripts/*_circuit*.sh .
-cp $root_dir/../../scripts/summarize.py .
+cp $root_dir/*_circuit*.sh .
+cp $root_dir/../summarize.py .
