@@ -7594,11 +7594,28 @@ namespace Legion {
 #endif
         // Before doing anything, write combine so we get
         // exactly one expression for each field
-        combine_writes(it->second, copier, false/*prune global*/);
-        // Handle the case where we detect that there is no 
-        // interference with our local write set
-        if (it->second.empty())
-          continue;
+        LegionList<FieldSet<IndexSpaceExpression*> >::aligned write_sets;
+        // Compute the common field sets and combine them, don't
+        // give a universal mask since we only care about the
+        // fields we have.
+        compute_field_sets<IndexSpaceExpression*>(FieldMask(),
+                                                  it->second, write_sets);
+        it->second.clear();
+        for (LegionList<FieldSet<IndexSpaceExpression*> >::aligned::
+              const_iterator wit = write_sets.begin(); 
+              wit != write_sets.end(); wit++)
+        {
+#ifdef DEBUG_LEGION
+          assert(!wit->elements.empty());
+#endif
+          IndexSpaceExpression *union_is = (wit->elements.size() > 1) ?
+            context->union_index_spaces(wit->elements) :
+            *(wit->elements.begin());
+          it->second[union_is] = wit->set_mask;
+        }
+#ifdef DEBUG_LEGION
+        assert(!it->second.empty());
+#endif
         rez.serialize<size_t>(it->second.size());
         for (WriteMasks::const_iterator wit = it->second.begin();
               wit != it->second.end(); wit++)
@@ -7608,6 +7625,9 @@ namespace Legion {
           // be performed so do the difference
           IndexSpaceExpression *write_mask = 
             context->subtract_index_spaces(dst_expr,wit->first);
+#ifdef DEBUG_LEGION
+          assert(!write_mask->is_empty());
+#endif
           write_mask->pack_expression(rez,
               owner_context->find_shard_space(it->first));
           // We need a separate completion event for each field
