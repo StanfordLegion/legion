@@ -9252,9 +9252,9 @@ namespace Legion {
         uncaptured_states[state] = mask;
         uncaptured_fields |= mask;
 #endif
-        state->add_nested_resource_ref(owner_did);
         // Root owners need gc and valid references on the tree
         // otherwise everyone else just needs a resource reference
+        state->add_nested_resource_ref(owner_did);
         if (root_owner)
         {
           state->add_nested_gc_ref(owner_did, mutator);
@@ -9302,7 +9302,14 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(root_owner); // should only be called on the root owner
 #endif
-#ifndef CVOPT
+#ifdef CVOPT
+      if (root_owner)
+      {
+        for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it =
+              version_states.begin(); it != version_states.end(); it++)
+          it->first->remove_nested_valid_ref(owner_did, mutator);
+      }
+#else
       // No need to check for deletion, we know we're also holding gc refs
       if (valid_version_states != NULL)
       {
