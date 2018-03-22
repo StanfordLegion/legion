@@ -51,7 +51,7 @@ def discover_conduit():
         raise Exception('Please set CONDUIT in your environment')
 
 def gasnet_enabled():
-    return not ('USE_GASNET' in os.environ and os.environ['USE_GASNET'] == '0')
+    return 'USE_GASNET' not in os.environ or os.environ['USE_GASNET'] == '1'
 
 def hdf_enabled():
     return 'USE_HDF' in os.environ and os.environ['USE_HDF'] == '1'
