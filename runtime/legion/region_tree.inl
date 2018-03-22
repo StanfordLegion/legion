@@ -3136,10 +3136,35 @@ namespace Legion {
         else
           copy_expr = context->intersect_index_spaces(copy_expr,
               intersect->as_index_part_node()->get_union_expression());
+        // Check to see if the index space is empty in which
+        // case there is nothing that we need to do
+        if (copy_expr->is_empty())
+        {
+#ifdef LEGION_SPY
+          ApUserEvent result = Runtime::create_ap_user_event();
+          Runtime::trigger_event(result);
+          return result;
+#else
+          return ApEvent::NO_AP_EVENT;
+#endif
+        }
       }
       // Then remove any mask from the copy
       if (mask != NULL)
+      {
         copy_expr = context->subtract_index_spaces(copy_expr, mask);
+        // Check to see if the index space is empty
+        if (copy_expr->is_empty())
+        {
+#ifdef LEGION_SPY
+          ApUserEvent result = Runtime::create_ap_user_event();
+          Runtime::trigger_event(result);
+          return result;
+#else
+          return ApEvent::NO_AP_EVENT;
+#endif
+        }
+      }
       if (context->runtime->profiler != NULL)
         context->runtime->profiler->add_copy_request(requests, op);
       Realm::IndexSpace<DIM,T> local_space;
@@ -3227,10 +3252,33 @@ namespace Legion {
         else
           fill_expr = context->intersect_index_spaces(fill_expr,
               intersect->as_index_part_node()->get_union_expression());
+        // Check to see if the index space is empty 
+        if (fill_expr->is_empty())
+        {
+#ifdef LEGION_SPY
+          ApUserEvent result = Runtime::create_ap_user_event();
+          Runtime::trigger_event(result);
+          return result;
+#else
+          return ApEvent::NO_AP_EVENT;
+#endif
+        }
       }
       // Then remove any mask from the fill 
       if (mask != NULL)
+      {
         fill_expr = context->subtract_index_spaces(fill_expr, mask);
+        if (fill_expr->is_empty())
+        {
+#ifdef LEGION_SPY
+          ApUserEvent result = Runtime::create_ap_user_event();
+          Runtime::trigger_event(result);
+          return result;
+#else
+          return ApEvent::NO_AP_EVENT;
+#endif
+        }
+      }
       if (context->runtime->profiler != NULL)
         context->runtime->profiler->add_fill_request(requests, op);
       Realm::IndexSpace<DIM,T> local_space;
