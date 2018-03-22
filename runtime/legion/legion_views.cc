@@ -10748,7 +10748,7 @@ namespace Legion {
       if (!term_event.exists())
         return;
       const UniqueID op_id = op->get_unique_op_id();
-#ifdef DISTRIBUTED_INSTANCE_VIEWS
+#ifndef DISTRIBUTED_INSTANCE_VIEWS
       if (!is_logical_owner())
       {
         Serializer rez;
