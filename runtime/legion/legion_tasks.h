@@ -688,7 +688,8 @@ namespace Legion {
       RtEvent perform_versioning_analysis(void);
       virtual RtEvent perform_must_epoch_version_analysis(MustEpochOp *own);
     public:
-      virtual bool has_prepipeline_stage(void) const { return true; }
+      virtual bool has_prepipeline_stage(void) const
+        { return need_prepipeline_stage; }
       virtual void trigger_prepipeline_stage(void);
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);

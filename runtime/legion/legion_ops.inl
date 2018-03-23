@@ -39,6 +39,7 @@ namespace Legion {
     {
       tpl = NULL;
       memo_state = NO_MEMO;
+      need_prepipeline_stage = false;
     }
 
     //--------------------------------------------------------------------------
@@ -48,6 +49,7 @@ namespace Legion {
     {
       RezCheck z(rez);
       rez.serialize(memo_state);
+      rez.serialize(need_prepipeline_stage);
     }
 
     //--------------------------------------------------------------------------
@@ -57,6 +59,7 @@ namespace Legion {
     {
       DerezCheck z(derez);
       derez.deserialize(memo_state);
+      derez.deserialize(need_prepipeline_stage);
       // TODO: remote mapping is not yet supported in dynamic tracing
       tpl = NULL;
     }
@@ -119,6 +122,7 @@ namespace Legion {
           memo_state = RECORD;
         }
       }
+      need_prepipeline_stage = true;
       OP::execute_dependence_analysis();
     };
 
