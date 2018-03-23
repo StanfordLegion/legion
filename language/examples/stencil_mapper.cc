@@ -15,6 +15,8 @@
 
 #include "stencil_mapper.h"
 
+#include <vector>
+
 #include "mappers/default_mapper.h"
 
 #define SPMD_SHARD_USE_IO_PROC 1
@@ -29,7 +31,13 @@ class StencilMapper : public DefaultMapper
 public:
   StencilMapper(MapperRuntime *rt, Machine machine, Processor local,
                 const char *mapper_name,
-                std::vector<Processor>* procs_list);
+                std::vector<Processor>* procs_list,
+                std::vector<Memory>* sysmems_list,
+                std::map<Memory, std::vector<Processor> >* sysmem_local_procs,
+                std::map<Processor, Memory>* proc_sysmems,
+                std::map<Processor, Memory>* proc_regmems,
+                std::map<Processor, Memory>* proc_fbmems,
+                std::map<Processor, Memory>* proc_zcmems);
   virtual void select_task_options(const MapperContext    ctx,
                                    const Task&            task,
                                          TaskOptions&     output);
@@ -62,21 +70,51 @@ public:
                                     std::vector<PhysicalInstance> &instances);
 private:
   std::vector<Processor>& procs_list;
+  std::vector<Memory>& sysmems_list;
+  std::map<Memory, std::vector<Processor> >& sysmem_local_procs;
+  std::map<Processor, Memory>& proc_sysmems;
+  std::map<Processor, Memory>& proc_regmems;
+  std::map<Processor, Memory>& proc_fbmems;
+  std::map<Processor, Memory>& proc_zcmems;
+  std::map<LogicalRegion, PhysicalInstance> cached_instances;
+  std::map<std::pair<TaskID, LogicalRegion>, Processor> init_procs;
 };
 
 StencilMapper::StencilMapper(MapperRuntime *rt, Machine machine, Processor local,
                              const char *mapper_name,
-                             std::vector<Processor>* _procs_list)
+                             std::vector<Processor>* _procs_list,
+                             std::vector<Memory>* _sysmems_list,
+                             std::map<Memory, std::vector<Processor> >* _sysmem_local_procs,
+                             std::map<Processor, Memory>* _proc_sysmems,
+                             std::map<Processor, Memory>* _proc_regmems,
+                             std::map<Processor, Memory>* _proc_fbmems,
+                             std::map<Processor, Memory>* _proc_zcmems)
   : DefaultMapper(rt, machine, local, mapper_name)
   , procs_list(*_procs_list)
+  , sysmems_list(*_sysmems_list)
+  , sysmem_local_procs(*_sysmem_local_procs)
+  , proc_sysmems(*_proc_sysmems)
+  , proc_regmems(*_proc_regmems)
+  , proc_fbmems(*_proc_fbmems)
+  , proc_zcmems(*_proc_zcmems)
 {
 }
 
 void StencilMapper::select_task_options(const MapperContext    ctx,
-                                        const Task&            task,
-                                              TaskOptions&     output)
+                                         const Task&            task,
+                                               TaskOptions&     output)
 {
-  output.initial_proc = default_policy_select_initial_processor(ctx, task);
+  std::pair<TaskID, LogicalRegion> key(task.task_id,
+      task.regions.size() > 0 ? task.regions[0].region
+                              : LogicalRegion::NO_REGION);
+  std::map<std::pair<TaskID, LogicalRegion>, Processor>::iterator
+    finder = init_procs.find(key);
+  if (finder == init_procs.end()) {
+    output.initial_proc = default_policy_select_initial_processor(ctx, task);
+    init_procs[key] = output.initial_proc;
+  } else {
+    output.initial_proc = finder->second;
+  }
   output.inline_task = false;
   output.stealable = stealing_enabled;
 #ifdef MAP_LOCALLY
@@ -84,6 +122,25 @@ void StencilMapper::select_task_options(const MapperContext    ctx,
 #else
   output.map_locally = false;
 #endif
+}
+
+Processor StencilMapper::default_policy_select_initial_processor(
+                                    MapperContext ctx, const Task &task)
+{
+  if (!task.regions.empty()) {
+    if (task.regions[0].handle_type == SINGULAR) {
+      Color index = runtime->get_logical_region_color(ctx, task.regions[0].region);
+      std::vector<Processor> &local_procs =
+        sysmem_local_procs[proc_sysmems[local_proc]];
+      if (local_procs.size() > 1) {
+        return local_procs[index % local_procs.size()];
+      } else {
+        return local_procs[0];
+      }
+    }
+  }
+
+  return DefaultMapper::default_policy_select_initial_processor(ctx, task);
 }
 
 void StencilMapper::default_policy_rank_processor_kinds(MapperContext ctx,
@@ -109,12 +166,6 @@ void StencilMapper::default_policy_rank_processor_kinds(MapperContext ctx,
 #if SPMD_SHARD_USE_IO_PROC
   }
 #endif
-}
-
-Processor StencilMapper::default_policy_select_initial_processor(
-                                    MapperContext ctx, const Task &task)
-{
-  return DefaultMapper::default_policy_select_initial_processor(ctx, task);
 }
 
 void StencilMapper::default_policy_select_target_processors(
@@ -276,19 +327,71 @@ void StencilMapper::stencil_create_copy_instance(MapperContext ctx,
 static void create_mappers(Machine machine, HighLevelRuntime *runtime, const std::set<Processor> &local_procs)
 {
   std::vector<Processor>* procs_list = new std::vector<Processor>();
+  std::vector<Memory>* sysmems_list = new std::vector<Memory>();
+  std::map<Memory, std::vector<Processor> >* sysmem_local_procs =
+    new std::map<Memory, std::vector<Processor> >();
+  std::map<Processor, Memory>* proc_sysmems = new std::map<Processor, Memory>();
+  std::map<Processor, Memory>* proc_regmems = new std::map<Processor, Memory>();
+  std::map<Processor, Memory>* proc_fbmems = new std::map<Processor, Memory>();
+  std::map<Processor, unsigned> proc_fbmems_affinity;
+  std::map<Processor, Memory>* proc_zcmems = new std::map<Processor, Memory>();
 
-  Machine::ProcessorQuery procs_query(machine);
-  procs_query.only_kind(Processor::LOC_PROC);
-  for (Machine::ProcessorQuery::iterator it = procs_query.begin();
-        it != procs_query.end(); it++)
-    procs_list->push_back(*it);
+
+  std::vector<Machine::ProcessorMemoryAffinity> proc_mem_affinities;
+  machine.get_proc_mem_affinity(proc_mem_affinities);
+
+  for (unsigned idx = 0; idx < proc_mem_affinities.size(); ++idx) {
+    Machine::ProcessorMemoryAffinity& affinity = proc_mem_affinities[idx];
+    if (affinity.p.kind() == Processor::LOC_PROC ||
+        affinity.p.kind() == Processor::IO_PROC) {
+      if (affinity.m.kind() == Memory::SYSTEM_MEM) {
+        (*proc_sysmems)[affinity.p] = affinity.m;
+        if (proc_regmems->find(affinity.p) == proc_regmems->end())
+          (*proc_regmems)[affinity.p] = affinity.m;
+      }
+      else if (affinity.m.kind() == Memory::REGDMA_MEM)
+        (*proc_regmems)[affinity.p] = affinity.m;
+    }
+    else if (affinity.p.kind() == Processor::TOC_PROC) {
+      if (affinity.m.kind() == Memory::GPU_FB_MEM) {
+        std::map<Processor, unsigned>::iterator finder =
+          proc_fbmems_affinity.find(affinity.p);
+        if (finder == proc_fbmems_affinity.end() ||
+            finder->second > affinity.latency)
+        {
+          (*proc_fbmems)[affinity.p] = affinity.m;
+          proc_fbmems_affinity[affinity.p] = affinity.latency;
+        }
+      }
+      else if (affinity.m.kind() == Memory::Z_COPY_MEM) {
+        (*proc_zcmems)[affinity.p] = affinity.m;
+      }
+    }
+  }
+
+  for (std::map<Processor, Memory>::iterator it = proc_sysmems->begin();
+       it != proc_sysmems->end(); ++it) {
+    procs_list->push_back(it->first);
+    if (it->first.kind() == Processor::LOC_PROC)
+      (*sysmem_local_procs)[it->second].push_back(it->first);
+  }
+
+  for (std::map<Memory, std::vector<Processor> >::iterator it =
+        sysmem_local_procs->begin(); it != sysmem_local_procs->end(); ++it)
+    sysmems_list->push_back(it->first);
 
   for (std::set<Processor>::const_iterator it = local_procs.begin();
         it != local_procs.end(); it++)
   {
     StencilMapper* mapper = new StencilMapper(runtime->get_mapper_runtime(),
                                               machine, *it, "stencil_mapper",
-                                              procs_list);
+                                              procs_list,
+                                              sysmems_list,
+                                              sysmem_local_procs,
+                                              proc_sysmems,
+                                              proc_regmems,
+                                              proc_fbmems,
+                                              proc_zcmems);
     runtime->replace_default_mapper(mapper, *it);
   }
 }
