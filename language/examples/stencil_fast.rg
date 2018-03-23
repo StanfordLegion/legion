@@ -43,7 +43,7 @@ if USE_FOREIGN then
   local cxx = os.getenv('CXX') or 'c++'
 
   local cxx_flags = os.getenv('CC_FLAGS') or ''
-  cxx_flags = cxx_flags .. " -O3 -Wall -Werror -DDTYPE=" .. tostring(DTYPE) .. " -DRESTRICT=__restrict__ -DRADIUS=" .. tostring(RADIUS)
+  cxx_flags = cxx_flags .. " -O3 -march=native -Wall -Werror -DDTYPE=" .. tostring(DTYPE) .. " -DRESTRICT=__restrict__ -DRADIUS=" .. tostring(RADIUS)
   if os.execute('test "$(uname)" = Darwin') == 0 then
     cxx_flags =
       (cxx_flags ..
