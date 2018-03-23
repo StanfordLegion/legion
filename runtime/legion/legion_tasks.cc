@@ -7947,7 +7947,7 @@ namespace Legion {
             (target_proc != current_proc))
         {
           // Make a slice copy and send it away
-          SliceTask *clone = clone_as_slice_task(launch_space, target_proc,
+          SliceTask *clone = clone_as_slice_task(internal_space, target_proc,
                                                  true/*needs slice*/,
                                                  stealable, 1LL);
           runtime->send_task(clone);
