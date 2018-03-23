@@ -254,8 +254,8 @@ class HasNoDependencies(HasDependencies):
 
 class TimeRange(object):
     def __init__(self, create, ready, start, stop):
-        assert create <= ready
-        assert ready <= start
+        # assert create <= ready
+        # assert ready <= start
         assert start <= stop
         self.create = create
         self.ready = ready
@@ -1801,7 +1801,7 @@ class State(object):
         variant = self.find_variant(task_id, variant_id)
         task = self.find_task(op_id, variant)
         assert wait_ready >= wait_start
-        assert wait_end >= wait_ready
+        # assert wait_end >= wait_ready
         task.add_wait_interval(wait_start, wait_ready, wait_end)
 
     def log_meta_wait_info(self, op_id, lg_id, wait_start, wait_ready, wait_end):
