@@ -1625,7 +1625,7 @@ namespace Legion {
     void PhysicalTemplate::initialize(ApEvent completion, bool recurrent)
     //--------------------------------------------------------------------------
     {
-      fence_completion = ApEvent::NO_AP_EVENT;
+      fence_completion = completion;
       if (recurrent)
         for (std::map<unsigned, unsigned>::iterator it = frontiers.begin();
             it != frontiers.end(); ++it)
@@ -2145,8 +2145,6 @@ namespace Legion {
         delete (*it);
 
       size_t num_origins = 0;
-      std::map<TraceLocalID, SetReadyEvent*> last_set_ready_event;
-      std::set<SetReadyEvent*> last_set_ready_events;
       for (std::vector<Instruction*>::iterator it = instructions.begin();
            it != instructions.end(); ++it)
         switch ((*it)->get_kind())
@@ -2165,25 +2163,9 @@ namespace Legion {
             }
           case SET_READY_EVENT:
             {
-              SetReadyEvent *set_ready_event = (*it)->as_set_ready_event();
-              num_origins += set_ready_event->ready_event_idx ==
-                             fence_completion_id;
-              std::map<TraceLocalID, SetReadyEvent*>::iterator finder =
-                last_set_ready_event.find(set_ready_event->op_key);
-              if (finder == last_set_ready_event.end())
-              {
-                last_set_ready_event[set_ready_event->op_key] = set_ready_event;
-              }
-              else
-              {
-#ifdef DEBUG_LEGION
-                assert(last_set_ready_events.find(finder->second) !=
-                       last_set_ready_events.end());
-#endif
-                last_set_ready_events.erase(finder->second);
-                finder->second = set_ready_event;
-              }
-              last_set_ready_events.insert(set_ready_event);
+              num_origins +=
+                (*it)->as_set_ready_event()->ready_event_idx ==
+                fence_completion_id;
               break;
             }
           default:
@@ -2225,7 +2207,6 @@ namespace Legion {
       {
         Instruction *inst = instructions[idx];
         MergeEvent *new_merge = NULL;
-        LaunchTask *new_launch_task = NULL;
         std::set<unsigned> users;
 
         switch (inst->get_kind())
@@ -2300,18 +2281,6 @@ namespace Legion {
                   ++next_instruction_id;
                 }
               }
-              if (last_set_ready_events.find(ready) !=
-                  last_set_ready_events.end())
-              {
-#ifdef DEBUG_LEGION
-                std::map<TraceLocalID, Operation*>::iterator finder =
-                  operations.find(ready->op_key);
-                assert(finder != operations.end());
-                assert(finder->second->get_operation_kind() ==
-                       Operation::TASK_OP_KIND);
-#endif
-                new_launch_task = new LaunchTask(*this, ready->op_key);
-              }
               break;
             }
           default:
@@ -2323,10 +2292,13 @@ namespace Legion {
         if (new_merge != NULL)
           new_instructions.push_back(new_merge);
         new_instructions.push_back(inst);
-        if (new_launch_task != NULL)
-          new_instructions.push_back(new_launch_task);
       }
       instructions.swap(new_instructions);
+
+      for (std::map<TraceLocalID, Operation*>::iterator it =
+           operations.begin(); it != operations.end(); ++it)
+        if (it->second->get_operation_kind() == Operation::TASK_OP_KIND)
+          instructions.push_back(new LaunchTask(*this, it->first));
     }
 
     //--------------------------------------------------------------------------
@@ -2479,6 +2451,8 @@ namespace Legion {
                               std::deque<InstanceSet> &physical_instances) const
     //--------------------------------------------------------------------------
     {
+      AutoLock t_lock(template_lock, 1, false/*exclusive*/);
+
       TraceLocalID op_key = task->get_trace_local_id();
       CachedMappings::const_iterator finder = cached_mappings.find(op_key);
 #ifdef DEBUG_LEGION
@@ -3436,6 +3410,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(events[lhs].exists());
       assert(user_events[lhs].exists());
+      assert(events[rhs].exists());
       assert(events[lhs].id == user_events[lhs].id);
 #endif
       Runtime::trigger_event(user_events[lhs], events[rhs]);
@@ -4070,7 +4045,7 @@ namespace Legion {
       assert(task->is_leaf() && !task->has_virtual_instances());
 #endif
       task->update_no_access_regions();
-      task->defer_launch_task(RtEvent::NO_RT_EVENT, LG_RUNNING_PRIORITY);
+      task->launch_task();
     }
 
     //--------------------------------------------------------------------------
