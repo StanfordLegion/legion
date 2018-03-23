@@ -1804,6 +1804,7 @@ task test()
   __demand(__spmd)
   do
     -- Main Simulation Loop
+    __demand(__trace)
     while continue_simulation(warmup, cycle, cstop, time, tstop) do
       -- if warmup and cycle > 0 then
       --   wait_for(dthydro)

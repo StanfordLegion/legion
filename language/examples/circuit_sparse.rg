@@ -877,7 +877,7 @@ task toplevel()
   var simulation_success = true
   var steps = conf.steps
   var num_loops = conf.num_loops
-  __demand(__spmd)
+  __demand(__spmd, __trace)
   for j = 0, num_loops do
     -- c.legion_runtime_begin_trace(__runtime(), __context(), 0, false)
 

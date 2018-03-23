@@ -536,6 +536,7 @@ task main()
     --   fill_(private[i], init)
     -- end
 
+    __demand(__trace)
     for t = 0, tsteps do
       -- __demand(__parallel)
       for i = 0, nt2 do
