@@ -3156,6 +3156,10 @@ namespace Legion {
         return ApEvent::NO_AP_EVENT;
 #endif
       }
+      else if ((op != NULL) && op->has_execution_fence_event())
+        precondition = 
+          Runtime::merge_events(precondition, op->get_execution_fence_event());
+      
       // If we make it here then record our performed write
       if (perf != NULL)
       {
@@ -3251,6 +3255,9 @@ namespace Legion {
         return ApEvent::NO_AP_EVENT;
 #endif
       }
+      else if ((op != NULL) && op->has_execution_fence_event())
+        precondition = 
+          Runtime::merge_events(precondition, op->get_execution_fence_event());
       // If we make it here then record our performed write
       if (perf != NULL)
       {
