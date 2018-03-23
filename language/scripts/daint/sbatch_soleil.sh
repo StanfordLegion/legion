@@ -15,7 +15,7 @@ for n in 64 32 16; do
     for r in 0 1 2 3 4; do
         if [[ ! -f out_"$n"x8_r"$r".log ]]; then
             echo "Running $n""x8_r$r""..."
-            srun -n $n -N $n --ntasks-per-node 1 --cpu_bind none /lib64/ld-linux-x86-64.so.2 "$root_dir"/taylor-256x128x128-dop"$n" -ll:csize 30000 -ll:rsize 1024 -ll:gsize 0 -ll:cpu 0 -ll:ocpu 1 -ll:othr 8 -ll:okindhack -ll:io 1 -ll:util 2 -ll:dma 2 | tee out_"$n"x8_r"$r".log
+            srun -n $n -N $n --ntasks-per-node 1 --cpu_bind none /lib64/ld-linux-x86-64.so.2 "$root_dir"/taylor-256x128x128-dop"$n" -ll:csize 30000 -ll:rsize 1024 -ll:gsize 0 -ll:cpu 0 -ll:ocpu 1 -ll:othr 8 -ll:okindhack -ll:io 1 -ll:util 2 -ll:dma 2 -dm:memoize | tee out_"$n"x8_r"$r".log
             # -lg:prof 4 -lg:prof_logfile prof_"$n"x8_r"$r"_%.gz
         fi
     done

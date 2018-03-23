@@ -20,7 +20,7 @@ for n in 64 32 16; do
         if [[ ! -f out_"$n"x14_r"$r".log ]]; then
             echo "Running $n""x14_r$r""..."
 
-            OMP_NUM_THREADS=36 srun -n $(( n * 2 )) -N $n "$root_dir/circuit.spmd14" -npp 10 -wpp 40 -l 100 -p $(( 1024 * 14 )) -pps $(( 1024 / n )) -ll:csize 30000 -ll:rsize 512 -ll:gsize 0 -ll:cpu 14 -ll:io 1 -ll:util 1 -ll:dma 2 | tee out_"$n"x14_r"$r".log
+            OMP_NUM_THREADS=36 srun -n $(( n * 2 )) -N $n "$root_dir/circuit.spmd14" -npp 10 -wpp 40 -l 100 -p $(( 1024 * 14 )) -pps $(( 1024 / n )) -ll:csize 30000 -ll:rsize 512 -ll:gsize 0 -ll:cpu 14 -ll:io 1 -ll:util 1 -ll:dma 2 -dm:memoize | tee out_"$n"x14_r"$r".log
             # -lg:prof 4 -lg:prof_logfile prof_"$n"x14_r"$r"_%.gz
         fi
     done
