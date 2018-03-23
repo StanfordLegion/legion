@@ -1607,7 +1607,10 @@ namespace Legion {
           for (std::deque<InstanceSet>::iterator pit =
               it->second.physical_instances.begin(); pit !=
               it->second.physical_instances.end(); pit++)
+          {
+            pit->remove_valid_references(MAPPING_ACQUIRE_REF);
             pit->clear();
+          }
         }
         cached_mappings.clear();
       }
@@ -2440,6 +2443,12 @@ namespace Legion {
       mapping.task_priority = output.task_priority;
       mapping.postmap_task = output.postmap_task;
       mapping.physical_instances = physical_instances;
+      for (std::deque<InstanceSet>::iterator it =
+           mapping.physical_instances.begin(); it !=
+           mapping.physical_instances.end(); ++it)
+      {
+        it->add_valid_references(MAPPING_ACQUIRE_REF);
+      }
     }
 
     //--------------------------------------------------------------------------
