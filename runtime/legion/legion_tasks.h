@@ -309,9 +309,7 @@ namespace Legion {
     public:
       RtEvent defer_distribute_task(RtEvent precondition);
       RtEvent defer_perform_mapping(RtEvent precondition, MustEpochOp *op);
-      RtEvent defer_launch_task(RtEvent precondition,
-                                LgPriority priority =
-                                LG_THROUGHPUT_DEFERRED_PRIORITY);
+      RtEvent defer_launch_task(RtEvent precondition);
     protected:
       void enqueue_ready_task(bool use_target_processor,
                               RtEvent wait_on = RtEvent::NO_RT_EVENT);

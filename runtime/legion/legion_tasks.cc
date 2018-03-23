@@ -1340,11 +1340,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtEvent TaskOp::defer_launch_task(RtEvent precondition, LgPriority priority)
+    RtEvent TaskOp::defer_launch_task(RtEvent precondition)
     //--------------------------------------------------------------------------
     {
       DeferLaunchArgs args(this);
-      return runtime->issue_runtime_meta_task(args, priority, precondition);
+      return runtime->issue_runtime_meta_task(args,
+          LG_THROUGHPUT_DEFERRED_PRIORITY, precondition);
     }
 
     //--------------------------------------------------------------------------
