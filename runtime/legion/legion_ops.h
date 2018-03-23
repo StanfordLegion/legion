@@ -797,6 +797,7 @@ namespace Legion {
       PhysicalTemplate *tpl;
       // Track whether we are memoizing physical analysis for this operation
       MemoizableState memo_state;
+      bool need_prepipeline_stage;
     };
 
     /**
@@ -923,7 +924,8 @@ namespace Legion {
       virtual size_t get_region_count(void) const;
       virtual Mappable* get_mappable(void);
     public:
-      virtual bool has_prepipeline_stage(void) const { return true; }
+      virtual bool has_prepipeline_stage(void) const
+        { return need_prepipeline_stage; }
       virtual void trigger_prepipeline_stage(void);
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
@@ -2689,7 +2691,8 @@ namespace Legion {
       virtual unsigned get_context_index(void) const;
       virtual int get_depth(void) const;
     public:
-      virtual bool has_prepipeline_stage(void) const { return true; }
+      virtual bool has_prepipeline_stage(void) const
+        { return need_prepipeline_stage; }
       virtual void trigger_prepipeline_stage(void);
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);

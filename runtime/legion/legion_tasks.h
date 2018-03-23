@@ -309,7 +309,9 @@ namespace Legion {
     public:
       RtEvent defer_distribute_task(RtEvent precondition);
       RtEvent defer_perform_mapping(RtEvent precondition, MustEpochOp *op);
-      RtEvent defer_launch_task(RtEvent precondition);
+      RtEvent defer_launch_task(RtEvent precondition,
+                                LgPriority priority =
+                                LG_THROUGHPUT_DEFERRED_PRIORITY);
     protected:
       void enqueue_ready_task(bool use_target_processor,
                               RtEvent wait_on = RtEvent::NO_RT_EVENT);
@@ -688,7 +690,8 @@ namespace Legion {
       RtEvent perform_versioning_analysis(void);
       virtual RtEvent perform_must_epoch_version_analysis(MustEpochOp *own);
     public:
-      virtual bool has_prepipeline_stage(void) const { return true; }
+      virtual bool has_prepipeline_stage(void) const
+        { return need_prepipeline_stage; }
       virtual void trigger_prepipeline_stage(void);
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
