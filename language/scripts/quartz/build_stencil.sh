@@ -12,6 +12,8 @@ for c in 12; do
     mv stencil stencil.spmd"$c"
 done
 
+$root_dir/build_stencil_icc_kernels.sh .
+
 cp $root_dir/../../../bindings/regent/libregent.so .
 cp $root_dir/../../examples/libstencil.so .
 cp $root_dir/../../examples/libstencil_mapper.so .
