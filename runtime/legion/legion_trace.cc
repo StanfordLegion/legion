@@ -3975,7 +3975,6 @@ namespace Legion {
       CopyOp *copy = static_cast<CopyOp*>(operations[lhs]);
 #endif
       copy->complete_copy_execution(events[rhs]);
-      copy->remove_mapping_reference(copy->get_generation());
     }
 
     //--------------------------------------------------------------------------
@@ -4047,7 +4046,6 @@ namespace Legion {
 #endif
       task->update_no_access_regions();
       task->launch_task();
-      task->remove_mapping_reference(task->get_generation());
     }
 
     //--------------------------------------------------------------------------

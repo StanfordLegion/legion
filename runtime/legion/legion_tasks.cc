@@ -5772,7 +5772,6 @@ namespace Legion {
 #ifdef LEGION_SPY
       LegionSpy::log_replay_operation(unique_op_id);
 #endif
-      add_mapping_reference(gen);
       tpl->register_operation(this);
       complete_mapping();
     }
@@ -6543,7 +6542,6 @@ namespace Legion {
 #ifdef LEGION_SPY
       LegionSpy::log_replay_operation(unique_op_id);
 #endif
-      add_mapping_reference(gen);
       tpl->register_operation(this);
       complete_mapping();
     }
