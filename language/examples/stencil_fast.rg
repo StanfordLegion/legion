@@ -319,33 +319,14 @@ local function make_stencil_interior(private, interior, radius)
       end
     end
   else
-    local weight
-    __demand(__inline)
-    task weight(i : int64, j : int64, radius : int64)
-      return (j + radius)*(2*radius + 1) + (i + radius)
-    end
-
     return rquote
       var rect = get_rect(private.ispace)
       var { base_input = base, stride_input = stride } = get_base_and_stride(rect, __physical(private)[0], __fields(private)[0])
       var { base_output = base, stride_output = stride } = get_base_and_stride(rect, __physical(private)[1], __fields(private)[1])
       regentlib.assert(stride_output == stride_input, "strides do not match")
 
-      var weights : double[(2*radius + 1)*(2*radius + 1)]
-      for i = -radius, radius + 1 do
-        for j = -radius, radius + 1 do
-          weights[weight(i, j, radius)] = 0
-        end
-      end
-      for i = 1, radius + 1 do
-        weights[weight( 0,  i, radius)] =  1.0/(2.0*i*radius)
-        weights[weight( i,  0, radius)] =  1.0/(2.0*i*radius)
-        weights[weight( 0, -i, radius)] = -1.0/(2.0*i*radius)
-        weights[weight(-i,  0, radius)] = -1.0/(2.0*i*radius)
-      end
-
       var interior_rect = get_rect(interior.ispace)
-      cstencil.stencil(base_input, base_output, weights,
+      cstencil.stencil(base_input, base_output,
                        stride_input / [terralib.sizeof(DTYPE)],
                        interior_rect.lo.x[0] - rect.lo.x[0], interior_rect.hi.x[0] - rect.lo.x[0] + 1,
                        interior_rect.lo.x[1] - rect.lo.x[1], interior_rect.hi.x[1] - rect.lo.x[1] + 1)

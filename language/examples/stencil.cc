@@ -17,13 +17,25 @@
 
 void stencil(DTYPE* RESTRICT inputPtr,
              DTYPE* RESTRICT outputPtr,
-             DTYPE* RESTRICT weightPtr,
              coord_t haloX, coord_t startX, coord_t endX,
              coord_t startY, coord_t endY)
 {
 #define IN(i, j)     inputPtr[(j) * haloX + i]
 #define OUT(i, j)    outputPtr[(j) * haloX + i]
-#define WEIGHT(i, j) weightPtr[(j + RADIUS) * (2 * RADIUS + 1) + (i + RADIUS)]
+#define WEIGHT(i, j) weightPtr2[j + RADIUS][i + RADIUS]
+
+  DTYPE weightPtr2[2 * RADIUS + 1][2 * RADIUS + 1];
+  for (coord_t jj = -RADIUS; jj <= RADIUS; ++jj)
+    for (coord_t ii = -RADIUS; ii <= RADIUS; ++ii)
+      WEIGHT(ii, jj) = 0.0;
+
+  for (coord_t ii = 1; ii <= RADIUS; ++ii) {
+    WEIGHT(  0,  ii) =  1.0/(2.0 * ii * RADIUS);
+    WEIGHT( ii,   0) =  1.0/(2.0 * ii * RADIUS);
+    WEIGHT(  0, -ii) = -1.0/(2.0 * ii * RADIUS);
+    WEIGHT(-ii,   0) = -1.0/(2.0 * ii * RADIUS);
+  }
+
   for (coord_t j = startY; j < endY; ++j)
     for (coord_t i = startX; i < endX; ++i)
       {
