@@ -7000,7 +7000,7 @@ class Task(object):
         for op in self.operations:
             op.print_op_mapping_decisions(depth)
 
-    def print_dataflow_graph(self, path, simplify_graphs):
+    def print_dataflow_graph(self, path, simplify_graphs, zoom_graphs):
         if len(self.operations) == 0:
             return 0
         if len(self.operations) == 1:
@@ -7070,7 +7070,7 @@ class Task(object):
             previous_pairs = set()
             for op in self.operations:
                 op.print_incoming_dataflow_edges(printer, previous_pairs)
-        printer.print_pdf_after_close(False)
+        printer.print_pdf_after_close(False, zoom_graphs)
         # We printed our dataflow graph
         return 1   
 
@@ -8510,7 +8510,8 @@ class PhysicalTraverser(object):
 
 
 class GraphPrinter(object):
-    __slots__ = ['name', 'filename', 'out', 'depth', 'next_cluster_id']
+    # Static member so we only issue this warning once
+    zoom_warning = True
     def __init__(self,path,name,direction='LR'):
         self.name = name
         self.filename = path+name+'.dot'
@@ -8533,7 +8534,7 @@ class GraphPrinter(object):
         self.out.close()
         return self.filename
 
-    def print_pdf_after_close(self, simplify):
+    def print_pdf_after_close(self, simplify, zoom_graph=False):
         dot_file = self.close()
         pdf_file = self.name+".pdf"
         #svg_file = self.name+".svg"
@@ -8556,6 +8557,80 @@ class GraphPrinter(object):
         except:
             print("WARNING: DOT failure, image for graph "+str(self.name)+" not generated")
             subprocess.call(['rm', '-f', 'core', pdf_file])
+        # If we are making a zoom graph, then make a directory with the appropriate name
+        if zoom_graph:
+            try:
+                import pydot
+                # Make a directory to put this in 
+                zoom_dir = 'zoom_'+self.name
+                os.mkdir(zoom_dir)
+                # Rest of this is courtesy of @manopapad
+                nodes = {} # map(string,Node)
+                in_edges = {} # map(string,set(Edge))
+                out_edges = {} # map(string,set(Edge))
+                def collect_nodes_edges(g):
+                    for sub in g.get_subgraphs():
+                        collect_nodes_edges(sub)
+                    for n in g.get_nodes():
+                        if n.get_style() == 'invis':
+                            # HACK: Assuming invisible nodes aren't connected to anything
+                            continue
+                        assert(n.get_name() not in nodes)
+                        nodes[n.get_name()] = n
+                        n.set_URL(n.get_name() + '.svg')
+                        in_edges[n.get_name()] = set()
+                        out_edges[n.get_name()] = set()
+                    for e in g.get_edges():
+                        out_edges[e.get_source()].add(e)
+                        in_edges[e.get_destination()].add(e)
+
+                # Support both older and newer versions of pydot library
+                # See pydot issue 159 on github:
+                # https://github.com/erocarrera/pydot/issues/159
+                graphs = pydot.graph_from_dot_file(self.filename)
+                if type(graphs) == list:
+                    # This is the common path
+                    assert len(graphs) == 1
+                    g = graphs[0]
+                else:
+                    # This is the deprecated path
+                    g = graphs
+                collect_nodes_edges(g)
+
+                g.write_svg(zoom_dir + '/zoom.svg')
+                g.write_cmap(zoom_dir + '/zoom.map')
+                g.write_png(zoom_dir + '/zoom.png')
+                with open(zoom_dir+'/index.html', 'w') as f:
+                    f.write('<!DOCTYPE html>\n')
+                    f.write('<html>\n')
+                    f.write('<head></head>\n')
+                    f.write('<body>\n')
+                    f.write('<img src="zoom.png" usemap="#mainmap"/>\n')
+                    f.write('<map id="mainmap" name="mainmap">\n')
+                    with open(zoom_dir+'/zoom.map', 'r') as f_map:
+                        for line in f_map:
+                            f.write(line)
+                    f.write('</map>\n')
+                    f.write('</body>\n')
+                    f.write('</html>\n')
+
+                for n in nodes.values():
+                    sub = pydot.Dot()
+                    sub.obj_dict['attributes'] = g.get_attributes()
+                    sub.add_node(n)
+                    for e in out_edges[n.get_name()]:
+                        dst = nodes[e.get_destination()]
+                        sub.add_node(dst)
+                        sub.add_edge(e)
+                    for e in in_edges[n.get_name()]:
+                        src = nodes[e.get_source()]
+                        sub.add_node(src)
+                        sub.add_edge(e)
+                    sub.write_svg(zoom_dir + '/' + n.get_name() + '.svg')
+            except ImportError:
+                if self.zoom_warning:
+                    print("WARNING: Unable to make zoom plots because the package pydot is not installed")
+                    GraphPrinter.zoom_warning = False
 
     def up(self):
         assert self.depth > 0
@@ -10157,14 +10232,14 @@ class State(object):
             mem.print_mem_edges(machine_printer)
         machine_printer.print_pdf_after_close(False)
 
-    def make_dataflow_graphs(self, path, simplify_graphs):
+    def make_dataflow_graphs(self, path, simplify_graphs, zoom_graphs):
         total_dataflow_graphs = 0
         for task in self.tasks.itervalues():
-            total_dataflow_graphs += task.print_dataflow_graph(path, simplify_graphs)
+            total_dataflow_graphs += task.print_dataflow_graph(path, simplify_graphs, zoom_graphs)
         if self.verbose:
             print("Made "+str(total_dataflow_graphs)+" dataflow graphs")
 
-    def make_event_graph(self, path):
+    def make_event_graph(self, path, zoom_graphs):
         # we print these recursively so we can see the hierarchy
         assert self.top_level_uid is not None
         op = self.get_operation(self.top_level_uid)
@@ -10176,7 +10251,7 @@ class State(object):
         # Now print the edges at the very end
         for node in all_nodes:
             node.print_incoming_event_edges(printer) 
-        printer.print_pdf_after_close(False)
+        printer.print_pdf_after_close(False, zoom_graphs)
 
     def print_realm_statistics(self):
         print('Total events: '+str(len(self.events)))
@@ -10644,6 +10719,9 @@ def main(temp_dir):
         '--assert-warning', dest='assert_on_warning', action='store_true',
         help='assert on warnings (implies -a)')
     parser.add_argument(
+        '--zoom', dest='zoom_graphs', action='store_true',
+        help='enable generation of "zoom" graphs for all emitted graphs')
+    parser.add_argument(
         dest='filenames', nargs='+',
         help='input legion spy log filenames')
     args = parser.parse_args()
@@ -10671,6 +10749,7 @@ def main(temp_dir):
     assert_on_error = args.assert_on_error or args.assert_on_warning
     assert_on_warning = args.assert_on_warning
     test_geometry = args.test_geometry
+    zoom_graphs = args.zoom_graphs
 
     if test_geometry:
         run_geometry_tests()
@@ -10769,10 +10848,10 @@ def main(temp_dir):
         state.make_machine_graphs(temp_dir)
     if dataflow_graphs:
         print("Making dataflow graphs...")
-        state.make_dataflow_graphs(temp_dir, simplify_graphs)
+        state.make_dataflow_graphs(temp_dir, simplify_graphs, zoom_graphs)
     if event_graphs:
         print("Making event graphs...")
-        state.make_event_graph(temp_dir)
+        state.make_event_graph(temp_dir, zoom_graphs)
     if realm_stats:
         print("Printing Realm statistics...")
         state.print_realm_statistics()
