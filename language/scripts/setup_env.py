@@ -50,6 +50,12 @@ def discover_conduit():
     else:
         raise Exception('Please set CONDUIT in your environment')
 
+def gasnet_enabled():
+    return 'USE_GASNET' not in os.environ or os.environ['USE_GASNET'] == '1'
+
+def hdf_enabled():
+    return 'USE_HDF' in os.environ and os.environ['USE_HDF'] == '1'
+
 def check_sha1(file_path, sha1):
     with open(file_path, 'rb') as f:
         assert hashlib.sha1(f.read()).hexdigest() == sha1
@@ -142,14 +148,35 @@ def build_terra(terra_dir, llvm_dir, cache, is_cray, thread_count):
         cwd=terra_dir,
         env=env)
 
+def build_hdf(source_dir, install_dir, thread_count, is_cray):
+    env = None
+    if is_cray:
+        env = dict(list(os.environ.items()) + [
+            ('CC', os.environ['HOST_CC']),
+            ('CXX', os.environ['HOST_CXX']),
+        ])
+    subprocess.check_call(
+        ['./configure',
+         '--prefix=%s' % install_dir,
+         '--enable-threadsafe',
+         '--disable-hl'],
+        cwd=source_dir,
+        env=env)
+    subprocess.check_call(['make', '-j', str(thread_count)], cwd=source_dir)
+    subprocess.check_call(['make', 'install'], cwd=source_dir)
+
 def build_regent(root_dir, use_cmake, cmake_exe,
-                 gasnet_dir, llvm_dir, terra_dir, conduit, thread_count):
-    env = dict(list(os.environ.items()) + [
-        ('CONDUIT', conduit),
-        ('GASNET', gasnet_dir),
-        ('USE_GASNET', os.environ['USE_GASNET'] if 'USE_GASNET' in os.environ else '1'),
-        ('LLVM_CONFIG', os.path.join(llvm_dir, 'bin', 'llvm-config')),
-    ])
+                 gasnet_dir, llvm_dir, terra_dir, hdf_dir, conduit, thread_count):
+    env = dict(list(os.environ.items()) +
+        ([('CONDUIT', conduit),
+          ('GASNET', gasnet_dir),
+          ('USE_GASNET', '1')]
+         if gasnet_enabled() else []) +
+        ([('HDF_ROOT', hdf_dir),
+          ('USE_HDF', '1')]
+         if hdf_enabled() else []) +
+        [('LLVM_CONFIG', os.path.join(llvm_dir, 'bin', 'llvm-config'))]
+    )
 
     subprocess.check_call(
         [os.path.join(root_dir, 'install.py'),
@@ -200,6 +227,19 @@ def install_llvm(llvm_dir, llvm_install_dir, llvm_version, llvm_use_cmake, cmake
         os.mkdir(llvm_build_dir)
         os.mkdir(llvm_install_dir)
         build_llvm(llvm_source_dir, llvm_build_dir, llvm_install_dir, llvm_use_cmake, cmake_exe, thread_count, is_cray)
+
+def install_hdf(hdf_dir, hdf_install_dir, thread_count, cache, is_cray, insecure):
+    try:
+        os.mkdir(hdf_dir)
+    except OSError:
+        pass # Hope this means it already exists
+    assert(os.path.isdir(hdf_dir))
+    hdf_tarball = os.path.join(hdf_dir, 'hdf5-1.10.1.tar.gz')
+    hdf_source_dir = os.path.join(hdf_dir, 'hdf5-1.10.1')
+    download(hdf_tarball, 'http://sapling.stanford.edu/~manolis/hdf/hdf5-1.10.1.tar.gz', '73b77a23ca099ac47d8241f633bf67430007c430', insecure=insecure)
+    if not cache:
+        extract(hdf_dir, hdf_tarball, 'gz')
+        build_hdf(hdf_source_dir, hdf_install_dir, thread_count, is_cray)
 
 def print_advice(component_dir):
     print('Given the number of things that could potentially have gone')
@@ -290,23 +330,26 @@ def driver(prefix_dir=None, cache=False, legion_use_cmake=False, llvm_version=No
 
     thread_count = multiprocessing.cpu_count()
 
-    gasnet_dir = os.path.realpath(os.path.join(prefix_dir, 'gasnet'))
-    if not os.path.exists(gasnet_dir):
-        git_clone(gasnet_dir, 'https://github.com/StanfordLegion/gasnet.git')
-    if not cache:
-        conduit = discover_conduit()
-        gasnet_release_dir = os.path.join(gasnet_dir, 'release')
-        gasnet_build_result = os.path.join(
-            gasnet_release_dir, '%s-conduit' % conduit,
-            'libgasnet-%s-par.a' % conduit)
-        if not os.path.exists(gasnet_release_dir):
-            try:
-                build_gasnet(gasnet_dir, conduit)
-            except Exception as e:
-                report_build_failure('gasnet', gasnet_dir, e)
-        else:
-            check_dirty_build('gasnet', gasnet_build_result, gasnet_dir)
-        assert os.path.exists(gasnet_build_result)
+    gasnet_release_dir = None
+    conduit = None
+    if gasnet_enabled():
+        gasnet_dir = os.path.realpath(os.path.join(prefix_dir, 'gasnet'))
+        if not os.path.exists(gasnet_dir):
+            git_clone(gasnet_dir, 'https://github.com/StanfordLegion/gasnet.git')
+        if not cache:
+            conduit = discover_conduit()
+            gasnet_release_dir = os.path.join(gasnet_dir, 'release')
+            gasnet_build_result = os.path.join(
+                gasnet_release_dir, '%s-conduit' % conduit,
+                'libgasnet-%s-par.a' % conduit)
+            if not os.path.exists(gasnet_release_dir):
+                try:
+                    build_gasnet(gasnet_dir, conduit)
+                except Exception as e:
+                    report_build_failure('gasnet', gasnet_dir, e)
+            else:
+                check_dirty_build('gasnet', gasnet_build_result, gasnet_dir)
+            assert os.path.exists(gasnet_build_result)
 
     cmake_exe = None
     try:
@@ -365,9 +408,24 @@ def driver(prefix_dir=None, cache=False, legion_use_cmake=False, llvm_version=No
     if not cache:
         assert os.path.exists(terra_build_result)
 
+    hdf_install_dir = None
+    if hdf_enabled():
+        hdf_dir = os.path.join(prefix_dir, 'hdf')
+        hdf_install_dir = os.path.join(hdf_dir, 'install')
+        hdf_build_result = os.path.join(hdf_install_dir, 'lib', 'libhdf5.so')
+        if not os.path.exists(hdf_install_dir):
+            try:
+                install_hdf(hdf_dir, hdf_install_dir, thread_count, cache, is_cray, insecure)
+            except Exception as e:
+                report_build_failure('hdf', hdf_dir, e)
+        else:
+            check_dirty_build('hdf', hdf_build_result, hdf_dir)
+        if not cache:
+            assert os.path.exists(hdf_build_result)
+
     if not cache:
         build_regent(root_dir, legion_use_cmake, cmake_exe,
-                     gasnet_release_dir, llvm_install_dir, terra_dir,
+                     gasnet_release_dir, llvm_install_dir, terra_dir, hdf_install_dir,
                      conduit, thread_count)
 
 if __name__ == '__main__':
