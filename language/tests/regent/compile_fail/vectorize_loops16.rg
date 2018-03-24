@@ -13,9 +13,9 @@
 -- limitations under the License.
 
 -- fails-with:
--- vectorize_loops16.rg:40: vectorization failed: loop body has a scattered read from a structured region
--- e.p2.v = e.p1.v
--- ^
+-- vectorize_loops16.rg:40: vectorization failed: loop body has aliasing update of path region(fs2()).v
+--     e.p2.v = e.p1.v
+--     ^
 
 import "regent"
 
