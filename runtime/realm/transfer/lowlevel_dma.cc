@@ -2459,15 +2459,15 @@ namespace Realm {
       return false;
     }
 
-#define SPECIALIZE_FILL(TYPE, N)                               \
-    {                                                          \
-      TYPE *ptr = (TYPE *)rep_buffer;                          \
-      TYPE fill_value = *(TYPE*)fill_buffer;                   \
-      for(size_t ofs = 0; ofs < rep_size; ofs += sizeof(TYPE)) \
-      {                                                        \
-        ASSIGN_##N;                                            \
-      }                                                        \
-    }                                                          \
+#define SPECIALIZE_FILL(TYPE, N)                                   \
+    {                                                              \
+      TYPE *ptr = (TYPE *)rep_buffer;                              \
+      TYPE fill_value = *(TYPE*)fill_buffer;                       \
+      for(size_t ofs = 0; ofs < rep_size; ofs += N * sizeof(TYPE)) \
+      {                                                            \
+        ASSIGN_##N;                                                \
+      }                                                            \
+    }                                                              \
 
 #define ASSIGN_1 *ptr++ = fill_value
 #define ASSIGN_2 ASSIGN_1; ASSIGN_1
