@@ -2459,6 +2459,20 @@ namespace Realm {
       return false;
     }
 
+#define SPECIALIZE_FILL(TYPE, N)                               \
+    {                                                          \
+      TYPE *ptr = (TYPE *)rep_buffer;                          \
+      TYPE fill_value = *(TYPE*)fill_buffer;                   \
+      for(size_t ofs = 0; ofs < rep_size; ofs += sizeof(TYPE)) \
+      {                                                        \
+        ASSIGN_##N;                                            \
+      }                                                        \
+    }                                                          \
+
+#define ASSIGN_1 *ptr++ = fill_value
+#define ASSIGN_2 ASSIGN_1; ASSIGN_1
+#define ASSIGN_4 ASSIGN_2; ASSIGN_2
+
     void FillRequest::perform_dma(void)
     {
       // if we are doing large chunks of data, we will build a buffer with
@@ -2496,8 +2510,35 @@ namespace Realm {
 	    rep_size = rep_elems * fill_size;
 	    rep_buffer = malloc(rep_size);
 	    assert(rep_buffer != 0);
-	    for(size_t ofs = 0; ofs < rep_size; ofs += fill_size)
-	      memcpy(((char *)rep_buffer)+ofs, fill_buffer, fill_size);
+            switch (fill_size)
+            {
+              case sizeof(uint32_t):
+                {
+                  SPECIALIZE_FILL(uint32_t, 1);
+                  break;
+                }
+              case sizeof(uint64_t):
+                {
+                  SPECIALIZE_FILL(uint64_t, 1);
+                  break;
+                }
+              case 2 * sizeof(uint64_t):
+                {
+                  SPECIALIZE_FILL(uint64_t, 2);
+                  break;
+                }
+              case 4 * sizeof(uint64_t):
+                {
+                  SPECIALIZE_FILL(uint64_t, 4);
+                  break;
+                }
+              default:
+                {
+                  for(size_t ofs = 0; ofs < rep_size; ofs += fill_size)
+                    memcpy(((char *)rep_buffer)+ofs, fill_buffer, fill_size);
+                  break;
+                }
+            }
 	  }
 	  use_buffer = rep_buffer;
 	  use_size = rep_size;
