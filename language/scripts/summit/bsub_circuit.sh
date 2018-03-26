@@ -8,11 +8,13 @@
 
 root_dir="$PWD"
 
-source "$root_dir"/summit_env.sh
+source "$root_dir"/env.sh
 
 export LD_LIBRARY_PATH="$LD_LIBRARY_PATH:$PWD"
 
 export REALM_BACKTRACE=1
+
+export GASNET_NUM_QPS=1 # Hack: workaround for GASNet bug 3447
 
 for n in 2; do
     for r in 0; do

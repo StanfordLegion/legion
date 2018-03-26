@@ -23,7 +23,7 @@ for i in 1; do
     for r in 0; do
         if [[ ! -f out_"$n"x2_r"$r".log ]]; then
             echo "Running $n""x2_r$r""..."
-            jsrun -n $(( n * 2 )) --tasks_per_rs 1 --rs_per_host 2 --cpu_per_rs 21 --bind rs "$root_dir"/stencil.spmd16 -nx 20000 -ny 20000 -ntx $(( nx * 4 )) -nty $(( ny * 8 )) -tsteps 100 -tprune 5 -ll:cpu 16 -ll:io 1 -ll:util 2 -ll:dma 2 -ll:csize 60000 -ll:rsize 512 -ll:gsize 0 -ll:show_rsrv -hl:prof $(( n * 2 )) -hl:prof_logfile prof_"$n"x2_r"$r"_%.gz -dm:memoize | tee out_"$n"x2_r"$r".log
+            jsrun -n $(( n * 2 )) --tasks_per_rs 1 --rs_per_host 2 --cpu_per_rs 21 --bind rs "$root_dir"/stencil.spmd16 -nx 20000 -ny 20000 -ntx $(( nx * 4 )) -nty $(( ny * 8 )) -tsteps 100 -tprune 5 -ll:cpu 16 -ll:io 1 -ll:util 2 -ll:dma 2 -ll:csize 60000 -ll:rsize 512 -ll:gsize 0 -hl:prof $(( n * 2 )) -hl:prof_logfile prof_"$n"x2_r"$r"_%.gz -dm:memoize | tee out_"$n"x2_r"$r".log
         fi
     done
 done
