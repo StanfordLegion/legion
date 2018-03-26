@@ -20,7 +20,7 @@ for n in 2; do
     for r in 0; do
         if [[ ! -f out_"$n"x2_r"$r".log ]]; then
             echo "Running $n""x2_r$r""..."
-            jsrun -n $(( n * 2 )) --tasks_per_rs 1 --rs_per_host 2 --cpu_per_rs 21 --bind rs "$root_dir"/circuit.spmd18 -npp 20 -wpp 80 -l 100 -p $(( 1024 * 18 )) -pps $(( 1024 / n )) -ll:cpu 18 -ll:io 1 -ll:util 2 -ll:dma 2 -ll:csize 60000 -ll:rsize 512 -ll:gsize 0 -ll:show_rsrv -hl:prof $(( n * 2 )) -hl:prof_logfile prof_"$n"x2_r"$r"_%.gz -dm:memoize | tee out_"$n"x2_r"$r".log
+            jsrun -n $(( n * 2 )) --tasks_per_rs 1 --rs_per_host 2 --cpu_per_rs 21 --bind rs "$root_dir"/circuit.spmd18 -npp 20 -wpp 80 -l 100 -p $(( 1024 * 18 )) -pps $(( 1024 / n )) -ll:cpu 18 -ll:io 1 -ll:util 2 -ll:dma 2 -ll:csize 60000 -ll:rsize 512 -ll:gsize 0 -hl:prof $(( n * 2 )) -hl:prof_logfile prof_"$n"x2_r"$r"_%.gz -dm:memoize | tee out_"$n"x2_r"$r".log
         fi
     done
 done
