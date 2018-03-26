@@ -2457,7 +2457,7 @@ void init_endpoints(int gasnet_mem_size_in_mb,
   assert(ok);
 
   size_t srcdatapool_size = sdpsize_in_mb << 20;
-  if(lmbsize_in_kb) lmb_size = lmb_size << 10;
+  if(lmbsize_in_kb) lmb_size = lmbsize_in_kb << 10;
   if(spillwarn_in_mb)
     SrcDataPool::print_spill_threshold = spillwarn_in_mb << 20;
   if(spillstep_in_mb)
