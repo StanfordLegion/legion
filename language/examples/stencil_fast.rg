@@ -42,8 +42,16 @@ if USE_FOREIGN then
   end
   local cxx = os.getenv('CXX') or 'c++'
 
+  local march = os.getenv('MARCH') or 'native'
+  local march_flag = '-march=' .. march
+  if os.execute("bash -c \"[ `uname` == 'Linux' ]\"") == 0 then
+    if os.execute("grep altivec /proc/cpuinfo > /dev/null") == 0 then
+      march_flag = '-mcpu=' .. march .. ' -maltivec -mabi=altivec -mvsx'
+    end
+  end
+
   local cxx_flags = os.getenv('CC_FLAGS') or ''
-  cxx_flags = cxx_flags .. " -O3 -march=native -Wall -Werror -DDTYPE=" .. tostring(DTYPE) .. " -DRESTRICT=__restrict__ -DRADIUS=" .. tostring(RADIUS)
+  cxx_flags = cxx_flags .. " -O3 " .. march_flag .. " -Wall -Werror -DDTYPE=" .. tostring(DTYPE) .. " -DRESTRICT=__restrict__ -DRADIUS=" .. tostring(RADIUS)
   if os.execute('test "$(uname)" = Darwin') == 0 then
     cxx_flags =
       (cxx_flags ..
