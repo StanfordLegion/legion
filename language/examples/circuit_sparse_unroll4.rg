@@ -881,56 +881,19 @@ task toplevel()
   for j = 0, num_loops, 4 do
     -- c.legion_runtime_begin_trace(__runtime(), __context(), 0, false)
 
-    --__demand(__parallel)
-    for i = 0, num_superpieces do
-      calculate_new_currents(j == 0, steps, rp_private[i], rp_shared[i], rp_ghost[i], rp_wires[i])
-    end
-    --__demand(__parallel)
-    for i = 0, num_superpieces do
-      distribute_charge(rp_private[i], rp_shared[i], rp_ghost[i], rp_wires[i])
-    end
-    --__demand(__parallel)
-    for i = 0, num_superpieces do
-      update_voltages(j == num_loops - 1, rp_private[i], rp_shared[i])
-    end
-
-    --__demand(__parallel)
-    for i = 0, num_superpieces do
-      calculate_new_currents(j + 1 == 0, steps, rp_private[i], rp_shared[i], rp_ghost[i], rp_wires[i])
-    end
-    --__demand(__parallel)
-    for i = 0, num_superpieces do
-      distribute_charge(rp_private[i], rp_shared[i], rp_ghost[i], rp_wires[i])
-    end
-    --__demand(__parallel)
-    for i = 0, num_superpieces do
-      update_voltages(j + 1 == num_loops - 1, rp_private[i], rp_shared[i])
-    end
-
-    --__demand(__parallel)
-    for i = 0, num_superpieces do
-      calculate_new_currents(j + 2 == 0, steps, rp_private[i], rp_shared[i], rp_ghost[i], rp_wires[i])
-    end
-    --__demand(__parallel)
-    for i = 0, num_superpieces do
-      distribute_charge(rp_private[i], rp_shared[i], rp_ghost[i], rp_wires[i])
-    end
-    --__demand(__parallel)
-    for i = 0, num_superpieces do
-      update_voltages(j + 2 == num_loops - 1, rp_private[i], rp_shared[i])
-    end
-
-    --__demand(__parallel)
-    for i = 0, num_superpieces do
-      calculate_new_currents(j + 3 == 0, steps, rp_private[i], rp_shared[i], rp_ghost[i], rp_wires[i])
-    end
-    --__demand(__parallel)
-    for i = 0, num_superpieces do
-      distribute_charge(rp_private[i], rp_shared[i], rp_ghost[i], rp_wires[i])
-    end
-    --__demand(__parallel)
-    for i = 0, num_superpieces do
-      update_voltages(j + 3 == num_loops - 1, rp_private[i], rp_shared[i])
+    for k = 0, 4 do
+      --__demand(__parallel)
+      for i = 0, num_superpieces do
+        calculate_new_currents(j + k == 0, steps, rp_private[i], rp_shared[i], rp_ghost[i], rp_wires[i])
+      end
+      --__demand(__parallel)
+      for i = 0, num_superpieces do
+        distribute_charge(rp_private[i], rp_shared[i], rp_ghost[i], rp_wires[i])
+      end
+      --__demand(__parallel)
+      for i = 0, num_superpieces do
+        update_voltages(j + k == num_loops - 1, rp_private[i], rp_shared[i])
+      end
     end
 
     -- c.legion_runtime_end_trace(__runtime(), __context(), 0)
