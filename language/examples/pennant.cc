@@ -967,7 +967,7 @@ void generate_mesh_raw(
 /// Mapper
 ///
 
-#define SPMD_SHARD_USE_IO_PROC 0
+#define SPMD_SHARD_USE_IO_PROC 1
 
 static LegionRuntime::Logger::Category log_pennant("pennant");
 
