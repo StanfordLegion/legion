@@ -18,7 +18,7 @@ for i in 3 2 1 0; do
     for r in 0 1 2 3 4; do
         if [[ ! -f out_"$n"x8_r"$r".log ]]; then
             echo "Running $n""x8_r$r"" ($n = $nx * $ny)..."
-	    srun -n $n -N $n --ntasks-per-node 1 --cpu_bind none /lib64/ld-linux-x86-64.so.2 "$root_dir/stencil.spmd8" -nx 16384 -ny 16384 -ntx $(( nx * 2 )) -nty $(( ny * 4 )) -tsteps 400 -tprune 5 -ll:cpu 8 -ll:io 1 -ll:util 2 -ll:dma 2 -ll:csize 30000 -ll:rsize 512 -ll:gsize 0 -dm:memoize | tee out_"$n"x8_r"$r".log
+	    srun -n $n -N $n --ntasks-per-node 1 --cpu_bind none /lib64/ld-linux-x86-64.so.2 "$root_dir/stencil.spmd8" -nx 32768 -ny 32768 -ntx $(( nx * 2 )) -nty $(( ny * 4 )) -tsteps 400 -tprune 5 -ll:cpu 8 -ll:io 1 -ll:util 2 -ll:dma 2 -ll:csize 30000 -ll:rsize 512 -ll:gsize 0 -dm:memoize | tee out_"$n"x8_r"$r".log
             # -lg:prof 4 -lg:prof_logfile prof_"$n"x8_r"$r"_%.gz
         fi
     done
