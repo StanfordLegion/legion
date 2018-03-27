@@ -36,7 +36,6 @@ typedef long long int coord_t;
 
 void stencil(DTYPE* RESTRICT inputPtr,
              DTYPE* RESTRICT outputPtr,
-             DTYPE* RESTRICT weightPtr,
              coord_t haloX, coord_t startX, coord_t endX,
              coord_t startY, coord_t endY);
 
