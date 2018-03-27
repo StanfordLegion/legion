@@ -669,6 +669,7 @@ namespace Realm {
     , num_cpu_procs(1), num_util_procs(1), num_io_procs(0)
     , concurrent_io_threads(1)  // Legion does not support values > 1 right now
     , sysmem_size_in_mb(512), stack_size_in_mb(2)
+    , pin_util_procs(false)
   {}
 
   CoreModule::~CoreModule(void)
@@ -687,6 +688,7 @@ namespace Realm {
       .add_option_int("-ll:concurrent_io", m->concurrent_io_threads)
       .add_option_int("-ll:csize", m->sysmem_size_in_mb)
       .add_option_int("-ll:stacksize", m->stack_size_in_mb, true /*keep*/)
+      .add_option_bool("-ll:pin_util", m->pin_util_procs)
       .parse_command_line(cmdline);
 
     return m;
@@ -716,7 +718,8 @@ namespace Realm {
       Processor p = runtime->next_local_processor_id();
       ProcessorImpl *pi = new LocalUtilityProcessor(p, runtime->core_reservation_set(),
 						    stack_size_in_mb << 20,
-						    Config::force_kernel_threads);
+						    Config::force_kernel_threads,
+                                                    pin_util_procs);
       runtime->add_processor(pi);
     }
 

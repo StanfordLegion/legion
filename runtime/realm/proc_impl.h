@@ -143,7 +143,8 @@ namespace Realm {
     class LocalUtilityProcessor : public LocalTaskProcessor {
     public:
       LocalUtilityProcessor(Processor _me, CoreReservationSet& crs,
-			    size_t _stack_size, bool _force_kthreads);
+			    size_t _stack_size, bool _force_kthreads,
+                            bool _pin_util_proc);
       virtual ~LocalUtilityProcessor(void);
     protected:
       CoreReservation *core_rsrv;
