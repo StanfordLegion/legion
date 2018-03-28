@@ -32,6 +32,9 @@
 #endif
 #ifdef __ALTIVEC__
 #include <altivec.h>
+// Don't let IBM screw us over
+#undef bool
+#undef vector
 #endif
 #else // !__MACH__
 #ifdef __SSE2__
