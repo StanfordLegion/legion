@@ -87,6 +87,7 @@ struct Config {
   random_seed : uint,
   steps : uint,
   sync : uint,
+  prune : uint,
   perform_checks : bool,
   dump_values : bool,
   pct_shared_nodes : double,
@@ -175,6 +176,9 @@ terra parse_input_args(conf : Config)
     elseif cstring.strcmp(args.argv[i], "-sync") == 0 then
       i = i + 1
       conf.sync = std.atoi(args.argv[i])
+    elseif cstring.strcmp(args.argv[i], "-prune") == 0 then
+      i = i + 1
+      conf.prune = std.atoi(args.argv[i])
     elseif cstring.strcmp(args.argv[i], "-checks") == 0 then
       conf.perform_checks = true
     elseif cstring.strcmp(args.argv[i], "-dump") == 0 then
@@ -761,6 +765,7 @@ task toplevel()
   conf.random_seed = 12345
   conf.steps = STEPS
   conf.sync = 0
+  conf.prune = 0
   conf.perform_checks = false
   conf.dump_values = false
   conf.pct_shared_nodes = 1.0
@@ -773,8 +778,8 @@ task toplevel()
       "pieces should be evenly distributed to superpieces")
   conf.shared_nodes_per_piece =
     [int](ceil(conf.nodes_per_piece * conf.pct_shared_nodes / 100.0))
-  c.printf("circuit settings: loops=%d pieces=%d (pieces/superpiece=%d) nodes/piece=%d (nodes/piece=%d) wires/piece=%d pct_in_piece=%d seed=%d\n",
-    conf.num_loops, conf.num_pieces, conf.pieces_per_superpiece, conf.nodes_per_piece,
+  c.printf("circuit settings: loops=%d prune=%d pieces=%d (pieces/superpiece=%d) nodes/piece=%d (nodes/piece=%d) wires/piece=%d pct_in_piece=%d seed=%d\n",
+    conf.num_loops, conf.prune, conf.num_pieces, conf.pieces_per_superpiece, conf.nodes_per_piece,
     conf.shared_nodes_per_piece, conf.wires_per_piece, conf.pct_wire_in_piece, conf.random_seed)
 
   var num_pieces = conf.num_pieces
@@ -873,14 +878,15 @@ task toplevel()
   var ts_start = c.legion_get_current_time_in_micros()
   var simulation_success = true
   var steps = conf.steps
-  var num_loops = conf.num_loops
+  var prune = conf.prune
+  var num_loops = conf.num_loops + 2*prune
   __demand(__spmd)
   for j = 0, num_loops do
     -- c.legion_runtime_begin_trace(__runtime(), __context(), 0)
 
     --__demand(__parallel)
     for i = 0, num_superpieces do
-      calculate_new_currents(j == 0, steps, rp_private[i], rp_shared[i], rp_ghost[i], rp_wires[i])
+      calculate_new_currents(j == prune, steps, rp_private[i], rp_shared[i], rp_ghost[i], rp_wires[i])
     end
     --__demand(__parallel)
     for i = 0, num_superpieces do
@@ -888,7 +894,7 @@ task toplevel()
     end
     --__demand(__parallel)
     for i = 0, num_superpieces do
-      update_voltages(j == num_loops - 1, rp_private[i], rp_shared[i])
+      update_voltages(j == num_loops - prune - 1, rp_private[i], rp_shared[i])
     end
 
     -- c.legion_runtime_end_trace(__runtime(), __context(), 0)
