@@ -94,7 +94,7 @@ endif
 ifeq ($(findstring daint,$(shell uname -n)),daint)
 CUDA=${CUDATOOLKIT_HOME}
 CONDUIT=aries
-GPU_ARCH=k20
+GPU_ARCH=pascal
 endif
 ifeq ($(findstring excalibur,$(shell uname -n)),excalibur)
 CONDUIT=aries
