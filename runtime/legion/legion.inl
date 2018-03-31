@@ -2177,12 +2177,18 @@ namespace Legion {
         {
           if (!accessor.is_dense_arbitrary(r))
           {
+#ifdef __CUDA_ARCH__
+            printf(
+                "ERROR: Illegal request for pointer of non-dense rectangle\n");
+            assert(false);
+#else
             fprintf(stderr, 
                 "ERROR: Illegal request for pointer of non-dense rectangle\n");
 #ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_NON_DENSE_RECTANGLE);
+#endif
           }
           return accessor.ptr(r.lo);
         }
@@ -2327,12 +2333,18 @@ namespace Legion {
 #endif
           if (!accessor.is_dense_arbitrary(r))
           {
+#ifdef __CUDA_ARCH__
+            printf(
+                "ERROR: Illegal request for pointer of non-dense rectangle\n");
+            assert(false);
+#else
             fprintf(stderr, 
                 "ERROR: Illegal request for pointer of non-dense rectangle\n");
 #ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_NON_DENSE_RECTANGLE);
+#endif
           }
           return accessor.ptr(r.lo);
         }
@@ -2462,12 +2474,18 @@ namespace Legion {
         {
           if (!accessor.is_dense_arbitrary(r))
           {
+#ifdef __CUDA_ARCH__
+            printf(
+                "ERROR: Illegal request for pointer of non-dense rectangle\n");
+            assert(false);
+#else
             fprintf(stderr, 
                 "ERROR: Illegal request for pointer of non-dense rectangle\n");
 #ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_NON_DENSE_RECTANGLE);
+#endif
           }
           return accessor.ptr(r.lo); 
         }
@@ -2605,12 +2623,18 @@ namespace Legion {
 #endif
           if (!accessor.is_dense_arbitrary(r))
           {
+#ifdef __CUDA_ARCH__
+            printf(
+                "ERROR: Illegal request for pointer of non-dense rectangle\n");
+            assert(false);
+#else
             fprintf(stderr, 
                 "ERROR: Illegal request for pointer of non-dense rectangle\n");
 #ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_NON_DENSE_RECTANGLE);
+#endif
           }
           return accessor.ptr(r.lo);
         }
@@ -2735,12 +2759,18 @@ namespace Legion {
         {
           if (!accessor.is_dense_arbitrary(r))
           {
+#ifdef __CUDA_ARCH__
+            printf(
+                "ERROR: Illegal request for pointer of non-dense rectangle\n");
+            assert(false);
+#else
             fprintf(stderr, 
                 "ERROR: Illegal request for pointer of non-dense rectangle\n");
 #ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_NON_DENSE_RECTANGLE);
+#endif
           }
           return accessor.ptr(r.lo);
         }
@@ -2904,12 +2934,18 @@ namespace Legion {
 #endif
           if (!accessor.is_dense_arbitrary(r))
           {
+#ifdef __CUDA_ARCH__
+            printf(
+                "ERROR: Illegal request for pointer of non-dense rectangle\n");
+            assert(false);
+#else
             fprintf(stderr, 
                 "ERROR: Illegal request for pointer of non-dense rectangle\n");
 #ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_NON_DENSE_RECTANGLE);
+#endif
           }
           return accessor.ptr(r.lo);
         }
@@ -3056,12 +3092,18 @@ namespace Legion {
         {
           if (!accessor.is_dense_arbitrary(r))
           {
+#ifdef __CUDA_ARCH__
+            printf(
+                "ERROR: Illegal request for pointer of non-dense rectangle\n");
+            assert(false);
+#else
             fprintf(stderr, 
                 "ERROR: Illegal request for pointer of non-dense rectangle\n");
 #ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_NON_DENSE_RECTANGLE);
+#endif
           }
           return accessor.ptr(r.lo);
         }
@@ -3216,12 +3258,18 @@ namespace Legion {
 #endif
           if (!accessor.is_dense_arbitrary(r))
           {
+#ifdef __CUDA_ARCH__
+            printf(
+                "ERROR: Illegal request for pointer of non-dense rectangle\n");
+            assert(false);
+#else
             fprintf(stderr, 
                 "ERROR: Illegal request for pointer of non-dense rectangle\n");
 #ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_NON_DENSE_RECTANGLE);
+#endif
           }
           return accessor.ptr(r.lo);
         }
@@ -3358,12 +3406,18 @@ namespace Legion {
         {
           if (!accessor.is_dense_arbitrary(r))
           {
+#ifdef __CUDA_ARCH__
+            printf(
+                "ERROR: Illegal request for pointer of non-dense rectangle\n");
+            assert(false);
+#else
             fprintf(stderr, 
                 "ERROR: Illegal request for pointer of non-dense rectangle\n");
 #ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_NON_DENSE_RECTANGLE);
+#endif
           }
           return accessor.ptr(r);
         }
@@ -3521,12 +3575,18 @@ namespace Legion {
 #endif
           if (!accessor.is_dense_arbitrary(r))
           {
+#ifdef __CUDA_ARCH__
+            printf(
+                "ERROR: Illegal request for pointer of non-dense rectangle\n");
+            assert(false);
+#else
             fprintf(stderr, 
                 "ERROR: Illegal request for pointer of non-dense rectangle\n");
 #ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_NON_DENSE_RECTANGLE);
+#endif
           }
           return accessor.ptr(r.lo);
         }
@@ -3661,12 +3721,18 @@ namespace Legion {
         {
           if (!accessor.is_dense_arbitrary(r))
           {
+#ifdef __CUDA_ARCH__
+            printf(
+                "ERROR: Illegal request for pointer of non-dense rectangle\n");
+            assert(false);
+#else
             fprintf(stderr, 
                 "ERROR: Illegal request for pointer of non-dense rectangle\n");
 #ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_NON_DENSE_RECTANGLE);
+#endif
           }
           return accessor.ptr(r.lo);
         }
@@ -3815,12 +3881,18 @@ namespace Legion {
 #endif
           if (!accessor.is_dense_arbitrary(r))
           {
+#ifdef __CUDA_ARCH__
+            printf(
+                "ERROR: Illegal request for pointer of non-dense rectangle\n");
+            assert(false);
+#else
             fprintf(stderr, 
                 "ERROR: Illegal request for pointer of non-dense rectangle\n");
 #ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_NON_DENSE_RECTANGLE);
+#endif
           }
           return accessor.ptr(r.lo);
         }
@@ -3926,12 +3998,18 @@ namespace Legion {
         {
           if (!accessor.is_dense_arbitrary(r))
           {
+#ifdef __CUDA_ARCH__
+            printf(
+                "ERROR: Illegal request for pointer of non-dense rectangle\n");
+            assert(false);
+#else
             fprintf(stderr, 
                 "ERROR: Illegal request for pointer of non-dense rectangle\n");
 #ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_NON_DENSE_RECTANGLE);
+#endif
           }
           return accessor.ptr(r.lo);
         }
@@ -4072,12 +4150,18 @@ namespace Legion {
 #endif
           if (!accessor.is_dense_arbitrary(r))
           {
+#ifdef __CUDA_ARCH__
+            printf(
+                "ERROR: Illegal request for pointer of non-dense rectangle\n");
+            assert(false);
+#else
             fprintf(stderr, 
                 "ERROR: Illegal request for pointer of non-dense rectangle\n");
 #ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_NON_DENSE_RECTANGLE);
+#endif
           }
           return accessor.ptr(r.lo);
         }
@@ -4194,12 +4278,18 @@ namespace Legion {
         {
           if (!accessor.is_dense_arbitrary(r))
           {
+#ifdef __CUDA_ARCH__
+            printf(
+                "ERROR: Illegal request for pointer of non-dense rectangle\n");
+            assert(false);
+#else
             fprintf(stderr, 
                 "ERROR: Illegal request for pointer of non-dense rectangle\n");
 #ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_NON_DENSE_RECTANGLE);
+#endif
           }
           return accessor.ptr(r.lo);
         }
@@ -4329,12 +4419,18 @@ namespace Legion {
 #endif
           if (!accessor.is_dense_arbitrary(r))
           {
+#ifdef __CUDA_ARCH__
+            printf(
+                "ERROR: Illegal request for pointer of non-dense rectangle\n");
+            assert(false);
+#else
             fprintf(stderr, 
                 "ERROR: Illegal request for pointer of non-dense rectangle\n");
 #ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_NON_DENSE_RECTANGLE);
+#endif
           }
           return accessor.ptr(r.lo);
         }
@@ -4514,12 +4610,18 @@ namespace Legion {
         {
           if (!accessor.is_dense_arbitrary(r))
           {
+#ifdef __CUDA_ARCH__
+            printf(
+                "ERROR: Illegal request for pointer of non-dense rectangle\n");
+            assert(false);
+#else
             fprintf(stderr, 
                 "ERROR: Illegal request for pointer of non-dense rectangle\n");
 #ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_NON_DENSE_RECTANGLE);
+#endif
           }
           return accessor.ptr(r.lo);
         }
