@@ -2221,7 +2221,11 @@ namespace Legion {
      * A field accessor is a class used to perform reductions to a given
      * field inside a PhysicalRegion object for a specific field. Reductions
      * can be performed directly or array indexing can be used along with 
-     * the <<= operator to perform the reduction.
+     * the <<= operator to perform the reduction. We also provide the same
+     * variants of the 'ptr' method as normal accessors to obtain a pointer 
+     * to the underlying allocation. This seems to be useful when we need
+     * to do reductions directly to a buffer as is often necessary when
+     * invoking external libraries like BLAS.
      * This method currently only works with the Realm::AffineAccessor layout
      */
     template<typename REDOP, bool EXCLUSIVE, int N, typename COORD_T = coord_t,
