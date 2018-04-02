@@ -3419,7 +3419,7 @@ namespace Legion {
             exit(ERROR_NON_DENSE_RECTANGLE);
 #endif
           }
-          return accessor.ptr(r);
+          return accessor.ptr(r.lo);
         }
       __CUDA_HD__
       inline FT& operator[](const Point<N,T>& p) const
