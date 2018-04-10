@@ -1309,10 +1309,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void Operation::compute_ranking(
+    void Operation::compute_ranking(MapperManager *mapper,
                               const std::deque<MappingInstance> &output,
                               const InstanceSet &sources,
-                              std::vector<unsigned> &ranking)
+                              std::vector<unsigned> &ranking) const
     //--------------------------------------------------------------------------
     {
       ranking.reserve(output.size());
@@ -1320,15 +1320,22 @@ namespace Legion {
             output.begin(); it != output.end(); it++)
       {
         const PhysicalManager *manager = it->impl;
+        bool found = false;
         for (unsigned idx = 0; idx < sources.size(); idx++)
         {
           if (manager == sources[idx].get_manager())
           {
+            found = true;
             ranking.push_back(idx);
             break;
           }
         }
         // Ignore any instances which are not in the original set of sources
+        if (!found)
+          REPORT_LEGION_WARNING(LEGION_WARNING_MAPPER_INVALID_INSTANCE,
+              "Ignoring invalid instance output from mapper %s for "
+              "select copy sources call on Operation %s (UID %lld)",
+              mapper->get_mapper_name(), get_logging_name(), get_unique_op_id())
       }
     }
 
@@ -2613,7 +2620,7 @@ namespace Legion {
         mapper = runtime->find_mapper(exec_proc, map_id);
       }
       mapper->invoke_select_inline_sources(this, &input, &output);
-      compute_ranking(output.chosen_ranking, sources, ranking);
+      compute_ranking(mapper, output.chosen_ranking, sources, ranking);
     } 
 
     //--------------------------------------------------------------------------
@@ -3971,7 +3978,7 @@ namespace Legion {
       }
       mapper->invoke_select_copy_sources(this, &input, &output);
       // Fill in the ranking based on the output
-      compute_ranking(output.chosen_ranking, sources, ranking);
+      compute_ranking(mapper, output.chosen_ranking, sources, ranking);
     }
 
     //--------------------------------------------------------------------------
@@ -7013,7 +7020,7 @@ namespace Legion {
         mapper = runtime->find_mapper(exec_proc, map_id);
       }
       mapper->invoke_select_close_sources(this, &input, &output);
-      compute_ranking(output.chosen_ranking, sources, ranking);
+      compute_ranking(mapper, output.chosen_ranking, sources, ranking);
     }
 
     //--------------------------------------------------------------------------
@@ -7569,7 +7576,7 @@ namespace Legion {
         mapper = runtime->find_mapper(exec_proc, map_id);
       }
       mapper->invoke_select_close_sources(this, &input, &output);
-      compute_ranking(output.chosen_ranking, sources, ranking);
+      compute_ranking(mapper, output.chosen_ranking, sources, ranking);
     }
 
     //--------------------------------------------------------------------------
@@ -8776,7 +8783,7 @@ namespace Legion {
         mapper = runtime->find_mapper(exec_proc, map_id);
       }
       mapper->invoke_select_release_sources(this, &input, &output);
-      compute_ranking(output.chosen_ranking, sources, ranking);
+      compute_ranking(mapper, output.chosen_ranking, sources, ranking);
     }
 
     //--------------------------------------------------------------------------
@@ -12228,7 +12235,7 @@ namespace Legion {
         mapper = runtime->find_mapper(exec_proc, map_id);
       }
       mapper->invoke_select_partition_sources(this, &input, &output);
-      compute_ranking(output.chosen_ranking, sources, ranking);
+      compute_ranking(mapper, output.chosen_ranking, sources, ranking);
     }
 
     //--------------------------------------------------------------------------
