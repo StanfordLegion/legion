@@ -4469,7 +4469,7 @@ namespace Legion {
       // Handle the case for marking when the copy completes
       Runtime::trigger_event(completion_event, copy_complete_event);
       need_completion_trigger = false;
-      complete_execution();
+      complete_execution(Runtime::protect_event(copy_complete_event));
     }
 
     //--------------------------------------------------------------------------
@@ -8275,26 +8275,7 @@ namespace Legion {
       std::set<ApEvent> acquire_preconditions;
       for (unsigned idx = 0; idx < mapped_instances.size(); idx++)
         acquire_preconditions.insert(mapped_instances[idx].get_ready_event());
-      if (!wait_barriers.empty())
-      {
-        for (std::vector<PhaseBarrier>::const_iterator it = 
-              wait_barriers.begin(); it != wait_barriers.end(); it++)
-        {
-          ApEvent e = Runtime::get_previous_phase(*it);
-          acquire_preconditions.insert(e);
-          if (runtime->legion_spy_enabled)
-            LegionSpy::log_phase_barrier_wait(unique_op_id, e);
-        }
-      }
-      if (!grants.empty())
-      {
-        for (std::vector<Grant>::const_iterator it = grants.begin();
-              it != grants.end(); it++)
-        {
-          ApEvent e = it->impl->acquire_grant();
-          acquire_preconditions.insert(e);
-        }
-      }
+      acquire_preconditions.insert(compute_sync_precondition());
       ApEvent acquire_complete = Runtime::merge_events(acquire_preconditions);
       if (runtime->legion_spy_enabled)
       {
@@ -8401,6 +8382,61 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return requirement;
+    }
+
+    //--------------------------------------------------------------------------
+    ApEvent AcquireOp::compute_sync_precondition(void) const
+    //--------------------------------------------------------------------------
+    {
+      if (wait_barriers.empty() && grants.empty())
+        return ApEvent::NO_AP_EVENT;
+      std::set<ApEvent> sync_preconditions;
+      if (!wait_barriers.empty())
+      {
+        for (std::vector<PhaseBarrier>::const_iterator it =
+              wait_barriers.begin(); it != wait_barriers.end(); it++)
+        {
+          ApEvent e = Runtime::get_previous_phase(it->phase_barrier);
+          sync_preconditions.insert(e);
+          if (runtime->legion_spy_enabled)
+            LegionSpy::log_phase_barrier_wait(unique_op_id, e);
+        }
+      }
+      if (!grants.empty())
+      {
+        for (std::vector<Grant>::const_iterator it = grants.begin();
+              it != grants.end(); it++)
+        {
+          ApEvent e = it->impl->acquire_grant();
+          sync_preconditions.insert(e);
+        }
+      }
+      return Runtime::merge_events(sync_preconditions);
+    }
+
+    //--------------------------------------------------------------------------
+    void AcquireOp::complete_acquire_execution(ApEvent acquire_complete_event)
+    //--------------------------------------------------------------------------
+    {
+      // Chain all the unlock and barrier arrivals off of the
+      // copy complete event
+      if (!arrive_barriers.empty())
+      {
+        for (std::vector<PhaseBarrier>::iterator it =
+              arrive_barriers.begin(); it != arrive_barriers.end(); it++)
+        {
+          if (runtime->legion_spy_enabled)
+            LegionSpy::log_phase_barrier_arrival(unique_op_id,
+                                                 it->phase_barrier);
+          Runtime::phase_barrier_arrive(it->phase_barrier, 1/*count*/,
+                                        completion_event);
+        }
+      }
+
+      // Handle the case for marking when the copy completes
+      Runtime::trigger_event(completion_event, acquire_complete_event);
+      need_completion_trigger = false;
+      complete_execution(Runtime::protect_event(acquire_complete_event));
     }
 
     //--------------------------------------------------------------------------
@@ -8896,26 +8932,7 @@ namespace Legion {
       std::set<ApEvent> release_preconditions;
       for (unsigned idx = 0; idx < mapped_instances.size(); idx++)
         release_preconditions.insert(mapped_instances[idx].get_ready_event());
-      if (!wait_barriers.empty())
-      {
-        for (std::vector<PhaseBarrier>::const_iterator it = 
-              wait_barriers.begin(); it != wait_barriers.end(); it++)
-        {
-          ApEvent e = Runtime::get_previous_phase(*it);
-          release_preconditions.insert(e);
-          if (runtime->legion_spy_enabled)
-            LegionSpy::log_phase_barrier_wait(unique_op_id, e);
-        }
-      }
-      if (!grants.empty())
-      {
-        for (std::vector<Grant>::const_iterator it = grants.begin();
-              it != grants.end(); it++)
-        {
-          ApEvent e = it->impl->acquire_grant();
-          release_preconditions.insert(e);
-        }
-      }
+      release_preconditions.insert(compute_sync_precondition());
       ApEvent release_complete = Runtime::merge_events(release_preconditions);
       if (runtime->legion_spy_enabled)
       {
@@ -9078,6 +9095,61 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return requirement;
+    }
+
+    //--------------------------------------------------------------------------
+    ApEvent ReleaseOp::compute_sync_precondition(void) const
+    //--------------------------------------------------------------------------
+    {
+      if (wait_barriers.empty() && grants.empty())
+        return ApEvent::NO_AP_EVENT;
+      std::set<ApEvent> sync_preconditions;
+      if (!wait_barriers.empty())
+      {
+        for (std::vector<PhaseBarrier>::const_iterator it =
+              wait_barriers.begin(); it != wait_barriers.end(); it++)
+        {
+          ApEvent e = Runtime::get_previous_phase(it->phase_barrier);
+          sync_preconditions.insert(e);
+          if (runtime->legion_spy_enabled)
+            LegionSpy::log_phase_barrier_wait(unique_op_id, e);
+        }
+      }
+      if (!grants.empty())
+      {
+        for (std::vector<Grant>::const_iterator it = grants.begin();
+              it != grants.end(); it++)
+        {
+          ApEvent e = it->impl->acquire_grant();
+          sync_preconditions.insert(e);
+        }
+      }
+      return Runtime::merge_events(sync_preconditions);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReleaseOp::complete_release_execution(ApEvent release_complete_event)
+    //--------------------------------------------------------------------------
+    {
+      // Chain all the unlock and barrier arrivals off of the
+      // copy complete event
+      if (!arrive_barriers.empty())
+      {
+        for (std::vector<PhaseBarrier>::iterator it =
+              arrive_barriers.begin(); it != arrive_barriers.end(); it++)
+        {
+          if (runtime->legion_spy_enabled)
+            LegionSpy::log_phase_barrier_arrival(unique_op_id,
+                                                 it->phase_barrier);
+          Runtime::phase_barrier_arrive(it->phase_barrier, 1/*count*/,
+                                        completion_event);
+        }
+      }
+
+      // Handle the case for marking when the copy completes
+      Runtime::trigger_event(completion_event, release_complete_event);
+      need_completion_trigger = false;
+      complete_execution(Runtime::protect_event(release_complete_event));
     }
 
     //--------------------------------------------------------------------------

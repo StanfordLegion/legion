@@ -1658,6 +1658,9 @@ namespace Legion {
       virtual int get_depth(void) const;
     public:
       const RegionRequirement& get_requirement(void) const;
+    public:
+      ApEvent compute_sync_precondition(void) const;
+      void complete_acquire_execution(ApEvent acquire_complete_event);
     protected:
       void check_acquire_privilege(void);
       void compute_parent_index(void);
@@ -1737,6 +1740,9 @@ namespace Legion {
       virtual int get_depth(void) const;
     public:
       const RegionRequirement& get_requirement(void) const;
+    public:
+      ApEvent compute_sync_precondition(void) const;
+      void complete_release_execution(ApEvent release_complete_event);
     protected:
       void check_release_privilege(void);
       void compute_parent_index(void);
