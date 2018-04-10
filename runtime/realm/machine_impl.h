@@ -78,6 +78,8 @@ namespace Realm {
 
     std::map<Memory, MachineMemInfo *> mems;
     std::map<Memory::Kind, std::map<Memory, MachineMemInfo *> > mem_by_kind;
+
+
   };
 
     class MachineImpl {
@@ -189,11 +191,35 @@ namespace Realm {
     class ProcessorQueryImpl {
     public:
       ProcessorQueryImpl(const Machine& _machine);
+      // SEEMA
+      static bool init;
+      static std::vector<Processor>* _toc_procs_list;
+      static std::vector<Processor>* _loc_procs_list;
+      static std::map<Processor, Memory>* _proc_sysmems;
+      static std::map<Processor, Memory>* _proc_regmems;
+      static std::map<Processor, Memory>* _proc_fbmems;
+      static std::map<Processor, Memory>* _proc_zcmems;
+      static std::map<Processor, unsigned int> _proc_fbmems_affinity;
+      static std::vector<Machine::ProcessorMemoryAffinity> _proc_mem_affinities;
+
+      static std::vector<Processor>* _omp_procs_list;
+      static std::vector<Processor>* _io_procs_list;
+      static std::vector<Memory>* _sysmems_list;
+      static std::vector<Memory>* _fbmems_list;
+      static std::map<Memory, std::vector<Processor> >* _sysmem_local_procs;
+      static std::map<Memory, std::vector<Processor> >* _sysmem_local_io_procs;
+      static std::map<Memory, std::vector<Processor> >* _fbmem_local_procs;
      
     protected:
       // these things are refcounted and copied-on-write
       ProcessorQueryImpl(const ProcessorQueryImpl& copy_from);
       ~ProcessorQueryImpl(void);
+
+      // SEEMAH
+      std::vector<Processor>* toc_procs_list(void) const;
+      std::vector<Processor>* loc_procs_list(void) const;
+      std::vector<Processor>* io_procs_list(void) const;
+      std::vector<Processor>* omp_procs_list(void) const;
 
     public:
       void add_reference(void);
@@ -209,6 +235,12 @@ namespace Realm {
       Processor next_match(Processor after) const;
       size_t count_matches(void) const;
       Processor random_match(void) const;
+
+      // SEEMAH: specialized iterators
+      std::vector<Processor>::const_iterator begin(Processor::Kind k) const;
+      std::vector<Processor>::const_iterator end(Processor::Kind k) const;
+      std::vector<Processor>::iterator begin(Processor::Kind k);
+      std::vector<Processor>::iterator end(Processor::Kind k);
 
     protected:
       int references;

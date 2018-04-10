@@ -1216,6 +1216,15 @@ namespace Realm {
   }
 
 
+  // SEEMAH may want to add specific iterators
+  std::vector<Processor>::iterator Machine::ProcessorQuery::begin(Processor::Kind k) {
+    return ((ProcessorQueryImpl *)impl)->begin(k);
+  }
+
+  std::vector<Processor>::iterator Machine::ProcessorQuery::end(Processor::Kind k) {
+    return ((ProcessorQueryImpl *)impl)->end(k);
+  }
+
   ////////////////////////////////////////////////////////////////////////
   //
   // class Machine::MemoryQuery
@@ -1421,14 +1430,131 @@ namespace Realm {
   //
   // class ProcessorQueryImpl
   //
+  bool ProcessorQueryImpl::init=false;
+  std::vector<Processor>* ProcessorQueryImpl::_toc_procs_list=NULL;
+  std::vector<Processor>* ProcessorQueryImpl::_loc_procs_list=NULL;
+  std::map<Processor, Memory>* ProcessorQueryImpl::_proc_sysmems=NULL;
+  std::map<Processor, Memory>* ProcessorQueryImpl::_proc_regmems=NULL;
+  std::map<Processor, Memory>* ProcessorQueryImpl::_proc_fbmems=NULL;
+  std::map<Processor, Memory>* ProcessorQueryImpl::_proc_zcmems=NULL;
+  std::map<Processor, unsigned int>  ProcessorQueryImpl::_proc_fbmems_affinity;
+  std::vector<Machine::ProcessorMemoryAffinity>  ProcessorQueryImpl::_proc_mem_affinities;
+  std::vector<Processor>* ProcessorQueryImpl::_omp_procs_list=NULL;
+  std::vector<Processor>* ProcessorQueryImpl::_io_procs_list=NULL;
+  std::vector<Memory>* ProcessorQueryImpl::_sysmems_list=NULL;
+  std::vector<Memory>* ProcessorQueryImpl::_fbmems_list=NULL;
+  std::map<Memory, std::vector<Processor> >* ProcessorQueryImpl::_sysmem_local_procs=NULL;
+  std::map<Memory, std::vector<Processor> >* ProcessorQueryImpl::_sysmem_local_io_procs=NULL;
+  std::map<Memory, std::vector<Processor> >* ProcessorQueryImpl::_fbmem_local_procs=NULL;
 
   ProcessorQueryImpl::ProcessorQueryImpl(const Machine& _machine)
     : references(1)
     , machine((MachineImpl *)_machine.impl)
     , is_restricted_node(false)
     , is_restricted_kind(false)
-  {}
-     
+  {
+
+    // this is required and set once
+    if (!init) {
+      init = true;
+      // SEEMAH 
+      // _toc_procs_list -> throughput optimized procesors, typically GPUS
+      // _loc_procs_list -> latency optimized processors, typically CPUS
+      this->_toc_procs_list = new std::vector<Processor>();
+      this->_loc_procs_list = new std::vector<Processor>();
+
+      // _proc_sysmems -> processor/system memory map
+      // _proc_regmems -> processor/dma memory map
+      // _proc_fbmems ->  processor/frame buffer memory map, GPU related
+      // _proc_zcmems -> processor/zero copy memory map
+      this->_proc_sysmems = new std::map<Processor, Memory>();
+      this->_proc_regmems = new std::map<Processor, Memory>();
+      this->_proc_fbmems = new std::map<Processor, Memory>();
+      this->_proc_zcmems = new std::map<Processor,Memory>();
+
+      // _omp_procs_list -> openmp processors
+      // _io_procs_list -> io processors
+      // _sysmems_list -> system memories
+      // _fbmems_list -> frame buffer memories
+      // _sysmem_local_procs -> system memory-> local processor list map
+      // _sysmem_local_io_procs -> system memory-> local i/o processor list map
+      // _fbmem_local_procs -> frame buffer memory -> local processor list map
+
+      this->_omp_procs_list = new std::vector<Processor>();
+      this->_io_procs_list = new std::vector<Processor>();
+      this->_sysmems_list = new std::vector<Memory>();
+      this->_fbmems_list = new std::vector<Memory>();
+      this->_sysmem_local_procs =  new std::map<Memory, std::vector<Processor> >();
+      this->_sysmem_local_io_procs = new std::map<Memory, std::vector<Processor> >();
+      this->_fbmem_local_procs =  new std::map<Memory, std::vector<Processor> >();
+
+      machine->get_proc_mem_affinity(this->_proc_mem_affinities);
+
+      // build up the processor/memory maps
+      for (unsigned idx = 0; idx < this->_proc_mem_affinities.size(); ++idx) {
+	Machine::ProcessorMemoryAffinity& affinity = this->_proc_mem_affinities[idx];
+	if (affinity.p.kind() == Processor::LOC_PROC ||
+	    affinity.p.kind() == Processor::IO_PROC ||
+	    affinity.p.kind() == Processor::OMP_PROC) {
+	  if (affinity.m.kind() == Memory::SYSTEM_MEM) {
+	    (*(this->_proc_sysmems))[affinity.p] = affinity.m;
+	  }
+	  else if (affinity.m.kind() == Memory::REGDMA_MEM) {
+	    (*(this->_proc_regmems))[affinity.p] = affinity.m;
+	  }
+	}
+	else if (affinity.p.kind() == Processor::TOC_PROC) {
+	  if (affinity.m.kind() == Memory::GPU_FB_MEM) {
+	    std::map<Processor, unsigned>::iterator finder =
+	      this->_proc_fbmems_affinity.find(affinity.p);
+	    if (finder == this->_proc_fbmems_affinity.end() ||
+		finder->second > affinity.latency)
+	      {
+		(*(this->_proc_fbmems))[affinity.p] = affinity.m;
+		this->_proc_fbmems_affinity[affinity.p] = affinity.latency;
+	      }
+	  }
+	  else if (affinity.m.kind() == Memory::Z_COPY_MEM) {
+	    (*(this->_proc_zcmems))[affinity.p] = affinity.m;
+	  }
+      }
+    }
+      for (std::map<Processor, Memory>::iterator it = this->_proc_sysmems->begin();
+	   it != this->_proc_sysmems->end(); ++it) {
+	if (it->first.kind() == Processor::LOC_PROC) {
+	  this->_loc_procs_list->push_back(it->first);
+	  (*(this->_sysmem_local_procs))[it->second].push_back(it->first);
+      }
+      else if (it->first.kind() == Processor::IO_PROC) {
+	(*(this->_sysmem_local_io_procs))[it->second].push_back(it->first);
+	this->_io_procs_list->push_back(it->first);
+      }
+      else if (it->first.kind() == Processor::OMP_PROC) {
+	this->_omp_procs_list->push_back(it->first);
+      }
+      }
+
+      for (std::map<Memory, std::vector<Processor> >::iterator it =
+	   this->_sysmem_local_procs->begin(); it != this->_sysmem_local_procs->end(); ++it)
+	this->_sysmems_list->push_back(it->first);
+
+      for (std::map<Processor, Memory>::iterator it = this->_proc_fbmems->begin();
+	   it != this->_proc_fbmems->end(); ++it) {
+	if (it->first.kind() == Processor::TOC_PROC) {
+	  this->_toc_procs_list->push_back(it->first);
+	  (*(this->_fbmem_local_procs))[it->second].push_back(it->first);
+      }
+      }
+
+    for (std::map<Memory, std::vector<Processor> >::iterator it =
+	   this->_fbmem_local_procs->begin(); it != this->_fbmem_local_procs->end(); ++it)
+      this->_fbmems_list->push_back(it->first);
+
+    //    std::cout << "size of _toc_procs_list = " << this->_toc_procs_list->size()  << "\n";
+    //    std::cout << "size of _loc_procs_list = " <<  this->_loc_procs_list->size()  << "\n";
+    }
+  }
+
   ProcessorQueryImpl::ProcessorQueryImpl(const ProcessorQueryImpl& copy_from)
     : references(1)
     , machine(copy_from.machine)
@@ -1544,6 +1670,34 @@ namespace Realm {
       if(is_restricted_node && (it->first != restricted_node_id))
 	break;
 
+      // SEEMAH BEGIN
+      if(is_restricted_kind && (!predicates.size())) {
+	switch (restricted_kind) {
+	case Processor::LOC_PROC:
+	  if (loc_procs_list()->size())
+	    return (*loc_procs_list())[0];
+	  return Processor::NO_PROC;
+	  break;
+	case Processor::IO_PROC:
+	  if (io_procs_list()->size())
+	    return (*io_procs_list())[0];
+	  return Processor::NO_PROC;
+	  break;
+	case Processor::OMP_PROC:
+	  if (omp_procs_list()->size())
+	    return (*omp_procs_list())[0];
+	  return Processor::NO_PROC;
+	  break;
+	case Processor::TOC_PROC:
+	  if (toc_procs_list()->size())
+	    return (*toc_procs_list())[0];
+	  return Processor::NO_PROC;
+	default:
+	  break;
+	}
+      }
+      // SEEMAH END
+
       const std::map<Processor, MachineProcInfo *> *plist;
       if(is_restricted_kind) {
 	std::map<Processor::Kind, std::map<Processor, MachineProcInfo *> >::const_iterator it2 = it->second->proc_by_kind.find(restricted_kind);
@@ -1569,7 +1723,6 @@ namespace Realm {
 	  ++it2;
 	}
       }
-
       // try the next node (if it exists)
       ++it;
     }
@@ -1638,7 +1791,6 @@ namespace Realm {
 	    ok = (*it3)->matches_predicate(machine, it2->first, it2->second);
 	  if(ok)
 	    return it2->first;
-
 	  // try next processor (if it exists)
 	  ++it2;
 	}
@@ -1689,6 +1841,26 @@ namespace Realm {
 	break;
 
       const std::map<Processor, MachineProcInfo *> *plist;
+      // SEEMAH BEGIN
+      // optimize if restricted kind without predicates attached to the query
+      if(is_restricted_kind && (!predicates.size())) {
+	std::cout << "entered optimized code in count_matches" << "\n";
+	switch (restricted_kind) {
+	case Processor::LOC_PROC:
+	  return loc_procs_list()->size();
+	  break;
+	case Processor::IO_PROC:
+	  return io_procs_list()->size();
+	  break;
+	case Processor::OMP_PROC:
+	  return omp_procs_list()->size();
+	  break;
+	case Processor::TOC_PROC:
+	  return toc_procs_list()->size();
+	default:
+	  break;
+	}
+      }
       if(is_restricted_kind) {
 	std::map<Processor::Kind, std::map<Processor, MachineProcInfo *> >::const_iterator it2 = it->second->proc_by_kind.find(restricted_kind);
 	if(it2 != it->second->proc_by_kind.end())
@@ -1797,7 +1969,133 @@ namespace Realm {
     return chosen;
   }
 
+  // SEEMAH
+  // ADD additional methods to the ProcessorQueryImpl class
+  std::vector<Processor>*   ProcessorQueryImpl::toc_procs_list(void) const
+  {
+    return ProcessorQueryImpl::_toc_procs_list;
+  }
+  
+  std::vector<Processor>*  ProcessorQueryImpl::loc_procs_list(void) const
+  {
+    return ProcessorQueryImpl::_loc_procs_list;
+  }
 
+  std::vector<Processor>*  ProcessorQueryImpl::io_procs_list(void) const
+  {
+    return ProcessorQueryImpl::_io_procs_list;
+  }
+
+  std::vector<Processor>*  ProcessorQueryImpl::omp_procs_list(void) const
+  {
+    return ProcessorQueryImpl::_omp_procs_list;
+  }
+
+  // SEEMAH: specialized iterators to be used if we decide to enhance the ProcessorQuery API
+  std::vector<Processor>::const_iterator   ProcessorQueryImpl::begin(Processor::Kind k) const 
+  {
+    switch (k) {
+    case Processor::TOC_PROC:
+      return toc_procs_list()->begin();
+      break;
+	  
+    case Processor::LOC_PROC:
+      return loc_procs_list()->begin();
+      break;
+
+    case Processor::IO_PROC:
+      return io_procs_list()->begin();
+      break;
+	  
+    case Processor::OMP_PROC:
+      return omp_procs_list()->begin();
+      break;
+
+    default:
+      // unimplemented
+      assert(0);
+      break;
+    }
+  }
+
+  std::vector<Processor>::const_iterator  ProcessorQueryImpl::end(Processor::Kind k) const 
+  {
+    switch(k) {
+    case Processor::TOC_PROC:
+      return toc_procs_list()->end();
+      break;
+
+    case Processor::LOC_PROC:
+      return loc_procs_list()->end();
+      break;
+	
+    case Processor::IO_PROC:
+      return io_procs_list()->end();
+      break;
+	  
+    case Processor::OMP_PROC:
+      return omp_procs_list()->end();
+      break;
+
+    default:
+      // unimplemented
+      assert(0);
+      break;
+    }
+  }
+
+  std::vector<Processor>::iterator ProcessorQueryImpl::begin(Processor::Kind k) 
+  { 
+    switch (k) {
+    case Processor::TOC_PROC:
+      return toc_procs_list()->begin();
+      break;
+	  
+    case Processor::LOC_PROC:
+      return loc_procs_list()->begin();
+      break;
+	  
+    case Processor::IO_PROC:
+      return io_procs_list()->begin();
+      break;
+	  
+    case Processor::OMP_PROC:
+      return omp_procs_list()->begin();
+      break;
+
+    default:
+      // unimplemented
+      assert(0);
+      break;
+    }
+  }
+      
+  std::vector<Processor>::iterator ProcessorQueryImpl::end(Processor::Kind k) 
+  {
+    switch (k) {
+    case Processor::TOC_PROC:
+      return toc_procs_list()->end();
+      break;
+	  
+    case Processor::LOC_PROC:
+      return loc_procs_list()->end();
+      break;
+
+    case Processor::IO_PROC:
+      return io_procs_list()->end();
+      break;
+	  
+    case Processor::OMP_PROC:
+      return omp_procs_list()->end();
+      break;
+      
+    default:
+      // unimplemented
+      assert(0);
+      break;
+    }
+  }
+		    
   ////////////////////////////////////////////////////////////////////////
   //
   // class MemoryHasProcAffinityPredicate
