@@ -1371,6 +1371,9 @@ namespace Legion {
 
       if (physical_trace->get_current_template() != NULL)
       {
+        if (!recurrent || implicit_runtime->no_trace_optimization)
+          execution_precondition =
+            parent_ctx->get_current_execution_fence_event();
         physical_trace->initialize_template(get_completion_event(), recurrent);
         local_trace->set_state_replay();
       }
@@ -1629,7 +1632,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       fence_completion = completion;
-      if (recurrent)
+      if (recurrent && !implicit_runtime->no_trace_optimization)
         for (std::map<unsigned, unsigned>::iterator it = frontiers.begin();
             it != frontiers.end(); ++it)
         {
@@ -1656,9 +1659,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       std::set<ApEvent> to_merge;
-      for (std::map<unsigned, unsigned>::const_iterator it = frontiers.begin();
-           it != frontiers.end(); ++it)
-        to_merge.insert(events[it->first]);
+      for (std::map<InstanceAccess, UserInfo>::const_iterator it =
+           last_users.begin(); it != last_users.end(); ++it)
+        for (std::set<unsigned>::const_iterator uit = it->second.users.begin();
+             uit != it->second.users.end(); ++uit)
+          to_merge.insert(events[*uit]);
       return Runtime::merge_events(to_merge);
     }
 
@@ -1919,6 +1924,15 @@ namespace Legion {
       generate.resize(instructions.size());
       preconditions.resize(instructions.size());
       simplified.resize(instructions.size());
+
+      if (implicit_runtime->no_trace_optimization)
+      {
+        for (std::map<TraceLocalID, Operation*>::iterator it =
+             operations.begin(); it != operations.end(); ++it)
+          if (it->second->get_operation_kind() == Operation::TASK_OP_KIND)
+            instructions.push_back(new LaunchTask(*this, it->first));
+        return;
+      }
 
       for (unsigned idx = 0; idx < instructions.size(); ++idx)
       {

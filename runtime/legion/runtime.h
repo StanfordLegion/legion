@@ -1452,6 +1452,7 @@ namespace Legion {
             dump_physical_traces(false),
             no_tracing(false),
             no_physical_tracing(false),
+            no_trace_optimization(false),
             verify_disjointness(false),
             runtime_warnings(false),
             separate_runtime_instances(false),
@@ -1502,6 +1503,7 @@ namespace Legion {
         bool dump_physical_traces;
         bool no_tracing;
         bool no_physical_tracing;
+        bool no_trace_optimization;
         bool verify_disjointness;
         bool runtime_warnings;
         bool separate_runtime_instances;
@@ -1620,6 +1622,7 @@ namespace Legion {
       const bool dump_physical_traces;
       const bool no_tracing;
       const bool no_physical_tracing;
+      const bool no_trace_optimization;
       const bool verify_disjointness;
       const bool runtime_warnings;
       const bool separate_runtime_instances;
