@@ -2193,6 +2193,13 @@ namespace Legion {
           return accessor.ptr(r.lo);
         }
       __CUDA_HD__
+      inline const FT* ptr(const Rect<N,T>& r, size_t strides[N]) const
+        {
+          for (int i = 0; i < N; i++)
+            strides[i] = accessor.strides[i] / sizeof(FT);
+          return accessor.ptr(r.lo);
+        }
+      __CUDA_HD__
       inline const FT& operator[](const Point<N,T>& p) const
         { 
           return accessor[p]; 
@@ -2349,6 +2356,19 @@ namespace Legion {
           return accessor.ptr(r.lo);
         }
       __CUDA_HD__
+      inline const FT* ptr(const Rect<N,T>& r, size_t strides[N]) const
+        {
+#ifdef __CUDA_ARCH__
+          assert(bounds.contains_all(r));
+#else
+          if (!bounds.contains_all(r)) 
+            field_region.fail_bounds_check(DomainPoint(r), field, READ_ONLY);
+#endif
+          for (int i = 0; i < N; i++)
+            strides[i] = accessor.strides[i] / sizeof(FT);
+          return accessor.ptr(r.lo);
+        }
+      __CUDA_HD__
       inline const FT& operator[](const Point<N,T>& p) const
         { 
 #ifdef __CUDA_ARCH__
@@ -2487,6 +2507,12 @@ namespace Legion {
             exit(ERROR_NON_DENSE_RECTANGLE);
 #endif
           }
+          return accessor.ptr(r.lo); 
+        }
+      __CUDA_HD__
+      inline const FT* ptr(const Rect<1,T>& r, size_t strides[1]) const
+        {
+          strides[0] = accessor.strides[0] / sizeof(FT);
           return accessor.ptr(r.lo); 
         }
       __CUDA_HD__
@@ -2639,6 +2665,18 @@ namespace Legion {
           return accessor.ptr(r.lo);
         }
       __CUDA_HD__
+      inline const FT* ptr(const Rect<1,T>& r, size_t strides[1]) const
+        {
+#ifdef __CUDA_ARCH__
+          assert(bounds.contains_all(r));
+#else
+          if (!bounds.contains_all(r)) 
+            field_region.fail_bounds_check(DomainPoint(r), field, READ_ONLY);
+#endif
+          strides[0] = accessor.strides[0] / sizeof(FT);
+          return accessor.ptr(r.lo);
+        }
+      __CUDA_HD__
       inline const FT& operator[](const Point<1,T>& p) const
         { 
 #ifdef __CUDA_ARCH__
@@ -2772,6 +2810,13 @@ namespace Legion {
             exit(ERROR_NON_DENSE_RECTANGLE);
 #endif
           }
+          return accessor.ptr(r.lo);
+        }
+      __CUDA_HD__
+      inline FT* ptr(const Rect<N,T>& r, size_t strides[N]) const
+        {
+          for (int i = 0; i < N; i++)
+            strides[i] = accessor.strides[i] / sizeof(FT);
           return accessor.ptr(r.lo);
         }
       __CUDA_HD__
@@ -2950,6 +2995,19 @@ namespace Legion {
           return accessor.ptr(r.lo);
         }
       __CUDA_HD__
+      inline FT* ptr(const Rect<N,T>& r, size_t strides[N]) const
+        {
+#ifdef __CUDA_ARCH__
+          assert(bounds.contains_all(r));
+#else
+          if (!bounds.contains_all(r)) 
+            field_region.fail_bounds_check(Domain(r), field, READ_WRITE);
+#endif
+          for (int i = 0; i < N; i++)
+            strides[i] = accessor.strides[i] / sizeof(FT);
+          return accessor.ptr(r.lo);
+        }
+      __CUDA_HD__
       inline FT& operator[](const Point<N,T>& p) const
         { 
 #ifdef __CUDA_ARCH__
@@ -3105,6 +3163,12 @@ namespace Legion {
             exit(ERROR_NON_DENSE_RECTANGLE);
 #endif
           }
+          return accessor.ptr(r.lo);
+        }
+      __CUDA_HD__
+      inline FT* ptr(const Rect<1,T>& r, size_t strides[1]) const
+        {
+          strides[0] = accessor.strides[0] / sizeof(FT);
           return accessor.ptr(r.lo);
         }
       __CUDA_HD__
@@ -3274,6 +3338,18 @@ namespace Legion {
           return accessor.ptr(r.lo);
         }
       __CUDA_HD__
+      inline FT* ptr(const Rect<1,T>& r, size_t strides[1]) const
+        {
+#ifdef __CUDA_ARCH__
+          assert(bounds.contains_all(r));
+#else
+          if (!bounds.contains_all(r)) 
+            field_region.fail_bounds_check(Domain(r), field, READ_WRITE);
+#endif
+          strides[0] = accessor.strides[0] / sizeof(FT);
+          return accessor.ptr(r.lo);
+        }
+      __CUDA_HD__
       inline FT& operator[](const Point<1,T>& p) const
         { 
 #ifdef __CUDA_ARCH__
@@ -3419,6 +3495,13 @@ namespace Legion {
             exit(ERROR_NON_DENSE_RECTANGLE);
 #endif
           }
+          return accessor.ptr(r.lo);
+        }
+      __CUDA_HD__
+      inline FT* ptr(const Rect<N,T>& r, size_t strides[N]) const
+        {
+          for (int i = 0; i < N; i++)
+            strides[i] = accessor.strides[i] / sizeof(FT);
           return accessor.ptr(r.lo);
         }
       __CUDA_HD__
@@ -3591,6 +3674,19 @@ namespace Legion {
           return accessor.ptr(r.lo);
         }
       __CUDA_HD__
+      inline FT* ptr(const Rect<N,T>& r, size_t strides[N]) const 
+        {
+#ifdef __CUDA_ARCH__
+          assert(bounds.contains_all(r));
+#else
+          if (!bounds.contains_all(r)) 
+            field_region.fail_bounds_check(Domain(r), field, READ_WRITE);
+#endif
+          for (int i = 0; i < N; i++)
+            strides[i] = accessor.strides[i] / sizeof(FT);
+          return accessor.ptr(r.lo);
+        }
+      __CUDA_HD__
       inline FT& operator[](const Point<N,T>& p) const
         { 
 #ifdef __CUDA_ARCH__
@@ -3734,6 +3830,12 @@ namespace Legion {
             exit(ERROR_NON_DENSE_RECTANGLE);
 #endif
           }
+          return accessor.ptr(r.lo);
+        }
+      __CUDA_HD__
+      inline FT* ptr(const Rect<1,T>& r, size_t strides[1]) const
+        {
+          strides[0] = accessor.strides[0] / sizeof(FT);
           return accessor.ptr(r.lo);
         }
       __CUDA_HD__
@@ -3897,6 +3999,18 @@ namespace Legion {
           return accessor.ptr(r.lo);
         }
       __CUDA_HD__
+      inline FT* ptr(const Rect<1,T>& r, size_t strides[1]) const
+        {
+#ifdef __CUDA_ARCH__
+          assert(bounds.contains_all(r));
+#else
+          if (!bounds.contains_all(r)) 
+            field_region.fail_bounds_check(Domain(r), field, READ_WRITE);
+#endif
+          strides[0] = accessor.strides[0] / sizeof(FT);
+          return accessor.ptr(r.lo);
+        }
+      __CUDA_HD__
       inline FT& operator[](const Point<1,T>& p) const
         { 
 #ifdef __CUDA_ARCH__
@@ -4011,6 +4125,14 @@ namespace Legion {
             exit(ERROR_NON_DENSE_RECTANGLE);
 #endif
           }
+          return accessor.ptr(r.lo);
+        }
+      __CUDA_HD__
+      inline typename REDOP::RHS* ptr(const Rect<N,T>& r, 
+                                      size_t strides[N]) const
+        {
+          for (int i = 0; i < N; i++)
+            strides[i] = accessor.strides[i] / sizeof(typename REDOP::RHS);
           return accessor.ptr(r.lo);
         }
       __CUDA_HD__
@@ -4166,6 +4288,20 @@ namespace Legion {
           return accessor.ptr(r.lo);
         }
       __CUDA_HD__
+      inline typename REDOP::RHS* ptr(const Rect<N,T>& r,
+                                      size_t strides[N]) const
+        {
+#ifdef __CUDA_ARCH__
+          assert(bounds.contains_all(r));
+#else
+          if (!bounds.contains_all(r)) 
+            field_region.fail_bounds_check(DomainPoint(r), field, REDUCE);
+#endif
+          for (int i = 0; i < N; i++)
+            strides[i] = accessor.strides[i] / sizeof(typename REDOP::RHS);
+          return accessor.ptr(r.lo);
+        }
+      __CUDA_HD__
       inline ArraySyntax::ReductionHelper<ReductionAccessor<REDOP,EXCLUSIVE,N,
              T,Realm::AffineAccessor<typename REDOP::RHS,N,T>,true>,
              typename REDOP::RHS,N,T>
@@ -4291,6 +4427,13 @@ namespace Legion {
             exit(ERROR_NON_DENSE_RECTANGLE);
 #endif
           }
+          return accessor.ptr(r.lo);
+        }
+      __CUDA_HD__
+      inline typename REDOP::RHS* ptr(const Rect<1,T>& r, 
+                                      size_t strides[1]) const
+        {
+          strides[0] = accessor.strides[0] / sizeof(typename REDOP::RHS);
           return accessor.ptr(r.lo);
         }
       __CUDA_HD__
@@ -4432,6 +4575,19 @@ namespace Legion {
             exit(ERROR_NON_DENSE_RECTANGLE);
 #endif
           }
+          return accessor.ptr(r.lo);
+        }
+      __CUDA_HD__
+      inline typename REDOP::RHS* ptr(const Rect<1,T>& r,
+                                      size_t strides[1]) const
+        {
+#ifdef __CUDA_ARCH__
+          assert(bounds.contains_all(r));
+#else
+          if (!bounds.contains_all(r)) 
+            field_region.fail_bounds_check(DomainPoint(r), field, REDUCE);
+#endif
+          strides[0] = accessor.strides[0] / sizeof(typename REDOP::RHS);
           return accessor.ptr(r.lo);
         }
       __CUDA_HD__
@@ -4623,6 +4779,13 @@ namespace Legion {
             exit(ERROR_NON_DENSE_RECTANGLE);
 #endif
           }
+          return accessor.ptr(r.lo);
+        }
+      __CUDA_HD__
+      inline FT* ptr(const Rect<N,T>& r, size_t strides[N]) const
+        {
+          for (int i = 0; i < N; i++)
+            strides[i] = accessor.strides[i] / sizeof(FT);
           return accessor.ptr(r.lo);
         }
       __CUDA_HD__
