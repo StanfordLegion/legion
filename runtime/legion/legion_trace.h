@@ -611,16 +611,16 @@ namespace Legion {
     enum InstructionKind
     {
       GET_TERM_EVENT = 0,
-      GET_COPY_TERM_EVENT,
+      GET_OP_TERM_EVENT,
       CREATE_AP_USER_EVENT,
       TRIGGER_EVENT,
       MERGE_EVENT,
       ISSUE_COPY,
       ISSUE_FILL,
-      SET_COPY_SYNC_EVENT,
+      SET_OP_SYNC_EVENT,
       ASSIGN_FENCE_COMPLETION,
       SET_READY_EVENT,
-      TRIGGER_COPY_COMPLETION,
+      COMPLETE_REPLAY,
       LAUNCH_TASK,
     };
 
@@ -643,9 +643,9 @@ namespace Legion {
       virtual IssueCopy* as_issue_copy(void) = 0;
       virtual IssueFill* as_issue_fill(void) = 0;
       virtual SetReadyEvent* as_set_ready_event(void) = 0;
-      virtual GetCopyTermEvent* as_get_copy_term_event(void) = 0;
-      virtual SetCopySyncEvent* as_set_copy_sync_event(void) = 0;
-      virtual TriggerCopyCompletion* as_triger_copy_completion(void) = 0;
+      virtual GetOpTermEvent* as_get_copy_term_event(void) = 0;
+      virtual SetOpSyncEvent* as_set_copy_sync_event(void) = 0;
+      virtual CompleteReplay* as_triger_copy_completion(void) = 0;
 
       virtual Instruction* clone(PhysicalTemplate& tpl,
                                const std::map<unsigned, unsigned> &rewrite) = 0;
@@ -687,11 +687,11 @@ namespace Legion {
         { return NULL; }
       virtual SetReadyEvent* as_set_ready_event(void)
         { return NULL; }
-      virtual GetCopyTermEvent* as_get_copy_term_event(void)
+      virtual GetOpTermEvent* as_get_copy_term_event(void)
         { return NULL; }
-      virtual SetCopySyncEvent* as_set_copy_sync_event(void)
+      virtual SetOpSyncEvent* as_set_copy_sync_event(void)
         { return NULL; }
-      virtual TriggerCopyCompletion* as_triger_copy_completion(void)
+      virtual CompleteReplay* as_triger_copy_completion(void)
         { return NULL; }
 
       virtual Instruction* clone(PhysicalTemplate& tpl,
@@ -733,11 +733,11 @@ namespace Legion {
         { return NULL; }
       virtual SetReadyEvent* as_set_ready_event(void)
         { return NULL; }
-      virtual GetCopyTermEvent* as_get_copy_term_event(void)
+      virtual GetOpTermEvent* as_get_copy_term_event(void)
         { return NULL; }
-      virtual SetCopySyncEvent* as_set_copy_sync_event(void)
+      virtual SetOpSyncEvent* as_set_copy_sync_event(void)
         { return NULL; }
-      virtual TriggerCopyCompletion* as_triger_copy_completion(void)
+      virtual CompleteReplay* as_triger_copy_completion(void)
         { return NULL; }
 
       virtual Instruction* clone(PhysicalTemplate& tpl,
@@ -778,11 +778,11 @@ namespace Legion {
         { return NULL; }
       virtual SetReadyEvent* as_set_ready_event(void)
         { return NULL; }
-      virtual GetCopyTermEvent* as_get_copy_term_event(void)
+      virtual GetOpTermEvent* as_get_copy_term_event(void)
         { return NULL; }
-      virtual SetCopySyncEvent* as_set_copy_sync_event(void)
+      virtual SetOpSyncEvent* as_set_copy_sync_event(void)
         { return NULL; }
-      virtual TriggerCopyCompletion* as_triger_copy_completion(void)
+      virtual CompleteReplay* as_triger_copy_completion(void)
         { return NULL; }
 
       virtual Instruction* clone(PhysicalTemplate& tpl,
@@ -825,11 +825,11 @@ namespace Legion {
         { return NULL; }
       virtual SetReadyEvent* as_set_ready_event(void)
         { return NULL; }
-      virtual GetCopyTermEvent* as_get_copy_term_event(void)
+      virtual GetOpTermEvent* as_get_copy_term_event(void)
         { return NULL; }
-      virtual SetCopySyncEvent* as_set_copy_sync_event(void)
+      virtual SetOpSyncEvent* as_set_copy_sync_event(void)
         { return NULL; }
-      virtual TriggerCopyCompletion* as_triger_copy_completion(void)
+      virtual CompleteReplay* as_triger_copy_completion(void)
         { return NULL; }
 
       virtual Instruction* clone(PhysicalTemplate& tpl,
@@ -871,11 +871,11 @@ namespace Legion {
         { return NULL; }
       virtual SetReadyEvent* as_set_ready_event(void)
         { return NULL; }
-      virtual GetCopyTermEvent* as_get_copy_term_event(void)
+      virtual GetOpTermEvent* as_get_copy_term_event(void)
         { return NULL; }
-      virtual SetCopySyncEvent* as_set_copy_sync_event(void)
+      virtual SetOpSyncEvent* as_set_copy_sync_event(void)
         { return NULL; }
-      virtual TriggerCopyCompletion* as_triger_copy_completion(void)
+      virtual CompleteReplay* as_triger_copy_completion(void)
         { return NULL; }
 
       virtual Instruction* clone(PhysicalTemplate& tpl,
@@ -931,11 +931,11 @@ namespace Legion {
         { return this; }
       virtual SetReadyEvent* as_set_ready_event(void)
         { return NULL; }
-      virtual GetCopyTermEvent* as_get_copy_term_event(void)
+      virtual GetOpTermEvent* as_get_copy_term_event(void)
         { return NULL; }
-      virtual SetCopySyncEvent* as_set_copy_sync_event(void)
+      virtual SetOpSyncEvent* as_set_copy_sync_event(void)
         { return NULL; }
-      virtual TriggerCopyCompletion* as_triger_copy_completion(void)
+      virtual CompleteReplay* as_triger_copy_completion(void)
         { return NULL; }
 
       virtual Instruction* clone(PhysicalTemplate& tpl,
@@ -998,11 +998,11 @@ namespace Legion {
         { return NULL; }
       virtual SetReadyEvent* as_set_ready_event(void)
         { return NULL; }
-      virtual GetCopyTermEvent* as_get_copy_term_event(void)
+      virtual GetOpTermEvent* as_get_copy_term_event(void)
         { return NULL; }
-      virtual SetCopySyncEvent* as_set_copy_sync_event(void)
+      virtual SetOpSyncEvent* as_set_copy_sync_event(void)
         { return NULL; }
-      virtual TriggerCopyCompletion* as_triger_copy_completion(void)
+      virtual CompleteReplay* as_triger_copy_completion(void)
         { return NULL; }
 
       virtual Instruction* clone(PhysicalTemplate& tpl,
@@ -1060,11 +1060,11 @@ namespace Legion {
         { return NULL; }
       virtual SetReadyEvent* as_set_ready_event(void)
         { return this; }
-      virtual GetCopyTermEvent* as_get_copy_term_event(void)
+      virtual GetOpTermEvent* as_get_copy_term_event(void)
         { return NULL; }
-      virtual SetCopySyncEvent* as_set_copy_sync_event(void)
+      virtual SetOpSyncEvent* as_set_copy_sync_event(void)
         { return NULL; }
-      virtual TriggerCopyCompletion* as_triger_copy_completion(void)
+      virtual CompleteReplay* as_triger_copy_completion(void)
         { return NULL; }
 
       virtual Instruction* clone(PhysicalTemplate& tpl,
@@ -1083,18 +1083,18 @@ namespace Legion {
     };
 
     /**
-     * \class GetCopyTermEvent
+     * \class GetOpTermEvent
      * This instruction has the following semantics:
      *   events[lhs] = operations[rhs].get_completion_event()
      */
-    struct GetCopyTermEvent : public Instruction {
-      GetCopyTermEvent(PhysicalTemplate& tpl, unsigned lhs,
+    struct GetOpTermEvent : public Instruction {
+      GetOpTermEvent(PhysicalTemplate& tpl, unsigned lhs,
                        const TraceLocalID& rhs);
       virtual void execute(void);
       virtual std::string to_string(void);
 
       virtual InstructionKind get_kind(void)
-        { return GET_COPY_TERM_EVENT; }
+        { return GET_OP_TERM_EVENT; }
       virtual GetTermEvent* as_get_term_event(void)
         { return NULL; }
       virtual CreateApUserEvent* as_create_ap_user_event(void)
@@ -1111,11 +1111,11 @@ namespace Legion {
         { return NULL; }
       virtual SetReadyEvent* as_set_ready_event(void)
         { return NULL; }
-      virtual GetCopyTermEvent* as_get_copy_term_event(void)
+      virtual GetOpTermEvent* as_get_copy_term_event(void)
         { return this; }
-      virtual SetCopySyncEvent* as_set_copy_sync_event(void)
+      virtual SetOpSyncEvent* as_set_copy_sync_event(void)
         { return NULL; }
-      virtual TriggerCopyCompletion* as_triger_copy_completion(void)
+      virtual CompleteReplay* as_triger_copy_completion(void)
         { return NULL; }
 
       virtual Instruction* clone(PhysicalTemplate& tpl,
@@ -1130,18 +1130,18 @@ namespace Legion {
     };
 
     /**
-     * \class SetCopySyncEvent
+     * \class SetOpSyncEvent
      * This instruction has the following semantics:
      *   events[lhs] = operations[rhs].compute_sync_precondition()
      */
-    struct SetCopySyncEvent : public Instruction {
-      SetCopySyncEvent(PhysicalTemplate& tpl, unsigned lhs,
+    struct SetOpSyncEvent : public Instruction {
+      SetOpSyncEvent(PhysicalTemplate& tpl, unsigned lhs,
                        const TraceLocalID& rhs);
       virtual void execute(void);
       virtual std::string to_string(void);
 
       virtual InstructionKind get_kind(void)
-        { return SET_COPY_SYNC_EVENT; }
+        { return SET_OP_SYNC_EVENT; }
       virtual GetTermEvent* as_get_term_event(void)
         { return NULL; }
       virtual CreateApUserEvent* as_create_ap_user_event(void)
@@ -1158,11 +1158,11 @@ namespace Legion {
         { return NULL; }
       virtual SetReadyEvent* as_set_ready_event(void)
         { return NULL; }
-      virtual GetCopyTermEvent* as_get_copy_term_event(void)
+      virtual GetOpTermEvent* as_get_copy_term_event(void)
         { return NULL; }
-      virtual SetCopySyncEvent* as_set_copy_sync_event(void)
+      virtual SetOpSyncEvent* as_set_copy_sync_event(void)
         { return this; }
-      virtual TriggerCopyCompletion* as_triger_copy_completion(void)
+      virtual CompleteReplay* as_triger_copy_completion(void)
         { return NULL; }
 
       virtual Instruction* clone(PhysicalTemplate& tpl,
@@ -1177,18 +1177,18 @@ namespace Legion {
     };
 
     /**
-     * \class TriggerCopyCompletion
+     * \class CompleteReplay
      * This instruction has the following semantics:
-     *   operations[lhs]->complete_copy_execution(events[rhs])
+     *   operations[lhs]->complete_replay(events[rhs])
      */
-    struct TriggerCopyCompletion : public Instruction {
-      TriggerCopyCompletion(PhysicalTemplate& tpl, const TraceLocalID& lhs,
+    struct CompleteReplay : public Instruction {
+      CompleteReplay(PhysicalTemplate& tpl, const TraceLocalID& lhs,
                             unsigned rhs);
       virtual void execute(void);
       virtual std::string to_string(void);
 
       virtual InstructionKind get_kind(void)
-        { return TRIGGER_COPY_COMPLETION; }
+        { return COMPLETE_REPLAY; }
       virtual GetTermEvent* as_get_term_event(void)
         { return NULL; }
       virtual CreateApUserEvent* as_create_ap_user_event(void)
@@ -1205,11 +1205,11 @@ namespace Legion {
         { return NULL; }
       virtual SetReadyEvent* as_set_ready_event(void)
         { return NULL; }
-      virtual GetCopyTermEvent* as_get_copy_term_event(void)
+      virtual GetOpTermEvent* as_get_copy_term_event(void)
         { return NULL; }
-      virtual SetCopySyncEvent* as_set_copy_sync_event(void)
+      virtual SetOpSyncEvent* as_set_copy_sync_event(void)
         { return NULL; }
-      virtual TriggerCopyCompletion* as_triger_copy_completion(void)
+      virtual CompleteReplay* as_triger_copy_completion(void)
         { return this; }
 
       virtual Instruction* clone(PhysicalTemplate& tpl,
@@ -1246,11 +1246,11 @@ namespace Legion {
         { return NULL; }
       virtual SetReadyEvent* as_set_ready_event(void)
         { return NULL; }
-      virtual GetCopyTermEvent* as_get_copy_term_event(void)
+      virtual GetOpTermEvent* as_get_copy_term_event(void)
         { return NULL; }
-      virtual SetCopySyncEvent* as_set_copy_sync_event(void)
+      virtual SetOpSyncEvent* as_set_copy_sync_event(void)
         { return NULL; }
-      virtual TriggerCopyCompletion* as_triger_copy_completion(void)
+      virtual CompleteReplay* as_triger_copy_completion(void)
         { return NULL; }
 
       virtual Instruction* clone(PhysicalTemplate& tpl,

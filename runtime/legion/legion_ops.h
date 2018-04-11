@@ -785,6 +785,10 @@ namespace Legion {
     public:
       // From Memoizable
       virtual TraceLocalID get_trace_local_id() const;
+      virtual ApEvent compute_sync_precondition(void) const
+        { assert(false); return ApEvent::NO_AP_EVENT; }
+      virtual void complete_replay(ApEvent complete_event)
+        { assert(false); }
     protected:
       void invoke_memoize_operation(MapperID mapper_id);
       void set_memoize(bool memoize);
@@ -963,8 +967,8 @@ namespace Legion {
       // From MemoizableOp
       virtual void replay_analysis(void);
     public:
-      ApEvent compute_sync_precondition(void) const;
-      void complete_copy_execution(ApEvent copy_complete_event);
+      virtual ApEvent compute_sync_precondition(void) const;
+      virtual void complete_replay(ApEvent copy_complete_event);
     protected:
       template<bool IS_SRC>
       int perform_conversion(unsigned idx, const RegionRequirement &req,

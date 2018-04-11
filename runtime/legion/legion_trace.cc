@@ -2024,16 +2024,16 @@ namespace Legion {
               }
               break;
             }
-          case GET_COPY_TERM_EVENT:
-          case SET_COPY_SYNC_EVENT:
+          case GET_OP_TERM_EVENT:
+          case SET_OP_SYNC_EVENT:
             {
               generate[idx] = idx;
               break;
             }
-          case TRIGGER_COPY_COMPLETION:
+          case COMPLETE_REPLAY:
             {
               generate[idx] = idx;
-              TriggerCopyCompletion *inst =
+              CompleteReplay *inst =
                 instructions[idx]->as_triger_copy_completion();
               std::set<unsigned> &rhs_pre = preconditions[inst->rhs];
               std::map<TraceLocalID, unsigned>::iterator finder =
@@ -2078,9 +2078,9 @@ namespace Legion {
           case TRIGGER_EVENT:
           case ISSUE_COPY:
           case ISSUE_FILL:
-          case GET_COPY_TERM_EVENT:
-          case SET_COPY_SYNC_EVENT:
-          case TRIGGER_COPY_COMPLETION:
+          case GET_OP_TERM_EVENT:
+          case SET_OP_SYNC_EVENT:
+          case COMPLETE_REPLAY:
             {
 #ifdef DEBUG_LEGION
               assert(generate[idx] == idx);
@@ -2968,7 +2968,7 @@ namespace Legion {
       operations[key] = copy;
       task_entries[key] = instructions.size();
 
-      instructions.push_back(new GetCopyTermEvent(*this, lhs_, key));
+      instructions.push_back(new GetOpTermEvent(*this, lhs_, key));
 #ifdef DEBUG_LEGION
       assert(instructions.size() == events.size());
 #endif
@@ -3002,7 +3002,7 @@ namespace Legion {
       assert(operations.find(key) != operations.end());
       assert(task_entries.find(key) != task_entries.end());
 #endif
-      instructions.push_back(new SetCopySyncEvent(*this, lhs_, key));
+      instructions.push_back(new SetOpSyncEvent(*this, lhs_, key));
 #ifdef DEBUG_LEGION
       assert(instructions.size() == events.size());
 #endif
@@ -3029,7 +3029,7 @@ namespace Legion {
       assert(operations.find(lhs_) != operations.end());
       assert(task_entries.find(lhs_) != task_entries.end());
 #endif
-      instructions.push_back(new TriggerCopyCompletion(*this, lhs_, rhs_));
+      instructions.push_back(new CompleteReplay(*this, lhs_, rhs_));
 
 #ifdef DEBUG_LEGION
       assert(instructions.size() == events.size());
@@ -3832,11 +3832,11 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
-    // GetCopyTermEvent
+    // GetOpTermEvent
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    GetCopyTermEvent::GetCopyTermEvent(PhysicalTemplate& tpl, unsigned l,
+    GetOpTermEvent::GetOpTermEvent(PhysicalTemplate& tpl, unsigned l,
                                        const TraceLocalID& r)
       : Instruction(tpl), lhs(l), rhs(r)
     //--------------------------------------------------------------------------
@@ -3848,23 +3848,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void GetCopyTermEvent::execute(void)
+    void GetOpTermEvent::execute(void)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(operations.find(rhs) != operations.end());
       assert(operations.find(rhs)->second != NULL);
-
-      CopyOp *copy = dynamic_cast<CopyOp*>(operations[rhs]);
-      assert(copy != NULL);
-#else
-      CopyOp *copy = static_cast<CopyOp*>(operations[rhs]);
 #endif
-      events[lhs] = copy->get_completion_event();
+      events[lhs] = operations[rhs]->get_completion_event();
     }
 
     //--------------------------------------------------------------------------
-    std::string GetCopyTermEvent::to_string(void)
+    std::string GetOpTermEvent::to_string(void)
     //--------------------------------------------------------------------------
     {
       std::stringstream ss;
@@ -3881,7 +3876,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Instruction* GetCopyTermEvent::clone(PhysicalTemplate& tpl,
+    Instruction* GetOpTermEvent::clone(PhysicalTemplate& tpl,
                                     const std::map<unsigned, unsigned> &rewrite)
     //--------------------------------------------------------------------------
     {
@@ -3889,15 +3884,15 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(finder != rewrite.end());
 #endif
-      return new GetCopyTermEvent(tpl, finder->second, rhs);
+      return new GetOpTermEvent(tpl, finder->second, rhs);
     }
 
     /////////////////////////////////////////////////////////////
-    // SetCopySyncEvent
+    // SetOpSyncEvent
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    SetCopySyncEvent::SetCopySyncEvent(PhysicalTemplate& tpl, unsigned l,
+    SetOpSyncEvent::SetOpSyncEvent(PhysicalTemplate& tpl, unsigned l,
                                        const TraceLocalID& r)
       : Instruction(tpl), lhs(l), rhs(r)
     //--------------------------------------------------------------------------
@@ -3909,24 +3904,23 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void SetCopySyncEvent::execute(void)
+    void SetOpSyncEvent::execute(void)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(operations.find(rhs) != operations.end());
       assert(operations.find(rhs)->second != NULL);
-
-      CopyOp *copy = dynamic_cast<CopyOp*>(operations[rhs]);
-      assert(copy != NULL);
-#else
-      CopyOp *copy = static_cast<CopyOp*>(operations[rhs]);
 #endif
-      ApEvent sync_condition = copy->compute_sync_precondition();
+      Memoizable *memoizable = operations[rhs]->get_memoizable();
+#ifdef DEBUG_LEGION
+      assert(memoizable != NULL);
+#endif
+      ApEvent sync_condition = memoizable->compute_sync_precondition();
       events[lhs] = sync_condition;
     }
 
     //--------------------------------------------------------------------------
-    std::string SetCopySyncEvent::to_string(void)
+    std::string SetOpSyncEvent::to_string(void)
     //--------------------------------------------------------------------------
     {
       std::stringstream ss;
@@ -3943,7 +3937,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Instruction* SetCopySyncEvent::clone(PhysicalTemplate& tpl,
+    Instruction* SetOpSyncEvent::clone(PhysicalTemplate& tpl,
                                     const std::map<unsigned, unsigned> &rewrite)
     //--------------------------------------------------------------------------
     {
@@ -3951,15 +3945,15 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(finder != rewrite.end());
 #endif
-      return new SetCopySyncEvent(tpl, finder->second, rhs);
+      return new SetOpSyncEvent(tpl, finder->second, rhs);
     }
 
     /////////////////////////////////////////////////////////////
-    // TriggerCopyCompletion
+    // CompleteReplay
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    TriggerCopyCompletion::TriggerCopyCompletion(PhysicalTemplate& tpl,
+    CompleteReplay::CompleteReplay(PhysicalTemplate& tpl,
                                               const TraceLocalID& l, unsigned r)
       : Instruction(tpl), lhs(l), rhs(r)
     //--------------------------------------------------------------------------
@@ -3971,23 +3965,22 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TriggerCopyCompletion::execute(void)
+    void CompleteReplay::execute(void)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(operations.find(lhs) != operations.end());
       assert(operations.find(lhs)->second != NULL);
-
-      CopyOp *copy = dynamic_cast<CopyOp*>(operations[lhs]);
-      assert(copy != NULL);
-#else
-      CopyOp *copy = static_cast<CopyOp*>(operations[lhs]);
 #endif
-      copy->complete_copy_execution(events[rhs]);
+      Memoizable *memoizable = operations[lhs]->get_memoizable();
+#ifdef DEBUG_LEGION
+      assert(memoizable != NULL);
+#endif
+      memoizable->complete_replay(events[rhs]);
     }
 
     //--------------------------------------------------------------------------
-    std::string TriggerCopyCompletion::to_string(void)
+    std::string CompleteReplay::to_string(void)
     //--------------------------------------------------------------------------
     {
       std::stringstream ss;
@@ -4004,7 +3997,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Instruction* TriggerCopyCompletion::clone(PhysicalTemplate& tpl,
+    Instruction* CompleteReplay::clone(PhysicalTemplate& tpl,
                                     const std::map<unsigned, unsigned> &rewrite)
     //--------------------------------------------------------------------------
     {
@@ -4012,7 +4005,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(finder != rewrite.end());
 #endif
-      return new TriggerCopyCompletion(tpl, lhs, finder->second);
+      return new CompleteReplay(tpl, lhs, finder->second);
     }
 
     /////////////////////////////////////////////////////////////

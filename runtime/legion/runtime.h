@@ -1376,6 +1376,8 @@ namespace Legion {
       // Return a trace local unique ID for this operation
       typedef std::pair<unsigned, DomainPoint> TraceLocalID;
       virtual TraceLocalID get_trace_local_id(void) const = 0;
+      virtual ApEvent compute_sync_precondition(void) const = 0;
+      virtual void complete_replay(ApEvent complete_event) = 0;
     };
 
     /**

@@ -4448,7 +4448,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void CopyOp::complete_copy_execution(ApEvent copy_complete_event)
+    void CopyOp::complete_replay(ApEvent copy_complete_event)
     //--------------------------------------------------------------------------
     {
       // Chain all the unlock and barrier arrivals off of the
