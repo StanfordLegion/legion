@@ -514,10 +514,10 @@ namespace Legion {
       static void prepare_for_mapping(const InstanceSet &valid,
                            const std::set<Memory> &filter_memories,
                            std::vector<MappingInstance> &input_valid);
-      static void compute_ranking(
+      void compute_ranking(MapperManager            *mapper,
           const std::deque<MappingInstance>         &output,
           const InstanceSet                         &sources,
-          std::vector<unsigned>                     &ranking);
+          std::vector<unsigned>                     &ranking) const;
     public:
       // Perform the versioning analysis for a projection requirement
       void perform_projection_version_analysis(const ProjectionInfo &proj_info,
