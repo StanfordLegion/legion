@@ -2859,7 +2859,7 @@ namespace Legion {
                                                   ContextID physical_ctx)
     //--------------------------------------------------------------------------
     {
-      if (op->get_operation_kind() == Operation::COPY_OP_KIND) return;
+      if (op->get_operation_kind() != Operation::TASK_OP_KIND) return;
 
       AutoLock tpl_lock(template_lock);
 
@@ -2945,11 +2945,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::record_get_copy_term_event(ApEvent lhs, CopyOp* copy)
+    void PhysicalTemplate::record_get_op_term_event(ApEvent lhs, Operation* op)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(copy->is_memoizing());
+      assert(op->is_memoizing());
 #endif
       AutoLock tpl_lock(template_lock);
 
@@ -2960,12 +2960,15 @@ namespace Legion {
 #endif
       event_map[lhs] = lhs_;
 
-      TraceLocalID key = copy->get_trace_local_id();
+#ifdef DEBUG_LEGION
+      assert(op->get_memoizable() != NULL);
+#endif
+      TraceLocalID key = op->get_memoizable()->get_trace_local_id();
 #ifdef DEBUG_LEGION
       assert(operations.find(key) == operations.end());
       assert(task_entries.find(key) == task_entries.end());
 #endif
-      operations[key] = copy;
+      operations[key] = op;
       task_entries[key] = instructions.size();
 
       instructions.push_back(new GetOpTermEvent(*this, lhs_, key));
@@ -2975,8 +2978,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::record_set_copy_sync_event(
-                                                     ApEvent &lhs, CopyOp* copy)
+    void PhysicalTemplate::record_set_op_sync_event(ApEvent &lhs, Operation* op)
     //--------------------------------------------------------------------------
     {
       if (!lhs.exists())
@@ -2986,7 +2988,7 @@ namespace Legion {
         lhs = ApEvent(rename);
       }
 #ifdef DEBUG_LEGION
-      assert(copy->is_memoizing());
+      assert(op->is_memoizing());
 #endif
       AutoLock tpl_lock(template_lock);
 
@@ -2997,7 +2999,10 @@ namespace Legion {
 #endif
       event_map[lhs] = lhs_;
 
-      TraceLocalID key = copy->get_trace_local_id();
+#ifdef DEBUG_LEGION
+      assert(op->get_memoizable() != NULL);
+#endif
+      TraceLocalID key = op->get_memoizable()->get_trace_local_id();
 #ifdef DEBUG_LEGION
       assert(operations.find(key) != operations.end());
       assert(task_entries.find(key) != task_entries.end());
@@ -3009,17 +3014,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::record_trigger_copy_completion(
-                                                      CopyOp* copy, ApEvent rhs)
+    void PhysicalTemplate::record_complete_replay(Operation* op, ApEvent rhs)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(copy->is_memoizing());
+      assert(op->is_memoizing());
 #endif
       AutoLock tpl_lock(template_lock);
 
       events.push_back(ApEvent());
-      TraceLocalID lhs_ = copy->get_trace_local_id();
+#ifdef DEBUG_LEGION
+      assert(op->get_memoizable() != NULL);
+#endif
+      TraceLocalID lhs_ = op->get_memoizable()->get_trace_local_id();
 #ifdef DEBUG_LEGION
       assert(event_map.find(rhs) != event_map.end());
 #endif
@@ -3871,7 +3878,8 @@ namespace Legion {
         ss << rhs.second[dim];
       }
       if (rhs.second.dim > 1) ss << ")";
-      ss << ")].get_completion_event()";
+      ss << ")].get_completion_event()    (op kind: "
+         << Operation::op_names[operations[rhs]->get_operation_kind()] << ")";
       return ss.str();
     }
 
@@ -3932,7 +3940,8 @@ namespace Legion {
         ss << rhs.second[dim];
       }
       if (rhs.second.dim > 1) ss << ")";
-      ss << ")].compute_sync_precondition()";
+      ss << ")].compute_sync_precondition()    (op kind: "
+         << Operation::op_names[operations[rhs]->get_operation_kind()] << ")";
       return ss.str();
     }
 
@@ -3992,7 +4001,8 @@ namespace Legion {
         ss << lhs.second[dim];
       }
       if (lhs.second.dim > 1) ss << ")";
-      ss << ")].complete_copy_execution(events[" << rhs << "])";
+      ss << ")].complete_replay(events[" << rhs << "])    (op kind: "
+         << Operation::op_names[operations[lhs]->get_operation_kind()] << ")";
       return ss.str();
     }
 

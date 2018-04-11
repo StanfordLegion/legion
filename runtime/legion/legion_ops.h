@@ -967,6 +967,7 @@ namespace Legion {
       // From MemoizableOp
       virtual void replay_analysis(void);
     public:
+      // From Memoizable
       virtual ApEvent compute_sync_precondition(void) const;
       virtual void complete_replay(ApEvent copy_complete_event);
     protected:
@@ -1619,7 +1620,7 @@ namespace Legion {
      * user-level software coherence when tasks own
      * regions with simultaneous coherence.
      */
-    class AcquireOp : public Acquire, public SpeculativeOp,
+    class AcquireOp : public Acquire, public MemoizableOp<SpeculativeOp>,
                       public LegionHeapify<AcquireOp> {
     public:
       static const AllocationType alloc_type = ACQUIRE_OP_ALLOC;
@@ -1663,8 +1664,12 @@ namespace Legion {
     public:
       const RegionRequirement& get_requirement(void) const;
     public:
-      ApEvent compute_sync_precondition(void) const;
-      void complete_acquire_execution(ApEvent acquire_complete_event);
+      // From MemoizableOp
+      virtual void replay_analysis(void);
+    public:
+      // From Memoizable
+      virtual ApEvent compute_sync_precondition(void) const;
+      virtual void complete_replay(ApEvent acquire_complete_event);
     protected:
       void check_acquire_privilege(void);
       void compute_parent_index(void);
@@ -1696,7 +1701,7 @@ namespace Legion {
      * user-level software coherence when tasks own
      * regions with simultaneous coherence.
      */
-    class ReleaseOp : public Release, public SpeculativeOp,
+    class ReleaseOp : public Release, public MemoizableOp<SpeculativeOp>,
                       public LegionHeapify<ReleaseOp> {
     public:
       static const AllocationType alloc_type = RELEASE_OP_ALLOC;
@@ -1745,8 +1750,12 @@ namespace Legion {
     public:
       const RegionRequirement& get_requirement(void) const;
     public:
-      ApEvent compute_sync_precondition(void) const;
-      void complete_release_execution(ApEvent release_complete_event);
+      // From MemoizableOp
+      virtual void replay_analysis(void);
+    public:
+      // From Memoizable
+      virtual ApEvent compute_sync_precondition(void) const;
+      virtual void complete_replay(ApEvent release_complete_event);
     protected:
       void check_release_privilege(void);
       void compute_parent_index(void);

@@ -532,9 +532,9 @@ namespace Legion {
                                   const FieldMask &fields,
                                   ContextID logical_ctx,
                                   ContextID physical_ctx);
-      void record_get_copy_term_event(ApEvent lhs, CopyOp *copy);
-      void record_set_copy_sync_event(ApEvent &lhs, CopyOp *copy);
-      void record_trigger_copy_completion(CopyOp *copy, ApEvent rhs);
+      void record_get_op_term_event(ApEvent lhs, Operation *op);
+      void record_set_op_sync_event(ApEvent &lhs, Operation *op);
+      void record_complete_replay(Operation *op, ApEvent rhs);
       void record_issue_fill(Operation *op, ApEvent &lhs,
                              RegionNode *node,
                              const std::vector<CopySrcDstField> &fields,
