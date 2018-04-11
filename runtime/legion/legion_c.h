@@ -62,6 +62,7 @@ extern "C" {
   NEW_OPAQUE_TYPE(legion_index_launcher_t);
   NEW_OPAQUE_TYPE(legion_inline_launcher_t);
   NEW_OPAQUE_TYPE(legion_copy_launcher_t);
+  NEW_OPAQUE_TYPE(legion_index_copy_launcher_t);
   NEW_OPAQUE_TYPE(legion_acquire_launcher_t);
   NEW_OPAQUE_TYPE(legion_release_launcher_t);
   NEW_OPAQUE_TYPE(legion_attach_launcher_t);
@@ -2532,6 +2533,156 @@ extern "C" {
   void
   legion_copy_launcher_add_arrival_barrier(legion_copy_launcher_t launcher,
                                            legion_phase_barrier_t bar);
+
+  // -----------------------------------------------------------------------
+  // Index Copy Operations
+  // -----------------------------------------------------------------------
+
+  /**
+   * @return Caller takes ownership of return value.
+   *
+   * @see Legion::IndexCopyLauncher::IndexCopyLauncher()
+   */
+  legion_index_copy_launcher_t
+  legion_index_copy_launcher_create(
+    legion_domain_t domain,
+    legion_predicate_t pred /* = legion_predicate_true() */,
+    legion_mapper_id_t id /* = 0 */,
+    legion_mapping_tag_id_t launcher_tag /* = 0 */);
+
+  /**
+   * @param handle Caller must have ownership of parameter `handle`.
+   *
+   * @see Legion::IndexCopyLauncher::~IndexCopyLauncher()
+   */
+  void
+  legion_index_copy_launcher_destroy(legion_index_copy_launcher_t handle);
+
+  /**
+   * @return Caller takes ownership of return value.
+   *
+   * @see Legion::Runtime::issue_index_copy_operation()
+   */
+  void
+  legion_index_copy_launcher_execute(legion_runtime_t runtime,
+                                     legion_context_t ctx,
+                                     legion_index_copy_launcher_t launcher);
+
+  /**
+   * @see Legion::IndexCopyLauncher::add_copy_requirements()
+   */
+  unsigned
+  legion_index_copy_launcher_add_src_region_requirement_logical_region(
+    legion_index_copy_launcher_t launcher,
+    legion_logical_region_t handle,
+    legion_projection_id_t proj /* = 0 */,
+    legion_privilege_mode_t priv,
+    legion_coherence_property_t prop,
+    legion_logical_region_t parent,
+    legion_mapping_tag_id_t tag /* = 0 */,
+    bool verified /* = false*/);
+
+  /**
+   * @see Legion::IndexCopyLauncher::add_copy_requirements()
+   */
+  unsigned
+  legion_index_copy_launcher_add_dst_region_requirement_logical_region(
+    legion_index_copy_launcher_t launcher,
+    legion_logical_region_t handle,
+    legion_projection_id_t proj /* = 0 */,
+    legion_privilege_mode_t priv,
+    legion_coherence_property_t prop,
+    legion_logical_region_t parent,
+    legion_mapping_tag_id_t tag /* = 0 */,
+    bool verified /* = false*/);
+
+  /**
+   * @see Legion::IndexCopyLauncher::add_copy_requirements()
+   */
+  unsigned
+  legion_index_copy_launcher_add_src_region_requirement_logical_partition(
+    legion_index_copy_launcher_t launcher,
+    legion_logical_partition_t handle,
+    legion_projection_id_t proj /* = 0 */,
+    legion_privilege_mode_t priv,
+    legion_coherence_property_t prop,
+    legion_logical_region_t parent,
+    legion_mapping_tag_id_t tag /* = 0 */,
+    bool verified /* = false*/);
+
+  /**
+   * @see Legion::IndexCopyLauncher::add_copy_requirements()
+   */
+  unsigned
+  legion_index_copy_launcher_add_dst_region_requirement_logical_partition(
+    legion_index_copy_launcher_t launcher,
+    legion_logical_partition_t handle,
+    legion_projection_id_t proj /* = 0 */,
+    legion_privilege_mode_t priv,
+    legion_coherence_property_t prop,
+    legion_logical_region_t parent,
+    legion_mapping_tag_id_t tag /* = 0 */,
+    bool verified /* = false*/);
+
+  /**
+   * @see Legion::IndexCopyLauncher::add_copy_requirements()
+   */
+  unsigned
+  legion_index_copy_launcher_add_dst_region_requirement_logical_region_reduction(
+    legion_index_copy_launcher_t launcher,
+    legion_logical_region_t handle,
+    legion_projection_id_t proj /* = 0 */,
+    legion_reduction_op_id_t redop,
+    legion_coherence_property_t prop,
+    legion_logical_region_t parent,
+    legion_mapping_tag_id_t tag /* = 0 */,
+    bool verified /* = false*/);
+
+  /**
+   * @see Legion::IndexCopyLauncher::add_copy_requirements()
+   */
+  unsigned
+  legion_index_copy_launcher_add_dst_region_requirement_logical_partition_reduction(
+    legion_index_copy_launcher_t launcher,
+    legion_logical_partition_t handle,
+    legion_projection_id_t proj /* = 0 */,
+    legion_reduction_op_id_t redop,
+    legion_coherence_property_t prop,
+    legion_logical_region_t parent,
+    legion_mapping_tag_id_t tag /* = 0 */,
+    bool verified /* = false*/);
+
+  /**
+   * @see Legion::IndexCopyLauncher::add_src_field()
+   */
+  void
+  legion_index_copy_launcher_add_src_field(legion_index_copy_launcher_t launcher,
+                                           unsigned idx,
+                                           legion_field_id_t fid,
+                                           bool inst /* = true */);
+
+  /**
+   * @see Legion::IndexCopyLauncher::add_dst_field()
+   */
+  void
+  legion_index_copy_launcher_add_dst_field(legion_index_copy_launcher_t launcher,
+                                           unsigned idx,
+                                           legion_field_id_t fid,
+                                           bool inst /* = true */);
+
+  /**
+   * @see Legion::IndexCopyLauncher::add_wait_barrier()
+   */
+  void
+  legion_index_copy_launcher_add_wait_barrier(legion_index_copy_launcher_t launcher,
+                                              legion_phase_barrier_t bar);
+
+  /**
+   * @see Legion::IndexCopyLauncher::add_arrival_barrier()
+   */
+  void
+  legion_index_copy_launcher_add_arrival_barrier(legion_index_copy_launcher_t launcher,
+                                                 legion_phase_barrier_t bar);
 
   // -----------------------------------------------------------------------
   // Acquire Operations
