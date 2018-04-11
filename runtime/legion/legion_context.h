@@ -300,6 +300,7 @@ namespace Legion {
       virtual ApEvent register_fence_dependence(Operation *op) = 0;
     public:
       virtual RtEvent get_current_mapping_fence_event(void) = 0;
+      virtual ApEvent get_current_execution_fence_event(void) = 0;
       virtual ApEvent perform_fence_analysis(FenceOp *op, 
                                              bool mapping, bool execution) = 0;
       virtual void update_current_fence(FenceOp *op, 
@@ -905,6 +906,7 @@ namespace Legion {
       virtual ApEvent register_fence_dependence(Operation *op);
     public:
       virtual RtEvent get_current_mapping_fence_event(void);
+      virtual ApEvent get_current_execution_fence_event(void);
       virtual ApEvent perform_fence_analysis(FenceOp *op,
                                           bool mapping, bool execution);
       virtual void update_current_fence(FenceOp *op,
@@ -1508,6 +1510,7 @@ namespace Legion {
       virtual ApEvent register_fence_dependence(Operation *op);
     public:
       virtual RtEvent get_current_mapping_fence_event(void);
+      virtual ApEvent get_current_execution_fence_event(void);
       virtual ApEvent perform_fence_analysis(FenceOp *op,
                                              bool mapping, bool execution);
       virtual void update_current_fence(FenceOp *op,
@@ -1821,6 +1824,7 @@ namespace Legion {
       virtual ApEvent register_fence_dependence(Operation *op);
     public:
       virtual RtEvent get_current_mapping_fence_event(void);
+      virtual ApEvent get_current_execution_fence_event(void);
       virtual ApEvent perform_fence_analysis(FenceOp *op,
                                              bool mapping, bool execution);
       virtual void update_current_fence(FenceOp *op,

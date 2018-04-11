@@ -5203,6 +5203,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    ApEvent InnerContext::get_current_execution_fence_event(void)
+    //--------------------------------------------------------------------------
+    {
+      return current_execution_fence_event;
+    }
+
+    //--------------------------------------------------------------------------
     void InnerContext::begin_trace(TraceID tid, bool logical_only)
     //--------------------------------------------------------------------------
     {
@@ -8558,6 +8565,14 @@ namespace Legion {
       return RtEvent::NO_RT_EVENT;
     }
 
+    //--------------------------------------------------------------------------
+    ApEvent LeafContext::get_current_execution_fence_event(void)
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+      return ApEvent::NO_AP_EVENT;
+    }
+
 
     //--------------------------------------------------------------------------
     void LeafContext::begin_trace(TraceID tid, bool logical_only)
@@ -9737,6 +9752,14 @@ namespace Legion {
     {
       return enclosing->get_current_mapping_fence_event();
     }
+
+    //--------------------------------------------------------------------------
+    ApEvent InlineContext::get_current_execution_fence_event(void)
+    //--------------------------------------------------------------------------
+    {
+      return enclosing->get_current_execution_fence_event();
+    }
+
 
     //--------------------------------------------------------------------------
     void InlineContext::begin_trace(TraceID tid, bool logical_only)
