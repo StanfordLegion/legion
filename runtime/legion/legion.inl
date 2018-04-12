@@ -2336,7 +2336,7 @@ namespace Legion {
           assert(bounds.contains_all(r));
 #else
           if (!bounds.contains_all(r)) 
-            field_region.fail_bounds_check(DomainPoint(r), field, READ_ONLY);
+            field_region.fail_bounds_check(Domain(r), field, READ_ONLY);
 #endif
           if (!accessor.is_dense_arbitrary(r))
           {
@@ -2362,7 +2362,7 @@ namespace Legion {
           assert(bounds.contains_all(r));
 #else
           if (!bounds.contains_all(r)) 
-            field_region.fail_bounds_check(DomainPoint(r), field, READ_ONLY);
+            field_region.fail_bounds_check(Domain(r), field, READ_ONLY);
 #endif
           for (int i = 0; i < N; i++)
             strides[i] = accessor.strides[i] / sizeof(FT);
@@ -2645,7 +2645,7 @@ namespace Legion {
           assert(bounds.contains_all(r));
 #else
           if (!bounds.contains_all(r)) 
-            field_region.fail_bounds_check(DomainPoint(r), field, READ_ONLY);
+            field_region.fail_bounds_check(Domain(r), field, READ_ONLY);
 #endif
           if (!accessor.is_dense_arbitrary(r))
           {
@@ -2671,7 +2671,7 @@ namespace Legion {
           assert(bounds.contains_all(r));
 #else
           if (!bounds.contains_all(r)) 
-            field_region.fail_bounds_check(DomainPoint(r), field, READ_ONLY);
+            field_region.fail_bounds_check(Domain(r), field, READ_ONLY);
 #endif
           strides[0] = accessor.strides[0] / sizeof(FT);
           return accessor.ptr(r.lo);
@@ -4268,7 +4268,7 @@ namespace Legion {
           assert(bounds.contains_all(r));
 #else
           if (!bounds.contains_all(r)) 
-            field_region.fail_bounds_check(DomainPoint(r), field, REDUCE);
+            field_region.fail_bounds_check(Domain(r), field, REDUCE);
 #endif
           if (!accessor.is_dense_arbitrary(r))
           {
@@ -4295,7 +4295,7 @@ namespace Legion {
           assert(bounds.contains_all(r));
 #else
           if (!bounds.contains_all(r)) 
-            field_region.fail_bounds_check(DomainPoint(r), field, REDUCE);
+            field_region.fail_bounds_check(Domain(r), field, REDUCE);
 #endif
           for (int i = 0; i < N; i++)
             strides[i] = accessor.strides[i] / sizeof(typename REDOP::RHS);
@@ -4558,7 +4558,7 @@ namespace Legion {
           assert(bounds.contains_all(r));
 #else
           if (!bounds.contains_all(r)) 
-            field_region.fail_bounds_check(DomainPoint(r), field, REDUCE);
+            field_region.fail_bounds_check(Domain(r), field, REDUCE);
 #endif
           if (!accessor.is_dense_arbitrary(r))
           {
@@ -4585,7 +4585,7 @@ namespace Legion {
           assert(bounds.contains_all(r));
 #else
           if (!bounds.contains_all(r)) 
-            field_region.fail_bounds_check(DomainPoint(r), field, REDUCE);
+            field_region.fail_bounds_check(Domain(r), field, REDUCE);
 #endif
           strides[0] = accessor.strides[0] / sizeof(typename REDOP::RHS);
           return accessor.ptr(r.lo);
