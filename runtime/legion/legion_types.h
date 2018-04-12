@@ -788,7 +788,7 @@ namespace Legion {
         "Send Index Space Child Response",                            \
         "Send Index Space Colors Request",                            \
         "Send Index Space Colors Response",                           \
-        "Send Remot Expression Invalidation",                         \
+        "Send Remote Expression Invalidation",                        \
         "Send Index Partition Notification",                          \
         "Send Index Partition Node",                                  \
         "Send Index Partition Request",                               \
@@ -952,6 +952,7 @@ namespace Legion {
         "Send Index Space Child Response",                            \
         "Send Index Space Colors Request",                            \
         "Send Index Space Colors Response",                           \
+        "Send Remote Expression Invalidation",                        \
         "Send Index Partition Notification",                          \
         "Send Index Partition Node",                                  \
         "Send Index Partition Request",                               \
