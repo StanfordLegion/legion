@@ -192,7 +192,7 @@ namespace Realm {
     public:
       ProcessorQueryImpl(const Machine& _machine);
       // SEEMA
-      static bool init;
+      static int init;
       static std::vector<Processor>* _toc_procs_list;
       static std::vector<Processor>* _loc_procs_list;
       static std::map<Processor, Memory>* _proc_sysmems;
@@ -204,8 +204,7 @@ namespace Realm {
 
       static std::vector<Processor>* _omp_procs_list;
       static std::vector<Processor>* _io_procs_list;
-      static std::vector<Memory>* _sysmems_list;
-      static std::vector<Memory>* _fbmems_list;
+
       static std::map<Memory, std::vector<Processor> >* _sysmem_local_procs;
       static std::map<Memory, std::vector<Processor> >* _sysmem_local_io_procs;
       static std::map<Memory, std::vector<Processor> >* _fbmem_local_procs;
@@ -317,6 +316,9 @@ namespace Realm {
     class MemoryQueryImpl {
     public:
       MemoryQueryImpl(const Machine& _machine);
+      static int init;
+      static std::vector<Memory>* _sysmems_list;
+      static std::vector<Memory>* _fbmems_list;
      
     protected:
       // these things are refcounted and copied-on-write
@@ -338,6 +340,12 @@ namespace Realm {
       size_t count_matches(void) const;
       Memory random_match(void) const;
 
+      std::vector<Memory>::iterator begin(Memory::Kind k);
+      std::vector<Memory>::iterator end(Memory::Kind k);
+
+      std::vector<Memory>::const_iterator begin(Memory::Kind k) const;
+      std::vector<Memory>::const_iterator end(Memory::Kind k) const;
+
     protected:
       int references;
       MachineImpl *machine;
@@ -346,6 +354,9 @@ namespace Realm {
       bool is_restricted_kind;
       Memory::Kind restricted_kind;
       std::vector<MemoryQueryPredicate *> predicates;     
+      std::vector<Memory>* sysmems_list(void) const;
+      std::vector<Memory>* fbmems_list(void) const;
+
     };            
 
     extern MachineImpl *machine_singleton;

@@ -224,6 +224,10 @@ namespace Realm {
       MemoryQuery& best_affinity_to(Processor p, int bandwidth_weight = 1, int latency_weight = 0);
       MemoryQuery& best_affinity_to(Memory m, int bandwidth_weight = 1, int latency_weight = 0);
 
+      // SEEMAH - additional iterators
+      std::vector<Memory>::iterator begin(Memory::Kind k);
+      std::vector<Memory>::iterator end(Memory::Kind k);
+
       // results - a query may be executed multiple times - when the machine model is
       //  dynamic, there is no guarantee that the results of any two executions will be consistent
 
