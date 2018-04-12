@@ -2487,6 +2487,53 @@ namespace Realm {
       TransferIterator *iter = domain->create_iterator(dst.inst,
 						       RegionInstance::NO_INST,
 						       dst_field);
+      // HACK: see if we are writing to a GPU FB memory, if so do 
+      // synchronous cuMemset calls to get the advantage of the GPU
+      // eventually these should be off-loaded asynchronously, but
+      // for now this is better than the alternative
+#ifdef USE_CUDA
+      if (mem_impl->lowlevel_kind == Memory::GPU_FB_MEM) {
+        // Check to see if this is either 32-bit data or all zeros
+        bool can_use_gpu_fill = (fill_size == 4);
+        if (!can_use_gpu_fill && (fill_size > 4) && ((fill_size % 4) == 0)) {
+          can_use_gpu_fill = true;
+          for (unsigned idx = 0; idx < fill_size/4; idx++) {
+            if ((*(((uint32_t*)fill_buffer)+idx)) == 0)
+              continue;
+            can_use_gpu_fill = false;
+            break;
+          }
+        }
+        if (can_use_gpu_fill) {
+          const unsigned value = *((uint32_t*)fill_buffer);
+          Cuda::GPUFBMemory *fbm = static_cast<Cuda::GPUFBMemory *>(mem_impl);
+          while(!iter->done()) {
+            TransferIterator::AddressInfo info;
+
+            size_t max_bytes = (size_t)-1;
+            // code below is 2D/3D-capable
+            unsigned flags = (TransferIterator::LINES_OK |
+                              TransferIterator::PLANES_OK);
+            size_t act_bytes = iter->step(max_bytes, info, flags);
+            assert(act_bytes >= 0);
+
+            for(size_t p = 0; p < info.num_planes; p++) {
+              const size_t offset = info.base_offset + p * info.plane_stride;
+              if (info.num_lines == 1) {
+                // Normal cuda memset
+                fbm->fill_memory(offset, info.bytes_per_chunk, value);
+              } else {
+                assert(info.num_lines > 1);
+                // 2-D cuda memset
+                fbm->fill_memory2D(offset, info.line_stride, value,
+                                   info.bytes_per_chunk, info.num_lines);
+              }
+            }
+          }
+          // After this is done we fall through so the clean-up is the same
+        }
+      }
+#endif
 
       while(!iter->done()) {
 	TransferIterator::AddressInfo info;

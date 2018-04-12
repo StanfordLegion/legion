@@ -1619,6 +1619,17 @@ namespace Realm {
       return -1;
     }
 
+    void GPUFBMemory::fill_memory(off_t offset, size_t width, unsigned int value)
+    {
+      CHECK_CU( cuMemsetD32((CUdeviceptr)base + offset, value, width / sizeof(unsigned)) );  
+    }
+
+    void GPUFBMemory::fill_memory2D(off_t offset, size_t pitch, unsigned int value,
+                                    size_t width, size_t height)
+    {
+      CHECK_CU( cuMemsetD2D32((CUdeviceptr)base + offset, pitch, value,
+            width / sizeof(unsigned), height) );
+    }
 
     ////////////////////////////////////////////////////////////////////////
     //

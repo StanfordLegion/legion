@@ -601,6 +601,12 @@ namespace Realm {
 
       virtual int get_home_node(off_t offset, size_t size);
 
+      // HACK: Give a way to call cuMemset for the DMA system
+      // this should be removed once fills are refactored
+      void fill_memory(off_t offset, size_t width, unsigned int value);
+
+      void fill_memory2D(off_t offset, size_t pitch, unsigned int value,
+                         size_t width, size_t height);
     public:
       GPU *gpu;
       CUdeviceptr base;
