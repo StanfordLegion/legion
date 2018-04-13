@@ -85,6 +85,7 @@ namespace Legion {
       virtual bool is_dynamic_trace(void) const = 0;
       virtual StaticTrace* as_static_trace(void) = 0;
       virtual DynamicTrace* as_dynamic_trace(void) = 0;
+      virtual TraceID get_trace_id(void) const = 0;
     public:
       virtual bool is_fixed(void) const = 0;
       virtual bool handles_region_tree(RegionTreeID tid) const = 0;
@@ -162,6 +163,7 @@ namespace Legion {
       virtual bool is_dynamic_trace(void) const { return false; }
       virtual StaticTrace* as_static_trace(void) { return this; }
       virtual DynamicTrace* as_dynamic_trace(void) { return NULL; }
+      virtual TraceID get_trace_id(void) const { return 0; }
     public:
       virtual bool is_fixed(void) const;
       virtual bool handles_region_tree(RegionTreeID tid) const;
@@ -217,6 +219,7 @@ namespace Legion {
       virtual bool is_dynamic_trace(void) const { return true; }
       virtual StaticTrace* as_static_trace(void) { return NULL; }
       virtual DynamicTrace* as_dynamic_trace(void) { return this; }
+      virtual TraceID get_trace_id(void) const { return tid; }
     public:
       // Called by task execution thread
       virtual bool is_fixed(void) const { return fixed; }
@@ -415,7 +418,7 @@ namespace Legion {
      */
     class PhysicalTrace {
     public:
-      PhysicalTrace(Runtime *runtime);
+      PhysicalTrace(Runtime *runtime, LegionTrace *logical_trace);
       PhysicalTrace(const PhysicalTrace &rhs);
       ~PhysicalTrace(void);
     public:
@@ -433,7 +436,8 @@ namespace Legion {
     public:
       void initialize_template(ApEvent fence_completion, bool recurrent);
     public:
-      Runtime *runtime;
+      const Runtime *runtime;
+      const LegionTrace *logical_trace;
     private:
       mutable LocalLock trace_lock;
       PhysicalTemplate* current_template;

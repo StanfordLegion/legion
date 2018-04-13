@@ -38,7 +38,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       physical_trace = logical_only ? NULL
-                                    : new PhysicalTrace(c->owner_task->runtime);
+                                    : new PhysicalTrace(c->owner_task->runtime,
+                                                        this);
     }
 
     //--------------------------------------------------------------------------
@@ -1478,8 +1479,9 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    PhysicalTrace::PhysicalTrace(Runtime *rt)
-      : runtime(rt), current_template(NULL), nonreplayable_count(0)
+    PhysicalTrace::PhysicalTrace(Runtime *rt, LegionTrace *lt)
+      : runtime(rt), logical_trace(lt), current_template(NULL),
+        nonreplayable_count(0)
     //--------------------------------------------------------------------------
     {
     }
@@ -1527,9 +1529,10 @@ namespace Legion {
           REPORT_LEGION_WARNING(LEGION_WARNING_NON_REPLAYABLE_COUNT_EXCEEDED,
               "WARNING: The runtime has failed to memoize the trace more than "
               "%u times, due to the absence of a replayable template. It is "
-              "highly likely that your trace will not be memoized for the rest "
+              "highly likely that trace %u will not be memoized for the rest "
               "of execution. Please change the mapper to stop making "
-              "memoization requests.", LEGION_NON_REPLAYABLE_WARNING)
+              "memoization requests.", LEGION_NON_REPLAYABLE_WARNING,
+              logical_trace->get_trace_id())
           nonreplayable_count = 0;
         }
       }
