@@ -7687,12 +7687,13 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(is_replaying());
+      assert(current_proc.exists());
 #endif
 #ifdef LEGION_SPY
       LegionSpy::log_replay_operation(unique_op_id);
 #endif
       SliceTask *new_slice = this->clone_as_slice_task(internal_space,
-                                                       target_proc,
+                                                       current_proc,
                                                        false,
                                                        false, 1LL);
       slices.push_back(new_slice);
