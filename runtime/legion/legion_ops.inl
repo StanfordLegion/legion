@@ -142,6 +142,7 @@ namespace Legion {
       Mapper::MemoizeInput  input;
       Mapper::MemoizeOutput output;
       input.traced = OP::trace != NULL;
+      input.trace_id = input.traced ? OP::trace->get_trace_id() : -1U;
       output.memoize = false;
       Processor mapper_proc = OP::parent_ctx->get_executing_processor();
       MapperManager *mapper = OP::runtime->find_mapper(mapper_proc, mapper_id);

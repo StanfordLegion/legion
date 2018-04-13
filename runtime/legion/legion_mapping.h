@@ -1480,6 +1480,7 @@ namespace Legion {
        *
        */
       struct MemoizeInput {
+        TraceID trace_id;
         bool traced;
       };
       struct MemoizeOutput {
