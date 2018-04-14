@@ -1995,16 +1995,25 @@ namespace Legion {
       }
 
       std::vector<Instruction*> new_instructions;
+      std::vector<Instruction*> complete_replays;
       std::vector<Instruction*> to_delete;
 
       for (unsigned idx = 0; idx < instructions.size(); ++idx)
         if (used[idx])
-          new_instructions.push_back(instructions[idx]);
+        {
+          Instruction *inst = instructions[idx];
+          if (inst->get_kind() == COMPLETE_REPLAY)
+            complete_replays.push_back(inst);
+          else
+            new_instructions.push_back(inst);
+        }
         else
           to_delete.push_back(instructions[idx]);
 
+      new_instructions.insert(new_instructions.end(),
+                              complete_replays.begin(),
+                              complete_replays.end());
       new_instructions.swap(instructions);
-
       for (unsigned idx = 0; idx < to_delete.size(); ++idx)
         delete to_delete[idx];
 
