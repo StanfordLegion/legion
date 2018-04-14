@@ -347,12 +347,6 @@ namespace Legion {
         else
           ready_event.wait();
       }
-      if (empty)
-        REPORT_LEGION_ERROR(ERROR_ACCESSING_EMPTY_FUTURE, 
-                            "Accessing empty future! (UID %lld)",
-                            (producer_op == NULL) ? 0 : 
-                              producer_op->get_unique_op_id())
-      mark_sampled();
     }
 
     //--------------------------------------------------------------------------
