@@ -1924,6 +1924,93 @@ namespace Legion {
     void PhysicalTemplate::optimize(void)
     //--------------------------------------------------------------------------
     {
+      std::vector<bool> used(instructions.size(), false);
+
+      for (unsigned idx = 0; idx < instructions.size(); ++idx)
+      {
+        Instruction *inst = instructions[idx];
+        InstructionKind kind = inst->get_kind();
+        used[idx] = kind != MERGE_EVENT;
+        switch (kind)
+        {
+          case MERGE_EVENT:
+            {
+              MergeEvent *merge = inst->as_merge_event();
+              std::set<unsigned> new_rhs;
+              bool changed = false;
+              for (std::set<unsigned>::iterator it = merge->rhs.begin();
+                   it != merge->rhs.end(); ++it)
+              {
+                if (instructions[*it]->get_kind() == MERGE_EVENT)
+                {
+                  MergeEvent *to_splice = instructions[*it]->as_merge_event();
+                  new_rhs.insert(to_splice->rhs.begin(), to_splice->rhs.end());
+                  changed = true;
+                }
+                else
+                  new_rhs.insert(*it);
+              }
+              if (changed)
+                merge->rhs.swap(new_rhs);
+              break;
+            }
+          case TRIGGER_EVENT:
+            {
+              TriggerEvent *trigger = inst->as_trigger_event();
+              used[trigger->rhs] = true;
+              break;
+            }
+          case ISSUE_COPY:
+            {
+              IssueCopy *copy = inst->as_issue_copy();
+              used[copy->precondition_idx] = true;
+              break;
+            }
+          case ISSUE_FILL:
+            {
+              IssueFill *fill = inst->as_issue_fill();
+              used[fill->precondition_idx] = true;
+              break;
+            }
+          case COMPLETE_REPLAY:
+            {
+              CompleteReplay *complete = inst->as_complete_replay();
+              used[complete->rhs] = true;
+              break;
+            }
+          case GET_TERM_EVENT:
+          case GET_OP_TERM_EVENT:
+          case CREATE_AP_USER_EVENT:
+          case SET_OP_SYNC_EVENT:
+          case ASSIGN_FENCE_COMPLETION:
+            {
+              break;
+            }
+          default:
+            {
+              // unreachable
+              assert(false);
+            }
+        }
+      }
+
+      std::vector<Instruction*> new_instructions;
+      std::vector<Instruction*> to_delete;
+
+      for (unsigned idx = 0; idx < instructions.size(); ++idx)
+        if (used[idx])
+          new_instructions.push_back(instructions[idx]);
+        else
+          to_delete.push_back(instructions[idx]);
+
+      new_instructions.swap(instructions);
+
+      for (unsigned idx = 0; idx < to_delete.size(); ++idx)
+        delete to_delete[idx];
+
+      if (implicit_runtime->no_trace_optimization)
+        return;
+
       std::vector<unsigned> generate;
       std::vector<std::set<unsigned> > preconditions;
       std::vector<std::set<unsigned> > simplified;
@@ -1931,11 +2018,6 @@ namespace Legion {
       generate.resize(instructions.size());
       preconditions.resize(instructions.size());
       simplified.resize(instructions.size());
-
-      if (implicit_runtime->no_trace_optimization)
-      {
-        return;
-      }
 
       for (unsigned idx = 0; idx < instructions.size(); ++idx)
       {
@@ -2027,7 +2109,7 @@ namespace Legion {
             {
               generate[idx] = idx;
               CompleteReplay *inst =
-                instructions[idx]->as_triger_copy_completion();
+                instructions[idx]->as_complete_replay();
               std::set<unsigned> &rhs_pre = preconditions[inst->rhs];
               std::map<TraceLocalID, unsigned>::iterator finder =
                 task_entries.find(inst->lhs);
@@ -2037,11 +2119,6 @@ namespace Legion {
               std::set<unsigned> &copy_pre = preconditions[finder->second];
               copy_pre.insert(generate[inst->rhs]);
               copy_pre.insert(rhs_pre.begin(), rhs_pre.end());
-              break;
-            }
-          case LAUNCH_TASK:
-            {
-              assert(false);
               break;
             }
 #ifdef DEBUG_LEGION
@@ -2054,7 +2131,6 @@ namespace Legion {
         }
       }
 
-      std::vector<Instruction*> new_instructions;
       unsigned count = 0;
       std::map<unsigned, unsigned> rewrite;
       for (unsigned idx = 0; idx < instructions.size(); ++idx)
@@ -2109,11 +2185,6 @@ namespace Legion {
               }
               else
                 rewrite[idx] = rewrite[generate[idx]];
-              break;
-            }
-          case LAUNCH_TASK:
-            {
-              assert(false);
               break;
             }
 #ifdef DEBUG_LEGION
@@ -3886,73 +3957,6 @@ namespace Legion {
       assert(finder != rewrite.end());
 #endif
       return new CompleteReplay(tpl, lhs, finder->second);
-    }
-
-    /////////////////////////////////////////////////////////////
-    // LaunchTask
-    /////////////////////////////////////////////////////////////
-
-    //--------------------------------------------------------------------------
-    LaunchTask::LaunchTask(PhysicalTemplate& tpl, const TraceLocalID& op)
-      : Instruction(tpl), op_key(op)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(operations.find(op_key) != operations.end());
-#endif
-    }
-
-    //--------------------------------------------------------------------------
-    void LaunchTask::execute(void)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(operations.find(op_key) != operations.end());
-      assert(operations.find(op_key)->second != NULL);
-
-      SingleTask *task = dynamic_cast<SingleTask*>(operations[op_key]);
-      assert(task != NULL);
-#else
-      SingleTask *task = static_cast<SingleTask*>(operations[op_key]);
-#endif
-      if (!task->arrive_barriers.empty())
-      {
-        ApEvent done_event = task->get_task_completion();
-        for (std::vector<PhaseBarrier>::const_iterator it = 
-             task->arrive_barriers.begin(); it != 
-             task->arrive_barriers.end(); it++)
-          Runtime::phase_barrier_arrive(*it, 1/*count*/, done_event);
-      }
-#ifdef DEBUG_LEGION
-      assert(task->is_leaf() && !task->has_virtual_instances());
-#endif
-      task->update_no_access_regions();
-      task->launch_task();
-    }
-
-    //--------------------------------------------------------------------------
-    std::string LaunchTask::to_string(void)
-    //--------------------------------------------------------------------------
-    {
-      std::stringstream ss;
-      ss << "operations[" << op_key.first << ",";
-      if (op_key.second.dim > 1) ss << "(";
-      for (int dim = 0; dim < op_key.second.dim; ++dim)
-      {
-        if (dim > 0) ss << ",";
-        ss << op_key.second[dim];
-      }
-      if (op_key.second.dim > 1) ss << ")";
-      ss << ")].launch_task()";
-      return ss.str();
-    }
-
-    //--------------------------------------------------------------------------
-    Instruction* LaunchTask::clone(PhysicalTemplate& tpl,
-                                    const std::map<unsigned, unsigned> &rewrite)
-    //--------------------------------------------------------------------------
-    {
-      return new LaunchTask(tpl, op_key);
     }
 
     /////////////////////////////////////////////////////////////

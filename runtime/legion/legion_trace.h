@@ -624,7 +624,6 @@ namespace Legion {
       SET_OP_SYNC_EVENT,
       ASSIGN_FENCE_COMPLETION,
       COMPLETE_REPLAY,
-      LAUNCH_TASK,
     };
 
     /**
@@ -645,9 +644,9 @@ namespace Legion {
       virtual AssignFenceCompletion* as_assignment_fence_completion(void) = 0;
       virtual IssueCopy* as_issue_copy(void) = 0;
       virtual IssueFill* as_issue_fill(void) = 0;
-      virtual GetOpTermEvent* as_get_copy_term_event(void) = 0;
-      virtual SetOpSyncEvent* as_set_copy_sync_event(void) = 0;
-      virtual CompleteReplay* as_triger_copy_completion(void) = 0;
+      virtual GetOpTermEvent* as_get_op_term_event(void) = 0;
+      virtual SetOpSyncEvent* as_set_op_sync_event(void) = 0;
+      virtual CompleteReplay* as_complete_replay(void) = 0;
 
       virtual Instruction* clone(PhysicalTemplate& tpl,
                                const std::map<unsigned, unsigned> &rewrite) = 0;
@@ -687,11 +686,11 @@ namespace Legion {
         { return NULL; }
       virtual IssueFill* as_issue_fill(void)
         { return NULL; }
-      virtual GetOpTermEvent* as_get_copy_term_event(void)
+      virtual GetOpTermEvent* as_get_op_term_event(void)
         { return NULL; }
-      virtual SetOpSyncEvent* as_set_copy_sync_event(void)
+      virtual SetOpSyncEvent* as_set_op_sync_event(void)
         { return NULL; }
-      virtual CompleteReplay* as_triger_copy_completion(void)
+      virtual CompleteReplay* as_complete_replay(void)
         { return NULL; }
 
       virtual Instruction* clone(PhysicalTemplate& tpl,
@@ -731,11 +730,11 @@ namespace Legion {
         { return NULL; }
       virtual IssueFill* as_issue_fill(void)
         { return NULL; }
-      virtual GetOpTermEvent* as_get_copy_term_event(void)
+      virtual GetOpTermEvent* as_get_op_term_event(void)
         { return NULL; }
-      virtual SetOpSyncEvent* as_set_copy_sync_event(void)
+      virtual SetOpSyncEvent* as_set_op_sync_event(void)
         { return NULL; }
-      virtual CompleteReplay* as_triger_copy_completion(void)
+      virtual CompleteReplay* as_complete_replay(void)
         { return NULL; }
 
       virtual Instruction* clone(PhysicalTemplate& tpl,
@@ -774,11 +773,11 @@ namespace Legion {
         { return NULL; }
       virtual IssueFill* as_issue_fill(void)
         { return NULL; }
-      virtual GetOpTermEvent* as_get_copy_term_event(void)
+      virtual GetOpTermEvent* as_get_op_term_event(void)
         { return NULL; }
-      virtual SetOpSyncEvent* as_set_copy_sync_event(void)
+      virtual SetOpSyncEvent* as_set_op_sync_event(void)
         { return NULL; }
-      virtual CompleteReplay* as_triger_copy_completion(void)
+      virtual CompleteReplay* as_complete_replay(void)
         { return NULL; }
 
       virtual Instruction* clone(PhysicalTemplate& tpl,
@@ -819,11 +818,11 @@ namespace Legion {
         { return NULL; }
       virtual IssueFill* as_issue_fill(void)
         { return NULL; }
-      virtual GetOpTermEvent* as_get_copy_term_event(void)
+      virtual GetOpTermEvent* as_get_op_term_event(void)
         { return NULL; }
-      virtual SetOpSyncEvent* as_set_copy_sync_event(void)
+      virtual SetOpSyncEvent* as_set_op_sync_event(void)
         { return NULL; }
-      virtual CompleteReplay* as_triger_copy_completion(void)
+      virtual CompleteReplay* as_complete_replay(void)
         { return NULL; }
 
       virtual Instruction* clone(PhysicalTemplate& tpl,
@@ -863,11 +862,11 @@ namespace Legion {
         { return NULL; }
       virtual IssueFill* as_issue_fill(void)
         { return NULL; }
-      virtual GetOpTermEvent* as_get_copy_term_event(void)
+      virtual GetOpTermEvent* as_get_op_term_event(void)
         { return NULL; }
-      virtual SetOpSyncEvent* as_set_copy_sync_event(void)
+      virtual SetOpSyncEvent* as_set_op_sync_event(void)
         { return NULL; }
-      virtual CompleteReplay* as_triger_copy_completion(void)
+      virtual CompleteReplay* as_complete_replay(void)
         { return NULL; }
 
       virtual Instruction* clone(PhysicalTemplate& tpl,
@@ -921,11 +920,11 @@ namespace Legion {
         { return NULL; }
       virtual IssueFill* as_issue_fill(void)
         { return this; }
-      virtual GetOpTermEvent* as_get_copy_term_event(void)
+      virtual GetOpTermEvent* as_get_op_term_event(void)
         { return NULL; }
-      virtual SetOpSyncEvent* as_set_copy_sync_event(void)
+      virtual SetOpSyncEvent* as_set_op_sync_event(void)
         { return NULL; }
-      virtual CompleteReplay* as_triger_copy_completion(void)
+      virtual CompleteReplay* as_complete_replay(void)
         { return NULL; }
 
       virtual Instruction* clone(PhysicalTemplate& tpl,
@@ -986,11 +985,11 @@ namespace Legion {
         { return this; }
       virtual IssueFill* as_issue_fill(void)
         { return NULL; }
-      virtual GetOpTermEvent* as_get_copy_term_event(void)
+      virtual GetOpTermEvent* as_get_op_term_event(void)
         { return NULL; }
-      virtual SetOpSyncEvent* as_set_copy_sync_event(void)
+      virtual SetOpSyncEvent* as_set_op_sync_event(void)
         { return NULL; }
-      virtual CompleteReplay* as_triger_copy_completion(void)
+      virtual CompleteReplay* as_complete_replay(void)
         { return NULL; }
 
       virtual Instruction* clone(PhysicalTemplate& tpl,
@@ -1039,11 +1038,11 @@ namespace Legion {
         { return NULL; }
       virtual IssueFill* as_issue_fill(void)
         { return NULL; }
-      virtual GetOpTermEvent* as_get_copy_term_event(void)
+      virtual GetOpTermEvent* as_get_op_term_event(void)
         { return this; }
-      virtual SetOpSyncEvent* as_set_copy_sync_event(void)
+      virtual SetOpSyncEvent* as_set_op_sync_event(void)
         { return NULL; }
-      virtual CompleteReplay* as_triger_copy_completion(void)
+      virtual CompleteReplay* as_complete_replay(void)
         { return NULL; }
 
       virtual Instruction* clone(PhysicalTemplate& tpl,
@@ -1084,11 +1083,11 @@ namespace Legion {
         { return NULL; }
       virtual IssueFill* as_issue_fill(void)
         { return NULL; }
-      virtual GetOpTermEvent* as_get_copy_term_event(void)
+      virtual GetOpTermEvent* as_get_op_term_event(void)
         { return NULL; }
-      virtual SetOpSyncEvent* as_set_copy_sync_event(void)
+      virtual SetOpSyncEvent* as_set_op_sync_event(void)
         { return this; }
-      virtual CompleteReplay* as_triger_copy_completion(void)
+      virtual CompleteReplay* as_complete_replay(void)
         { return NULL; }
 
       virtual Instruction* clone(PhysicalTemplate& tpl,
@@ -1129,11 +1128,11 @@ namespace Legion {
         { return NULL; }
       virtual IssueFill* as_issue_fill(void)
         { return NULL; }
-      virtual GetOpTermEvent* as_get_copy_term_event(void)
+      virtual GetOpTermEvent* as_get_op_term_event(void)
         { return NULL; }
-      virtual SetOpSyncEvent* as_set_copy_sync_event(void)
+      virtual SetOpSyncEvent* as_set_op_sync_event(void)
         { return NULL; }
-      virtual CompleteReplay* as_triger_copy_completion(void)
+      virtual CompleteReplay* as_complete_replay(void)
         { return this; }
 
       virtual Instruction* clone(PhysicalTemplate& tpl,
@@ -1145,44 +1144,6 @@ namespace Legion {
       friend struct PhysicalTemplate;
       TraceLocalID lhs;
       unsigned rhs;
-    };
-
-    struct LaunchTask : public Instruction {
-      LaunchTask(PhysicalTemplate& tpl, const TraceLocalID& lhs);
-      virtual void execute(void);
-      virtual std::string to_string(void);
-
-      virtual InstructionKind get_kind(void)
-        { return LAUNCH_TASK; }
-      virtual GetTermEvent* as_get_term_event(void)
-        { return NULL; }
-      virtual CreateApUserEvent* as_create_ap_user_event(void)
-        { return NULL; }
-      virtual TriggerEvent* as_trigger_event(void)
-        { return NULL; }
-      virtual MergeEvent* as_merge_event(void)
-        { return NULL; }
-      virtual AssignFenceCompletion* as_assignment_fence_completion(void)
-        { return NULL; }
-      virtual IssueCopy* as_issue_copy(void)
-        { return NULL; }
-      virtual IssueFill* as_issue_fill(void)
-        { return NULL; }
-      virtual GetOpTermEvent* as_get_copy_term_event(void)
-        { return NULL; }
-      virtual SetOpSyncEvent* as_set_copy_sync_event(void)
-        { return NULL; }
-      virtual CompleteReplay* as_triger_copy_completion(void)
-        { return NULL; }
-
-      virtual Instruction* clone(PhysicalTemplate& tpl,
-                                 const std::map<unsigned, unsigned> &rewrite);
-
-      virtual TraceLocalID get_owner(const TraceLocalID &key) { return op_key; }
-
-    private:
-      friend struct PhysicalTemplate;
-      TraceLocalID op_key;
     };
 
   }; // namespace Internal
