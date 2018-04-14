@@ -534,6 +534,9 @@ namespace Legion {
                                  size_t res_size, bool owned) = 0; 
       virtual void handle_post_mapped(RtEvent pre = RtEvent::NO_RT_EVENT) = 0;
       virtual void handle_misspeculation(void) = 0;
+    public:
+      // From Memoizable
+      virtual void complete_replay(ApEvent completion_event);
     protected:
       // Boolean for each region saying if it is virtual mapped
       std::vector<bool> virtual_mapped;

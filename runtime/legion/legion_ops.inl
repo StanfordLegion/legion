@@ -99,7 +99,8 @@ namespace Legion {
         if (tpl == NULL)
         {
           OP::trace->set_state_record();
-          tpl = physical_trace->start_new_template();
+          tpl = physical_trace->start_new_template(
+              OP::parent_ctx->get_current_execution_fence_event());
           assert(tpl != NULL);
         }
 

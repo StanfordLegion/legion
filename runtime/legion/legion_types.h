@@ -1390,7 +1390,6 @@ namespace Legion {
     struct AssignFenceCompletion;
     struct IssueCopy;
     struct IssueFill;
-    struct SetReadyEvent;
     struct GetOpTermEvent;
     struct SetOpSyncEvent;
     struct CompleteReplay;

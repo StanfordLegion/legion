@@ -3858,11 +3858,22 @@ namespace Legion {
       // doing the inner task optimization
       if (!do_inner_task_optimization)
       {
+        std::set<ApEvent> ready_events;
         for (unsigned idx = 0; idx < regions.size(); idx++)
         {
           if (!virtual_mapped[idx] && !no_access_regions[idx])
-            physical_instances[idx].update_wait_on_events(wait_on_events);
+            physical_instances[idx].update_wait_on_events(ready_events);
         }
+        ApEvent ready_event = Runtime::merge_events(ready_events);
+        if (is_recording())
+        {
+#ifdef DEBUG_LEGION
+          assert(tpl != NULL && tpl->is_recording());
+#endif
+          tpl->record_merge_events(ready_event, ready_events);
+          tpl->record_complete_replay(this, ready_event);
+        }
+        wait_on_events.insert(ready_event);
       }
       // Now add get all the other preconditions for the launch
       for (unsigned idx = 0; idx < futures.size(); idx++)
@@ -4100,6 +4111,29 @@ namespace Legion {
             &runtime->outstanding_counts[MisspeculationTaskArgs::TASK_ID],-1);
 #endif
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void SingleTask::complete_replay(ApEvent instance_ready_event)
+    //--------------------------------------------------------------------------
+    {
+      if (!arrive_barriers.empty())
+      {
+        ApEvent done_event = get_task_completion();
+        for (std::vector<PhaseBarrier>::const_iterator it =
+             arrive_barriers.begin(); it !=
+             arrive_barriers.end(); it++)
+          Runtime::phase_barrier_arrive(*it, 1/*count*/, done_event);
+      }
+#ifdef DEBUG_LEGION
+      assert(is_leaf() && !has_virtual_instances());
+#endif
+      for (std::deque<InstanceSet>::iterator it = physical_instances.begin();
+           it != physical_instances.end(); ++it)
+        for (unsigned idx = 0; idx < it->size(); ++idx)
+          (*it)[idx].set_ready_event(instance_ready_event);
+      update_no_access_regions();
+      launch_task();
     }
 
     //--------------------------------------------------------------------------

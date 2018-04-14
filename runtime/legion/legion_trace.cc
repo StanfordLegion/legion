@@ -1564,10 +1564,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    PhysicalTemplate* PhysicalTrace::start_new_template()
+    PhysicalTemplate* PhysicalTrace::start_new_template(ApEvent fence_event)
     //--------------------------------------------------------------------------
     {
-      current_template = new PhysicalTemplate();
+      current_template = new PhysicalTemplate(fence_event);
+#ifdef DEBUG_LEGION
+      assert(fence_event.exists());
+#endif
       return current_template;
     }
 
@@ -1587,12 +1590,13 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    PhysicalTemplate::PhysicalTemplate(void)
+    PhysicalTemplate::PhysicalTemplate(ApEvent fence_event)
       : recording(true), replayable(true), has_block(false),
         fence_completion_id(0)
     //--------------------------------------------------------------------------
     {
-      events.push_back(ApEvent());
+      events.push_back(fence_event);
+      event_map[fence_event] = fence_completion_id;
       instructions.push_back(
           new AssignFenceCompletion(*this, fence_completion_id));
     }
@@ -1930,10 +1934,6 @@ namespace Legion {
 
       if (implicit_runtime->no_trace_optimization)
       {
-        for (std::map<TraceLocalID, Operation*>::iterator it =
-             operations.begin(); it != operations.end(); ++it)
-          if (it->second->get_operation_kind() == Operation::TASK_OP_KIND)
-            instructions.push_back(new LaunchTask(*this, it->first));
         return;
       }
 
@@ -2017,30 +2017,6 @@ namespace Legion {
               pre.insert(pre_pre.begin(), pre_pre.end());
               break;
             }
-          case SET_READY_EVENT:
-            {
-              SetReadyEvent *inst = instructions[idx]->as_set_ready_event();
-              std::set<unsigned> &ready_pre = preconditions[inst->ready_event_idx];
-              {
-                std::map<TraceLocalID, unsigned>::iterator finder =
-                  task_entries.find(inst->op_key);
-#ifdef DEBUG_LEGION
-                assert(finder != task_entries.end());
-#endif
-                std::set<unsigned> &task_pre = preconditions[finder->second];
-                task_pre.insert(generate[inst->ready_event_idx]);
-                task_pre.insert(ready_pre.begin(), ready_pre.end());
-              }
-              {
-                std::map<TraceLocalID, std::set<unsigned> >::iterator finder =
-                  ready_preconditions.find(inst->op_key);
-                if (finder == ready_preconditions.end())
-                  ready_preconditions[inst->op_key] = ready_pre;
-                else
-                  finder->second.insert(ready_pre.begin(), ready_pre.end());
-              }
-              break;
-            }
           case GET_OP_TERM_EVENT:
           case SET_OP_SYNC_EVENT:
             {
@@ -2108,14 +2084,6 @@ namespace Legion {
               ++count;
               break;
             }
-          case SET_READY_EVENT:
-            {
-              SetReadyEvent *inst = instructions[idx]->as_set_ready_event();
-              rewrite[idx] = count;
-              new_instructions.push_back(inst->clone(*this, rewrite));
-              ++count;
-              break;
-            }
           case MERGE_EVENT:
             {
               if (generate[idx] == idx)
@@ -2179,13 +2147,6 @@ namespace Legion {
             {
               num_origins +=
                 (*it)->as_issue_fill()->precondition_idx == fence_completion_id;
-              break;
-            }
-          case SET_READY_EVENT:
-            {
-              num_origins +=
-                (*it)->as_set_ready_event()->ready_event_idx ==
-                fence_completion_id;
               break;
             }
           default:
@@ -2278,31 +2239,6 @@ namespace Legion {
               }
               break;
             }
-          case SET_READY_EVENT:
-            {
-              SetReadyEvent *ready = inst->as_set_ready_event();
-              if (ready->ready_event_idx == fence_completion_id)
-              {
-                std::vector<FieldID> field_ids;
-                InstanceView *view = ready->view;
-                view->logical_node->get_column_source()
-                  ->get_field_set(ready->fields, field_ids);
-                const PhysicalInstance &inst =
-                  view->get_manager()->get_instance();
-                for (std::vector<FieldID>::iterator it = field_ids.begin();
-                    it != field_ids.end(); ++it)
-                  find_last_users(inst, *it, users);
-                if (users.size() == 1)
-                  ready->ready_event_idx = *users.begin();
-                else
-                {
-                  new_merge = new MergeEvent(*this, next_instruction_id, users);
-                  ready->ready_event_idx = next_instruction_id;
-                  ++next_instruction_id;
-                }
-              }
-              break;
-            }
           default:
             {
               break;
@@ -2314,11 +2250,6 @@ namespace Legion {
         new_instructions.push_back(inst);
       }
       instructions.swap(new_instructions);
-
-      for (std::map<TraceLocalID, Operation*>::iterator it =
-           operations.begin(); it != operations.end(); ++it)
-        if (it->second->get_operation_kind() == Operation::TASK_OP_KIND)
-          instructions.push_back(new LaunchTask(*this, it->first));
     }
 
     //--------------------------------------------------------------------------
@@ -2606,6 +2537,26 @@ namespace Legion {
                                                const std::set<ApEvent>& rhs)
     //--------------------------------------------------------------------------
     {
+      AutoLock tpl_lock(template_lock);
+
+      std::set<unsigned> rhs_;
+      for (std::set<ApEvent>::const_iterator it = rhs.begin(); it != rhs.end();
+           it++)
+      {
+        std::map<ApEvent, unsigned>::iterator finder = event_map.find(*it);
+        if (finder != event_map.end() && finder->second != fence_completion_id)
+          rhs_.insert(finder->second);
+      }
+      if (rhs_.size() == 0)
+        rhs_.insert(fence_completion_id);
+
+      if (rhs_.size() == 1)
+      {
+        unsigned rhs = *rhs_.begin();
+        lhs = events[rhs];
+        return;
+      }
+
 #ifndef LEGION_SPY
       if (!lhs.exists() || (rhs.find(lhs) != rhs.end()))
       {
@@ -2618,27 +2569,12 @@ namespace Legion {
       }
 #endif
 
-      AutoLock tpl_lock(template_lock);
-
       unsigned lhs_ = events.size();
       events.push_back(lhs);
 #ifdef DEBUG_LEGION
       assert(event_map.find(lhs) == event_map.end());
 #endif
       event_map[lhs] = lhs_;
-
-      std::set<unsigned> rhs_;
-      rhs_.insert(fence_completion_id);
-      for (std::set<ApEvent>::const_iterator it = rhs.begin(); it != rhs.end();
-           it++)
-      {
-        std::map<ApEvent, unsigned>::iterator finder = event_map.find(*it);
-        if (finder != event_map.end())
-          rhs_.insert(finder->second);
-      }
-#ifdef DEBUG_LEGION
-      assert(rhs_.size() > 0);
-#endif
 
       instructions.push_back(new MergeEvent(*this, lhs_, rhs_));
 #ifdef DEBUG_LEGION
@@ -2868,7 +2804,7 @@ namespace Legion {
     void PhysicalTemplate::record_set_ready_event(Operation *op,
                                                   unsigned region_idx,
                                                   unsigned inst_idx,
-                                                  ApEvent ready_event,
+                                                  ApEvent &ready_event,
                                                   const RegionRequirement &req,
                                                   InstanceView *view,
                                                   const FieldMask &fields,
@@ -2876,8 +2812,6 @@ namespace Legion {
                                                   ContextID physical_ctx)
     //--------------------------------------------------------------------------
     {
-      if (op->get_operation_kind() != Operation::TASK_OP_KIND) return;
-
       AutoLock tpl_lock(template_lock);
 
       Memoizable *memoizable = op->get_memoizable();
@@ -2888,13 +2822,6 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(operations.find(op_key) != operations.end());
 #endif
-
-      std::map<ApEvent, unsigned>::iterator ready_finder =
-        event_map.find(ready_event);
-#ifdef DEBUG_LEGION
-      assert(ready_finder != event_map.end());
-#endif
-      unsigned ready_event_idx = ready_finder->second;
 
       RegionNode *region_node = view->logical_node->as_region_node();
       if (view->is_reduction_view())
@@ -2912,14 +2839,26 @@ namespace Legion {
           layout->compute_copy_offsets(fill_fields, manager, fields);
         }
 
-        unsigned lhs_ = events.size();
-        events.push_back(ApEvent());
-
         void *fill_buffer = malloc(reduction_op->sizeof_rhs);
         reduction_op->init(fill_buffer, 1);
 #ifdef DEBUG_LEGION
         assert(view->logical_node->is_region());
 #endif
+
+        std::map<ApEvent, unsigned>::iterator ready_finder =
+          event_map.find(ready_event);
+#ifdef DEBUG_LEGION
+        assert(ready_finder != event_map.end());
+#endif
+        unsigned ready_event_idx = ready_finder->second;
+
+        ApUserEvent lhs = Runtime::create_ap_user_event();
+        unsigned lhs_ = events.size();
+        events.push_back(lhs);
+        event_map[lhs] = lhs_;
+        Runtime::trigger_event(lhs, ready_event);
+        ready_event = lhs;
+
         instructions.push_back(
             new IssueFill(*this, lhs_, region_node,
                           op_key, fields, fill_buffer, reduction_op->sizeof_rhs,
@@ -2934,16 +2873,7 @@ namespace Legion {
           record_last_user(field.inst, region_node, field.field_id, lhs_, true);
         }
         free(fill_buffer);
-        ready_event_idx = lhs_;
       }
-
-      events.push_back(ApEvent());
-      instructions.push_back(
-          new SetReadyEvent(*this, op_key, region_idx, inst_idx,
-                            ready_event_idx, view, fields));
-#ifdef DEBUG_LEGION
-      assert(instructions.size() == events.size());
-#endif
 
       record_ready_view(req, view, fields, logical_ctx, physical_ctx);
 
@@ -3776,83 +3706,6 @@ namespace Legion {
           fill_uid,
 #endif
           intersect);
-    }
-
-    /////////////////////////////////////////////////////////////
-    // SetReadyEvent
-    /////////////////////////////////////////////////////////////
-
-    //--------------------------------------------------------------------------
-    SetReadyEvent::SetReadyEvent(PhysicalTemplate& tpl,
-                                 const TraceLocalID& key, unsigned ri,
-                                 unsigned ii, unsigned rei, InstanceView *v,
-                                 const FieldMask &f)
-      : Instruction(tpl), op_key(key), region_idx(ri), inst_idx(ii),
-        ready_event_idx(rei), view(v), fields(f)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(operations.find(op_key) != operations.end());
-      assert(ready_event_idx < events.size());
-#endif
-    }
-
-    //--------------------------------------------------------------------------
-    void SetReadyEvent::execute(void)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(ready_event_idx < events.size());
-      assert(operations.find(op_key) != operations.end());
-      assert(operations.find(op_key)->second != NULL);
-
-      SingleTask *task = dynamic_cast<SingleTask*>(operations[op_key]);
-      assert(task != NULL);
-#else
-      SingleTask *task = static_cast<SingleTask*>(operations[op_key]);
-#endif
-      const std::deque<InstanceSet> &physical_instances =
-        task->get_physical_instances();
-      InstanceRef &ref =
-        const_cast<InstanceRef&>(physical_instances[region_idx][inst_idx]);
-      ApEvent ready_event = events[ready_event_idx];
-      ref.set_ready_event(ready_event);
-    }
-
-    //--------------------------------------------------------------------------
-    std::string SetReadyEvent::to_string(void)
-    //--------------------------------------------------------------------------
-    {
-      std::stringstream ss;
-      ss << "operations[(" << op_key.first << ",";
-      if (op_key.second.dim > 1) ss << "(";
-      for (int dim = 0; dim < op_key.second.dim; ++dim)
-      {
-        if (dim > 0) ss << ",";
-        ss << op_key.second[dim];
-      }
-      if (op_key.second.dim > 1) ss << ")";
-      ss << ")].get_physical_instances()["
-         << region_idx << "]["
-         << inst_idx << "].set_ready_event(events["
-         << ready_event_idx << "])  (pointer: "
-         << std::hex << view << ", instance id: "
-         << std::hex << view->get_manager()->get_instance().id << ")";
-      return ss.str();
-    }
-
-    //--------------------------------------------------------------------------
-    Instruction* SetReadyEvent::clone(PhysicalTemplate& tpl,
-                                    const std::map<unsigned, unsigned> &rewrite)
-    //--------------------------------------------------------------------------
-    {
-      std::map<unsigned, unsigned>::const_iterator finder =
-        rewrite.find(ready_event_idx);
-#ifdef DEBUG_LEGION
-      assert(finder != rewrite.end());
-#endif
-      return new SetReadyEvent(tpl, op_key, region_idx, inst_idx,
-        finder->second, view, fields);
     }
 
     /////////////////////////////////////////////////////////////
