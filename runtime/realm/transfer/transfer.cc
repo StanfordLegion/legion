@@ -1164,9 +1164,9 @@ namespace Realm {
       //  giving out, paying attention to the piece's bounds, where we've stopped,
       //  and piece strides
       int cur_dim = 0;
-      int max_dims = (((flags & LINES_OK) == 0)  ? 1 :
-		      ((flags & PLANES_OK) == 0) ? 2 :
-		                                   3);
+      int max_dims = ((N == 1) || ((flags & LINES_OK) == 0) ? 1 :
+		      (N == 2) || ((flags & PLANES_OK) == 0) ? 2 :
+		                                                3);
       ssize_t act_counts[3], act_strides[3];
       act_counts[0] = field_size;
       act_strides[0] = 1;
