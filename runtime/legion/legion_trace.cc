@@ -1924,6 +1924,156 @@ namespace Legion {
     void PhysicalTemplate::optimize(void)
     //--------------------------------------------------------------------------
     {
+      // Reserve some events for merges to be added during fence elision
+      unsigned num_merges = 0;
+      for (std::vector<Instruction*>::iterator it = instructions.begin();
+           it != instructions.end(); ++it)
+        switch ((*it)->get_kind())
+        {
+          case ISSUE_COPY:
+            {
+              unsigned precondition_idx =
+                (*it)->as_issue_copy()->precondition_idx;
+              InstructionKind generator_kind =
+                instructions[precondition_idx]->get_kind();
+              num_merges += generator_kind != MERGE_EVENT;
+              break;
+            }
+          case ISSUE_FILL:
+            {
+              unsigned precondition_idx =
+                (*it)->as_issue_fill()->precondition_idx;
+              InstructionKind generator_kind =
+                instructions[precondition_idx]->get_kind();
+              num_merges += generator_kind != MERGE_EVENT;
+              break;
+            }
+          case COMPLETE_REPLAY:
+            {
+              unsigned completion_event_idx =
+                (*it)->as_complete_replay()->rhs;
+              InstructionKind generator_kind =
+                instructions[completion_event_idx]->get_kind();
+              num_merges += generator_kind != MERGE_EVENT;
+              break;
+            }
+          default:
+            {
+              break;
+            }
+        }
+
+      unsigned merge_starts = events.size();
+      events.resize(events.size() + num_merges);
+
+      // Reserve space for completion events of the previously replayed trace
+      // - frontiers[idx] == (event idx from the previous trace)
+      // - after each replay, we do assignment events[frontiers[idx]] = idx
+      // Note that 'frontiers' is used in 'find_last_users()'
+      for (std::map<InstanceAccess, UserInfo>::iterator it = last_users.begin();
+           it != last_users.end(); ++it)
+        for (std::set<unsigned>::iterator uit = it->second.users.begin(); uit !=
+             it->second.users.end(); ++uit)
+        {
+          unsigned frontier = *uit;
+          if (frontiers.find(frontier) == frontiers.end())
+          {
+            unsigned next_event_id = events.size();
+            frontiers[frontier] = next_event_id;
+            events.resize(next_event_id + 1);
+          }
+        }
+
+      // We are now going to break the invariant that
+      // the generator of events[idx] is instructions[idx].
+      // After fence elision, the generator of events[idx] is
+      // instructions[gen[idx]].
+      std::vector<unsigned> gen;
+      gen.resize(events.size());
+      std::vector<Instruction*> new_instructions;
+
+      for (unsigned idx = 0; idx < instructions.size(); ++idx)
+      {
+        Instruction *inst = instructions[idx];
+        InstructionKind kind = inst->get_kind();
+        std::set<unsigned> users;
+        unsigned *precondition_idx = NULL;
+        switch (kind)
+        {
+          case COMPLETE_REPLAY:
+            {
+              CompleteReplay *replay = inst->as_complete_replay();
+              std::map<TraceLocalID, std::vector<InstanceReq> >::iterator
+                finder = op_reqs.find(replay->lhs);
+              if (finder == op_reqs.end())
+                break;
+              const std::vector<InstanceReq> &reqs = finder->second;
+              for (std::vector<InstanceReq>::const_iterator it = reqs.begin();
+                   it != reqs.end(); ++it)
+                for (std::vector<FieldID>::const_iterator fit =
+                     it->fields.begin(); fit != it->fields.end(); ++fit)
+                  find_last_users(it->instance, *fit, users);
+              precondition_idx = &replay->rhs;
+              break;
+            }
+          case ISSUE_COPY:
+            {
+              IssueCopy *copy = inst->as_issue_copy();
+              for (unsigned idx = 0; idx < copy->src_fields.size(); ++idx)
+              {
+                const CopySrcDstField &field = copy->src_fields[idx];
+                find_last_users(field.inst, field.field_id, users);
+              }
+              for (unsigned idx = 0; idx < copy->dst_fields.size(); ++idx)
+              {
+                const CopySrcDstField &field = copy->dst_fields[idx];
+                find_last_users(field.inst, field.field_id, users);
+              }
+              precondition_idx = &copy->precondition_idx;
+              break;
+            }
+          case ISSUE_FILL:
+            {
+              IssueFill *fill = inst->as_issue_fill();
+              for (unsigned idx = 0; idx < fill->fields.size(); ++idx)
+              {
+                const CopySrcDstField &field = fill->fields[idx];
+                find_last_users(field.inst, field.field_id, users);
+              }
+              precondition_idx = &fill->precondition_idx;
+              break;
+            }
+          default:
+            {
+              break;
+            }
+        }
+
+        if (users.size() > 0)
+        {
+          Instruction *generator_inst = instructions[*precondition_idx];
+          if (generator_inst->get_kind() == MERGE_EVENT)
+          {
+            MergeEvent *merge = generator_inst->as_merge_event();
+            merge->rhs.insert(users.begin(), users.end());
+          }
+          else
+          {
+            unsigned merging_event_idx = merge_starts++;
+            if (*precondition_idx != fence_completion_id)
+              users.insert(*precondition_idx);
+            gen[merging_event_idx] = new_instructions.size();
+            new_instructions.push_back(
+                new MergeEvent(*this, merging_event_idx, users));
+            *precondition_idx = merging_event_idx;
+          }
+        }
+        gen[idx] = new_instructions.size();
+        new_instructions.push_back(inst);
+      }
+      instructions.swap(new_instructions);
+      new_instructions.clear();
+
       std::vector<bool> used(instructions.size(), false);
 
       for (unsigned idx = 0; idx < instructions.size(); ++idx)
@@ -1941,9 +2091,10 @@ namespace Legion {
               for (std::set<unsigned>::iterator it = merge->rhs.begin();
                    it != merge->rhs.end(); ++it)
               {
-                if (instructions[*it]->get_kind() == MERGE_EVENT)
+                Instruction *generator = instructions[gen[*it]];
+                if (generator ->get_kind() == MERGE_EVENT)
                 {
-                  MergeEvent *to_splice = instructions[*it]->as_merge_event();
+                  MergeEvent *to_splice = generator->as_merge_event();
                   new_rhs.insert(to_splice->rhs.begin(), to_splice->rhs.end());
                   changed = true;
                 }
@@ -1957,25 +2108,25 @@ namespace Legion {
           case TRIGGER_EVENT:
             {
               TriggerEvent *trigger = inst->as_trigger_event();
-              used[trigger->rhs] = true;
+              used[gen[trigger->rhs]] = true;
               break;
             }
           case ISSUE_COPY:
             {
               IssueCopy *copy = inst->as_issue_copy();
-              used[copy->precondition_idx] = true;
+              used[gen[copy->precondition_idx]] = true;
               break;
             }
           case ISSUE_FILL:
             {
               IssueFill *fill = inst->as_issue_fill();
-              used[fill->precondition_idx] = true;
+              used[gen[fill->precondition_idx]] = true;
               break;
             }
           case COMPLETE_REPLAY:
             {
               CompleteReplay *complete = inst->as_complete_replay();
-              used[complete->rhs] = true;
+              used[gen[complete->rhs]] = true;
               break;
             }
           case GET_TERM_EVENT:
@@ -1994,7 +2145,6 @@ namespace Legion {
         }
       }
 
-      std::vector<Instruction*> new_instructions;
       std::vector<Instruction*> complete_replays;
       std::vector<Instruction*> to_delete;
 
@@ -2013,323 +2163,9 @@ namespace Legion {
       new_instructions.insert(new_instructions.end(),
                               complete_replays.begin(),
                               complete_replays.end());
-      new_instructions.swap(instructions);
+      instructions.swap(new_instructions);
       for (unsigned idx = 0; idx < to_delete.size(); ++idx)
         delete to_delete[idx];
-
-      if (implicit_runtime->no_trace_optimization)
-        return;
-
-      std::vector<unsigned> generate;
-      std::vector<std::set<unsigned> > preconditions;
-      std::vector<std::set<unsigned> > simplified;
-      std::map<TraceLocalID, std::set<unsigned> > ready_preconditions;
-      generate.resize(instructions.size());
-      preconditions.resize(instructions.size());
-      simplified.resize(instructions.size());
-
-      for (unsigned idx = 0; idx < instructions.size(); ++idx)
-      {
-        std::set<unsigned> &pre = preconditions[idx];
-        switch (instructions[idx]->get_kind())
-        {
-          case ASSIGN_FENCE_COMPLETION:
-          case GET_TERM_EVENT:
-          case CREATE_AP_USER_EVENT:
-            {
-              generate[idx] = idx;
-              break;
-            }
-          case TRIGGER_EVENT:
-            {
-              TriggerEvent *inst = instructions[idx]->as_trigger_event();
-              unsigned rhs = inst->rhs;
-              pre.insert(preconditions[rhs].begin(), preconditions[rhs].end());
-              pre.insert(generate[rhs]);
-              generate[idx] = idx;
-              break;
-            }
-          case MERGE_EVENT:
-            {
-              MergeEvent *inst = instructions[idx]->as_merge_event();
-              for (std::set<unsigned>::iterator it = inst->rhs.begin();
-                   it != inst->rhs.end(); ++it)
-              {
-                pre.insert(preconditions[*it].begin(),
-                           preconditions[*it].end());
-                unsigned rhs_gen = generate[*it];
-                pre.insert(preconditions[rhs_gen].begin(),
-                           preconditions[rhs_gen].end());
-              }
-              std::set<unsigned> gen;
-              for (std::set<unsigned>::iterator it = inst->rhs.begin();
-                   it != inst->rhs.end(); ++it)
-                if (pre.find(*it) == pre.end()) gen.insert(generate[*it]);
-              if (gen.size() > 1)
-              {
-                pre.insert(gen.begin(), gen.end());
-                generate[idx] = idx;
-
-                std::set<unsigned> &simpl = simplified[idx];
-                std::set<unsigned> pre_pre;
-                for (std::set<unsigned>::iterator it = pre.begin(); it != pre.end();
-                    ++it)
-                  pre_pre.insert(preconditions[*it].begin(),
-                                 preconditions[*it].end());
-                for (std::set<unsigned>::iterator it = pre.begin(); it != pre.end();
-                    ++it)
-                  if (pre_pre.find(*it) == pre_pre.end())
-                    simpl.insert(*it);
-              }
-              else
-              {
-#ifdef DEBUG_LEGION
-                assert(gen.size() == 1);
-#endif
-                generate[idx] = *gen.begin();
-              }
-              break;
-            }
-          case ISSUE_COPY:
-            {
-              generate[idx] = idx;
-              IssueCopy *inst = instructions[idx]->as_issue_copy();
-              std::set<unsigned> &pre_pre = preconditions[inst->precondition_idx];
-              pre.insert(generate[inst->precondition_idx]);
-              pre.insert(pre_pre.begin(), pre_pre.end());
-              break;
-            }
-          case ISSUE_FILL:
-            {
-              generate[idx] = idx;
-              IssueFill *inst = instructions[idx]->as_issue_fill();
-              std::set<unsigned> &pre_pre = preconditions[inst->precondition_idx];
-              pre.insert(generate[inst->precondition_idx]);
-              pre.insert(pre_pre.begin(), pre_pre.end());
-              break;
-            }
-          case GET_OP_TERM_EVENT:
-          case SET_OP_SYNC_EVENT:
-            {
-              generate[idx] = idx;
-              break;
-            }
-          case COMPLETE_REPLAY:
-            {
-              generate[idx] = idx;
-              CompleteReplay *inst =
-                instructions[idx]->as_complete_replay();
-              std::set<unsigned> &rhs_pre = preconditions[inst->rhs];
-              std::map<TraceLocalID, unsigned>::iterator finder =
-                task_entries.find(inst->lhs);
-#ifdef DEBUG_LEGION
-              assert(finder != task_entries.end());
-#endif
-              std::set<unsigned> &copy_pre = preconditions[finder->second];
-              copy_pre.insert(generate[inst->rhs]);
-              copy_pre.insert(rhs_pre.begin(), rhs_pre.end());
-              break;
-            }
-#ifdef DEBUG_LEGION
-          default:
-            {
-              assert(false);
-              break;
-            }
-#endif
-        }
-      }
-
-      unsigned count = 0;
-      std::map<unsigned, unsigned> rewrite;
-      for (unsigned idx = 0; idx < instructions.size(); ++idx)
-      {
-#ifdef DEBUG_LEGION
-        assert(rewrite.find(idx) == rewrite.end());
-        assert(rewrite.size() == idx);
-#endif
-        switch (instructions[idx]->get_kind())
-        {
-          case ASSIGN_FENCE_COMPLETION:
-          case GET_TERM_EVENT:
-          case CREATE_AP_USER_EVENT:
-          case TRIGGER_EVENT:
-          case ISSUE_COPY:
-          case ISSUE_FILL:
-          case GET_OP_TERM_EVENT:
-          case SET_OP_SYNC_EVENT:
-          case COMPLETE_REPLAY:
-            {
-#ifdef DEBUG_LEGION
-              assert(generate[idx] == idx);
-#endif
-              rewrite[idx] = count;
-              new_instructions.push_back(
-                  instructions[idx]->clone(*this, rewrite));
-              ++count;
-              break;
-            }
-          case MERGE_EVENT:
-            {
-              if (generate[idx] == idx)
-              {
-                if (simplified[idx].size() > 1)
-                {
-                  std::set<unsigned> rhs;
-                  for (std::set<unsigned>::iterator it =
-                       simplified[idx].begin(); it !=
-                       simplified[idx].end(); ++it)
-                  {
-#ifdef DEBUG_LEGION
-                    assert(rewrite.find(*it) != rewrite.end());
-#endif
-                    rhs.insert(rewrite[*it]);
-                  }
-                  rewrite[idx] = count;
-                  new_instructions.push_back(new MergeEvent(*this, count, rhs));
-                  ++count;
-                }
-                else
-                  rewrite[idx] = rewrite[*simplified[idx].begin()];
-              }
-              else
-                rewrite[idx] = rewrite[generate[idx]];
-              break;
-            }
-#ifdef DEBUG_LEGION
-          default:
-            {
-              assert(false);
-              break;
-            }
-#endif
-        }
-      }
-
-      instructions.swap(new_instructions);
-
-      for (std::vector<Instruction*>::iterator it = new_instructions.begin();
-           it != new_instructions.end(); ++it)
-        delete (*it);
-
-      size_t num_origins = 0;
-      for (std::vector<Instruction*>::iterator it = instructions.begin();
-           it != instructions.end(); ++it)
-        switch ((*it)->get_kind())
-        {
-          case ISSUE_COPY:
-            {
-              num_origins +=
-                (*it)->as_issue_copy()->precondition_idx == fence_completion_id;
-              break;
-            }
-          case ISSUE_FILL:
-            {
-              num_origins +=
-                (*it)->as_issue_fill()->precondition_idx == fence_completion_id;
-              break;
-            }
-          default:
-            {
-              break;
-            }
-        }
-      events.resize(instructions.size() + num_origins);
-      std::map<InstanceAccess, UserInfo> new_last_users;
-      for (std::map<InstanceAccess, UserInfo>::iterator it = last_users.begin();
-           it != last_users.end(); ++it)
-      {
-        std::set<unsigned> pre;
-        for (std::set<unsigned>::iterator uit = it->second.users.begin(); uit !=
-             it->second.users.end(); ++uit)
-          pre.insert(preconditions[*uit].begin(), preconditions[*uit].end());
-        for (std::set<unsigned>::iterator uit = it->second.users.begin(); uit !=
-             it->second.users.end(); ++uit)
-          if (pre.find(*uit) == pre.end())
-          {
-#ifdef DEBUG_LEGION
-            assert(rewrite.find(*uit) != rewrite.end());
-#endif
-            unsigned frontier = rewrite[*uit];
-            if (frontiers.find(frontier) == frontiers.end())
-            {
-              unsigned next_event_id = events.size();
-              frontiers[frontier] = next_event_id;
-              events.resize(next_event_id + 1);
-            }
-            new_last_users[it->first].users.insert(frontier);
-          }
-      }
-      last_users.swap(new_last_users);
-
-      new_instructions.clear();
-      unsigned next_instruction_id = instructions.size();
-      for (unsigned idx = 0; idx < instructions.size(); ++idx)
-      {
-        Instruction *inst = instructions[idx];
-        MergeEvent *new_merge = NULL;
-        std::set<unsigned> users;
-
-        switch (inst->get_kind())
-        {
-          case ISSUE_COPY:
-            {
-              IssueCopy *copy = inst->as_issue_copy();
-              if (copy->precondition_idx == fence_completion_id)
-              {
-                for (unsigned idx = 0; idx < copy->src_fields.size(); ++idx)
-                {
-                  const CopySrcDstField &field = copy->src_fields[idx];
-                  find_last_users(field.inst, field.field_id, users);
-                }
-                for (unsigned idx = 0; idx < copy->dst_fields.size(); ++idx)
-                {
-                  const CopySrcDstField &field = copy->dst_fields[idx];
-                  find_last_users(field.inst, field.field_id, users);
-                }
-                if (users.size() == 1)
-                  copy->precondition_idx = *users.begin();
-                else
-                {
-                  new_merge = new MergeEvent(*this, next_instruction_id, users);
-                  copy->precondition_idx = next_instruction_id;
-                  ++next_instruction_id;
-                }
-              }
-              break;
-            }
-          case ISSUE_FILL:
-            {
-              IssueFill *fill = inst->as_issue_fill();
-              if (fill->precondition_idx == fence_completion_id)
-              {
-                for (unsigned idx = 0; idx < fill->fields.size(); ++idx)
-                {
-                  const CopySrcDstField &field = fill->fields[idx];
-                  find_last_users(field.inst, field.field_id, users);
-                }
-                if (users.size() == 1)
-                  fill->precondition_idx = *users.begin();
-                else
-                {
-                  new_merge = new MergeEvent(*this, next_instruction_id, users);
-                  fill->precondition_idx = next_instruction_id;
-                  ++next_instruction_id;
-                }
-              }
-              break;
-            }
-          default:
-            {
-              break;
-            }
-        }
-
-        if (new_merge != NULL)
-          new_instructions.push_back(new_merge);
-        new_instructions.push_back(inst);
-      }
-      instructions.swap(new_instructions);
     }
 
     //--------------------------------------------------------------------------
@@ -2962,13 +2798,15 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(finder != task_entries.end());
 #endif
-      std::vector<FieldID> field_ids;
-      region_node->get_column_source()->get_field_set(fields, field_ids);
-      const PhysicalInstance &inst = view->get_manager()->get_instance();
-      for (std::vector<FieldID>::iterator it = field_ids.begin(); it !=
-           field_ids.end(); ++it)
-        record_last_user(inst, region_node, *it, finder->second,
-                         IS_READ_ONLY(req));
+      InstanceReq inst_req;
+      inst_req.instance = view->get_manager()->get_instance();
+      region_node->get_column_source()->get_field_set(fields, inst_req.fields);
+      inst_req.read = IS_READ_ONLY(req);
+      op_reqs[op_key].push_back(inst_req);
+      for (std::vector<FieldID>::iterator it = inst_req.fields.begin(); it !=
+           inst_req.fields.end(); ++it)
+        record_last_user(inst_req.instance, region_node, *it, finder->second,
+                         inst_req.read);
     }
 
     //--------------------------------------------------------------------------

@@ -589,6 +589,12 @@ namespace Legion {
         bool read;
       };
       std::map<InstanceAccess, UserInfo> last_users;
+      struct InstanceReq {
+        PhysicalInstance instance;
+        std::vector<FieldID> fields;
+        bool read;
+      };
+      std::map<TraceLocalID, std::vector<InstanceReq> > op_reqs;
       std::map<unsigned, unsigned> frontiers;
     public:
       ApEvent fence_completion;
