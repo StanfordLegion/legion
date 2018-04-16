@@ -1623,6 +1623,7 @@ namespace Realm {
     {
       gpu->push_context();
       CHECK_CU( cuMemsetD32((CUdeviceptr)base + offset, value, width / sizeof(unsigned)) );  
+      CHECK_CU( cuCtxSynchronize() );
       gpu->pop_context();
     }
 
@@ -1632,6 +1633,7 @@ namespace Realm {
       gpu->push_context();
       CHECK_CU( cuMemsetD2D32((CUdeviceptr)base + offset, pitch, value,
             width / sizeof(unsigned), height) );
+      CHECK_CU( cuCtxSynchronize() );
       gpu->pop_context();
     }
 
