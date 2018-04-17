@@ -2851,7 +2851,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     LogicalRegion ProjectionFunctor::project(LogicalRegion upper_bound,
-                                             const DomainPoint &point)
+                          const DomainPoint &point, const Domain &launch_domain)
     //--------------------------------------------------------------------------
     {
       Internal::log_run.error("ERROR: INVOCATION OF FUNCTIONAL PROJECTION "
@@ -2862,7 +2862,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     LogicalRegion ProjectionFunctor::project(LogicalPartition upper_bound,
-                                             const DomainPoint &point)
+                          const DomainPoint &point, const Domain &launch_domain)
     //--------------------------------------------------------------------------
     {
       Internal::log_run.error("ERROR: INVOCATION OF FUNCTIONAL PROJECTION "

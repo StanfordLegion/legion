@@ -3031,10 +3031,12 @@ namespace Legion {
        * return the same result when called with the same parameters
        * @param upper_bound the upper bound logical region
        * @param point the point being projected
+       * @param launch_domain the launch domain of the index operation
        * @return logical region result
        */
       virtual LogicalRegion project(LogicalRegion upper_bound,
-                                    const DomainPoint &point);
+                                    const DomainPoint &point,
+                                    const Domain &launch_domain);
 
       /**
        * This method corresponds to the one above for projecting from
@@ -3043,10 +3045,12 @@ namespace Legion {
        * return the same result when called with the same parameters
        * @param upper_bound the upper bound logical partition 
        * @param point the point being projected
+       * @param launch_domain the launch domain of the index operation
        * @return logical region result
        */
       virtual LogicalRegion project(LogicalPartition upper_bound,
-                                    const DomainPoint &point);
+                                    const DomainPoint &point,
+                                    const Domain &launch_domain);
 
       /**
        * @deprecated

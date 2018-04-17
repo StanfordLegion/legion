@@ -1403,9 +1403,11 @@ namespace Legion {
                                     LogicalPartition upper_bound,
                                     const DomainPoint &point);
       virtual LogicalRegion project(LogicalRegion upper_bound,
-                                    const DomainPoint &point);
+                                    const DomainPoint &point,
+                                    const Domain &launch_domain);
       virtual LogicalRegion project(LogicalPartition upper_bound,
-                                    const DomainPoint &point);
+                                    const DomainPoint &point,
+                                    const Domain &launch_domain);
       virtual bool is_functional(void) const;
       virtual bool is_exclusive(void) const;
       virtual unsigned get_depth(void) const;
@@ -1450,12 +1452,14 @@ namespace Legion {
     public:
       // The old path explicitly for tasks
       LogicalRegion project_point(Task *task, unsigned idx, Runtime *runtime,
-                                  const DomainPoint &point);
+                       const Domain &launch_domain, const DomainPoint &point);
       void project_points(const RegionRequirement &req, unsigned idx,
-          Runtime *runtime, const std::vector<PointTask*> &point_tasks);
+                          Runtime *runtime, const Domain &launch_domain,
+                          const std::vector<PointTask*> &point_tasks);
       // Generalized and annonymized
       void project_points(Operation *op, unsigned idx, 
-                          const RegionRequirement &req, Runtime *runtime,
+                          const RegionRequirement &req, 
+                          Runtime *runtime, const Domain &launch_domain,
                           const std::vector<ProjectionPoint*> &points);
 #ifdef CVOPT
       // For inverting the projection function and finding interfering

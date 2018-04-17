@@ -4784,7 +4784,7 @@ namespace Legion {
         ProjectionFunction *function = 
           runtime->find_projection_function(src_requirements[idx].projection);
         function->project_points(this, idx, src_requirements[idx],
-                                 runtime, projection_points);
+                                 runtime, index_domain, projection_points);
       }
       for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
       {
@@ -4794,7 +4794,7 @@ namespace Legion {
           runtime->find_projection_function(dst_requirements[idx].projection);
         function->project_points(this, src_requirements.size() + idx, 
                                  dst_requirements[idx], runtime, 
-                                 projection_points);
+                                 index_domain, projection_points);
       }
 #ifdef DEBUG_LEGION
       // Check for interfering point requirements in debug mode
@@ -7106,8 +7106,10 @@ namespace Legion {
         runtime->find_projection_function(requirement.projection);
       std::vector<ProjectionPoint*> projection_points(points.begin(),
                                                       points.end());
+      // These are never sharded in a control replication case so
+      // it is safe to use the point domain here
       function->project_points(this, 0/*idx*/, requirement,
-                               runtime, projection_points);
+                               runtime, point_domain, projection_points);
       // Launch the points
       std::set<RtEvent> mapped_preconditions;
       std::set<ApEvent> executed_preconditions;
@@ -11631,7 +11633,7 @@ namespace Legion {
         std::vector<ProjectionPoint*> projection_points(points.begin(),
                                                         points.end());
         function->project_points(this, 0/*idx*/, requirement,
-                                 runtime, projection_points);
+                                 runtime, index_domain, projection_points);
         // No need to check the validity of the points, we know they are good
         if (runtime->legion_spy_enabled)
         {
@@ -13328,7 +13330,7 @@ namespace Legion {
       std::vector<ProjectionPoint*> projection_points(points.begin(),
                                                       points.end());
       function->project_points(this, 0/*idx*/, requirement,
-                               runtime, projection_points);
+                               runtime, index_domain, projection_points);
 #ifdef DEBUG_LEGION
       // Check for interfering point requirements in debug mode
       check_point_requirements();

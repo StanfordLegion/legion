@@ -1908,8 +1908,8 @@ namespace Legion {
         {
           ProjectionFunction *function = 
             runtime->find_projection_function(regions[idx].projection);
-          regions[idx].region = 
-            function->project_point(this, idx, runtime, index_point);
+          regions[idx].region = function->project_point(this, idx, runtime, 
+                                                index_domain, index_point);
           // Update the region requirement kind 
           regions[idx].handle_type = SINGULAR;
         }
@@ -9295,7 +9295,8 @@ namespace Legion {
         {
           ProjectionFunction *function = 
             runtime->find_projection_function(regions[idx].projection);
-          function->project_points(regions[idx], idx, runtime, points);
+          function->project_points(regions[idx], idx, runtime, 
+                                   index_domain, points);
         }
       }
       // Update the no access regions
