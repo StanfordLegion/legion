@@ -24,7 +24,7 @@ local common = require("stencil_common")
 
 local DTYPE = double
 local RADIUS = 2
-local USE_FOREIGN = true
+local USE_FOREIGN = (os.getenv('USE_FOREIGN') or '1') == '1'
 
 local c = regentlib.c
 
@@ -42,8 +42,16 @@ if USE_FOREIGN then
   end
   local cxx = os.getenv('CXX') or 'c++'
 
+  local march = os.getenv('MARCH') or 'native'
+  local march_flag = '-march=' .. march
+  if os.execute("bash -c \"[ `uname` == 'Linux' ]\"") == 0 then
+    if os.execute("grep altivec /proc/cpuinfo > /dev/null") == 0 then
+      march_flag = '-mcpu=' .. march .. ' -maltivec -mabi=altivec -mvsx'
+    end
+  end
+
   local cxx_flags = os.getenv('CC_FLAGS') or ''
-  cxx_flags = cxx_flags .. " -O3 -march=native -Wall -Werror -DDTYPE=" .. tostring(DTYPE) .. " -DRESTRICT=__restrict__ -DRADIUS=" .. tostring(RADIUS)
+  cxx_flags = cxx_flags .. " -O3 " .. march_flag .. " -Wall -Werror -DDTYPE=" .. tostring(DTYPE) .. " -DRESTRICT=__restrict__ -DRADIUS=" .. tostring(RADIUS)
   if os.execute('test "$(uname)" = Darwin') == 0 then
     cxx_flags =
       (cxx_flags ..
@@ -335,7 +343,8 @@ local function make_stencil_interior(private, interior, radius)
 end
 
 local function make_stencil(radius)
-  local task stencil(private : region(ispace(int2d), point),
+  local __demand(__cuda)
+        task stencil(private : region(ispace(int2d), point),
                      interior : region(ispace(int2d), point),
                      xm : region(ispace(int2d), point),
                      xp : region(ispace(int2d), point),
@@ -404,6 +413,7 @@ local function make_increment_interior(private, exterior)
   end
 end
 
+__demand(__cuda)
 task increment(private : region(ispace(int2d), point),
                exterior : region(ispace(int2d), point),
                xm : region(ispace(int2d), point),
@@ -536,7 +546,10 @@ end
 if os.getenv('SAVEOBJ') == '1' then
   local root_dir = arg[0]:match(".*/") or "./"
   local out_dir = (os.getenv('OBJNAME') and os.getenv('OBJNAME'):match('.*/')) or root_dir
-  local link_flags = {"-L" .. out_dir, "-lstencil", "-lstencil_mapper"}
+  local link_flags = terralib.newlist({"-L" .. out_dir, "-lstencil_mapper"})
+  if USE_FOREIGN then
+    link_flags:insert("-lstencil")
+  end
 
   if os.getenv('STANDALONE') == '1' then
     os.execute('cp ' .. os.getenv('LG_RT_DIR') .. '/../bindings/regent/libregent.so ' .. out_dir)

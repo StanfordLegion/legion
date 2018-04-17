@@ -2487,6 +2487,38 @@ namespace Realm {
       TransferIterator *iter = domain->create_iterator(dst.inst,
 						       RegionInstance::NO_INST,
 						       dst_field);
+#ifdef USE_CUDA
+      // fills to GPU FB memory are offloaded to the GPU itself
+      if (mem_impl->lowlevel_kind == Memory::GPU_FB_MEM) {
+	Cuda::GPU *gpu = static_cast<Cuda::GPUFBMemory *>(mem_impl)->gpu;
+	size_t total_bytes = 0;
+	while(!iter->done()) {
+	  TransferIterator::AddressInfo info;
+
+	  size_t max_bytes = (size_t)-1;
+	  // gpu memset supports 1d or 2d, but not 3d (yet)
+	  unsigned flags = TransferIterator::LINES_OK;
+	  size_t act_bytes = iter->step(max_bytes, info, flags);
+	  assert(act_bytes >= 0);
+	  total_bytes += act_bytes;
+
+	  if(info.num_lines == 1) {
+	    gpu->fill_within_fb(info.base_offset, info.bytes_per_chunk,
+				fill_buffer, fill_size);
+	  } else {
+	    gpu->fill_within_fb_2d(info.base_offset, info.line_stride,
+				   info.bytes_per_chunk, info.num_lines,
+				   fill_buffer, fill_size);
+	  }
+	}
+
+	// if we did any asynchronous operations, insert a fence
+	if(total_bytes > 0)
+	  gpu->fence_within_fb(this);
+
+	// fall through so the clean-up is the same
+      }
+#endif
 
       while(!iter->done()) {
 	TransferIterator::AddressInfo info;

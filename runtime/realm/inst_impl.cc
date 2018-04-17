@@ -462,6 +462,9 @@ namespace Realm {
 	  // send any remaining incomplete profiling responses
 	  measurements.send_responses(requests);
 
+          // clear the measurments after we send the response
+          measurements.clear();
+
 	  // poison the completion event, if it exists
 	  Event ready_event = Event::NO_EVENT;
 	  {

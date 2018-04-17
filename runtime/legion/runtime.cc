@@ -349,12 +349,6 @@ namespace Legion {
         else
           ready_event.wait();
       }
-      if (empty)
-        REPORT_LEGION_ERROR(ERROR_ACCESSING_EMPTY_FUTURE, 
-                            "Accessing empty future! (UID %lld)",
-                            (producer_op == NULL) ? 0 : 
-                              producer_op->get_unique_op_id())
-      mark_sampled();
     }
 
     //--------------------------------------------------------------------------
@@ -2150,31 +2144,33 @@ namespace Legion {
           runtime->legion_collective_participating_spaces)
     //--------------------------------------------------------------------------
     {
-      // We already have our contributions for each stage so
-      // we can set the inditial participants to 1
-      if (participating)
-      {
-        sent_stages.resize(runtime->legion_collective_stages, false);
-#ifdef DEBUG_LEGION
-        assert(runtime->legion_collective_stages > 0);
-#endif
-        stage_notifications.resize(runtime->legion_collective_stages, 1);
-        // Stage 0 always starts with 0 notifications since we'll 
-        // explictcly arrive on it
-	// Special case: if we expect a stage -1 message from a 
-        // non-participating space, we'll count that as part of 
-        // stage 0, it will make it a negative count, but the 
-        // type is 'int' so we're good
-	if ((runtime->legion_collective_stages > 0) &&
-	    (runtime->address_space <
-	     (runtime->total_address_spaces -
-	      runtime->legion_collective_participating_spaces)))
-	  stage_notifications[0] = -1;
-        else
-          stage_notifications[0] = 0;
-      }
       if (runtime->total_address_spaces > 1)
+      {
+        // We already have our contributions for each stage so
+        // we can set the inditial participants to 1
+        if (participating)
+        {
+          sent_stages.resize(runtime->legion_collective_stages, false);
+#ifdef DEBUG_LEGION
+          assert(runtime->legion_collective_stages > 0);
+#endif
+          stage_notifications.resize(runtime->legion_collective_stages, 1);
+          // Stage 0 always starts with 0 notifications since we'll 
+          // explictcly arrive on it
+          // Special case: if we expect a stage -1 message from a 
+          // non-participating space, we'll count that as part of 
+          // stage 0, it will make it a negative count, but the 
+          // type is 'int' so we're good
+          if ((runtime->legion_collective_stages > 0) &&
+              (runtime->address_space <
+               (runtime->total_address_spaces -
+                runtime->legion_collective_participating_spaces)))
+            stage_notifications[0] = -1;
+          else
+            stage_notifications[0] = 0;
+        }
         done_event = Runtime::create_rt_user_event();
+      }
       // Add ourselves to the set before any exchanges start
 #ifdef DEBUG_LEGION
       assert(Runtime::mpi_rank >= 0);

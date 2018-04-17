@@ -2177,13 +2177,26 @@ namespace Legion {
         {
           if (!accessor.is_dense_arbitrary(r))
           {
+#ifdef __CUDA_ARCH__
+            printf(
+                "ERROR: Illegal request for pointer of non-dense rectangle\n");
+            assert(false);
+#else
             fprintf(stderr, 
                 "ERROR: Illegal request for pointer of non-dense rectangle\n");
 #ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_NON_DENSE_RECTANGLE);
+#endif
           }
+          return accessor.ptr(r.lo);
+        }
+      __CUDA_HD__
+      inline const FT* ptr(const Rect<N,T>& r, size_t strides[N]) const
+        {
+          for (int i = 0; i < N; i++)
+            strides[i] = accessor.strides[i] / sizeof(FT);
           return accessor.ptr(r.lo);
         }
       __CUDA_HD__
@@ -2323,17 +2336,36 @@ namespace Legion {
           assert(bounds.contains_all(r));
 #else
           if (!bounds.contains_all(r)) 
-            field_region.fail_bounds_check(DomainPoint(r), field, READ_ONLY);
+            field_region.fail_bounds_check(Domain(r), field, READ_ONLY);
 #endif
           if (!accessor.is_dense_arbitrary(r))
           {
+#ifdef __CUDA_ARCH__
+            printf(
+                "ERROR: Illegal request for pointer of non-dense rectangle\n");
+            assert(false);
+#else
             fprintf(stderr, 
                 "ERROR: Illegal request for pointer of non-dense rectangle\n");
 #ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_NON_DENSE_RECTANGLE);
+#endif
           }
+          return accessor.ptr(r.lo);
+        }
+      __CUDA_HD__
+      inline const FT* ptr(const Rect<N,T>& r, size_t strides[N]) const
+        {
+#ifdef __CUDA_ARCH__
+          assert(bounds.contains_all(r));
+#else
+          if (!bounds.contains_all(r)) 
+            field_region.fail_bounds_check(Domain(r), field, READ_ONLY);
+#endif
+          for (int i = 0; i < N; i++)
+            strides[i] = accessor.strides[i] / sizeof(FT);
           return accessor.ptr(r.lo);
         }
       __CUDA_HD__
@@ -2462,13 +2494,25 @@ namespace Legion {
         {
           if (!accessor.is_dense_arbitrary(r))
           {
+#ifdef __CUDA_ARCH__
+            printf(
+                "ERROR: Illegal request for pointer of non-dense rectangle\n");
+            assert(false);
+#else
             fprintf(stderr, 
                 "ERROR: Illegal request for pointer of non-dense rectangle\n");
 #ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_NON_DENSE_RECTANGLE);
+#endif
           }
+          return accessor.ptr(r.lo); 
+        }
+      __CUDA_HD__
+      inline const FT* ptr(const Rect<1,T>& r, size_t strides[1]) const
+        {
+          strides[0] = accessor.strides[0] / sizeof(FT);
           return accessor.ptr(r.lo); 
         }
       __CUDA_HD__
@@ -2601,17 +2645,35 @@ namespace Legion {
           assert(bounds.contains_all(r));
 #else
           if (!bounds.contains_all(r)) 
-            field_region.fail_bounds_check(DomainPoint(r), field, READ_ONLY);
+            field_region.fail_bounds_check(Domain(r), field, READ_ONLY);
 #endif
           if (!accessor.is_dense_arbitrary(r))
           {
+#ifdef __CUDA_ARCH__
+            printf(
+                "ERROR: Illegal request for pointer of non-dense rectangle\n");
+            assert(false);
+#else
             fprintf(stderr, 
                 "ERROR: Illegal request for pointer of non-dense rectangle\n");
 #ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_NON_DENSE_RECTANGLE);
+#endif
           }
+          return accessor.ptr(r.lo);
+        }
+      __CUDA_HD__
+      inline const FT* ptr(const Rect<1,T>& r, size_t strides[1]) const
+        {
+#ifdef __CUDA_ARCH__
+          assert(bounds.contains_all(r));
+#else
+          if (!bounds.contains_all(r)) 
+            field_region.fail_bounds_check(Domain(r), field, READ_ONLY);
+#endif
+          strides[0] = accessor.strides[0] / sizeof(FT);
           return accessor.ptr(r.lo);
         }
       __CUDA_HD__
@@ -2735,13 +2797,26 @@ namespace Legion {
         {
           if (!accessor.is_dense_arbitrary(r))
           {
+#ifdef __CUDA_ARCH__
+            printf(
+                "ERROR: Illegal request for pointer of non-dense rectangle\n");
+            assert(false);
+#else
             fprintf(stderr, 
                 "ERROR: Illegal request for pointer of non-dense rectangle\n");
 #ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_NON_DENSE_RECTANGLE);
+#endif
           }
+          return accessor.ptr(r.lo);
+        }
+      __CUDA_HD__
+      inline FT* ptr(const Rect<N,T>& r, size_t strides[N]) const
+        {
+          for (int i = 0; i < N; i++)
+            strides[i] = accessor.strides[i] / sizeof(FT);
           return accessor.ptr(r.lo);
         }
       __CUDA_HD__
@@ -2904,13 +2979,32 @@ namespace Legion {
 #endif
           if (!accessor.is_dense_arbitrary(r))
           {
+#ifdef __CUDA_ARCH__
+            printf(
+                "ERROR: Illegal request for pointer of non-dense rectangle\n");
+            assert(false);
+#else
             fprintf(stderr, 
                 "ERROR: Illegal request for pointer of non-dense rectangle\n");
 #ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_NON_DENSE_RECTANGLE);
+#endif
           }
+          return accessor.ptr(r.lo);
+        }
+      __CUDA_HD__
+      inline FT* ptr(const Rect<N,T>& r, size_t strides[N]) const
+        {
+#ifdef __CUDA_ARCH__
+          assert(bounds.contains_all(r));
+#else
+          if (!bounds.contains_all(r)) 
+            field_region.fail_bounds_check(Domain(r), field, READ_WRITE);
+#endif
+          for (int i = 0; i < N; i++)
+            strides[i] = accessor.strides[i] / sizeof(FT);
           return accessor.ptr(r.lo);
         }
       __CUDA_HD__
@@ -3056,13 +3150,25 @@ namespace Legion {
         {
           if (!accessor.is_dense_arbitrary(r))
           {
+#ifdef __CUDA_ARCH__
+            printf(
+                "ERROR: Illegal request for pointer of non-dense rectangle\n");
+            assert(false);
+#else
             fprintf(stderr, 
                 "ERROR: Illegal request for pointer of non-dense rectangle\n");
 #ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_NON_DENSE_RECTANGLE);
+#endif
           }
+          return accessor.ptr(r.lo);
+        }
+      __CUDA_HD__
+      inline FT* ptr(const Rect<1,T>& r, size_t strides[1]) const
+        {
+          strides[0] = accessor.strides[0] / sizeof(FT);
           return accessor.ptr(r.lo);
         }
       __CUDA_HD__
@@ -3216,13 +3322,31 @@ namespace Legion {
 #endif
           if (!accessor.is_dense_arbitrary(r))
           {
+#ifdef __CUDA_ARCH__
+            printf(
+                "ERROR: Illegal request for pointer of non-dense rectangle\n");
+            assert(false);
+#else
             fprintf(stderr, 
                 "ERROR: Illegal request for pointer of non-dense rectangle\n");
 #ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_NON_DENSE_RECTANGLE);
+#endif
           }
+          return accessor.ptr(r.lo);
+        }
+      __CUDA_HD__
+      inline FT* ptr(const Rect<1,T>& r, size_t strides[1]) const
+        {
+#ifdef __CUDA_ARCH__
+          assert(bounds.contains_all(r));
+#else
+          if (!bounds.contains_all(r)) 
+            field_region.fail_bounds_check(Domain(r), field, READ_WRITE);
+#endif
+          strides[0] = accessor.strides[0] / sizeof(FT);
           return accessor.ptr(r.lo);
         }
       __CUDA_HD__
@@ -3358,14 +3482,27 @@ namespace Legion {
         {
           if (!accessor.is_dense_arbitrary(r))
           {
+#ifdef __CUDA_ARCH__
+            printf(
+                "ERROR: Illegal request for pointer of non-dense rectangle\n");
+            assert(false);
+#else
             fprintf(stderr, 
                 "ERROR: Illegal request for pointer of non-dense rectangle\n");
 #ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_NON_DENSE_RECTANGLE);
+#endif
           }
-          return accessor.ptr(r);
+          return accessor.ptr(r.lo);
+        }
+      __CUDA_HD__
+      inline FT* ptr(const Rect<N,T>& r, size_t strides[N]) const
+        {
+          for (int i = 0; i < N; i++)
+            strides[i] = accessor.strides[i] / sizeof(FT);
+          return accessor.ptr(r.lo);
         }
       __CUDA_HD__
       inline FT& operator[](const Point<N,T>& p) const
@@ -3521,13 +3658,32 @@ namespace Legion {
 #endif
           if (!accessor.is_dense_arbitrary(r))
           {
+#ifdef __CUDA_ARCH__
+            printf(
+                "ERROR: Illegal request for pointer of non-dense rectangle\n");
+            assert(false);
+#else
             fprintf(stderr, 
                 "ERROR: Illegal request for pointer of non-dense rectangle\n");
 #ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_NON_DENSE_RECTANGLE);
+#endif
           }
+          return accessor.ptr(r.lo);
+        }
+      __CUDA_HD__
+      inline FT* ptr(const Rect<N,T>& r, size_t strides[N]) const 
+        {
+#ifdef __CUDA_ARCH__
+          assert(bounds.contains_all(r));
+#else
+          if (!bounds.contains_all(r)) 
+            field_region.fail_bounds_check(Domain(r), field, READ_WRITE);
+#endif
+          for (int i = 0; i < N; i++)
+            strides[i] = accessor.strides[i] / sizeof(FT);
           return accessor.ptr(r.lo);
         }
       __CUDA_HD__
@@ -3661,13 +3817,25 @@ namespace Legion {
         {
           if (!accessor.is_dense_arbitrary(r))
           {
+#ifdef __CUDA_ARCH__
+            printf(
+                "ERROR: Illegal request for pointer of non-dense rectangle\n");
+            assert(false);
+#else
             fprintf(stderr, 
                 "ERROR: Illegal request for pointer of non-dense rectangle\n");
 #ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_NON_DENSE_RECTANGLE);
+#endif
           }
+          return accessor.ptr(r.lo);
+        }
+      __CUDA_HD__
+      inline FT* ptr(const Rect<1,T>& r, size_t strides[1]) const
+        {
+          strides[0] = accessor.strides[0] / sizeof(FT);
           return accessor.ptr(r.lo);
         }
       __CUDA_HD__
@@ -3815,13 +3983,31 @@ namespace Legion {
 #endif
           if (!accessor.is_dense_arbitrary(r))
           {
+#ifdef __CUDA_ARCH__
+            printf(
+                "ERROR: Illegal request for pointer of non-dense rectangle\n");
+            assert(false);
+#else
             fprintf(stderr, 
                 "ERROR: Illegal request for pointer of non-dense rectangle\n");
 #ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_NON_DENSE_RECTANGLE);
+#endif
           }
+          return accessor.ptr(r.lo);
+        }
+      __CUDA_HD__
+      inline FT* ptr(const Rect<1,T>& r, size_t strides[1]) const
+        {
+#ifdef __CUDA_ARCH__
+          assert(bounds.contains_all(r));
+#else
+          if (!bounds.contains_all(r)) 
+            field_region.fail_bounds_check(Domain(r), field, READ_WRITE);
+#endif
+          strides[0] = accessor.strides[0] / sizeof(FT);
           return accessor.ptr(r.lo);
         }
       __CUDA_HD__
@@ -3915,6 +4101,39 @@ namespace Legion {
                          typename REDOP::RHS val) const
         { 
           REDOP::template fold<EXCLUSIVE>(accessor[p], val);
+        }
+      __CUDA_HD__
+      inline typename REDOP::RHS* ptr(const Point<N,T>& p) const
+        {
+          return accessor.ptr(p);
+        }
+      __CUDA_HD__
+      inline typename REDOP::RHS* ptr(const Rect<N,T>& r) const
+        {
+          if (!accessor.is_dense_arbitrary(r))
+          {
+#ifdef __CUDA_ARCH__
+            printf(
+                "ERROR: Illegal request for pointer of non-dense rectangle\n");
+            assert(false);
+#else
+            fprintf(stderr, 
+                "ERROR: Illegal request for pointer of non-dense rectangle\n");
+#ifdef DEBUG_LEGION
+            assert(false);
+#endif
+            exit(ERROR_NON_DENSE_RECTANGLE);
+#endif
+          }
+          return accessor.ptr(r.lo);
+        }
+      __CUDA_HD__
+      inline typename REDOP::RHS* ptr(const Rect<N,T>& r, 
+                                      size_t strides[N]) const
+        {
+          for (int i = 0; i < N; i++)
+            strides[i] = accessor.strides[i] / sizeof(typename REDOP::RHS);
+          return accessor.ptr(r.lo);
         }
       __CUDA_HD__
       inline ArraySyntax::ReductionHelper<ReductionAccessor<REDOP,EXCLUSIVE,N,
@@ -4032,6 +4251,57 @@ namespace Legion {
           REDOP::template fold<EXCLUSIVE>(accessor[p], val);
         }
       __CUDA_HD__
+      inline typename REDOP::RHS* ptr(const Point<N,T>& p) const
+        { 
+#ifdef __CUDA_ARCH__
+          assert(bounds.contains(p));
+#else
+          if (!bounds.contains(p)) 
+            field_region.fail_bounds_check(DomainPoint(p), field, REDUCE);
+#endif
+          return accessor.ptr(p); 
+        }
+      __CUDA_HD__
+      inline typename REDOP::RHS* ptr(const Rect<N,T>& r) const
+        {
+#ifdef __CUDA_ARCH__
+          assert(bounds.contains_all(r));
+#else
+          if (!bounds.contains_all(r)) 
+            field_region.fail_bounds_check(Domain(r), field, REDUCE);
+#endif
+          if (!accessor.is_dense_arbitrary(r))
+          {
+#ifdef __CUDA_ARCH__
+            printf(
+                "ERROR: Illegal request for pointer of non-dense rectangle\n");
+            assert(false);
+#else
+            fprintf(stderr, 
+                "ERROR: Illegal request for pointer of non-dense rectangle\n");
+#ifdef DEBUG_LEGION
+            assert(false);
+#endif
+            exit(ERROR_NON_DENSE_RECTANGLE);
+#endif
+          }
+          return accessor.ptr(r.lo);
+        }
+      __CUDA_HD__
+      inline typename REDOP::RHS* ptr(const Rect<N,T>& r,
+                                      size_t strides[N]) const
+        {
+#ifdef __CUDA_ARCH__
+          assert(bounds.contains_all(r));
+#else
+          if (!bounds.contains_all(r)) 
+            field_region.fail_bounds_check(Domain(r), field, REDUCE);
+#endif
+          for (int i = 0; i < N; i++)
+            strides[i] = accessor.strides[i] / sizeof(typename REDOP::RHS);
+          return accessor.ptr(r.lo);
+        }
+      __CUDA_HD__
       inline ArraySyntax::ReductionHelper<ReductionAccessor<REDOP,EXCLUSIVE,N,
              T,Realm::AffineAccessor<typename REDOP::RHS,N,T>,true>,
              typename REDOP::RHS,N,T>
@@ -4133,6 +4403,38 @@ namespace Legion {
                          typename REDOP::RHS val) const
         { 
           REDOP::template fold<EXCLUSIVE>(accessor[p], val);
+        }
+      __CUDA_HD__
+      inline typename REDOP::RHS* ptr(const Point<1,T>& p) const
+        {
+          return accessor.ptr(p);
+        }
+      __CUDA_HD__
+      inline typename REDOP::RHS* ptr(const Rect<1,T>& r) const
+        {
+          if (!accessor.is_dense_arbitrary(r))
+          {
+#ifdef __CUDA_ARCH__
+            printf(
+                "ERROR: Illegal request for pointer of non-dense rectangle\n");
+            assert(false);
+#else
+            fprintf(stderr, 
+                "ERROR: Illegal request for pointer of non-dense rectangle\n");
+#ifdef DEBUG_LEGION
+            assert(false);
+#endif
+            exit(ERROR_NON_DENSE_RECTANGLE);
+#endif
+          }
+          return accessor.ptr(r.lo);
+        }
+      __CUDA_HD__
+      inline typename REDOP::RHS* ptr(const Rect<1,T>& r, 
+                                      size_t strides[1]) const
+        {
+          strides[0] = accessor.strides[0] / sizeof(typename REDOP::RHS);
+          return accessor.ptr(r.lo);
         }
       __CUDA_HD__
       inline ArraySyntax::ReductionHelper<ReductionAccessor<REDOP,EXCLUSIVE,1,
@@ -4237,6 +4539,56 @@ namespace Legion {
             field_region.fail_bounds_check(DomainPoint(p), field, REDUCE);
 #endif
           REDOP::template fold<EXCLUSIVE>(accessor[p], val);
+        }
+      __CUDA_HD__
+      inline typename REDOP::RHS* ptr(const Point<1,T>& p) const
+        { 
+#ifdef __CUDA_ARCH__
+          assert(bounds.contains(p));
+#else
+          if (!bounds.contains(p)) 
+            field_region.fail_bounds_check(DomainPoint(p), field, REDUCE);
+#endif
+          return accessor.ptr(p); 
+        }
+      __CUDA_HD__
+      inline typename REDOP::RHS* ptr(const Rect<1,T>& r) const
+        {
+#ifdef __CUDA_ARCH__
+          assert(bounds.contains_all(r));
+#else
+          if (!bounds.contains_all(r)) 
+            field_region.fail_bounds_check(Domain(r), field, REDUCE);
+#endif
+          if (!accessor.is_dense_arbitrary(r))
+          {
+#ifdef __CUDA_ARCH__
+            printf(
+                "ERROR: Illegal request for pointer of non-dense rectangle\n");
+            assert(false);
+#else
+            fprintf(stderr, 
+                "ERROR: Illegal request for pointer of non-dense rectangle\n");
+#ifdef DEBUG_LEGION
+            assert(false);
+#endif
+            exit(ERROR_NON_DENSE_RECTANGLE);
+#endif
+          }
+          return accessor.ptr(r.lo);
+        }
+      __CUDA_HD__
+      inline typename REDOP::RHS* ptr(const Rect<1,T>& r,
+                                      size_t strides[1]) const
+        {
+#ifdef __CUDA_ARCH__
+          assert(bounds.contains_all(r));
+#else
+          if (!bounds.contains_all(r)) 
+            field_region.fail_bounds_check(Domain(r), field, REDUCE);
+#endif
+          strides[0] = accessor.strides[0] / sizeof(typename REDOP::RHS);
+          return accessor.ptr(r.lo);
         }
       __CUDA_HD__
       inline ArraySyntax::ReductionHelper<ReductionAccessor<REDOP,EXCLUSIVE,1,
@@ -4414,13 +4766,26 @@ namespace Legion {
         {
           if (!accessor.is_dense_arbitrary(r))
           {
+#ifdef __CUDA_ARCH__
+            printf(
+                "ERROR: Illegal request for pointer of non-dense rectangle\n");
+            assert(false);
+#else
             fprintf(stderr, 
                 "ERROR: Illegal request for pointer of non-dense rectangle\n");
 #ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_NON_DENSE_RECTANGLE);
+#endif
           }
+          return accessor.ptr(r.lo);
+        }
+      __CUDA_HD__
+      inline FT* ptr(const Rect<N,T>& r, size_t strides[N]) const
+        {
+          for (int i = 0; i < N; i++)
+            strides[i] = accessor.strides[i] / sizeof(FT);
           return accessor.ptr(r.lo);
         }
       __CUDA_HD__

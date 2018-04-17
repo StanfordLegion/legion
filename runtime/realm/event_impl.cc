@@ -1477,6 +1477,7 @@ namespace Realm {
     public:
       PthreadCondWaiter(GASNetCondVar &_cv)
         : cv(_cv)
+	, signalled(false)
 	, poisoned(false)
       {
       }
@@ -1491,6 +1492,7 @@ namespace Realm {
 
         // Need to hold the lock to avoid the race
         AutoHSLLock(cv.mutex);
+	signalled = true;
 	cv.signal();
         // we're allocated on caller's stack, so deleting would be bad
         return false;
@@ -1508,6 +1510,7 @@ namespace Realm {
 
     public:
       GASNetCondVar &cv;
+      bool signalled;
       bool poisoned;
     };
 
@@ -1520,7 +1523,7 @@ namespace Realm {
 	AutoHSLLock a(mutex);
 
 	// re-check condition before going to sleep
-	while(gen_needed > generation) {
+	while(!w.signalled) {
 	  // now just sleep on the condition variable - hope we wake up
 	  cv.wait();
 	}
