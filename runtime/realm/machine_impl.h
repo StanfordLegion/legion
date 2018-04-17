@@ -191,20 +191,12 @@ namespace Realm {
     class ProcessorQueryImpl {
     public:
       ProcessorQueryImpl(const Machine& _machine);
-      // SEEMA
+
       static int init;
       static std::vector<Processor>* _toc_procs_list;
       static std::vector<Processor>* _loc_procs_list;
-      static std::map<Processor, Memory>* _proc_sysmems;
-      static std::map<Processor, Memory>* _proc_regmems;
-      static std::map<Processor, Memory>* _proc_fbmems;
-      static std::map<Processor, Memory>* _proc_zcmems;
-      static std::map<Processor, unsigned int> _proc_fbmems_affinity;
-      static std::vector<Machine::ProcessorMemoryAffinity> _proc_mem_affinities;
-
       static std::vector<Processor>* _omp_procs_list;
       static std::vector<Processor>* _io_procs_list;
-
       static std::map<Memory, std::vector<Processor> >* _sysmem_local_procs;
       static std::map<Memory, std::vector<Processor> >* _sysmem_local_io_procs;
       static std::map<Memory, std::vector<Processor> >* _fbmem_local_procs;
@@ -214,7 +206,7 @@ namespace Realm {
       ProcessorQueryImpl(const ProcessorQueryImpl& copy_from);
       ~ProcessorQueryImpl(void);
 
-      // SEEMAH
+
       std::vector<Processor>* toc_procs_list(void) const;
       std::vector<Processor>* loc_procs_list(void) const;
       std::vector<Processor>* io_procs_list(void) const;
@@ -231,9 +223,12 @@ namespace Realm {
       void add_predicate(ProcQueryPredicate *pred);
 
       Processor first_match(void) const;
-      Processor next_match(Processor after) const;
+      Processor next_match(Processor after);
       size_t count_matches(void) const;
       Processor random_match(void) const;
+
+      void set_cached(Memory m) { cached_mem = m; if (predicates.size() == 1) is_cached = true; };
+      void reset_cached() { is_cached = false; };
 
       // SEEMAH: specialized iterators
       std::vector<Processor>::const_iterator begin(Processor::Kind k) const;
@@ -249,6 +244,14 @@ namespace Realm {
       bool is_restricted_kind;
       Processor::Kind restricted_kind;
       std::vector<ProcQueryPredicate *> predicates;     
+      Memory cached_mem;
+      bool is_cached;
+      unsigned int cur_index;
+
+      // cached list of processors
+      std::vector<Processor>* cached_list() const;
+      // cached iterator
+      bool cached_list_next(Processor after, Processor& nextp); 
     };            
 
     typedef QueryPredicate<Memory, MachineMemInfo> MemoryQueryPredicate;
@@ -356,7 +359,7 @@ namespace Realm {
       std::vector<MemoryQueryPredicate *> predicates;     
       std::vector<Memory>* sysmems_list(void) const;
       std::vector<Memory>* fbmems_list(void) const;
-
+      std::vector<Memory>* cached_list() const;
     };            
 
     extern MachineImpl *machine_singleton;

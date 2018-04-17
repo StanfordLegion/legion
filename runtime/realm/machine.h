@@ -176,7 +176,7 @@ namespace Realm {
       Processor first(void) const;
 
       // return the next matched processor after the one given, or NO_PROC
-      Processor next(Processor after) const;
+      Processor next(Processor after);
 
       // return a random matched processor, or NO_PROC if none exist
       Processor random(void) const;
