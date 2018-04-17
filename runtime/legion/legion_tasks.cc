@@ -2728,6 +2728,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, FINALIZE_MAP_TASK_CALL);
+      if (mapper == NULL)
+        mapper = runtime->find_mapper(current_proc, map_id);
       // first check the processors to make sure they are all on the
       // same node and of the same kind, if we know we have a must epoch
       // owner then we also know there is only one valid choice
