@@ -3018,6 +3018,212 @@ legion_copy_launcher_add_arrival_barrier(legion_copy_launcher_t launcher_,
 }
 
 // -----------------------------------------------------------------------
+// Index Copy Operations
+// -----------------------------------------------------------------------
+
+legion_index_copy_launcher_t
+legion_index_copy_launcher_create(
+  legion_domain_t domain_,
+  legion_predicate_t pred_ /* = legion_predicate_true() */,
+  legion_mapper_id_t id /* = 0 */,
+  legion_mapping_tag_id_t launcher_tag /* = 0 */)
+{
+  Domain domain = CObjectWrapper::unwrap(domain_);
+  Predicate *pred = CObjectWrapper::unwrap(pred_);
+
+  IndexCopyLauncher *launcher = new IndexCopyLauncher(domain, *pred, id, launcher_tag);
+  return CObjectWrapper::wrap(launcher);
+}
+
+void
+legion_index_copy_launcher_destroy(legion_index_copy_launcher_t handle_)
+{
+  IndexCopyLauncher *handle = CObjectWrapper::unwrap(handle_);
+
+  delete handle;
+}
+
+void
+legion_index_copy_launcher_execute(legion_runtime_t runtime_,
+                                   legion_context_t ctx_,
+                                   legion_index_copy_launcher_t launcher_)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+  IndexCopyLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+
+  runtime->issue_copy_operation(ctx, *launcher);
+}
+
+unsigned
+legion_index_copy_launcher_add_src_region_requirement_logical_region(
+  legion_index_copy_launcher_t launcher_,
+  legion_logical_region_t handle_,
+  legion_projection_id_t proj /* = 0 */,
+  legion_privilege_mode_t priv,
+  legion_coherence_property_t prop,
+  legion_logical_region_t parent_,
+  legion_mapping_tag_id_t tag /* = 0 */,
+  bool verified /* = false*/)
+{
+  IndexCopyLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+  LogicalRegion handle = CObjectWrapper::unwrap(handle_);
+  LogicalRegion parent = CObjectWrapper::unwrap(parent_);
+
+  unsigned idx = launcher->src_requirements.size();
+  launcher->src_requirements.push_back(
+    RegionRequirement(handle, proj, priv, prop, parent, tag, verified));
+  return idx;
+}
+
+unsigned
+legion_index_copy_launcher_add_dst_region_requirement_logical_region(
+  legion_index_copy_launcher_t launcher_,
+  legion_logical_region_t handle_,
+  legion_projection_id_t proj /* = 0 */,
+  legion_privilege_mode_t priv,
+  legion_coherence_property_t prop,
+  legion_logical_region_t parent_,
+  legion_mapping_tag_id_t tag /* = 0 */,
+  bool verified /* = false*/)
+{
+  IndexCopyLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+  LogicalRegion handle = CObjectWrapper::unwrap(handle_);
+  LogicalRegion parent = CObjectWrapper::unwrap(parent_);
+
+  unsigned idx = launcher->dst_requirements.size();
+  launcher->dst_requirements.push_back(
+    RegionRequirement(handle, proj, priv, prop, parent, tag, verified));
+  return idx;
+}
+
+unsigned
+legion_index_copy_launcher_add_src_region_requirement_logical_partition(
+  legion_index_copy_launcher_t launcher_,
+  legion_logical_partition_t handle_,
+  legion_projection_id_t proj /* = 0 */,
+  legion_privilege_mode_t priv,
+  legion_coherence_property_t prop,
+  legion_logical_region_t parent_,
+  legion_mapping_tag_id_t tag /* = 0 */,
+  bool verified /* = false*/)
+{
+  IndexCopyLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+  LogicalPartition handle = CObjectWrapper::unwrap(handle_);
+  LogicalRegion parent = CObjectWrapper::unwrap(parent_);
+
+  unsigned idx = launcher->src_requirements.size();
+  launcher->src_requirements.push_back(
+    RegionRequirement(handle, proj, priv, prop, parent, tag, verified));
+  return idx;
+}
+
+unsigned
+legion_index_copy_launcher_add_dst_region_requirement_logical_partition(
+  legion_index_copy_launcher_t launcher_,
+  legion_logical_partition_t handle_,
+  legion_projection_id_t proj /* = 0 */,
+  legion_privilege_mode_t priv,
+  legion_coherence_property_t prop,
+  legion_logical_region_t parent_,
+  legion_mapping_tag_id_t tag /* = 0 */,
+  bool verified /* = false*/)
+{
+  IndexCopyLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+  LogicalPartition handle = CObjectWrapper::unwrap(handle_);
+  LogicalRegion parent = CObjectWrapper::unwrap(parent_);
+
+  unsigned idx = launcher->dst_requirements.size();
+  launcher->dst_requirements.push_back(
+    RegionRequirement(handle, proj, priv, prop, parent, tag, verified));
+  return idx;
+}
+
+unsigned
+legion_index_copy_launcher_add_dst_region_requirement_logical_region_reduction(
+  legion_index_copy_launcher_t launcher_,
+  legion_logical_region_t handle_,
+  legion_projection_id_t proj /* = 0 */,
+  legion_reduction_op_id_t redop,
+  legion_coherence_property_t prop,
+  legion_logical_region_t parent_,
+  legion_mapping_tag_id_t tag /* = 0 */,
+  bool verified /* = false*/)
+{
+  IndexCopyLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+  LogicalRegion handle = CObjectWrapper::unwrap(handle_);
+  LogicalRegion parent = CObjectWrapper::unwrap(parent_);
+
+  unsigned idx = launcher->dst_requirements.size();
+  launcher->dst_requirements.push_back(
+    RegionRequirement(handle, redop, proj, prop, parent, tag, verified));
+  return idx;
+}
+
+unsigned
+legion_index_copy_launcher_add_dst_region_requirement_logical_partition_reduction(
+  legion_index_copy_launcher_t launcher_,
+  legion_logical_partition_t handle_,
+  legion_projection_id_t proj /* = 0 */,
+  legion_reduction_op_id_t redop,
+  legion_coherence_property_t prop,
+  legion_logical_region_t parent_,
+  legion_mapping_tag_id_t tag /* = 0 */,
+  bool verified /* = false*/)
+{
+  IndexCopyLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+  LogicalPartition handle = CObjectWrapper::unwrap(handle_);
+  LogicalRegion parent = CObjectWrapper::unwrap(parent_);
+
+  unsigned idx = launcher->dst_requirements.size();
+  launcher->dst_requirements.push_back(
+    RegionRequirement(handle, redop, proj, prop, parent, tag, verified));
+  return idx;
+}
+
+void
+legion_index_copy_launcher_add_src_field(legion_index_copy_launcher_t launcher_,
+                                         unsigned idx,
+                                         legion_field_id_t fid,
+                                         bool inst /* = true */)
+{
+  IndexCopyLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+
+  launcher->add_src_field(idx, fid, inst);
+}
+
+void
+legion_index_copy_launcher_add_dst_field(legion_index_copy_launcher_t launcher_,
+                                         unsigned idx,
+                                         legion_field_id_t fid,
+                                         bool inst /* = true */)
+{
+  IndexCopyLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+
+  launcher->add_dst_field(idx, fid, inst);
+}
+
+void
+legion_index_copy_launcher_add_wait_barrier(legion_index_copy_launcher_t launcher_,
+                                            legion_phase_barrier_t bar_)
+{
+  IndexCopyLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+  PhaseBarrier bar = CObjectWrapper::unwrap(bar_);
+
+  launcher->add_wait_barrier(bar);
+}
+
+void
+legion_index_copy_launcher_add_arrival_barrier(legion_index_copy_launcher_t launcher_,
+                                               legion_phase_barrier_t bar_)
+{
+  IndexCopyLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+  PhaseBarrier bar = CObjectWrapper::unwrap(bar_);
+
+  launcher->add_arrival_barrier(bar);
+}
+
+// -----------------------------------------------------------------------
 // Acquire Operations
 // -----------------------------------------------------------------------
 
