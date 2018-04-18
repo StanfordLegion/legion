@@ -9998,7 +9998,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     ShardID CyclicShardingFunctor::shard(const DomainPoint &point,
                                          const Domain &full_space,
-                                         const size_t total_shards) const
+                                         const size_t total_shards)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
