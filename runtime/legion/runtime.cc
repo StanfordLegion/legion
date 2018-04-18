@@ -10074,7 +10074,14 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(full_space.contains(point));
 #endif
-      return functor->shard(point, full_space, total_shards);
+      ShardID result = functor->shard(point, full_space, total_shards);
+      if (total_shards <= result)
+        REPORT_LEGION_ERROR(ERROR_ILLEGAL_SHARDING_FUNCTOR_OUTPUT,
+                            "Illegal output shard %d from sharding functor %d. "
+                            "Shards for this index space launch must be "
+                            "between 0 and %ld (exclusive).", result,
+                            sharding_id, total_shards)
+      return result;
     }
 
     //--------------------------------------------------------------------------
