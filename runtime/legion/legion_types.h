@@ -335,6 +335,7 @@ namespace Legion {
       LG_CONTROL_REP_LAUNCH_TASK_ID,
       LG_CONTROL_REP_DELETE_TASK_ID,
       LG_RECLAIM_FUTURE_MAP_TASK_ID,
+      LG_DEFER_COMPOSITE_COPY_TASK_ID,
       LG_TIGHTEN_INDEX_SPACE_TASK_ID,
       LG_DEFER_VERSION_BROADCAST_TASK_ID,
       LG_REMOTE_PHYSICAL_REQUEST_TASK_ID,
@@ -422,6 +423,7 @@ namespace Legion {
         "Control Replication Launch",                             \
         "Control Replciation Delete",                             \
         "Reclaim Future Map",                                     \
+        "Defer Composite Copy",                                   \
         "Tighten Index Space",                                    \
         "Defer Version Broadcast",                                \
         "Remote Physical Context Request",                        \

@@ -22499,6 +22499,13 @@ namespace Legion {
             ReplicateContext::handle_future_map_reclaim(args);
             break;
           }
+#ifdef CVOPT
+        case LG_DEFER_COMPOSITE_COPY_TASK_ID:
+          {
+            ReplicateContext::handle_deferred_copy_request(args);
+            break;
+          }
+#endif
         case LG_TIGHTEN_INDEX_SPACE_TASK_ID:
           {
             IndexSpaceExpression::handle_tighten_index_space(args);

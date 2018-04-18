@@ -10668,7 +10668,16 @@ namespace Legion {
         find_or_buffer_composite_view_copy_request(derez, source);
       if (view == NULL)
         return;
-      view->handle_sharding_copy_request(derez, runtime, this, source);
+      // These are expensive and we don't ever want to block
+      // the virtual channel where we're handling this so 
+      // always defer them onto a normal processor
+      const size_t remaining_bytes = derez.get_remaining_bytes();
+      void *buffer = malloc(remaining_bytes);
+      memcpy(buffer, derez.get_current_pointer(), remaining_bytes);
+      derez.advance_pointer(remaining_bytes);
+      DeferCompositeCopyArgs args(this, runtime, view, source,
+                                  buffer, remaining_bytes, false/*reduce*/);
+      runtime->issue_runtime_meta_task(args, LG_THROUGHPUT_MESSAGE_PRIORITY);
     }
 
     //--------------------------------------------------------------------------
@@ -10680,7 +10689,33 @@ namespace Legion {
         find_or_buffer_composite_view_reduction_request(derez, source);
       if (view == NULL)
         return;
-      view->handle_sharding_reduction_request(derez, runtime, this, source);
+      // These are expensive and we don't ever want to block
+      // the virtual channel where we're handling this so 
+      // always defer them onto a normal processor
+      const size_t remaining_bytes = derez.get_remaining_bytes();
+      void *buffer = malloc(remaining_bytes);
+      memcpy(buffer, derez.get_current_pointer(), remaining_bytes);
+      derez.advance_pointer(remaining_bytes);
+      DeferCompositeCopyArgs args(this, runtime, view, source,
+                                  buffer, remaining_bytes, true/*reduce*/);
+      runtime->issue_runtime_meta_task(args, LG_THROUGHPUT_MESSAGE_PRIORITY);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ReplicateContext::handle_deferred_copy_request(
+                                                                 const void *as)
+    //--------------------------------------------------------------------------
+    {
+      const DeferCompositeCopyArgs *args = (const DeferCompositeCopyArgs*)as;
+      Deserializer derez(args->buffer, args->length);
+      if (args->reduce)
+        args->view->handle_sharding_reduction_request(derez, args->runtime,
+                                                      args->ctx, args->source);
+      else
+        args->view->handle_sharding_copy_request(derez, args->runtime,
+                                                 args->ctx, args->source);
+      // Always free our buffer when we are done
+      free(args->buffer);
     }
 #else
     //--------------------------------------------------------------------------
@@ -10935,9 +10970,12 @@ namespace Legion {
         for (std::vector<PendingCopy>::const_iterator it = 
               to_copy.begin(); it != to_copy.end(); it++)
         {
-          Deserializer derez(it->buffer, it->buffer_size);
-          view->handle_sharding_copy_request(derez, runtime, this, it->source);
-          free(it->buffer);
+          // These are expensive and we don't ever want to block
+          // the virtual channel where we're handling this so 
+          // always defer them onto a normal processor
+          DeferCompositeCopyArgs args(this, runtime, view, it->source,
+                        it->buffer, it->buffer_size, false/*reduce*/);
+          runtime->issue_runtime_meta_task(args,LG_THROUGHPUT_MESSAGE_PRIORITY);
         }
       }
       if (!to_reduce.empty())
@@ -10945,10 +10983,12 @@ namespace Legion {
         for (std::vector<PendingCopy>::const_iterator it = 
               to_reduce.begin(); it != to_reduce.end(); it++)
         {
-          Deserializer derez(it->buffer, it->buffer_size);
-          view->handle_sharding_reduction_request(derez, runtime, 
-                                                  this, it->source);
-          free(it->buffer);
+          // These are expensive and we don't ever want to block
+          // the virtual channel where we're handling this so 
+          // always defer them onto a normal processor
+          DeferCompositeCopyArgs args(this, runtime, view, it->source,
+                          it->buffer, it->buffer_size, true/*reduce*/);
+          runtime->issue_runtime_meta_task(args,LG_THROUGHPUT_MESSAGE_PRIORITY);
         }
       }
 #else

@@ -1260,6 +1260,27 @@ namespace Legion {
         ReplicateContext *const ctx;
         ReplFutureMapImpl *const impl;
       };
+#ifdef CVOPT
+      struct DeferCompositeCopyArgs :
+        public LgTaskArgs<DeferCompositeCopyArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_DEFER_COMPOSITE_COPY_TASK_ID;
+      public:
+        DeferCompositeCopyArgs(ReplicateContext *c, Runtime *rt,
+                               CompositeView *v, AddressSpaceID src,
+                               void *b, size_t l, bool r)
+          : LgTaskArgs<DeferCompositeCopyArgs>(0), ctx(c), runtime(rt),
+            view(v), source(src), buffer(b), length(l), reduce(r) { }
+      public:
+        ReplicateContext *const ctx;
+        Runtime *const runtime;
+        CompositeView *const view;
+        const AddressSpaceID source;
+        void *const buffer;
+        const size_t length;
+        const bool reduce;
+      };
+#endif
       struct ISBroadcast {
       public:
         ISBroadcast(void) : did(0) { }
@@ -1574,6 +1595,7 @@ namespace Legion {
                                               AddressSpaceID source);
       void handle_composite_view_reduction_request(Deserializer &derez,
                                               AddressSpaceID source);
+      static void handle_deferred_copy_request(const void *args);
 #else
       void handle_composite_view_request(Deserializer &derez);
 #endif
