@@ -144,10 +144,14 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
     class Deserializer {
     public:
-      Deserializer(const void *buf, size_t buffer_size)
+      Deserializer(const void *buf, size_t buffer_size
+#ifdef DEBUG_LEGION
+          , size_t ctx_bytes = 0
+#endif
+          )
         : total_bytes(buffer_size), buffer((const char*)buf), index(0)
 #ifdef DEBUG_LEGION
-          , context_bytes(0)
+          , context_bytes(ctx_bytes)
 #endif
       { }
       Deserializer(const Deserializer &rhs)
@@ -210,6 +214,8 @@ namespace Legion {
       size_t index;
 #ifdef DEBUG_LEGION
       size_t context_bytes;
+    public:
+      inline size_t get_context_bytes(void) const { return context_bytes; }
 #endif
     };
 

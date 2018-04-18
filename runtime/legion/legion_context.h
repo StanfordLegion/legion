@@ -1279,6 +1279,9 @@ namespace Legion {
         void *const buffer;
         const size_t length;
         const bool reduce;
+#ifdef DEBUG_LEGION
+        size_t context_bytes;
+#endif
       };
 #endif
       struct ISBroadcast {
@@ -1698,6 +1701,9 @@ namespace Legion {
         void *buffer;
         size_t buffer_size;
         AddressSpaceID source;
+#ifdef DEBUG_LEGION
+        size_t context_bytes;
+#endif
       };
       std::map<RtEvent,std::vector<PendingCopy> > 
                                     pending_composite_view_copy_requests;

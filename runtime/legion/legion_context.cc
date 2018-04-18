@@ -10674,10 +10674,13 @@ namespace Legion {
       const size_t remaining_bytes = derez.get_remaining_bytes();
       void *buffer = malloc(remaining_bytes);
       memcpy(buffer, derez.get_current_pointer(), remaining_bytes);
-      derez.advance_pointer(remaining_bytes);
       DeferCompositeCopyArgs args(this, runtime, view, source,
                                   buffer, remaining_bytes, false/*reduce*/);
+#ifdef DEBUG_LEGION
+      args.context_bytes = derez.get_context_bytes();
+#endif
       runtime->issue_runtime_meta_task(args, LG_THROUGHPUT_MESSAGE_PRIORITY);
+      derez.advance_pointer(remaining_bytes);
     }
 
     //--------------------------------------------------------------------------
@@ -10695,10 +10698,13 @@ namespace Legion {
       const size_t remaining_bytes = derez.get_remaining_bytes();
       void *buffer = malloc(remaining_bytes);
       memcpy(buffer, derez.get_current_pointer(), remaining_bytes);
-      derez.advance_pointer(remaining_bytes);
       DeferCompositeCopyArgs args(this, runtime, view, source,
                                   buffer, remaining_bytes, true/*reduce*/);
+#ifdef DEBUG_LEGION
+      args.context_bytes = derez.get_context_bytes();
+#endif
       runtime->issue_runtime_meta_task(args, LG_THROUGHPUT_MESSAGE_PRIORITY);
+      derez.advance_pointer(remaining_bytes);
     }
 
     //--------------------------------------------------------------------------
@@ -10707,7 +10713,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       const DeferCompositeCopyArgs *args = (const DeferCompositeCopyArgs*)as;
+#ifdef DEBUG_LEGION
+      Deserializer derez(args->buffer, args->length, args->context_bytes);
+#else
       Deserializer derez(args->buffer, args->length);
+#endif
       if (args->reduce)
         args->view->handle_sharding_reduction_request(derez, args->runtime,
                                                       args->ctx, args->source);
@@ -10975,6 +10985,9 @@ namespace Legion {
           // always defer them onto a normal processor
           DeferCompositeCopyArgs args(this, runtime, view, it->source,
                         it->buffer, it->buffer_size, false/*reduce*/);
+#ifdef DEBUG_LEGION
+          args.context_bytes = it->context_bytes;
+#endif
           runtime->issue_runtime_meta_task(args,LG_THROUGHPUT_MESSAGE_PRIORITY);
         }
       }
@@ -10988,6 +11001,9 @@ namespace Legion {
           // always defer them onto a normal processor
           DeferCompositeCopyArgs args(this, runtime, view, it->source,
                           it->buffer, it->buffer_size, true/*reduce*/);
+#ifdef DEBUG_LEGION
+          args.context_bytes = it->context_bytes;
+#endif
           runtime->issue_runtime_meta_task(args,LG_THROUGHPUT_MESSAGE_PRIORITY);
         }
       }
@@ -11026,6 +11042,10 @@ namespace Legion {
       derez.advance_pointer(remaining_bytes);
       pending_composite_view_copy_requests[composite_name].push_back(
           PendingCopy(buffer, remaining_bytes, source));
+#ifdef DEBUG_LEGION
+      pending_composite_view_copy_requests[composite_name].back().context_bytes
+        = derez.get_context_bytes(); 
+#endif
       return NULL;
     }
 
@@ -11050,6 +11070,10 @@ namespace Legion {
       derez.advance_pointer(remaining_bytes);
       pending_composite_view_reduction_requests[composite_name].push_back(
           PendingCopy(buffer, remaining_bytes, source));
+#ifdef DEBUG_LEGION
+      pending_composite_view_copy_requests[composite_name].back().context_bytes
+        = derez.get_context_bytes(); 
+#endif
       return NULL;
     }
 #else
