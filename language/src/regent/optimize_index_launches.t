@@ -322,6 +322,36 @@ local function analyze_is_loop_invariant(cx, node)
     node, true)
 end
 
+local function analyze_is_projectable(cx, arg, loop_index)
+  -- 1. We can project any index access `p[...]`
+  if not arg:is(ast.typed.expr.IndexAccess) then
+    return false
+  end
+
+  -- 2. As long as `p` is a partition or cross product (otherwise this
+  -- is irrelevant, since we wouldn't be producing a region requirement).
+  if not (std.is_partition(std.as_read(arg.value.expr_type)) or
+       std.is_cross_product(std.as_read(arg.value.expr_type)))
+  then
+    return false
+  end
+
+  -- 3. And as long as `p` is loop-invariant (we have to index from
+  -- the same partition every time).
+  if not analyze_is_loop_invariant(cx, arg.value) then
+    return false
+  end
+
+  -- 4. And as long as the index itself is a simple expression of the
+  -- loop index.
+
+  -- FIXME: For now just accept the trivial projection functor `p[i]`
+  return (arg.index:is(ast.typed.expr.ID) and arg.index.value == loop_index) or
+    (arg.index:is(ast.typed.expr.Cast) and
+       arg.index.arg:is(ast.typed.expr.ID) and
+       arg.index.arg.value == loop_index)
+end
+
 local optimize_index_launch = {}
 
 local function ignore(...) end
@@ -435,8 +465,9 @@ local function optimize_loop_body(cx, node, report_pass, report_fail)
   --     must be one of:
   --
   --      a. Provably loop-invariant.
-  --      b. Provably loop-variant, with simple indexing which can be
-  --         analyzed by the optimizer.
+  --      b. Provably projectable (i.e. can be expressed as a
+  --         projection functor from the partition and index), with
+  --         simple indexing which can be analyzed by the optimizer.
   --      c. (Not yet implemented.) Neither, but (i) the region has no
   --         privileges, and (ii) it is provably a subregion of one of
   --         the other region arguments to the task (which must
@@ -459,7 +490,7 @@ local function optimize_loop_body(cx, node, report_pass, report_fail)
   local args = call.args
   local args_provably = ast.IndexLaunchArgsProvably {
     invariant = terralib.newlist(),
-    variant = terralib.newlist(),
+    projectable = terralib.newlist(),
   }
   local regions_previously_used = terralib.newlist()
   local mapping = {}
@@ -471,7 +502,7 @@ local function optimize_loop_body(cx, node, report_pass, report_fail)
 
     local arg_invariant = analyze_is_loop_invariant(loop_cx, arg)
 
-    local arg_variant = false
+    local arg_projectable = false
     local partition_type
 
     local arg_type = std.as_read(arg.expr_type)
@@ -481,22 +512,13 @@ local function optimize_loop_body(cx, node, report_pass, report_fail)
     mapping[arg] = param_types[i]
     -- Tests for conformance to index launch requirements.
     if std.is_ispace(arg_type) or std.is_region(arg_type) then
-      if arg:is(ast.typed.expr.IndexAccess) and
-        (std.is_partition(std.as_read(arg.value.expr_type)) or
-           std.is_cross_product(std.as_read(arg.value.expr_type)))
-      then
-        if (arg.index:is(ast.typed.expr.ID) and arg.index.value == node.symbol) or
-          (arg.index:is(ast.typed.expr.Cast) and
-             arg.index.arg:is(ast.typed.expr.ID) and
-             arg.index.arg.value == node.symbol)
-        then
-          partition_type = std.as_read(arg.value.expr_type)
-          arg_variant = true
-        end
+      if analyze_is_projectable(loop_cx, arg, node.symbol) then
+        partition_type = std.as_read(arg.value.expr_type)
+        arg_projectable = true
       end
 
-      if not (arg_variant or arg_invariant) then
-        report_fail(call, "loop optimization failed: argument " .. tostring(i) .. " is not provably variant or invariant")
+      if not (arg_projectable or arg_invariant) then
+        report_fail(call, "loop optimization failed: argument " .. tostring(i) .. " is not provably projectable or invariant")
         return
       end
     end
@@ -543,7 +565,7 @@ local function optimize_loop_body(cx, node, report_pass, report_fail)
     end
 
     args_provably.invariant[i] = arg_invariant
-    args_provably.variant[i] = arg_variant
+    args_provably.projectable[i] = arg_projectable
 
     regions_previously_used[i] = nil
     if std.is_region(arg_type) then

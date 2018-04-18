@@ -7630,7 +7630,7 @@ local function stat_index_launch_setup(cx, node, domain, actions)
   local args_partitions = terralib.newlist()
   for i, arg in ipairs(node.call.args) do
     local partition = false
-    if not node.args_provably.variant[i] then
+    if not node.args_provably.projectable[i] then
       args:insert(codegen.expr(cx, arg):read(cx))
     else
       -- Run codegen halfway to get the partition. Note: Remember to
@@ -7766,7 +7766,7 @@ local function stat_index_launch_setup(cx, node, domain, actions)
     if std.is_ispace(arg_type) then
       local param_type = param_types[i]
 
-      if not node.args_provably.variant[i] then
+      if not node.args_provably.projectable[i] then
         expr_call_setup_ispace_arg(
           cx, fn.value, arg_type, param_type, launcher, true, args_setup)
       else
@@ -7786,7 +7786,7 @@ local function stat_index_launch_setup(cx, node, domain, actions)
     local arg_type = arg_types[i]
     local param_type = param_types[i]
 
-    if not node.args_provably.variant[i] then
+    if not node.args_provably.projectable[i] then
       expr_call_setup_region_arg(
         cx, fn.value, arg_type, param_type, launcher, true, args_setup)
     else

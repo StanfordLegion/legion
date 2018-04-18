@@ -13,7 +13,7 @@
 -- limitations under the License.
 
 -- fails-with:
--- optimize_index_launch_list6.rg:70: loop optimization failed: argument 1 is not provably variant or invariant
+-- optimize_index_launch_list6.rg:70: loop optimization failed: argument 1 is not provably projectable or invariant
 --     f(p_disjoint[(int(i) + 1) % n])
 --     ^
 
