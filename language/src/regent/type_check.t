@@ -580,6 +580,93 @@ function type_check.expr_field_access(cx, node)
   }
 end
 
+local function is_analyzable_index(index)
+  return index:is(ast.typed.expr.Constant) or
+    (index:is(ast.typed.expr.ID) and not std.is_rawref(index.expr_type))
+end
+
+local function is_analyzable_index_expression(expr)
+  return is_analyzable_index(expr) or
+    (expr:is(ast.typed.expr.Binary) and
+       is_analyzable_index(expr.lhs) and
+       expr.rhs:is(ast.typed.expr.Constant) and
+       (expr.op == "+" or expr.op == "-"))
+end
+
+local function get_analyzable_index_key(index)
+  -- For certain kinds of analyzable expressions, we can trivially
+  -- identify them as being equivalent by a key (e.g. a constant
+  -- number, or a symbol representing an immutable variable). Use that
+  -- key when registering the subregions so they can be identified later.
+  if index:is(ast.typed.expr.Constant) or
+    (index:is(ast.typed.expr.ID) and not std.is_rawref(index.expr_type))
+  then
+    return index.value
+  end
+
+  -- Otherwise, just return the AST node. This will result in a
+  -- different subregion for every occurance of the expression, which
+  -- may be suboptimal but should still be correct.
+  return index
+end
+
+local function get_affine_coefficients(expr)
+  -- Return `x`, `b` satisfying the equation `expr = x + b`.
+
+  if type(expr) == "number" or terralib.isconstant(expr) then
+    return nil, std.get_subregion_index(expr)
+  end
+
+  if data.is_tuple(expr) then
+    return nil, expr
+  end
+
+  if std.is_symbol(expr) then
+    return expr, 0
+  end
+
+  if expr:is(ast.typed.expr.Binary) and
+      expr.lhs:is(ast.typed.expr.ID) and
+      expr.rhs:is(ast.typed.expr.Constant) and
+      (expr.op == "+" or expr.op == "-")
+  then
+    return expr.lhs.value, expr.rhs.value * (expr.op == "-" and -1 or 1)
+
+  else
+    assert(false)
+  end
+end
+
+local function analyze_index_noninterference(index, other_index)
+  -- Can we prove that these two indexes will always be
+  -- non-interfering?
+
+  -- Trivial case: numbers can be compared directly.
+  if (type(index) == "number" or type(other_index) == "number") and
+    index ~= other_index
+  then
+    return true
+  end
+
+  -- Otherwise attempt affine analysis.
+  local x1, b1 = get_affine_coefficients(index)
+  local x2, b2 = get_affine_coefficients(other_index)
+  if x1 == x1 and b1 ~= b2 then
+    return true
+  end
+
+  return false
+end
+
+local function add_analyzable_disjointness_constraints(cx, partition, subregion, index_key)
+  local other_subregions = partition:subregions_constant()
+  for other_key, other_subregion in other_subregions:items() do
+    if analyze_index_noninterference(index_key, other_key) then
+      std.add_constraint(cx, subregion, other_subregion, std.disjointness, true)
+    end
+  end
+end
+
 function type_check.expr_index_access(cx, node)
   local value = type_check.expr(cx, node.value)
   local value_type = std.check_read(cx, value)
@@ -589,12 +676,8 @@ function type_check.expr_index_access(cx, node)
   -- Some kinds of operations require information about the index used
   -- (e.g. partition access at a constant). Save that index now to
   -- avoid getting entangled in any implicit casts.
-  local static_index
-  if index:is(ast.typed.expr.Constant) or
-    (index:is(ast.typed.expr.ID) and not std.is_rawref(index.expr_type))
-  then
-    static_index = index.value
-  end
+  local analyzable = is_analyzable_index_expression(index)
+  local index_key = get_analyzable_index_key(index)
 
   if std.is_partition(value_type) then
     local color_type = value_type:colors().index_type
@@ -607,16 +690,11 @@ function type_check.expr_index_access(cx, node)
     local parent = value_type:parent_region()
 
     local subregion
-    if static_index then
-      subregion = value_type:subregion_constant(static_index)
+    if analyzable then
+      subregion = value_type:subregion_constant(index_key)
 
       if value_type:is_disjoint() then
-        local other_subregions = value_type:subregions_constant()
-        for other_index, other_subregion in other_subregions:items() do
-          if static_index ~= other_index then
-            std.add_constraint(cx, subregion, other_subregion, std.disjointness, true)
-          end
-        end
+        add_analyzable_disjointness_constraints(cx, value_type, subregion, index_key)
       end
     else
       subregion = value_type:subregion_dynamic()
@@ -642,17 +720,12 @@ function type_check.expr_index_access(cx, node)
     local partition = value_type:partition()
     local parent = value_type:parent_region()
     local subregion, subpartition
-    if static_index then
-      subpartition = value_type:subpartition_constant(static_index)
+    if index_key then
+      subpartition = value_type:subpartition_constant(index_key)
       subregion = subpartition:parent_region()
 
       if value_type:is_disjoint() then
-        local other_subregions = value_type:subregions_constant()
-        for other_index, other_subregion in other_subregions:items() do
-          if static_index ~= other_index then
-            std.add_constraint(cx, subregion, other_subregion, std.disjointness, true)
-          end
-        end
+        add_analyzable_disjointness_constraints(cx, value_type, subregion, index_key)
       end
     else
       subpartition = value_type:subpartition_dynamic()

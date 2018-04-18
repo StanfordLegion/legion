@@ -2245,8 +2245,8 @@ std.aliased = ast.disjointness_kind.Aliased {}
 
 -- This is used in methods such as subregion_constant where the index
 -- of a subregion has to be munged to make it safe to go in a map.
-local function get_subregion_index(i)
-  if type(i) == "number" or std.is_symbol(i) then
+function std.get_subregion_index(i)
+  if type(i) == "number" or std.is_symbol(i) or ast.is_node(i) then
     return i
   elseif terralib.isconstant(i) and std.is_index_type(i.type) then
     -- Terra, pretty please give me the value inside this constant
@@ -2331,7 +2331,7 @@ do
     end
 
     function st:subregion_constant(i)
-      local i = get_subregion_index(i)
+      local i = std.get_subregion_index(i)
       if not self.subregions[i] then
         self.subregions[i] = self:subregion_dynamic()
       end
@@ -2448,7 +2448,7 @@ function std.cross_product(...)
 
   function st:subpartition_constant(i)
     local region_type = self:subregion_constant(i)
-    local i = get_subregion_index(i)
+    local i = std.get_subregion_index(i)
     if not self.subpartitions[i] then
       local partition = st:subpartition_dynamic(region_type)
       self.subpartitions[i] = partition
