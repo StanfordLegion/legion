@@ -9430,7 +9430,8 @@ namespace Legion {
         const LogicalRegion upper = upper_bound->as_region_node()->handle;
         for (Domain::DomainPointIterator itr(launch_space_domain); itr; itr++)
         {
-          const LogicalRegion handle = functor->project(upper, itr.p);
+          const LogicalRegion handle = 
+            functor->project(upper, itr.p, launch_space_domain);
           IndexSpaceNode *subspace = forest->get_node(handle.get_index_space());
           IndexSpaceExpression *intersection = 
             forest->intersect_index_spaces(target, subspace);
@@ -9444,7 +9445,8 @@ namespace Legion {
         const LogicalPartition upper = upper_bound->as_partition_node()->handle;
         for (Domain::DomainPointIterator itr(launch_space_domain); itr; itr++)
         {
-          const LogicalRegion handle = functor->project(upper, itr.p);
+          const LogicalRegion handle = 
+            functor->project(upper, itr.p, launch_space_domain);
           IndexSpaceNode *subspace = forest->get_node(handle.get_index_space());
           IndexSpaceExpression *intersection = 
             forest->intersect_index_spaces(target, subspace);
