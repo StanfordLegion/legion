@@ -3146,6 +3146,20 @@ end
 -- ## Main
 -- #################
 
+local projection_functors = terralib.newlist()
+
+do
+  local next_id = 1
+  function std.register_projection_functor(depth, region_functor, partition_functor)
+    local id = next_id
+    next_id = next_id + 1
+
+    projection_functors:insert(terralib.newlist({id, depth, region_functor, partition_functor}))
+
+    return id
+  end
+end
+
 local variants = terralib.newlist()
 
 function std.register_variant(variant)
@@ -3291,6 +3305,30 @@ function std.setup(main_task, extra_setup_thunk, task_wrappers, registration_nam
     end
   end
 
+  local projection_functor_registrations = projection_functors:map(
+    function(args)
+      local id, depth, region_functor, partition_functor = unpack(args)
+      -- Hack: Work around Terra not wanting to escape nil.
+      if region_functor and partition_functor then
+        return quote
+          c.legion_runtime_preregister_projection_functor(
+            id, depth, region_functor, partition_functor)
+        end
+      elseif region_functor then
+        return quote
+          c.legion_runtime_preregister_projection_functor(
+            id, depth, region_functor, nil)
+        end
+      elseif partition_functor then
+        return quote
+          c.legion_runtime_preregister_projection_functor(
+            id, depth, nil, partition_functor)
+        end
+      else
+        assert(false)
+      end
+    end)
+
   local task_registrations = variants:map(
     function(variant)
       local task = variant.task
@@ -3425,6 +3463,7 @@ function std.setup(main_task, extra_setup_thunk, task_wrappers, registration_nam
   local terra main([argc], [argv])
     [reduction_registrations];
     [layout_registrations];
+    [projection_functor_registrations];
     [task_registrations];
     [cuda_setup];
     [extra_setup];

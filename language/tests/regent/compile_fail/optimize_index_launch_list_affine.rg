@@ -12,6 +12,12 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
+-- fails-with:
+-- optimize_index_launch_list_affine.rg:34: loop optimization failed: argument 1 interferes with itself
+--     g(p[i * 2])
+--      ^
+
+
 import "regent"
 
 -- This tests the various loop optimizations supported by the
@@ -24,22 +30,14 @@ where reads(r), writes(r) do
   return 5
 end
 
-terra compute_index(i : int, j : int)
-  return i
-end
-
 task main()
   var n = 5
   var r = region(ispace(ptr, n), int)
-  var p = partition(equal, r, ispace(int1d, 2))
-  var q = partition(equal, r, ispace(int1d, 2))
-  var s = cross_product(p, q)
+  var p = partition(equal, r, ispace(int1d, 5))
 
+  __demand(__parallel)
   for i = 0, 2 do
-    __demand(__parallel)
-    for j = 0, 2 do
-      g(s[i][j])
-    end
+    g(p[i * 2])
   end
 end
 regentlib.start(main)

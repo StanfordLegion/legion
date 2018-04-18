@@ -17,10 +17,13 @@ import "regent"
 -- This tests the various loop optimizations supported by the
 -- compiler.
 
-local c = regentlib.c
-
 task g(r : region(int)) : int
 where reads(r), writes(r) do
+  return 5
+end
+
+task g2(r : region(int), s : region(int)) : int
+where reads writes(r, s) do
   return 5
 end
 
@@ -31,15 +34,26 @@ end
 task main()
   var n = 5
   var r = region(ispace(ptr, n), int)
-  var p = partition(equal, r, ispace(int1d, 2))
-  var q = partition(equal, r, ispace(int1d, 2))
-  var s = cross_product(p, q)
+  var p = partition(equal, r, ispace(int1d, 5))
 
+  __demand(__parallel)
   for i = 0, 2 do
-    __demand(__parallel)
-    for j = 0, 2 do
-      g(s[i][j])
-    end
+    g(p[i+0])
+  end
+
+  __demand(__parallel)
+  for i = 0, 2 do
+    g(p[i+1])
+  end
+
+  __demand(__parallel)
+  for i = 1, 3 do
+    g(p[i-0])
+  end
+
+  __demand(__parallel)
+  for i = 1, 3 do
+    g(p[i-1])
   end
 end
 regentlib.start(main)
