@@ -300,7 +300,7 @@ namespace Legion {
                       ReferenceMutator *mutator);
       void get_void_result(const DomainPoint &point, 
                             bool silence_warnings = true);
-      void wait_all_results(bool silence_warnings = true);
+      virtual void wait_all_results(bool silence_warnings = true);
       void complete_all_futures(void);
       bool reset_all_futures(void);
     public:
@@ -354,6 +354,7 @@ namespace Legion {
       virtual Future get_future(const DomainPoint &point,
                                 bool allow_empty = false);
       virtual void get_all_futures(std::map<DomainPoint,Future> &futures);
+      virtual void wait_all_results(bool silence_warnings = true);
     public:
       void set_sharding_function(ShardingFunction *function);
       void handle_future_map_request(Deserializer &derez);

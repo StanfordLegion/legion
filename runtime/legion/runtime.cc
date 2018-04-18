@@ -1271,12 +1271,35 @@ namespace Legion {
       // Have to hold the lock when doing this as there might be
       // other requests for the future map
       AutoLock m_lock(gc_lock);
-      FutureNameExchange collective(repl_ctx, collective_index);
-      collective.exchange_future_names(futures);
-      // When the collective is done we can mark that we've done it
-      // and then copy the results
-      collective_performed = true;
+      if (!collective_performed)
+      {
+        FutureNameExchange collective(repl_ctx, collective_index);
+        collective.exchange_future_names(futures);
+        // When the collective is done we can mark that we've done it
+        // and then copy the results
+        collective_performed = true;
+      }
       others = futures;
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplFutureMapImpl::wait_all_results(bool silence_warnings)
+    //--------------------------------------------------------------------------
+    {
+      if (runtime->runtime_warnings && !silence_warnings && 
+          (context != NULL) && !context->is_leaf_context())
+        REPORT_LEGION_WARNING(LEGION_WARNING_WAITING_ALL_FUTURES, 
+            "Waiting for all futures in a future map in "
+            "non-leaf task %s (UID %lld) is a violation of Legion's deferred "
+            "execution model best practices. You may notice a severe "
+            "performance degredation.", context->get_task_name(),
+            context->get_unique_id())
+      // As a proxy for this, we will get the names of all the futures
+      // needed for this future map in case we need them in the future
+      // The process of doing this will wait on both our ready event
+      // as well as on the ready events of all other shards
+      std::map<DomainPoint,Future> dummy_others;
+      get_all_futures(dummy_others);
     }
 
     //--------------------------------------------------------------------------
