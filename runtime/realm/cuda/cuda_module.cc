@@ -2232,7 +2232,7 @@ namespace Realm {
 	  AutoGPUContext agc(this);
 	  CHECK_CU( cuCtxEnablePeerAccess((*it)->context, 0) );
 	}
-	log_gpu.print() << "peer access enabled from GPU " << p << " to FB " << (*it)->fbmem->me;
+	log_gpu.info() << "peer access enabled from GPU " << p << " to FB " << (*it)->fbmem->me;
 	peer_fbs.insert((*it)->fbmem->me);
 
 	{
