@@ -109,11 +109,28 @@ local function check_privilege_noninterference(cx, task, arg,
   return true
 end
 
-local function strip_casts(expr)
-  if expr:is(ast.typed.expr.Cast) then
-    return expr.arg
+local function strip_casts(node)
+  if node:is(ast.typed.expr.Cast) then
+    return node.arg
   end
-  return expr
+  return node
+end
+
+local function is_constant_expr(node)
+  if node:is(ast.typed.expr.Constant) then
+    return true
+  end
+
+  if node:is(ast.typed.expr.Ctor) then
+    for _, field in ipairs(node.fields) do
+      if not is_constant_expr(field.value) then
+        return false
+      end
+    end
+    return true
+  end
+
+  return false
 end
 
 local function check_index_noninterference_self(cx, arg)
@@ -127,7 +144,7 @@ local function check_index_noninterference_self(cx, arg)
   -- Another easy case: index is loop variable plus or minus a constant.
   if (index:is(ast.typed.expr.Binary) and
       index.lhs:is(ast.typed.expr.ID) and cx:is_loop_index(index.lhs.value) and
-      index.rhs:is(ast.typed.expr.Constant) and
+      is_constant_expr(index.rhs) and
       (index.op == "+" or index.op == "-"))
   then
     return true

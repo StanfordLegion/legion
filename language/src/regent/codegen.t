@@ -2412,7 +2412,9 @@ local function make_partition_projection_functor(cx, expr, loop_index, color_spa
   local subregion_point = terralib.newsymbol(c.legion_domain_point_t)
   local subregion_setup
   if std.is_bounded_type(symbol_type) then
-    assert(false)
+    subregion_setup = quote
+      var [subregion_point] = [subregion_index]:to_domain_point()
+    end
   else
     -- Otherwise symbol_type has to be some simple integral type.
     assert(symbol_type:isintegral())
