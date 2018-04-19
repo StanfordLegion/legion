@@ -225,7 +225,7 @@ setmetatable(data.tuple, { __index = terralib.newlist })
 data.tuple.__index = data.tuple
 
 function data.tuple.__eq(a, b)
-  if getmetatable(a) ~= data.tuple or getmetatable(b) ~= data.tuple then
+  if not data.is_tuple(a) or not data.is_tuple(b) then
     return false
   end
   if #a ~= #b then
