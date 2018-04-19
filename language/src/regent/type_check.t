@@ -597,7 +597,7 @@ local convert_constant_expr
 
 local function convert_ctor_to_constant(node)
   assert(node:is(ast.typed.expr.Ctor))
-  return data.newtuple(
+  return data.newvector(
     unpack(
       node.fields:map(
         function(field)
@@ -648,7 +648,7 @@ local function get_affine_coefficients(expr)
     return nil, std.get_subregion_index(expr)
   end
 
-  if data.is_tuple(expr) then
+  if data.is_vector(expr) then
     return nil, expr
   end
 
@@ -673,28 +673,6 @@ local function get_affine_coefficients(expr)
   end
 end
 
-local function upgrade_tuple(a, size)
-  if data.is_tuple(a) then
-    assert(#a == size)
-    return a
-  end
-  local result = terralib.newlist()
-  for i = 1, size do
-    result:insert(a)
-  end
-  return data.newtuple(unpack(result))
-end
-
-local function vector_eq(a, b)
-  if data.is_tuple(a) then
-    return a == upgrade_tuple(b, #a)
-  elseif data.is_tuple(b) then
-    return b == upgrade_tuple(a, #b)
-  else
-    return a == b
-  end
-end
-
 local function analyze_index_noninterference(index, other_index)
   -- Can we prove that these two indexes will always be
   -- non-interfering?
@@ -702,7 +680,7 @@ local function analyze_index_noninterference(index, other_index)
   -- Attempt a simple affine analysis.
   local x1, b1 = get_affine_coefficients(index)
   local x2, b2 = get_affine_coefficients(other_index)
-  if x1 == x1 and not vector_eq(b1, b2) then
+  if x1 == x1 and not data.vector.eq(b1, b2) then
     return true
   end
 

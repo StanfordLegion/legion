@@ -250,16 +250,6 @@ function data.tuple.__concat(a, b)
   return result
 end
 
--- Vector-scalar multiply.
-function data.tuple.__mul(a, b)
-  assert(data.is_tuple(a))
-  local result = data.newtuple()
-  for i, v in ipairs(a) do
-    result:insert(v * b)
-  end
-  return result
-end
-
 function data.tuple:slice(start --[[ inclusive ]], stop --[[ inclusive ]])
   local result = data.newtuple()
   for i = start, stop do
@@ -308,28 +298,30 @@ setmetatable(data.vector, { __index = data.tuple })
 data.vector.__index = data.vector
 
 function data.vector.__eq(a, b)
+  assert(data.is_vector(a) and data.is_vector(b))
+  for i, v in ipairs(a) do
+    if v ~= b[i] then
+      return false
+    end
+  end
+  return true
+end
+
+-- Since Lua doesn't support mixed-type equality, we have to expose this as a method.
+function data.vector.eq(a, b)
   if data.is_vector(a) then
-    if data.is_vector(b) then
-      for i, v in ipairs(a) do
-        if v ~= b[i] then
-          return false
-        end
-      end
-      return true
-    elseif type(b) == "number" then
+    if type(b) == "number" then
       for i, v in ipairs(a) do
         if v ~= b then
           return false
         end
       end
       return true
-    else
-      return false
     end
   elseif data.is_vector(b) then
-    return data.vector.__eq(b, a)
+    return data.vector.eq(b, a)
   end
-  assert(false) -- At least one should have been a vector
+  return a == b
 end
 
 function data.vector.__add(a, b)
