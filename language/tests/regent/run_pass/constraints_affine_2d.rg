@@ -34,7 +34,8 @@ task main()
 
   for i in s do
     assert_disjoint { x = p[i], y = p[i + { 1, 0 }] }
-    assert_disjoint { x = p[i - { 0, 1 }], y = p[i + { 0, 0 }] }
+    -- Shouldn't matter if explicit type is used or not.
+    assert_disjoint { x = p[i - { 0, 1 }], y = p[i + int2d { -1, 0 }] }
   end
 end
 regentlib.start(main)

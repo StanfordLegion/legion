@@ -593,15 +593,30 @@ local function is_analyzable_index_expression(node)
        (node.op == "+" or node.op == "-"))
 end
 
+local convert_constant_expr
+
 local function convert_ctor_to_constant(node)
   assert(node:is(ast.typed.expr.Ctor))
   return data.newtuple(
     unpack(
       node.fields:map(
         function(field)
-          assert(field.value:is(ast.typed.expr.Constant))
-          return std.get_subregion_index(field.value.value)
+          return convert_constant_expr(field.value)
   end)))
+end
+
+function convert_constant_expr(node)
+  if node:is(ast.typed.expr.Constant) then
+    return std.get_subregion_index(node.value)
+  elseif node:is(ast.typed.expr.Ctor) then
+    return convert_ctor_to_constant(node)
+  elseif node:is(ast.typed.expr.Cast) then
+    return convert_constant_expr(node.arg)
+  elseif node:is(ast.typed.expr.Unary) and node.op == "-" then
+    return -convert_constant_expr(node.rhs)
+  else
+    assert(false)
+  end
 end
 
 local function get_analyzable_index_key(node)
@@ -650,14 +665,7 @@ local function get_affine_coefficients(expr)
       expr.lhs:is(ast.typed.expr.ID) and
       (expr.op == "+" or expr.op == "-")
   then
-    local rhs_value
-    if expr.rhs:is(ast.typed.expr.Constant) then
-      rhs_value = std.get_subregion_index(expr.rhs.value)
-    elseif expr.rhs:is(ast.typed.expr.Ctor) then
-      rhs_value = convert_ctor_to_constant(expr.rhs)
-    else
-      assert(false)
-    end
+    local rhs_value = convert_constant_expr(expr.rhs)
     return expr.lhs.value, rhs_value * (expr.op == "-" and -1 or 1)
 
   else

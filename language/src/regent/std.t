@@ -2257,6 +2257,14 @@ function std.is_constant_expr(node)
     return true
   end
 
+  if node:is(ast.typed.expr.Cast) then
+    return std.is_constant_expr(node.arg)
+  end
+
+  if node:is(ast.typed.expr.Unary) then
+    return std.is_constant_expr(node.rhs)
+  end
+
   return false
 end
 
