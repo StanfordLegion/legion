@@ -39,6 +39,7 @@ end
 function context:new_local_scope()
   local cx = {
     constraints = self.constraints,
+    loop_index = false,
     loop_variables = {},
   }
   return setmetatable(cx, context)
@@ -56,6 +57,11 @@ function context.new_global_scope()
   return setmetatable(cx, context)
 end
 
+function context:set_loop_index(loop_index)
+  assert(not self.loop_index)
+  self.loop_index = loop_index
+end
+
 function context:add_loop_variable(loop_variable)
   assert(self.loop_variables)
   self.loop_variables[loop_variable] = true
@@ -64,6 +70,11 @@ end
 function context:is_loop_variable(variable)
   assert(self.loop_variables)
   return self.loop_variables[variable]
+end
+
+function context:is_loop_index(variable)
+  assert(self.loop_index)
+  return self.loop_index == variable
 end
 
 local function check_privilege_noninterference(cx, task, arg,
@@ -109,13 +120,13 @@ local function check_index_noninterference_self(cx, arg)
   local index = strip_casts(arg.index)
 
   -- Easy case: index is just the loop variable.
-  if (index:is(ast.typed.expr.ID) and cx:is_loop_variable(index.value)) then
+  if (index:is(ast.typed.expr.ID) and cx:is_loop_index(index.value)) then
     return true
   end
 
   -- Another easy case: index is loop variable plus or minus a constant.
   if (index:is(ast.typed.expr.Binary) and
-      index.lhs:is(ast.typed.expr.ID) and cx:is_loop_variable(index.lhs.value) and
+      index.lhs:is(ast.typed.expr.ID) and cx:is_loop_index(index.lhs.value) and
       index.rhs:is(ast.typed.expr.Constant) and
       (index.op == "+" or index.op == "-"))
   then
@@ -357,14 +368,14 @@ local function analyze_is_loop_invariant(cx, node)
     node, true)
 end
 
-local function analyze_is_simple_index_expression(cx)
+local function analyze_is_simple_index_expression_node(cx)
   return function(node)
     -- Expressions:
     if node:is(ast.typed.expr.ID) then
       -- Right now we can't capture a closure on any variable other
       -- than the loop variable, because that's the only variable that
       -- gets supplied through the projection functor API.
-      return cx:is_loop_variable(node.value)
+      return cx:is_loop_index(node.value)
     elseif node:is(ast.typed.expr.FieldAccess) or
       node:is(ast.typed.expr.IndexAccess) or
       node:is(ast.typed.expr.MethodCall) or
@@ -438,6 +449,13 @@ local function analyze_is_simple_index_expression(cx)
   end
 end
 
+local function analyze_is_simple_index_expression(cx, node)
+  return ast.mapreduce_node_postorder(
+    analyze_is_simple_index_expression_node(cx),
+    data.all,
+    node, true)
+end
+
 local function analyze_is_projectable(cx, arg)
   -- 1. We can project any index access `p[...]`
   if not arg:is(ast.typed.expr.IndexAccess) then
@@ -460,7 +478,7 @@ local function analyze_is_projectable(cx, arg)
 
   -- 4. And as long as the index itself is a simple expression of the
   -- loop index.
-  return analyze_is_simple_index_expression(arg.index)
+  return analyze_is_simple_index_expression(cx, arg.index)
 end
 
 local optimize_index_launch = {}
@@ -474,6 +492,7 @@ local function optimize_loop_body(cx, node, report_pass, report_fail)
   end
 
   local loop_cx = cx:new_local_scope()
+  loop_cx:set_loop_index(node.symbol)
   loop_cx:add_loop_variable(node.symbol)
 
   local preamble = terralib.newlist()

@@ -720,7 +720,7 @@ function type_check.expr_index_access(cx, node)
     local partition = value_type:partition()
     local parent = value_type:parent_region()
     local subregion, subpartition
-    if index_key then
+    if analyzable then
       subpartition = value_type:subpartition_constant(index_key)
       subregion = subpartition:parent_region()
 
