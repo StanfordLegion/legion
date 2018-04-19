@@ -14,6 +14,7 @@
 
 -- Regent Standard Library
 
+local affine_helper = require("regent/affine_helper")
 local ast = require("regent/ast")
 local base = require("regent/std_base")
 local cudahelper = require("regent/cudahelper")
@@ -2243,50 +2244,6 @@ std.wild = std.newsymbol(std.wild_type, "wild")
 std.disjoint = ast.disjointness_kind.Disjoint {}
 std.aliased = ast.disjointness_kind.Aliased {}
 
-function std.is_constant_expr(node)
-  if node:is(ast.typed.expr.Constant) then
-    return true
-  end
-
-  if node:is(ast.typed.expr.Ctor) then
-    for _, field in ipairs(node.fields) do
-      if not std.is_constant_expr(field.value) then
-        return false
-      end
-    end
-    return true
-  end
-
-  if node:is(ast.typed.expr.Cast) then
-    return std.is_constant_expr(node.arg)
-  end
-
-  if node:is(ast.typed.expr.Unary) then
-    return std.is_constant_expr(node.rhs)
-  end
-
-  return false
-end
-
--- This is used in methods such as subregion_constant where the index
--- of a subregion has to be munged to make it safe to go in a map.
-function std.get_subregion_index(i)
-  if type(i) == "number" or std.is_symbol(i) or
-    data.is_vector(i) or ast.is_node(i)
-  then
-    return i
-  elseif terralib.isconstant(i) and std.is_index_type(i.type) then
-    -- Terra, pretty please give me the value inside this constant
-    local value = (terra() return i end)()
-    return data.newvector(
-      unpack(
-        i.type.fields:map(
-          function(field_name) return value.__ptr[field_name] end)))
-  else
-    assert(false)
-  end
-end
-
 do
   local next_partition_id = 1
   function std.partition(disjointness, region_symbol, colors_symbol)
@@ -2358,7 +2315,7 @@ do
     end
 
     function st:subregion_constant(i)
-      local i = std.get_subregion_index(i)
+      local i = affine_helper.get_subregion_index(i)
       if not self.subregions[i] then
         self.subregions[i] = self:subregion_dynamic()
       end
@@ -2475,7 +2432,7 @@ function std.cross_product(...)
 
   function st:subpartition_constant(i)
     local region_type = self:subregion_constant(i)
-    local i = std.get_subregion_index(i)
+    local i = affine_helper.get_subregion_index(i)
     if not self.subpartitions[i] then
       local partition = st:subpartition_dynamic(region_type)
       self.subpartitions[i] = partition

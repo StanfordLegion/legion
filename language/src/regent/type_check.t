@@ -14,6 +14,7 @@
 
 -- Legion Type Checker
 
+local affine_helper = require("regent/affine_helper")
 local ast = require("regent/ast")
 local data = require("common/data")
 local report = require("common/report")
@@ -580,117 +581,10 @@ function type_check.expr_field_access(cx, node)
   }
 end
 
-local function is_analyzable_index(node)
-  return std.is_constant_expr(node) or
-    (node:is(ast.typed.expr.ID) and not std.is_rawref(node.expr_type))
-end
-
-local function is_analyzable_index_expression(node)
-  return is_analyzable_index(node) or
-    (node:is(ast.typed.expr.Binary) and
-       is_analyzable_index(node.lhs) and
-       std.is_constant_expr(node.rhs) and
-       (node.op == "+" or node.op == "-"))
-end
-
-local convert_constant_expr
-
-local function convert_ctor_to_constant(node)
-  assert(node:is(ast.typed.expr.Ctor))
-  return data.newvector(
-    unpack(
-      node.fields:map(
-        function(field)
-          return convert_constant_expr(field.value)
-  end)))
-end
-
-function convert_constant_expr(node)
-  if node:is(ast.typed.expr.Constant) then
-    return std.get_subregion_index(node.value)
-  elseif node:is(ast.typed.expr.Ctor) then
-    return convert_ctor_to_constant(node)
-  elseif node:is(ast.typed.expr.Cast) then
-    return convert_constant_expr(node.arg)
-  elseif node:is(ast.typed.expr.Unary) and node.op == "-" then
-    return -convert_constant_expr(node.rhs)
-  else
-    assert(false)
-  end
-end
-
-local function get_analyzable_index_key(node)
-  -- For certain kinds of analyzable expressions, we can trivially
-  -- identify them as being equivalent by a key (e.g. a constant
-  -- number, or a symbol representing an immutable variable). Use that
-  -- key when registering the subregions so they can be identified later.
-  if node:is(ast.typed.expr.Constant) or
-    (node:is(ast.typed.expr.ID) and not std.is_rawref(node.expr_type))
-  then
-    return node.value
-  end
-
-  -- FIXME: This breaks tests cases because of duplicate defined symbols.
-  -- if node:is(ast.typed.expr.Ctor) then
-  --   return convert_ctor_to_constant(node)
-  -- end
-
-  -- Otherwise, just return the AST node. This will result in a
-  -- different subregion for every occurance of the expression, which
-  -- may be suboptimal but should still be correct.
-  return node
-end
-
-local function get_affine_coefficients(expr)
-  -- Return `x`, `b` satisfying the equation `expr = x + b`.
-
-  if type(expr) == "number" or terralib.isconstant(expr) then
-    return nil, std.get_subregion_index(expr)
-  end
-
-  if data.is_vector(expr) then
-    return nil, expr
-  end
-
-  if std.is_symbol(expr) then
-    return expr, 0
-  end
-
-  -- FIXME: This should be handled in get_analyzable_index_key...
-  if expr:is(ast.typed.expr.Ctor) then
-    return nil, convert_ctor_to_constant(expr)
-  end
-
-  if expr:is(ast.typed.expr.Binary) and
-      expr.lhs:is(ast.typed.expr.ID) and
-      (expr.op == "+" or expr.op == "-")
-  then
-    local rhs_value = convert_constant_expr(expr.rhs)
-    return expr.lhs.value, rhs_value * (expr.op == "-" and -1 or 1)
-
-  else
-    assert(false)
-  end
-end
-
-local function analyze_index_noninterference(index, other_index)
-  -- Can we prove that these two indexes will always be
-  -- non-interfering?
-
-  -- Attempt a simple affine analysis.
-  local x1, b1 = get_affine_coefficients(index)
-  local x2, b2 = get_affine_coefficients(other_index)
-  if x1 == x1 and not data.vector.eq(b1, b2) then
-    return true
-  end
-
-  return false
-end
-
 local function add_analyzable_disjointness_constraints(cx, partition, subregion, index_key)
   local other_subregions = partition:subregions_constant()
   for other_key, other_subregion in other_subregions:items() do
-    if analyze_index_noninterference(index_key, other_key) then
+    if affine_helper.analyze_index_noninterference(index_key, other_key) then
       std.add_constraint(cx, subregion, other_subregion, std.disjointness, true)
     end
   end
@@ -705,8 +599,7 @@ function type_check.expr_index_access(cx, node)
   -- Some kinds of operations require information about the index used
   -- (e.g. partition access at a constant). Save that index now to
   -- avoid getting entangled in any implicit casts.
-  local analyzable = is_analyzable_index_expression(index)
-  local index_key = get_analyzable_index_key(index)
+  local analyzable = affine_helper.is_analyzable_index_expression(index)
 
   if std.is_partition(value_type) then
     local color_type = value_type:colors().index_type
@@ -720,10 +613,10 @@ function type_check.expr_index_access(cx, node)
 
     local subregion
     if analyzable then
-      subregion = value_type:subregion_constant(index_key)
+      subregion = value_type:subregion_constant(index)
 
       if value_type:is_disjoint() then
-        add_analyzable_disjointness_constraints(cx, value_type, subregion, index_key)
+        add_analyzable_disjointness_constraints(cx, value_type, subregion, index)
       end
     else
       subregion = value_type:subregion_dynamic()
@@ -750,11 +643,11 @@ function type_check.expr_index_access(cx, node)
     local parent = value_type:parent_region()
     local subregion, subpartition
     if analyzable then
-      subpartition = value_type:subpartition_constant(index_key)
+      subpartition = value_type:subpartition_constant(index)
       subregion = subpartition:parent_region()
 
       if value_type:is_disjoint() then
-        add_analyzable_disjointness_constraints(cx, value_type, subregion, index_key)
+        add_analyzable_disjointness_constraints(cx, value_type, subregion, index)
       end
     else
       subpartition = value_type:subpartition_dynamic()

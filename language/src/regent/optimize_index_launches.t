@@ -17,6 +17,7 @@
 -- Attempts to determine which loops can be transformed into index
 -- space task launches.
 
+local affine_helper = require("regent/affine_helper")
 local ast = require("regent/ast")
 local data = require("common/data")
 local report = require("common/report")
@@ -127,7 +128,7 @@ local function check_index_noninterference_self(cx, arg)
   -- Another easy case: index is loop variable plus or minus a constant.
   if (index:is(ast.typed.expr.Binary) and
       index.lhs:is(ast.typed.expr.ID) and cx:is_loop_index(index.lhs.value) and
-      std.is_constant_expr(index.rhs) and
+      affine_helper.is_constant_expr(index.rhs) and
       (index.op == "+" or index.op == "-"))
   then
     return true
