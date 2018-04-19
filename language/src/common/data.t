@@ -300,6 +300,97 @@ function data.is_tuple(x)
 end
 
 -- #####################################
+-- ## Vectors
+-- #################
+
+data.vector = {}
+setmetatable(data.vector, { __index = data.tuple })
+data.vector.__index = data.vector
+
+function data.vector.__eq(a, b)
+  if data.is_vector(a) then
+    if data.is_vector(b) then
+      for i, v in ipairs(a) do
+        if v ~= b[i] then
+          return false
+        end
+      end
+      return true
+    elseif type(b) == "number" then
+      for i, v in ipairs(a) do
+        if v ~= b then
+          return false
+        end
+      end
+      return true
+    else
+      return false
+    end
+  elseif data.is_vector(b) then
+    return data.vector.__eq(b, a)
+  end
+  assert(false) -- At least one should have been a vector
+end
+
+function data.vector.__add(a, b)
+  if data.is_vector(a) then
+    if data.is_vector(b) then
+      local result = data.newvector()
+      for i, v in ipairs(a) do
+        result:insert(v + b[i])
+      end
+      return result
+    elseif type(b) == "number" then
+      local result = data.newvector()
+      for i, v in ipairs(a) do
+        result:insert(v + b)
+      end
+      return result
+    end
+  elseif data.is_vector(b) then
+    return data.vector.__add(b, a)
+  end
+  assert(false) -- At least one should have been a vector
+end
+
+function data.vector.__mul(a, b)
+  if data.is_vector(a) then
+    if data.is_vector(b) then
+      local result = data.newvector()
+      for i, v in ipairs(a) do
+        result:insert(v * b[i])
+      end
+      return result
+    elseif type(b) == "number" then
+      local result = data.newvector()
+      for i, v in ipairs(a) do
+        result:insert(v * b)
+      end
+      return result
+    end
+  elseif data.is_vector(b) then
+    return data.vector.__mul(b, a)
+  end
+  assert(false) -- At least one should have been a vector
+end
+
+function data.vector:__tostring()
+  return self:mkstring("[", ",", "]")
+end
+
+function data.vector:hash()
+  return "data.vector" .. tostring(self)
+end
+
+function data.newvector(...)
+  return setmetatable({...}, data.vector)
+end
+
+function data.is_vector(x)
+  return getmetatable(x) == data.vector
+end
+
+-- #####################################
 -- ## Maps
 -- #################
 
