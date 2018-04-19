@@ -641,14 +641,7 @@ local function analyze_index_noninterference(index, other_index)
   -- Can we prove that these two indexes will always be
   -- non-interfering?
 
-  -- Trivial case: numbers can be compared directly.
-  if (type(index) == "number" or type(other_index) == "number") and
-    index ~= other_index
-  then
-    return true
-  end
-
-  -- Otherwise attempt affine analysis.
+  -- Attempt a simple affine analysis.
   local x1, b1 = get_affine_coefficients(index)
   local x2, b2 = get_affine_coefficients(other_index)
   if x1 == x1 and b1 ~= b2 then
