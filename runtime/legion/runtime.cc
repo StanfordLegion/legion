@@ -10079,7 +10079,7 @@ namespace Legion {
         REPORT_LEGION_ERROR(ERROR_ILLEGAL_SHARDING_FUNCTOR_OUTPUT,
                             "Illegal output shard %d from sharding functor %d. "
                             "Shards for this index space launch must be "
-                            "between 0 and %ld (exclusive).", result,
+                            "between 0 and %zd (exclusive).", result,
                             sharding_id, total_shards)
       return result;
     }
