@@ -496,28 +496,15 @@ namespace Legion {
       : kind(k), redop(r), no_access(no)
     //--------------------------------------------------------------------------
     {
-      if (redop == 0)
+      if (redop != 0)
       {
-        if ((kind == REDUCTION_FOLD_SPECIALIZE) ||
-            (kind == REDUCTION_LIST_SPECIALIZE))
+        if ((kind != REDUCTION_FOLD_SPECIALIZE) &&
+            (kind != REDUCTION_LIST_SPECIALIZE))
         {
           fprintf(stderr,"Illegal specialize constraint with reduction op %d."
                          "Only reduction specialized constraints are "
                          "permitted to have non-zero reduction operators.",
                          redop);
-          assert(false);
-        }
-      }
-      else
-      {
-        if ((kind != REDUCTION_FOLD_SPECIALIZE) && 
-            (kind != REDUCTION_LIST_SPECIALIZE))
-        {
-          fprintf(stderr,"Illegal %s reduction specialized constraint with "
-                         "reduction op '0'. Zero is a reserved reduction "
-                         "operator ID and cannot be used for any reductions "
-                         "and therefore is an invalid constraint.",
-                         (kind == REDUCTION_FOLD_SPECIALIZE) ? "fold" : "list");
           assert(false);
         }
       }
@@ -532,7 +519,8 @@ namespace Legion {
         return true;
       if (kind != other.kind)
         return false;
-      if (redop != other.redop)
+      // Make sure we also handle the unspecialized case of redop 0
+      if ((redop != other.redop) && (other.redop != 0))
         return false;
       if (no_access && !other.no_access)
         return false;
@@ -550,7 +538,8 @@ namespace Legion {
         return false;
       if (kind != other.kind)
         return true;
-      if (redop != other.redop)
+      // Only conflicts if we both have non-zero redops that don't equal
+      if ((redop != other.redop) && (redop != 0) && (other.redop != 0))
         return true;
       // No access never causes a conflict
       return false;
