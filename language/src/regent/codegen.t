@@ -2348,13 +2348,16 @@ local function raise_privilege_depth(cx, value, container_type, field_paths, opt
 end
 
 local function make_region_projection_functor(cx, expr)
-  -- We assume that there's only one variable, and that it's the loop index.
+  -- Right now we never generate any non-trivial region projection functors.
 
-  if expr:is(ast.typed.expr.ID) then
-    return 0 -- Identity projection functor.
+  return 0 -- Identity projection functor.
+end
+
+local function strip_casts(node)
+  if node:is(ast.typed.expr.Cast) then
+    return node.arg
   end
-
-  assert(false)
+  return node
 end
 
 local function make_partition_projection_functor(cx, expr, loop_index, color_space)
@@ -2362,8 +2365,10 @@ local function make_partition_projection_functor(cx, expr, loop_index, color_spa
 
   assert(expr:is(ast.typed.expr.IndexAccess))
 
-  if expr.index:is(ast.typed.expr.ID) then
-    assert(expr.index.value == loop_index)
+  local index = strip_casts(expr.index)
+
+  if index:is(ast.typed.expr.ID) then
+    assert(index.value == loop_index)
     return 0 -- Identity projection functor.
   end
 
@@ -2403,7 +2408,7 @@ local function make_partition_projection_functor(cx, expr, loop_index, color_spa
   end
 
   -- Same business to convert it back to a domain point.
-  local subregion_index = terralib.newsymbol(expr.index.expr_type)
+  local subregion_index = terralib.newsymbol(index.expr_type)
   local subregion_point = terralib.newsymbol(c.legion_domain_point_t)
   local subregion_setup
   if std.is_bounded_type(symbol_type) then
@@ -2418,7 +2423,7 @@ local function make_partition_projection_functor(cx, expr, loop_index, color_spa
   end
 
   -- Generate a projection functor that evaluates `expr`.
-  local value = codegen.expr(cx, expr.index):read(cx)
+  local value = codegen.expr(cx, index):read(cx)
   local terra partition_functor(runtime : c.legion_runtime_t,
                                 mappable : c.legion_mappable_t,
                                 index : uint,
