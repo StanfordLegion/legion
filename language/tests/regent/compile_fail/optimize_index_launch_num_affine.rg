@@ -13,7 +13,7 @@
 -- limitations under the License.
 
 -- fails-with:
--- optimize_index_launch_list_affine.rg:39: loop optimization failed: argument 1 interferes with itself
+-- optimize_index_launch_num_affine.rg:39: loop optimization failed: argument 1 interferes with itself
 --     g(p[i * 2])
 --      ^
 

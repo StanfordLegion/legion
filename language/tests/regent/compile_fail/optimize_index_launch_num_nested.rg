@@ -13,7 +13,7 @@
 -- limitations under the License.
 
 -- fails-with:
--- optimize_index_launch_list_nested.rg:46: loop optimization failed: argument 1 is not provably projectable or invariant
+-- optimize_index_launch_num_nested.rg:46: loop optimization failed: argument 1 is not provably projectable or invariant
 --       g(s[compute_index(i, j)][j])
 --        ^
 

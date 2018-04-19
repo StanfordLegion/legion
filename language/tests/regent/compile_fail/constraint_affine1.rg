@@ -13,7 +13,7 @@
 -- limitations under the License.
 
 -- fails-with:
--- constraint_affine.rg:32: invalid cast missing constraint $x * $y
+-- constraint_affine1.rg:32: invalid cast missing constraint $x * $y
 --     assert_disjoint { x = p[i], y = p[i + 0] }
 --                     ^
 

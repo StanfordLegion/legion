@@ -22,15 +22,6 @@ where reads(r), writes(r) do
   return 5
 end
 
-task g2(r : region(int), s : region(int)) : int
-where reads writes(r, s) do
-  return 5
-end
-
-terra compute_index(i : int, j : int)
-  return i
-end
-
 task main()
   var n = 5
   var r = region(ispace(ptr, n), int)
