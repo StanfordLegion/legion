@@ -2372,56 +2372,27 @@ local function make_partition_projection_functor(cx, expr, loop_index, color_spa
     return 0 -- Identity projection functor.
   end
 
-  -- FIXME: Why do we need all this boiler plate just to convert to
-  -- and from a domain point?
   local point = terralib.newsymbol(c.legion_domain_point_t, "point")
 
   local symbol_type = loop_index:gettype()
   local symbol = loop_index:getsymbol()
   local symbol_setup
   if std.is_bounded_type(symbol_type) then
-    local fields = symbol_type.index_type.fields
-    if fields then
-      local dim = #fields
-      local get_point = c["legion_domain_point_get_point_" .. dim .. "d"]
-      symbol_setup = quote
-        var pt = [get_point]([point])
-        var [symbol] = [symbol_type] {
-          __ptr = [symbol_type.index_type.impl_type] {
-            [data.range(dim):map(function(i) return `(pt.x[ [i] ]) end)]
-          }
-        }
-      end
-    else
-      symbol_setup = quote
-        var [symbol] = [symbol_type] {
-          __ptr = c.legion_domain_point_get_point_1d([point]).x[0]
-        }
-      end
+    symbol_setup = quote
+      var [symbol] = [symbol_type]({ __ptr = [symbol_type.index_type]([point]) })
     end
   else
     -- Otherwise symbol_type has to be some simple integral type.
     assert(symbol_type:isintegral())
     symbol_setup = quote
-      var [symbol] = c.legion_domain_point_get_point_1d([point]).x[0]
+      var [symbol] = [int1d]([point])
     end
   end
 
-  -- Same business to convert it back to a domain point.
-  local subregion_index = terralib.newsymbol(index.expr_type)
-  local subregion_point = terralib.newsymbol(c.legion_domain_point_t)
-  local subregion_setup
-  if std.is_bounded_type(symbol_type) then
-    subregion_setup = quote
-      var [subregion_point] = [subregion_index]:to_domain_point()
-    end
-  else
-    -- Otherwise symbol_type has to be some simple integral type.
-    assert(symbol_type:isintegral())
-    subregion_setup = quote
-      var [subregion_point] = c.legion_domain_point_from_point_1d(
-          c.legion_point_1d_t { x = arrayof(c.coord_t, [subregion_index]) })
-    end
+  -- Again, if it's a number it has to be converted back through an index type.
+  local index_type = std.as_read(index.expr_type)
+  if index_type:isintegral() then
+    index_type = int1d
   end
 
   -- Generate a projection functor that evaluates `expr`.
@@ -2433,10 +2404,9 @@ local function make_partition_projection_functor(cx, expr, loop_index, color_spa
                                 [point])
     [symbol_setup];
     [value.actions];
-    var [subregion_index] = [value.value];
-    [subregion_setup];
+    var index : index_type = [value.value];
     var subregion = c.legion_logical_partition_get_logical_subregion_by_color_domain_point(
-      runtime, parent, subregion_point)
+      runtime, parent, index)
     return subregion
   end
 
@@ -2888,8 +2858,7 @@ function codegen.expr_call(cx, node)
       launcher_execute = quote
         c.legion_must_epoch_launcher_add_single_task(
           [cx.must_epoch],
-          c.legion_domain_point_from_point_1d(
-            c.legion_point_1d_t { x = arrayof(c.coord_t, [cx.must_epoch_point]) }),
+          [int1d]([cx.must_epoch_point]),
           [launcher])
         [cx.must_epoch_point] = [cx.must_epoch_point] + 1
       end
@@ -7918,30 +7887,14 @@ local function stat_index_launch_setup(cx, node, domain, actions)
   local symbol = node.symbol:getsymbol()
   local symbol_setup
   if std.is_bounded_type(symbol_type) then
-    local fields = symbol_type.index_type.fields
-    if fields then
-      local dim = #fields
-      local get_point = c["legion_domain_point_get_point_" .. dim .. "d"]
-      symbol_setup = quote
-        var pt = [get_point]([point])
-        var [symbol] = [symbol_type] {
-          __ptr = [symbol_type.index_type.impl_type] {
-            [data.range(dim):map(function(i) return `(pt.x[ [i] ]) end)]
-          }
-        }
-      end
-    else
-      symbol_setup = quote
-        var [symbol] = [symbol_type] {
-          __ptr = c.legion_domain_point_get_point_1d([point]).x[0]
-        }
-      end
+    symbol_setup = quote
+      var [symbol] = [symbol_type]({ __ptr = [symbol_type.index_type]([point]) })
     end
   else
     -- Otherwise symbol_type has to be some simple integral type.
     assert(symbol_type:isintegral())
     symbol_setup = quote
-      var [symbol] = c.legion_domain_point_get_point_1d([point]).x[0]
+      var [symbol] = [int1d]([point])
     end
   end
 
