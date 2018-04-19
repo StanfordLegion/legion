@@ -250,6 +250,16 @@ function data.tuple.__concat(a, b)
   return result
 end
 
+-- Vector-scalar multiply.
+function data.tuple.__mul(a, b)
+  assert(data.is_tuple(a))
+  local result = data.newtuple()
+  for i, v in ipairs(a) do
+    result:insert(v * b)
+  end
+  return result
+end
+
 function data.tuple:slice(start --[[ inclusive ]], stop --[[ inclusive ]])
   local result = data.newtuple()
   for i = start, stop do

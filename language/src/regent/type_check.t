@@ -580,34 +580,50 @@ function type_check.expr_field_access(cx, node)
   }
 end
 
-local function is_analyzable_index(index)
-  return index:is(ast.typed.expr.Constant) or
-    (index:is(ast.typed.expr.ID) and not std.is_rawref(index.expr_type))
+local function is_analyzable_index(node)
+  return std.is_constant_expr(node) or
+    (node:is(ast.typed.expr.ID) and not std.is_rawref(node.expr_type))
 end
 
-local function is_analyzable_index_expression(expr)
-  return is_analyzable_index(expr) or
-    (expr:is(ast.typed.expr.Binary) and
-       is_analyzable_index(expr.lhs) and
-       expr.rhs:is(ast.typed.expr.Constant) and
-       (expr.op == "+" or expr.op == "-"))
+local function is_analyzable_index_expression(node)
+  return is_analyzable_index(node) or
+    (node:is(ast.typed.expr.Binary) and
+       is_analyzable_index(node.lhs) and
+       std.is_constant_expr(node.rhs) and
+       (node.op == "+" or node.op == "-"))
 end
 
-local function get_analyzable_index_key(index)
+local function convert_ctor_to_constant(node)
+  assert(node:is(ast.typed.expr.Ctor))
+  return data.newtuple(
+    unpack(
+      node.fields:map(
+        function(field)
+          assert(field.value:is(ast.typed.expr.Constant))
+          return std.get_subregion_index(field.value.value)
+  end)))
+end
+
+local function get_analyzable_index_key(node)
   -- For certain kinds of analyzable expressions, we can trivially
   -- identify them as being equivalent by a key (e.g. a constant
   -- number, or a symbol representing an immutable variable). Use that
   -- key when registering the subregions so they can be identified later.
-  if index:is(ast.typed.expr.Constant) or
-    (index:is(ast.typed.expr.ID) and not std.is_rawref(index.expr_type))
+  if node:is(ast.typed.expr.Constant) or
+    (node:is(ast.typed.expr.ID) and not std.is_rawref(node.expr_type))
   then
-    return index.value
+    return node.value
   end
+
+  -- FIXME: This breaks tests cases because of duplicate defined symbols.
+  -- if node:is(ast.typed.expr.Ctor) then
+  --   return convert_ctor_to_constant(node)
+  -- end
 
   -- Otherwise, just return the AST node. This will result in a
   -- different subregion for every occurance of the expression, which
   -- may be suboptimal but should still be correct.
-  return index
+  return node
 end
 
 local function get_affine_coefficients(expr)
@@ -625,15 +641,49 @@ local function get_affine_coefficients(expr)
     return expr, 0
   end
 
+  -- FIXME: This should be handled in get_analyzable_index_key...
+  if expr:is(ast.typed.expr.Ctor) then
+    return nil, convert_ctor_to_constant(expr)
+  end
+
   if expr:is(ast.typed.expr.Binary) and
       expr.lhs:is(ast.typed.expr.ID) and
-      expr.rhs:is(ast.typed.expr.Constant) and
       (expr.op == "+" or expr.op == "-")
   then
-    return expr.lhs.value, expr.rhs.value * (expr.op == "-" and -1 or 1)
+    local rhs_value
+    if expr.rhs:is(ast.typed.expr.Constant) then
+      rhs_value = std.get_subregion_index(expr.rhs.value)
+    elseif expr.rhs:is(ast.typed.expr.Ctor) then
+      rhs_value = convert_ctor_to_constant(expr.rhs)
+    else
+      assert(false)
+    end
+    return expr.lhs.value, rhs_value * (expr.op == "-" and -1 or 1)
 
   else
     assert(false)
+  end
+end
+
+local function upgrade_tuple(a, size)
+  if data.is_tuple(a) then
+    assert(#a == size)
+    return a
+  end
+  local result = terralib.newlist()
+  for i = 1, size do
+    result:insert(a)
+  end
+  return data.newtuple(unpack(result))
+end
+
+local function vector_eq(a, b)
+  if data.is_tuple(a) then
+    return a == upgrade_tuple(b, #a)
+  elseif data.is_tuple(b) then
+    return b == upgrade_tuple(a, #b)
+  else
+    return a == b
   end
 end
 
@@ -644,7 +694,7 @@ local function analyze_index_noninterference(index, other_index)
   -- Attempt a simple affine analysis.
   local x1, b1 = get_affine_coefficients(index)
   local x2, b2 = get_affine_coefficients(other_index)
-  if x1 == x1 and b1 ~= b2 then
+  if x1 == x1 and not vector_eq(b1, b2) then
     return true
   end
 

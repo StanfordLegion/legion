@@ -2243,10 +2243,29 @@ std.wild = std.newsymbol(std.wild_type, "wild")
 std.disjoint = ast.disjointness_kind.Disjoint {}
 std.aliased = ast.disjointness_kind.Aliased {}
 
+function std.is_constant_expr(node)
+  if node:is(ast.typed.expr.Constant) then
+    return true
+  end
+
+  if node:is(ast.typed.expr.Ctor) then
+    for _, field in ipairs(node.fields) do
+      if not std.is_constant_expr(field.value) then
+        return false
+      end
+    end
+    return true
+  end
+
+  return false
+end
+
 -- This is used in methods such as subregion_constant where the index
 -- of a subregion has to be munged to make it safe to go in a map.
 function std.get_subregion_index(i)
-  if type(i) == "number" or std.is_symbol(i) or ast.is_node(i) then
+  if type(i) == "number" or std.is_symbol(i) or
+    data.is_tuple(i) or ast.is_node(i)
+  then
     return i
   elseif terralib.isconstant(i) and std.is_index_type(i.type) then
     -- Terra, pretty please give me the value inside this constant
