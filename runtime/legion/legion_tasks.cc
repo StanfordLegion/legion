@@ -134,11 +134,12 @@ namespace Legion {
         {
           for (std::map<std::pair<FieldSpace,FieldID>,bool>::const_iterator it =
                 created_fields.begin(); it != created_fields.end(); it++)
-          {
-            rez.serialize(it->first.first);
-            rez.serialize(it->first.second);
-            rez.serialize<bool>(it->second);
-          }
+            if (!it->second)
+            {
+              rez.serialize(it->first.first);
+              rez.serialize(it->first.second);
+              rez.serialize<bool>(it->second);
+            }
         }
       }
       else
