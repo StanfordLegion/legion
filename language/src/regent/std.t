@@ -2181,6 +2181,7 @@ do
     st.is_region = true
     st.ispace_symbol = ispace_symbol
     st.fspace_type = fspace_type
+    st.index_expr = false
 
     function st:ispace()
       local ispace = self.ispace_symbol:gettype()
@@ -2196,6 +2197,21 @@ do
 
     function st:fspace()
       return st.fspace_type
+    end
+
+    function st:has_index_expr()
+      return st.index_expr
+    end
+
+    function st:get_index_expr()
+      assert(st.index_expr)
+      return st.index_expr
+    end
+
+    function st:set_index_expr(expr)
+      assert(not st.index_expr)
+      assert(ast.is_node(expr))
+      st.index_expr = expr
     end
 
     -- For API compatibility with std.list:
@@ -2280,6 +2296,7 @@ do
     st.disjointness = disjointness
     st.parent_region_symbol = region_symbol
     st.colors_symbol = colors_symbol
+    st.index_expr = false
     st.subregions = data.newmap()
 
     function st:is_disjoint()
@@ -2310,16 +2327,32 @@ do
       return self:parent_region():fspace()
     end
 
+    function st:has_index_expr()
+      return st.index_expr
+    end
+
+    function st:get_index_expr()
+      assert(st.index_expr)
+      return st.index_expr
+    end
+
+    function st:set_index_expr(expr)
+      assert(not st.index_expr)
+      assert(ast.is_node(expr))
+      st.index_expr = expr
+    end
+
     function st:subregions_constant()
       return self.subregions
     end
 
-    function st:subregion_constant(i)
-      local i = affine_helper.get_subregion_index(i)
-      if not self.subregions[i] then
-        self.subregions[i] = self:subregion_dynamic()
+    function st:subregion_constant(index_expr)
+      local index = affine_helper.get_subregion_index(index_expr)
+      if not self.subregions[index] then
+        self.subregions[index] = self:subregion_dynamic()
+        self.subregions[index]:set_index_expr(index_expr)
       end
-      return self.subregions[i]
+      return self.subregions[index]
     end
 
     function st:subregion_dynamic()
@@ -2387,6 +2420,7 @@ function std.cross_product(...)
 
   st.is_cross_product = true
   st.partition_symbols = data.newtuple(unpack(partition_symbols))
+  st.index_expr = false
   st.subpartitions = data.newmap()
 
   function st:partitions()
@@ -2416,6 +2450,21 @@ function std.cross_product(...)
     return self:partition():parent_region()
   end
 
+    function st:has_index_expr()
+      return st.index_expr
+    end
+
+    function st:get_index_expr()
+      assert(st.index_expr)
+      return st.index_expr
+    end
+
+    function st:set_index_expr(expr)
+      assert(not st.index_expr)
+      assert(ast.is_node(expr))
+      st.index_expr = expr
+    end
+
   function st:subregion_constant(i)
     local region_type = self:partition():subregion_constant(i)
     return region_type
@@ -2430,14 +2479,15 @@ function std.cross_product(...)
     return region_type
   end
 
-  function st:subpartition_constant(i)
-    local region_type = self:subregion_constant(i)
-    local i = affine_helper.get_subregion_index(i)
-    if not self.subpartitions[i] then
+  function st:subpartition_constant(index_expr)
+    local region_type = self:subregion_constant(index_expr)
+    local index = affine_helper.get_subregion_index(index_expr)
+    if not self.subpartitions[index] then
       local partition = st:subpartition_dynamic(region_type)
-      self.subpartitions[i] = partition
+      self.subpartitions[index] = partition
+      self.subpartitions[index]:set_index_expr(index_expr)
     end
-    return self.subpartitions[i]
+    return self.subpartitions[index]
   end
 
   function st:subpartition_dynamic(region_type)
