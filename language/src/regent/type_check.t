@@ -581,10 +581,12 @@ function type_check.expr_field_access(cx, node)
   }
 end
 
-local function add_analyzable_disjointness_constraints(cx, partition, subregion, index_key)
+local function add_analyzable_disjointness_constraints(cx, partition, subregion)
+  local index = subregion:get_index_expr()
   local other_subregions = partition:subregions_constant()
-  for other_key, other_subregion in other_subregions:items() do
-    if affine_helper.analyze_index_noninterference(index_key, other_key) then
+  for _, other_subregion in other_subregions:items() do
+    local other_index = other_subregion:get_index_expr()
+    if affine_helper.analyze_index_noninterference(index, other_index) then
       std.add_constraint(cx, subregion, other_subregion, std.disjointness, true)
     end
   end
@@ -616,7 +618,7 @@ function type_check.expr_index_access(cx, node)
       subregion = value_type:subregion_constant(index)
 
       if value_type:is_disjoint() then
-        add_analyzable_disjointness_constraints(cx, value_type, subregion, index)
+        add_analyzable_disjointness_constraints(cx, value_type, subregion)
       end
     else
       subregion = value_type:subregion_dynamic()
@@ -647,7 +649,7 @@ function type_check.expr_index_access(cx, node)
       subregion = subpartition:parent_region()
 
       if value_type:is_disjoint() then
-        add_analyzable_disjointness_constraints(cx, value_type, subregion, index)
+        add_analyzable_disjointness_constraints(cx, value_type, subregion)
       end
     else
       subpartition = value_type:subpartition_dynamic()
