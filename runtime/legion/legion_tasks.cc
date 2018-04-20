@@ -100,14 +100,40 @@ namespace Legion {
       // Shouldn't need the lock here since we only do this
       // while there is no one else executing
       RezCheck z(rez);
-      rez.serialize<size_t>(created_regions.size());
-      if (!created_regions.empty())
+      if (returning)
       {
+        // Only non-local task regions get returned
+        size_t non_local = 0;
         for (std::map<LogicalRegion,bool>::const_iterator it =
-              created_regions.begin(); it != created_regions.end(); it++)
+             created_regions.begin(); it != created_regions.end(); it++)
         {
-          rez.serialize(it->first);
-          rez.serialize<bool>(it->second);
+          if (it->second)
+            continue;
+          non_local++;
+        }
+        rez.serialize(non_local);
+        if (non_local > 0)
+        {
+          for (std::map<LogicalRegion,bool>::const_iterator it =
+               created_regions.begin(); it != created_regions.end(); it++)
+            if (!it->second)
+            {
+              rez.serialize(it->first);
+              rez.serialize<bool>(it->second);
+            }
+        }
+      }
+      else
+      {
+        rez.serialize<size_t>(created_regions.size());
+        if (!created_regions.empty())
+        {
+          for (std::map<LogicalRegion,bool>::const_iterator it =
+              created_regions.begin(); it != created_regions.end(); it++)
+          {
+            rez.serialize(it->first);
+            rez.serialize<bool>(it->second);
+          }
         }
       }
       rez.serialize<size_t>(deleted_regions.size());

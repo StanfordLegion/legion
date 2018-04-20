@@ -3527,6 +3527,13 @@ namespace Legion {
       forest->create_logical_region(region);
       // Register the creation of a top-level region with the context
       register_region_creation(region, task_local);
+      if (task_local)
+      {
+#ifdef DEBUG_LEGION
+        assert(local_regions.find(region) == local_regions.end());
+#endif
+        local_regions.insert(region);
+      }
       return region;
     }
 
@@ -6255,6 +6262,11 @@ namespace Legion {
                         get_task_name(), get_unique_id())
       // Unmap any of our mapped regions before issuing any close operations
       unmap_all_regions();
+      // If we own any task local regions, we issue deletion operations on them.
+      if (!local_regions.empty())
+        for (std::set<LogicalRegion>::iterator it = local_regions.begin();
+             it != local_regions.end(); it++)
+          destroy_logical_region(*it);
       const std::deque<InstanceSet> &physical_instances = 
         single_task->get_physical_instances();
       // Note that this loop doesn't handle create regions

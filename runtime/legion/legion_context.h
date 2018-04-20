@@ -1109,6 +1109,9 @@ namespace Legion {
       // Track information for locally allocated fields
       mutable LocalLock                                 local_field_lock;
       std::map<FieldSpace,std::vector<LocalFieldInfo> > local_fields;
+    protected:
+      // Track information for locally created regions
+      std::set<LogicalRegion> local_regions;
     };
 
     /**
