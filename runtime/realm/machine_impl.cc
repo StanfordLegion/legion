@@ -1216,7 +1216,9 @@ namespace Realm {
 
   Processor Machine::ProcessorQuery::next(Processor after) 
   {
-    return ((ProcessorQueryImpl *)impl)->next_match(after);
+    //     return ((ProcessorQueryImpl *)impl)->next_match(after);
+     return ((ProcessorQueryImpl *)impl)->cache_next(after);
+
   }
 
   Processor Machine::ProcessorQuery::random(void) const
@@ -1350,7 +1352,8 @@ namespace Realm {
 
   Memory Machine::MemoryQuery::next(Memory after) const
   {
-    return ((MemoryQueryImpl *)impl)->next_match(after);
+    //       return ((MemoryQueryImpl *)impl)->next_match(after);
+    return ((MemoryQueryImpl *)impl)->cache_next(after);
   }
 
   Memory Machine::MemoryQuery::random(void) const
@@ -1527,8 +1530,8 @@ namespace Realm {
       if (init == 2)
 	return;
     }
-    std::cout << "size of _toc_procs_list = " << this->_toc_procs_list->size()  << "\n";
-    std::cout << "size of _loc_procs_list = " <<  this->_loc_procs_list->size()  << "\n";
+    //    std::cout << "size of _toc_procs_list = " << this->_toc_procs_list->size()  << "\n";
+    //    std::cout << "size of _loc_procs_list = " <<  this->_loc_procs_list->size()  << "\n";
   }
 
   ProcessorQueryImpl::ProcessorQueryImpl(const ProcessorQueryImpl& copy_from)
@@ -1863,9 +1866,10 @@ namespace Realm {
   // cache the set of valid processors if required and return next
   Processor ProcessorQueryImpl::cache_next(Processor after)
   {
-    bool first_time = false;
+    bool first_time = true;
     Processor pval = Processor::NO_PROC;
     
+    //    std::cout << "valid cache = " << valid_cache << "\n";
     // if valid cache
     if (valid_cache) {
       return next(after);
@@ -2505,10 +2509,7 @@ namespace Realm {
     //  cache memory information only once
     // _sysmems_list -> system memories
     // _fbmems_list -> frame buffer memories
-    //std::cout << "entered memory query impl init code \n";
     if (__sync_bool_compare_and_swap(&init,0,1)) {
-
-      //      std::cout << "entered memory query impl init code \n";
 
       this->_sysmems_list = new std::vector<Memory>();
       this->_fbmems_list = new std::vector<Memory>();
@@ -2841,7 +2842,7 @@ namespace Realm {
   // cache valid set of memories 
   Memory MemoryQueryImpl::cache_next(Memory after) 
   {
-    bool first_time = false;
+    bool first_time = true;
     Memory mval = Memory::NO_MEMORY;
 
     // if valid cache
