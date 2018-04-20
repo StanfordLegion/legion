@@ -3543,7 +3543,7 @@ function codegen.expr_region(cx, node)
        end)]
     [fs_naming_actions];
     c.legion_field_allocator_destroy(fsa)
-    var [lr] = c.legion_logical_region_create([cx.runtime], [cx.context], [is], [fs])
+    var [lr] = c.legion_logical_region_create([cx.runtime], [cx.context], [is], [fs], true)
     var [r] = [region_type]{ impl = [lr] }
   end
   local tag = terralib.newsymbol(c.legion_mapping_tag_id_t, "tag")
@@ -4125,7 +4125,7 @@ function codegen.expr_list_duplicate_partition(cx, node)
       var color = [indices_type:data(indices.value)][i]
       var orig_r = [get_partition_subregion(cx, partition, color)]
       var r = c.legion_logical_region_create(
-        [cx.runtime], [cx.context], orig_r.index_space, orig_r.field_space)
+        [cx.runtime], [cx.context], orig_r.index_space, orig_r.field_space, true)
       var new_root = c.legion_logical_partition_get_logical_subregion_by_tree(
         [cx.runtime], orig_r.index_space, orig_r.field_space, r.tree_id)
 

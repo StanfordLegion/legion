@@ -1515,14 +1515,16 @@ legion_logical_region_t
 legion_logical_region_create(legion_runtime_t runtime_,
                              legion_context_t ctx_,
                              legion_index_space_t index_,
-                             legion_field_space_t fields_)
+                             legion_field_space_t fields_,
+                             bool task_local)
 {
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_)->context();
   IndexSpace index = CObjectWrapper::unwrap(index_);
   FieldSpace fields = CObjectWrapper::unwrap(fields_);
 
-  LogicalRegion r = runtime->create_logical_region(ctx, index, fields);
+  LogicalRegion r =
+    runtime->create_logical_region(ctx, index, fields, task_local);
   return CObjectWrapper::wrap(r);
 }
 

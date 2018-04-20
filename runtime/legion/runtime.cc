@@ -11224,13 +11224,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     LogicalRegion Runtime::create_logical_region(Context ctx, 
-                                IndexSpace index_space, FieldSpace field_space)
+                IndexSpace index_space, FieldSpace field_space, bool task_local)
     //--------------------------------------------------------------------------
     {
       if (ctx == DUMMY_CONTEXT)
         REPORT_DUMMY_CONTEXT(
             "Illegal dummy context create logical region!");
-      return ctx->create_logical_region(forest, index_space, field_space); 
+      return ctx->create_logical_region(forest, index_space, field_space,
+                                        task_local); 
     }
 
     //--------------------------------------------------------------------------
