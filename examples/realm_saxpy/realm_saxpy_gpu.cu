@@ -27,7 +27,7 @@ void gpu_saxpy(const float alpha,
 {
   int p = bounds.lo + (blockIdx.x * blockDim.x) + threadIdx.x;
   if (p <= bounds.hi)
-    ra_z[p] = alpha * ra_x[p] + ra_y[p];
+    ra_z[p] += alpha * ra_x[p] + ra_y[p];
 }
 
 __host__

@@ -12,25 +12,39 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
--- fails-with:
--- optimize_index_launch_num_vars2.rg:33: loop optimization failed: argument 1 is not provably projectable or invariant
---     f(p[j])
---      ^
-
 import "regent"
 
-task f(r : region(int)) where reads writes(r) do end
+-- This tests the various loop optimizations supported by the
+-- compiler.
 
-terra g(x : int) return x end
+task g(r : region(int)) : int
+where reads(r), writes(r) do
+  return 5
+end
 
 task main()
-  var r = region(ispace(ptr, 5), int)
-  var p = partition(equal, r, ispace(int1d, 4))
+  var n = 5
+  var r = region(ispace(ptr, n), int)
+  var p = partition(equal, r, ispace(int1d, 5))
 
   __demand(__parallel)
-  for i = 0, 4 do
-    var j = g(i)
-    f(p[j])
+  for i = 0, 2 do
+    g(p[i+0])
+  end
+
+  __demand(__parallel)
+  for i = 0, 2 do
+    g(p[i+1])
+  end
+
+  __demand(__parallel)
+  for i = 1, 3 do
+    g(p[i-0])
+  end
+
+  __demand(__parallel)
+  for i = 1, 3 do
+    g(p[i-1])
   end
 end
 regentlib.start(main)

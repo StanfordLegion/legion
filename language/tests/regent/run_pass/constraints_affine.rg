@@ -12,25 +12,28 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
--- fails-with:
--- optimize_index_launch_num_vars2.rg:33: loop optimization failed: argument 1 is not provably projectable or invariant
---     f(p[j])
---      ^
-
 import "regent"
 
-task f(r : region(int)) where reads writes(r) do end
+fspace assert_subregion {
+  x : region(int),
+  y : region(int),
+} where x <= y end
 
-terra g(x : int) return x end
+fspace assert_disjoint {
+  x : region(int),
+  y : region(int),
+} where x * y end
 
 task main()
-  var r = region(ispace(ptr, 5), int)
-  var p = partition(equal, r, ispace(int1d, 4))
+  var t = region(ispace(ptr, 5), int)
+  var p = partition(equal, t, ispace(int1d, 5))
 
-  __demand(__parallel)
-  for i = 0, 4 do
-    var j = g(i)
-    f(p[j])
+  assert_disjoint { x = p[0], y = p[1] }
+
+  for i = 1, 2 do
+    assert_disjoint { x = p[i], y = p[i + 1] }
+    assert_disjoint { x = p[i - 1], y = p[i + 0] }
+    -- assert_disjoint { x = p[i], y = p[i - 1] } -- FIXME: name already defined?
   end
 end
 regentlib.start(main)

@@ -365,8 +365,7 @@ extern "C" {
   typedef
     legion_logical_region_t (*legion_projection_functor_logical_region_t)(
       legion_runtime_t /* runtime */,
-      legion_context_t /* context */,
-      legion_task_t /* task */,
+      const legion_mappable_t /* mappable */,
       unsigned /* index */,
       legion_logical_region_t /* upper_bound */,
       legion_domain_point_t /* point */);
@@ -378,8 +377,7 @@ extern "C" {
   typedef
     legion_logical_region_t (*legion_projection_functor_logical_partition_t)(
       legion_runtime_t /* runtime */,
-      legion_context_t /* context */,
-      legion_task_t /* task */,
+      const legion_mappable_t /* mappable */,
       unsigned /* index */,
       legion_logical_partition_t /* upper_bound */,
       legion_domain_point_t /* point */);
@@ -3653,11 +3651,23 @@ extern "C" {
       size_t count);
 
   /**
+   * @see Legion::Runtime::preregister_projection_functor()
+   */
+  void
+  legion_runtime_preregister_projection_functor(
+    legion_projection_id_t id,
+    unsigned depth,
+    legion_projection_functor_logical_region_t region_functor,
+    legion_projection_functor_logical_partition_t partition_functor);
+
+  /**
    * @see Legion::Runtime::register_projection_functor()
    */
   void
   legion_runtime_register_projection_functor(
+    legion_runtime_t runtime,
     legion_projection_id_t id,
+    unsigned depth,
     legion_projection_functor_logical_region_t region_functor,
     legion_projection_functor_logical_partition_t partition_functor);
 

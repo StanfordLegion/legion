@@ -249,6 +249,13 @@ void top_level_task(const void *args, size_t arglen,
       dsts.push_back(gpu_y_field);
       copy_y = bounds.copy(srcs, dsts, ProfilingRequestSet(), fill_y);
     }
+    Event fill_z;
+    {
+      std::vector<CopySrcDstField> dsts(1, gpu_z_field);
+      float fill_value = 1.0f;
+      fill_z = bounds.fill(dsts, ProfilingRequestSet(),
+			   &fill_value, sizeof(fill_value));
+    }
 
     SaxpyArgs gpu_args;
     gpu_args.x_inst = gpu_inst;
@@ -257,7 +264,7 @@ void top_level_task(const void *args, size_t arglen,
     gpu_args.alpha  = saxpy_args.alpha;
     gpu_args.bounds = bounds;
 
-    Event precondition = Event::merge_events(copy_x, copy_y);
+    Event precondition = Event::merge_events(copy_x, copy_y, fill_z);
     Event gpu_done = first_gpu.spawn(GPU_SAXPY_TASK, &gpu_args,
                                      sizeof(gpu_args), precondition);
     // Copy back
@@ -271,7 +278,15 @@ void top_level_task(const void *args, size_t arglen,
   else
   {
     // Run the computation on the CPU
-    Event precondition = Event::merge_events(fill_x, fill_y);
+    Event fill_z;
+    {
+      std::vector<CopySrcDstField> dsts(1, cpu_z_field);
+      float fill_value = 1.0f;
+      fill_z = bounds.fill(dsts, ProfilingRequestSet(),
+			   &fill_value, sizeof(fill_value));
+    }
+
+    Event precondition = Event::merge_events(fill_x, fill_y, fill_z);
     z_ready = first_cpu.spawn(CPU_SAXPY_TASK, &saxpy_args, 
                               sizeof(saxpy_args), precondition);
   }
@@ -299,7 +314,7 @@ void cpu_saxpy_task(const void *args, size_t arglen,
 							   FID_Z);
 
   for(int i = saxpy_args->bounds.lo; i <= saxpy_args->bounds.hi; i++)
-    ra_z[i] = saxpy_args->alpha * ra_x[i] + ra_y[i];
+    ra_z[i] += saxpy_args->alpha * ra_x[i] + ra_y[i];
 }
 
 void check_result_task(const void *args, size_t arglen,
@@ -319,7 +334,7 @@ void check_result_task(const void *args, size_t arglen,
 
   bool success = true;
   for(int i = saxpy_args->bounds.lo; i <= saxpy_args->bounds.hi; i++) {
-    float expected = saxpy_args->alpha * ra_x[i] + ra_y[i];
+    float expected = saxpy_args->alpha * ra_x[i] + ra_y[i] + 1.0;
     float actual = ra_z[i];
 
     // FMAs are too accurate

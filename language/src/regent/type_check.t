@@ -14,6 +14,7 @@
 
 -- Legion Type Checker
 
+local affine_helper = require("regent/affine_helper")
 local ast = require("regent/ast")
 local data = require("common/data")
 local report = require("common/report")
@@ -580,6 +581,15 @@ function type_check.expr_field_access(cx, node)
   }
 end
 
+local function add_analyzable_disjointness_constraints(cx, partition, subregion, index_key)
+  local other_subregions = partition:subregions_constant()
+  for other_key, other_subregion in other_subregions:items() do
+    if affine_helper.analyze_index_noninterference(index_key, other_key) then
+      std.add_constraint(cx, subregion, other_subregion, std.disjointness, true)
+    end
+  end
+end
+
 function type_check.expr_index_access(cx, node)
   local value = type_check.expr(cx, node.value)
   local value_type = std.check_read(cx, value)
@@ -589,12 +599,7 @@ function type_check.expr_index_access(cx, node)
   -- Some kinds of operations require information about the index used
   -- (e.g. partition access at a constant). Save that index now to
   -- avoid getting entangled in any implicit casts.
-  local static_index
-  if index:is(ast.typed.expr.Constant) or
-    (index:is(ast.typed.expr.ID) and not std.is_rawref(index.expr_type))
-  then
-    static_index = index.value
-  end
+  local analyzable = affine_helper.is_analyzable_index_expression(index)
 
   if std.is_partition(value_type) then
     local color_type = value_type:colors().index_type
@@ -607,16 +612,11 @@ function type_check.expr_index_access(cx, node)
     local parent = value_type:parent_region()
 
     local subregion
-    if static_index then
-      subregion = value_type:subregion_constant(static_index)
+    if analyzable then
+      subregion = value_type:subregion_constant(index)
 
       if value_type:is_disjoint() then
-        local other_subregions = value_type:subregions_constant()
-        for other_index, other_subregion in other_subregions:items() do
-          if static_index ~= other_index then
-            std.add_constraint(cx, subregion, other_subregion, std.disjointness, true)
-          end
-        end
+        add_analyzable_disjointness_constraints(cx, value_type, subregion, index)
       end
     else
       subregion = value_type:subregion_dynamic()
@@ -642,17 +642,12 @@ function type_check.expr_index_access(cx, node)
     local partition = value_type:partition()
     local parent = value_type:parent_region()
     local subregion, subpartition
-    if static_index then
-      subpartition = value_type:subpartition_constant(static_index)
+    if analyzable then
+      subpartition = value_type:subpartition_constant(index)
       subregion = subpartition:parent_region()
 
       if value_type:is_disjoint() then
-        local other_subregions = value_type:subregions_constant()
-        for other_index, other_subregion in other_subregions:items() do
-          if static_index ~= other_index then
-            std.add_constraint(cx, subregion, other_subregion, std.disjointness, true)
-          end
-        end
+        add_analyzable_disjointness_constraints(cx, value_type, subregion, index)
       end
     else
       subpartition = value_type:subpartition_dynamic()

@@ -14,6 +14,7 @@
 
 -- Regent Standard Library
 
+local affine_helper = require("regent/affine_helper")
 local ast = require("regent/ast")
 local base = require("regent/std_base")
 local cudahelper = require("regent/cudahelper")
@@ -2243,23 +2244,6 @@ std.wild = std.newsymbol(std.wild_type, "wild")
 std.disjoint = ast.disjointness_kind.Disjoint {}
 std.aliased = ast.disjointness_kind.Aliased {}
 
--- This is used in methods such as subregion_constant where the index
--- of a subregion has to be munged to make it safe to go in a map.
-local function get_subregion_index(i)
-  if type(i) == "number" or std.is_symbol(i) then
-    return i
-  elseif terralib.isconstant(i) and std.is_index_type(i.type) then
-    -- Terra, pretty please give me the value inside this constant
-    local value = (terra() return i end)()
-    return data.newtuple(
-      unpack(
-        i.type.fields:map(
-          function(field_name) return value.__ptr[field_name] end)))
-  else
-    assert(false)
-  end
-end
-
 do
   local next_partition_id = 1
   function std.partition(disjointness, region_symbol, colors_symbol)
@@ -2331,7 +2315,7 @@ do
     end
 
     function st:subregion_constant(i)
-      local i = get_subregion_index(i)
+      local i = affine_helper.get_subregion_index(i)
       if not self.subregions[i] then
         self.subregions[i] = self:subregion_dynamic()
       end
@@ -2448,7 +2432,7 @@ function std.cross_product(...)
 
   function st:subpartition_constant(i)
     local region_type = self:subregion_constant(i)
-    local i = get_subregion_index(i)
+    local i = affine_helper.get_subregion_index(i)
     if not self.subpartitions[i] then
       local partition = st:subpartition_dynamic(region_type)
       self.subpartitions[i] = partition
@@ -3146,6 +3130,20 @@ end
 -- ## Main
 -- #################
 
+local projection_functors = terralib.newlist()
+
+do
+  local next_id = 1
+  function std.register_projection_functor(depth, region_functor, partition_functor)
+    local id = next_id
+    next_id = next_id + 1
+
+    projection_functors:insert(terralib.newlist({id, depth, region_functor, partition_functor}))
+
+    return id
+  end
+end
+
 local variants = terralib.newlist()
 
 function std.register_variant(variant)
@@ -3291,6 +3289,30 @@ function std.setup(main_task, extra_setup_thunk, task_wrappers, registration_nam
     end
   end
 
+  local projection_functor_registrations = projection_functors:map(
+    function(args)
+      local id, depth, region_functor, partition_functor = unpack(args)
+      -- Hack: Work around Terra not wanting to escape nil.
+      if region_functor and partition_functor then
+        return quote
+          c.legion_runtime_preregister_projection_functor(
+            id, depth, region_functor, partition_functor)
+        end
+      elseif region_functor then
+        return quote
+          c.legion_runtime_preregister_projection_functor(
+            id, depth, region_functor, nil)
+        end
+      elseif partition_functor then
+        return quote
+          c.legion_runtime_preregister_projection_functor(
+            id, depth, nil, partition_functor)
+        end
+      else
+        assert(false)
+      end
+    end)
+
   local task_registrations = variants:map(
     function(variant)
       local task = variant.task
@@ -3425,6 +3447,7 @@ function std.setup(main_task, extra_setup_thunk, task_wrappers, registration_nam
   local terra main([argc], [argv])
     [reduction_registrations];
     [layout_registrations];
+    [projection_functor_registrations];
     [task_registrations];
     [cuda_setup];
     [extra_setup];
