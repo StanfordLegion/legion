@@ -273,7 +273,101 @@ function std.check_any_privilege(cx, region, field_path)
   return false
 end
 
-function std.search_constraint(cx, region, constraint, visited, reflexive, symmetric)
+local function analyze_uses_variables_node(variables)
+  return function(node)
+    -- Expressions:
+    if node:is(ast.typed.expr.ID) then
+      return variables[node.value]
+
+    elseif node:is(ast.typed.expr.FieldAccess) or
+      node:is(ast.typed.expr.IndexAccess) or
+      node:is(ast.typed.expr.MethodCall) or
+      node:is(ast.typed.expr.Call) or
+      node:is(ast.typed.expr.RawContext) or
+      node:is(ast.typed.expr.RawFields) or
+      node:is(ast.typed.expr.RawPhysical) or
+      node:is(ast.typed.expr.RawRuntime) or
+      node:is(ast.typed.expr.RawValue) or
+      node:is(ast.typed.expr.Isnull) or
+      node:is(ast.typed.expr.Null) or
+      node:is(ast.typed.expr.DynamicCast) or
+      node:is(ast.typed.expr.StaticCast) or
+      node:is(ast.typed.expr.UnsafeCast) or
+      node:is(ast.typed.expr.Ispace) or
+      node:is(ast.typed.expr.Region) or
+      node:is(ast.typed.expr.Partition) or
+      node:is(ast.typed.expr.PartitionEqual) or
+      node:is(ast.typed.expr.PartitionByField) or
+      node:is(ast.typed.expr.Image) or
+      node:is(ast.typed.expr.Preimage) or
+      node:is(ast.typed.expr.CrossProduct) or
+      node:is(ast.typed.expr.ListSlicePartition) or
+      node:is(ast.typed.expr.ListDuplicatePartition) or
+      node:is(ast.typed.expr.ListSliceCrossProduct) or
+      node:is(ast.typed.expr.ListCrossProduct) or
+      node:is(ast.typed.expr.ListCrossProductComplete) or
+      node:is(ast.typed.expr.ListPhaseBarriers) or
+      node:is(ast.typed.expr.ListInvert) or
+      node:is(ast.typed.expr.ListRange) or
+      node:is(ast.typed.expr.PhaseBarrier) or
+      node:is(ast.typed.expr.DynamicCollective) or
+      node:is(ast.typed.expr.DynamicCollectiveGetResult) or
+      node:is(ast.typed.expr.Advance) or
+      node:is(ast.typed.expr.Adjust) or
+      node:is(ast.typed.expr.Arrive) or
+      node:is(ast.typed.expr.Await) or
+      node:is(ast.typed.expr.Copy) or
+      node:is(ast.typed.expr.Fill) or
+      node:is(ast.typed.expr.Acquire) or
+      node:is(ast.typed.expr.Release) or
+      node:is(ast.typed.expr.AllocateScratchFields) or
+      node:is(ast.typed.expr.WithScratchFields) or
+      node:is(ast.typed.expr.RegionRoot) or
+      node:is(ast.typed.expr.Condition) or
+      node:is(ast.typed.expr.Deref)
+    then
+      return false
+
+    elseif node:is(ast.typed.expr.Constant) or
+      node:is(ast.typed.expr.Function) or
+      node:is(ast.typed.expr.Cast) or
+      node:is(ast.typed.expr.Ctor) or
+      node:is(ast.typed.expr.CtorListField) or
+      node:is(ast.typed.expr.CtorRecField) or
+      node:is(ast.typed.expr.Unary) or
+      node:is(ast.typed.expr.Binary)
+    then
+      return false
+
+    -- Miscellaneous:
+    elseif node:is(ast.location) or
+      node:is(ast.annotation) or
+      node:is(ast.condition_kind)
+    then
+      return false
+
+    else
+      assert(false, "unexpected node type " .. tostring(node.node_type))
+    end
+  end
+end
+
+local function analyze_uses_variables(node, variables)
+  return ast.mapreduce_node_postorder(
+    analyze_uses_variables_node(variables),
+    data.any,
+    node, false)
+end
+
+local function uses_variables(region, variables)
+  if region:has_index_expr() then
+    return analyze_uses_variables(region:get_index_expr(), variables)
+  end
+  return false
+end
+
+function std.search_constraint(cx, region, constraint, exclude_variables,
+                               visited, reflexive, symmetric)
   return std.search_constraint_predicate(
     cx, region, visited,
     function(cx, region)
@@ -283,7 +377,10 @@ function std.search_constraint(cx, region, constraint, visited, reflexive, symme
 
       if cx.constraints:has(constraint.op) and
         cx.constraints[constraint.op]:has(region) and
-        cx.constraints[constraint.op][region][constraint.rhs]
+        cx.constraints[constraint.op][region][constraint.rhs] and
+        not (exclude_variables and
+               uses_variables(region, exclude_variables) and
+               uses_variables(constraint.rhs, exclude_variables))
       then
         return true
       end
@@ -294,7 +391,9 @@ function std.search_constraint(cx, region, constraint, visited, reflexive, symme
           rhs = region,
           op = constraint.op,
         }
-        if std.search_constraint(cx, constraint.lhs, constraint, {}, reflexive, false) then
+        if std.search_constraint(cx, constraint.lhs, constraint,
+                                 exclude_variables, {}, reflexive, false)
+        then
           return true
         end
       end
@@ -303,7 +402,7 @@ function std.search_constraint(cx, region, constraint, visited, reflexive, symme
     end)
 end
 
-function std.check_constraint(cx, constraint)
+function std.check_constraint(cx, constraint, exclude_variables)
   local lhs = constraint.lhs
   if lhs == std.wild then
     return true
@@ -328,7 +427,7 @@ function std.check_constraint(cx, constraint)
     op = constraint.op,
   }
   return std.search_constraint(
-    cx, constraint.lhs, constraint, {},
+    cx, constraint.lhs, constraint, exclude_variables, {},
     constraint.op == std.subregion --[[ reflexive ]],
     constraint.op == std.disjointness --[[ symmetric ]])
 end

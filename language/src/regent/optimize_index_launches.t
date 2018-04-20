@@ -149,10 +149,11 @@ local function analyze_noninterference_previous(
       region_type,
       other_region_type,
       std.disjointness)
+    local exclude_variables = { [cx.loop_index] = true }
 
     if not (
         not std.type_maybe_eq(region_type.fspace_type, other_region_type.fspace_type) or
-        std.check_constraint(cx, constraint) or
+        std.check_constraint(cx, constraint, exclude_variables) or
         check_privilege_noninterference(cx, task, arg, other_arg, mapping))
         -- Index non-interference is handled at the type checker level
         -- and is captured in the constraints.
