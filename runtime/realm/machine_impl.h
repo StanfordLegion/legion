@@ -229,6 +229,8 @@ namespace Realm {
 
       void set_cached(Memory m) { cached_mem = m; if (predicates.size() == 1) is_cached = true; };
       void reset_cached() { is_cached = false; };
+      Processor cache_next(Processor after);
+
 
       // SEEMAH: specialized iterators
       std::vector<Processor>::const_iterator begin(Processor::Kind k) const;
@@ -245,13 +247,15 @@ namespace Realm {
       Processor::Kind restricted_kind;
       std::vector<ProcQueryPredicate *> predicates;     
       Memory cached_mem;
-      bool is_cached;
+      bool is_cached, shared_cached_list, valid_cache;
       unsigned int cur_index;
+      std::vector<Processor>* cur_cached_list;
 
       // cached list of processors
       std::vector<Processor>* cached_list() const;
       // cached iterator
       bool cached_list_next(Processor after, Processor& nextp); 
+      Processor next(Processor after);
     };            
 
     typedef QueryPredicate<Memory, MachineMemInfo> MemoryQueryPredicate;
@@ -342,6 +346,7 @@ namespace Realm {
       Memory next_match(Memory after) const;
       size_t count_matches(void) const;
       Memory random_match(void) const;
+      Memory cache_next(Memory after);
 
       std::vector<Memory>::iterator begin(Memory::Kind k);
       std::vector<Memory>::iterator end(Memory::Kind k);
@@ -355,11 +360,15 @@ namespace Realm {
       bool is_restricted_node;
       int restricted_node_id;
       bool is_restricted_kind;
+      bool   shared_cached_list, valid_cache;
+      unsigned int cur_index;
       Memory::Kind restricted_kind;
+      std::vector<Memory>* cur_cached_list;
       std::vector<MemoryQueryPredicate *> predicates;     
       std::vector<Memory>* sysmems_list(void) const;
       std::vector<Memory>* fbmems_list(void) const;
       std::vector<Memory>* cached_list() const;
+      Memory next(Memory after);
     };            
 
     extern MachineImpl *machine_singleton;
