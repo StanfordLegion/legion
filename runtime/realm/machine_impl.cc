@@ -1463,9 +1463,10 @@ namespace Realm {
     , is_restricted_node(false)
     , is_restricted_kind(false) 
     , is_cached(false)
-    , cur_cached_list(NULL)
-    , valid_cache(false)
     , shared_cached_list(false)
+    , valid_cache(false)
+    , cur_cached_list(NULL)
+
   {
     // to be done only once
     if (__sync_bool_compare_and_swap(&init,0,1)) {
@@ -1539,8 +1540,8 @@ namespace Realm {
     , restricted_kind(copy_from.restricted_kind)
     , is_cached(copy_from.is_cached)
     , shared_cached_list(copy_from.shared_cached_list)
-    , cur_cached_list(copy_from.cur_cached_list)
     , valid_cache(copy_from.valid_cache)
+    , cur_cached_list(copy_from.cur_cached_list)
   {
     predicates.reserve(copy_from.predicates.size());
     for(std::vector<ProcQueryPredicate *>::const_iterator it = copy_from.predicates.begin();
@@ -2496,9 +2497,9 @@ namespace Realm {
     , machine((MachineImpl *)_machine.impl)
     , is_restricted_node(false)
     , is_restricted_kind(false)
-    , cur_cached_list(NULL)
-    , valid_cache(false)
     , shared_cached_list(false)
+    , valid_cache(false)
+    , cur_cached_list(NULL)
 
   {
     //  cache memory information only once
@@ -2564,9 +2565,10 @@ namespace Realm {
     , restricted_node_id(copy_from.restricted_node_id)
     , is_restricted_kind(copy_from.is_restricted_kind)
     , restricted_kind(copy_from.restricted_kind)
-    , cur_cached_list(copy_from.cur_cached_list)
-    , valid_cache(copy_from.valid_cache)
     , shared_cached_list(copy_from.shared_cached_list)
+    , valid_cache(copy_from.valid_cache)
+    , cur_cached_list(copy_from.cur_cached_list)
+
   {
     predicates.reserve(copy_from.predicates.size());
     for(std::vector<MemoryQueryPredicate *>::const_iterator it = copy_from.predicates.begin();

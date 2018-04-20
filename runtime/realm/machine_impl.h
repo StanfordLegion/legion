@@ -360,9 +360,9 @@ namespace Realm {
       bool is_restricted_node;
       int restricted_node_id;
       bool is_restricted_kind;
+      Memory::Kind restricted_kind;
       bool   shared_cached_list, valid_cache;
       unsigned int cur_index;
-      Memory::Kind restricted_kind;
       std::vector<Memory>* cur_cached_list;
       std::vector<MemoryQueryPredicate *> predicates;     
       std::vector<Memory>* sysmems_list(void) const;
