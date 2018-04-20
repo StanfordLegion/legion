@@ -3562,7 +3562,7 @@ namespace Legion {
       }
     }
 
-#ifdef CVOPT
+#ifndef DISABLE_CVOPT
     //--------------------------------------------------------------------------
     void ClosedNode::find_needed_shards(FieldMask mask, ShardID origin_shard,
                   IndexSpaceExpression *target, const WriteMasks &write_masks,

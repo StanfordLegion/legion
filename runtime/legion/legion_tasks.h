@@ -946,7 +946,7 @@ namespace Legion {
       void return_privilege_state(ResourceTracker *target);
       void handle_collective_message(Deserializer &derez);
       void handle_future_map_request(Deserializer &derez);
-#ifdef CVOPT
+#ifndef DISABLE_CVOPT
       void handle_composite_view_copy_request(Deserializer &derez, 
                                               AddressSpaceID source);
       void handle_composite_view_reduction_request(Deserializer &derez,

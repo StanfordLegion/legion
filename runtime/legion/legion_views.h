@@ -983,7 +983,7 @@ namespace Legion {
       };
       typedef std::map<ReductionView*,
                        LegionList<PendingReduction>::aligned> PendingReductions;
-#ifdef CVOPT
+#ifndef DISABLE_CVOPT
       struct ShardInfo {
       public:
         ShardInfo(void) { }
@@ -1049,7 +1049,7 @@ namespace Legion {
                              RegionTreeNode *intersect,
          const LegionMap<IndexSpaceExpression*,FieldMask>::aligned &write_masks,
                LegionMap<ReductionView*,FieldMask>::aligned &source_reductions);
-#ifdef CVOPT
+#ifndef DISABLE_CVOPT
       void buffer_reduction_shards(PredEvent pred_guard, 
               ReplicationID repl_id, RtEvent shard_invalid_barrier,
               const std::map<ShardID,WriteMasks> &reduction_shards);
@@ -1059,7 +1059,7 @@ namespace Legion {
       void begin_reduction_epoch(void);
       void end_reduction_epoch(void);
       void finalize(std::set<ApEvent> *postconditions = NULL);
-#ifdef CVOPT
+#ifndef DISABLE_CVOPT
       void pack_copier(Serializer &rez, const FieldMask &copy_mask);
 #endif
     protected:
@@ -1086,7 +1086,7 @@ namespace Legion {
       // Reduction data 
       unsigned current_reduction_epoch;
       std::vector<PendingReductions> reduction_epochs;
-#ifdef CVOPT
+#ifndef DISABLE_CVOPT
       std::vector<PendingReductionShards> reduction_shards;
 #endif
       LegionVector<FieldMask>::aligned reduction_epoch_masks;
@@ -1096,7 +1096,7 @@ namespace Legion {
       bool finalized;
     };
 
-#ifdef CVOPT
+#ifndef DISABLE_CVOPT
     /**
      * \struct RemoteDeferredCopier
      * This is a version of the above copier that is used for
@@ -1148,7 +1148,7 @@ namespace Legion {
         IndexSpaceExpression *mask;
       };
       typedef std::map<ReductionView*,PendingReduction> PendingReductions;
-#ifdef CVOPT
+#ifndef DISABLE_CVOPT
       struct ShardInfo {
       public:
         ShardInfo(void) { }
@@ -1209,7 +1209,7 @@ namespace Legion {
       void buffer_reductions(VersionTracker *tracker, PredEvent pred_guard,
                              RegionTreeNode *intersect, IndexSpaceExpression *mask,
                              std::vector<ReductionView*> &source_reductions);
-#ifdef CVOPT
+#ifndef DISABLE_CVOPT
       void buffer_reduction_shards(PredEvent pred_guard, 
           ReplicationID repl_id, RtEvent shard_invalid_barrier,
           const std::map<ShardID,IndexSpaceExpression*> &source_reductions);
@@ -1219,7 +1219,7 @@ namespace Legion {
       void begin_reduction_epoch(void);
       void end_reduction_epoch(void);
       void finalize(std::set<ApEvent> *postconditions = NULL);
-#ifdef CVOPT
+#ifndef DISABLE_CVOPT
       void pack_copier(Serializer &rez);
 #endif
       inline void record_postcondition(ApEvent post)
@@ -1241,7 +1241,7 @@ namespace Legion {
     protected: // internal members
       unsigned current_reduction_epoch;
       std::vector<PendingReductions> reduction_epochs;
-#ifdef CVOPT
+#ifndef DISABLE_CVOPT
       std::vector<PendingReductionShards> reduction_shards;
 #endif
     protected:
@@ -1251,7 +1251,7 @@ namespace Legion {
       bool finalized;
     };
 
-#ifdef CVOPT
+#ifndef DISABLE_CVOPT
     /**
      * \struct RemoteDeferredSingleCopier
      * This is a version of the above copier that is used for
@@ -1509,7 +1509,7 @@ namespace Legion {
     public:
       virtual InnerContext* get_owner_context(void) const = 0;
       virtual DistributedID get_owner_did(void) const = 0;
-#ifdef CVOPT
+#ifndef DISABLE_CVOPT
       virtual void perform_ready_check(FieldMask mask) = 0;
 #else
       virtual void perform_ready_check(FieldMask mask,
@@ -1672,7 +1672,7 @@ namespace Legion {
       virtual void pack_writing_version_numbers(Serializer &rez) const;
       virtual void pack_upper_bound_node(Serializer &rez) const;
     protected:
-#ifdef CVOPT
+#ifndef DISABLE_CVOPT
       CompositeNode* capture_above(RegionTreeNode *node,
                                    const FieldMask &needed_fields);
 #else
@@ -1684,7 +1684,7 @@ namespace Legion {
       // From CompositeBase
       virtual InnerContext* get_owner_context(void) const;
       virtual DistributedID get_owner_did(void) const { return did; }
-#ifdef CVOPT
+#ifndef DISABLE_CVOPT
       virtual void perform_ready_check(FieldMask mask);
 #else
       virtual void perform_ready_check(FieldMask mask,
@@ -1732,7 +1732,7 @@ namespace Legion {
       static void handle_deferred_view_ref(const void *args);
     public:
       // For control replication
-#ifdef CVOPT
+#ifndef DISABLE_CVOPT
       void handle_sharding_copy_request(Deserializer &derez, Runtime *runtime,
                                   InnerContext *ctx, AddressSpaceID source);
       void handle_sharding_reduction_request(Deserializer &derez, 
@@ -1761,7 +1761,7 @@ namespace Legion {
       NestedViewMap nested_composite_views;
     protected:
       LegionMap<RegionTreeNode*,NodeVersionInfo>::aligned node_versions;
-#ifndef CVOPT
+#ifdef DISABLE_CVOPT
     protected:
       // Keep track of a packed version of tree for this shard 
       // when we are running in a control replication setting
@@ -1794,7 +1794,7 @@ namespace Legion {
         CompositeNode *proxy_this;
         VersionState *state;
         DistributedID owner_did;
-#ifndef CVOPT
+#ifdef DISABLE_CVOPT
         FieldMask *mask;
 #endif
         bool root_owner;
@@ -1818,7 +1818,7 @@ namespace Legion {
       // From CompositeBase
       virtual InnerContext* get_owner_context(void) const;
       virtual DistributedID get_owner_did(void) const { return owner_did; }
-#ifdef CVOPT
+#ifndef DISABLE_CVOPT
       virtual void perform_ready_check(FieldMask mask);
 #else
       virtual void perform_ready_check(FieldMask mask,
@@ -1849,7 +1849,7 @@ namespace Legion {
                  bool root_owner);
       void unpack_version_states(Deserializer &derez, Runtime *runtime,
                        std::set<RtEvent> &preconditions, bool need_lock);
-#ifndef CVOPT
+#ifdef DISABLE_CVOPT
       void add_uncaptured_state(VersionState *state, const FieldMask &mask);
 #endif
       static void handle_deferred_node_state(const void *args);
@@ -1877,13 +1877,13 @@ namespace Legion {
       // No need to hold references in general, but we do have to hold
       // them if we are the root child of a composite view subtree
       LegionMap<VersionState*,FieldMask>::aligned version_states;
-#ifndef CVOPT
+#ifdef DISABLE_CVOPT
       // Only used on the owner node to track the set of version 
       // states on which we hold valid references
       std::vector<VersionState*> *valid_version_states;
 #endif
     protected:
-#ifdef CVOPT
+#ifndef DISABLE_CVOPT
       // Keep track of the fields we have captured
       FieldMask captured_fields;
       LegionMap<RtUserEvent,FieldMask>::aligned pending_captures;
@@ -2077,7 +2077,7 @@ namespace Legion {
         { assert(false); return NULL; }
       virtual DistributedID get_owner_did(void) const
         { assert(false); return 0; }
-#ifdef CVOPT
+#ifndef DISABLE_CVOPT
       virtual void perform_ready_check(FieldMask mask)
 #else
       virtual void perform_ready_check(FieldMask mask, RegionTreeNode *target)

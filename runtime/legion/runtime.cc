@@ -6727,7 +6727,7 @@ namespace Legion {
               runtime->handle_control_replicate_future_map_response(derez);
               break;
             }
-#ifdef CVOPT
+#ifndef DISABLE_CVOPT
           case SEND_REPL_COMPOSITE_VIEW_COPY_REQUEST:
             {
               runtime->handle_control_replicate_composite_view_copy_request(
@@ -6895,7 +6895,7 @@ namespace Legion {
               runtime->handle_remote_context_physical_response(derez);
               break;
             }
-#ifdef CVOPT
+#ifndef DISABLE_CVOPT
           case SEND_REMOTE_CONTEXT_SHARD_COPY_REQUEST:
             {
               runtime->handle_remote_context_shard_copy_request(derez);
@@ -9418,7 +9418,7 @@ namespace Legion {
       }
     }
 
-#ifdef CVOPT
+#ifndef DISABLE_CVOPT
     //--------------------------------------------------------------------------
     void ProjectionFunction::find_interfering_points(RegionTreeForest *forest,
                                              RegionTreeNode *upper_bound,
@@ -15575,7 +15575,7 @@ namespace Legion {
                   COLLECTIVE_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
     }
 
-#ifdef CVOPT
+#ifndef DISABLE_CVOPT
     //--------------------------------------------------------------------------
     void Runtime::send_control_replicate_composite_view_copy_request(
                                          AddressSpaceID target, Serializer &rez)
@@ -15849,7 +15849,7 @@ namespace Legion {
           CONTEXT_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
     }
 
-#ifdef CVOPT
+#ifndef DISABLE_CVOPT
     //--------------------------------------------------------------------------
     void Runtime::send_remote_context_shard_copy_request(AddressSpaceID target,
                                                          Serializer &rez)
@@ -16996,7 +16996,7 @@ namespace Legion {
       ReplFutureMapImpl::handle_future_map_response(derez, this);
     }
 
-#ifdef CVOPT
+#ifndef DISABLE_CVOPT
     //--------------------------------------------------------------------------
     void Runtime::handle_control_replicate_composite_view_copy_request(
                                      Deserializer &derez, AddressSpaceID source)
@@ -17275,7 +17275,7 @@ namespace Legion {
       RemoteContext::handle_physical_response(derez, this);
     }
 
-#ifdef CVOPT
+#ifndef DISABLE_CVOPT
     //--------------------------------------------------------------------------
     void Runtime::handle_remote_context_shard_copy_request(Deserializer &derez)
     //--------------------------------------------------------------------------
@@ -22506,7 +22506,7 @@ namespace Legion {
             ReplicateContext::handle_future_map_reclaim(args);
             break;
           }
-#ifdef CVOPT
+#ifndef DISABLE_CVOPT
         case LG_DEFER_COMPOSITE_COPY_TASK_ID:
           {
             ReplicateContext::handle_deferred_copy_request(args);

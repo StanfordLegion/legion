@@ -5881,7 +5881,7 @@ namespace Legion {
                    node, version_info, closed_tree, this, true/*register now*/);
     }
 
-#ifdef CVOPT
+#ifndef DISABLE_CVOPT
     //--------------------------------------------------------------------------
     AddressSpaceID InnerContext::find_shard_space(ShardID sid) const
     //--------------------------------------------------------------------------
@@ -10474,7 +10474,7 @@ namespace Legion {
           owner_shard->shard_id);
     }
 
-#ifdef CVOPT
+#ifndef DISABLE_CVOPT
     //--------------------------------------------------------------------------
     AddressSpaceID ReplicateContext::find_shard_space(ShardID sid) const
     //--------------------------------------------------------------------------
@@ -10658,7 +10658,7 @@ namespace Legion {
       impl->handle_future_map_request(derez);
     }
 
-#ifdef CVOPT
+#ifndef DISABLE_CVOPT
     //--------------------------------------------------------------------------
     void ReplicateContext::handle_composite_view_copy_request(
                                      Deserializer &derez, AddressSpaceID source)
@@ -10935,7 +10935,7 @@ namespace Legion {
                                                    RtEvent close_done)
     //--------------------------------------------------------------------------
     {
-#ifdef CVOPT
+#ifndef DISABLE_CVOPT
       std::vector<PendingCopy> to_copy;
       std::vector<PendingCopy> to_reduce;
 #else
@@ -10948,7 +10948,7 @@ namespace Legion {
                 live_composite_views.end());
 #endif
         live_composite_views[close_done] = view;
-#ifdef CVOPT
+#ifndef DISABLE_CVOPT
         // Check to see if we have any pending requests to perform
         std::map<RtEvent,std::vector<PendingCopy> >::iterator
           finder = pending_composite_view_copy_requests.find(close_done);
@@ -10974,7 +10974,7 @@ namespace Legion {
         }
 #endif
       }
-#ifdef CVOPT
+#ifndef DISABLE_CVOPT
       if (!to_copy.empty())
       {
         for (std::vector<PendingCopy>::const_iterator it = 
@@ -11021,7 +11021,7 @@ namespace Legion {
 #endif
     }
 
-#ifdef CVOPT
+#ifndef DISABLE_CVOPT
     //--------------------------------------------------------------------------
     CompositeView* ReplicateContext::find_or_buffer_composite_view_copy_request(
                                      Deserializer &derez, AddressSpaceID source)
@@ -11712,7 +11712,7 @@ namespace Legion {
       return result;
     }
 
-#ifdef CVOPT
+#ifndef DISABLE_CVOPT
     //--------------------------------------------------------------------------
     AddressSpaceID RemoteContext::find_shard_space(ShardID sid) const
     //--------------------------------------------------------------------------

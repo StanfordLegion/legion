@@ -1059,7 +1059,7 @@ namespace Legion {
                                       DeferredVersionInfo *version_info, 
                                       ClosedNode *closed_tree, 
                                       InterCloseOp *op, bool clone);
-#ifdef CVOPT
+#ifndef DISABLE_CVOPT
       virtual AddressSpaceID find_shard_space(ShardID sid) const;
       virtual void send_composite_view_shard_copy_request(ShardID sid,
                                                           Serializer &rez);
@@ -1260,7 +1260,7 @@ namespace Legion {
         ReplicateContext *const ctx;
         ReplFutureMapImpl *const impl;
       };
-#ifdef CVOPT
+#ifndef DISABLE_CVOPT
       struct DeferCompositeCopyArgs :
         public LgTaskArgs<DeferCompositeCopyArgs> {
       public:
@@ -1572,7 +1572,7 @@ namespace Legion {
                                       DeferredVersionInfo *version_info, 
                                       ClosedNode *closed_tree, 
                                       InterCloseOp *op, bool clone);
-#ifdef CVOPT
+#ifndef DISABLE_CVOPT
       virtual AddressSpaceID find_shard_space(ShardID sid) const;
       virtual void send_composite_view_shard_copy_request(ShardID sid,
                                                           Serializer &rez);
@@ -1593,7 +1593,7 @@ namespace Legion {
       void exchange_common_resources(void);
       void handle_collective_message(Deserializer &derez);
       void handle_future_map_request(Deserializer &derez);
-#ifdef CVOPT
+#ifndef DISABLE_CVOPT
       void handle_composite_view_copy_request(Deserializer &derez,
                                               AddressSpaceID source);
       void handle_composite_view_reduction_request(Deserializer &derez,
@@ -1618,7 +1618,7 @@ namespace Legion {
     public:
       // Composite view methods
       void register_composite_view(CompositeView* view, RtEvent close_done);
-#ifdef CVOPT
+#ifndef DISABLE_CVOPT
       CompositeView* find_or_buffer_composite_view_copy_request(
                                     Deserializer &derez, AddressSpaceID source);
       CompositeView* find_or_buffer_composite_view_reduction_request(
@@ -1692,7 +1692,7 @@ namespace Legion {
     protected:
       // Composite views that are still valid across the shards
       std::map<RtEvent/*done event*/,CompositeView*> live_composite_views;
-#ifdef CVOPT
+#ifndef DISABLE_CVOPT
       struct PendingCopy {
       public:
         PendingCopy(void *buf, size_t size, AddressSpaceID src)
@@ -1807,7 +1807,7 @@ namespace Legion {
       virtual void invalidate_remote_tree_contexts(Deserializer &derez);
     public:
       virtual ShardingFunction* find_sharding_function(ShardingID sid);
-#ifdef CVOPT
+#ifndef DISABLE_CVOPT
       virtual AddressSpaceID find_shard_space(ShardID sid) const;
       virtual void send_composite_view_shard_copy_request(ShardID sid,
                                                           Serializer &rez);

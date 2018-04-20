@@ -1462,7 +1462,7 @@ namespace Legion {
                           const RegionRequirement &req, 
                           Runtime *runtime, const Domain &launch_domain,
                           const std::vector<ProjectionPoint*> &points);
-#ifdef CVOPT
+#ifndef DISABLE_CVOPT
       // For inverting the projection function and finding interfering
       // points given a specific target in the region tree
       void find_interfering_points(RegionTreeForest *forest,
@@ -1522,7 +1522,7 @@ namespace Legion {
       ProjectionFunctor *const functor;
     protected:
       mutable LocalLock projection_reservation;
-#ifdef CVOPT
+#ifndef DISABLE_CVOPT
       std::map<std::pair<IndexSpaceExpression*,IndexSpace>,
                std::map<DomainPoint,IndexSpaceExpression*> > interfering_points;
 #else
@@ -2401,7 +2401,7 @@ namespace Legion {
                                                      Serializer &rez);
       void send_control_replicate_future_map_response(AddressSpaceID target,
                                                       Serializer &rez);
-#ifdef CVOPT
+#ifndef DISABLE_CVOPT
       void send_control_replicate_composite_view_copy_request(
                                       AddressSpaceID target, Serializer &rez);
       void send_control_replicate_composite_view_reduction_request(
@@ -2454,7 +2454,7 @@ namespace Legion {
                                                 Serializer &rez);
       void send_remote_context_physical_response(AddressSpaceID target,
                                                  Serializer &rez);
-#ifdef CVOPT
+#ifndef DISABLE_CVOPT
       void send_remote_context_shard_copy_request(AddressSpaceID target, 
                                                   Serializer &rez);
       void send_remote_context_shard_reduction_request(AddressSpaceID target,
@@ -2641,7 +2641,7 @@ namespace Legion {
       void handle_future_map_future_response(Deserializer &derez);
       void handle_control_replicate_future_map_request(Deserializer &derez);
       void handle_control_replicate_future_map_response(Deserializer &derez);
-#ifdef CVOPT
+#ifndef DISABLE_CVOPT
       void handle_control_replicate_composite_view_copy_request(
                                 Deserializer &derez, AddressSpaceID source);
       void handle_control_replicate_composite_view_reduction_request(
@@ -2693,7 +2693,7 @@ namespace Legion {
       void handle_remote_context_physical_request(Deserializer &derez,
                                                   AddressSpaceID source);
       void handle_remote_context_physical_response(Deserializer &derez);
-#ifdef CVOPT
+#ifndef DISABLE_CVOPT
       void handle_remote_context_shard_copy_request(Deserializer &derez);
       void handle_remote_context_shard_reduction_request(Deserializer &derez);
 #else

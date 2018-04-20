@@ -758,7 +758,7 @@ namespace Legion {
                               const FieldMask &closed_fields);
       void record_projection(ProjectionFunction *function, OpenState state,
                              IndexSpaceNode *domain, const FieldMask &mask);
-#ifdef CVOPT
+#ifndef DISABLE_CVOPT
       void find_needed_shards(FieldMask mask, ShardID origin_shard,
                           IndexSpaceExpression *target, 
                           const WriteMasks &write_masks,

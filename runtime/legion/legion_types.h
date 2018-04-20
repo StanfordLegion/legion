@@ -689,7 +689,7 @@ namespace Legion {
       SEND_FUTURE_MAP_RESPONSE,
       SEND_REPL_FUTURE_MAP_REQUEST,
       SEND_REPL_FUTURE_MAP_RESPONSE,
-#ifdef CVOPT
+#ifndef DISABLE_CVOPT
       SEND_REPL_COMPOSITE_VIEW_COPY_REQUEST,
       SEND_REPL_COMPOSITE_VIEW_REDUCTION_REQUEST,
 #else
@@ -721,7 +721,7 @@ namespace Legion {
       SEND_REMOTE_CONTEXT_FREE,
       SEND_REMOTE_CONTEXT_PHYSICAL_REQUEST,
       SEND_REMOTE_CONTEXT_PHYSICAL_RESPONSE,
-#ifdef CVOPT
+#ifndef DISABLE_CVOPT
       SEND_REMOTE_CONTEXT_SHARD_COPY_REQUEST,
       SEND_REMOTE_CONTEXT_SHARD_REDUCTION_REQUEST,
 #else
@@ -776,7 +776,7 @@ namespace Legion {
       LAST_SEND_KIND, // This one must be last
     };
 
-#ifdef CVOPT
+#ifndef DISABLE_CVOPT
 #define LG_MESSAGE_DESCRIPTIONS(name)                                 \
       const char *name[LAST_SEND_KIND] = {                            \
         "Task Message",                                               \

@@ -4012,7 +4012,7 @@ namespace Legion {
       assert(false);
     }
 
-#ifdef CVOPT
+#ifndef DISABLE_CVOPT
     //--------------------------------------------------------------------------
     void ShardManager::send_composite_view_copy_request(ShardID target, 
                                                         Serializer &rez)
@@ -4282,7 +4282,7 @@ namespace Legion {
       manager->handle_future_map_request(derez);
     }
 
-#ifdef CVOPT
+#ifndef DISABLE_CVOPT
     //--------------------------------------------------------------------------
     /*static*/ void ShardManager::handle_composite_view_copy_request(
                    Deserializer &derez, Runtime *runtime, AddressSpaceID source)

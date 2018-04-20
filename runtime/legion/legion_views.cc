@@ -4584,7 +4584,7 @@ namespace Legion {
       {
         reduction_epochs.resize(current_reduction_epoch + 1);
         reduction_epoch_masks.resize(current_reduction_epoch + 1);
-#ifdef CVOPT
+#ifndef DISABLE_CVOPT
         reduction_shards.resize(current_reduction_epoch + 1);
 #endif
       }
@@ -4628,7 +4628,7 @@ namespace Legion {
       }
     }
 
-#ifdef CVOPT
+#ifndef DISABLE_CVOPT
     //--------------------------------------------------------------------------
     void DeferredCopier::buffer_reduction_shards(PredEvent pred_guard,
         ReplicationID repl_id, RtEvent shard_invalid_barrier,
@@ -4764,7 +4764,7 @@ namespace Legion {
       }
     }
 
-#ifdef CVOPT
+#ifndef DISABLE_CVOPT
     //--------------------------------------------------------------------------
     void DeferredCopier::pack_copier(Serializer &rez,const FieldMask &copy_mask)
     //--------------------------------------------------------------------------
@@ -4862,7 +4862,7 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(reduction_epochs.size() == reduction_epoch_masks.size());
-#ifdef CVOPT
+#ifndef DISABLE_CVOPT
       assert(reduction_shards.size() == reduction_epoch_masks.size());
 #endif
 #endif
@@ -4906,7 +4906,7 @@ namespace Legion {
         if (!epoch_mask)
           continue;
         LegionMap<ApEvent,FieldMask>::aligned reduction_postconditions;
-#ifdef CVOPT
+#ifndef DISABLE_CVOPT
         // Send anything to remote shards first to get things in flight
         PendingReductionShards &pending_shards = reduction_shards[epoch];
         for (PendingReductionShards::const_iterator pit = 
@@ -5107,7 +5107,7 @@ namespace Legion {
       return false;
     }
 
-#ifdef CVOPT
+#ifndef DISABLE_CVOPT
     /////////////////////////////////////////////////////////////
     // RemoteDeferredCopier
     /////////////////////////////////////////////////////////////
@@ -5329,7 +5329,7 @@ namespace Legion {
       if (current_reduction_epoch >= reduction_epochs.size())
       {
         reduction_epochs.resize(current_reduction_epoch + 1);
-#ifdef CVOPT
+#ifndef DISABLE_CVOPT
         reduction_shards.resize(current_reduction_epoch + 1);
 #endif
       }
@@ -5346,7 +5346,7 @@ namespace Legion {
       }
     }
 
-#ifdef CVOPT
+#ifndef DISABLE_CVOPT
     //--------------------------------------------------------------------------
     void DeferredSingleCopier::buffer_reduction_shards(PredEvent pred_guard,
         ReplicationID repl_id, RtEvent shard_invalid_barrier, 
@@ -5427,7 +5427,7 @@ namespace Legion {
 #endif
       finalized = true;
       // Apply any pending reductions using the proper preconditions
-#ifdef CVOPT
+#ifndef DISABLE_CVOPT
       if (!reduction_epochs.empty() || !reduction_shards.empty())
 #else
       if (!reduction_epochs.empty())
@@ -5463,7 +5463,7 @@ namespace Legion {
                                copy_postconditions.end());
     }
 
-#ifdef CVOPT
+#ifndef DISABLE_CVOPT
     //--------------------------------------------------------------------------
     void DeferredSingleCopier::pack_copier(Serializer &rez)
     //--------------------------------------------------------------------------
@@ -5519,7 +5519,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-#ifdef CVOPT
+#ifndef DISABLE_CVOPT
       assert(reduction_epochs.size() == reduction_shards.size());
 #endif
 #endif
@@ -5536,7 +5536,7 @@ namespace Legion {
       for (int epoch = reduction_epochs.size()-1; epoch >= 0; epoch--)
       {
         std::set<ApEvent> reduction_postconditions;
-#ifdef CVOPT
+#ifndef DISABLE_CVOPT
         PendingReductionShards &pending_shards = reduction_shards[epoch];
         // First send messages to any shards to get things in flight
         for (PendingReductionShards::const_iterator it = 
@@ -5602,7 +5602,7 @@ namespace Legion {
       }
     }
 
-#ifdef CVOPT
+#ifndef DISABLE_CVOPT
     /////////////////////////////////////////////////////////////
     // RemoteDeferredSingleCopier
     /////////////////////////////////////////////////////////////
@@ -6147,7 +6147,7 @@ namespace Legion {
         // Otherwise we can fall through and keep going
       }
       // First check to see if we have all the valid meta-data
-#ifdef CVOPT
+#ifndef DISABLE_CVOPT
       perform_ready_check(local_copy_mask);
 #else
       perform_ready_check(local_copy_mask, logical_node);
@@ -6343,7 +6343,7 @@ namespace Legion {
         // shard writes on remote nodes
       }
       // First check to see if we have all the valid meta-data
-#ifdef CVOPT
+#ifndef DISABLE_CVOPT
       perform_ready_check(copier.copy_mask);
 #else
       perform_ready_check(copier.copy_mask, logical_node);
@@ -6464,7 +6464,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Issue any reductions at this level and then traverse the children
-#ifdef CVOPT
+#ifndef DISABLE_CVOPT
       perform_ready_check(local_mask);
 #else
       perform_ready_check(local_mask, reducer.dst->logical_node);
@@ -6583,7 +6583,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Issue any reductions at this level and then traverse the children
-#ifdef CVOPT
+#ifndef DISABLE_CVOPT
       perform_ready_check(reducer.reduction_mask);
 #else
       perform_ready_check(reducer.reduction_mask, reducer.dst->logical_node);
@@ -6966,7 +6966,7 @@ namespace Legion {
         CompositeBase(view_lock, invalid_bar.exists()),
         version_info(info), closed_tree(tree), owner_context(context),
         repl_id(repl), shard_invalid_barrier(invalid_bar), origin_shard(origin)
-#ifndef CVOPT
+#ifdef DISABLE_CVOPT
         , packed_shard(NULL)
 #endif
     //--------------------------------------------------------------------------
@@ -7016,7 +7016,7 @@ namespace Legion {
       // Remove the reference on our context
       if (owner_context->remove_reference())
         delete owner_context;
-#ifndef CVOPT
+#ifdef DISABLE_CVOPT
       if (packed_shard != NULL)
         delete packed_shard;
 #endif
@@ -7425,7 +7425,7 @@ namespace Legion {
         else
           still_needed = needed_fields; // we still need all the fields
       }
-#ifdef CVOPT
+#ifndef DISABLE_CVOPT
       CompositeNode *capture_node = capture_above(node, still_needed);
 #else
       CompositeNode *capture_node = capture_above(node, still_needed, node);
@@ -7477,7 +7477,7 @@ namespace Legion {
       version_info->pack_upper_bound_node(rez);
     }
 
-#ifdef CVOPT
+#ifndef DISABLE_CVOPT
     //--------------------------------------------------------------------------
     CompositeNode* CompositeView::capture_above(RegionTreeNode *node,
                                                 const FieldMask &needed_fields)
@@ -7567,7 +7567,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(shard_invalid_barrier.exists());
 #endif
-#ifdef CVOPT
+#ifndef DISABLE_CVOPT
       RegionTreeForest *context = logical_node->context;
       std::map<ShardID,WriteMasks> needed_shards, reduction_shards; 
       IndexSpaceExpression *dst_expr = context->intersect_index_spaces(
@@ -7682,7 +7682,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(shard_invalid_barrier.exists());
 #endif
-#ifdef CVOPT
+#ifndef DISABLE_CVOPT
       RegionTreeForest *context = logical_node->context;
       IndexSpaceExpression *target_expr = context->intersect_index_spaces(
         logical_node->get_index_space_expression(), 
@@ -7747,7 +7747,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-#ifdef CVOPT
+#ifndef DISABLE_CVOPT
     void CompositeView::perform_ready_check(FieldMask check_mask)
 #else
     void CompositeView::perform_ready_check(FieldMask check_mask, 
@@ -7755,7 +7755,7 @@ namespace Legion {
 #endif
     //--------------------------------------------------------------------------
     {
-#ifndef CVOPT
+#ifdef DISABLE_CVOPT
       // See if we need to do a sharding test for control replication
       if (shard_invalid_barrier.exists() && (target != NULL))
       {
@@ -8159,7 +8159,7 @@ namespace Legion {
       // where it is safe to register ourselves as a composite view
       if (shard_invalid_barrier.exists())
       {
-#ifndef CVOPT
+#ifdef DISABLE_CVOPT
         // Compute an initial packing of shard
 #ifdef DEBUG_LEGION
         assert(packed_shard == NULL);
@@ -8314,7 +8314,7 @@ namespace Legion {
         delete iargs->view;
     }
 
-#ifdef CVOPT
+#ifndef DISABLE_CVOPT
     //--------------------------------------------------------------------------
     void CompositeView::handle_sharding_copy_request(Deserializer &derez,
                           Runtime *rt, InnerContext *ctx, AddressSpaceID source)
@@ -8548,7 +8548,7 @@ namespace Legion {
                                  DistributedID own_did, bool root_own)
       : CompositeBase(node_lock, false), logical_node(node), parent(p), 
         owner_did(own_did), root_owner(root_own)
-#ifndef CVOPT
+#ifdef DISABLE_CVOPT
         , valid_version_states(NULL)
 #endif
     //--------------------------------------------------------------------------
@@ -8641,7 +8641,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-#ifdef CVOPT
+#ifndef DISABLE_CVOPT
     void CompositeNode::perform_ready_check(FieldMask mask)
 #else
     void CompositeNode::perform_ready_check(FieldMask mask,
@@ -8651,7 +8651,7 @@ namespace Legion {
     {
       RtUserEvent capture_event;
       std::set<RtEvent> preconditions;
-#ifdef CVOPT
+#ifndef DISABLE_CVOPT
       // Do a quick test with read-only lock first
       {
         AutoLock n_lock(node_lock,1,false/*exclusive*/);
@@ -8827,7 +8827,7 @@ namespace Legion {
         // Now we can remove the capture event from the set
         AutoLock n_lock(node_lock);
         pending_captures.erase(capture_event);
-#ifdef CVOPT
+#ifndef DISABLE_CVOPT
         // Once we're done with the capture then we can record 
         // the fields as having been captured
         captured_fields |= mask;
@@ -9033,7 +9033,7 @@ namespace Legion {
           runtime->find_or_request_version_state(did, ready); 
         std::map<VersionState*,FieldMask>::iterator finder = 
           version_states.find(state);
-#ifdef CVOPT
+#ifndef DISABLE_CVOPT
         if (finder != version_states.end())
         {
           FieldMask state_mask;
@@ -9116,7 +9116,7 @@ namespace Legion {
       }
     }
 
-#ifndef CVOPT
+#ifdef DISABLE_CVOPT
     //--------------------------------------------------------------------------
     void CompositeNode::add_uncaptured_state(VersionState *state, 
                                              const FieldMask &state_mask)
@@ -9155,7 +9155,7 @@ namespace Legion {
       LocalReferenceMutator mutator;
       if (nargs->root_owner)
         nargs->state->add_nested_gc_ref(nargs->owner_did, &mutator);
-#ifndef CVOPT
+#ifdef DISABLE_CVOPT
       // Add the state to the view
       nargs->proxy_this->add_uncaptured_state(nargs->state, *nargs->mask);
       // Free up the mask that we allocated
@@ -9247,7 +9247,7 @@ namespace Legion {
       if (finder == version_states.end())
       {
         version_states[state] = mask;
-#ifndef CVOPT
+#ifdef DISABLE_CVOPT
         // Also need to update the uncaptured state
         uncaptured_states[state] = mask;
         uncaptured_fields |= mask;
@@ -9258,7 +9258,7 @@ namespace Legion {
         if (root_owner)
         {
           state->add_nested_gc_ref(owner_did, mutator);
-#ifndef CVOPT
+#ifdef DISABLE_CVOPT
           if (valid_version_states == NULL)
             valid_version_states = new std::vector<VersionState*>();
           valid_version_states->push_back(state);
@@ -9272,7 +9272,7 @@ namespace Legion {
         const FieldMask uncaptured_mask = mask - finder->second;
         if (!!uncaptured_mask)
         {
-#ifndef CVOPT
+#ifdef DISABLE_CVOPT
           uncaptured_states[state] |= uncaptured_mask;
           uncaptured_fields |= uncaptured_mask;
 #endif
@@ -9302,7 +9302,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(root_owner); // should only be called on the root owner
 #endif
-#ifdef CVOPT
+#ifndef DISABLE_CVOPT
       if (root_owner)
       {
         for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it =

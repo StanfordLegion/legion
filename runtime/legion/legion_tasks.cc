@@ -7261,7 +7261,7 @@ namespace Legion {
       repl_ctx->handle_future_map_request(derez);
     }
 
-#ifdef CVOPT
+#ifndef DISABLE_CVOPT
     //--------------------------------------------------------------------------
     void ShardTask::handle_composite_view_copy_request(Deserializer &derez,
                                                        AddressSpaceID source)
