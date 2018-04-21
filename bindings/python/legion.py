@@ -400,7 +400,7 @@ class Region(object):
         if not isinstance(fspace, Fspace):
             fspace = Fspace.create(fspace)
         handle = c.legion_logical_region_create(
-            _my.ctx.runtime, _my.ctx.context, ispace.handle[0], fspace.handle[0])
+            _my.ctx.runtime, _my.ctx.context, ispace.handle[0], fspace.handle[0], False)
         result = Region(handle, ispace, fspace)
         for field_name in fspace.field_ids.keys():
             result.set_privilege(field_name, RW)
