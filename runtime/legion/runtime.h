@@ -2007,7 +2007,7 @@ namespace Legion {
                                   const std::set<FieldID> &to_free);
     public:
       LogicalRegion create_logical_region(Context ctx, IndexSpace index,
-                                          FieldSpace fields);
+                                          FieldSpace fields, bool task_local);
       void destroy_logical_region(Context ctx, LogicalRegion handle);
       void destroy_logical_partition(Context ctx, LogicalPartition handle);
       // Called from deletion ops

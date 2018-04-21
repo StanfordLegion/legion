@@ -60,7 +60,7 @@ terra top_level_task(task : c.legion_task_t,
 
   var is = c.legion_index_space_create(runtime, ctx, 5)
   var fs = c.legion_field_space_create(runtime, ctx)
-  var r = c.legion_logical_region_create(runtime, ctx, is, fs)
+  var r = c.legion_logical_region_create(runtime, ctx, is, fs, true)
 
   var ptr1 : c.legion_ptr_t, ptr2 : c.legion_ptr_t
   var f1 : c.legion_field_id_t, f2 : c.legion_field_id_t

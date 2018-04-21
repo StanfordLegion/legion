@@ -7577,11 +7577,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     LogicalRegionT<DIM,T> Runtime::create_logical_region(Context ctx,
-                                    IndexSpaceT<DIM,T> index, FieldSpace fields)
+                   IndexSpaceT<DIM,T> index, FieldSpace fields, bool task_local)
     //--------------------------------------------------------------------------
     {
       return LogicalRegionT<DIM,T>(create_logical_region(ctx, 
-                                  IndexSpace(index), fields));
+                                  IndexSpace(index), fields, task_local));
     }
 
     //--------------------------------------------------------------------------

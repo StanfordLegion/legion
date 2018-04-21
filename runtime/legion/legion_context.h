@@ -250,7 +250,8 @@ namespace Legion {
                                const std::set<FieldID> &to_free) = 0; 
       virtual LogicalRegion create_logical_region(RegionTreeForest *forest,
                                             IndexSpace index_space,
-                                            FieldSpace field_space) = 0;
+                                            FieldSpace field_space,
+                                            bool task_local) = 0;
       virtual void destroy_logical_region(LogicalRegion handle) = 0;
       virtual void destroy_logical_partition(LogicalPartition handle) = 0;
       virtual FieldAllocator create_field_allocator(Legion::Runtime *external,
@@ -421,7 +422,7 @@ namespace Legion {
       void log_created_requirements(void);
     public: // Privilege tracker methods
       virtual void register_region_creations(
-                          const std::set<LogicalRegion> &regions);
+                     const std::map<LogicalRegion,bool> &regions);
       virtual void register_region_deletions(
                           const std::set<LogicalRegion> &regions);
     public:
@@ -445,7 +446,7 @@ namespace Legion {
       virtual void register_index_partition_deletions(
                           const std::set<IndexPartition> &parts);
     public:
-      void register_region_creation(LogicalRegion handle);
+      void register_region_creation(LogicalRegion handle, bool task_local);
       void register_region_deletion(LogicalRegion handle,
                                     bool do_finalize = true);
     public:
@@ -890,7 +891,8 @@ namespace Legion {
                                const std::set<FieldID> &to_free);
       virtual LogicalRegion create_logical_region(RegionTreeForest *forest,
                                             IndexSpace index_space,
-                                            FieldSpace field_space);
+                                            FieldSpace field_space,
+                                            bool task_local);
       virtual void destroy_logical_region(LogicalRegion handle);
       virtual void destroy_logical_partition(LogicalPartition handle);
       virtual FieldAllocator create_field_allocator(Legion::Runtime *external,
@@ -1200,6 +1202,9 @@ namespace Legion {
       // Track information for locally allocated fields
       mutable LocalLock                                 local_field_lock;
       std::map<FieldSpace,std::vector<LocalFieldInfo> > local_fields;
+    protected:
+      // Track information for locally created regions
+      std::set<LogicalRegion> local_regions;
     };
 
     /**
@@ -2046,7 +2051,8 @@ namespace Legion {
                                const std::set<FieldID> &to_free);
       virtual LogicalRegion create_logical_region(RegionTreeForest *forest,
                                             IndexSpace index_space,
-                                            FieldSpace field_space);
+                                            FieldSpace field_space,
+                                            bool task_local);
       virtual void destroy_logical_region(LogicalRegion handle);
       virtual void destroy_logical_partition(LogicalPartition handle);
       virtual FieldAllocator create_field_allocator(Legion::Runtime *external,
@@ -2387,7 +2393,8 @@ namespace Legion {
                                const std::set<FieldID> &to_free);
       virtual LogicalRegion create_logical_region(RegionTreeForest *forest,
                                             IndexSpace index_space,
-                                            FieldSpace field_space);
+                                            FieldSpace field_space,
+                                            bool task_local);
       virtual void destroy_logical_region(LogicalRegion handle);
       virtual void destroy_logical_partition(LogicalPartition handle);
       virtual FieldAllocator create_field_allocator(Legion::Runtime *external,

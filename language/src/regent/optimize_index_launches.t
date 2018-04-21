@@ -17,6 +17,7 @@
 -- Attempts to determine which loops can be transformed into index
 -- space task launches.
 
+local affine_helper = require("regent/affine_helper")
 local ast = require("regent/ast")
 local data = require("common/data")
 local report = require("common/report")
@@ -39,6 +40,7 @@ end
 function context:new_local_scope()
   local cx = {
     constraints = self.constraints,
+    loop_index = false,
     loop_variables = {},
   }
   return setmetatable(cx, context)
@@ -56,6 +58,11 @@ function context.new_global_scope()
   return setmetatable(cx, context)
 end
 
+function context:set_loop_index(loop_index)
+  assert(not self.loop_index)
+  self.loop_index = loop_index
+end
+
 function context:add_loop_variable(loop_variable)
   assert(self.loop_variables)
   self.loop_variables[loop_variable] = true
@@ -64,6 +71,11 @@ end
 function context:is_loop_variable(variable)
   assert(self.loop_variables)
   return self.loop_variables[variable]
+end
+
+function context:is_loop_index(variable)
+  assert(self.loop_index)
+  return self.loop_index == variable
 end
 
 local function check_privilege_noninterference(cx, task, arg,
@@ -98,6 +110,36 @@ local function check_privilege_noninterference(cx, task, arg,
   return true
 end
 
+local function strip_casts(node)
+  if node:is(ast.typed.expr.Cast) then
+    return node.arg
+  end
+  return node
+end
+
+local function check_index_noninterference_self(cx, arg)
+  local index = strip_casts(arg.index)
+
+  -- Easy case: index is just the loop variable.
+  if (index:is(ast.typed.expr.ID) and cx:is_loop_index(index.value)) then
+    return true
+  end
+
+  -- Another easy case: index is loop variable plus or minus a constant.
+  if (index:is(ast.typed.expr.Binary) and
+      index.lhs:is(ast.typed.expr.ID) and cx:is_loop_index(index.lhs.value) and
+      affine_helper.is_constant_expr(index.rhs) and
+      (index.op == "+" or index.op == "-"))
+  then
+    return true
+  end
+
+  -- FIXME: Do a proper affine analysis of the index expression.
+
+  -- Otherwise return false.
+  return false
+end
+
 local function analyze_noninterference_previous(
     cx, task, arg, regions_previously_used, mapping)
   local region_type = std.as_read(arg.expr_type)
@@ -107,10 +149,14 @@ local function analyze_noninterference_previous(
       region_type,
       other_region_type,
       std.disjointness)
+    local exclude_variables = { [cx.loop_index] = true }
 
-    if std.type_maybe_eq(region_type.fspace_type, other_region_type.fspace_type) and
-      not std.check_constraint(cx, constraint) and
-      not check_privilege_noninterference(cx, task, arg, other_arg, mapping)
+    if not (
+        not std.type_maybe_eq(region_type.fspace_type, other_region_type.fspace_type) or
+        std.check_constraint(cx, constraint, exclude_variables) or
+        check_privilege_noninterference(cx, task, arg, other_arg, mapping))
+        -- Index non-interference is handled at the type checker level
+        -- and is captured in the constraints.
     then
       return false, i
     end
@@ -121,7 +167,9 @@ end
 local function analyze_noninterference_self(
     cx, task, arg, partition_type, mapping)
   local region_type = std.as_read(arg.expr_type)
-  if partition_type and partition_type:is_disjoint() then
+  if partition_type and partition_type:is_disjoint() and
+    check_index_noninterference_self(cx, arg)
+  then
     return true
   end
 
@@ -322,6 +370,119 @@ local function analyze_is_loop_invariant(cx, node)
     node, true)
 end
 
+local function analyze_is_simple_index_expression_node(cx)
+  return function(node)
+    -- Expressions:
+    if node:is(ast.typed.expr.ID) then
+      -- Right now we can't capture a closure on any variable other
+      -- than the loop variable, because that's the only variable that
+      -- gets supplied through the projection functor API.
+      return cx:is_loop_index(node.value)
+    elseif node:is(ast.typed.expr.FieldAccess) or
+      node:is(ast.typed.expr.IndexAccess) or
+      node:is(ast.typed.expr.MethodCall) or
+      node:is(ast.typed.expr.Call) or
+      node:is(ast.typed.expr.RawContext) or
+      node:is(ast.typed.expr.RawFields) or
+      node:is(ast.typed.expr.RawPhysical) or
+      node:is(ast.typed.expr.RawRuntime) or
+      node:is(ast.typed.expr.RawValue) or
+      node:is(ast.typed.expr.Isnull) or
+      node:is(ast.typed.expr.Null) or
+      node:is(ast.typed.expr.DynamicCast) or
+      node:is(ast.typed.expr.StaticCast) or
+      node:is(ast.typed.expr.UnsafeCast) or
+      node:is(ast.typed.expr.Ispace) or
+      node:is(ast.typed.expr.Region) or
+      node:is(ast.typed.expr.Partition) or
+      node:is(ast.typed.expr.PartitionEqual) or
+      node:is(ast.typed.expr.PartitionByField) or
+      node:is(ast.typed.expr.Image) or
+      node:is(ast.typed.expr.Preimage) or
+      node:is(ast.typed.expr.CrossProduct) or
+      node:is(ast.typed.expr.ListSlicePartition) or
+      node:is(ast.typed.expr.ListDuplicatePartition) or
+      node:is(ast.typed.expr.ListSliceCrossProduct) or
+      node:is(ast.typed.expr.ListCrossProduct) or
+      node:is(ast.typed.expr.ListCrossProductComplete) or
+      node:is(ast.typed.expr.ListPhaseBarriers) or
+      node:is(ast.typed.expr.ListInvert) or
+      node:is(ast.typed.expr.ListRange) or
+      node:is(ast.typed.expr.PhaseBarrier) or
+      node:is(ast.typed.expr.DynamicCollective) or
+      node:is(ast.typed.expr.DynamicCollectiveGetResult) or
+      node:is(ast.typed.expr.Advance) or
+      node:is(ast.typed.expr.Adjust) or
+      node:is(ast.typed.expr.Arrive) or
+      node:is(ast.typed.expr.Await) or
+      node:is(ast.typed.expr.Copy) or
+      node:is(ast.typed.expr.Fill) or
+      node:is(ast.typed.expr.Acquire) or
+      node:is(ast.typed.expr.Release) or
+      node:is(ast.typed.expr.AllocateScratchFields) or
+      node:is(ast.typed.expr.WithScratchFields) or
+      node:is(ast.typed.expr.RegionRoot) or
+      node:is(ast.typed.expr.Condition) or
+      node:is(ast.typed.expr.Deref)
+    then
+      return false
+
+    elseif node:is(ast.typed.expr.Constant) or
+      node:is(ast.typed.expr.Function) or
+      node:is(ast.typed.expr.Cast) or
+      node:is(ast.typed.expr.Ctor) or
+      node:is(ast.typed.expr.CtorListField) or
+      node:is(ast.typed.expr.CtorRecField) or
+      node:is(ast.typed.expr.Unary) or
+      node:is(ast.typed.expr.Binary)
+    then
+      return true
+
+    -- Miscellaneous:
+    elseif node:is(ast.location) or
+      node:is(ast.annotation) or
+      node:is(ast.condition_kind)
+    then
+      return true
+
+    else
+      assert(false, "unexpected node type " .. tostring(node.node_type))
+    end
+  end
+end
+
+local function analyze_is_simple_index_expression(cx, node)
+  return ast.mapreduce_node_postorder(
+    analyze_is_simple_index_expression_node(cx),
+    data.all,
+    node, true)
+end
+
+local function analyze_is_projectable(cx, arg)
+  -- 1. We can project any index access `p[...]`
+  if not arg:is(ast.typed.expr.IndexAccess) then
+    return false
+  end
+
+  -- 2. As long as `p` is a partition or cross product (otherwise this
+  -- is irrelevant, since we wouldn't be producing a region requirement).
+  if not (std.is_partition(std.as_read(arg.value.expr_type)) or
+       std.is_cross_product(std.as_read(arg.value.expr_type)))
+  then
+    return false
+  end
+
+  -- 3. And as long as `p` is loop-invariant (we have to index from
+  -- the same partition every time).
+  if not analyze_is_loop_invariant(cx, arg.value) then
+    return false
+  end
+
+  -- 4. And as long as the index itself is a simple expression of the
+  -- loop index.
+  return analyze_is_simple_index_expression(cx, arg.index)
+end
+
 local optimize_index_launch = {}
 
 local function ignore(...) end
@@ -333,6 +494,7 @@ local function optimize_loop_body(cx, node, report_pass, report_fail)
   end
 
   local loop_cx = cx:new_local_scope()
+  loop_cx:set_loop_index(node.symbol)
   loop_cx:add_loop_variable(node.symbol)
 
   local preamble = terralib.newlist()
@@ -343,7 +505,7 @@ local function optimize_loop_body(cx, node, report_pass, report_fail)
       report_fail(stat, "loop optimization failed: preamble statement is not a variable")
       return
     end
-    if not analyze_is_side_effect_free(cx, stat) then
+    if not analyze_is_side_effect_free(loop_cx, stat) then
       if not (i == #node.block.stats - 1 and
               stat.value and
               stat.value:is(ast.typed.expr.Call)) then
@@ -411,7 +573,7 @@ local function optimize_loop_body(cx, node, report_pass, report_fail)
       report_fail(body, "loop optimization failed: reduction over " .. tostring(reduce_op) .. " " .. tostring(reduce_as_type) .. " not supported")
     end
 
-    if not analyze_is_side_effect_free(cx, reduce_lhs) then
+    if not analyze_is_side_effect_free(loop_cx, reduce_lhs) then
       report_fail(body, "loop optimization failed: reduction is not side-effect free")
     end
   end
@@ -435,8 +597,9 @@ local function optimize_loop_body(cx, node, report_pass, report_fail)
   --     must be one of:
   --
   --      a. Provably loop-invariant.
-  --      b. Provably loop-variant, with simple indexing which can be
-  --         analyzed by the optimizer.
+  --      b. Provably projectable (i.e. can be expressed as a
+  --         projection functor from the partition and index), with
+  --         simple indexing which can be analyzed by the optimizer.
   --      c. (Not yet implemented.) Neither, but (i) the region has no
   --         privileges, and (ii) it is provably a subregion of one of
   --         the other region arguments to the task (which must
@@ -459,19 +622,19 @@ local function optimize_loop_body(cx, node, report_pass, report_fail)
   local args = call.args
   local args_provably = ast.IndexLaunchArgsProvably {
     invariant = terralib.newlist(),
-    variant = terralib.newlist(),
+    projectable = terralib.newlist(),
   }
   local regions_previously_used = terralib.newlist()
   local mapping = {}
   for i, arg in ipairs(args) do
-    if not analyze_is_side_effect_free(cx, arg) then
+    if not analyze_is_side_effect_free(loop_cx, arg) then
       report_fail(call, "loop optimization failed: argument " .. tostring(i) .. " is not side-effect free")
       return
     end
 
     local arg_invariant = analyze_is_loop_invariant(loop_cx, arg)
 
-    local arg_variant = false
+    local arg_projectable = false
     local partition_type
 
     local arg_type = std.as_read(arg.expr_type)
@@ -481,22 +644,13 @@ local function optimize_loop_body(cx, node, report_pass, report_fail)
     mapping[arg] = param_types[i]
     -- Tests for conformance to index launch requirements.
     if std.is_ispace(arg_type) or std.is_region(arg_type) then
-      if arg:is(ast.typed.expr.IndexAccess) and
-        (std.is_partition(std.as_read(arg.value.expr_type)) or
-           std.is_cross_product(std.as_read(arg.value.expr_type)))
-      then
-        if (arg.index:is(ast.typed.expr.ID) and arg.index.value == node.symbol) or
-          (arg.index:is(ast.typed.expr.Cast) and
-             arg.index.arg:is(ast.typed.expr.ID) and
-             arg.index.arg.value == node.symbol)
-        then
-          partition_type = std.as_read(arg.value.expr_type)
-          arg_variant = true
-        end
+      if analyze_is_projectable(loop_cx, arg) then
+        partition_type = std.as_read(arg.value.expr_type)
+        arg_projectable = true
       end
 
-      if not (arg_variant or arg_invariant) then
-        report_fail(call, "loop optimization failed: argument " .. tostring(i) .. " is not provably variant or invariant")
+      if not (arg_projectable or arg_invariant) then
+        report_fail(call, "loop optimization failed: argument " .. tostring(i) .. " is not provably projectable or invariant")
         return
       end
     end
@@ -525,7 +679,7 @@ local function optimize_loop_body(cx, node, report_pass, report_fail)
     if std.is_region(arg_type) then
       do
         local passed, failure_i = analyze_noninterference_previous(
-          cx, task, arg, regions_previously_used, mapping)
+          loop_cx, task, arg, regions_previously_used, mapping)
         if not passed then
           report_fail(call, "loop optimization failed: argument " .. tostring(i) .. " interferes with argument " .. tostring(failure_i))
           return
@@ -534,7 +688,7 @@ local function optimize_loop_body(cx, node, report_pass, report_fail)
 
       do
         local passed = analyze_noninterference_self(
-          cx, task, arg, partition_type, mapping)
+          loop_cx, task, arg, partition_type, mapping)
         if not passed then
           report_fail(call, "loop optimization failed: argument " .. tostring(i) .. " interferes with itself")
           return
@@ -543,7 +697,7 @@ local function optimize_loop_body(cx, node, report_pass, report_fail)
     end
 
     args_provably.invariant[i] = arg_invariant
-    args_provably.variant[i] = arg_variant
+    args_provably.projectable[i] = arg_projectable
 
     regions_previously_used[i] = nil
     if std.is_region(arg_type) then

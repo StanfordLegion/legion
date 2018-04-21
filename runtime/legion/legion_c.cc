@@ -1515,14 +1515,16 @@ legion_logical_region_t
 legion_logical_region_create(legion_runtime_t runtime_,
                              legion_context_t ctx_,
                              legion_index_space_t index_,
-                             legion_field_space_t fields_)
+                             legion_field_space_t fields_,
+                             bool task_local)
 {
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_)->context();
   IndexSpace index = CObjectWrapper::unwrap(index_);
   FieldSpace fields = CObjectWrapper::unwrap(fields_);
 
-  LogicalRegion r = runtime->create_logical_region(ctx, index, fields);
+  LogicalRegion r =
+    runtime->create_logical_region(ctx, index, fields, task_local);
   return CObjectWrapper::wrap(r);
 }
 
@@ -4550,6 +4552,16 @@ legion_runtime_replace_default_mapper(
 
 class FunctorWrapper : public ProjectionFunctor {
 public:
+  FunctorWrapper(unsigned dep,
+                 legion_projection_functor_logical_region_t region_fn,
+                 legion_projection_functor_logical_partition_t partition_fn)
+    : ProjectionFunctor()
+    , depth(dep)
+    , region_functor(region_fn)
+    , partition_functor(partition_fn)
+  {
+  }
+
   FunctorWrapper(Runtime *rt, unsigned dep,
                  legion_projection_functor_logical_region_t region_fn,
                  legion_projection_functor_logical_partition_t partition_fn)
@@ -4560,39 +4572,35 @@ public:
   {
   }
 
-  LogicalRegion project(Context ctx, Task *task,
-                        unsigned index,
-                        LogicalRegion upper_bound,
-                        const DomainPoint &point)
+  virtual LogicalRegion project(const Mappable *mappable,
+                                unsigned index,
+                                LogicalRegion upper_bound,
+                                const DomainPoint &point)
   {
     legion_runtime_t runtime_ = CObjectWrapper::wrap(runtime);
-    CContext cctx(ctx);
-    legion_context_t ctx_ = CObjectWrapper::wrap(&cctx);
-    legion_task_t task_ = CObjectWrapper::wrap(task);
+    const legion_mappable_t mappable_ = CObjectWrapper::wrap_const(mappable);
     legion_logical_region_t upper_bound_ = CObjectWrapper::wrap(upper_bound);
     legion_domain_point_t point_ = CObjectWrapper::wrap(point);
 
     assert(region_functor);
     legion_logical_region_t result =
-      region_functor(runtime_, ctx_, task_, index, upper_bound_, point_);
+      region_functor(runtime_, mappable_, index, upper_bound_, point_);
     return CObjectWrapper::unwrap(result);
   }
 
-  LogicalRegion project(Context ctx, Task *task,
-                        unsigned index,
-                        LogicalPartition upper_bound,
-                        const DomainPoint &point)
+  virtual LogicalRegion project(const Mappable *mappable,
+                                unsigned index,
+                                LogicalPartition upper_bound,
+                                const DomainPoint &point)
   {
     legion_runtime_t runtime_ = CObjectWrapper::wrap(runtime);
-    CContext cctx(ctx);
-    legion_context_t ctx_ = CObjectWrapper::wrap(&cctx);
-    legion_task_t task_ = CObjectWrapper::wrap(task);
+    legion_mappable_t mappable_ = CObjectWrapper::wrap_const(mappable);
     legion_logical_partition_t upper_bound_ = CObjectWrapper::wrap(upper_bound);
     legion_domain_point_t point_ = CObjectWrapper::wrap(point);
 
     assert(partition_functor);
     legion_logical_region_t result =
-      partition_functor(runtime_, ctx_, task_, index, upper_bound_, point_);
+      partition_functor(runtime_, mappable_, index, upper_bound_, point_);
     return CObjectWrapper::unwrap(result);
   }
 
@@ -4613,6 +4621,18 @@ legion_runtime_generate_library_projection_ids(
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
 
   return runtime->generate_library_projection_ids(library_name, count);
+}
+
+void
+legion_runtime_preregister_projection_functor(
+  legion_projection_id_t id,
+  unsigned depth,
+  legion_projection_functor_logical_region_t region_functor,
+  legion_projection_functor_logical_partition_t partition_functor)
+{
+  FunctorWrapper *functor =
+    new FunctorWrapper(depth, region_functor, partition_functor);
+  Runtime::preregister_projection_functor(id, functor);
 }
 
 void

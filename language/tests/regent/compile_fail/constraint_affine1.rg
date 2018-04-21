@@ -13,24 +13,23 @@
 -- limitations under the License.
 
 -- fails-with:
--- optimize_index_launch_num_vars2.rg:33: loop optimization failed: argument 1 is not provably projectable or invariant
---     f(p[j])
---      ^
+-- constraint_affine1.rg:32: invalid cast missing constraint $x * $y
+--     assert_disjoint { x = p[i], y = p[i + 0] }
+--                     ^
 
 import "regent"
 
-task f(r : region(int)) where reads writes(r) do end
-
-terra g(x : int) return x end
+fspace assert_disjoint {
+  x : region(int),
+  y : region(int),
+} where x * y end
 
 task main()
-  var r = region(ispace(ptr, 5), int)
-  var p = partition(equal, r, ispace(int1d, 4))
+  var t = region(ispace(ptr, 5), int)
+  var p = partition(equal, t, ispace(int1d, 5))
 
-  __demand(__parallel)
-  for i = 0, 4 do
-    var j = g(i)
-    f(p[j])
+  for i = 1, 2 do
+    assert_disjoint { x = p[i], y = p[i + 0] }
   end
 end
 regentlib.start(main)

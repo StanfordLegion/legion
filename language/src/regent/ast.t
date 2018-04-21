@@ -495,7 +495,7 @@ ast.typed.stat:leaf("IndexLaunchNum", {"symbol", "values", "preamble", "call",
 ast.typed.stat:leaf("IndexLaunchList", {"symbol", "value", "preamble", "call",
                                         "reduce_lhs", "reduce_op",
                                         "args_provably"})
-ast:leaf("IndexLaunchArgsProvably", {"invariant", "variant"})
+ast:leaf("IndexLaunchArgsProvably", {"invariant", "projectable"})
 ast.typed.stat:leaf("Var", {"symbol", "type", "value"})
 ast.typed.stat:leaf("VarUnpack", {"symbols", "fields", "field_types", "value"})
 ast.typed.stat:leaf("Return", {"value"})
