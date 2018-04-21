@@ -3550,6 +3550,9 @@ namespace Legion {
       DeletionOp *op = runtime->get_available_deletion_op();
       op->initialize_logical_region_deletion(this, handle);
       runtime->add_to_dependence_queue(this, executing_processor, op);
+      std::set<LogicalRegion>::iterator finder = local_regions.find(handle);
+      if (finder != local_regions.end())
+        local_regions.erase(finder);
     }
 
     //--------------------------------------------------------------------------
@@ -6266,7 +6269,10 @@ namespace Legion {
       if (!local_regions.empty())
         for (std::set<LogicalRegion>::iterator it = local_regions.begin();
              it != local_regions.end(); it++)
+        {
+          assert(created_regions.find(*it) != created_regions.end());
           destroy_logical_region(*it);
+        }
       const std::deque<InstanceSet> &physical_instances = 
         single_task->get_physical_instances();
       // Note that this loop doesn't handle create regions
