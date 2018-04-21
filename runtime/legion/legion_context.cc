@@ -9479,7 +9479,8 @@ namespace Legion {
     LogicalRegion ReplicateContext::create_logical_region(
                                                       RegionTreeForest *forest,
                                                       IndexSpace index_space,
-                                                      FieldSpace field_space)
+                                                      FieldSpace field_space,
+                                                      bool task_local)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -9519,7 +9520,7 @@ namespace Legion {
       }
       Runtime::advance_barrier(creation_barrier);
       // Register the creation of a top-level region with the context
-      register_region_creation(handle);
+      register_region_creation(handle, task_local);
       // Update the allocator shard
       logical_region_allocator_shard++;
       if (logical_region_allocator_shard == total_shards)

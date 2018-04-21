@@ -1509,7 +1509,8 @@ namespace Legion {
                                const std::set<FieldID> &to_free);
       virtual LogicalRegion create_logical_region(RegionTreeForest *forest,
                                             IndexSpace index_space,
-                                            FieldSpace field_space);
+                                            FieldSpace field_space,
+                                            bool task_local);
       virtual void destroy_logical_region(LogicalRegion handle);
       virtual void destroy_logical_partition(LogicalPartition handle);
     public:
