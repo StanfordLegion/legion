@@ -52,7 +52,7 @@ terra top_level_task(task : c.legion_task_t,
     c.legion_field_allocator_destroy(allocator)
   end
   var lr1 =
-    c.legion_logical_region_create(runtime, ctx, is1, fs1)
+    c.legion_logical_region_create(runtime, ctx, is1, fs1, true)
 
   var is2 = c.legion_index_space_create(runtime, ctx, 5)
   var fs2 = c.legion_field_space_create(runtime, ctx)
@@ -66,7 +66,7 @@ terra top_level_task(task : c.legion_task_t,
     c.legion_field_allocator_destroy(allocator)
   end
   var lr2 =
-    c.legion_logical_region_create(runtime, ctx, is2, fs2)
+    c.legion_logical_region_create(runtime, ctx, is2, fs2, true)
 
   var arg_nil = c.legion_task_argument_t { args = nil, arglen = 0 }
 

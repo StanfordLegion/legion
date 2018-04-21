@@ -2347,8 +2347,74 @@ local function raise_privilege_depth(cx, value, container_type, field_paths, opt
   return value
 end
 
+local function make_region_projection_functor(cx, expr)
+  -- Right now we never generate any non-trivial region projection functors.
+
+  return 0 -- Identity projection functor.
+end
+
+local function strip_casts(node)
+  if node:is(ast.typed.expr.Cast) then
+    return node.arg
+  end
+  return node
+end
+
+local function make_partition_projection_functor(cx, expr, loop_index, color_space)
+  -- We assume that there's only one variable, and that it's the loop index.
+
+  assert(expr:is(ast.typed.expr.IndexAccess))
+
+  local index = strip_casts(expr.index)
+
+  if index:is(ast.typed.expr.ID) then
+    assert(index.value == loop_index)
+    return 0 -- Identity projection functor.
+  end
+
+  local point = terralib.newsymbol(c.legion_domain_point_t, "point")
+
+  local symbol_type = loop_index:gettype()
+  local symbol = loop_index:getsymbol()
+  local symbol_setup
+  if std.is_bounded_type(symbol_type) then
+    symbol_setup = quote
+      var [symbol] = [symbol_type]({ __ptr = [symbol_type.index_type]([point]) })
+    end
+  else
+    -- Otherwise symbol_type has to be some simple integral type.
+    assert(symbol_type:isintegral())
+    symbol_setup = quote
+      var [symbol] = [int1d]([point])
+    end
+  end
+
+  -- Again, if it's a number it has to be converted back through an index type.
+  local index_type = std.as_read(index.expr_type)
+  if index_type:isintegral() then
+    index_type = int1d
+  end
+
+  -- Generate a projection functor that evaluates `expr`.
+  local value = codegen.expr(cx, index):read(cx)
+  local terra partition_functor(runtime : c.legion_runtime_t,
+                                mappable : c.legion_mappable_t,
+                                index : uint,
+                                parent : c.legion_logical_partition_t,
+                                [point])
+    [symbol_setup];
+    [value.actions];
+    var index : index_type = [value.value];
+    var subregion = c.legion_logical_partition_get_logical_subregion_by_color_domain_point(
+      runtime, parent, index)
+    return subregion
+  end
+
+  return std.register_projection_functor(0, nil, partition_functor)
+end
+
 local function expr_call_setup_region_arg(
-    cx, task, arg_type, param_type, launcher, index, args_setup)
+    cx, task, arg_value, arg_type, param_type, launcher, index, args_setup)
   local privileges, privilege_field_paths, privilege_field_types, coherences, flags =
     std.find_task_privileges(param_type, task)
   local privilege_modes = privileges:map(std.privilege_mode)
@@ -2407,7 +2473,8 @@ local function expr_call_setup_region_arg(
     local requirement_args = terralib.newlist({
         launcher, region})
     if index then
-      requirement_args:insert(0)
+      local projection_functor = make_region_projection_functor(cx, arg_value)
+      requirement_args:insert(projection_functor)
     end
     if reduction_op then
       requirement_args:insert(reduction_op)
@@ -2582,7 +2649,7 @@ local function expr_call_setup_list_of_regions_arg(
 end
 
 local function expr_call_setup_partition_arg(
-    cx, task, arg_type, param_type, partition, launcher, index, args_setup)
+    cx, task, arg_value, arg_type, param_type, partition, loop_index, launcher, index, args_setup)
   assert(index)
   local privileges, privilege_field_paths, privilege_field_types, coherences, flags =
     std.find_task_privileges(param_type, task)
@@ -2618,9 +2685,12 @@ local function expr_call_setup_partition_arg(
     end
     assert(add_requirement)
 
+    local projection_functor = make_partition_projection_functor(cx, arg_value, loop_index)
+
     local requirement = terralib.newsymbol(uint, "requirement")
     local requirement_args = terralib.newlist({
-        launcher, `([partition].impl), 0 --[[ default projection ID ]]})
+        launcher, `([partition].impl), projection_functor})
+
     if reduction_op then
       requirement_args:insert(reduction_op)
     else
@@ -2742,11 +2812,12 @@ function codegen.expr_call(cx, node)
     -- Pass regions through region requirements.
     local fn_type = fn.value:get_type()
     for _, i in ipairs(std.fn_param_regions_by_index(fn_type)) do
+      local arg_value = arg_values[i]
       local arg_type = arg_types[i]
       local param_type = param_types[i]
 
       expr_call_setup_region_arg(
-        cx, fn.value, arg_type, param_type, launcher, false, args_setup)
+        cx, fn.value, node.args[i], arg_type, param_type, launcher, false, args_setup)
     end
 
     -- Pass regions through lists of region requirements.
@@ -2787,8 +2858,7 @@ function codegen.expr_call(cx, node)
       launcher_execute = quote
         c.legion_must_epoch_launcher_add_single_task(
           [cx.must_epoch],
-          c.legion_domain_point_from_point_1d(
-            c.legion_point_1d_t { x = arrayof(c.coord_t, [cx.must_epoch_point]) }),
+          [int1d]([cx.must_epoch_point]),
           [launcher])
         [cx.must_epoch_point] = [cx.must_epoch_point] + 1
       end
@@ -3473,7 +3543,7 @@ function codegen.expr_region(cx, node)
        end)]
     [fs_naming_actions];
     c.legion_field_allocator_destroy(fsa)
-    var [lr] = c.legion_logical_region_create([cx.runtime], [cx.context], [is], [fs])
+    var [lr] = c.legion_logical_region_create([cx.runtime], [cx.context], [is], [fs], true)
     var [r] = [region_type]{ impl = [lr] }
   end
   local tag = terralib.newsymbol(c.legion_mapping_tag_id_t, "tag")
@@ -4055,7 +4125,7 @@ function codegen.expr_list_duplicate_partition(cx, node)
       var color = [indices_type:data(indices.value)][i]
       var orig_r = [get_partition_subregion(cx, partition, color)]
       var r = c.legion_logical_region_create(
-        [cx.runtime], [cx.context], orig_r.index_space, orig_r.field_space)
+        [cx.runtime], [cx.context], orig_r.index_space, orig_r.field_space, true)
       var new_root = c.legion_logical_partition_get_logical_subregion_by_tree(
         [cx.runtime], orig_r.index_space, orig_r.field_space, r.tree_id)
 
@@ -7630,7 +7700,7 @@ local function stat_index_launch_setup(cx, node, domain, actions)
   local args_partitions = terralib.newlist()
   for i, arg in ipairs(node.call.args) do
     local partition = false
-    if not node.args_provably.variant[i] then
+    if not node.args_provably.projectable[i] then
       args:insert(codegen.expr(cx, arg):read(cx))
     else
       -- Run codegen halfway to get the partition. Note: Remember to
@@ -7766,7 +7836,7 @@ local function stat_index_launch_setup(cx, node, domain, actions)
     if std.is_ispace(arg_type) then
       local param_type = param_types[i]
 
-      if not node.args_provably.variant[i] then
+      if not node.args_provably.projectable[i] then
         expr_call_setup_ispace_arg(
           cx, fn.value, arg_type, param_type, launcher, true, args_setup)
       else
@@ -7783,17 +7853,18 @@ local function stat_index_launch_setup(cx, node, domain, actions)
 
   -- Pass regions through region requirements.
   for _, i in ipairs(std.fn_param_regions_by_index(fn.value:get_type())) do
+    local arg_value = arg_values[i]
     local arg_type = arg_types[i]
     local param_type = param_types[i]
 
-    if not node.args_provably.variant[i] then
+    if not node.args_provably.projectable[i] then
       expr_call_setup_region_arg(
-        cx, fn.value, arg_type, param_type, launcher, true, args_setup)
+        cx, fn.value, node.call.args[i], arg_type, param_type, launcher, true, args_setup)
     else
       local partition = args_partitions[i]
       assert(partition)
       expr_call_setup_partition_arg(
-        cx, fn.value, arg_type, param_type, partition.value, launcher, true,
+        cx, fn.value, node.call.args[i], arg_type, param_type, partition.value, node.symbol, launcher, true,
         args_setup)
     end
   end
@@ -7816,30 +7887,14 @@ local function stat_index_launch_setup(cx, node, domain, actions)
   local symbol = node.symbol:getsymbol()
   local symbol_setup
   if std.is_bounded_type(symbol_type) then
-    local fields = symbol_type.index_type.fields
-    if fields then
-      local dim = #fields
-      local get_point = c["legion_domain_point_get_point_" .. dim .. "d"]
-      symbol_setup = quote
-        var pt = [get_point]([point])
-        var [symbol] = [symbol_type] {
-          __ptr = [symbol_type.index_type.impl_type] {
-            [data.range(dim):map(function(i) return `(pt.x[ [i] ]) end)]
-          }
-        }
-      end
-    else
-      symbol_setup = quote
-        var [symbol] = [symbol_type] {
-          __ptr = c.legion_domain_point_get_point_1d([point]).x[0]
-        }
-      end
+    symbol_setup = quote
+      var [symbol] = [symbol_type]({ __ptr = [symbol_type.index_type]([point]) })
     end
   else
     -- Otherwise symbol_type has to be some simple integral type.
     assert(symbol_type:isintegral())
     symbol_setup = quote
-      var [symbol] = c.legion_domain_point_get_point_1d([point]).x[0]
+      var [symbol] = [int1d]([point])
     end
   end
 

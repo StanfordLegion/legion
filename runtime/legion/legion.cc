@@ -5330,10 +5330,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     LogicalRegion Runtime::create_logical_region(Context ctx, 
-                                            IndexSpace index, FieldSpace fields)
+                           IndexSpace index, FieldSpace fields, bool task_local)
     //--------------------------------------------------------------------------
     {
-      return runtime->create_logical_region(ctx, index, fields);
+      return runtime->create_logical_region(ctx, index, fields, task_local);
     }
 
     //--------------------------------------------------------------------------

@@ -12,25 +12,30 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
--- fails-with:
--- optimize_index_launch_num_vars2.rg:33: loop optimization failed: argument 1 is not provably projectable or invariant
---     f(p[j])
---      ^
-
 import "regent"
 
-task f(r : region(int)) where reads writes(r) do end
+fspace assert_subregion {
+  x : region(ispace(int2d), int),
+  y : region(ispace(int2d), int),
+} where x <= y end
 
-terra g(x : int) return x end
+fspace assert_disjoint {
+  x : region(ispace(int2d), int),
+  y : region(ispace(int2d), int),
+} where x * y end
 
 task main()
-  var r = region(ispace(ptr, 5), int)
-  var p = partition(equal, r, ispace(int1d, 4))
+  var t = region(ispace(int2d, { 5, 5 }), int)
+  var p = partition(equal, t, ispace(int2d, { 4, 3 }))
 
-  __demand(__parallel)
-  for i = 0, 4 do
-    var j = g(i)
-    f(p[j])
+  assert_disjoint { x = p[{0, 0}], y = p[{0, 1}] }
+
+  var s = ispace(int2d, { 2, 1 }, { 1, 1 })
+
+  for i in s do
+    assert_disjoint { x = p[i], y = p[i + { 1, 0 }] }
+    -- Shouldn't matter if explicit type is used or not.
+    assert_disjoint { x = p[i - { 0, 1 }], y = p[i + int2d { -1, 0 }] }
   end
 end
 regentlib.start(main)

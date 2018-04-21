@@ -100,13 +100,40 @@ namespace Legion {
       // Shouldn't need the lock here since we only do this
       // while there is no one else executing
       RezCheck z(rez);
-      rez.serialize<size_t>(created_regions.size());
-      if (!created_regions.empty())
+      if (returning)
       {
-        for (std::set<LogicalRegion>::const_iterator it =
-              created_regions.begin(); it != created_regions.end(); it++)
+        // Only non-local task regions get returned
+        size_t non_local = 0;
+        for (std::map<LogicalRegion,bool>::const_iterator it =
+             created_regions.begin(); it != created_regions.end(); it++)
         {
-          rez.serialize(*it);
+          if (it->second)
+            continue;
+          non_local++;
+        }
+        rez.serialize(non_local);
+        if (non_local > 0)
+        {
+          for (std::map<LogicalRegion,bool>::const_iterator it =
+               created_regions.begin(); it != created_regions.end(); it++)
+            if (!it->second)
+            {
+              rez.serialize(it->first);
+              rez.serialize<bool>(it->second);
+            }
+        }
+      }
+      else
+      {
+        rez.serialize<size_t>(created_regions.size());
+        if (!created_regions.empty())
+        {
+          for (std::map<LogicalRegion,bool>::const_iterator it =
+              created_regions.begin(); it != created_regions.end(); it++)
+          {
+            rez.serialize(it->first);
+            rez.serialize<bool>(it->second);
+          }
         }
       }
       rez.serialize<size_t>(deleted_regions.size());
@@ -134,11 +161,12 @@ namespace Legion {
         {
           for (std::map<std::pair<FieldSpace,FieldID>,bool>::const_iterator it =
                 created_fields.begin(); it != created_fields.end(); it++)
-          {
-            rez.serialize(it->first.first);
-            rez.serialize(it->first.second);
-            rez.serialize<bool>(it->second);
-          }
+            if (!it->second)
+            {
+              rez.serialize(it->first.first);
+              rez.serialize(it->first.second);
+              rez.serialize<bool>(it->second);
+            }
         }
       }
       else
@@ -239,12 +267,14 @@ namespace Legion {
       derez.deserialize(num_created_regions);
       if (num_created_regions > 0)
       {
-        std::set<LogicalRegion> created_regions;
+        std::map<LogicalRegion,bool> created_regions;
         for (unsigned idx = 0; idx < num_created_regions; idx++)
         {
           LogicalRegion reg;
+          bool local;
           derez.deserialize(reg);
-          created_regions.insert(reg);
+          derez.deserialize(local);
+          created_regions[reg] = local;
         }
         target->register_region_creations(created_regions);
       }
@@ -8695,17 +8725,17 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void SliceTask::register_region_creations(
-                                            const std::set<LogicalRegion> &regs)
+                                       const std::map<LogicalRegion,bool> &regs)
     //--------------------------------------------------------------------------
     {
       AutoLock o_lock(op_lock);
-      for (std::set<LogicalRegion>::const_iterator it = regs.begin();
+      for (std::map<LogicalRegion,bool>::const_iterator it = regs.begin();
             it != regs.end(); it++)
       {
 #ifdef DEBUG_LEGION
-        assert(created_regions.find(*it) == created_regions.end());
+        assert(created_regions.find(it->first) == created_regions.end());
 #endif
-        created_regions.insert(*it);
+        created_regions[it->first] = it->second;
       }
     }
 

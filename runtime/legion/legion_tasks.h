@@ -46,7 +46,7 @@ namespace Legion {
       ResourceTracker& operator=(const ResourceTracker &rhs);
     public:
       virtual void register_region_creations(
-                          const std::set<LogicalRegion> &regions) = 0;
+                     const std::map<LogicalRegion,bool> &regions) = 0;
       virtual void register_region_deletions(
                           const std::set<LogicalRegion> &regions) = 0;
     public:
@@ -76,7 +76,8 @@ namespace Legion {
       static void unpack_privilege_state(Deserializer &derez,
                                          ResourceTracker *target);
     protected:
-      std::set<LogicalRegion>                   created_regions;
+      std::map<LogicalRegion,
+               bool/*local*/>                   created_regions;
       std::map<std::pair<FieldSpace,FieldID>,
                bool/*local*/>                   created_fields;
       std::set<FieldSpace>                      created_field_spaces;
@@ -1079,7 +1080,7 @@ namespace Legion {
       static void handle_slice_return(Runtime *rt, Deserializer &derez);
     public: // Privilege tracker methods
       virtual void register_region_creations(
-                          const std::set<LogicalRegion> &regions);
+                     const std::map<LogicalRegion,bool> &regions);
       virtual void register_region_deletions(
                           const std::set<LogicalRegion> &regions);
     public:

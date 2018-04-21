@@ -208,7 +208,8 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
-    void TaskContext::register_region_creation(LogicalRegion handle)
+    void TaskContext::register_region_creation(LogicalRegion handle,
+                                               bool task_local)
     //--------------------------------------------------------------------------
     {
       // Create a new logical region 
@@ -218,7 +219,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(created_regions.find(handle) == created_regions.end());
 #endif
-      created_regions.insert(handle); 
+      created_regions[handle] = task_local; 
       add_created_region(handle);
     }
 
@@ -231,7 +232,8 @@ namespace Legion {
       // be returning values from the utility processor
       {
         AutoLock priv_lock(privilege_lock);
-        std::set<LogicalRegion>::iterator finder = created_regions.find(handle);
+        std::map<LogicalRegion,bool>::iterator finder =
+          created_regions.find(handle);
         // See if we created this region, if so remove it from the list
         // of created regions, otherwise add it to the list of deleted
         // regions to flow backwards
@@ -434,18 +436,18 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void TaskContext::register_region_creations(
-                                            const std::set<LogicalRegion> &regs)
+                                       const std::map<LogicalRegion,bool> &regs)
     //--------------------------------------------------------------------------
     {
       AutoLock priv_lock(privilege_lock);
-      for (std::set<LogicalRegion>::const_iterator it = regs.begin();
+      for (std::map<LogicalRegion,bool>::const_iterator it = regs.begin();
             it != regs.end(); it++)
       {
 #ifdef DEBUG_LEGION
-        assert(created_regions.find(*it) == created_regions.end());
+        assert(created_regions.find(it->first) == created_regions.end());
 #endif
-        created_regions.insert(*it);
-        add_created_region(*it);
+        created_regions[it->first] = it->second;
+        add_created_region(it->first);
       }
     }
 
@@ -460,7 +462,8 @@ namespace Legion {
         for (std::set<LogicalRegion>::const_iterator it = regs.begin();
               it != regs.end(); it++)
         {
-          std::set<LogicalRegion>::iterator finder = created_regions.find(*it);
+          std::map<LogicalRegion,bool>::iterator finder =
+            created_regions.find(*it);
           if (finder != created_regions.end())
           {
             created_regions.erase(finder);
@@ -3505,7 +3508,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     LogicalRegion InnerContext::create_logical_region(RegionTreeForest *forest,
                                                       IndexSpace index_space,
-                                                      FieldSpace field_space)
+                                                      FieldSpace field_space,
+                                                      bool task_local)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -3522,7 +3526,14 @@ namespace Legion {
 
       forest->create_logical_region(region);
       // Register the creation of a top-level region with the context
-      register_region_creation(region);
+      register_region_creation(region, task_local);
+      if (task_local)
+      {
+#ifdef DEBUG_LEGION
+        assert(local_regions.find(region) == local_regions.end());
+#endif
+        local_regions.insert(region);
+      }
       return region;
     }
 
@@ -3539,6 +3550,9 @@ namespace Legion {
       DeletionOp *op = runtime->get_available_deletion_op();
       op->initialize_logical_region_deletion(this, handle);
       runtime->add_to_dependence_queue(this, executing_processor, op);
+      std::set<LogicalRegion>::iterator finder = local_regions.find(handle);
+      if (finder != local_regions.end())
+        local_regions.erase(finder);
     }
 
     //--------------------------------------------------------------------------
@@ -6251,6 +6265,14 @@ namespace Legion {
                         get_task_name(), get_unique_id())
       // Unmap any of our mapped regions before issuing any close operations
       unmap_all_regions();
+      // If we own any task local regions, we issue deletion operations on them.
+      if (!local_regions.empty())
+        for (std::set<LogicalRegion>::iterator it = local_regions.begin();
+             it != local_regions.end(); it++)
+        {
+          assert(created_regions.find(*it) != created_regions.end());
+          destroy_logical_region(*it);
+        }
       const std::deque<InstanceSet> &physical_instances = 
         single_task->get_physical_instances();
       // Note that this loop doesn't handle create regions
@@ -8135,7 +8157,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     LogicalRegion LeafContext::create_logical_region(RegionTreeForest *forest,
                                                      IndexSpace index_space,
-                                                     FieldSpace field_space)
+                                                     FieldSpace field_space,
+                                                     bool task_local)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_REGION_CREATION,
@@ -9350,10 +9373,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     LogicalRegion InlineContext::create_logical_region(RegionTreeForest *forest,
                                                        IndexSpace index_space,
-                                                       FieldSpace field_space)
+                                                       FieldSpace field_space,
+                                                       bool task_local)
     //--------------------------------------------------------------------------
     {
-      return enclosing->create_logical_region(forest, index_space, field_space);
+      return enclosing->create_logical_region(forest, index_space, field_space,
+                                              task_local);
     }
 
     //--------------------------------------------------------------------------
