@@ -6153,7 +6153,6 @@ namespace Legion {
           VersionID next_version = vit->first+1;
           // Remove this version number from the delete set if it exists
           to_delete_current.erase(next_version);
-          VersionState *new_state = NULL;
           if (repl_states != NULL)
           {
             // If we've been given remote states to use from another
@@ -6166,31 +6165,47 @@ namespace Legion {
               // See the ghost exchange example
               //if (it->first->version_number != next_version)
               //  continue;
-              if (it->second != version_overlap)
+              FieldMask overlap = it->second & version_overlap;
+              if (!overlap)
                 continue;
-              new_state = it->first;
-              break;
+              if (update_parent_state || (dirty_previous != NULL))
+                new_states.insert(it->first, overlap, &mutator);
+              // Kind of dangerous to be getting another iterator to this
+              // data structure that we're iterating, but since neither
+              // is mutating, we won't invalidate any iterators
+              LegionMap<VersionID,ManagerVersions>::aligned::iterator 
+                next_finder = current_version_infos.find(next_version);
+              if (next_finder != current_version_infos.end())
+                next_finder->second.insert(it->first, overlap, &mutator);
+              else
+                to_add[it->first] = overlap;
+              current_filter -= overlap;
+              version_overlap -= overlap;
+              if (!version_overlap)
+                break;
             }
 #ifdef DEBUG_LEGION
-            assert(new_state != NULL);
+            assert(!version_overlap); // should be empty when we're done
 #endif
           }
           else
-            new_state = create_new_version_state(next_version);
-          if (update_parent_state || (dirty_previous != NULL))
-            new_states.insert(new_state, version_overlap, &mutator);
-          // Kind of dangerous to be getting another iterator to this
-          // data structure that we're iterating, but since neither
-          // is mutating, we won't invalidate any iterators
-          LegionMap<VersionID,ManagerVersions>::aligned::iterator 
-            next_finder = current_version_infos.find(next_version);
-          if (next_finder != current_version_infos.end())
-            next_finder->second.insert(new_state, version_overlap, &mutator);
-          else
-            to_add[new_state] = version_overlap;
-          current_filter -= version_overlap;
-          if (!current_filter)
-            break;
+          {
+            VersionState *new_state = create_new_version_state(next_version);
+            if (update_parent_state || (dirty_previous != NULL))
+              new_states.insert(new_state, version_overlap, &mutator);
+            // Kind of dangerous to be getting another iterator to this
+            // data structure that we're iterating, but since neither
+            // is mutating, we won't invalidate any iterators
+            LegionMap<VersionID,ManagerVersions>::aligned::iterator 
+              next_finder = current_version_infos.find(next_version);
+            if (next_finder != current_version_infos.end())
+              next_finder->second.insert(new_state, version_overlap, &mutator);
+            else
+              to_add[new_state] = version_overlap;
+            current_filter -= version_overlap;
+            if (!current_filter)
+              break;
+          }
         }
         // Remove any old version state infos
         if (!to_delete_current.empty())
@@ -6204,12 +6219,12 @@ namespace Legion {
         // are being initialized and should be added as version 1
         if (!!current_filter)
         {
-          VersionState *new_state = NULL;
           if (repl_states != NULL)
           {
             // If we've been given remote states to use from another
             // control replicated context then we should be able
             // to find a version state with the right version number
+            FieldMask remaining_filter = current_filter;
             for (VersioningSet<>::iterator it = repl_states->begin();
                   it != repl_states->end(); it++)
             {
@@ -6217,21 +6232,31 @@ namespace Legion {
               // See the ghost exchange example
               //if (it->first->version_number != init_version)
               //  continue;
-              if (it->second != current_filter)
+              const FieldMask overlap = remaining_filter & it->second;
+              if (!overlap)
                 continue;
-              new_state = it->first;
-              break;
+              if (update_parent_state || (dirty_previous != NULL))
+                new_states.insert(it->first, overlap, &mutator);
+              current_version_infos[it->first->version_number].insert(
+                  it->first, overlap, &mutator);
+              // Update the mask of fields we have yet to handle
+              remaining_filter -= overlap;
+              if (!remaining_filter)
+                break;
             }
 #ifdef DEBUG_LEGION
-            assert(new_state != NULL);
+            assert(!remaining_filter); // should be empty when we're done
 #endif
           }
           else
-            new_state = create_new_version_state(init_version);
-          if (update_parent_state || (dirty_previous != NULL))
-            new_states.insert(new_state, current_filter, &mutator);
-          current_version_infos[init_version].insert(new_state, 
-                                                     current_filter, &mutator);
+          {
+            // No repl states for us to worry about here
+            VersionState *new_state = create_new_version_state(init_version);
+            if (update_parent_state || (dirty_previous != NULL))
+              new_states.insert(new_state, current_filter, &mutator);
+            current_version_infos[init_version].insert(new_state, 
+                                                       current_filter,&mutator);
+          }
         }
         // Finally add in our new states
         if (!to_add.empty())
