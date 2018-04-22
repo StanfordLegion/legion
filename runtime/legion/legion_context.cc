@@ -6271,8 +6271,12 @@ namespace Legion {
         // We cannot destroy task local regions until our child tasks are done
         // accessing them.
         issue_execution_fence();
-        for (std::set<LogicalRegion>::iterator it = local_regions.begin();
-             it != local_regions.end(); it++)
+        // Create a copy of this since it's about to be mutated in 
+        // the function call we're about to do
+        const std::vector<LogicalRegion> to_destroy(local_regions.begin(),
+                                                    local_regions.end());
+        for (std::vector<LogicalRegion>::const_iterator it = 
+              to_destroy.begin(); it != to_destroy.end(); it++)
         {
 #ifdef DEBUG_LEGION
           assert(created_regions.find(*it) != created_regions.end());
