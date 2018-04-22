@@ -521,6 +521,10 @@ namespace Legion {
       // Application tasks can manipulate these next two data
       // structures by creating regions and fields, make sure you are
       // holding the operation lock when you are accessing them
+      // We use a region requirement with an empty privilege_fields
+      // set to indicate regions on which we have privileges for 
+      // all fields because this is a created region instead of
+      // a created field.
       std::deque<RegionRequirement>             created_requirements;
       // Track whether the created region requirements have
       // privileges to be returned or not

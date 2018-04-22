@@ -1607,9 +1607,10 @@ namespace Legion {
       AutoLock priv_lock(privilege_lock,1,false/*exclusive*/);
       for (unsigned idx = 0; idx < created_requirements.size(); idx++, index++)
       {
+        const RegionRequirement &created_req = created_requirements[idx];
         LegionErrorType et = 
-          check_privilege_internal(req, created_requirements[idx], 
-                privilege_fields, bad_field, index, bad_index, skip_privilege);
+          check_privilege_internal(req, created_req, privilege_fields, 
+                                   bad_field, index, bad_index, skip_privilege);
         // No error so we are done
         if (et == NO_ERROR)
           return et;
@@ -1618,10 +1619,10 @@ namespace Legion {
           return et;
         // If we got a BAD_PARENT_REGION, see if this a returnable
         // privilege in which case we know we have privileges on all fields
-        if (returnable_privileges[idx])
+        if (created_req.privilege_fields.empty())
         {
           // Still have to check the parent region is right
-          if (req.parent == created_requirements[idx].region)
+          if (req.parent == created_req.region)
             return NO_ERROR;
         }
         // Otherwise we just keep going
