@@ -417,7 +417,7 @@ namespace Legion {
       PhysicalRegion get_physical_region(unsigned idx);
       void get_physical_references(unsigned idx, InstanceSet &refs);
     public:
-      void add_created_region(LogicalRegion handle);
+      void add_created_region(LogicalRegion handle, bool task_local);
       // for logging created region requirements
       void log_created_requirements(void);
     public: // Privilege tracker methods
@@ -562,6 +562,10 @@ namespace Legion {
       // Application tasks can manipulate these next two data
       // structures by creating regions and fields, make sure you are
       // holding the operation lock when you are accessing them
+      // We use a region requirement with an empty privilege_fields
+      // set to indicate regions on which we have privileges for 
+      // all fields because this is a created region instead of
+      // a created field.
       std::deque<RegionRequirement>             created_requirements;
       // Track whether the created region requirements have
       // privileges to be returned or not
