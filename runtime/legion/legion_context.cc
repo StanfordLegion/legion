@@ -1629,7 +1629,7 @@ namespace Legion {
       }
       // Finally see if we created all the fields in which case we know
       // we have privileges on all their regions
-      const FieldSpace sp = req.region.get_field_space();
+      const FieldSpace sp = req.parent.get_field_space();
       for (std::set<FieldID>::const_iterator it = req.privilege_fields.begin();
             it != req.privilege_fields.end(); it++)
       {
