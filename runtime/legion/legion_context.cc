@@ -6267,12 +6267,19 @@ namespace Legion {
       unmap_all_regions();
       // If we own any task local regions, we issue deletion operations on them.
       if (!local_regions.empty())
+      {
+        // We cannot destroy task local regions until our child tasks are done
+        // accessing them.
+        issue_execution_fence();
         for (std::set<LogicalRegion>::iterator it = local_regions.begin();
              it != local_regions.end(); it++)
         {
+#ifdef DEBUG_LEGION
           assert(created_regions.find(*it) != created_regions.end());
+#endif
           destroy_logical_region(*it);
         }
+      }
       const std::deque<InstanceSet> &physical_instances = 
         single_task->get_physical_instances();
       // Note that this loop doesn't handle create regions
