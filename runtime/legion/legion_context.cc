@@ -166,7 +166,7 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
-    void TaskContext::add_created_region(LogicalRegion handle)
+    void TaskContext::add_created_region(LogicalRegion handle, bool task_local)
     //--------------------------------------------------------------------------
     {
       // Already hold the lock from the caller
@@ -177,7 +177,7 @@ namespace Legion {
       // Now make a new region requirement and physical region
       created_requirements.push_back(new_req);
       // Created regions always return privileges that they make
-      returnable_privileges.push_back(true);
+      returnable_privileges.push_back(!task_local);
     }
 
     //--------------------------------------------------------------------------
@@ -220,7 +220,7 @@ namespace Legion {
       assert(created_regions.find(handle) == created_regions.end());
 #endif
       created_regions[handle] = task_local; 
-      add_created_region(handle);
+      add_created_region(handle, task_local);
     }
 
     //--------------------------------------------------------------------------
@@ -447,7 +447,7 @@ namespace Legion {
         assert(created_regions.find(it->first) == created_regions.end());
 #endif
         created_regions[it->first] = it->second;
-        add_created_region(it->first);
+        add_created_region(it->first, it->second);
       }
     }
 
@@ -1607,9 +1607,10 @@ namespace Legion {
       AutoLock priv_lock(privilege_lock,1,false/*exclusive*/);
       for (unsigned idx = 0; idx < created_requirements.size(); idx++, index++)
       {
+        const RegionRequirement &created_req = created_requirements[idx];
         LegionErrorType et = 
-          check_privilege_internal(req, created_requirements[idx], 
-                privilege_fields, bad_field, index, bad_index, skip_privilege);
+          check_privilege_internal(req, created_req, privilege_fields, 
+                                   bad_field, index, bad_index, skip_privilege);
         // No error so we are done
         if (et == NO_ERROR)
           return et;
@@ -1618,17 +1619,17 @@ namespace Legion {
           return et;
         // If we got a BAD_PARENT_REGION, see if this a returnable
         // privilege in which case we know we have privileges on all fields
-        if (returnable_privileges[idx])
+        if (created_req.privilege_fields.empty())
         {
           // Still have to check the parent region is right
-          if (req.parent == created_requirements[idx].region)
+          if (req.parent == created_req.region)
             return NO_ERROR;
         }
         // Otherwise we just keep going
       }
       // Finally see if we created all the fields in which case we know
       // we have privileges on all their regions
-      const FieldSpace sp = req.region.get_field_space();
+      const FieldSpace sp = req.parent.get_field_space();
       for (std::set<FieldID>::const_iterator it = req.privilege_fields.begin();
             it != req.privilege_fields.end(); it++)
       {
@@ -6267,12 +6268,23 @@ namespace Legion {
       unmap_all_regions();
       // If we own any task local regions, we issue deletion operations on them.
       if (!local_regions.empty())
-        for (std::set<LogicalRegion>::iterator it = local_regions.begin();
-             it != local_regions.end(); it++)
+      {
+        // We cannot destroy task local regions until our child tasks are done
+        // accessing them.
+        issue_execution_fence();
+        // Create a copy of this since it's about to be mutated in 
+        // the function call we're about to do
+        const std::vector<LogicalRegion> to_destroy(local_regions.begin(),
+                                                    local_regions.end());
+        for (std::vector<LogicalRegion>::const_iterator it = 
+              to_destroy.begin(); it != to_destroy.end(); it++)
         {
+#ifdef DEBUG_LEGION
           assert(created_regions.find(*it) != created_regions.end());
+#endif
           destroy_logical_region(*it);
         }
+      }
       const std::deque<InstanceSet> &physical_instances = 
         single_task->get_physical_instances();
       // Note that this loop doesn't handle create regions

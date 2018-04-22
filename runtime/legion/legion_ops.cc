@@ -5754,6 +5754,9 @@ namespace Legion {
         if (it->second == it->first->get_generation())
           completion_events.insert(complete);
       }
+      // If we have an execution fence event then we also need to wait for it
+      if (has_execution_fence_event())
+        completion_events.insert(get_execution_fence_event());
       // Mark that we're done mapping and defer the execution as appropriate
       complete_mapping();
       if (!completion_events.empty())
