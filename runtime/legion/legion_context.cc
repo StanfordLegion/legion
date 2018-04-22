@@ -166,7 +166,7 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
-    void TaskContext::add_created_region(LogicalRegion handle)
+    void TaskContext::add_created_region(LogicalRegion handle, bool task_local)
     //--------------------------------------------------------------------------
     {
       // Already hold the lock from the caller
@@ -177,7 +177,7 @@ namespace Legion {
       // Now make a new region requirement and physical region
       created_requirements.push_back(new_req);
       // Created regions always return privileges that they make
-      returnable_privileges.push_back(true);
+      returnable_privileges.push_back(!task_local);
     }
 
     //--------------------------------------------------------------------------
@@ -220,7 +220,7 @@ namespace Legion {
       assert(created_regions.find(handle) == created_regions.end());
 #endif
       created_regions[handle] = task_local; 
-      add_created_region(handle);
+      add_created_region(handle, task_local);
     }
 
     //--------------------------------------------------------------------------
@@ -447,7 +447,7 @@ namespace Legion {
         assert(created_regions.find(it->first) == created_regions.end());
 #endif
         created_regions[it->first] = it->second;
-        add_created_region(it->first);
+        add_created_region(it->first, it->second);
       }
     }
 

@@ -381,7 +381,7 @@ namespace Legion {
       PhysicalRegion get_physical_region(unsigned idx);
       void get_physical_references(unsigned idx, InstanceSet &refs);
     public:
-      void add_created_region(LogicalRegion handle);
+      void add_created_region(LogicalRegion handle, bool task_local);
       // for logging created region requirements
       void log_created_requirements(void);
     public: // Privilege tracker methods
