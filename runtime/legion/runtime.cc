@@ -7082,6 +7082,11 @@ namespace Legion {
               runtime->handle_replicate_post_mapped(derez);
               break;
             }
+          case SEND_REPLICATE_POST_EXECUTION:
+            {
+              runtime->handle_replicate_post_execution(derez);
+              break;
+            }
           case SEND_REPLICATE_TRIGGER_COMPLETE:
             {
               runtime->handle_replicate_trigger_complete(derez);
@@ -16154,6 +16159,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_replicate_post_execution(AddressSpaceID target, 
+                                                Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_REPLICATE_POST_EXECUTION,
+                                        DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_replicate_trigger_complete(AddressSpaceID target,
                                                   Serializer &rez)
     //--------------------------------------------------------------------------
@@ -17605,6 +17619,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       ShardManager::handle_post_mapped(derez, this);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_replicate_post_execution(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      ShardManager::handle_post_execution(derez, this);
     }
     
     //--------------------------------------------------------------------------

@@ -2499,6 +2499,8 @@ namespace Legion {
       void send_replicate_launch(AddressSpaceID target, Serializer &rez);
       void send_replicate_delete(AddressSpaceID target, Serializer &rez);
       void send_replicate_post_mapped(AddressSpaceID target, Serializer &rez);
+      void send_replicate_post_execution(AddressSpaceID target,
+                                         Serializer &rez);
       void send_replicate_trigger_complete(AddressSpaceID target, 
                                            Serializer &rez);
       void send_replicate_trigger_commit(AddressSpaceID target,
@@ -2738,6 +2740,7 @@ namespace Legion {
       void handle_replicate_launch(Deserializer &derez,AddressSpaceID source);
       void handle_replicate_delete(Deserializer &derez);
       void handle_replicate_post_mapped(Deserializer &derez);
+      void handle_replicate_post_execution(Deserializer &derez);
       void handle_replicate_trigger_complete(Deserializer &derez);
       void handle_replicate_trigger_commit(Deserializer &derez);
       void handle_control_replicate_collective_message(Deserializer &derez);

@@ -4025,9 +4025,6 @@ namespace Legion {
       // we just do the launch directly from the shard manager
       if ((shard_manager != NULL) && !is_shard_task())
       {
-        // Mark that we've completed execution for this task
-        // since the shards will do all the real work
-        complete_execution();
         shard_manager->launch();
         return;
       }
@@ -7146,7 +7143,7 @@ namespace Legion {
     void ShardTask::handle_future(const void *res, size_t res_size, bool owned)
     //--------------------------------------------------------------------------
     {
-      shard_manager->handle_future(res, res_size, owned);
+      shard_manager->handle_post_execution(res, res_size, owned, true/*local*/);
     }
 
     //--------------------------------------------------------------------------

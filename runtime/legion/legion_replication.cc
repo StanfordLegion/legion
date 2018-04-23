@@ -3470,9 +3470,11 @@ namespace Legion {
         original_task(original),control_replicated(control),
         top_level_task(top), address_spaces(NULL), 
         local_mapping_complete(0), remote_mapping_complete(0),
+        local_execution_complete(0), remote_execution_complete(0),
         trigger_local_complete(0), trigger_remote_complete(0),
         trigger_local_commit(0), trigger_remote_commit(0), 
-        remote_constituents(0), first_future(true), startup_barrier(bar) 
+        remote_constituents(0), local_future_result(NULL), 
+        local_future_size(0), local_future_set(false), startup_barrier(bar) 
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -3579,6 +3581,8 @@ namespace Legion {
       }
       if ((address_spaces != NULL) && address_spaces->remove_reference())
         delete address_spaces;
+      if (local_future_result != NULL)
+        free(local_future_result);
     }
 
     //--------------------------------------------------------------------------
@@ -3833,18 +3837,78 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ShardManager::handle_future(const void *res,size_t res_size,bool owned)
+    void ShardManager::handle_post_execution(const void *res, size_t res_size, 
+                                             bool owned, bool local)
     //--------------------------------------------------------------------------
     {
       bool notify = false;
+      bool future_claimed = false;
       {
         AutoLock m_lock(manager_lock);
-        notify = first_future;
-        first_future = false;
+        if (local)
+        {
+          local_execution_complete++;
+#ifdef DEBUG_LEGION
+          assert(local_execution_complete <= local_shards.size());
+#endif
+        }
+        else
+        {
+          remote_execution_complete++;
+#ifdef DEBUG_LEGION
+          assert(remote_execution_complete <= remote_constituents);
+#endif
+        }
+        notify = (local_execution_complete == local_shards.size()) &&
+                 (remote_execution_complete == remote_constituents);
+        // See if we need to save the future or compare it
+        if (!local_future_set)
+        {
+          local_future_size = res_size;
+          if (!owned)
+          {
+            local_future_result = malloc(local_future_size);
+            memcpy(local_future_result, res, local_future_size);
+          }
+          else
+          {
+            local_future_result = const_cast<void*>(res); // take ownership
+            future_claimed = true;
+          }
+          local_future_set = true;
+        }
+#ifdef DEBUG_LEGION
+        // In debug mode we'll do a comparison to see if the futures
+        // are bit-wise the same or not and issue a warning if not
+        else if ((local_future_size != res_size) || ((local_future_size > 0) && 
+                  (strncmp((const char*)res, (const char*)local_future_result, 
+                                                      local_future_size) != 0)))
+          REPORT_LEGION_WARNING(LEGION_WARNING_MISMATCHED_REPLICATED_FUTURES,
+                                "WARNING: futures returned from replicated "
+                                "task have different bitwise values!")
+#endif
       }
-      if (notify && (original_task != NULL))
-        original_task->handle_future(res, res_size, owned);
-      else if (owned) // if we own it and don't use it we need to free it
+      if (notify)
+      {
+        if (original_task == NULL)
+        {
+          Serializer rez;
+          rez.serialize(repl_id);
+          rez.serialize<size_t>(local_future_size);
+          if (local_future_size > 0)
+            rez.serialize(local_future_result, local_future_size);
+        }
+        else
+        {
+          original_task->handle_future(local_future_result,
+                                       local_future_size, true/*owned*/);
+          local_future_result = NULL;
+          local_future_size = 0;
+          original_task->complete_execution();
+        }
+      }
+      // if we own it and don't use it we need to free it
+      if (owned && !future_claimed)
         free(const_cast<void*>(res));
     }
 
@@ -4234,6 +4298,23 @@ namespace Legion {
       derez.deserialize(repl_id);
       ShardManager *manager = runtime->find_shard_manager(repl_id);
       manager->handle_post_mapped(false/*local*/);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ShardManager::handle_post_execution(
+                                          Deserializer &derez, Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      ReplicationID repl_id;
+      derez.deserialize(repl_id);
+      ShardManager *manager = runtime->find_shard_manager(repl_id);
+      size_t future_result_size;
+      derez.deserialize(future_result_size);
+      const void *future_result = derez.get_current_pointer();
+      if (future_result_size > 0)
+        derez.advance_pointer(future_result_size);
+      manager->handle_post_execution(future_result, future_result_size,
+                                     false/*owned*/, false/*local*/);
     }
 
     //--------------------------------------------------------------------------

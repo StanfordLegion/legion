@@ -1239,7 +1239,8 @@ namespace Legion {
       void complete_startup_initialization(void) const;
     public:
       void handle_post_mapped(bool local);
-      void handle_future(const void *res, size_t res_size, bool owned);
+      void handle_post_execution(const void *res, size_t res_size, 
+                                 bool owned, bool local);
       void trigger_task_complete(bool local);
       void trigger_task_commit(bool local);
     public:
@@ -1273,6 +1274,7 @@ namespace Legion {
                                 AddressSpaceID source);
       static void handle_delete(Deserializer &derez, Runtime *rt);
       static void handle_post_mapped(Deserializer &derez, Runtime *rt);
+      static void handle_post_execution(Deserializer &derez, Runtime *rt);
       static void handle_trigger_complete(Deserializer &derez, Runtime *rt);
       static void handle_trigger_commit(Deserializer &derez, Runtime *rt);
       static void handle_collective_message(Deserializer &derez, Runtime *rt);
@@ -1323,10 +1325,12 @@ namespace Legion {
       // The owner applies these to the original task object only
       // after they have occurred for all the shards
       unsigned    local_mapping_complete, remote_mapping_complete;
+      unsigned    local_execution_complete, remote_execution_complete;
       unsigned    trigger_local_complete, trigger_remote_complete;
       unsigned    trigger_local_commit,   trigger_remote_commit;
       unsigned    remote_constituents;
-      bool        first_future;
+      void*       local_future_result; size_t local_future_size;
+      bool        local_future_set;
     protected:
       RtBarrier startup_barrier;
       ApBarrier pending_partition_barrier;

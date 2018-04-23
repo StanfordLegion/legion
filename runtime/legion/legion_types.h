@@ -760,6 +760,7 @@ namespace Legion {
       SEND_REPLICATE_LAUNCH,
       SEND_REPLICATE_DELETE,
       SEND_REPLICATE_POST_MAPPED,
+      SEND_REPLICATE_POST_EXECUTION,
       SEND_REPLICATE_TRIGGER_COMPLETE,
       SEND_REPLICATE_TRIGGER_COMMIT,
       SEND_CONTROL_REPLICATE_COLLECTIVE_MESSAGE,
@@ -926,6 +927,7 @@ namespace Legion {
         "Send Replication Launch",                                    \
         "Send Replication Delete",                                    \
         "Send Replication Post Mapped",                               \
+        "Send Replication Post Execution",                            \
         "Send Replication Trigger Complete",                          \
         "Send Replication Trigger Commit",                            \
         "Send Control Replication Collective Message",                \
@@ -1089,6 +1091,7 @@ namespace Legion {
         "Send Replication Launch",                                    \
         "Send Replication Delete",                                    \
         "Send Replication Post Mapped",                               \
+        "Send Replication Post Execution",                            \
         "Send Replication Trigger Complete",                          \
         "Send Replication Trigger Commit",                            \
         "Send Control Replication Collective Message",                \
