@@ -494,11 +494,7 @@ namespace Legion {
     {
       if (region_node != NULL)
       {
-#ifdef LEGION_GC
-        region_node->add_base_resource_ref(PHYSICAL_MANAGER_REF);
-#else
-        region_node->add_reference();
-#endif
+        region_node->add_base_gc_ref(PHYSICAL_MANAGER_REF);
         region_node->register_physical_manager(this);
       }
       if (instance_domain != NULL)
@@ -515,11 +511,7 @@ namespace Legion {
       if (region_node != NULL)
       {
         region_node->unregister_physical_manager(this);
-#ifdef LEGION_GC
-        if (region_node->remove_base_resource_ref(PHYSICAL_MANAGER_REF))
-#else
-        if (region_node->remove_reference())
-#endif
+        if (region_node->remove_base_gc_ref(PHYSICAL_MANAGER_REF))
           delete region_node;
       }
       if ((instance_domain != NULL) && 
