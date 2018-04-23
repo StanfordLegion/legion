@@ -1352,7 +1352,7 @@ namespace Realm {
 
   Memory Machine::MemoryQuery::next(Memory after) const
   {
-    //       return ((MemoryQueryImpl *)impl)->next_match(after);
+    //return ((MemoryQueryImpl *)impl)->next_match(after);
     return ((MemoryQueryImpl *)impl)->cache_next(after);
   }
 
@@ -2553,10 +2553,11 @@ namespace Realm {
     }
     // wait until initialization is complete
     while (true) {
-      if (init == 2)
+      if (init == 2) 
 	return;
     }
   }
+
 
      
   MemoryQueryImpl::MemoryQueryImpl(const MemoryQueryImpl& copy_from)
@@ -2591,7 +2592,7 @@ namespace Realm {
 	it++)
       delete *it;
     
-    if (cur_cached_list)
+    if (!shared_cached_list && cur_cached_list)
       delete cur_cached_list;
   }
 
