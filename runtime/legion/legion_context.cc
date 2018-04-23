@@ -8202,6 +8202,8 @@ namespace Legion {
         // Now broadcast the chosen color to all the other shards
         ValueBroadcast<LegionColor> color_collective(this, COLLECTIVE_LOC_15);
         color_collective.broadcast(partition_color);
+        // Wait for the creation to be done
+        creation_barrier.wait();
       }
       else
       {
@@ -8217,7 +8219,13 @@ namespace Legion {
                                              kind, partition_color, term_event,
                                              owner_shard->shard_id,
                                              total_shards);
+        // Signal that we're done with our creation
+        Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
+        // Also have to wait for creation to finish on all shards because
+        // any shard can handle requests for any cross-product partition
+        creation_barrier.wait();
       }
+      Runtime::advance_barrier(creation_barrier);
       part_op->initialize_cross_product(this, handle1, handle2,partition_color);
       // Now we can add the operation to the queue
       runtime->add_to_dependence_queue(this, executing_processor, part_op);
