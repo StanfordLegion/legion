@@ -5470,18 +5470,21 @@ namespace Legion {
         case MAPPING_FENCE:
           {
             parent_ctx->perform_fence_analysis(this, true, false);
+            parent_ctx->update_current_fence(this, true, false);
             break;
           }
         case EXECUTION_FENCE:
           {
             execution_precondition = 
               parent_ctx->perform_fence_analysis(this, false, true);
+            parent_ctx->update_current_fence(this, false, true);
             break;
           }
         case MIXED_FENCE:
           {
             execution_precondition =
               parent_ctx->perform_fence_analysis(this, true, true);
+            parent_ctx->update_current_fence(this, true, true);
             break;
           }
         default:
@@ -5907,33 +5910,22 @@ namespace Legion {
                                                    privilege_path);
         version_info.clear();
       }
+      // We treat this as a fence on everything that came before it since
+      // we don't know which prior operations might need the names of the
+      // region before it is deleted
+      completion_precondition = parent_ctx->perform_fence_analysis(this, 
+                                    false/*mapping*/, true/*execution*/);
     }
 
     //--------------------------------------------------------------------------
     void DeletionOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
-    {
-      // Iterate over our incoming operations and find the completion 
-      // operations that we need to wait to be done executing before
-      // we can actually perform the deletion
-      std::set<ApEvent> completion_events;
-      for (std::map<Operation*,GenerationID>::const_iterator it = 
-            incoming.begin(); it != incoming.end(); it++)
-      {
-        ApEvent complete = it->first->get_completion_event();
-        if (it->second == it->first->get_generation())
-          completion_events.insert(complete);
-      }
-      // If we have an execution fence event then we also need to wait for it
-      if (has_execution_fence_event())
-        completion_events.insert(get_execution_fence_event());
+    { 
       // Mark that we're done mapping and defer the execution as appropriate
       complete_mapping();
-      if (!completion_events.empty())
-      {
-        ApEvent completion_ready = Runtime::merge_events(completion_events);
-        complete_execution(Runtime::protect_event(completion_ready));
-      }
+      if (completion_precondition.exists() && 
+          !completion_precondition.has_triggered())
+        complete_execution(Runtime::protect_event(completion_precondition));
       else
         complete_execution();
     }
