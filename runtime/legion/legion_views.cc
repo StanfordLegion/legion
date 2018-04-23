@@ -43,22 +43,14 @@ namespace Legion {
         context(ctx), logical_node(node)
     //--------------------------------------------------------------------------
     {
-#ifdef LEGION_GC
-      logical_node->add_base_resource_ref(LOGICAL_VIEW_REF);
-#else
-      logical_node->add_reference();
-#endif
+      logical_node->add_base_gc_ref(LOGICAL_VIEW_REF);
     }
 
     //--------------------------------------------------------------------------
     LogicalView::~LogicalView(void)
     //--------------------------------------------------------------------------
     {
-#ifdef LEGION_GC
-      if (logical_node->remove_base_resource_ref(LOGICAL_VIEW_REF))
-#else
-      if (logical_node->remove_reference())
-#endif
+      if (logical_node->remove_base_gc_ref(LOGICAL_VIEW_REF))
         delete logical_node;
     }
 

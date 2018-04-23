@@ -550,13 +550,17 @@ namespace Legion {
       RegionNode*     get_tree(RegionTreeID tid);
       // Request but don't block
       RtEvent request_node(IndexSpace space);
+      // Find a local node if it exists and return it with reference
+      // otherwise return NULL
+      RegionNode*     find_local_node(LogicalRegion handle);
+      PartitionNode*  find_local_node(LogicalPartition handle);
     public:
-      bool has_node(IndexSpace space, bool local_only = false);
-      bool has_node(IndexPartition part, bool local_only = false);
-      bool has_node(FieldSpace space, bool local_only = false);
-      bool has_node(LogicalRegion handle, bool local_only = false);
-      bool has_node(LogicalPartition handle, bool local_only = false);
-      bool has_tree(RegionTreeID tid, bool local_only = false);
+      bool has_node(IndexSpace space);
+      bool has_node(IndexPartition part);
+      bool has_node(FieldSpace space);
+      bool has_node(LogicalRegion handle);
+      bool has_node(LogicalPartition handle);
+      bool has_tree(RegionTreeID tid);
       bool has_field(FieldSpace space, FieldID fid);
     public:
       void remove_node(IndexSpace space);
@@ -2419,23 +2423,15 @@ namespace Legion {
      * this kind of node making them general across
      * all kinds of node types.
      */
-    class RegionTreeNode
-#ifdef LEGION_GC
-      : public DistributedCollectable
-#else
-      : public Collectable
-#endif
-      {
+    class RegionTreeNode : public DistributedCollectable {
     public:
       RegionTreeNode(RegionTreeForest *ctx, FieldSpaceNode *column);
       virtual ~RegionTreeNode(void);
-#ifdef LEGION_GC
     public:
-      virtual void notify_active(ReferenceMutator *mutator) { assert(false); }
-      virtual void notify_inactive(ReferenceMutator *mutator) { assert(false); }
+      virtual void notify_active(ReferenceMutator *mutator);
+      virtual void notify_inactive(ReferenceMutator *mutator) = 0;
       virtual void notify_valid(ReferenceMutator *mutator) { assert(false); }
       virtual void notify_invalid(ReferenceMutator *mutator) { assert(false); }
-#endif
     public:
       static AddressSpaceID get_owner_space(RegionTreeID tid, Runtime *rt);
     public:
@@ -2863,20 +2859,18 @@ namespace Legion {
       RegionTreeForest *const context;
       FieldSpaceNode *const column_source;
     public:
-#ifndef LEGION_GC
       NodeSet remote_instances;
-#endif
       bool registered;
       bool destroyed;
+#ifdef DEBUG_LEGION
+    protected:
+      bool currently_active; // should be monotonic
+#endif
     protected:
       DynamicTable<LogicalStateAllocator> logical_states;
       DynamicTable<VersionManagerAllocator> current_versions;
     protected:
-#ifdef LEGION_GC
       LocalLock &node_lock;
-#else
-      mutable LocalLock node_lock;
-#endif
       // While logical states and version managers have dense keys
       // within a node, distributed IDs don't so we use a map that
       // should rarely need to be accessed for tracking views
@@ -2925,6 +2919,8 @@ namespace Legion {
       virtual ~RegionNode(void);
     public:
       RegionNode& operator=(const RegionNode &rhs);
+    public:
+      virtual void notify_inactive(ReferenceMutator *mutator);
     public:
       void record_registered(void);
     public:
@@ -3129,6 +3125,8 @@ namespace Legion {
       virtual ~PartitionNode(void);
     public:
       PartitionNode& operator=(const PartitionNode &rhs);
+    public:
+      virtual void notify_inactive(ReferenceMutator *mutator);
     public:
       void record_registered(void);
     public:
