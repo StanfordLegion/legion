@@ -166,6 +166,15 @@ DECLARE_REDUCTION(register_reduction_plus_int64,
                   safe_reduce_plus_int64, safe_reduce_plus_int64_point,
                   reduce_plus_int64, reduce_plus_int64_point,
                   PlusOpLongLong, long long int, long long int, ADD, ADD, 0)
+DECLARE_REDUCTION(register_reduction_plus_uint32,
+                  safe_reduce_plus_uint32, safe_reduce_plus_uint32_point,
+                  reduce_plus_uint32, reduce_plus_uint32_point,
+                  PlusOpUInt, unsigned, unsigned, ADD, ADD, 0U)
+DECLARE_REDUCTION(register_reduction_plus_uint64,
+                  safe_reduce_plus_uint64, safe_reduce_plus_uint64_point,
+                  reduce_plus_uint64, reduce_plus_uint64_point,
+                  PlusOpULongLong, unsigned long long, unsigned long long,
+                  ADD, ADD, 0ULL)
 
 DECLARE_REDUCTION(register_reduction_minus_float,
                   safe_reduce_minus_float, safe_reduce_minus_float_point,
@@ -183,6 +192,15 @@ DECLARE_REDUCTION(register_reduction_minus_int64,
                   safe_reduce_minus_int64, safe_reduce_minus_int64_point,
                   reduce_minus_int64, reduce_minus_int64_point,
                   MinusOpLongLong, long long int, long long int, ADD, SUB, 0)
+DECLARE_REDUCTION(register_reduction_minus_uint32,
+                  safe_reduce_minus_uint32, safe_reduce_minus_uint32_point,
+                  reduce_minus_uint32, reduce_minus_uint32_point,
+                  MinusOpUInt, unsigned, unsigned, ADD, SUB, 0U)
+DECLARE_REDUCTION(register_reduction_minus_uint64,
+                  safe_reduce_minus_uint64, safe_reduce_minus_uint64_point,
+                  reduce_minus_uint64, reduce_minus_uint64_point,
+                  MinusOpULongLong, unsigned long long, unsigned long long,
+                  ADD, SUB, 0ULL)
 
 DECLARE_REDUCTION(register_reduction_times_float,
                   safe_reduce_times_float, safe_reduce_times_float_point,
@@ -200,6 +218,15 @@ DECLARE_REDUCTION(register_reduction_times_int64,
                   safe_reduce_times_int64, safe_reduce_times_int64_point,
                   reduce_times_int64, reduce_times_int64_point,
                   TimesOpLongLong, long long int, long long int, MUL, MUL, 1)
+DECLARE_REDUCTION(register_reduction_times_uint32,
+                  safe_reduce_times_uint32, safe_reduce_times_uint32_point,
+                  reduce_times_uint32, reduce_times_uint32_point,
+                  TimesOpUInt, unsigned, unsigned, MUL, MUL, 1U)
+DECLARE_REDUCTION(register_reduction_times_uint64,
+                  safe_reduce_times_uint64, safe_reduce_times_uint64_point,
+                  reduce_times_uint64, reduce_times_uint64_point,
+                  TimesOpULongLong, unsigned long long, unsigned long long,
+                  MUL, MUL, 1ULL)
 
 DECLARE_REDUCTION(register_reduction_divide_float,
                   safe_reduce_divide_float, safe_reduce_divide_float_point,
@@ -217,6 +244,15 @@ DECLARE_REDUCTION(register_reduction_divide_int64,
                   safe_reduce_divide_int64, safe_reduce_divide_int64_point,
                   reduce_divide_int64, reduce_divide_int64_point,
                   DivideOpLongLong, long long int, long long int, DIV, MUL, 1)
+DECLARE_REDUCTION(register_reduction_divide_uint32,
+                  safe_reduce_divide_uint32, safe_reduce_divide_uint32_point,
+                  reduce_divide_uint32, reduce_divide_uint32_point,
+                  DivideOpUInt, unsigned, unsigned, DIV, MUL, 1U)
+DECLARE_REDUCTION(register_reduction_divide_uint64,
+                  safe_reduce_divide_uint64, safe_reduce_divide_uint64_point,
+                  reduce_divide_uint64, reduce_divide_uint64_point,
+                  DivideOpULongLong, unsigned long long, unsigned long long,
+                  DIV, MUL, 1ULL)
 
 DECLARE_REDUCTION(register_reduction_max_float,
                   safe_reduce_max_float, safe_reduce_max_float_point,
@@ -234,6 +270,16 @@ DECLARE_REDUCTION(register_reduction_max_int64,
                   safe_reduce_max_int64, safe_reduce_max_int64_point,
                   reduce_max_int64, reduce_max_int64_point,
                   MaxOpLongLong, long long int, long long int, std::max, std::max, LLONG_MIN)
+DECLARE_REDUCTION(register_reduction_max_uint32,
+                  safe_reduce_max_uint32, safe_reduce_max_uint32_point,
+                  reduce_max_uint32, reduce_max_uint32_point,
+                  MaxOpUInt, unsigned, unsigned, std::max, std::max,
+                  std::numeric_limits<unsigned>::min())
+DECLARE_REDUCTION(register_reduction_max_uint64,
+                  safe_reduce_max_uint64, safe_reduce_max_uint64_point,
+                  reduce_max_uint64, reduce_max_uint64_point,
+                  MaxOpULongLong, unsigned long long, unsigned long long,
+                  std::max, std::max, std::numeric_limits<unsigned long long>::min())
 
 DECLARE_REDUCTION(register_reduction_min_float,
                   safe_reduce_min_float, safe_reduce_min_float_point,
@@ -251,4 +297,14 @@ DECLARE_REDUCTION(register_reduction_min_int64,
                   safe_reduce_min_int64, safe_reduce_min_int64_point,
                   reduce_min_int64, reduce_min_int64_point,
                   MinOpLongLong, long long int, long long int, std::min, std::min, LLONG_MAX)
+DECLARE_REDUCTION(register_reduction_min_uint32,
+                  safe_reduce_min_uint32, safe_reduce_min_uint32_point,
+                  reduce_min_uint32, reduce_min_uint32_point,
+                  MinOpUInt, unsigned, unsigned,
+                  std::min, std::min, std::numeric_limits<unsigned>::max())
+DECLARE_REDUCTION(register_reduction_min_uint64,
+                  safe_reduce_min_uint64, safe_reduce_min_uint64_point,
+                  reduce_min_uint64, reduce_min_uint64_point,
+                  MinOpULongLong, unsigned long long, unsigned long long,
+                  std::min, std::min, std::numeric_limits<unsigned long long>::max())
 

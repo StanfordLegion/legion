@@ -132,6 +132,8 @@ base.reduction_types = terralib.newlist({
     double,
     int32,
     int64,
+    uint32,
+    uint64,
 })
 
 base.reduction_op_init = {}

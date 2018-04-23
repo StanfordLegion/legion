@@ -8397,10 +8397,24 @@ namespace Legion {
       {
         // This is a debug case for when we have one runtime instance
         // for each processor
-        Processor proc = Processor::get_executing_processor();
-        Realm::ProfilingRequestSet profiling_requests;
-        ready_event = ApEvent(proc.register_task(descriptor_id,
-            *realm_descriptor, profiling_requests, user_data, user_data_size));
+        std::set<Processor::Kind> handled_kinds;
+        Machine::ProcessorQuery local_procs(runtime->machine);
+        local_procs.local_address_space();
+        std::set<ApEvent> ready_events;
+        for (Machine::ProcessorQuery::iterator it = 
+              local_procs.begin(); it != local_procs.end(); it++)
+        {
+          const Processor::Kind kind = it->kind();
+          if (handled_kinds.find(kind) != handled_kinds.end())
+            continue;
+          Realm::ProfilingRequestSet profiling_requests;
+          ready_events.insert(ApEvent(Processor::register_task_by_kind(kind,
+                          false/*global*/, descriptor_id, *realm_descriptor, 
+                          profiling_requests, user_data, user_data_size)));
+          handled_kinds.insert(kind);
+        }
+        if (!ready_events.empty())
+          ready_event = Runtime::merge_events(ready_events);
       }
       // If we have a variant name, then record it
       if (registrar.task_variant_name == NULL)
