@@ -300,7 +300,11 @@ namespace Legion {
       virtual void unregister_child_operation(Operation *op) = 0;
       virtual ApEvent register_fence_dependence(Operation *op) = 0;
     public:
-      virtual ApEvent perform_fence_analysis(FenceOp *op, 
+      // Break this into two pieces since we know that there are some
+      // kinds of operations (like deletions) that want to act like 
+      // one-sided fences (e.g. waiting on everything before) but not
+      // preventing re-ordering for things afterwards
+      virtual ApEvent perform_fence_analysis(Operation *op, 
                                              bool mapping, bool execution) = 0;
       virtual void update_current_fence(FenceOp *op, 
                                         bool mapping, bool execution) = 0;
@@ -906,7 +910,7 @@ namespace Legion {
       virtual void unregister_child_operation(Operation *op);
       virtual ApEvent register_fence_dependence(Operation *op);
     public:
-      virtual ApEvent perform_fence_analysis(FenceOp *op,
+      virtual ApEvent perform_fence_analysis(Operation *op,
                                           bool mapping, bool execution);
       virtual void update_current_fence(FenceOp *op,
                                         bool mapping, bool execution);
@@ -1507,7 +1511,7 @@ namespace Legion {
       virtual void unregister_child_operation(Operation *op);
       virtual ApEvent register_fence_dependence(Operation *op);
     public:
-      virtual ApEvent perform_fence_analysis(FenceOp *op,
+      virtual ApEvent perform_fence_analysis(Operation *op,
                                              bool mapping, bool execution);
       virtual void update_current_fence(FenceOp *op,
                                         bool mapping, bool execution);
@@ -1817,7 +1821,7 @@ namespace Legion {
       virtual void unregister_child_operation(Operation *op);
       virtual ApEvent register_fence_dependence(Operation *op);
     public:
-      virtual ApEvent perform_fence_analysis(FenceOp *op,
+      virtual ApEvent perform_fence_analysis(Operation *op,
                                              bool mapping, bool execution);
       virtual void update_current_fence(FenceOp *op,
                                         bool mapping, bool execution);

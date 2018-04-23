@@ -1133,6 +1133,7 @@ namespace Legion {
       LogicalPartition logical_part;
       std::set<FieldID> free_fields;
       std::vector<unsigned> parent_req_indexes;
+      ApEvent completion_precondition;
     }; 
 
     /**

@@ -3548,12 +3548,15 @@ namespace Legion {
                        handle.index_space.id, handle.field_space.id, 
                        get_task_name(), get_unique_id());
 #endif
-      DeletionOp *op = runtime->get_available_deletion_op();
-      op->initialize_logical_region_deletion(this, handle);
-      runtime->add_to_dependence_queue(this, executing_processor, op);
+      // If this is a local region remove it from our set
       std::set<LogicalRegion>::iterator finder = local_regions.find(handle);
       if (finder != local_regions.end())
         local_regions.erase(finder);
+#if 0
+      DeletionOp *op = runtime->get_available_deletion_op();
+      op->initialize_logical_region_deletion(this, handle);
+      runtime->add_to_dependence_queue(this, executing_processor, op);
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -4983,7 +4986,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ApEvent InnerContext::perform_fence_analysis(FenceOp *op, 
+    ApEvent InnerContext::perform_fence_analysis(Operation *op, 
                                                  bool mapping, bool execution)
     //--------------------------------------------------------------------------
     {
@@ -5171,8 +5174,6 @@ namespace Legion {
       // before we update the current fence
       if (execution && current_execution_fence_event.exists())
         previous_events.insert(current_execution_fence_event);
-      // Now we can update the current fence
-      update_current_fence(op, mapping, execution); 
       if (!previous_events.empty())
         return Runtime::merge_events(previous_events);
       return ApEvent::NO_AP_EVENT;
@@ -6269,9 +6270,6 @@ namespace Legion {
       // If we own any task local regions, we issue deletion operations on them.
       if (!local_regions.empty())
       {
-        // We cannot destroy task local regions until our child tasks are done
-        // accessing them.
-        issue_execution_fence();
         // Create a copy of this since it's about to be mutated in 
         // the function call we're about to do
         const std::vector<LogicalRegion> to_destroy(local_regions.begin(),
@@ -8505,7 +8503,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ApEvent LeafContext::perform_fence_analysis(FenceOp *op, 
+    ApEvent LeafContext::perform_fence_analysis(Operation *op, 
                                                 bool mapping, bool execution)
     //--------------------------------------------------------------------------
     {
@@ -9654,7 +9652,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ApEvent InlineContext::perform_fence_analysis(FenceOp *op, 
+    ApEvent InlineContext::perform_fence_analysis(Operation *op, 
                                                   bool mapping, bool execution)
     //--------------------------------------------------------------------------
     {
