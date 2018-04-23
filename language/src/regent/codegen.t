@@ -2398,10 +2398,9 @@ local function make_partition_projection_functor(cx, expr, loop_index, color_spa
   -- Generate a projection functor that evaluates `expr`.
   local value = codegen.expr(cx, index):read(cx)
   local terra partition_functor(runtime : c.legion_runtime_t,
-                                mappable : c.legion_mappable_t,
-                                index : uint,
                                 parent : c.legion_logical_partition_t,
-                                [point])
+                                [point],
+                                launch : c.legion_domain_t)
     [symbol_setup];
     [value.actions];
     var index : index_type = [value.value];

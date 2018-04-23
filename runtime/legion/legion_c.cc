@@ -4572,39 +4572,39 @@ public:
   {
   }
 
-  virtual LogicalRegion project(const Mappable *mappable,
-                                unsigned index,
-                                LogicalRegion upper_bound,
-                                const DomainPoint &point)
+  virtual LogicalRegion project(LogicalRegion upper_bound,
+                                const DomainPoint &point,
+                                const Domain &launch_domain)
   {
     legion_runtime_t runtime_ = CObjectWrapper::wrap(runtime);
-    const legion_mappable_t mappable_ = CObjectWrapper::wrap_const(mappable);
     legion_logical_region_t upper_bound_ = CObjectWrapper::wrap(upper_bound);
     legion_domain_point_t point_ = CObjectWrapper::wrap(point);
+    legion_domain_t launch_domain_ = CObjectWrapper::wrap(launch_domain);
 
     assert(region_functor);
     legion_logical_region_t result =
-      region_functor(runtime_, mappable_, index, upper_bound_, point_);
+      region_functor(runtime_, upper_bound_, point_, launch_domain_);
     return CObjectWrapper::unwrap(result);
   }
 
-  virtual LogicalRegion project(const Mappable *mappable,
-                                unsigned index,
-                                LogicalPartition upper_bound,
-                                const DomainPoint &point)
+  virtual LogicalRegion project(LogicalPartition upper_bound,
+                                const DomainPoint &point,
+                                const Domain &launch_domain)
   {
     legion_runtime_t runtime_ = CObjectWrapper::wrap(runtime);
-    legion_mappable_t mappable_ = CObjectWrapper::wrap_const(mappable);
     legion_logical_partition_t upper_bound_ = CObjectWrapper::wrap(upper_bound);
     legion_domain_point_t point_ = CObjectWrapper::wrap(point);
+    legion_domain_t launch_domain_ = CObjectWrapper::wrap(launch_domain);
 
     assert(partition_functor);
     legion_logical_region_t result =
-      partition_functor(runtime_, mappable_, index, upper_bound_, point_);
+      partition_functor(runtime_, upper_bound_, point_, launch_domain_);
     return CObjectWrapper::unwrap(result);
   }
 
-  unsigned get_depth(void) const { return depth; }
+  virtual unsigned get_depth(void) const { return depth; }
+
+  virtual bool is_functional(void) const { return true; }
 
 private:
   const unsigned depth;
