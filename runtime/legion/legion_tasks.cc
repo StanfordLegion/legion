@@ -6009,14 +6009,21 @@ namespace Legion {
     {
       DETAILED_PROFILER(runtime, INDIVIDUAL_PACK_REMOTE_COMPLETE_CALL);
       AddressSpaceID target = runtime->find_address_space(orig_proc);
-      if (execution_context->has_created_requirements())
+      if ((execution_context != NULL) &&
+          execution_context->has_created_requirements())
         execution_context->send_back_created_state(target); 
       // Send back the pointer to the task instance, then serialize
       // everything else that needs to be sent back
       rez.serialize(orig_task);
       RezCheck z(rez);
       // Pack the privilege state
-      execution_context->pack_privilege_state(rez, target, true/*returning*/);
+      if (execution_context != NULL)
+      {
+        rez.serialize<bool>(true);
+        execution_context->pack_privilege_state(rez, target, true/*returning*/);
+      }
+      else
+        rez.serialize<bool>(false);
       // Then pack the future result
       {
         RezCheck z2(rez);
@@ -6032,7 +6039,10 @@ namespace Legion {
       DETAILED_PROFILER(runtime, INDIVIDUAL_UNPACK_REMOTE_COMPLETE_CALL);
       DerezCheck z(derez);
       // First unpack the privilege state
-      ResourceTracker::unpack_privilege_state(derez, parent_ctx);
+      bool has_privilege_state;
+      derez.deserialize(has_privilege_state);
+      if (has_privilege_state)
+        ResourceTracker::unpack_privilege_state(derez, parent_ctx);
       // Unpack the future result
       {
         DerezCheck z2(derez);
