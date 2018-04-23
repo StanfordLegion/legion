@@ -12505,14 +12505,17 @@ namespace Legion {
                                        mapped_instances, sync_precondition,
                                        map_applied_conditions, 
                                        true_guard, false_guard);
-        if (!mapped_instances.empty())
-          runtime->forest->log_mapping_decision(unique_op_id, 0/*idx*/,
-                                                requirement,
-                                                mapped_instances);
+        if (runtime->legion_spy_enabled)
+        {
+          if (!mapped_instances.empty())
+            runtime->forest->log_mapping_decision(unique_op_id, 0/*idx*/,
+                                                  requirement,
+                                                  mapped_instances);
 #ifdef LEGION_SPY
-        LegionSpy::log_operation_events(unique_op_id, done_event, 
-                                        completion_event);
+          LegionSpy::log_operation_events(unique_op_id, done_event, 
+                                          completion_event);
 #endif
+        }
         version_info.apply_mapping(map_applied_conditions);
         // Clear value and value size since the forest ended up 
         // taking ownership of them
