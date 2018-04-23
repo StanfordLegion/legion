@@ -3552,11 +3552,9 @@ namespace Legion {
       std::set<LogicalRegion>::iterator finder = local_regions.find(handle);
       if (finder != local_regions.end())
         local_regions.erase(finder);
-#if 0
       DeletionOp *op = runtime->get_available_deletion_op();
       op->initialize_logical_region_deletion(this, handle);
       runtime->add_to_dependence_queue(this, executing_processor, op);
-#endif
     }
 
     //--------------------------------------------------------------------------
