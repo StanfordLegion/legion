@@ -901,9 +901,9 @@ namespace Legion {
       virtual void trigger_mapping(void);
       virtual void trigger_complete(void);
     public:
-      void set_mapped_barrier(RtBarrier mapped_barrier);
+      void set_execution_barrier(RtBarrier execution_barrier);
     protected:
-      RtBarrier mapped_barrier;
+      RtBarrier execution_barrier;
     };
 
     /**

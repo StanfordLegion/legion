@@ -7628,12 +7628,9 @@ namespace Legion {
         log_index.debug("Destroying index space %x in task %s (ID %lld)", 
                         handle.id, get_task_name(), get_unique_id());
 #endif
-      ReplFenceOp *fence_op = runtime->get_available_repl_fence_op();
-      fence_op->initialize_repl_fence(this, FenceOp::MAPPING_FENCE);
-      runtime->add_to_dependence_queue(this, executing_processor, fence_op);
       ReplDeletionOp *op = runtime->get_available_repl_deletion_op();
       op->initialize_index_space_deletion(this, handle);
-      op->set_mapped_barrier(deletion_barrier);
+      op->set_execution_barrier(deletion_barrier);
       runtime->add_to_dependence_queue(this, executing_processor, op);
       Runtime::advance_barrier(deletion_barrier);
     }
@@ -7648,12 +7645,9 @@ namespace Legion {
         log_index.debug("Destroying index partition %x in task %s (ID %lld)", 
                         handle.id, get_task_name(), get_unique_id());
 #endif
-      ReplFenceOp *fence_op = runtime->get_available_repl_fence_op();
-      fence_op->initialize_repl_fence(this, FenceOp::MAPPING_FENCE);
-      runtime->add_to_dependence_queue(this, executing_processor, fence_op);
       ReplDeletionOp *op = runtime->get_available_repl_deletion_op();
       op->initialize_index_part_deletion(this, handle);
-      op->set_mapped_barrier(deletion_barrier);
+      op->set_execution_barrier(deletion_barrier);
       runtime->add_to_dependence_queue(this, executing_processor, op);
       Runtime::advance_barrier(deletion_barrier);
     }
@@ -9378,12 +9372,9 @@ namespace Legion {
         log_field.debug("Destroying field space %x in task %s (ID %lld)", 
                         handle.id, get_task_name(), get_unique_id());
 #endif
-      ReplFenceOp *fence_op = runtime->get_available_repl_fence_op();
-      fence_op->initialize_repl_fence(this, FenceOp::MAPPING_FENCE);
-      runtime->add_to_dependence_queue(this, executing_processor, fence_op);
       ReplDeletionOp *op = runtime->get_available_repl_deletion_op();
       op->initialize_field_space_deletion(this, handle);
-      op->set_mapped_barrier(deletion_barrier);
+      op->set_execution_barrier(deletion_barrier);
       runtime->add_to_dependence_queue(this, executing_processor, op);
       Runtime::advance_barrier(deletion_barrier);
     }
@@ -9441,12 +9432,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      ReplFenceOp *fence_op = runtime->get_available_repl_fence_op();
-      fence_op->initialize_repl_fence(this, FenceOp::MAPPING_FENCE);
-      runtime->add_to_dependence_queue(this, executing_processor, fence_op);
       ReplDeletionOp *op = runtime->get_available_repl_deletion_op();
       op->initialize_field_deletion(this, space, fid);
-      op->set_mapped_barrier(deletion_barrier);
+      op->set_execution_barrier(deletion_barrier);
       runtime->add_to_dependence_queue(this, executing_processor, op);
       Runtime::advance_barrier(deletion_barrier);
     }
@@ -9473,12 +9461,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      ReplFenceOp *fence_op = runtime->get_available_repl_fence_op();
-      fence_op->initialize_repl_fence(this, FenceOp::MAPPING_FENCE);
-      runtime->add_to_dependence_queue(this, executing_processor, fence_op);
       ReplDeletionOp *op = runtime->get_available_repl_deletion_op();
       op->initialize_field_deletions(this, space, to_free);
-      op->set_mapped_barrier(deletion_barrier);
+      op->set_execution_barrier(deletion_barrier);
       runtime->add_to_dependence_queue(this, executing_processor, op);
       Runtime::advance_barrier(deletion_barrier);
     }
@@ -9547,12 +9532,9 @@ namespace Legion {
                          handle.index_space.id, handle.field_space.id, 
                          get_task_name(), get_unique_id());
 #endif
-      ReplFenceOp *fence_op = runtime->get_available_repl_fence_op();
-      fence_op->initialize_repl_fence(this, FenceOp::MAPPING_FENCE);
-      runtime->add_to_dependence_queue(this, executing_processor, fence_op);
       ReplDeletionOp *op = runtime->get_available_repl_deletion_op();
       op->initialize_logical_region_deletion(this, handle);
-      op->set_mapped_barrier(deletion_barrier);
+      op->set_execution_barrier(deletion_barrier);
       runtime->add_to_dependence_queue(this, executing_processor, op);
       Runtime::advance_barrier(deletion_barrier);
     }
@@ -9569,12 +9551,9 @@ namespace Legion {
                          handle.field_space.id, get_task_name(), 
                          get_unique_id());
 #endif
-      ReplFenceOp *fence_op = runtime->get_available_repl_fence_op();
-      fence_op->initialize_repl_fence(this, FenceOp::MAPPING_FENCE);
-      runtime->add_to_dependence_queue(this, executing_processor, fence_op);
       ReplDeletionOp *op = runtime->get_available_repl_deletion_op();
       op->initialize_logical_partition_deletion(this, handle);
-      op->set_mapped_barrier(deletion_barrier);
+      op->set_execution_barrier(deletion_barrier);
       runtime->add_to_dependence_queue(this, executing_processor, op);
       Runtime::advance_barrier(deletion_barrier);
     }

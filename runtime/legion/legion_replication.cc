@@ -1692,7 +1692,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       activate_deletion();
-      mapped_barrier = RtBarrier::NO_RT_BARRIER;
+      execution_barrier = RtBarrier::NO_RT_BARRIER;
     }
 
     //--------------------------------------------------------------------------
@@ -1708,24 +1708,22 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(mapped_barrier.exists());
+      assert(execution_barrier.exists());
       ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
       assert(repl_ctx != NULL);
 #else
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
-      // Shard 0 will handle all the deletions
-      if (repl_ctx->owner_shard->shard_id != 0)
-      {
-        // Everyone else can arrive on the barrier and map like normal
-        // since they are not going to do anything
-        Runtime::phase_barrier_arrive(mapped_barrier, 1/*count*/);
-        complete_mapping();
-      }
-      else // shard 0 maps when everyone has mapped
-        complete_mapping(mapped_barrier);
-      // We don't do anything for execution so we are executed
-      complete_execution();
+      // We can complete our mapping now and defer our execution as necessary
+      complete_mapping();
+      // Everyone arrives on our phase barrier with our completion precondition
+      Runtime::phase_barrier_arrive(execution_barrier, 1/*count*/,  
+                  Runtime::protect_event(completion_precondition));
+      // Shard 0 will defer doing the deletion until it's ready for everyone
+      if (repl_ctx->owner_shard->shard_id == 0)
+        complete_execution(execution_barrier);
+      else
+        complete_execution();
     }
 
     //--------------------------------------------------------------------------
@@ -1795,13 +1793,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplDeletionOp::set_mapped_barrier(RtBarrier mapped)
+    void ReplDeletionOp::set_execution_barrier(RtBarrier execution)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(!mapped_barrier.exists());
+      assert(!execution_barrier.exists());
 #endif
-      mapped_barrier = mapped;
+      execution_barrier = execution;
     }
 
     /////////////////////////////////////////////////////////////
@@ -3498,7 +3496,7 @@ namespace Legion {
           RtBarrier(Realm::Barrier::create_barrier(total_shards-1));
         // Same thing as above for deletion barriers
         deletion_barrier = 
-          RtBarrier(Realm::Barrier::create_barrier(total_shards-1));
+          RtBarrier(Realm::Barrier::create_barrier(total_shards));
         // Fence barriers need arrivals from everyone
         mapping_fence_barrier = 
           RtBarrier(Realm::Barrier::create_barrier(total_shards));
