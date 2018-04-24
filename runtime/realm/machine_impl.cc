@@ -33,6 +33,7 @@ namespace Realm {
 
   Logger log_machine("machine");
   Logger log_annc("announce");
+  Logger log_query("query");
 
   template <typename KT, typename VT>
   inline void delete_map_contents(std::map<KT,VT *>& m)
@@ -1153,7 +1154,6 @@ namespace Realm {
   {
     impl = ((ProcessorQueryImpl *)impl)->writeable_reference();
     ((ProcessorQueryImpl *)impl)->restrict_to_kind(kind);
-    // set the cached list
     return *this;
   }
 
@@ -1188,9 +1188,9 @@ namespace Realm {
     ((ProcessorQueryImpl *)impl)->add_predicate(new ProcessorHasAffinityPredicate(m, min_bandwidth, max_latency));
     // query type can use one of the cached maps
     if (!min_bandwidth && !max_latency)
-      ((ProcessorQueryImpl*)impl)->set_cached(m);
+      ((ProcessorQueryImpl*)impl)->set_cached_mem(m);
     else
-      ((ProcessorQueryImpl*)impl)->reset_cached();
+      ((ProcessorQueryImpl*)impl)->reset_cached_mem();
     return *this;
   }
 
@@ -1200,7 +1200,7 @@ namespace Realm {
   {
     impl = ((ProcessorQueryImpl *)impl)->writeable_reference();
     ((ProcessorQueryImpl *)impl)->add_predicate(new ProcessorBestAffinityPredicate(m, bandwidth_weight, latency_weight));
-    ((ProcessorQueryImpl *)impl)->reset_cached();
+    ((ProcessorQueryImpl *)impl)->reset_cached_mem();
     return *this;
   }
 
@@ -1216,8 +1216,8 @@ namespace Realm {
 
   Processor Machine::ProcessorQuery::next(Processor after) 
   {
-    //     return ((ProcessorQueryImpl *)impl)->next_match(after);
-     return ((ProcessorQueryImpl *)impl)->cache_next(after);
+    //return ((ProcessorQueryImpl *)impl)->next_match(after);
+    return ((ProcessorQueryImpl *)impl)->cache_next(after);
 
   }
 
@@ -1352,8 +1352,8 @@ namespace Realm {
 
   Memory Machine::MemoryQuery::next(Memory after) const
   {
-    //return ((MemoryQueryImpl *)impl)->next_match(after);
-    return ((MemoryQueryImpl *)impl)->cache_next(after);
+    //     return ((MemoryQueryImpl *)impl)->next_match(after);
+        return ((MemoryQueryImpl *)impl)->cache_next(after);
   }
 
   Memory Machine::MemoryQuery::random(void) const
@@ -1465,7 +1465,8 @@ namespace Realm {
     , machine((MachineImpl *)_machine.impl)
     , is_restricted_node(false)
     , is_restricted_kind(false) 
-    , is_cached(false)
+    , cached_mem(Memory::NO_MEMORY)
+    , is_cached_mem(false)
     , shared_cached_list(false)
     , valid_cache(false)
     , cur_cached_list(NULL)
@@ -1530,8 +1531,6 @@ namespace Realm {
       if (init == 2)
 	return;
     }
-    //    std::cout << "size of _toc_procs_list = " << this->_toc_procs_list->size()  << "\n";
-    //    std::cout << "size of _loc_procs_list = " <<  this->_loc_procs_list->size()  << "\n";
   }
 
   ProcessorQueryImpl::ProcessorQueryImpl(const ProcessorQueryImpl& copy_from)
@@ -1541,7 +1540,8 @@ namespace Realm {
     , restricted_node_id(copy_from.restricted_node_id)
     , is_restricted_kind(copy_from.is_restricted_kind)
     , restricted_kind(copy_from.restricted_kind)
-    , is_cached(copy_from.is_cached)
+    , cached_mem(copy_from.cached_mem)
+    , is_cached_mem(copy_from.is_cached_mem)
     , shared_cached_list(copy_from.shared_cached_list)
     , valid_cache(copy_from.valid_cache)
     , cur_cached_list(copy_from.cur_cached_list)
@@ -1608,6 +1608,7 @@ namespace Realm {
     }
     // any constraint to processor query will invalidate cached list
     valid_cache = false;
+
   }
 
   void ProcessorQueryImpl::restrict_to_kind(Processor::Kind new_kind)
@@ -1629,6 +1630,8 @@ namespace Realm {
     // a writer is always unique, so no need for mutexes
     predicates.push_back(pred);
     valid_cache = false;
+
+
   }
 
   // complete iterators
@@ -1652,12 +1655,22 @@ namespace Realm {
   Processor ProcessorQueryImpl::next(Processor after)
   {
     Processor nextp = Processor::NO_PROC;
+
+    if (cur_cached_list == NULL) {
+      log_query.fatal() << "cur_cached_list is null";
+      assert(0);
+    }
     if (!cur_cached_list) return nextp;
     if (!cur_cached_list->size()) return nextp;
-    if ((*cur_cached_list)[0] == after)
+    if ((*cur_cached_list)[0] == after) 
       	cur_index = 1;
-    else 
+    else {
+      if (((*cur_cached_list)[cur_index] != after) && (cur_index < cur_cached_list->size())) {
+	log_query.fatal() << "cur_cached_list: inconsistent state";
+	assert(0);
+      }
       ++cur_index;
+    }
     if (cur_index < cur_cached_list->size())
       nextp =  (*cur_cached_list)[cur_index];
     return nextp;
@@ -1691,7 +1704,7 @@ namespace Realm {
 	}
       }
 
-      else if (is_cached) {
+      else if (is_cached_mem) {
 	switch (restricted_kind) {
 	case Processor::LOC_PROC:
 	  return &(*_sysmem_local_procs)[cached_mem];
@@ -1819,7 +1832,7 @@ namespace Realm {
     return lowest;
 #else
     // optimize if restricted kind without predicates and restricted_node attached to the query
-      
+
     std::map<int, MachineNodeInfo *>::const_iterator it;
     // start where we left off
     it = machine->nodeinfos.find(ID(after).proc.owner_node);
@@ -1850,8 +1863,8 @@ namespace Realm {
 	      ok && (it3 != predicates.end());
 	      it3++)
 	    ok = (*it3)->matches_predicate(machine, it2->first, it2->second);
-	  if(ok)
-	    return it2->first;
+	  if (ok) 
+	     return it2->first;
 	  // try next processor (if it exists)
 	  ++it2;
 	}
@@ -1869,14 +1882,18 @@ namespace Realm {
     bool first_time = true;
     Processor pval = Processor::NO_PROC;
     
-    //    std::cout << "valid cache = " << valid_cache << "\n";
+
+    log_query.debug("cache_next: processor input id =  %llu\n", after.id);
     // if valid cache
     if (valid_cache) {
-      return next(after);
+      pval = next(after);
+      log_query.debug("cache_next: processor output id: [valid cache] = %llu\n", pval.id);
+      return pval;
     }
     // else build the cache. Use existing caches for common queries or build a new one for more complex mutated queries
     else {
       valid_cache=true;
+      shared_cached_list = false;
 	// if this is not pointing to a persistent list
       if (cur_cached_list && !shared_cached_list) {
 	delete cur_cached_list;
@@ -1887,11 +1904,17 @@ namespace Realm {
       // shared_cached_list = true  i.e. cur_cached_list points to a precomputed list
       if ((cur_cached_list = cached_list()) != NULL) {
 	shared_cached_list = true;
-	return next(after);
+	pval = next(after);
+	log_query.debug("cache_next: processor output id: [cached list] = %llu\n", pval.id);
+	return pval;
       }
 
       // general mutated query
       cur_cached_list = new std::vector<Processor>();
+      // enter the first element i.e. after
+      cur_cached_list->push_back(after);
+      cur_index = 1;
+
       std::map<int, MachineNodeInfo *>::const_iterator it;
       // start where we left off
       it = machine->nodeinfos.find(ID(after).proc.owner_node);
@@ -1937,7 +1960,9 @@ namespace Realm {
 	++it;
       }
     }
+    log_query.debug("cache_next: processor output id =  %llu\n", pval.id);
     return pval;
+
   }
 
   size_t ProcessorQueryImpl::count_matches(void) const
@@ -2855,6 +2880,7 @@ namespace Realm {
     // a new one for more complex mutated queries
     else {
       valid_cache=true;
+      shared_cached_list = false;
 	// if this is not pointing to a persistent list
       if (cur_cached_list && !shared_cached_list) {
 	delete cur_cached_list;
@@ -2870,6 +2896,9 @@ namespace Realm {
       }
       // general mutated query
       cur_cached_list = new std::vector<Memory>();
+      // enter the first element
+      cur_cached_list->push_back(after);
+      cur_index = 1;
       std::map<int, MachineNodeInfo *>::const_iterator it;
       // start where we left off
       it = machine->nodeinfos.find(ID(after).memory.owner_node);

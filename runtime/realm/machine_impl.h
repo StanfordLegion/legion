@@ -227,12 +227,13 @@ namespace Realm {
       size_t count_matches(void) const;
       Processor random_match(void) const;
 
-      void set_cached(Memory m) { cached_mem = m; if (predicates.size() == 1) is_cached = true; };
-      void reset_cached() { is_cached = false; };
+      void set_cached_mem(Memory m) { cached_mem = m; 
+	if (predicates.size() == 1) is_cached_mem = true; else is_cached_mem=false;};
+      void reset_cached_mem() { cached_mem = Memory::NO_MEMORY; is_cached_mem = false;};
       Processor cache_next(Processor after);
 
 
-      // SEEMAH: specialized iterators
+      // specialized iterators
       std::vector<Processor>::const_iterator begin(Processor::Kind k) const;
       std::vector<Processor>::const_iterator end(Processor::Kind k) const;
       std::vector<Processor>::iterator begin(Processor::Kind k);
@@ -247,7 +248,7 @@ namespace Realm {
       Processor::Kind restricted_kind;
       std::vector<ProcQueryPredicate *> predicates;     
       Memory cached_mem;
-      bool is_cached, shared_cached_list, valid_cache;
+      bool is_cached_mem, shared_cached_list, valid_cache;
       unsigned int cur_index;
       std::vector<Processor>* cur_cached_list;
 
