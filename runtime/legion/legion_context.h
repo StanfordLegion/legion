@@ -246,7 +246,8 @@ namespace Legion {
                                const std::set<FieldID> &to_free) = 0; 
       virtual LogicalRegion create_logical_region(RegionTreeForest *forest,
                                             IndexSpace index_space,
-                                            FieldSpace field_space) = 0;
+                                            FieldSpace field_space,
+                                            bool task_local) = 0;
       virtual void destroy_logical_region(LogicalRegion handle) = 0;
       virtual void destroy_logical_partition(LogicalPartition handle) = 0;
       virtual FieldAllocator create_field_allocator(Legion::Runtime *external,
@@ -299,7 +300,11 @@ namespace Legion {
       virtual void unregister_child_operation(Operation *op) = 0;
       virtual ApEvent register_fence_dependence(Operation *op) = 0;
     public:
-      virtual ApEvent perform_fence_analysis(FenceOp *op, 
+      // Break this into two pieces since we know that there are some
+      // kinds of operations (like deletions) that want to act like 
+      // one-sided fences (e.g. waiting on everything before) but not
+      // preventing re-ordering for things afterwards
+      virtual ApEvent perform_fence_analysis(Operation *op, 
                                              bool mapping, bool execution) = 0;
       virtual void update_current_fence(FenceOp *op, 
                                         bool mapping, bool execution) = 0;
@@ -380,12 +385,12 @@ namespace Legion {
       PhysicalRegion get_physical_region(unsigned idx);
       void get_physical_references(unsigned idx, InstanceSet &refs);
     public:
-      void add_created_region(LogicalRegion handle);
+      void add_created_region(LogicalRegion handle, bool task_local);
       // for logging created region requirements
       void log_created_requirements(void);
     public: // Privilege tracker methods
       virtual void register_region_creations(
-                          const std::set<LogicalRegion> &regions);
+                     const std::map<LogicalRegion,bool> &regions);
       virtual void register_region_deletions(
                           const std::set<LogicalRegion> &regions);
     public:
@@ -409,7 +414,7 @@ namespace Legion {
       virtual void register_index_partition_deletions(
                           const std::set<IndexPartition> &parts);
     public:
-      void register_region_creation(LogicalRegion handle);
+      void register_region_creation(LogicalRegion handle, bool task_local);
       void register_region_deletion(LogicalRegion handle);
     public:
       void register_field_creation(FieldSpace space, FieldID fid, bool local);
@@ -520,6 +525,10 @@ namespace Legion {
       // Application tasks can manipulate these next two data
       // structures by creating regions and fields, make sure you are
       // holding the operation lock when you are accessing them
+      // We use a region requirement with an empty privilege_fields
+      // set to indicate regions on which we have privileges for 
+      // all fields because this is a created region instead of
+      // a created field.
       std::deque<RegionRequirement>             created_requirements;
       // Track whether the created region requirements have
       // privileges to be returned or not
@@ -848,7 +857,8 @@ namespace Legion {
                                const std::set<FieldID> &to_free);
       virtual LogicalRegion create_logical_region(RegionTreeForest *forest,
                                             IndexSpace index_space,
-                                            FieldSpace field_space);
+                                            FieldSpace field_space,
+                                            bool task_local);
       virtual void destroy_logical_region(LogicalRegion handle);
       virtual void destroy_logical_partition(LogicalPartition handle);
       virtual FieldAllocator create_field_allocator(Legion::Runtime *external,
@@ -900,7 +910,7 @@ namespace Legion {
       virtual void unregister_child_operation(Operation *op);
       virtual ApEvent register_fence_dependence(Operation *op);
     public:
-      virtual ApEvent perform_fence_analysis(FenceOp *op,
+      virtual ApEvent perform_fence_analysis(Operation *op,
                                           bool mapping, bool execution);
       virtual void update_current_fence(FenceOp *op,
                                         bool mapping, bool execution);
@@ -1107,6 +1117,9 @@ namespace Legion {
       // Track information for locally allocated fields
       mutable LocalLock                                 local_field_lock;
       std::map<FieldSpace,std::vector<LocalFieldInfo> > local_fields;
+    protected:
+      // Track information for locally created regions
+      std::set<LogicalRegion> local_regions;
     };
 
     /**
@@ -1448,7 +1461,8 @@ namespace Legion {
                                const std::set<FieldID> &to_free);
       virtual LogicalRegion create_logical_region(RegionTreeForest *forest,
                                             IndexSpace index_space,
-                                            FieldSpace field_space);
+                                            FieldSpace field_space,
+                                            bool task_local);
       virtual void destroy_logical_region(LogicalRegion handle);
       virtual void destroy_logical_partition(LogicalPartition handle);
       virtual FieldAllocator create_field_allocator(Legion::Runtime *external,
@@ -1497,7 +1511,7 @@ namespace Legion {
       virtual void unregister_child_operation(Operation *op);
       virtual ApEvent register_fence_dependence(Operation *op);
     public:
-      virtual ApEvent perform_fence_analysis(FenceOp *op,
+      virtual ApEvent perform_fence_analysis(Operation *op,
                                              bool mapping, bool execution);
       virtual void update_current_fence(FenceOp *op,
                                         bool mapping, bool execution);
@@ -1757,7 +1771,8 @@ namespace Legion {
                                const std::set<FieldID> &to_free);
       virtual LogicalRegion create_logical_region(RegionTreeForest *forest,
                                             IndexSpace index_space,
-                                            FieldSpace field_space);
+                                            FieldSpace field_space,
+                                            bool task_local);
       virtual void destroy_logical_region(LogicalRegion handle);
       virtual void destroy_logical_partition(LogicalPartition handle);
       virtual FieldAllocator create_field_allocator(Legion::Runtime *external,
@@ -1806,7 +1821,7 @@ namespace Legion {
       virtual void unregister_child_operation(Operation *op);
       virtual ApEvent register_fence_dependence(Operation *op);
     public:
-      virtual ApEvent perform_fence_analysis(FenceOp *op,
+      virtual ApEvent perform_fence_analysis(Operation *op,
                                              bool mapping, bool execution);
       virtual void update_current_fence(FenceOp *op,
                                         bool mapping, bool execution);

@@ -12,6 +12,11 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
+-- fails-with:
+-- optimize_index_launch_num_affine2.rg:37: loop optimization failed: argument 2 interferes with argument 1
+--     g2(p[i], p[i+1])
+--       ^
+
 import "regent"
 
 -- This tests the various loop optimizations supported by the
@@ -27,8 +32,7 @@ task main()
   var r = region(ispace(ptr, n), int)
   var p = partition(equal, r, ispace(int1d, 5))
 
-  -- FIXME: This should be rejected by the index optimization
-  __forbid(__parallel)
+  __demand(__parallel)
   for i = 0, 2 do
     g2(p[i], p[i+1])
   end

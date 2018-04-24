@@ -21,37 +21,6 @@ local data = require("common/data")
 local affine = {}
 
 -- #####################################
--- ## Helper for Hashing Index Expressions
--- #################
-
-local index_key = {}
-index_key = {}
-index_key.__index = index_key
-
-function index_key:hash()
-  return data.hash(self.key)
-end
-
-function index_key:__tostring()
-  return tostring(self.node)
-end
-
-local function new_index_key(node, key)
-  return setmetatable({ node = node, key = key }, index_key)
-end
-
-local function is_index_key(x)
-  return getmetatable(x) == index_key
-end
-
-local function unwrap_index_key(x)
-  if is_index_key(x) then
-    return x.node
-  end
-  return x
-end
-
--- #####################################
 -- ## Constant Evaluation
 -- #################
 
@@ -174,8 +143,8 @@ function affine.analyze_index_noninterference(index, other_index)
   -- Can we prove that these two indexes will always be
   -- non-interfering?
 
-  local index = strip_casts(unwrap_index_key(index))
-  local other_index = strip_casts(unwrap_index_key(other_index))
+  local index = strip_casts(index)
+  local other_index = strip_casts(other_index)
 
   -- Attempt a simple affine analysis.
   local x1, b1 = get_affine_coefficients(index)
@@ -202,16 +171,16 @@ function affine.get_subregion_index(node)
   -- should still consider them equivalent.
 
   -- if affine.is_constant_expr(node) then
-  --   return new_index_key(node, convert_constant_expr(node))
+  --   return convert_constant_expr(node)
   -- end
 
   if node:is(ast.typed.expr.Constant) then
-    return new_index_key(node, convert_constant_expr(node))
+    return convert_constant_expr(node)
   end
 
 
   if node:is(ast.typed.expr.ID) and not base.types.is_rawref(node.expr_type) then
-    return new_index_key(node, node.value)
+    return node.value
   end
 
   return node

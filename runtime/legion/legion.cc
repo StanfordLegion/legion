@@ -3260,7 +3260,7 @@ namespace Legion {
                                    pointer_fid);
       }
       LogicalRegionT<1,coord_t> temp_lr = create_logical_region(ctx,
-                                                  temp_is, temp_fs);
+                                            temp_is, temp_fs, true);
       // Fill in the logical region with the data
       // Do this with a task launch to maintain deferred execution
       switch (color_space.get_dim())
@@ -3402,7 +3402,7 @@ namespace Legion {
                                    pointer_fid);
       }
       LogicalRegionT<1,coord_t> temp_lr = create_logical_region(ctx,
-                                                  temp_is, temp_fs);
+                                            temp_is, temp_fs, true);
       // Fill in the logical region with the data
       // Do this with a task launch to maintain deferred execution
       if (do_ranges)
@@ -3522,7 +3522,7 @@ namespace Legion {
         }
       }
       LogicalRegionT<1,coord_t> temp_lr = create_logical_region(ctx,
-                                                  temp_is, temp_fs);
+                                            temp_is, temp_fs, true);
       // Fill in the logical region with the data
       // Do this with a task launch to maintain deferred execution
       switch (color_dim)
@@ -3691,7 +3691,7 @@ namespace Legion {
         }
       }
       LogicalRegionT<1,coord_t> temp_lr = create_logical_region(ctx,
-                                                  temp_is, temp_fs);
+                                            temp_is, temp_fs, true);
       // Fill in the logical region with the data
       // Do this with a task launch to maintain deferred execution
       switch (range_dim)
@@ -3819,7 +3819,7 @@ namespace Legion {
         }
       }
       LogicalRegionT<1,coord_t> temp_lr = create_logical_region(ctx,
-                                                  temp_is, temp_fs);
+                                            temp_is, temp_fs, true);
       // Fill in the logical region with the data
       // Do this with a task launch to maintain deferred execution
       switch (color_dim)
@@ -3991,7 +3991,7 @@ namespace Legion {
         }
       }
       LogicalRegionT<1,coord_t> temp_lr = create_logical_region(ctx,
-                                                  temp_is, temp_fs);
+                                            temp_is, temp_fs, true);
       // Fill in the logical region with the data
       // Do this with a task launch to maintain deferred execution
       switch (range_dim)
@@ -5330,10 +5330,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     LogicalRegion Runtime::create_logical_region(Context ctx, 
-                                            IndexSpace index, FieldSpace fields)
+                           IndexSpace index, FieldSpace fields, bool task_local)
     //--------------------------------------------------------------------------
     {
-      return runtime->create_logical_region(ctx, index, fields);
+      return runtime->create_logical_region(ctx, index, fields, task_local);
     }
 
     //--------------------------------------------------------------------------

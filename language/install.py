@@ -318,6 +318,7 @@ def driver():
         help='Path to Terra installation directory (optional).')
     parser.add_argument(
         '--debug', dest='debug', action='store_true', required=False,
+        default=os.environ.get('DEBUG') == '1',
         help='Build Legion with debugging enabled.')
     parser.add_argument(
         '--gasnet', dest='gasnet', action='store_true', required=False,

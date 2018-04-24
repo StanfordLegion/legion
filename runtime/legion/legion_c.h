@@ -1368,7 +1368,8 @@ extern "C" {
   legion_logical_region_create(legion_runtime_t runtime,
                                legion_context_t ctx,
                                legion_index_space_t index,
-                               legion_field_space_t fields);
+                               legion_field_space_t fields,
+                               bool task_local);
 
   /**
    * @param handle Caller must have ownership of parameter `handle`.

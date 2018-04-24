@@ -166,7 +166,7 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
-    void TaskContext::add_created_region(LogicalRegion handle)
+    void TaskContext::add_created_region(LogicalRegion handle, bool task_local)
     //--------------------------------------------------------------------------
     {
       // Already hold the lock from the caller
@@ -177,7 +177,7 @@ namespace Legion {
       // Now make a new region requirement and physical region
       created_requirements.push_back(new_req);
       // Created regions always return privileges that they make
-      returnable_privileges.push_back(true);
+      returnable_privileges.push_back(!task_local);
     }
 
     //--------------------------------------------------------------------------
@@ -208,7 +208,8 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
-    void TaskContext::register_region_creation(LogicalRegion handle)
+    void TaskContext::register_region_creation(LogicalRegion handle,
+                                               bool task_local)
     //--------------------------------------------------------------------------
     {
       // Create a new logical region 
@@ -218,8 +219,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(created_regions.find(handle) == created_regions.end());
 #endif
-      created_regions.insert(handle); 
-      add_created_region(handle);
+      created_regions[handle] = task_local; 
+      add_created_region(handle, task_local);
     }
 
     //--------------------------------------------------------------------------
@@ -231,7 +232,8 @@ namespace Legion {
       // be returning values from the utility processor
       {
         AutoLock priv_lock(privilege_lock);
-        std::set<LogicalRegion>::iterator finder = created_regions.find(handle);
+        std::map<LogicalRegion,bool>::iterator finder =
+          created_regions.find(handle);
         // See if we created this region, if so remove it from the list
         // of created regions, otherwise add it to the list of deleted
         // regions to flow backwards
@@ -434,18 +436,18 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void TaskContext::register_region_creations(
-                                            const std::set<LogicalRegion> &regs)
+                                       const std::map<LogicalRegion,bool> &regs)
     //--------------------------------------------------------------------------
     {
       AutoLock priv_lock(privilege_lock);
-      for (std::set<LogicalRegion>::const_iterator it = regs.begin();
+      for (std::map<LogicalRegion,bool>::const_iterator it = regs.begin();
             it != regs.end(); it++)
       {
 #ifdef DEBUG_LEGION
-        assert(created_regions.find(*it) == created_regions.end());
+        assert(created_regions.find(it->first) == created_regions.end());
 #endif
-        created_regions.insert(*it);
-        add_created_region(*it);
+        created_regions[it->first] = it->second;
+        add_created_region(it->first, it->second);
       }
     }
 
@@ -460,7 +462,8 @@ namespace Legion {
         for (std::set<LogicalRegion>::const_iterator it = regs.begin();
               it != regs.end(); it++)
         {
-          std::set<LogicalRegion>::iterator finder = created_regions.find(*it);
+          std::map<LogicalRegion,bool>::iterator finder =
+            created_regions.find(*it);
           if (finder != created_regions.end())
           {
             created_regions.erase(finder);
@@ -1604,9 +1607,10 @@ namespace Legion {
       AutoLock priv_lock(privilege_lock,1,false/*exclusive*/);
       for (unsigned idx = 0; idx < created_requirements.size(); idx++, index++)
       {
+        const RegionRequirement &created_req = created_requirements[idx];
         LegionErrorType et = 
-          check_privilege_internal(req, created_requirements[idx], 
-                privilege_fields, bad_field, index, bad_index, skip_privilege);
+          check_privilege_internal(req, created_req, privilege_fields, 
+                                   bad_field, index, bad_index, skip_privilege);
         // No error so we are done
         if (et == NO_ERROR)
           return et;
@@ -1615,17 +1619,17 @@ namespace Legion {
           return et;
         // If we got a BAD_PARENT_REGION, see if this a returnable
         // privilege in which case we know we have privileges on all fields
-        if (returnable_privileges[idx])
+        if (created_req.privilege_fields.empty())
         {
           // Still have to check the parent region is right
-          if (req.parent == created_requirements[idx].region)
+          if (req.parent == created_req.region)
             return NO_ERROR;
         }
         // Otherwise we just keep going
       }
       // Finally see if we created all the fields in which case we know
       // we have privileges on all their regions
-      const FieldSpace sp = req.region.get_field_space();
+      const FieldSpace sp = req.parent.get_field_space();
       for (std::set<FieldID>::const_iterator it = req.privilege_fields.begin();
             it != req.privilege_fields.end(); it++)
       {
@@ -3505,7 +3509,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     LogicalRegion InnerContext::create_logical_region(RegionTreeForest *forest,
                                                       IndexSpace index_space,
-                                                      FieldSpace field_space)
+                                                      FieldSpace field_space,
+                                                      bool task_local)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -3522,7 +3527,14 @@ namespace Legion {
 
       forest->create_logical_region(region);
       // Register the creation of a top-level region with the context
-      register_region_creation(region);
+      register_region_creation(region, task_local);
+      if (task_local)
+      {
+#ifdef DEBUG_LEGION
+        assert(local_regions.find(region) == local_regions.end());
+#endif
+        local_regions.insert(region);
+      }
       return region;
     }
 
@@ -3536,6 +3548,10 @@ namespace Legion {
                        handle.index_space.id, handle.field_space.id, 
                        get_task_name(), get_unique_id());
 #endif
+      // If this is a local region remove it from our set
+      std::set<LogicalRegion>::iterator finder = local_regions.find(handle);
+      if (finder != local_regions.end())
+        local_regions.erase(finder);
       DeletionOp *op = runtime->get_available_deletion_op();
       op->initialize_logical_region_deletion(this, handle);
       runtime->add_to_dependence_queue(this, executing_processor, op);
@@ -4968,7 +4984,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ApEvent InnerContext::perform_fence_analysis(FenceOp *op, 
+    ApEvent InnerContext::perform_fence_analysis(Operation *op, 
                                                  bool mapping, bool execution)
     //--------------------------------------------------------------------------
     {
@@ -5156,8 +5172,6 @@ namespace Legion {
       // before we update the current fence
       if (execution && current_execution_fence_event.exists())
         previous_events.insert(current_execution_fence_event);
-      // Now we can update the current fence
-      update_current_fence(op, mapping, execution); 
       if (!previous_events.empty())
         return Runtime::merge_events(previous_events);
       return ApEvent::NO_AP_EVENT;
@@ -6251,6 +6265,22 @@ namespace Legion {
                         get_task_name(), get_unique_id())
       // Unmap any of our mapped regions before issuing any close operations
       unmap_all_regions();
+      // If we own any task local regions, we issue deletion operations on them.
+      if (!local_regions.empty())
+      {
+        // Create a copy of this since it's about to be mutated in 
+        // the function call we're about to do
+        const std::vector<LogicalRegion> to_destroy(local_regions.begin(),
+                                                    local_regions.end());
+        for (std::vector<LogicalRegion>::const_iterator it = 
+              to_destroy.begin(); it != to_destroy.end(); it++)
+        {
+#ifdef DEBUG_LEGION
+          assert(created_regions.find(*it) != created_regions.end());
+#endif
+          destroy_logical_region(*it);
+        }
+      }
       const std::deque<InstanceSet> &physical_instances = 
         single_task->get_physical_instances();
       // Note that this loop doesn't handle create regions
@@ -8135,7 +8165,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     LogicalRegion LeafContext::create_logical_region(RegionTreeForest *forest,
                                                      IndexSpace index_space,
-                                                     FieldSpace field_space)
+                                                     FieldSpace field_space,
+                                                     bool task_local)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_REGION_CREATION,
@@ -8470,7 +8501,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ApEvent LeafContext::perform_fence_analysis(FenceOp *op, 
+    ApEvent LeafContext::perform_fence_analysis(Operation *op, 
                                                 bool mapping, bool execution)
     //--------------------------------------------------------------------------
     {
@@ -9350,10 +9381,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     LogicalRegion InlineContext::create_logical_region(RegionTreeForest *forest,
                                                        IndexSpace index_space,
-                                                       FieldSpace field_space)
+                                                       FieldSpace field_space,
+                                                       bool task_local)
     //--------------------------------------------------------------------------
     {
-      return enclosing->create_logical_region(forest, index_space, field_space);
+      return enclosing->create_logical_region(forest, index_space, field_space,
+                                              task_local);
     }
 
     //--------------------------------------------------------------------------
@@ -9617,7 +9650,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ApEvent InlineContext::perform_fence_analysis(FenceOp *op, 
+    ApEvent InlineContext::perform_fence_analysis(Operation *op, 
                                                   bool mapping, bool execution)
     //--------------------------------------------------------------------------
     {

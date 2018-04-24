@@ -4500,12 +4500,14 @@ namespace Legion {
        * @return handle for the logical region created
        */
       LogicalRegion create_logical_region(Context ctx, IndexSpace index, 
-                                          FieldSpace fields);
+                                          FieldSpace fields,
+                                          bool task_local = false);
       // Template version
       template<int DIM, typename COORD_T>
       LogicalRegionT<DIM,COORD_T> create_logical_region(Context ctx,
                                       IndexSpaceT<DIM,COORD_T> index,
-                                      FieldSpace fields);
+                                      FieldSpace fields,
+                                      bool task_local = false);
       /**
        * Destroy a logical region and all of its logical sub-regions.
        * @param ctx enclosing task context
