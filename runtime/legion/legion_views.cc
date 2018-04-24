@@ -7581,8 +7581,6 @@ namespace Legion {
         rez.serialize<RtEvent>(shard_invalid_barrier);
         rez.serialize(pred_guard);
         rez.serialize<bool>(false); // single
-        rez.serialize(local_copy_mask);
-        copier.pack_copier(rez, local_copy_mask);
 #ifdef DEBUG_LEGION
         assert(!it->second.empty());
 #endif
@@ -7595,6 +7593,7 @@ namespace Legion {
         compute_field_sets<IndexSpaceExpression*>(FieldMask(),
                                                   it->second, write_sets);
         it->second.clear();
+        FieldMask shard_copy_mask;
         for (LegionList<FieldSet<IndexSpaceExpression*> >::aligned::
               const_iterator wit = write_sets.begin(); 
               wit != write_sets.end(); wit++)
@@ -7606,10 +7605,14 @@ namespace Legion {
             context->union_index_spaces(wit->elements) :
             *(wit->elements.begin());
           it->second[union_is] = wit->set_mask;
+          shard_copy_mask |= wit->set_mask;
         }
 #ifdef DEBUG_LEGION
         assert(!it->second.empty());
+        assert(!(shard_copy_mask - local_copy_mask));
 #endif
+        rez.serialize(shard_copy_mask);
+        copier.pack_copier(rez, shard_copy_mask);
         rez.serialize<size_t>(it->second.size());
         for (WriteMasks::const_iterator wit = it->second.begin();
               wit != it->second.end(); wit++)
