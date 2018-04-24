@@ -3326,33 +3326,12 @@ namespace Legion {
           }
         case EXECUTION_FENCE:
           {
-            // Go through and launch a completion task dependent upon
-            // all the completion events of our incoming dependences.
-            // Make sure that the events that we pulled out our still valid.
-            // Note since we are performing this operation, then we know
-            // that we are mapped and therefore our set of input dependences
-            // have been fixed so we can read them without holding the lock.
-            std::set<ApEvent> arrival_events;
-            for (std::map<Operation*,GenerationID>::const_iterator it = 
-                  incoming.begin(); it != incoming.end(); it++)
-            {
-              ApEvent complete = it->first->get_completion_event();
-              if (it->second == it->first->get_generation())
-                arrival_events.insert(complete);
-            }
-#ifdef LEGION_SPY
-            // If we're doing Legion Spy verification, we also need to 
-            // validate that we have all the completion events from ALL
-            // the previous events in the context since the last fence
-            arrival_events.insert(execution_precondition);   
-#endif
-            // We do our arrival on our execution fence contingent on
-            // all the previous trigger events
+            // We arrive on our barrier when all our previous operations
+            // have finished executing
             Runtime::phase_barrier_arrive(execution_fence_barrier, 1/*count*/,
-                                        Runtime::merge_events(arrival_events));
+                                          execution_precondition);
             // We can always trigger the completion event when these are done
-            Runtime::trigger_event(completion_event, execution_fence_barrier);
-            need_completion_trigger = false;
+            request_early_complete(execution_fence_barrier);
             if (!execution_fence_barrier.has_triggered())
             {
               RtEvent wait_on = Runtime::protect_event(execution_fence_barrier);
