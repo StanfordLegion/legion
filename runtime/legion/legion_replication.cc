@@ -3884,8 +3884,9 @@ namespace Legion {
                   (strncmp((const char*)res, (const char*)local_future_result, 
                                                       local_future_size) != 0)))
           REPORT_LEGION_WARNING(LEGION_WARNING_MISMATCHED_REPLICATED_FUTURES,
-                                "WARNING: futures returned from replicated "
-                                "task have different bitwise values!")
+                                "WARNING: futures returned from control "
+                                "replicated task %s have different bitwise "
+                                "values!", local_shards[0]->get_task_name())
 #endif
       }
       if (notify)
@@ -3897,6 +3898,7 @@ namespace Legion {
           rez.serialize<size_t>(local_future_size);
           if (local_future_size > 0)
             rez.serialize(local_future_result, local_future_size);
+          runtime->send_replicate_post_execution(owner_space, rez);
         }
         else
         {
