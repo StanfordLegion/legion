@@ -1153,6 +1153,9 @@ namespace Legion {
     { 
       privilege_fields = priv_fields;
       instance_fields = inst_fields;
+      // For backwards compatibility with the old encoding
+      if (privilege == WRITE_PRIV)
+        privilege = WRITE_DISCARD;
 #ifdef DEBUG_LEGION
       if (IS_REDUCE(*this)) // Shouldn't use this constructor for reductions
         REPORT_LEGION_ERROR(ERROR_USE_REDUCTION_REGION_REQ, 
@@ -1175,6 +1178,9 @@ namespace Legion {
     { 
       privilege_fields = priv_fields;
       instance_fields = inst_fields;
+      // For backwards compatibility with the old encoding
+      if (privilege == WRITE_PRIV)
+        privilege = WRITE_DISCARD;
 #ifdef DEBUG_LEGION
       if (IS_REDUCE(*this))
         REPORT_LEGION_ERROR(ERROR_USE_REDUCTION_REGION_REQ, 
@@ -1197,6 +1203,9 @@ namespace Legion {
     {
       privilege_fields = priv_fields;
       instance_fields = inst_fields;
+      // For backwards compatibility with the old encoding
+      if (privilege == WRITE_PRIV)
+        privilege = WRITE_DISCARD;
 #ifdef DEBUG_LEGION
       if (IS_REDUCE(*this))
         REPORT_LEGION_ERROR(ERROR_USE_REDUCTION_REGION_REQ, 
@@ -1282,6 +1291,9 @@ namespace Legion {
         handle_type(SINGULAR)
     //--------------------------------------------------------------------------
     { 
+      // For backwards compatibility with the old encoding
+      if (privilege == WRITE_PRIV)
+        privilege = WRITE_DISCARD;
 #ifdef DEBUG_LEGION
       if (IS_REDUCE(*this)) // Shouldn't use this constructor for reductions
         REPORT_LEGION_ERROR(ERROR_USE_REDUCTION_REGION_REQ, 
@@ -1303,6 +1315,9 @@ namespace Legion {
         handle_type(PART_PROJECTION), projection(_proj)
     //--------------------------------------------------------------------------
     { 
+      // For backwards compatibility with the old encoding
+      if (privilege == WRITE_PRIV)
+        privilege = WRITE_DISCARD;
 #ifdef DEBUG_LEGION
       if (IS_REDUCE(*this))
         REPORT_LEGION_ERROR(ERROR_USE_REDUCTION_REGION_REQ, 
@@ -1324,6 +1339,9 @@ namespace Legion {
         handle_type(REG_PROJECTION), projection(_proj)
     //--------------------------------------------------------------------------
     {
+      // For backwards compatibility with the old encoding
+      if (privilege == WRITE_PRIV)
+        privilege = WRITE_DISCARD;
 #ifdef DEBUG_LEGION
       if (IS_REDUCE(*this))
         REPORT_LEGION_ERROR(ERROR_USE_REDUCTION_REGION_REQ, 
