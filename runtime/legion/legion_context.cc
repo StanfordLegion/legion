@@ -1396,7 +1396,7 @@ namespace Legion {
           continue;
         // Next check the privileges
         if (check_privilege && 
-            ((req.privilege & our_req.privilege) != req.privilege))
+            ((PRIV_ONLY(req) & our_req.privilege) != PRIV_ONLY(req)))
           continue;
         // Finally check that all the fields are contained
         bool dominated = true;
@@ -1428,7 +1428,7 @@ namespace Legion {
           continue;
         // Next check the privileges
         if (check_privilege && 
-            ((req.privilege & our_req.privilege) != req.privilege))
+            ((PRIV_ONLY(req) & our_req.privilege) != PRIV_ONLY(req)))
           continue;
         // If this is a returnable privilege requiremnt that means
         // that we made this region so we always have privileges
@@ -1717,20 +1717,13 @@ namespace Legion {
               our_req.privilege_fields.end())
           {
             // Only need to do this check if there were overlapping fields
-            if (!skip_privilege && (req.privilege & (~(our_req.privilege))))
+            if (!skip_privilege && (PRIV_ONLY(req) & (~(our_req.privilege))))
             {
-              // Handle the special case where the parent has WRITE_DISCARD
-              // privilege and the sub-task wants any other kind of privilege.  
-              // This case is ok because the parent could write something
-              // and then hand it off to the child.
-              if (our_req.privilege != WRITE_DISCARD)
-              {
-                if ((req.handle_type == SINGULAR) || 
-                    (req.handle_type == REG_PROJECTION))
-                  return ERROR_BAD_REGION_PRIVILEGES;
-                else
-                  return ERROR_BAD_PARTITION_PRIVILEGES;
-              }
+              if ((req.handle_type == SINGULAR) || 
+                  (req.handle_type == REG_PROJECTION))
+                return ERROR_BAD_REGION_PRIVILEGES;
+              else
+                return ERROR_BAD_PARTITION_PRIVILEGES;
             }
             privilege_fields.erase(fit++);
           }

@@ -4940,6 +4940,42 @@ legion_get_current_time_in_nanos(void)
   return Realm::Clock::current_time_in_nanoseconds();
 }
 
+legion_future_t
+legion_issue_timing_op_seconds(legion_runtime_t runtime_,
+                               legion_context_t ctx_)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+
+  TimingLauncher launcher(MEASURE_SECONDS);
+  Future f = runtime->issue_timing_measurement(ctx, launcher);  
+  return CObjectWrapper::wrap(new Future(f));
+}
+
+legion_future_t
+legion_issue_timing_op_microseconds(legion_runtime_t runtime_,
+                                    legion_context_t ctx_)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+
+  TimingLauncher launcher(MEASURE_MICRO_SECONDS);
+  Future f = runtime->issue_timing_measurement(ctx, launcher);  
+  return CObjectWrapper::wrap(new Future(f));
+}
+
+legion_future_t
+legion_issue_timing_op_nanoseconds(legion_runtime_t runtime_,
+                                   legion_context_t ctx_)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+
+  TimingLauncher launcher(MEASURE_NANO_SECONDS);
+  Future f = runtime->issue_timing_measurement(ctx, launcher);  
+  return CObjectWrapper::wrap(new Future(f));
+}
+
 // -----------------------------------------------------------------------
 // Machine Operations
 // -----------------------------------------------------------------------

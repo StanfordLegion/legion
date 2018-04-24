@@ -1900,6 +1900,7 @@ namespace Legion {
                             fid, context->get_task_name())
             break;
           }
+        case WRITE_ONLY:
         case WRITE_DISCARD:
           {
             if (!(WRITE_DISCARD & req.privilege))
@@ -2058,6 +2059,7 @@ namespace Legion {
                           context->get_task_name())
             break;
           }
+        case WRITE_ONLY:
         case WRITE_DISCARD:
           {
             REPORT_LEGION_ERROR(ERROR_ACCESSOR_BOUNDS_CHECK, 

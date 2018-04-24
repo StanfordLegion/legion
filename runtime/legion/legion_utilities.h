@@ -50,11 +50,13 @@
 
 // Useful macros
 #define IS_NO_ACCESS(req) (((req).privilege & READ_WRITE) == NO_ACCESS)
-#define IS_READ_ONLY(req) (((req).privilege & READ_WRITE) <= READ_ONLY)
-#define HAS_READ(req) ((req).privilege & READ_ONLY)
-#define HAS_WRITE(req) ((req).privilege & (WRITE_DISCARD | REDUCE))
-#define IS_WRITE(req) ((req).privilege & WRITE_DISCARD)
-#define IS_WRITE_ONLY(req) (((req).privilege & READ_WRITE) == WRITE_DISCARD)
+#define IS_READ_ONLY(req) (((req).privilege & READ_WRITE) <= READ_PRIV)
+#define HAS_READ(req) ((req).privilege & READ_PRIV)
+#define HAS_WRITE(req) ((req).privilege & (WRITE_PRIV | REDUCE))
+#define IS_WRITE(req) ((req).privilege & WRITE_PRIV)
+#define HAS_WRITE_DISCARD(req) (((req).privilege & WRITE_ONLY) == WRITE_ONLY)
+#define IS_DISCARD(req) (((req).privilege & DISCARD_MASK) == DISCARD_MASK)
+#define PRIV_ONLY(req) ((req).privilege & READ_WRITE)
 #define IS_REDUCE(req) (((req).privilege & READ_WRITE) == REDUCE)
 #define IS_EXCLUSIVE(req) ((req).prop == EXCLUSIVE)
 #define IS_ATOMIC(req) ((req).prop == ATOMIC)
@@ -264,7 +266,7 @@ namespace Legion {
       }
       else
       {
-        if (IS_WRITE_ONLY(u2))
+        if (HAS_WRITE_DISCARD(u2))
         {
           // WAW with a write-only
           return ANTI_DEPENDENCE;

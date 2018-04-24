@@ -51,11 +51,12 @@ DEPENDENCE_TYPES = [
 "simultaneous",
 ]
 
-NO_ACCESS  = 0x00000000
-READ_ONLY  = 0x00000001
-READ_WRITE = 0x00000007
-WRITE_ONLY = 0x00000002
-REDUCE     = 0x00000004
+NO_ACCESS     = 0x00000000
+READ_ONLY     = 0x00000001
+READ_WRITE    = 0x00000007
+WRITE_ONLY    = 0x10000002
+WRITE_DISCARD = 0x10000007
+REDUCE        = 0x00000004
 
 EXCLUSIVE = 0
 ATOMIC = 1
@@ -3390,7 +3391,7 @@ class LogicalState(object):
                 # If we're going to do a write discard then
                 # this can be a read only close, but only if
                 # the operation is not predicated and it dominates
-                overwrite = req.priv == WRITE_ONLY and not op.predicate and \
+                overwrite = req.priv == WRITE_DISCARD and not op.predicate and \
                                req.logical_node.dominates(self.node)
                 for child,open_mode in self.open_children.iteritems():
                     if open_mode == OPEN_READ_ONLY:                
@@ -3744,7 +3745,7 @@ class LogicalState(object):
             if not still_dirty:
                 for privilege in self.open_children.itervalues():
                     if privilege == READ_WRITE or privilege == REDUCE or \
-                        privilege == WRITE_ONLY:
+                        privilege == WRITE_DISCARD:
                           still_dirty = True
                           break
             if not still_dirty:
@@ -4751,16 +4752,17 @@ class Requirement(object):
 
     def has_write(self):
         return (self.priv == READ_WRITE) or (self.priv == REDUCE) or \
-                (self.priv == WRITE_ONLY)
+                (self.priv == WRITE_DISCARD) or (self.priv == WRITE_ONLY)
 
     def is_write(self):
-        return (self.priv == READ_WRITE) or (self.priv == WRITE_ONLY)
+        return (self.priv == READ_WRITE) or (self.priv == WRITE_DISCARD) or \
+                (self.priv == WRITE_ONLY)
 
     def is_read_write(self):
         return self.priv == READ_WRITE
 
     def is_write_only(self):
-        return self.priv == WRITE_ONLY
+        return self.priv == WRITE_DISCARD or self.priv == WRITE_ONLY
 
     def is_reduce(self):
         return self.priv == REDUCE
@@ -4798,8 +4800,8 @@ class Requirement(object):
             return "READ-ONLY"
         elif self.priv == READ_WRITE:
             return "READ-WRITE"
-        elif self.priv == WRITE_ONLY:
-            return "WRITE-ONLY"
+        elif self.priv == WRITE_DISCARD:
+            return "WRITE-DISCARD"
         else:
             assert self.priv == REDUCE
             return "REDUCE with Reduction Op "+str(self.redop)
@@ -7293,16 +7295,17 @@ class PointUser(object):
 
     def has_write(self):
         return (self.priv == READ_WRITE) or (self.priv == REDUCE) or \
-                (self.priv == WRITE_ONLY)
+                (self.priv == WRITE_DISCARD) or (self.priv == WRITE_ONLY)
 
     def is_write(self):
-        return (self.priv == READ_WRITE) or (self.priv == WRITE_ONLY)
+        return (self.priv == READ_WRITE) or (self.priv == WRITE_DISCARD) or \
+                (self.priv == WRITE_ONLY)
 
     def is_read_write(self):
         return self.priv == READ_WRITE
 
     def is_write_only(self):
-        return self.priv == WRITE_ONLY
+        return self.priv == WRITE_DISCARD or self.priv == WRITE_ONLY
 
     def is_reduce(self):
         return self.priv == REDUCE
@@ -7474,16 +7477,17 @@ class InstanceUser(object):
 
     def has_write(self):
         return (self.priv == READ_WRITE) or (self.priv == REDUCE) or \
-                (self.priv == WRITE_ONLY)
+                (self.priv == WRITE_DISCARD) or (self.priv == WRITE_ONLY)
 
     def is_write(self):
-        return (self.priv == READ_WRITE) or (self.priv == WRITE_ONLY)
+        return (self.priv == READ_WRITE) or (self.priv == WRITE_DISCARD) or \
+                (self.priv == WRITE_ONLY)
 
     def is_read_write(self):
         return self.priv == READ_WRITE
 
     def is_write_only(self):
-        return self.priv == WRITE_ONLY
+        return self.priv == WRITE_DISCARD or self.priv == WRITE_ONLY
 
     def is_reduce(self):
         return self.priv == REDUCE

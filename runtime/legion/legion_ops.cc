@@ -245,9 +245,14 @@ namespace Legion {
 #endif
       r.parent = r.region;
       r.prop = EXCLUSIVE;
-      // Write discard privileges become read-write inside the operation
-      if (r.privilege == WRITE_DISCARD)
-        r.privilege = READ_WRITE;
+      // If we're doing a write discard, then we can add read privileges
+      // inside our task since it is safe to read what we wrote
+      if (HAS_WRITE_DISCARD(r))
+      {
+        r.privilege |= READ_PRIV;
+        // Then remove any discard masks from the privileges
+        r.privilege &= ~DISCARD_MASK;
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -3128,7 +3133,7 @@ namespace Legion {
         // If our privilege is not reduce, then shift it to write discard
         // since we are going to write all over the region
         if (dst_requirements[idx].privilege != REDUCE)
-          dst_requirements[idx].privilege = WRITE_DISCARD;
+          dst_requirements[idx].privilege = WRITE_ONLY;
       }
       grants = launcher.grants;
       // Register ourselves with all the grants
@@ -3469,8 +3474,8 @@ namespace Legion {
       for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
       {
         RegionRequirement &req = dst_requirements[idx];
-        if (IS_WRITE_ONLY(req))
-          req.privilege = READ_WRITE;
+        if (HAS_WRITE_DISCARD(req))
+          req.privilege &= ~DISCARD_MASK;
       }
       return true;
     }
@@ -4456,7 +4461,7 @@ namespace Legion {
         // If our privilege is not reduce, then shift it to write discard
         // since we are going to write all over the region
         if (dst_requirements[idx].privilege != REDUCE)
-          dst_requirements[idx].privilege = WRITE_DISCARD;
+          dst_requirements[idx].privilege = WRITE_ONLY;
       }
       grants = launcher.grants;
       // Register ourselves with all the grants

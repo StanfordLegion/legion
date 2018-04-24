@@ -3810,6 +3810,27 @@ extern "C" {
   unsigned long long
   legion_get_current_time_in_nanos(void);
 
+  /**
+   * @see Legion::Runtime::get_current_time()
+   */
+  legion_future_t
+  legion_issue_timing_op_seconds(legion_runtime_t runtime,
+                                 legion_context_t ctx);
+
+  /**
+   * @see Legion::Runtime::get_current_time_in_microseconds()
+   */
+  legion_future_t
+  legion_issue_timing_op_microseconds(legion_runtime_t runtime,
+                                      legion_context_t ctx);
+
+  /**
+   * @see Legion::Runtime::get_current_time_in_nanoseconds()
+   */
+  legion_future_t
+  legion_issue_timing_op_nanoseconds(legion_runtime_t runtime,
+                                     legion_context_t ctx);
+
   // -----------------------------------------------------------------------
   // Machine Operations
   // -----------------------------------------------------------------------

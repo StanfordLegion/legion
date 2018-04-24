@@ -1469,7 +1469,8 @@ namespace Legion {
         assert(!IS_REDUCE(usage)); // no user reductions currently, might change
 #endif
         // Only writing if we are overwriting, otherwise we are also reading
-        perform_remote_valid_check(user_mask, versions, !IS_WRITE_ONLY(usage));
+        perform_remote_valid_check(user_mask, versions, 
+                                   !HAS_WRITE_DISCARD(usage));
       }
 #elif defined(DEBUG_LEGION)
       assert(is_logical_owner());
@@ -1562,7 +1563,8 @@ namespace Legion {
         assert(!IS_REDUCE(usage)); // no reductions for now, might change
 #endif
         // We are reading if we are not overwriting
-        perform_remote_valid_check(user_mask, versions, !IS_WRITE_ONLY(usage));
+        perform_remote_valid_check(user_mask, versions, 
+                                   !HAS_WRITE_DISCARD(usage));
       }
 #elif defined(DEBUG_LEGION)
       assert(is_logical_owner());
