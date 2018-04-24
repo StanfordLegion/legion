@@ -11078,7 +11078,7 @@ namespace Legion {
       // In the future we might consider breaking this out so that we
       // generate two close operations: a read-only one for the predicate
       // true case, and normal close operation for the predicate false case
-      const bool overwriting = IS_WRITE_ONLY(closer.user.usage) && 
+      const bool overwriting = HAS_WRITE_DISCARD(closer.user.usage) && 
         (next_child == INVALID_COLOR) && !closer.user.op->is_predicated_op();
       // Now we can look at all the children
       for (LegionList<FieldState>::aligned::iterator it = 
@@ -15837,7 +15837,7 @@ namespace Legion {
         }
         std::vector<InstanceView*> new_views(targets.size());
         convert_target_views(targets, context, new_views);
-        if (!IS_WRITE_ONLY(info.req))
+        if (!HAS_WRITE_DISCARD(info.req))
         {
           // Any case but write-only
           // All close operations have already been done, so all

@@ -1184,8 +1184,8 @@ namespace Legion {
         for (unsigned idx = 0; idx < regions.size(); idx++)
         {
           RegionRequirement &req = regions[idx];
-          if (IS_WRITE_ONLY(req))
-            req.privilege = READ_WRITE;
+          if (HAS_WRITE_DISCARD(req))
+            req.privilege &= ~DISCARD_MASK;
         }
       }
       return output.speculate;
@@ -3791,12 +3791,6 @@ namespace Legion {
 #ifdef DEBUG_LEGION
           assert(regions[idx].handle_type == SINGULAR);
 #endif
-          // Convert any WRITE_ONLY or WRITE_DISCARD privleges to READ_WRITE
-          // This is necessary for any sub-operations which may need to rely
-          // on our privileges for determining their own privileges such
-          // as inline mappings or acquire and release operations
-          if (regions[idx].privilege == WRITE_DISCARD)
-            regions[idx].privilege = READ_WRITE;
           // If it was virtual mapper so it doesn't matter anyway.
           if (virtual_mapped[idx] || no_access_regions[idx])
           {

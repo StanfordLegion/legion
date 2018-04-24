@@ -628,13 +628,19 @@ typedef enum legion_error_t {
 }  legion_error_t;
 
 // enum and namepsaces don't really get along well
+// We would like to make these associations explicit
+// but the python cffi parser is stupid as hell
 typedef enum legion_privilege_mode_t {
   NO_ACCESS       = 0x00000000, 
-  READ_ONLY       = 0x00000001,
-  READ_WRITE      = 0x00000007, // All three privileges
-  WRITE_ONLY      = 0x00000002, // same as WRITE_DISCARD
-  WRITE_DISCARD   = 0x00000002, // same as WRITE_ONLY
-  REDUCE          = 0x00000004,
+  READ_PRIV       = 0x00000001,
+  READ_ONLY       = 0x00000001, // READ_PRIV,
+  WRITE_PRIV      = 0x00000002,
+  REDUCE_PRIV     = 0x00000004,
+  REDUCE          = 0x00000004, // REDUCE_PRIV,
+  READ_WRITE      = 0x00000007, // READ_PRIV | WRITE_PRIV | REDUCE_PRIV,
+  DISCARD_MASK    = 0x10000000, // For marking we don't need inputs
+  WRITE_ONLY      = 0x10000002, // WRITE_PRIV | DISCARD_MASK,
+  WRITE_DISCARD   = 0x10000007, // READ_WRITE | DISCARD_MASK,
 } legion_privilege_mode_t;
 
 typedef enum legion_allocate_mode_t {
