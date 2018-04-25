@@ -5472,7 +5472,10 @@ namespace Legion {
               rez.serialize(IndexPartition::NO_PART);
             rez.serialize(color);
             rez.serialize(index_space_ready);
-            pack_index_space(rez);
+            if (realm_index_space_set.has_triggered())
+              pack_index_space(rez, true/*include size*/);
+            else
+              rez.serialize<size_t>(0);
             rez.serialize<size_t>(semantic_info.size());
             for (LegionMap<SemanticTag,SemanticInfo>::aligned::iterator it = 
                   semantic_info.begin(); it != semantic_info.end(); it++)
