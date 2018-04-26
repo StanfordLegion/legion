@@ -1375,11 +1375,6 @@ namespace Legion {
       virtual DomainPoint get_domain_point_color(void) const;
       virtual DomainPoint delinearize_color_to_point(LegionColor c);
     public:
-      virtual bool intersects_with(IndexSpaceNode *rhs, bool compute = true);
-      virtual bool intersects_with(IndexPartNode *rhs, bool compute = true);
-      virtual bool dominates(IndexSpaceNode *rhs);
-      virtual bool dominates(IndexPartNode *rhs);
-    public:
       virtual void pack_index_space(Serializer &rez, bool include_size) const;
       virtual void unpack_index_space(Deserializer &derez,
                                       AddressSpaceID source);
