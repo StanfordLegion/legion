@@ -2169,7 +2169,7 @@ namespace Realm {
 	// can we directly access the source data?
 	const void *src_ptr = src_mem->get_direct_ptr(src_info.base_offset,
 						      src_info.bytes_per_chunk);
-	if(src_ptr == 0) {
+	if((src_ptr == 0) || (src_mem->kind == MemoryImpl::MKIND_GPUFB)) {
 	  // nope, make a local copy via get_bytes
 	  if(src_info.bytes_per_chunk > src_scratch_size) {
 	    if(src_scratch_size > 0)
@@ -2201,7 +2201,7 @@ namespace Realm {
 	  // case 2: destination is directly accessible
 	  void *dst_ptr = dst_mem->get_direct_ptr(dst_info.base_offset,
 						  dst_info.bytes_per_chunk);
-	  if(dst_ptr) {
+	  if(dst_ptr && (dst_mem->kind != MemoryImpl::MKIND_GPUFB)) {
 	    if(red_fold)
 	      redop->fold(dst_ptr, src_ptr, num_elems, false /*!excl*/);
 	    else
