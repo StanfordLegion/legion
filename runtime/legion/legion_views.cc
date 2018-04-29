@@ -6870,30 +6870,36 @@ namespace Legion {
       // Easy case if we are just copying from one or more instances
       else if (src_instance != NULL)
       {
-        LegionMap<ApEvent,FieldMask>::aligned temp_preconditions;
-        src_instance->find_copy_preconditions(0/*redop*/, true/*reading*/,
-                                              true/*single copy*/,
-                                              false/*restrict out*/,
-                                              copier.copy_mask, 
-                                              src_version_tracker,
-                                              info.op->get_unique_op_id(),
-                                              info.index,
-                                              context->runtime->address_space,
-                                              temp_preconditions,
-                                              info.map_applied_events);
-        std::set<ApEvent> copy_preconditions;
-        for (LegionMap<ApEvent,FieldMask>::aligned::const_iterator it =
-              temp_preconditions.begin(); it != temp_preconditions.end(); it++)
-          copy_preconditions.insert(it->first);
-        copier.merge_destination_preconditions(copy_preconditions);
-        // Issue the copy
-        ApEvent copy_pre = Runtime::merge_events(copy_preconditions);
-        ApEvent copy_post = dst->logical_node->issue_single_copy(*copier.info,
-            dst, false/*restrict out*/, pred_guard, copy_pre,
-            copier.copy_mask, src_instance, src_version_tracker,
-            copier.across_helper, logical_node, write_mask);
-        if (copy_post.exists())
-          copier.record_postcondition(copy_post);
+        // Check to see if they are the same instance, if they are
+        // then we don't actually have to do the copy ourself
+        if ((src_instance != dst) && (src_instance->manager->get_instance() !=
+              dst->manager->get_instance()))
+        {
+          LegionMap<ApEvent,FieldMask>::aligned temp_preconditions;
+          src_instance->find_copy_preconditions(0/*redop*/, true/*reading*/,
+                                                true/*single copy*/,
+                                                false/*restrict out*/,
+                                                copier.copy_mask, 
+                                                src_version_tracker,
+                                                info.op->get_unique_op_id(),
+                                                info.index,
+                                                context->runtime->address_space,
+                                                temp_preconditions,
+                                                info.map_applied_events);
+          std::set<ApEvent> copy_preconditions;
+          for (LegionMap<ApEvent,FieldMask>::aligned::const_iterator it =
+               temp_preconditions.begin(); it != temp_preconditions.end(); it++)
+            copy_preconditions.insert(it->first);
+          copier.merge_destination_preconditions(copy_preconditions);
+          // Issue the copy
+          ApEvent copy_pre = Runtime::merge_events(copy_preconditions);
+          ApEvent copy_post = dst->logical_node->issue_single_copy(*copier.info,
+              dst, false/*restrict out*/, pred_guard, copy_pre,
+              copier.copy_mask, src_instance, src_version_tracker,
+              copier.across_helper, logical_node, write_mask);
+          if (copy_post.exists())
+            copier.record_postcondition(copy_post);
+        }
         // Construct the write expression, intersect then subtract
         if (write_mask != NULL)
           return context->subtract_index_spaces(intersect_is, write_mask);
