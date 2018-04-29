@@ -39,20 +39,20 @@ end
 function context:new_local_scope()
   local cx = {
     env = self.env:new_local_scope(),
+    constraints = self.constraints,
   }
   setmetatable(cx, context)
   return cx
 end
 
-function context:new_global_scope(env)
+function context:new_global_scope(env, constraints)
   local cx = {
     env = symbol_table.new_global_scope(env),
+    constraints = constraints,
   }
   setmetatable(cx, context)
   return cx
 end
-
-local global_env = context:new_global_scope({})
 
 local function expr_id(sym, node)
   return ast.typed.expr.ID {
@@ -264,6 +264,12 @@ function inline_tasks.expr(cx, node)
               type_mapping[param_type].ispace_symbol
             type_mapping[param_type:ispace()] =
               type_mapping[param_type]:ispace()
+          elseif std.is_partition(param_type) then
+            type_mapping[param_type] = std.as_read(arg.expr_type)
+            type_mapping[param_type:colors()] =
+              type_mapping[param_type]:colors()
+            type_mapping[param_type.colors_symbol] =
+              type_mapping[param_type].colors_symbol
           end
         else
           local new_var = std.newsymbol(std.as_read(arg.expr_type))
@@ -298,13 +304,29 @@ function inline_tasks.expr(cx, node)
           local old_type = node.symbol:gettype()
           local new_type = std.type_sub(old_type, type_mapping)
 
-          if old_type ~= new_type then
-            local new_symbol = std.newsymbol(new_type, node.symbol:hasname())
-            expr_mapping[node.symbol] = new_symbol
-            return node { symbol = new_symbol }
-          else
-            return node
+          local new_symbol = std.newsymbol(new_type, node.symbol:hasname())
+          expr_mapping[node.symbol] = new_symbol
+          return node { symbol = new_symbol }
+        elseif node:is(ast.typed.expr.IndexAccess) then
+          local expr_type = std.as_read(node.expr_type)
+          if std.is_region(expr_type) then
+            local partition_type = std.as_read(node.value.expr_type)
+            assert(std.is_partition(partition_type))
+            local new_partition_type = type_mapping[partition_type]
+            if new_partition_type == nil then
+              new_partition_type = std.type_sub(partition_type, type_mapping)
+              type_mapping[partition_type] = new_partition_type
+            end
+            local new_subregion_type = type_mapping[expr_type]
+            if new_subregion_type == nil then
+              new_subregion_type = new_partition_type:subregion_dynamic()
+              type_mapping[expr_type] = new_subregion_type
+            end
+            local parent_region_type = new_partition_type:parent_region()
+            std.add_constraint(cx, new_partition_type, parent_region_type, std.subregion, false)
+            std.add_constraint(cx, new_subregion_type, new_partition_type, std.subregion, false)
           end
+          return node
         else
           return node
         end
@@ -329,12 +351,14 @@ function inline_tasks.expr(cx, node)
             local new_region = std.region(ispace, fspace)
             type_mapping[region] = new_region
           end
-          return node { expr_type = std.type_sub(node.expr_type, type_mapping) }
+          return node {
+            expr_type = type_mapping[node.expr_type] or
+                        std.type_sub(node.expr_type, type_mapping)
+          }
         elseif node:is(ast.typed.stat.Var) then
           local new_symbol = nil
-          local new_type = std.type_sub(node.type, type_mapping)
-          if new_type ~= node.type then
-            local new_sym = std.newsymbol(new_type)
+          local new_type = type_mapping[node.type] or std.type_sub(node.type, type_mapping)
+          if not std.type_eq(new_type, node.type) then
             new_symbol = std.newsymbol(new_type)
             expr_mapping[node.symbol] = new_symbol
             if std.is_region(new_type) then
@@ -352,7 +376,9 @@ function inline_tasks.expr(cx, node)
           return node
         end
       end
-      return_var = std.newsymbol(std.type_sub(task_ast.return_type, type_mapping))
+      return_var = std.newsymbol(
+          type_mapping[task_ast.return_type] or
+          std.type_sub(task_ast.return_type, type_mapping))
       return_var_expr = expr_id(return_var, node)
       stats:insertall(task_body.stats)
       if stats[#stats]:is(ast.typed.stat.Return) then
@@ -365,18 +391,6 @@ function inline_tasks.expr(cx, node)
     end
     stats:insert(stat_var(return_var, nil, node))
     stats:insert(new_block)
-    --- TODO: We add a dummy variable declaration that behaves like a fence.
-    ---       This hack is to prevent RDIR from reordering inlined blocks arbitrarily.
-    ---       Once we fix the issue in RDIR, we will remove this hack.
-    stats:insert(stat_var(
-        regentlib.newsymbol(int, "dummy"),
-        ast.typed.expr.Constant {
-          value = 0,
-          expr_type = int,
-          annotations = node.annotations,
-          span = node.span,
-        },
-        node))
 
     return stats, return_var_expr
 
@@ -481,8 +495,9 @@ function inline_tasks.top_task(cx, node)
   }
 end
 
-function inline_tasks.top(cx, node)
+function inline_tasks.top(node)
   if node:is(ast.typed.top.Task) then
+    local cx = context:new_global_scope({}, node.prototype:get_constraints())
     if node.annotations.inline:is(ast.annotation.Demand) then
       check_valid_inline_task(node, node)
     end
@@ -508,8 +523,7 @@ function inline_tasks.top(cx, node)
 end
 
 function inline_tasks.entry(node)
-  local cx = context:new_global_scope({})
-  return inline_tasks.top(cx, node)
+  return inline_tasks.top(node)
 end
 
 inline_tasks.pass_name = "inline_tasks"
