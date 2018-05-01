@@ -6917,9 +6917,6 @@ namespace Legion {
     IndexSpace InnerContext::find_index_launch_space(const Domain &domain)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(domain.dense());
-#endif
       std::map<Domain,IndexSpace>::const_iterator finder = 
         index_launch_spaces.find(domain);
       if (finder != index_launch_spaces.end())
