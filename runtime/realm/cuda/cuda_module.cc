@@ -522,20 +522,6 @@ namespace Realm {
 				     raw_stream) );
 	  break;
 	}
-      case 8:
-        {
-          // TODO: fix this hack with a proper memset kernel
-          const unsigned int *data = reinterpret_cast<const unsigned int*>(&fill_data.direct);
-          if (data[0] == data[1])
-          {
-            CHECK_CU( cuMemsetD32Async(CUdeviceptr(dst),
-                                       data[0],
-                                       bytes >> 2,
-                                       raw_stream) );
-            break;
-          }
-          // Otherwise fall through to our death
-        }
       default:
 	{
 	  log_gpudma.fatal() << "fill data size of " << fill_data_size
@@ -614,20 +600,6 @@ namespace Realm {
 				       raw_stream) );
 	  break;
 	}
-      case 8:
-        {
-          // TODO: fix this hack with a proper memset kernel
-          const unsigned int *data = reinterpret_cast<const unsigned int*>(&fill_data.direct);
-          if (data[0] == data[1])
-          {
-            CHECK_CU( cuMemsetD2D32Async(CUdeviceptr(dst), dst_stride,
-                                         data[0],
-                                         bytes >> 2, lines,
-                                         raw_stream) );
-            break;
-          }
-          // Otherwise fall through to our death
-        }
       default:
 	{
 	  log_gpudma.fatal() << "fill data size of " << fill_data_size
