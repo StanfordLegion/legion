@@ -523,7 +523,7 @@ namespace Legion {
       // We know the disjointness of the index partition
       IndexPartNode*  create_node(IndexPartition p, IndexSpaceNode *par,
                                   IndexSpaceNode *color_space, 
-                                  LegionColor color, bool disjoint,
+                                  LegionColor color, bool disjoint,int complete,
                                   DistributedID did, ApEvent partition_ready, 
                                   ApBarrier partial_pending,
                                   ShardMapping *shard_mapping = NULL);
@@ -1959,9 +1959,9 @@ namespace Legion {
     public:
       IndexPartNode(RegionTreeForest *ctx, IndexPartition p,
                     IndexSpaceNode *par, IndexSpaceNode *color_space,
-                    LegionColor c, bool disjoint, DistributedID did,
-                    ApEvent partition_ready, ApBarrier partial_pending,
-                    ShardMapping *mapping);
+                    LegionColor c, bool disjoint, int complete,
+                    DistributedID did, ApEvent partition_ready, 
+                    ApBarrier partial_pending, ShardMapping *mapping);
       IndexPartNode(RegionTreeForest *ctx, IndexPartition p,
                     IndexSpaceNode *par, IndexSpaceNode *color_space,
                     LegionColor c, RtEvent disjointness_ready,DistributedID did,
@@ -2012,7 +2012,7 @@ namespace Legion {
       void record_disjointness(bool disjoint,
                                const LegionColor c1, const LegionColor c2);
       bool is_complete(bool from_app = false);
-      IndexSpaceExpression* get_union_expression(void);
+      IndexSpaceExpression* get_union_expression(bool check_complete=true);
     public:
       void add_instance(PartitionNode *inst);
       bool has_instance(RegionTreeID tid);
@@ -2096,9 +2096,9 @@ namespace Legion {
     public:
       IndexPartNodeT(RegionTreeForest *ctx, IndexPartition p,
                      IndexSpaceNode *par, IndexSpaceNode *color_space,
-                     LegionColor c, bool disjoint, DistributedID did,
-                     ApEvent partition_ready, ApBarrier pending,
-                     ShardMapping *shard_mapping);
+                     LegionColor c, bool disjoint, int complete,
+                     DistributedID did, ApEvent partition_ready, 
+                     ApBarrier pending, ShardMapping *shard_mapping);
       IndexPartNodeT(RegionTreeForest *ctx, IndexPartition p,
                      IndexSpaceNode *par, IndexSpaceNode *color_space,
                      LegionColor c, RtEvent disjointness_ready,
@@ -2121,18 +2121,18 @@ namespace Legion {
     public:
       IndexPartCreator(RegionTreeForest *f, IndexPartition p,
                        IndexSpaceNode *par, IndexSpaceNode *cs,
-                       LegionColor c, bool d, DistributedID id,
+                       LegionColor c, bool d, int k, DistributedID id,
                        ApEvent r, ApBarrier pend, ShardMapping *m)
         : forest(f), partition(p), parent(par), color_space(cs),
-          color(c), disjoint(d), did(id), ready(r), 
+          color(c), disjoint(d), complete(k), did(id), ready(r), 
           pending(pend), mapping(m) { }
       IndexPartCreator(RegionTreeForest *f, IndexPartition p,
                        IndexSpaceNode *par, IndexSpaceNode *cs,
                        LegionColor c, RtEvent d, DistributedID id,
                        ApEvent r, ApBarrier pend, ShardMapping *m)
         : forest(f), partition(p), parent(par), color_space(cs),
-          color(c), disjoint(false), disjoint_ready(d), did(id),
-          ready(r), pending(pend), mapping(m) { }
+          color(c), disjoint(false), complete(-1), disjoint_ready(d),
+          did(id), ready(r), pending(pend), mapping(m) { }
     public:
       template<typename N, typename T>
       static inline void demux(IndexPartCreator *creator)
@@ -2145,8 +2145,8 @@ namespace Legion {
         else
           creator->result = new IndexPartNodeT<N::N,T>(creator->forest,
               creator->partition, creator->parent, creator->color_space,
-              creator->color, creator->disjoint, creator->did,
-              creator->ready, creator->pending, creator->mapping);
+              creator->color, creator->disjoint, creator->complete, 
+              creator->did, creator->ready, creator->pending, creator->mapping);
       }
     public:
       RegionTreeForest *const forest;
@@ -2155,6 +2155,7 @@ namespace Legion {
       IndexSpaceNode *const color_space;
       const LegionColor color;
       const bool disjoint;
+      const int complete;
       const RtEvent disjoint_ready;
       const DistributedID did;
       const ApEvent ready;

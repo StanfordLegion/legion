@@ -3532,10 +3532,10 @@ namespace Legion {
                                         IndexPartition p,
                                         IndexSpaceNode *par, IndexSpaceNode *cs,
                                         LegionColor c, bool disjoint, 
-                                        DistributedID did,
+                                        int complete, DistributedID did,
                                         ApEvent partition_ready, 
                                         ApBarrier pend, ShardMapping *map)
-      : IndexPartNode(ctx, p, par, cs, c, disjoint, did, 
+      : IndexPartNode(ctx, p, par, cs, c, disjoint, complete, did, 
                       partition_ready, pend, map)
     //--------------------------------------------------------------------------
     {

@@ -709,6 +709,8 @@ typedef enum legion_partition_kind_t {
   DISJOINT_KIND,
   ALIASED_KIND,
   COMPUTE_KIND,
+  DISJOINT_COMPLETE_KIND, // disjoint and complete
+  ALIASED_COMPLETE_KIND, // aliased and complete
 } legion_partition_kind_t;
 
 typedef enum legion_external_resource_t {

@@ -274,9 +274,13 @@ namespace Legion {
       }
       else
       {
-        const bool disjoint = (part_kind == DISJOINT_KIND);
-        create_node(pid, parent_node, color_node, partition_color,
-                    disjoint, did, partition_ready, partial_pending);
+        const bool disjoint = (part_kind == DISJOINT_KIND) || 
+                              (part_kind == DISJOINT_COMPLETE_KIND);
+        // Use 1 if we know it's complete, otherwise -1 since we don't know
+        const int complete = ((part_kind == DISJOINT_COMPLETE_KIND) ||
+                              (part_kind == ALIASED_COMPLETE_KIND)) ? 1 : -1;
+        create_node(pid, parent_node, color_node, partition_color, disjoint,
+                    complete, did, partition_ready, partial_pending);
         if (runtime->legion_spy_enabled)
           LegionSpy::log_index_partition(parent.id, pid.id, disjoint,
                                          partition_color);
@@ -460,9 +464,13 @@ namespace Legion {
         IndexPartNode *part_node;
         if (part_kind != COMPUTE_KIND)
         {
-          const bool disjoint = (part_kind == DISJOINT_KIND);
+          const bool disjoint = (part_kind == DISJOINT_KIND) || 
+                              (part_kind == DISJOINT_COMPLETE_KIND);
+          // Use 1 if we know it's complete, otherwise -1 since we don't know
+          const int complete = ((part_kind == DISJOINT_COMPLETE_KIND) ||
+                                (part_kind == ALIASED_COMPLETE_KIND)) ? 1 : -1;
           part_node = create_node(pid, parent_node, color_node, partition_color,
-                      disjoint, did, partition_ready, partial_pending, mapping);
+            disjoint, complete, did, partition_ready, partial_pending, mapping);
           if (runtime->legion_spy_enabled)
             LegionSpy::log_index_partition(parent.id, pid.id, disjoint,
                                            partition_color);
@@ -504,9 +512,13 @@ namespace Legion {
         IndexPartNode *part_node;
         if (part_kind != COMPUTE_KIND)
         {
-          const bool disjoint = (part_kind == DISJOINT_KIND);
+          const bool disjoint = (part_kind == DISJOINT_KIND) || 
+                              (part_kind == DISJOINT_COMPLETE_KIND);
+          // Use 1 if we know it's complete, otherwise -1 since we don't know
+          const int complete = ((part_kind == DISJOINT_COMPLETE_KIND) ||
+                                (part_kind == ALIASED_COMPLETE_KIND)) ? 1 : -1;
           part_node = create_node(pid, parent_node, color_node, partition_color,
-                      disjoint, did, partition_ready, partial_pending, mapping);
+            disjoint, complete, did, partition_ready, partial_pending, mapping);
         }
         else
           part_node = create_node(pid, parent_node, color_node,
@@ -3416,7 +3428,7 @@ namespace Legion {
                                                  IndexSpaceNode *parent,
                                                  IndexSpaceNode *color_space,
                                                  LegionColor color,
-                                                 bool disjoint, 
+                                                 bool disjoint, int complete,
                                                  DistributedID did,
                                                  ApEvent part_ready,
                                                  ApBarrier pending,
@@ -3427,7 +3439,7 @@ namespace Legion {
       assert(!pending.exists() || (shard_mapping == NULL));
 #endif
       IndexPartCreator creator(this, p, parent, color_space, color, disjoint,
-                               did, part_ready, pending, shard_mapping);
+                             complete, did, part_ready, pending, shard_mapping);
       NT_TemplateHelper::demux<IndexPartCreator>(p.get_type_tag(), &creator);
       IndexPartNode *result = creator.result;
 #ifdef DEBUG_LEGION
@@ -7086,16 +7098,17 @@ namespace Legion {
     //--------------------------------------------------------------------------
     IndexPartNode::IndexPartNode(RegionTreeForest *ctx, IndexPartition p, 
                                  IndexSpaceNode *par, IndexSpaceNode *color_sp,
-                                 LegionColor c, bool dis, DistributedID did, 
-                                 ApEvent part_ready, ApBarrier partial,
-                                 ShardMapping *mapping)
+                                 LegionColor c, bool dis, int comp, 
+                                 DistributedID did, ApEvent part_ready, 
+                                 ApBarrier partial, ShardMapping *mapping)
       : IndexTreeNode(ctx, par->depth+1, c, did,
                       get_owner_space(p, ctx->runtime)), handle(p), parent(par),
         color_space(color_sp), total_children(color_sp->get_volume()), 
         max_linearized_color(color_sp->get_max_linearized_color()),
         partition_ready(part_ready), partial_pending(partial),
-        shard_mapping(mapping), disjoint(dis), has_complete(false),
-        union_expr(NULL)
+        shard_mapping(mapping), disjoint(dis), 
+        has_complete(comp >= 0), complete(comp != 0), 
+        union_expr((has_complete && complete) ? parent : NULL)
     //--------------------------------------------------------------------------
     { 
       parent->add_nested_resource_ref(did);
@@ -7800,36 +7813,44 @@ namespace Legion {
       }
       // Save the result for the future
       AutoLock n_lock(node_lock);
+      // See if we lost the race
       complete = result;
       has_complete = true;
       return complete;
     }
 
     //--------------------------------------------------------------------------
-    IndexSpaceExpression* IndexPartNode::get_union_expression(void)
+    IndexSpaceExpression* IndexPartNode::get_union_expression(
+                                                            bool check_complete)
     //--------------------------------------------------------------------------
     {
       if (union_expr == NULL)
       {
-        std::set<IndexSpaceExpression*> child_spaces;
-        if (total_children == max_linearized_color)
+        // If we're complete then we can use the parent index space expresion
+        if (!check_complete || !is_complete())
         {
-          for (LegionColor color = 0; color < total_children; color++)
-            child_spaces.insert(get_child(color));
-        }
-        else
-        {
-          for (LegionColor color = 0; color < total_children; color++)
+          std::set<IndexSpaceExpression*> child_spaces;
+          if (total_children == max_linearized_color)
           {
-            if (!color_space->contains_color(color))
-              continue;
-            child_spaces.insert(get_child(color));
+            for (LegionColor color = 0; color < total_children; color++)
+              child_spaces.insert(get_child(color));
           }
+          else
+          {
+            for (LegionColor color = 0; color < total_children; color++)
+            {
+              if (!color_space->contains_color(color))
+                continue;
+              child_spaces.insert(get_child(color));
+            }
+          }
+          // We can always write the result immediately since we know
+          // that the common sub-expression code will give the same
+          // result if there is a race
+          union_expr = context->union_index_spaces(child_spaces);
         }
-        // We can always write the result immediately since we know
-        // that the common sub-expression code will give the same
-        // result if there is a race
-        union_expr = context->union_index_spaces(child_spaces);
+        else // if we're complete the parent is our expression
+          union_expr = parent;
       }
       return const_cast<IndexSpaceExpression*>(union_expr);
     }
@@ -7971,8 +7992,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(!is_disjoint());
 #endif
-      IndexSpaceExpression *diff = 
-        context->subtract_index_spaces(parent, get_union_expression());
+      IndexSpaceExpression *diff = context->subtract_index_spaces(parent, 
+                            get_union_expression(false/*check complete*/));
       return diff->is_empty();
     }
 
@@ -8158,6 +8179,15 @@ namespace Legion {
             rez.serialize(color_space->handle);
             rez.serialize(color);
             rez.serialize<bool>(disjoint_result);
+            if (has_complete)
+            {
+              if (complete)
+                rez.serialize<int>(1); // complete
+              else
+                rez.serialize<int>(0); // not complete
+            }
+            else
+              rez.serialize<int>(-1); // we don't know yet
             rez.serialize(partition_ready);
             rez.serialize(partial_pending);
             if (shard_mapping != NULL)
@@ -8202,6 +8232,8 @@ namespace Legion {
       derez.deserialize(color);
       bool disjoint;
       derez.deserialize(disjoint);
+      int complete;
+      derez.deserialize(complete);
       ApEvent ready_event;
       derez.deserialize(ready_event);
       ApBarrier partial_pending;
@@ -8223,8 +8255,8 @@ namespace Legion {
       assert(color_space_node != NULL);
 #endif
       IndexPartNode *node = context->create_node(handle, parent_node, 
-                                   color_space_node, color, disjoint, did,
-                                   ready_event, partial_pending, mapping);
+                               color_space_node, color, disjoint, complete,
+                               did, ready_event, partial_pending, mapping);
 #ifdef DEBUG_LEGION
       assert(node != NULL);
 #endif

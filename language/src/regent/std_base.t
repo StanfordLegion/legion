@@ -479,6 +479,10 @@ function base.types.is_unpack_result(t)
   return terralib.types.istype(t) and rawget(t, "is_unpack_result") or false
 end
 
+function base.types.is_string(t)
+  return terralib.types.istype(t) and rawget(t, "is_string") or false
+end
+
 function base.types.type_supports_privileges(t)
   return base.types.is_region(t) or base.types.is_list_of_regions(t)
 end

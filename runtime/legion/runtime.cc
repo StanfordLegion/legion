@@ -11453,8 +11453,8 @@ namespace Legion {
       IndexPartition result = 
         ctx->create_partition_by_union(forest, parent, handle1, handle2,
                                        color_space, kind, color);
-      if (verify_disjointness && (kind == DISJOINT_KIND) && 
-          !forest->is_disjoint(result))
+      if (verify_disjointness && ((kind == DISJOINT_KIND) || 
+            (kind == DISJOINT_COMPLETE_KIND)) && !forest->is_disjoint(result))
         REPORT_LEGION_ERROR(ERROR_DISJOINTNESS_TEST_FAILURE,
                             "Disjointness test failure for create partition "
                             "by union in task %s (UID %lld)",
@@ -11479,8 +11479,8 @@ namespace Legion {
         ctx->create_partition_by_intersection(forest, parent, handle1,
                                               handle2, color_space,
                                               kind, color);
-      if (verify_disjointness && (kind == DISJOINT_KIND) && 
-          !forest->is_disjoint(result))
+      if (verify_disjointness && ((kind == DISJOINT_KIND) ||
+            (kind == DISJOINT_COMPLETE_KIND)) && !forest->is_disjoint(result))
         REPORT_LEGION_ERROR(ERROR_DISJOINTNESS_TEST_FAILURE,
                             "Disjointness test failure for create partition "
                             "by intersection in task %s (UID %lld)",
@@ -11505,8 +11505,8 @@ namespace Legion {
         ctx->create_partition_by_difference(forest, parent, handle1, 
                                             handle2, color_space,
                                             kind, color);
-      if (verify_disjointness && (kind == DISJOINT_KIND) && 
-          !forest->is_disjoint(result))
+      if (verify_disjointness && ((kind == DISJOINT_KIND) ||
+            (kind == DISJOINT_COMPLETE_KIND)) && !forest->is_disjoint(result))
         REPORT_LEGION_ERROR(ERROR_DISJOINTNESS_TEST_FAILURE,
                             "Disjointness test failure for create partition "
                             "by difference in task %s (UID %lld)",
@@ -11528,7 +11528,8 @@ namespace Legion {
       Color result = 
         ctx->create_cross_product_partitions(forest, handle1, handle2, 
                                              handles, kind, color);
-      if (verify_disjointness && (kind == DISJOINT_KIND))
+      if (verify_disjointness && 
+          ((kind == DISJOINT_KIND) || (kind == DISJOINT_COMPLETE_KIND)))
       {
         Domain color_space = get_index_partition_color_space(handle1);
         // This code will only work if the color space has type coord_t
@@ -11626,8 +11627,8 @@ namespace Legion {
                                          transform, transform_size,
                                          extent, extent_size,
                                          part_kind, color);
-      if (verify_disjointness && (part_kind == DISJOINT_KIND) && 
-          !forest->is_disjoint(result))
+      if (verify_disjointness && ((part_kind == DISJOINT_KIND) ||
+         (part_kind == DISJOINT_COMPLETE_KIND)) && !forest->is_disjoint(result))
         REPORT_LEGION_ERROR(ERROR_DISJOINTNESS_TEST_FAILURE,
                             "Disjointness test failure for create restricted "
                             "partition in task %s (UID %lld)",
@@ -11671,8 +11672,8 @@ namespace Legion {
         ctx->create_partition_by_image(forest, handle, projection, parent,
                                        fid, color_space, part_kind, 
                                        color, id, tag);
-      if (verify_disjointness && (part_kind == DISJOINT_KIND) && 
-          !forest->is_disjoint(result))
+      if (verify_disjointness && ((part_kind == DISJOINT_KIND) ||
+         (part_kind == DISJOINT_COMPLETE_KIND)) && !forest->is_disjoint(result))
         REPORT_LEGION_ERROR(ERROR_DISJOINTNESS_TEST_FAILURE,
                             "Disjointness test failure for create partition "
                             "by image in task %s (UID %lld)",
@@ -11700,8 +11701,8 @@ namespace Legion {
         ctx->create_partition_by_image_range(forest, handle, projection, 
                                   parent, fid, color_space, part_kind, 
                                   color, id, tag);
-      if (verify_disjointness && (part_kind == DISJOINT_KIND) && 
-          !forest->is_disjoint(result))
+      if (verify_disjointness && ((part_kind == DISJOINT_KIND) ||
+         (part_kind == DISJOINT_COMPLETE_KIND)) && !forest->is_disjoint(result))
         REPORT_LEGION_ERROR(ERROR_DISJOINTNESS_TEST_FAILURE,
                             "Disjointness test failure for create partition "
                             "by image range in task %s (UID %lld)",
@@ -11729,8 +11730,8 @@ namespace Legion {
         ctx->create_partition_by_preimage(forest, projection, handle,
                               parent, fid, color_space, part_kind, 
                               color, id, tag);
-      if (verify_disjointness && (part_kind == DISJOINT_KIND) && 
-          !forest->is_disjoint(result))
+      if (verify_disjointness && ((part_kind == DISJOINT_KIND) ||
+         (part_kind == DISJOINT_COMPLETE_KIND)) && !forest->is_disjoint(result))
         REPORT_LEGION_ERROR(ERROR_DISJOINTNESS_TEST_FAILURE,
                             "Disjointness test failure for create partition "
                             "by preimage in task %s (UID %lld)",
@@ -11757,8 +11758,8 @@ namespace Legion {
         ctx->create_partition_by_preimage_range(forest, projection, handle,
                                     parent, fid, color_space, part_kind, 
                                     color, id, tag);
-      if (verify_disjointness && (part_kind == DISJOINT_KIND) && 
-          !forest->is_disjoint(result))
+      if (verify_disjointness && ((part_kind == DISJOINT_KIND) || 
+         (part_kind == DISJOINT_COMPLETE_KIND)) && !forest->is_disjoint(result))
         REPORT_LEGION_ERROR(ERROR_DISJOINTNESS_TEST_FAILURE,
                             "Disjointness test failure for create partition "
                             "by preimage range in task %s (UID %lld)",
