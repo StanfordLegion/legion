@@ -261,7 +261,8 @@ namespace Legion {
       }
       else
       {
-        const bool disjoint = (part_kind == DISJOINT_KIND);
+        const bool disjoint = (part_kind == DISJOINT_KIND) || 
+          (part_kind == DISJOINT_COMPLETE_KIND);
         create_node(pid, parent_node, color_node, partition_color,
                     disjoint, did, partition_ready, partial_pending);
         if (runtime->legion_spy_enabled)
