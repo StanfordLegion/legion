@@ -2471,7 +2471,7 @@ namespace Legion {
       ApEvent term_event = part_op->get_completion_event();
       // Tell the region tree forest about this partition
       RtEvent safe = forest->create_pending_partition(pid, parent, color_space,
-                              partition_color, DISJOINT_KIND, did, term_event);
+                      partition_color, DISJOINT_COMPLETE_KIND, did, term_event);
       // Now we can add the operation to the queue
       runtime->add_to_dependence_queue(this, executing_processor, part_op);
       // Wait for any notifications to occur before returning

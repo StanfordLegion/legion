@@ -1271,6 +1271,8 @@ local function compute_serialized_size_inner(value_type, value)
       end
     end
     return actions, result
+  elseif std.is_string(value_type) then
+    return quote end, `(c.strlen([rawstring](value)) + 1)
   else
     return quote end, 0
   end
@@ -1321,6 +1323,12 @@ local function serialize_inner(value_type, value, fixed_ptr, data_ptr)
         @[data_ptr] = @[data_ptr] + terralib.sizeof(element_type)
         [ser_actions]
       end
+    end
+  elseif std.is_string(value_type) then
+    actions = quote
+      [actions]
+      c.strcpy([rawstring](@[data_ptr]), [rawstring]([value]))
+      @[data_ptr] = @[data_ptr] + c.strlen([rawstring]([value])) + 1
     end
   end
 
@@ -1375,6 +1383,12 @@ local function deserialize_inner(value_type, fixed_ptr, data_ptr)
         [deser_actions]
         ([&element_type]([result].__data))[i] = [deser_value]
       end
+    end
+  elseif std.is_string(value_type) then
+    actions = quote
+      [actions]
+      [result] = c.strdup([rawstring](@[data_ptr]))
+      @[data_ptr] = @[data_ptr] + c.strlen([rawstring]([result])) + 1
     end
   end
 
@@ -3139,6 +3153,29 @@ do
     end
     return st
   end
+end
+
+do
+  -- Wrapper for a null-terminated string.
+  local st = terralib.types.newstruct("string")
+  st.entries = terralib.newlist({
+      { "impl", rawstring },
+  })
+  st.is_string = true
+
+  function st.metamethods.__cast(from, to, expr)
+    if std.is_string(to) then
+      if std.type_eq(from, rawstring) then
+        return `([to]{ impl = [expr] })
+      end
+    elseif std.type_eq(to, rawstring) then
+      if std.is_string(from) then
+        return `([expr].impl)
+      end
+    end
+    assert(false)
+  end
+  std.string = st
 end
 
 -- #####################################
