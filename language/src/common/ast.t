@@ -326,6 +326,26 @@ function ast_factory:__tostring()
   return self.name
 end
 
+-- Dispatch
+
+function ast.make_single_dispatch(table, error_handler)
+  assert(table and error_handler)
+
+  return function()
+    return function(node)
+      local node_type = node.node_type
+      while node_type and not table[node_type] do
+        node_type = node_type.parent
+      end
+      if table[node_type] then
+        return table[node_type](node)
+      else
+        return error_handler(node)
+      end
+    end
+  end
+end
+
 -- Traversal
 
 function ast.traverse_node_continuation(fn, node)

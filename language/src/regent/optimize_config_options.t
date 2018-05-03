@@ -145,30 +145,22 @@ local typed_node_is_leaf = {
   [ast.typed.stat.Assignment] = always_true,
   [ast.typed.stat.Reduce]     = always_true,
   [ast.typed.stat.Expr]       = always_true,
+
+  -- Miscellaneous:
+  [ast.typed.Block]             = always_true,
+  [ast.IndexLaunchArgsProvably] = always_true,
+  [ast.location]                = always_true,
+  [ast.annotation]              = always_true,
+  [ast.condition_kind]          = always_true,
+  [ast.disjointness_kind]       = always_true,
+  [ast.fence_kind]              = always_true,
 }
 
-local function analyze_leaf_node(cx)
-  return function(node)
-    -- Typed AST leaf nodes:
-    if typed_node_is_leaf[node.node_type] then
-      return typed_node_is_leaf[node.node_type](node)
-
-    -- Miscellaneous:
-    elseif node:is(ast.typed.Block) or
-      node:is(ast.IndexLaunchArgsProvably) or
-      node:is(ast.location) or
-      node:is(ast.annotation) or
-      node:is(ast.condition_kind) or
-      node:is(ast.disjointness_kind) or
-      node:is(ast.fence_kind)
-    then
-      return true
-
-    else
-      assert(false, "unexpected node type " .. tostring(node.node_type))
-    end
-  end
-end
+local analyze_leaf_node = ast.make_single_dispatch(
+  typed_node_is_leaf,
+  function(node)
+    assert(false, "unexpected node type " .. tostring(node.node_type))
+  end)
 
 local function analyze_leaf(cx, node)
   return ast.mapreduce_node_postorder(
@@ -248,6 +240,7 @@ local typed_node_is_inner = {
   [ast.typed.expr.Binary]                     = always_true,
   [ast.typed.expr.Future]                     = always_true,
   [ast.typed.expr.FutureGetResult]            = always_true,
+
   -- Statements:
   [ast.typed.stat.If]              = always_true,
   [ast.typed.stat.Elseif]          = always_true,
@@ -268,30 +261,22 @@ local typed_node_is_inner = {
   [ast.typed.stat.Expr]            = always_true,
   [ast.typed.stat.RawDelete]       = always_true,
   [ast.typed.stat.Fence]           = always_true,
+
+  -- Miscellaneous:
+  [ast.typed.Block]             = always_true,
+  [ast.IndexLaunchArgsProvably] = always_true,
+  [ast.location]                = always_true,
+  [ast.annotation]              = always_true,
+  [ast.condition_kind]          = always_true,
+  [ast.disjointness_kind]       = always_true,
+  [ast.fence_kind]              = always_true,
 }
 
-local function analyze_inner_node(cx)
-  return function(node)
-    -- Typed AST leaf nodes:
-    if typed_node_is_inner[node.node_type] then
-      return typed_node_is_inner[node.node_type](node)
-
-    -- Miscellaneous:
-    elseif node:is(ast.typed.Block) or
-      node:is(ast.IndexLaunchArgsProvably) or
-      node:is(ast.location) or
-      node:is(ast.annotation) or
-      node:is(ast.condition_kind) or
-      node:is(ast.disjointness_kind) or
-      node:is(ast.fence_kind)
-    then
-      return true
-
-    else
-      assert(false, "unexpected node type " .. tostring(node.node_type))
-    end
-  end
-end
+local analyze_inner_node = ast.make_single_dispatch(
+  typed_node_is_inner,
+  function(node)
+    assert(false, "unexpected node type " .. tostring(node.node_type))
+  end)
 
 local function analyze_inner(cx, node)
   return ast.mapreduce_node_postorder(
