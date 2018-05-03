@@ -255,9 +255,11 @@ namespace Legion {
       RtUserEvent disjointness_event;
       if ((part_kind == COMPUTE_KIND) || (part_kind == COMPUTE_COMPLETE_KIND))
       {
+        // Use 1 if we know it's complete, otherwise -1 since we don't know
+        const int complete = (part_kind == COMPUTE_COMPLETE_KIND) ? 1 : -1;
         disjointness_event = Runtime::create_rt_user_event();
         create_node(pid, parent_node, color_node, partition_color,
-                    disjointness_event, did, partition_ready, partial_pending);
+          disjointness_event, complete, did, partition_ready, partial_pending);
       }
       else
       {
@@ -305,7 +307,24 @@ namespace Legion {
       // resulting partitions will also be disjoint under intersection
       if (((kind == COMPUTE_KIND) || (kind == COMPUTE_COMPLETE_KIND)) && 
           source->is_disjoint(true/*from app*/))
-        kind = DISJOINT_KIND;
+      {
+        if (kind == COMPUTE_KIND)
+          kind = DISJOINT_KIND;
+        else
+          kind = DISJOINT_COMPLETE_KIND;
+      }
+      // If the source dominates the base then we know that all the
+      // partitions that we are about to make will be complete
+      if (((kind == DISJOINT_KIND) || (kind == ALIASED_KIND) || 
+            (kind == COMPUTE_KIND)) && source->dominates(base)) 
+      {
+        if (kind == DISJOINT_KIND)
+          kind = DISJOINT_COMPLETE_KIND;
+        else if (kind == ALIASED_KIND)
+          kind = ALIASED_COMPLETE_KIND;
+        else
+          kind = COMPUTE_COMPLETE_KIND;
+      }
       // If we haven't been given a color yet, we need to find
       // one that will be valid for all the child partitions
       if (part_color == INVALID_COLOR)
@@ -360,7 +379,7 @@ namespace Legion {
             runtime->get_available_distributed_id();
           create_pending_partition(pid, child_node->handle, 
                                    source->color_space->handle, 
-                                   part_color, kind, did, domain_ready);
+                                   part_color, kind, did, domain_ready); 
           // If the user requested the handle for this point return it
           std::map<IndexSpace,IndexPartition>::iterator finder = 
             user_handles.find(child_node->handle);
@@ -380,8 +399,8 @@ namespace Legion {
           DistributedID did = 
             runtime->get_available_distributed_id();
           create_pending_partition(pid, child_node->handle, 
-                                   source->color_space->handle,
-                                   part_color, kind, did, domain_ready);
+                                   source->color_space->handle, 
+                                   part_color, kind, did, domain_ready); 
           // If the user requested the handle for this point return it
           std::map<IndexSpace,IndexPartition>::iterator finder = 
             user_handles.find(child_node->handle);
@@ -3291,13 +3310,14 @@ namespace Legion {
                                                  IndexSpaceNode *color_space,
                                                  LegionColor color,
                                                  RtEvent disjointness_ready,
+                                                 int complete, 
                                                  DistributedID did,
                                                  ApEvent part_ready,
                                                  ApUserEvent pending)
     //--------------------------------------------------------------------------
     {
       IndexPartCreator creator(this, p, parent, color_space, color, 
-                               disjointness_ready, did, part_ready, pending);
+             disjointness_ready, complete, did, part_ready, pending);
       NT_TemplateHelper::demux<IndexPartCreator>(p.get_type_tag(), &creator);
       IndexPartNode *result = creator.result;
 #ifdef DEBUG_LEGION
@@ -6706,7 +6726,7 @@ namespace Legion {
     IndexPartNode::IndexPartNode(RegionTreeForest *ctx, IndexPartition p, 
                                  IndexSpaceNode *par, IndexSpaceNode *color_sp,
                                  LegionColor c, RtEvent dis_ready, 
-                                 DistributedID did,
+                                 int comp, DistributedID did,
                                  ApEvent part_ready, ApUserEvent part)
       : IndexTreeNode(ctx, par->depth+1, c, did, 
                       get_owner_space(p, ctx->runtime)), handle(p), parent(par),
@@ -6714,7 +6734,8 @@ namespace Legion {
         max_linearized_color(color_sp->get_max_linearized_color()),
         partition_ready(part_ready), partial_pending(part), 
         disjoint_ready(dis_ready), disjoint(false), 
-        has_complete(false), union_expr(NULL)
+        has_complete(comp >= 0), complete(comp != 0), 
+        union_expr((has_complete && complete) ? parent : NULL)
     //--------------------------------------------------------------------------
     {
       parent->add_nested_resource_ref(did);

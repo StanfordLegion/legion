@@ -2985,10 +2985,10 @@ namespace Legion {
                                         IndexPartition p,
                                         IndexSpaceNode *par, IndexSpaceNode *cs,
                                         LegionColor c, RtEvent disjoint_event,
-                                        DistributedID did,
+                                        int complete, DistributedID did,
                                         ApEvent partition_ready, 
                                         ApUserEvent pending)
-      : IndexPartNode(ctx, p, par, cs, c, disjoint_event, did, 
+      : IndexPartNode(ctx, p, par, cs, c, disjoint_event, complete, did, 
                       partition_ready, pending)
     //--------------------------------------------------------------------------
     {
