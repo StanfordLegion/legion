@@ -134,11 +134,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     IndexSpaceUnion<DIM,T>::IndexSpaceUnion(
-                                const std::set<IndexSpaceExpression*> &to_union,
-                                RegionTreeForest *ctx)
+                            const std::vector<IndexSpaceExpression*> &to_union,
+                            RegionTreeForest *ctx)
       : IndexSpaceOperationT<DIM,T>(IndexSpaceOperation::UNION_OP_KIND, ctx),
-        sub_expressions(
-           std::vector<IndexSpaceExpression*>(to_union.begin(), to_union.end()))
+        sub_expressions(to_union)
     //--------------------------------------------------------------------------
     {
       std::set<ApEvent> preconditions;
@@ -222,11 +221,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     IndexSpaceIntersection<DIM,T>::IndexSpaceIntersection(
-                                const std::set<IndexSpaceExpression*> &to_inter,
-                                RegionTreeForest *ctx)
+                            const std::vector<IndexSpaceExpression*> &to_inter,
+                            RegionTreeForest *ctx)
       : IndexSpaceOperationT<DIM,T>(IndexSpaceOperation::INTERSECT_OP_KIND,ctx),
-        sub_expressions(
-           std::vector<IndexSpaceExpression*>(to_inter.begin(), to_inter.end()))
+        sub_expressions(to_inter)
     //--------------------------------------------------------------------------
     {
       std::set<ApEvent> preconditions;

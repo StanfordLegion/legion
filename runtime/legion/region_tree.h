@@ -671,11 +671,20 @@ namespace Legion {
                                                IndexSpaceExpression *rhs);
       IndexSpaceExpression* union_index_spaces(
                                  const std::set<IndexSpaceExpression*> &exprs);
+    protected:
+      // Internal version
+      IndexSpaceExpression* union_index_spaces(
+                               const std::vector<IndexSpaceExpression*> &exprs);
+    public:
       IndexSpaceExpression* intersect_index_spaces(
                                                IndexSpaceExpression *lhs,
                                                IndexSpaceExpression *rhs);
       IndexSpaceExpression* intersect_index_spaces(
                                  const std::set<IndexSpaceExpression*> &exprs);
+    protected:
+      IndexSpaceExpression* intersect_index_spaces(
+                               const std::vector<IndexSpaceExpression*> &exprs);
+    public:
       IndexSpaceExpression* subtract_index_spaces(IndexSpaceExpression *lhs, 
                                                   IndexSpaceExpression *rhs);
     public:
@@ -880,7 +889,7 @@ namespace Legion {
     template<int DIM, typename T>
     class IndexSpaceUnion : public IndexSpaceOperationT<DIM,T> {
     public:
-      IndexSpaceUnion(const std::set<IndexSpaceExpression*> &to_union,
+      IndexSpaceUnion(const std::vector<IndexSpaceExpression*> &to_union,
                       RegionTreeForest *context);
       IndexSpaceUnion(const IndexSpaceUnion<DIM,T> &rhs);
       virtual ~IndexSpaceUnion(void);
@@ -902,7 +911,7 @@ namespace Legion {
     class UnionOpCreator : public OperationCreator {
     public:
       UnionOpCreator(RegionTreeForest *f, TypeTag t,
-                     const std::set<IndexSpaceExpression*> &e)
+                     const std::vector<IndexSpaceExpression*> &e)
         : forest(f), type_tag(t), exprs(e) { }
     public:
       virtual IndexSpaceOperation* create(void)
@@ -920,14 +929,14 @@ namespace Legion {
     public:
       RegionTreeForest *const forest;
       const TypeTag type_tag;
-      const std::set<IndexSpaceExpression*> &exprs;
+      const std::vector<IndexSpaceExpression*> &exprs;
       IndexSpaceOperation *result;
     };
 
     template<int DIM, typename T>
     class IndexSpaceIntersection : public IndexSpaceOperationT<DIM,T> {
     public:
-      IndexSpaceIntersection(const std::set<IndexSpaceExpression*> &to_inter,
+      IndexSpaceIntersection(const std::vector<IndexSpaceExpression*> &to_inter,
                              RegionTreeForest *context);
       IndexSpaceIntersection(const IndexSpaceIntersection &rhs);
       virtual ~IndexSpaceIntersection(void);
@@ -942,7 +951,7 @@ namespace Legion {
     class IntersectionOpCreator : public OperationCreator {
     public:
       IntersectionOpCreator(RegionTreeForest *f, TypeTag t,
-                            const std::set<IndexSpaceExpression*> &e)
+                            const std::vector<IndexSpaceExpression*> &e)
         : forest(f), type_tag(t), exprs(e) { }
     public:
       virtual IndexSpaceOperation* create(void)
@@ -960,7 +969,7 @@ namespace Legion {
     public:
       RegionTreeForest *const forest;
       const TypeTag type_tag;
-      const std::set<IndexSpaceExpression*> &exprs;
+      const std::vector<IndexSpaceExpression*> &exprs;
       IndexSpaceOperation *result;
     };
 
