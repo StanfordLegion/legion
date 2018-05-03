@@ -36,6 +36,10 @@ local function always_false(node)
   return false
 end
 
+local function unreachable(node)
+  assert(false, "unreachable")
+end
+
 local context = {}
 
 function context:__index (field)
@@ -68,6 +72,7 @@ local typed_node_is_leaf = {
   [ast.typed.expr.PartitionEqual]             = always_false,
   [ast.typed.expr.PartitionByField]           = always_false,
   [ast.typed.expr.Image]                      = always_false,
+  [ast.typed.expr.ImageByTask]                = always_false,
   [ast.typed.expr.Preimage]                   = always_false,
   [ast.typed.expr.CrossProduct]               = always_false,
   [ast.typed.expr.CrossProductArray]          = always_false,
@@ -96,6 +101,7 @@ local typed_node_is_leaf = {
   [ast.typed.expr.Condition]                  = always_false,
   [ast.typed.expr.Future]                     = always_false,
   [ast.typed.expr.FutureGetResult]            = always_false,
+  [ast.typed.expr.ParallelizerConstraint]     = always_false,
 
   [ast.typed.expr.ID]              = always_true,
   [ast.typed.expr.Constant]        = always_true,
@@ -124,12 +130,15 @@ local typed_node_is_leaf = {
   [ast.typed.expr.Binary]          = always_true,
   [ast.typed.expr.Deref]           = always_true,
 
+  [ast.typed.expr.Internal]        = unreachable,
+
   -- Statements:
   [ast.typed.stat.MustEpoch]       = always_false,
   [ast.typed.stat.IndexLaunchNum]  = always_false,
   [ast.typed.stat.IndexLaunchList] = always_false,
   [ast.typed.stat.RawDelete]       = always_false,
   [ast.typed.stat.Fence]           = always_false,
+  [ast.typed.stat.ParallelizeWith] = always_false,
 
   [ast.typed.stat.If]         = always_true,
   [ast.typed.stat.Elseif]     = always_true,
@@ -146,6 +155,14 @@ local typed_node_is_leaf = {
   [ast.typed.stat.Reduce]     = always_true,
   [ast.typed.stat.Expr]       = always_true,
 
+  [ast.typed.stat.Internal]          = unreachable,
+  [ast.typed.stat.ForNumVectorized]  = unreachable,
+  [ast.typed.stat.ForListVectorized] = unreachable,
+  [ast.typed.stat.BeginTrace]        = unreachable,
+  [ast.typed.stat.EndTrace]          = unreachable,
+  [ast.typed.stat.MapRegions]        = unreachable,
+  [ast.typed.stat.UnmapRegions]      = unreachable,
+
   -- Miscellaneous:
   [ast.typed.Block]             = always_true,
   [ast.IndexLaunchArgsProvably] = always_true,
@@ -160,7 +177,8 @@ local analyze_leaf_node = ast.make_single_dispatch(
   typed_node_is_leaf,
   function(node)
     assert(false, "unexpected node type " .. tostring(node.node_type))
-  end)
+  end,
+  {ast.typed.expr, ast.typed.stat})
 
 local function analyze_leaf(cx, node)
   return ast.mapreduce_node_postorder(
@@ -209,6 +227,7 @@ local typed_node_is_inner = {
   [ast.typed.expr.PartitionEqual]             = always_true,
   [ast.typed.expr.PartitionByField]           = always_true,
   [ast.typed.expr.Image]                      = always_true,
+  [ast.typed.expr.ImageByTask]                = always_true,
   [ast.typed.expr.Preimage]                   = always_true,
   [ast.typed.expr.CrossProduct]               = always_true,
   [ast.typed.expr.CrossProductArray]          = always_true,
@@ -240,6 +259,9 @@ local typed_node_is_inner = {
   [ast.typed.expr.Binary]                     = always_true,
   [ast.typed.expr.Future]                     = always_true,
   [ast.typed.expr.FutureGetResult]            = always_true,
+  [ast.typed.expr.ParallelizerConstraint]     = always_true,
+
+  [ast.typed.expr.Internal]                   = unreachable,
 
   -- Statements:
   [ast.typed.stat.If]              = always_true,
@@ -261,6 +283,15 @@ local typed_node_is_inner = {
   [ast.typed.stat.Expr]            = always_true,
   [ast.typed.stat.RawDelete]       = always_true,
   [ast.typed.stat.Fence]           = always_true,
+  [ast.typed.stat.ParallelizeWith] = always_true,
+
+  [ast.typed.stat.Internal]          = unreachable,
+  [ast.typed.stat.ForNumVectorized]  = unreachable,
+  [ast.typed.stat.ForListVectorized] = unreachable,
+  [ast.typed.stat.BeginTrace]        = unreachable,
+  [ast.typed.stat.EndTrace]          = unreachable,
+  [ast.typed.stat.MapRegions]        = unreachable,
+  [ast.typed.stat.UnmapRegions]      = unreachable,
 
   -- Miscellaneous:
   [ast.typed.Block]             = always_true,
@@ -276,7 +307,8 @@ local analyze_inner_node = ast.make_single_dispatch(
   typed_node_is_inner,
   function(node)
     assert(false, "unexpected node type " .. tostring(node.node_type))
-  end)
+  end,
+  {ast.typed.expr, ast.typed.stat})
 
 local function analyze_inner(cx, node)
   return ast.mapreduce_node_postorder(
