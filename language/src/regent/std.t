@@ -3878,6 +3878,11 @@ function std.start(main_task, extra_setup_thunk)
     [argv_setup];
     return main([argc], [argv])
   end
+
+  profile('compile', nil, function() wrapper:compile() end)()
+
+  profile.print_summary()
+
   wrapper()
 end
 
@@ -3917,6 +3922,7 @@ function std.saveobj(main_task, filename, filetype, extra_setup_thunk, link_flag
       terralib.saveobj(filename, names, flags)
     end
   end)()
+  profile.print_summary()
 end
 
 local function generate_task_interfaces()
@@ -4031,6 +4037,7 @@ function std.save_tasks(header_filename, filename, filetype,
       terralib.saveobj(filename, names, flags)
     end
   end)()
+  profile.print_summary()
 end
 
 -- #####################################

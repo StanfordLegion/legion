@@ -47,10 +47,10 @@ function passes.compile(node, allow_pretty)
     local env = environment_function()
     local node = profile("specialize", node, specialize.entry)(env, node)
     node = profile("normalize after specialize", node, normalize.entry)(node)
-    alpha_convert.entry(node) -- Run this here to avoid bitrot (discard result).
-    node = profile("type check", node, type_check.entry)(node)
-    node = profile("normalize after type check", node, normalize.entry)(node)
-    node = profile("check annotations", node, check_annotations.entry)(node)
+    profile("alpha_convert", node, alpha_convert.entry)(node) -- Run this here to avoid bitrot (discard result).
+    node = profile("type_check", node, type_check.entry)(node)
+    node = profile("normalize after type_check", node, normalize.entry)(node)
+    node = profile("check_annotations", node, check_annotations.entry)(node)
     node = passes.optimize(node)
     return profile("codegen", node, passes.codegen)(node, allow_pretty)
   end
