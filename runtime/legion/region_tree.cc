@@ -253,10 +253,13 @@ namespace Legion {
         parent_notified = notified_event;
       }
       RtUserEvent disjointness_event;
-      if ((part_kind == COMPUTE_KIND) || (part_kind == COMPUTE_COMPLETE_KIND))
+      if ((part_kind == COMPUTE_KIND) || (part_kind == COMPUTE_COMPLETE_KIND) ||
+          (part_kind == COMPUTE_INCOMPLETE_KIND))
       {
-        // Use 1 if we know it's complete, otherwise -1 since we don't know
-        const int complete = (part_kind == COMPUTE_COMPLETE_KIND) ? 1 : -1;
+        // Use 1 if we know it's complete, 0 if it's not, 
+        // otherwise -1 since we don't know
+        const int complete = (part_kind == COMPUTE_COMPLETE_KIND) ? 1 :
+                             (part_kind == COMPUTE_INCOMPLETE_KIND) ? 0 : -1;
         disjointness_event = Runtime::create_rt_user_event();
         create_node(pid, parent_node, color_node, partition_color,
           disjointness_event, complete, did, partition_ready, partial_pending);
@@ -264,10 +267,14 @@ namespace Legion {
       else
       {
         const bool disjoint = (part_kind == DISJOINT_KIND) || 
-                              (part_kind == DISJOINT_COMPLETE_KIND);
-        // Use 1 if we know it's complete, otherwise -1 since we don't know
+                              (part_kind == DISJOINT_COMPLETE_KIND) ||
+                              (part_kind == DISJOINT_INCOMPLETE_KIND);
+        // Use 1 if we know it's complete, 0 if it's not, 
+        // otherwise -1 since we don't know
         const int complete = ((part_kind == DISJOINT_COMPLETE_KIND) ||
-                              (part_kind == ALIASED_COMPLETE_KIND)) ? 1 : -1;
+                              (part_kind == ALIASED_COMPLETE_KIND)) ? 1 :
+                             ((part_kind == DISJOINT_INCOMPLETE_KIND) ||
+                              (part_kind == ALIASED_INCOMPLETE_KIND)) ? 0 : -1;
         create_node(pid, parent_node, color_node, partition_color, disjoint,
                     complete, did, partition_ready, partial_pending);
         if (runtime->legion_spy_enabled)
@@ -276,7 +283,8 @@ namespace Legion {
       }
       // If we need to compute the disjointness, only do that
       // after the partition is actually ready
-      if ((part_kind == COMPUTE_KIND) || (part_kind == COMPUTE_COMPLETE_KIND))
+      if ((part_kind == COMPUTE_KIND) || (part_kind == COMPUTE_COMPLETE_KIND) ||
+          (part_kind == COMPUTE_INCOMPLETE_KIND))
       {
 #ifdef DEBUG_LEGION
         assert(disjointness_event.exists());
@@ -305,13 +313,16 @@ namespace Legion {
       // If we're supposed to compute this, but we already know that
       // the source is disjoint then we can also conlclude the the 
       // resulting partitions will also be disjoint under intersection
-      if (((kind == COMPUTE_KIND) || (kind == COMPUTE_COMPLETE_KIND)) && 
+      if (((kind == COMPUTE_KIND) || (kind == COMPUTE_COMPLETE_KIND) ||
+           (kind == COMPUTE_INCOMPLETE_KIND)) && 
           source->is_disjoint(true/*from app*/))
       {
         if (kind == COMPUTE_KIND)
           kind = DISJOINT_KIND;
-        else
+        else if (kind == COMPUTE_COMPLETE_KIND)
           kind = DISJOINT_COMPLETE_KIND;
+        else
+          kind = DISJOINT_INCOMPLETE_KIND;
       }
       // If the source dominates the base then we know that all the
       // partitions that we are about to make will be complete
