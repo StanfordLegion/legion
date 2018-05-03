@@ -59,7 +59,7 @@ function context.new_global_scope()
   return setmetatable(cx, context)
 end
 
-local typed_node_is_leaf = {
+local node_is_leaf = {
   -- Expressions:
   [ast.typed.expr.Call] = function(node)
     return not std.is_task(node.fn.value)
@@ -174,7 +174,7 @@ local typed_node_is_leaf = {
 }
 
 local analyze_leaf_node = ast.make_single_dispatch(
-  typed_node_is_leaf,
+  node_is_leaf,
   function(node)
     assert(false, "unexpected node type " .. tostring(node.node_type))
   end,
@@ -187,7 +187,7 @@ local function analyze_leaf(cx, node)
     node, true)
 end
 
-local typed_node_is_inner = {
+local node_is_inner = {
   -- Expressions:
   [ast.typed.expr.Deref] = function(node)
     return not std.is_ref(node.expr_type)
@@ -304,7 +304,7 @@ local typed_node_is_inner = {
 }
 
 local analyze_inner_node = ast.make_single_dispatch(
-  typed_node_is_inner,
+  node_is_inner,
   function(node)
     assert(false, "unexpected node type " .. tostring(node.node_type))
   end,
