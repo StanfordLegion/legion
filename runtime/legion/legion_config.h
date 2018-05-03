@@ -706,11 +706,15 @@ typedef enum legion_projection_type_t {
 typedef legion_projection_type_t legion_handle_type_t;
 
 typedef enum legion_partition_kind_t {
-  DISJOINT_KIND,
-  ALIASED_KIND,
-  COMPUTE_KIND,
+  DISJOINT_KIND, // disjoint and unknown
+  ALIASED_KIND, // aliased and unknown
+  COMPUTE_KIND, // unknown and unknown
   DISJOINT_COMPLETE_KIND, // disjoint and complete
   ALIASED_COMPLETE_KIND, // aliased and complete
+  COMPUTE_COMPLETE_KIND, // unknown and complete
+  DISJOINT_INCOMPLETE_KIND, // disjoint and incomplete
+  ALIASED_INCOMPLETE_KIND, // aliased and incomplete
+  COMPUTE_INCOMPLETE_KIND, // unknown and incomplete
 } legion_partition_kind_t;
 
 typedef enum legion_external_resource_t {

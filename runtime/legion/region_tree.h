@@ -530,7 +530,7 @@ namespace Legion {
       // Give the event for when the disjointness information is ready
       IndexPartNode*  create_node(IndexPartition p, IndexSpaceNode *par,
                                   IndexSpaceNode *color_space,LegionColor color,
-                                  RtEvent disjointness_ready_event,
+                                  RtEvent disjointness_ready_event,int complete,
                                   DistributedID did, ApEvent partition_ready, 
                                   ApBarrier partial_pending,
                                   ShardMapping *shard_mapping = NULL);
@@ -1964,7 +1964,8 @@ namespace Legion {
                     ApBarrier partial_pending, ShardMapping *mapping);
       IndexPartNode(RegionTreeForest *ctx, IndexPartition p,
                     IndexSpaceNode *par, IndexSpaceNode *color_space,
-                    LegionColor c, RtEvent disjointness_ready,DistributedID did,
+                    LegionColor c, RtEvent disjointness_ready,
+                    int complete, DistributedID did,
                     ApEvent partition_ready, ApBarrier partial_pending,
                     ShardMapping *mapping);
       IndexPartNode(const IndexPartNode &rhs);
@@ -2102,7 +2103,7 @@ namespace Legion {
       IndexPartNodeT(RegionTreeForest *ctx, IndexPartition p,
                      IndexSpaceNode *par, IndexSpaceNode *color_space,
                      LegionColor c, RtEvent disjointness_ready,
-                     DistributedID did,
+                     int complete, DistributedID did,
                      ApEvent partition_ready, ApBarrier pending,
                      ShardMapping *shard_mapping);
       IndexPartNodeT(const IndexPartNodeT &rhs);
@@ -2128,10 +2129,10 @@ namespace Legion {
           pending(pend), mapping(m) { }
       IndexPartCreator(RegionTreeForest *f, IndexPartition p,
                        IndexSpaceNode *par, IndexSpaceNode *cs,
-                       LegionColor c, RtEvent d, DistributedID id,
+                       LegionColor c, RtEvent d, int k, DistributedID id,
                        ApEvent r, ApBarrier pend, ShardMapping *m)
         : forest(f), partition(p), parent(par), color_space(cs),
-          color(c), disjoint(false), complete(-1), disjoint_ready(d),
+          color(c), disjoint(false), complete(k), disjoint_ready(d),
           did(id), ready(r), pending(pend), mapping(m) { }
     public:
       template<typename N, typename T>
@@ -2140,8 +2141,8 @@ namespace Legion {
         if (creator->disjoint_ready.exists()) 
           creator->result = new IndexPartNodeT<N::N,T>(creator->forest,
               creator->partition, creator->parent, creator->color_space,
-              creator->color, creator->disjoint_ready, creator->did, 
-              creator->ready, creator->pending, creator->mapping);
+              creator->color, creator->disjoint_ready, creator->complete, 
+              creator->did, creator->ready, creator->pending, creator->mapping);
         else
           creator->result = new IndexPartNodeT<N::N,T>(creator->forest,
               creator->partition, creator->parent, creator->color_space,

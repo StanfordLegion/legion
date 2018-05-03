@@ -260,7 +260,8 @@ namespace Legion {
         runtime->send_index_partition_notification(parent_owner, rez);
         parent_notified = notified_event;
       }
-      if (part_kind == COMPUTE_KIND)
+      if ((part_kind == COMPUTE_KIND) || (part_kind == COMPUTE_COMPLETE_KIND) ||
+          (part_kind == COMPUTE_INCOMPLETE_KIND))
       {
         IndexPartNode::DisjointnessArgs args;
         args.pid = pid;
@@ -269,16 +270,24 @@ namespace Legion {
         RtEvent disjointness_event = runtime->issue_runtime_meta_task(args,
             LG_THROUGHPUT_DEFERRED_PRIORITY,
             Runtime::protect_event(partition_ready));
+        // Use 1 if we know it's complete, 0 if it's not, 
+        // otherwise -1 since we don't know
+        const int complete = (part_kind == COMPUTE_COMPLETE_KIND) ? 1 :
+                             (part_kind == COMPUTE_INCOMPLETE_KIND) ? 0 : -1;
         create_node(pid, parent_node, color_node, partition_color,
-                    disjointness_event, did, partition_ready, partial_pending);
+          disjointness_event, complete, did, partition_ready, partial_pending);
       }
       else
       {
         const bool disjoint = (part_kind == DISJOINT_KIND) || 
-                              (part_kind == DISJOINT_COMPLETE_KIND);
-        // Use 1 if we know it's complete, otherwise -1 since we don't know
+                              (part_kind == DISJOINT_COMPLETE_KIND) ||
+                              (part_kind == DISJOINT_INCOMPLETE_KIND);
+        // Use 1 if we know it's complete, 0 if it's not, 
+        // otherwise -1 since we don't know
         const int complete = ((part_kind == DISJOINT_COMPLETE_KIND) ||
-                              (part_kind == ALIASED_COMPLETE_KIND)) ? 1 : -1;
+                              (part_kind == ALIASED_COMPLETE_KIND)) ? 1 :
+                             ((part_kind == DISJOINT_INCOMPLETE_KIND) ||
+                              (part_kind == ALIASED_INCOMPLETE_KIND)) ? 0 : -1;
         create_node(pid, parent_node, color_node, partition_color, disjoint,
                     complete, did, partition_ready, partial_pending);
         if (runtime->legion_spy_enabled)
@@ -304,8 +313,29 @@ namespace Legion {
       // If we're supposed to compute this, but we already know that
       // the source is disjoint then we can also conlclude the the 
       // resulting partitions will also be disjoint under intersection
-      if ((kind == COMPUTE_KIND) && source->is_disjoint(true/*from app*/))
-        kind = DISJOINT_KIND;
+      if (((kind == COMPUTE_KIND) || (kind == COMPUTE_COMPLETE_KIND) ||
+           (kind == COMPUTE_INCOMPLETE_KIND)) && 
+          source->is_disjoint(true/*from app*/))
+      {
+        if (kind == COMPUTE_KIND)
+          kind = DISJOINT_KIND;
+        else if (kind == COMPUTE_COMPLETE_KIND)
+          kind = DISJOINT_COMPLETE_KIND;
+        else
+          kind = DISJOINT_INCOMPLETE_KIND;
+      }
+      // If the source dominates the base then we know that all the
+      // partitions that we are about to make will be complete
+      if (((kind == DISJOINT_KIND) || (kind == ALIASED_KIND) || 
+            (kind == COMPUTE_KIND)) && source->dominates(base)) 
+      {
+        if (kind == DISJOINT_KIND)
+          kind = DISJOINT_COMPLETE_KIND;
+        else if (kind == ALIASED_KIND)
+          kind = ALIASED_COMPLETE_KIND;
+        else
+          kind = COMPUTE_COMPLETE_KIND;
+      }
       // If we haven't been given a color yet, we need to find
       // one that will be valid for all the child partitions
       if (part_color == INVALID_COLOR)
@@ -361,7 +391,7 @@ namespace Legion {
             runtime->get_available_distributed_id();
           create_pending_partition(pid, child_node->handle, 
                                    source->color_space->handle, 
-                                   part_color, kind, did, domain_ready);
+                                   part_color, kind, did, domain_ready); 
           // If the user requested the handle for this point return it
           std::map<IndexSpace,IndexPartition>::iterator finder = 
             user_handles.find(child_node->handle);
@@ -382,8 +412,8 @@ namespace Legion {
           DistributedID did = 
             runtime->get_available_distributed_id();
           create_pending_partition(pid, child_node->handle, 
-                                   source->color_space->handle,
-                                   part_color, kind, did, domain_ready);
+                                   source->color_space->handle, 
+                                   part_color, kind, did, domain_ready); 
           // If the user requested the handle for this point return it
           std::map<IndexSpace,IndexPartition>::iterator finder = 
             user_handles.find(child_node->handle);
@@ -441,7 +471,8 @@ namespace Legion {
           parent_notified = notified_event;
         }
         RtEvent disjointness_event;
-        if (part_kind == COMPUTE_KIND)
+        if ((part_kind == COMPUTE_KIND) || (part_kind == COMPUTE_COMPLETE_KIND)
+            || (part_kind == COMPUTE_INCOMPLETE_KIND))
         {
 #ifdef DEBUG_LEGION
           assert(part_result != NULL);
@@ -462,13 +493,18 @@ namespace Legion {
           assert(part_result == NULL);
 #endif
         IndexPartNode *part_node;
-        if (part_kind != COMPUTE_KIND)
+        if ((part_kind != COMPUTE_KIND) && (part_kind != COMPUTE_COMPLETE_KIND)
+            && (part_kind != COMPUTE_INCOMPLETE_KIND))
         {
           const bool disjoint = (part_kind == DISJOINT_KIND) || 
-                              (part_kind == DISJOINT_COMPLETE_KIND);
-          // Use 1 if we know it's complete, otherwise -1 since we don't know
+                                (part_kind == DISJOINT_COMPLETE_KIND) ||
+                                (part_kind == DISJOINT_INCOMPLETE_KIND);
+          // Use 1 if we know it's complete, 0 if it's not, 
+          // otherwise -1 since we don't know
           const int complete = ((part_kind == DISJOINT_COMPLETE_KIND) ||
-                                (part_kind == ALIASED_COMPLETE_KIND)) ? 1 : -1;
+                                (part_kind == ALIASED_COMPLETE_KIND)) ? 1 :
+                               ((part_kind == DISJOINT_INCOMPLETE_KIND) ||
+                                (part_kind == ALIASED_INCOMPLETE_KIND)) ? 0 :-1;
           part_node = create_node(pid, parent_node, color_node, partition_color,
             disjoint, complete, did, partition_ready, partial_pending, mapping);
           if (runtime->legion_spy_enabled)
@@ -476,9 +512,15 @@ namespace Legion {
                                            partition_color);
         }
         else
-          part_node = create_node(pid, parent_node, color_node,
-                                  partition_color, disjointness_event, did,
+        {
+          // Use 1 if we know it's complete, 0 if it's not, 
+          // otherwise -1 since we don't know
+          const int complete = (part_kind == COMPUTE_COMPLETE_KIND) ? 1 :
+                               (part_kind == COMPUTE_INCOMPLETE_KIND) ? 0 : -1;
+          part_node = create_node(pid, parent_node, color_node, partition_color,
+                                  disjointness_event, complete, did,
                                   partition_ready, partial_pending, mapping);
+        }
         part_node->update_creation_set(*mapping);
         return parent_notified;
       }
@@ -491,7 +533,8 @@ namespace Legion {
         assert(partition_color != INVALID_COLOR);
 #endif
         RtEvent disjointness_event;
-        if (part_kind == COMPUTE_KIND)
+        if ((part_kind == COMPUTE_KIND) || (part_kind == COMPUTE_COMPLETE_KIND)
+            || (part_kind == COMPUTE_INCOMPLETE_KIND))
         {
 #ifdef DEBUG_LEGION
           assert(part_result != NULL);
@@ -510,20 +553,31 @@ namespace Legion {
           assert(part_result == NULL);
 #endif
         IndexPartNode *part_node;
-        if (part_kind != COMPUTE_KIND)
+        if ((part_kind != COMPUTE_KIND) && (part_kind != COMPUTE_COMPLETE_KIND)
+            && (part_kind != COMPUTE_INCOMPLETE_KIND))
         {
           const bool disjoint = (part_kind == DISJOINT_KIND) || 
-                              (part_kind == DISJOINT_COMPLETE_KIND);
-          // Use 1 if we know it's complete, otherwise -1 since we don't know
+                                (part_kind == DISJOINT_COMPLETE_KIND) ||
+                                (part_kind == DISJOINT_INCOMPLETE_KIND);
+          // Use 1 if we know it's complete, 0 if it's not, 
+          // otherwise -1 since we don't know
           const int complete = ((part_kind == DISJOINT_COMPLETE_KIND) ||
-                                (part_kind == ALIASED_COMPLETE_KIND)) ? 1 : -1;
+                                (part_kind == ALIASED_COMPLETE_KIND)) ? 1 :
+                               ((part_kind == DISJOINT_INCOMPLETE_KIND) ||
+                                (part_kind == ALIASED_INCOMPLETE_KIND)) ? 0 :-1;
           part_node = create_node(pid, parent_node, color_node, partition_color,
             disjoint, complete, did, partition_ready, partial_pending, mapping);
         }
         else
-          part_node = create_node(pid, parent_node, color_node,
-                                  partition_color, disjointness_event, did,
+        {
+          // Use 1 if we know it's complete, 0 if it's not, 
+          // otherwise -1 since we don't know
+          const int complete = (part_kind == COMPUTE_COMPLETE_KIND) ? 1 :
+                               (part_kind == COMPUTE_INCOMPLETE_KIND) ? 0 : -1;
+          part_node = create_node(pid, parent_node, color_node, partition_color,
+                                  disjointness_event, complete, did,
                                   partition_ready, partial_pending, mapping);
+        }
         part_node->update_creation_set(*mapping);
         // We know the parent is notified or we wouldn't even have
         // been given our pid
@@ -3504,6 +3558,7 @@ namespace Legion {
                                                  IndexSpaceNode *color_space,
                                                  LegionColor color,
                                                  RtEvent disjointness_ready,
+                                                 int complete, 
                                                  DistributedID did,
                                                  ApEvent part_ready,
                                                  ApBarrier pending,
@@ -3511,7 +3566,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       IndexPartCreator creator(this, p, parent, color_space, color, 
-                   disjointness_ready, did, part_ready, pending, shard_mapping);
+         disjointness_ready, complete, did, part_ready, pending, shard_mapping);
       NT_TemplateHelper::demux<IndexPartCreator>(p.get_type_tag(), &creator);
       IndexPartNode *result = creator.result;
 #ifdef DEBUG_LEGION
@@ -7129,7 +7184,7 @@ namespace Legion {
     IndexPartNode::IndexPartNode(RegionTreeForest *ctx, IndexPartition p, 
                                  IndexSpaceNode *par, IndexSpaceNode *color_sp,
                                  LegionColor c, RtEvent dis_ready,
-                                 DistributedID did,
+                                 int comp, DistributedID did,
                                  ApEvent part_ready, ApBarrier part,
                                  ShardMapping *map)
       : IndexTreeNode(ctx, par->depth+1, c, did,
@@ -7137,8 +7192,9 @@ namespace Legion {
         color_space(color_sp), total_children(color_sp->get_volume()),
         max_linearized_color(color_sp->get_max_linearized_color()),
         partition_ready(part_ready), partial_pending(part), shard_mapping(map),
-        disjoint_ready(dis_ready), disjoint(false), has_complete(false),
-        union_expr(NULL)
+        disjoint_ready(dis_ready), disjoint(false), 
+        has_complete(comp >= 0), complete(comp != 0), 
+        union_expr((has_complete && complete) ? parent : NULL)
     //--------------------------------------------------------------------------
     {
       parent->add_nested_resource_ref(did);
