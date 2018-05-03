@@ -26,7 +26,9 @@ RUN dpkg --add-architecture i386 && \
       libblas-dev liblapack-dev libhdf5-dev \
       gdb vim && \
     apt-get clean && \
+    pip install --upgrade setuptools && \
     pip install cffi github3.py numpy && \
+    pip3 install --upgrade setuptools && \
     pip3 install cffi github3.py numpy
 
 RUN wget https://cmake.org/files/v3.6/cmake-3.6.2-Linux-x86_64.tar.gz && \
