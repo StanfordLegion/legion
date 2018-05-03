@@ -4685,9 +4685,11 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(lhs->type_tag == rhs->type_tag);
 #endif
-      std::set<IndexSpaceExpression*> exprs;
-      exprs.insert(lhs);
-      exprs.insert(rhs);
+      if (lhs == rhs)
+        return lhs;
+      std::vector<IndexSpaceExpression*> exprs(2);
+      exprs[0] = lhs;
+      exprs[1] = rhs;
       return union_index_spaces(exprs);
     }
 
@@ -4699,11 +4701,42 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(!exprs.empty());
 #endif
-      IndexSpaceExpression *first = *(exprs.begin());
       if (exprs.size() == 1)
-        return first;
-      const IndexSpaceExprID key = first->expr_id;
+        return *(exprs.begin());
       std::vector<IndexSpaceExpression*> expressions(exprs.begin(),exprs.end());
+      // this helps make sure we don't overflow our stack
+      while (expressions.size() > 32)
+      {
+        std::vector<IndexSpaceExpression*> next_expressions;
+        while (!expressions.empty())
+        {
+          std::vector<IndexSpaceExpression*> temp_expressions;
+          temp_expressions.reserve(32);
+          // Pop up to 32 expressions off the back
+          for (unsigned idx = 0; idx < 32; idx++)
+          {
+            temp_expressions.push_back(expressions.back());
+            expressions.pop_back();
+            if (expressions.empty())
+              break;
+          }
+          next_expressions.push_back(union_index_spaces(temp_expressions));
+        }
+        expressions.swap(next_expressions);
+      }
+      return union_index_spaces(expressions);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpaceExpression* RegionTreeForest::union_index_spaces(
+                          const std::vector<IndexSpaceExpression*> &expressions)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!expressions.empty());
+#endif
+      IndexSpaceExpression *first = expressions[0];
+      const IndexSpaceExprID key = first->expr_id;
       // See if we can find it in read-only mode
       {
         AutoLock l_lock(lookup_is_op_lock,1,false/*exclusive*/);
@@ -4715,12 +4748,12 @@ namespace Legion {
           ExpressionTrieNode *next = NULL;
           if (finder->second->find_operation(expressions, result, next))
             return result;
-          UnionOpCreator creator(this, first->type_tag, exprs);
+          UnionOpCreator creator(this, first->type_tag, expressions);
           return next->find_or_create_operation(expressions, creator);
         }
       }
       ExpressionTrieNode *node = NULL;
-      UnionOpCreator creator(this, first->type_tag, exprs);
+      UnionOpCreator creator(this, first->type_tag, expressions);
       // Didn't find it, retake the lock, see if we lost the race
       // and if no make the actual trie node
       AutoLock l_lock(lookup_is_op_lock);
@@ -4748,9 +4781,11 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(lhs->type_tag == rhs->type_tag);
 #endif
-      std::set<IndexSpaceExpression*> exprs;
-      exprs.insert(lhs);
-      exprs.insert(rhs);
+      if (lhs == rhs)
+        return lhs;
+      std::vector<IndexSpaceExpression*> exprs(2);
+      exprs[0] = lhs;
+      exprs[1] = rhs;
       return intersect_index_spaces(exprs);
     }
 
@@ -4762,11 +4797,42 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(!exprs.empty());
 #endif
-      IndexSpaceExpression *first = *(exprs.begin());
       if (exprs.size() == 1)
-        return first;
-      const IndexSpaceExprID key = first->expr_id;
+        return *(exprs.begin());
       std::vector<IndexSpaceExpression*> expressions(exprs.begin(),exprs.end());
+      // this helps make sure we don't overflow our stack
+      while (expressions.size() > 32)
+      {
+        std::vector<IndexSpaceExpression*> next_expressions;
+        while (!expressions.empty())
+        {
+          std::vector<IndexSpaceExpression*> temp_expressions;
+          temp_expressions.reserve(32);
+          // Pop up to 32 expressions off the back
+          for (unsigned idx = 0; idx < 32; idx++)
+          {
+            temp_expressions.push_back(expressions.back());
+            expressions.pop_back();
+            if (expressions.empty())
+              break;
+          }
+          next_expressions.push_back(intersect_index_spaces(temp_expressions));
+        }
+        expressions.swap(next_expressions);
+      }
+      return intersect_index_spaces(expressions);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpaceExpression* RegionTreeForest::intersect_index_spaces(
+                          const std::vector<IndexSpaceExpression*> &expressions)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!expressions.empty());
+#endif
+      IndexSpaceExpression *first = expressions[0];
+      const IndexSpaceExprID key = first->expr_id;
       // See if we can find it in read-only mode
       {
         AutoLock l_lock(lookup_is_op_lock,1,false/*exclusive*/);
@@ -4778,12 +4844,12 @@ namespace Legion {
           ExpressionTrieNode *next = NULL;
           if (finder->second->find_operation(expressions, result, next))
             return result;
-          IntersectionOpCreator creator(this, first->type_tag, exprs);
+          IntersectionOpCreator creator(this, first->type_tag, expressions);
           return next->find_or_create_operation(expressions, creator);
         }
       }
       ExpressionTrieNode *node = NULL;
-      IntersectionOpCreator creator(this, first->type_tag, exprs);
+      IntersectionOpCreator creator(this, first->type_tag, expressions);
       // Didn't find it, retake the lock, see if we lost the race
       // and if not make the actual trie node
       AutoLock l_lock(lookup_is_op_lock);
