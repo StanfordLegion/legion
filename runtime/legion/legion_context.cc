@@ -2517,7 +2517,8 @@ namespace Legion {
       part_op->initialize_union_partition(this, pid, handle1, handle2);
       ApEvent term_event = part_op->get_completion_event();
       // If either partition is aliased the result is aliased
-      if ((kind == COMPUTE_KIND) == (kind == COMPUTE_COMPLETE_KIND))
+      if ((kind == COMPUTE_KIND) || (kind == COMPUTE_COMPLETE_KIND) ||
+          (kind == COMPUTE_INCOMPLETE_KIND))
       {
         // If one of these partitions is aliased then the result is aliased
         IndexPartNode *p1 = forest->get_node(handle1);
@@ -2525,10 +2526,24 @@ namespace Legion {
         {
           IndexPartNode *p2 = forest->get_node(handle2);
           if (!p2->is_disjoint(true/*from app*/))
-            kind = ALIASED_KIND;
+          {
+            if (kind == COMPUTE_KIND)
+              kind = ALIASED_KIND;
+            else if (kind == COMPUTE_COMPLETE_KIND)
+              kind = ALIASED_COMPLETE_KIND;
+            else
+              kind = ALIASED_INCOMPLETE_KIND;
+          }
         }
         else
-          kind = ALIASED_KIND;
+        {
+          if (kind == COMPUTE_KIND)
+            kind = ALIASED_KIND;
+          else if (kind == COMPUTE_COMPLETE_KIND)
+            kind = ALIASED_COMPLETE_KIND;
+          else
+            kind = ALIASED_INCOMPLETE_KIND;
+        }
       }
       // Tell the region tree forest about this partition
       RtEvent safe = forest->create_pending_partition(pid, parent, color_space, 
@@ -2578,17 +2593,32 @@ namespace Legion {
       part_op->initialize_intersection_partition(this, pid, handle1, handle2);
       ApEvent term_event = part_op->get_completion_event();
       // If either partition is disjoint then the result is disjoint
-      if ((kind == COMPUTE_KIND) || (kind == COMPUTE_COMPLETE_KIND))
+      if ((kind == COMPUTE_KIND) || (kind == COMPUTE_COMPLETE_KIND) ||
+          (kind == COMPUTE_INCOMPLETE_KIND))
       {
         IndexPartNode *p1 = forest->get_node(handle1);
         if (!p1->is_disjoint(true/*from app*/))
         {
           IndexPartNode *p2 = forest->get_node(handle2);
           if (p2->is_disjoint(true/*from app*/))
-            kind = DISJOINT_KIND;
+          {
+            if (kind == COMPUTE_KIND)
+              kind = DISJOINT_KIND;
+            else if (kind == COMPUTE_COMPLETE_KIND)
+              kind = DISJOINT_COMPLETE_KIND;
+            else
+              kind = DISJOINT_INCOMPLETE_KIND;
+          }
         }
         else
-          kind = DISJOINT_KIND;
+        {
+          if (kind == COMPUTE_KIND)
+            kind = DISJOINT_KIND;
+          else if (kind == COMPUTE_COMPLETE_KIND)
+            kind = DISJOINT_COMPLETE_KIND;
+          else
+            kind = DISJOINT_INCOMPLETE_KIND;
+        }
       }
       // Tell the region tree forest about this partition
       RtEvent safe = forest->create_pending_partition(pid, parent, color_space,
@@ -2641,11 +2671,19 @@ namespace Legion {
       part_op->initialize_difference_partition(this, pid, handle1, handle2);
       ApEvent term_event = part_op->get_completion_event();
       // If the left-hand-side is disjoint the result is disjoint
-      if ((kind == COMPUTE_KIND) || (kind == COMPUTE_COMPLETE_KIND))
+      if ((kind == COMPUTE_KIND) || (kind == COMPUTE_COMPLETE_KIND) ||
+          (kind == COMPUTE_INCOMPLETE_KIND))
       {
         IndexPartNode *p1 = forest->get_node(handle1);
         if (p1->is_disjoint(true/*from app*/))
-          kind = DISJOINT_KIND;
+        {
+          if (kind == COMPUTE_KIND)
+            kind = DISJOINT_KIND;
+          else if (kind == COMPUTE_COMPLETE_KIND)
+            kind = DISJOINT_COMPLETE_KIND;
+          else
+            kind = DISJOINT_INCOMPLETE_KIND;
+        }
       }
       // Tell the region tree forest about this partition
       RtEvent safe = forest->create_pending_partition(pid, parent, color_space, 
@@ -2990,11 +3028,19 @@ namespace Legion {
       ApEvent term_event = part_op->get_completion_event();
       // If the source of the preimage is disjoint then the result is disjoint
       // Note this only applies here and not to range
-      if ((part_kind == COMPUTE_KIND) || (part_kind == COMPUTE_COMPLETE_KIND))
+      if ((part_kind == COMPUTE_KIND) || (part_kind == COMPUTE_COMPLETE_KIND) ||
+          (part_kind == COMPUTE_INCOMPLETE_KIND))
       {
         IndexPartNode *p = forest->get_node(projection);
         if (p->is_disjoint(true/*from app*/))
-          part_kind = DISJOINT_KIND;
+        {
+          if (part_kind == COMPUTE_KIND)
+            part_kind = DISJOINT_KIND;
+          else if (part_kind == COMPUTE_COMPLETE_KIND)
+            part_kind = DISJOINT_COMPLETE_KIND;
+          else
+            part_kind = DISJOINT_INCOMPLETE_KIND;
+        }
       }
       // Tell the region tree forest about this partition
       RtEvent safe = forest->create_pending_partition(pid, 

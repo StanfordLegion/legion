@@ -253,7 +253,8 @@ namespace Legion {
         parent_notified = notified_event;
       }
       RtUserEvent disjointness_event;
-      if ((part_kind == COMPUTE_KIND) || (part_kind == COMPUTE_COMPLETE_KIND))
+      if ((part_kind == COMPUTE_KIND) || (part_kind == COMPUTE_COMPLETE_KIND) ||
+          (part_kind == COMPUTE_INCOMPLETE_KIND))
       {
         disjointness_event = Runtime::create_rt_user_event();
         create_node(pid, parent_node, color_node, partition_color,
@@ -262,7 +263,8 @@ namespace Legion {
       else
       {
         const bool disjoint = (part_kind == DISJOINT_KIND) || 
-          (part_kind == DISJOINT_COMPLETE_KIND);
+                              (part_kind == DISJOINT_COMPLETE_KIND) || 
+                              (part_kind == DISJOINT_INCOMPLETE_KIND);
         create_node(pid, parent_node, color_node, partition_color,
                     disjoint, did, partition_ready, partial_pending);
         if (runtime->legion_spy_enabled)
@@ -271,7 +273,8 @@ namespace Legion {
       }
       // If we need to compute the disjointness, only do that
       // after the partition is actually ready
-      if ((part_kind == COMPUTE_KIND) || (part_kind == COMPUTE_COMPLETE_KIND))
+      if ((part_kind == COMPUTE_KIND) || (part_kind == COMPUTE_COMPLETE_KIND) ||
+          (part_kind == COMPUTE_INCOMPLETE_KIND))
       {
 #ifdef DEBUG_LEGION
         assert(disjointness_event.exists());
@@ -300,9 +303,17 @@ namespace Legion {
       // If we're supposed to compute this, but we already know that
       // the source is disjoint then we can also conlclude the the 
       // resulting partitions will also be disjoint under intersection
-      if (((kind == COMPUTE_KIND) || (kind == COMPUTE_COMPLETE_KIND)) && 
+      if (((kind == COMPUTE_KIND) || (kind == COMPUTE_COMPLETE_KIND) ||
+           (kind == COMPUTE_INCOMPLETE_KIND)) && 
           source->is_disjoint(true/*from app*/))
-        kind = DISJOINT_KIND;
+      {
+        if (kind == COMPUTE_KIND)
+          kind = DISJOINT_KIND;
+        else if (kind == COMPUTE_COMPLETE_KIND)
+          kind = DISJOINT_COMPLETE_KIND;
+        else
+          kind = DISJOINT_INCOMPLETE_KIND;
+      }
       // If we haven't been given a color yet, we need to find
       // one that will be valid for all the child partitions
       if (part_color == INVALID_COLOR)
