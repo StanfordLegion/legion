@@ -236,13 +236,10 @@ local node_allow_annotations = {
 
 local check_annotations_node = ast.make_single_dispatch(
   node_allow_annotations,
-  function(node)
-    assert(false, "unexpected node type " .. tostring(node.node_type))
-  end,
   {ast.typed})
 
 function check_annotations.top(cx, node)
-  ast.traverse_node_postorder(check_annotations_node(cx), node)
+  ast.traverse_node_postorder(check_annotations_node(), node)
 end
 
 function check_annotations.entry(node)

@@ -175,14 +175,11 @@ local node_is_leaf = {
 
 local analyze_leaf_node = ast.make_single_dispatch(
   node_is_leaf,
-  function(node)
-    assert(false, "unexpected node type " .. tostring(node.node_type))
-  end,
   {ast.typed.expr, ast.typed.stat})
 
 local function analyze_leaf(cx, node)
   return ast.mapreduce_node_postorder(
-    analyze_leaf_node(cx),
+    analyze_leaf_node(),
     data.all,
     node, true)
 end
@@ -305,14 +302,11 @@ local node_is_inner = {
 
 local analyze_inner_node = ast.make_single_dispatch(
   node_is_inner,
-  function(node)
-    assert(false, "unexpected node type " .. tostring(node.node_type))
-  end,
   {ast.typed.expr, ast.typed.stat})
 
 local function analyze_inner(cx, node)
   return ast.mapreduce_node_postorder(
-    analyze_inner_node(cx),
+    analyze_inner_node(),
     data.all,
     node, true)
 end
