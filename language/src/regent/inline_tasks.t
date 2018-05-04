@@ -77,7 +77,16 @@ local function preserve_task_call(node)
 end
 
 function inline_tasks.expr_call(call)
-  if not call:is(ast.specialized.expr.Call) then
+  -- Task T is inlined at call site C only if T demands inlining and
+  -- C does not forbid inlining.
+  local function demands_inlining(node)
+    return node.annotations.inline:is(ast.annotation.Demand)
+  end
+  local function forbids_inlining(node)
+    return node.annotations.inline:is(ast.annotation.Forbid)
+  end
+
+  if not call:is(ast.specialized.expr.Call) or forbids_inlining(call) then
     return call, false
   end
 
@@ -86,22 +95,13 @@ function inline_tasks.expr_call(call)
 
   local task_ast = task:has_primary_variant() and
                    task:get_primary_variant():has_untyped_ast()
-  if not task_ast then return call, false end
-
-  -- Task T is inlined at call site C only if any of the following conditions is satisfied:
-  --   1) T demands inlining and C does not forbid inlining.
-  --   2) T does not forbid inlining and C demands inlining.
-  local function demands_inlining(node)
-    return node.annotations.inline:is(ast.annotation.Demand)
-  end
-  local function forbids_inlining(node)
-    return node.annotations.inline:is(ast.annotation.Forbid)
-  end
-  if not ((demands_inlining(task_ast) and not forbids_inlining(call)) or
-          (not forbids_inlining(task_ast) and demands_inlining(call)))
-  then
+  if not task_ast then
+    if demands_inlining(call) then
+      report.error(call, "cannot inline a task that does not demand inlining")
+    end
     return call, false
   end
+  assert(demands_inlining(task_ast))
 
   -- If the task does not demand inlining, check its validity before inlining it.
   if not demands_inlining(task_ast) then check_valid_inline_task(call, task_ast) end
@@ -450,7 +450,9 @@ function inline_tasks.top(node)
       check_valid_inline_task(node, node)
     end
     local new_node = inline_tasks.top_task(node)
-    if new_node.prototype:has_primary_variant() then
+    if new_node.prototype:has_primary_variant() and
+       node.annotations.inline:is(ast.annotation.Demand)
+    then
       new_node.prototype:get_primary_variant():set_untyped_ast(new_node)
     end
     return new_node
