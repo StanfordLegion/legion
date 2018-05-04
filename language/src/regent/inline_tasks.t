@@ -85,7 +85,7 @@ function inline_tasks.expr_call(call)
   if not std.is_task(task) then return call, false end
 
   local task_ast = task:has_primary_variant() and
-                   task:get_primary_variant():has_ast()
+                   task:get_primary_variant():has_untyped_ast()
   if not task_ast then return call, false end
 
   -- Task T is inlined at call site C only if any of the following conditions is satisfied:
@@ -451,7 +451,7 @@ function inline_tasks.top(node)
     end
     local new_node = inline_tasks.top_task(node)
     if new_node.prototype:has_primary_variant() then
-      new_node.prototype:get_primary_variant():set_ast(new_node)
+      new_node.prototype:get_primary_variant():set_untyped_ast(new_node)
     end
     return new_node
   elseif node:is(ast.specialized.top.Fspace) or

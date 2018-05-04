@@ -738,6 +738,20 @@ function base.variant:get_ast()
   return self.ast
 end
 
+function base.variant:set_untyped_ast(ast)
+  assert(not self.untyped_ast)
+  self.untyped_ast = ast
+end
+
+function base.variant:has_untyped_ast()
+  return self.untyped_ast
+end
+
+function base.variant:get_untyped_ast()
+  assert(self.untyped_ast)
+  return self.untyped_ast
+end
+
 function base.variant:compile()
   self.task:complete()
   return self:get_definition():compile()
@@ -818,6 +832,7 @@ do
       task = task,
       name = name,
       ast = false,
+      untyped_ast = false,
       definition = false,
       cuda = false,
       external = false,
