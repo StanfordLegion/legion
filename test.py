@@ -489,7 +489,7 @@ def check_test_legion_cxx(root_dir):
         raise Exception('There are tests that are NOT in the test suite')
 
 def build_cmake(root_dir, tmp_dir, env, thread_count,
-                test_regent, test_legion_cxx, test_perf, test_ctest):
+                test_regent, test_legion_cxx, test_external, test_perf, test_ctest):
     build_dir = os.path.join(tmp_dir, 'build')
     install_dir = os.path.join(tmp_dir, 'install')
     os.mkdir(build_dir)
@@ -718,7 +718,8 @@ def run_tests(test_modules=None,
             if use_cmake:
                 bin_dir = build_cmake(
                     root_dir, tmp_dir, env, thread_count,
-                    test_regent, test_legion_cxx, test_perf, test_ctest)
+                    test_regent, test_legion_cxx, test_external,
+                    test_perf, test_ctest)
             else:
                 # With GNU Make, builds happen inline. But clean here.
                 build_make_clean(
