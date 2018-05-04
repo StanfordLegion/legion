@@ -120,6 +120,11 @@ function inline_tasks.expr_call(call)
     end
   end)
 
+  local function is_singleton_type(type)
+    return std.is_ispace(type) or std.is_region(type) or
+           std.is_list_of_regions(type) or
+           std.is_partition(type) or std.is_cross_product(type)
+  end
   -- Second, make assignments to temporary variables.
   local params = task_ast.params:map(function(param) return param.symbol end)
   local param_types = params:map(function(param) return param:gettype() end)
@@ -127,21 +132,21 @@ function inline_tasks.expr_call(call)
   local expr_mapping = {}
   data.zip(params, param_types, args):map(function(tuple)
     local param, param_type, arg = unpack(tuple)
-    local new_symbol = std.newsymbol(nil, param:hasname())
-    symbol_mapping[param] = new_symbol
-    actions:insert(ast.specialized.stat.Var {
-      symbols = terralib.newlist { new_symbol },
-      values = terralib.newlist { arg },
-      annotations = ast.default_annotations(),
-      span = call.span,
-    })
+    if is_singleton_type(param_type) and arg:is(ast.specialized.expr.ID) then
+      expr_mapping[param] = arg
+      symbol_mapping[param] = arg.value
+    else
+      local new_symbol = std.newsymbol(nil, param:hasname())
+      symbol_mapping[param] = new_symbol
+      actions:insert(ast.specialized.stat.Var {
+        symbols = terralib.newlist { new_symbol },
+        values = terralib.newlist { arg },
+        annotations = ast.default_annotations(),
+        span = call.span,
+      })
+    end
   end)
 
-  local function is_singleton_type(type)
-    return std.is_ispace(type) or std.is_region(type) or
-           std.is_list_of_regions(type) or
-           std.is_partition(type) or std.is_cross_product(type)
-  end
   -- Do alpha conversion to avoid type collision.
   local stats = ast.map_node_postorder(function(node)
     if node:is(ast.specialized.stat.Var) then
@@ -168,9 +173,10 @@ function inline_tasks.expr_call(call)
   -- Third, replace all occurrences of parameters in the task body with the new temporary variables.
   stats = ast.map_node_postorder(function(node)
     if node:is(ast.specialized.expr.ID) then
-      local new_node =
-        (symbol_mapping[node.value] ~= nil and node { value = symbol_mapping[node.value] }) or
-        expr_mapping[node.value] or node
+      local new_node = expr_mapping[node.value] or
+                       (symbol_mapping[node.value] ~= nil and
+                        node { value = symbol_mapping[node.value] }) or
+                       node
       return new_node
     elseif node:is(ast.specialized.expr.DynamicCast) or
            node:is(ast.specialized.expr.StaticCast) or
