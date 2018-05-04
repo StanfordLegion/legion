@@ -1774,7 +1774,7 @@ local bounded_type = terralib.memoize(function(index_type, ...)
     -- Find the smallest bitmask that will fit.
     -- TODO: Would be nice to compress smaller than one byte.
    local bitmask_type
-    if #bounds < bit.lshift(1, 8) - 1 then
+    if #bounds < bit.lshift(1, 8) - 1 and terralib.llvmversion >= 38 then
       bitmask_type = uint8
     elseif #bounds < bit.lshift(1, 16) - 1 then
       bitmask_type = uint16
@@ -2659,7 +2659,7 @@ std.vptr = terralib.memoize(function(width, points_to_type, ...)
   if #bounds > 1 then
     -- Find the smallest bitmask that will fit.
     -- TODO: Would be nice to compress smaller than one byte.
-    if #bounds < bit.lshift(1, 8) - 1 then
+    if #bounds < bit.lshift(1, 8) - 1 and terralib.llvmversion >= 38 then
       bitmask_type = vector(uint8, width)
     elseif #bounds < bit.lshift(1, 16) - 1 then
       bitmask_type = vector(uint16, width)
