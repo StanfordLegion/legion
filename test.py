@@ -512,9 +512,9 @@ def build_cmake(root_dir, tmp_dir, env, thread_count,
         cmdline.append('-DLegion_ENABLE_TESTING=OFF')
     if 'CC_FLAGS' in env:
         cmdline.append('-DCMAKE_CXX_FLAGS=%s' % env['CC_FLAGS'])
-    if test_regent or test_legion_cxx or test_private or test_perf or test_ctest:
+    if test_regent or test_legion_cxx or test_external or test_perf or test_ctest:
         cmdline.append('-DLegion_BUILD_ALL=ON')
-    if test_regent or test_private:
+    if test_regent or test_external:
         cmdline.append('-DBUILD_SHARED_LIBS=ON')
     # last argument to cmake is the root of the tree
     cmdline.append(root_dir)
@@ -752,11 +752,11 @@ def run_tests(test_modules=None,
                 run_test_realm(launcher, root_dir, tmp_dir, bin_dir, env, thread_count)
         if test_external:
             with Stage('external'):
+                if not test_regent:
+                    build_regent(root_dir, env)
                 run_test_external(launcher, root_dir, tmp_dir, bin_dir, env, thread_count)
         if test_private:
             with Stage('private'):
-                if not test_regent:
-                    build_regent(root_dir, env)
                 run_test_private(launcher, root_dir, tmp_dir, bin_dir, env, thread_count)
         if test_perf:
             with Stage('perf'):
