@@ -525,7 +525,7 @@ def build_cmake(root_dir, tmp_dir, env, thread_count,
     return os.path.join(build_dir, 'bin')
 
 def build_regent(root_dir, env):
-    cmd([os.path.join(root_dir, 'language/travis.py', '--install_only')], env=env)
+    cmd([os.path.join(root_dir, 'language/travis.py'), '--install-only'], env=env)
 
 def clean_cxx(tests, root_dir, env, thread_count):
     env = dict(list(env.items()) + [
