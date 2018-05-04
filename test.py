@@ -257,6 +257,20 @@ def run_test_external(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
              [os.path.join(snap_dir, 'input/mms.in')] + flags]]
     run_cxx(snap, [], launcher, root_dir, None, env, thread_count)
 
+    # Soleil-X
+    # Contact: Manolis Papadakis <mpapadak@stanford.edu>
+    soleil_dir = os.path.join(tmp_dir, 'soleil-x')
+    cmd(['git', 'clone', 'https://github.com/stanfordhpccenter/soleil-x.git', soleil_dir])
+    soleil_env = dict(list(env.items()) + [
+        ('LEGION_DIR', root_dir),
+        ('SOLEIL_DIR', soleil_dir),
+        ('HDF_HEADER', 'hdf5/serial/hdf5.h'),
+        ('HDF_LIBNAME', 'hdf5_serial'),
+        ('CC', 'gcc'),
+    ])
+    cmd(['make', '-C', os.path.join(soleil_dir, 'src')], env=soleil_env)
+    # FIXME: Actually run it
+
 def run_test_private(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
     flags = ['-logfile', 'out_%.log']
 
@@ -498,9 +512,9 @@ def build_cmake(root_dir, tmp_dir, env, thread_count,
         cmdline.append('-DLegion_ENABLE_TESTING=OFF')
     if 'CC_FLAGS' in env:
         cmdline.append('-DCMAKE_CXX_FLAGS=%s' % env['CC_FLAGS'])
-    if test_regent or test_legion_cxx or test_perf or test_ctest:
+    if test_regent or test_legion_cxx or test_private or test_perf or test_ctest:
         cmdline.append('-DLegion_BUILD_ALL=ON')
-    if test_regent:
+    if test_regent or test_private:
         cmdline.append('-DBUILD_SHARED_LIBS=ON')
     # last argument to cmake is the root of the tree
     cmdline.append(root_dir)
@@ -509,6 +523,9 @@ def build_cmake(root_dir, tmp_dir, env, thread_count,
     cmd(['make', '-C', build_dir, '-j', str(thread_count)], env=env)
     cmd(['make', '-C', build_dir, 'install'], env=env)
     return os.path.join(build_dir, 'bin')
+
+def build_regent(root_dir, env):
+    cmd([os.path.join(root_dir, 'language/travis.py', '--install_only')], env=env)
 
 def clean_cxx(tests, root_dir, env, thread_count):
     env = dict(list(env.items()) + [
@@ -738,6 +755,8 @@ def run_tests(test_modules=None,
                 run_test_external(launcher, root_dir, tmp_dir, bin_dir, env, thread_count)
         if test_private:
             with Stage('private'):
+                if not test_regent:
+                    build_regent(root_dir, env)
                 run_test_private(launcher, root_dir, tmp_dir, bin_dir, env, thread_count)
         if test_perf:
             with Stage('perf'):
