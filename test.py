@@ -264,8 +264,6 @@ def run_test_external(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
     soleil_env = dict(list(env.items()) + [
         ('LEGION_DIR', root_dir),
         ('SOLEIL_DIR', soleil_dir),
-        ('HDF_HEADER', 'hdf5/serial/hdf5.h'),
-        ('HDF_LIBNAME', 'hdf5_serial'),
         ('CC', 'gcc'),
     ])
     cmd(['make', '-C', os.path.join(soleil_dir, 'src')], env=soleil_env)
