@@ -7286,6 +7286,18 @@ function codegen.stat_for_list(cx, node)
       end
     end
   else
+    -- Reject the loop if the body has external function calls
+    ast.traverse_node_postorder(function(node)
+      if node:is(ast.typed.expr.Call) then
+        local fn = node.fn.value
+        if std.is_task(fn) then
+          report.error(node, "CUDA task cannot launch other tasks in a for loop")
+        elseif cudahelper.replace_with_builtin(fn) == fn then
+          report.error(node, "CUDA task cannot call external functions in a for loop")
+        end
+      end
+    end, node.block)
+
     -- Now wrap the body as a terra function
     local indices = terralib.newlist()
     local lower_bounds = terralib.newlist()
