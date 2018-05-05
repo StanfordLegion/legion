@@ -3778,7 +3778,7 @@ function type_check.top_task(cx, node)
 
   for _, fixup_node in ipairs(cx.fixup_nodes) do
     if fixup_node:is(ast.typed.expr.Call) then
-      local fn_type = fixup_node.fn.value:gettype()
+      local fn_type = fixup_node.fn.value:get_type()
       assert(fn_type.returntype ~= untyped)
       fixup_node.expr_type = fn_type.returntype
     else
