@@ -136,7 +136,11 @@ function inline_tasks.expr_call(call)
       expr_mapping[param] = arg
       symbol_mapping[param] = arg.value
     else
-      local new_symbol = std.newsymbol(nil, param:hasname())
+      local symbol_type = nil
+      if param_type:isprimitive() or param_type:ispointer() then
+        symbol_type = param_type
+      end
+      local new_symbol = std.newsymbol(symbol_type, param:hasname())
       symbol_mapping[param] = new_symbol
       actions:insert(ast.specialized.stat.Var {
         symbols = terralib.newlist { new_symbol },
