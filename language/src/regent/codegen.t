@@ -6957,7 +6957,7 @@ local function collect_symbols(cx, node)
               node.expr_type:bounds() ~= node.value.expr_type:bounds()) then
         accesses[node] = true
       elseif node:is(ast.typed.stat.Reduce) then
-        if node.lhs:is(ast.typed.expr.ID) then
+        if node.lhs:is(ast.typed.expr.ID) and undefined[node.lhs.value] then
           reduction_variables[node.lhs.value:getsymbol()] = node.op
         end
       end
@@ -7292,7 +7292,7 @@ function codegen.stat_for_list(cx, node)
         local fn = node.fn.value
         if std.is_task(fn) then
           report.error(node, "CUDA task cannot launch other tasks in a for loop")
-        elseif cudahelper.replace_with_builtin(fn) == fn then
+        elseif cudahelper.replace_with_builtin(fn) == fn and fn ~= array then
           report.error(node, "CUDA task cannot call external functions in a for loop")
         end
       end
@@ -7341,21 +7341,6 @@ function codegen.stat_for_list(cx, node)
       end
     end
 
-    local tid_x   = cudalib.nvvm_read_ptx_sreg_tid_x
-    local n_tid_x = cudalib.nvvm_read_ptx_sreg_ntid_x
-    local bid_x   = cudalib.nvvm_read_ptx_sreg_ctaid_x
-    local n_bid_x = cudalib.nvvm_read_ptx_sreg_nctaid_x
-
-    local tid_y   = cudalib.nvvm_read_ptx_sreg_tid_y
-    local n_tid_y = cudalib.nvvm_read_ptx_sreg_ntid_y
-    local bid_y   = cudalib.nvvm_read_ptx_sreg_ctaid_y
-    local n_bid_y = cudalib.nvvm_read_ptx_sreg_nctaid_y
-
-    local tid_z   = cudalib.nvvm_read_ptx_sreg_tid_z
-    local n_tid_z = cudalib.nvvm_read_ptx_sreg_ntid_z
-    local bid_z   = cudalib.nvvm_read_ptx_sreg_ctaid_z
-    local n_bid_z = cudalib.nvvm_read_ptx_sreg_nctaid_z
-
     local index_inits = terralib.newlist()
     local tid = terralib.newsymbol(c.size_t, "tid")
     local offsets = terralib.newlist()
@@ -7371,10 +7356,10 @@ function codegen.stat_for_list(cx, node)
 
     -- Compute a global tid
     index_inits:insert(quote
-      var bid = bid_x() + n_bid_x() * bid_y() + n_bid_x() * n_bid_y() * bid_z()
-      var num_threads = n_tid_x() * n_tid_y() * n_tid_z()
-      var [tid] = bid * num_threads + tid_x() + n_tid_x() * tid_y() + n_tid_x() * n_tid_y() * tid_z()
-      if [tid] >= [count] then return end
+      var [tid] = [cudahelper.global_thread_id()]
+      if [tid] >= [count] then
+        return
+      end
     end)
 
     -- Convert the global tid into a point in an index space
@@ -7397,29 +7382,47 @@ function codegen.stat_for_list(cx, node)
       [body]
     end
 
-    local args = collect_symbols(cx, node)
+    local args, reductions = collect_symbols(cx, node)
+    -- Remove reduction variables from kernel argument list as
+    -- we will define them in the kernel
+    args = data.filter(function(arg) return reductions[arg] == nil end, args)
+    local shared_mem_size = cudahelper.compute_reduction_buffer_size(node, reductions)
+    local device_ptrs, device_ptrs_map, host_preamble =
+      cudahelper.generate_reduction_preamble(reductions)
+    local kernel_preamble, kernel_postamble =
+      cudahelper.generate_reduction_kernel(reductions, device_ptrs_map)
+    local host_postamble =
+      cudahelper.generate_reduction_postamble(reductions, device_ptrs_map)
     args:insertall(lower_bounds)
     args:insertall(counts)
+    args:insertall(device_ptrs)
     args:sort(function(s1, s2) return sizeof(s1.type) > sizeof(s2.type) end)
 
-    local terra kernel([args]) [body] end
+    local terra kernel([args])
+      [kernel_preamble]
+      [body]
+      [kernel_postamble]
+    end
 
     -- Register the kernel function to JIT
     local kernel_id = cx.task_meta:get_cuda_variant():add_cuda_kernel(kernel)
 
     ---- kernel launch
     local count = terralib.newsymbol(c.size_t, "count")
-    local kernel_call = cudahelper.codegen_kernel_call(kernel_id, count, args)
+    local kernel_call =
+      cudahelper.codegen_kernel_call(kernel_id, count, args, shared_mem_size)
 
     if ispace_type:is_opaque() then
       return quote
         [actions]
+        [host_preamble]
         while iterator_has_next([it]) do
           var [ counts[1] ] = 0
           var [ lower_bounds[1] ] = iterator_next_span([it], &[ counts[1] ], -1).value
           var [count] = [ counts[1] ]
           [kernel_call]
         end
+        [host_postamble]
         [cleanup_actions]
       end
     else
@@ -7440,9 +7443,11 @@ function codegen.stat_for_list(cx, node)
       end
       return quote
         [actions]
+        [host_preamble]
         var [rect] = [domain_get_rect]([domain])
         [bounds_setup]
         [kernel_call]
+        [host_postamble]
         [cleanup_actions]
       end
     end
