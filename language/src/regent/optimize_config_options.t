@@ -36,6 +36,10 @@ local function always_false(node)
   return false
 end
 
+local function unreachable(node)
+  assert(false, "unreachable")
+end
+
 local context = {}
 
 function context:__index (field)
@@ -55,7 +59,7 @@ function context.new_global_scope()
   return setmetatable(cx, context)
 end
 
-local typed_node_is_leaf = {
+local node_is_leaf = {
   -- Expressions:
   [ast.typed.expr.Call] = function(node)
     return not std.is_task(node.fn.value)
@@ -68,6 +72,7 @@ local typed_node_is_leaf = {
   [ast.typed.expr.PartitionEqual]             = always_false,
   [ast.typed.expr.PartitionByField]           = always_false,
   [ast.typed.expr.Image]                      = always_false,
+  [ast.typed.expr.ImageByTask]                = always_false,
   [ast.typed.expr.Preimage]                   = always_false,
   [ast.typed.expr.CrossProduct]               = always_false,
   [ast.typed.expr.CrossProductArray]          = always_false,
@@ -96,6 +101,7 @@ local typed_node_is_leaf = {
   [ast.typed.expr.Condition]                  = always_false,
   [ast.typed.expr.Future]                     = always_false,
   [ast.typed.expr.FutureGetResult]            = always_false,
+  [ast.typed.expr.ParallelizerConstraint]     = always_false,
 
   [ast.typed.expr.ID]              = always_true,
   [ast.typed.expr.Constant]        = always_true,
@@ -124,12 +130,15 @@ local typed_node_is_leaf = {
   [ast.typed.expr.Binary]          = always_true,
   [ast.typed.expr.Deref]           = always_true,
 
+  [ast.typed.expr.Internal]        = unreachable,
+
   -- Statements:
   [ast.typed.stat.MustEpoch]       = always_false,
   [ast.typed.stat.IndexLaunchNum]  = always_false,
   [ast.typed.stat.IndexLaunchList] = always_false,
   [ast.typed.stat.RawDelete]       = always_false,
   [ast.typed.stat.Fence]           = always_false,
+  [ast.typed.stat.ParallelizeWith] = always_false,
 
   [ast.typed.stat.If]         = always_true,
   [ast.typed.stat.Elseif]     = always_true,
@@ -145,39 +154,37 @@ local typed_node_is_leaf = {
   [ast.typed.stat.Assignment] = always_true,
   [ast.typed.stat.Reduce]     = always_true,
   [ast.typed.stat.Expr]       = always_true,
+
+  [ast.typed.stat.Internal]          = unreachable,
+  [ast.typed.stat.ForNumVectorized]  = unreachable,
+  [ast.typed.stat.ForListVectorized] = unreachable,
+  [ast.typed.stat.BeginTrace]        = unreachable,
+  [ast.typed.stat.EndTrace]          = unreachable,
+  [ast.typed.stat.MapRegions]        = unreachable,
+  [ast.typed.stat.UnmapRegions]      = unreachable,
+
+  -- Miscellaneous:
+  [ast.typed.Block]             = always_true,
+  [ast.IndexLaunchArgsProvably] = always_true,
+  [ast.location]                = always_true,
+  [ast.annotation]              = always_true,
+  [ast.condition_kind]          = always_true,
+  [ast.disjointness_kind]       = always_true,
+  [ast.fence_kind]              = always_true,
 }
 
-local function analyze_leaf_node(cx)
-  return function(node)
-    -- Typed AST leaf nodes:
-    if typed_node_is_leaf[node.node_type] then
-      return typed_node_is_leaf[node.node_type](node)
-
-    -- Miscellaneous:
-    elseif node:is(ast.typed.Block) or
-      node:is(ast.IndexLaunchArgsProvably) or
-      node:is(ast.location) or
-      node:is(ast.annotation) or
-      node:is(ast.condition_kind) or
-      node:is(ast.disjointness_kind) or
-      node:is(ast.fence_kind)
-    then
-      return true
-
-    else
-      assert(false, "unexpected node type " .. tostring(node.node_type))
-    end
-  end
-end
+local analyze_leaf_node = ast.make_single_dispatch(
+  node_is_leaf,
+  {ast.typed.expr, ast.typed.stat})
 
 local function analyze_leaf(cx, node)
   return ast.mapreduce_node_postorder(
-    analyze_leaf_node(cx),
+    analyze_leaf_node(),
     data.all,
     node, true)
 end
 
-local typed_node_is_inner = {
+local node_is_inner = {
   -- Expressions:
   [ast.typed.expr.Deref] = function(node)
     return not std.is_ref(node.expr_type)
@@ -217,6 +224,7 @@ local typed_node_is_inner = {
   [ast.typed.expr.PartitionEqual]             = always_true,
   [ast.typed.expr.PartitionByField]           = always_true,
   [ast.typed.expr.Image]                      = always_true,
+  [ast.typed.expr.ImageByTask]                = always_true,
   [ast.typed.expr.Preimage]                   = always_true,
   [ast.typed.expr.CrossProduct]               = always_true,
   [ast.typed.expr.CrossProductArray]          = always_true,
@@ -248,6 +256,10 @@ local typed_node_is_inner = {
   [ast.typed.expr.Binary]                     = always_true,
   [ast.typed.expr.Future]                     = always_true,
   [ast.typed.expr.FutureGetResult]            = always_true,
+  [ast.typed.expr.ParallelizerConstraint]     = always_true,
+
+  [ast.typed.expr.Internal]                   = unreachable,
+
   -- Statements:
   [ast.typed.stat.If]              = always_true,
   [ast.typed.stat.Elseif]          = always_true,
@@ -268,34 +280,33 @@ local typed_node_is_inner = {
   [ast.typed.stat.Expr]            = always_true,
   [ast.typed.stat.RawDelete]       = always_true,
   [ast.typed.stat.Fence]           = always_true,
+  [ast.typed.stat.ParallelizeWith] = always_true,
+
+  [ast.typed.stat.Internal]          = unreachable,
+  [ast.typed.stat.ForNumVectorized]  = unreachable,
+  [ast.typed.stat.ForListVectorized] = unreachable,
+  [ast.typed.stat.BeginTrace]        = unreachable,
+  [ast.typed.stat.EndTrace]          = unreachable,
+  [ast.typed.stat.MapRegions]        = unreachable,
+  [ast.typed.stat.UnmapRegions]      = unreachable,
+
+  -- Miscellaneous:
+  [ast.typed.Block]             = always_true,
+  [ast.IndexLaunchArgsProvably] = always_true,
+  [ast.location]                = always_true,
+  [ast.annotation]              = always_true,
+  [ast.condition_kind]          = always_true,
+  [ast.disjointness_kind]       = always_true,
+  [ast.fence_kind]              = always_true,
 }
 
-local function analyze_inner_node(cx)
-  return function(node)
-    -- Typed AST leaf nodes:
-    if typed_node_is_inner[node.node_type] then
-      return typed_node_is_inner[node.node_type](node)
-
-    -- Miscellaneous:
-    elseif node:is(ast.typed.Block) or
-      node:is(ast.IndexLaunchArgsProvably) or
-      node:is(ast.location) or
-      node:is(ast.annotation) or
-      node:is(ast.condition_kind) or
-      node:is(ast.disjointness_kind) or
-      node:is(ast.fence_kind)
-    then
-      return true
-
-    else
-      assert(false, "unexpected node type " .. tostring(node.node_type))
-    end
-  end
-end
+local analyze_inner_node = ast.make_single_dispatch(
+  node_is_inner,
+  {ast.typed.expr, ast.typed.stat})
 
 local function analyze_inner(cx, node)
   return ast.mapreduce_node_postorder(
-    analyze_inner_node(cx),
+    analyze_inner_node(),
     data.all,
     node, true)
 end

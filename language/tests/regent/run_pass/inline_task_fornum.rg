@@ -49,14 +49,8 @@ task h()
 end
 
 task main()
-  var id_main = c.legion_context_get_unique_id(__context())
-  var id_h = h()
-  regentlib.assert(id_h == id_main, "test failed")
-  for i = 0, 10 do
-    var ret_f, ret_g = f(i), g(i)
-    regentlib.assert(ret_f.v == ret_g.v, "test failed")
-    regentlib.assert(id_main == ret_f.id, "test failed")
-    regentlib.assert(id_main ~= ret_g.id, "test failed")
+  for i = 0, [int](f(0).id == g(0).id) do
+    regentlib.assert(false, "test failed")
   end
 end
 

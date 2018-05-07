@@ -603,21 +603,6 @@ function std.type_maybe_eq(a, b, mapping)
   end
 end
 
-function std.type_meet(a, b)
-  local function test()
-    local terra query(x : a, y : b)
-      if true then return x end
-      if true then return y end
-    end
-    return query:gettype().returntype
-  end
-  local valid, result_type = pcall(test)
-
-  if valid then
-    return result_type
-  end
-end
-
 local function add_region_symbol(symbols, region)
   if not symbols[region:gettype()] then
     symbols[region:gettype()] = region
@@ -1491,78 +1476,11 @@ end
 -- ## Codegen Helpers
 -- #################
 
-local gen_optimal = terralib.memoize(
-  function(op, lhs_type, rhs_type)
-    return terra(lhs : lhs_type, rhs : rhs_type)
-      if [std.quote_binary_op(op, lhs, rhs)] then
-        return lhs
-      else
-        return rhs
-      end
-    end
-  end)
-
-std.fmax = macro(
-  function(lhs, rhs)
-    local lhs_type, rhs_type = lhs:gettype(), rhs:gettype()
-    local result_type = std.type_meet(lhs_type, rhs_type)
-    assert(result_type)
-    return `([gen_optimal(">", lhs_type, rhs_type)]([lhs], [rhs]))
-  end)
-
-std.fmin = macro(
-  function(lhs, rhs)
-    local lhs_type, rhs_type = lhs:gettype(), rhs:gettype()
-    local result_type = std.type_meet(lhs_type, rhs_type)
-    assert(result_type)
-    return `([gen_optimal("<", lhs_type, rhs_type)]([lhs], [rhs]))
-  end)
-
-function std.quote_unary_op(op, rhs)
-  if op == "-" then
-    return `(-[rhs])
-  elseif op == "not" then
-    return `(not [rhs])
-  else
-    assert(false, "unknown operator " .. tostring(op))
-  end
-end
-
-function std.quote_binary_op(op, lhs, rhs)
-  if op == "*" then
-    return `([lhs] * [rhs])
-  elseif op == "/" then
-    return `([lhs] / [rhs])
-  elseif op == "%" then
-    return `([lhs] % [rhs])
-  elseif op == "+" then
-    return `([lhs] + [rhs])
-  elseif op == "-" then
-    return `([lhs] - [rhs])
-  elseif op == "<" then
-    return `([lhs] < [rhs])
-  elseif op == ">" then
-    return `([lhs] > [rhs])
-  elseif op == "<=" then
-    return `([lhs] <= [rhs])
-  elseif op == ">=" then
-    return `([lhs] >= [rhs])
-  elseif op == "==" then
-    return `([lhs] == [rhs])
-  elseif op == "~=" then
-    return `([lhs] ~= [rhs])
-  elseif op == "and" then
-    return `([lhs] and [rhs])
-  elseif op == "or" then
-    return `([lhs] or [rhs])
-  elseif op == "max" then
-    return `([std.fmax]([lhs], [rhs]))
-  elseif op == "min" then
-    return `([std.fmin]([lhs], [rhs]))
-  else
-    assert(false, "unknown operator " .. tostring(op))
-  end
-end
+std.type_meet = base.type_meet
+std.fmax = base.fmax
+std.fmin = base.fmin
+std.quote_unary_op = base.quote_unary_op
+std.quote_binary_op = base.quote_binary_op
 
 -- #####################################
 -- ## Types
@@ -1774,7 +1692,7 @@ local bounded_type = terralib.memoize(function(index_type, ...)
     -- Find the smallest bitmask that will fit.
     -- TODO: Would be nice to compress smaller than one byte.
    local bitmask_type
-    if #bounds < bit.lshift(1, 8) - 1 then
+    if #bounds < bit.lshift(1, 8) - 1 and terralib.llvmversion >= 38 then
       bitmask_type = uint8
     elseif #bounds < bit.lshift(1, 16) - 1 then
       bitmask_type = uint16
@@ -2659,7 +2577,7 @@ std.vptr = terralib.memoize(function(width, points_to_type, ...)
   if #bounds > 1 then
     -- Find the smallest bitmask that will fit.
     -- TODO: Would be nice to compress smaller than one byte.
-    if #bounds < bit.lshift(1, 8) - 1 then
+    if #bounds < bit.lshift(1, 8) - 1 and terralib.llvmversion >= 38 then
       bitmask_type = vector(uint8, width)
     elseif #bounds < bit.lshift(1, 16) - 1 then
       bitmask_type = vector(uint16, width)
@@ -3878,15 +3796,46 @@ function std.start(main_task, extra_setup_thunk)
     [argv_setup];
     return main([argc], [argv])
   end
+
+  profile('compile', nil, function() wrapper:compile() end)()
+
+  profile.print_summary()
+
   wrapper()
+end
+
+local function infer_filetype(filename)
+  if filename:match("%.o$") then
+    return "object"
+  elseif filename:match("%.bc$") then
+    return "bitcode"
+  elseif filename:match("%.ll$") then
+    return "llvmir"
+  elseif filename:match("%.so$") or filename:match("%.dylib$") or filename:match("%.dll$") then
+    return "sharedlibrary"
+  elseif filename:match("%.s") then
+    return "asm"
+  else
+    return "executable"
+  end
 end
 
 function std.saveobj(main_task, filename, filetype, extra_setup_thunk, link_flags)
   assert(std.is_task(main_task))
-  local flags = terralib.newlist()
+  filetype = filetype or infer_filetype(filename)
+  assert(not link_flags or filetype == 'sharedlibrary' or filetype == 'executable',
+         'Link flags are ignored unless saving to shared library or executable')
+
   local objfiles,task_wrappers = compile_tasks_in_parallel()
-  flags:insertall(objfiles)
+  if #objfiles > 0 then
+    assert(filetype == "object" or filetype == "executable",
+           'Parallel compilation only supported for object or executable output')
+  end
+
   local main, names = std.setup(main_task, extra_setup_thunk, task_wrappers)
+
+  local flags = terralib.newlist()
+  flags:insertall(objfiles)
   local use_cmake = os.getenv("USE_CMAKE") == "1"
   local lib_dir = os.getenv("LG_RT_DIR") .. "/../bindings/regent"
   if use_cmake then
@@ -3910,13 +3859,28 @@ function std.saveobj(main_task, filename, filetype, extra_setup_thunk, link_flag
   if use_cmake then
     flags:insertall({"-llegion", "-lrealm"})
   end
+
   profile('compile', nil, function()
-    if filetype ~= nil then
-      terralib.saveobj(filename, filetype, names, flags)
+    if #objfiles > 0 and filetype == 'object' then
+      -- Terra will not read the link flags in this case, to collect the code
+      -- that was compiled on different processes, so we have to combine all
+      -- the object files manually.
+      local mainobj = os.tmpname()
+      terralib.saveobj(mainobj, 'object', names)
+      local cmd = os.getenv('CXX') or 'c++'
+      cmd = cmd .. ' -Wl,-r'
+      cmd = cmd .. ' ' .. mainobj
+      for _,f in ipairs(objfiles) do
+        cmd = cmd .. ' ' .. f
+      end
+      cmd = cmd .. ' -o ' .. filename
+      cmd = cmd .. ' -nostdlib'
+      assert(os.execute(cmd) == 0)
     else
-      terralib.saveobj(filename, names, flags)
+      terralib.saveobj(filename, filetype, names, flags)
     end
   end)()
+  profile.print_summary()
 end
 
 local function generate_task_interfaces()
@@ -4031,6 +3995,7 @@ function std.save_tasks(header_filename, filename, filetype,
       terralib.saveobj(filename, names, flags)
     end
   end)()
+  profile.print_summary()
 end
 
 -- #####################################

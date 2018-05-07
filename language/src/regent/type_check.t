@@ -3778,7 +3778,7 @@ function type_check.top_task(cx, node)
 
   for _, fixup_node in ipairs(cx.fixup_nodes) do
     if fixup_node:is(ast.typed.expr.Call) then
-      local fn_type = fixup_node.fn.value:gettype()
+      local fn_type = fixup_node.fn.value:get_type()
       assert(fn_type.returntype ~= untyped)
       fixup_node.expr_type = fn_type.returntype
     else
@@ -3833,7 +3833,11 @@ end
 
 function type_check.top(cx, node)
   if node:is(ast.specialized.top.Task) then
-    return type_check.top_task(cx, node)
+    local new_node = type_check.top_task(cx, node)
+    if new_node.prototype:has_primary_variant() then
+      new_node.prototype:get_primary_variant():set_ast(new_node)
+    end
+    return new_node
 
   elseif node:is(ast.specialized.top.Fspace) then
     return type_check.top_fspace(cx, node)

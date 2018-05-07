@@ -24,9 +24,12 @@ RUN dpkg --add-architecture i386 && \
       mpich2 libmpich-dev \
       mesa-common-dev \
       libblas-dev liblapack-dev libhdf5-dev \
+      libssl-dev \
       gdb vim && \
     apt-get clean && \
+    pip install --upgrade setuptools && \
     pip install cffi github3.py numpy && \
+    pip3 install --upgrade setuptools && \
     pip3 install cffi github3.py numpy
 
 RUN wget https://cmake.org/files/v3.6/cmake-3.6.2-Linux-x86_64.tar.gz && \
@@ -34,7 +37,7 @@ RUN wget https://cmake.org/files/v3.6/cmake-3.6.2-Linux-x86_64.tar.gz && \
     tar xfzC cmake-3.6.2-Linux-x86_64.tar.gz /usr/local --strip-components=1 && \
     rm cmake-3.6.2-Linux-x86_64.tar.gz
 
-RUN git clone https://github.com/zdevito/terra.git && \
+RUN git clone -b luajit2.1 https://github.com/StanfordLegion/terra.git && \
     cp -r terra /usr/local/terra35 && \
     LLVM_CONFIG=llvm-config-3.5 make -C /usr/local/terra35 REEXPORT_LLVM_COMPONENTS="irreader jit mcjit x86" && \
     cp -r terra /usr/local/terra38 && \

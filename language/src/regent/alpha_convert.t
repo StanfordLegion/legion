@@ -99,251 +99,245 @@ function context:update_type(value_type)
   return std.type_sub(value_type, self.mapping[#self.mapping])
 end
 
-local function alpha_convert_node(cx)
-  return function(node, continuation)
-    if node:is(ast.condition_kind) or
-      node:is(ast.disjointness_kind) or
-      node:is(ast.fence_kind)
-    then
-      return continuation(node, true)
+local function pass_through(cx, node, continuation)
+  return continuation(node, true)
+end
 
-    elseif node:is(ast.specialized.region.Bare) then
-      return node { value = cx:update_symbol(node, node.value) }
-
-    elseif node:is(ast.specialized.region.Root) then
-      return node { value = cx:update_symbol(node, node.value) }
-
-    elseif node:is(ast.specialized.region.Field) then
-      return continuation(node, true)
-
-    elseif node:is(ast.specialized.expr.ID) then
-      return node { value = cx:update_symbol(node, node.value) }
-
-    elseif node:is(ast.specialized.expr.Function) then
-      if terralib.types.istype(node.value) then
-        return continuation(node, true) {
-          value = cx:update_type(node.value),
-        }
-      else
-        return continuation(node, true)
-      end
-
-    elseif node:is(ast.specialized.expr.New) or
-      node:is(ast.specialized.expr.Null)
-    then
-      return continuation(node, true) {
-        pointer_type = cx:update_type(node.pointer_type),
-      }
-
-    elseif node:is(ast.specialized.expr.DynamicCast) or
-      node:is(ast.specialized.expr.StaticCast) or
-      node:is(ast.specialized.expr.UnsafeCast)
-    then
-      return continuation(node, true) {
-        expr_type = cx:update_type(node.expr_type),
-      }
-
-    elseif node:is(ast.specialized.expr.Ispace) then
-      return continuation(node, true) {
-        index_type = cx:update_type(node.index_type),
-      }
-
-    elseif node:is(ast.specialized.expr.Region) then
-      return continuation(node, true) {
-        fspace_type = cx:update_type(node.fspace_type),
-      }
-
-    elseif node:is(ast.specialized.expr.Constant) or
-      node:is(ast.specialized.expr.FieldAccess) or
-      node:is(ast.specialized.expr.IndexAccess) or
-      node:is(ast.specialized.expr.MethodCall) or
-      node:is(ast.specialized.expr.Call) or
-      node:is(ast.specialized.expr.Cast) or
-      node:is(ast.specialized.expr.Ctor) or
-      node:is(ast.specialized.expr.CtorListField) or
-      node:is(ast.specialized.expr.CtorRecField) or
-      node:is(ast.specialized.expr.RawContext) or
-      node:is(ast.specialized.expr.RawFields) or
-      node:is(ast.specialized.expr.RawPhysical) or
-      node:is(ast.specialized.expr.RawRuntime) or
-      node:is(ast.specialized.expr.RawValue) or
-      node:is(ast.specialized.expr.Isnull) or
-      node:is(ast.specialized.expr.Partition) or
-      node:is(ast.specialized.expr.PartitionEqual) or
-      node:is(ast.specialized.expr.PartitionByField) or
-      node:is(ast.specialized.expr.Image) or
-      node:is(ast.specialized.expr.Preimage) or
-      node:is(ast.specialized.expr.CrossProduct) or
-      node:is(ast.specialized.expr.CrossProductArray) or
-      node:is(ast.specialized.expr.ListSlicePartition) or
-      node:is(ast.specialized.expr.ListDuplicatePartition) or
-      node:is(ast.specialized.expr.ListCrossProduct) or
-      node:is(ast.specialized.expr.ListCrossProductComplete) or
-      node:is(ast.specialized.expr.ListPhaseBarriers) or
-      node:is(ast.specialized.expr.ListInvert) or
-      node:is(ast.specialized.expr.ListRange) or
-      node:is(ast.specialized.expr.ListIspace) or
-      node:is(ast.specialized.expr.ListFromElement) or
-      node:is(ast.specialized.expr.PhaseBarrier) or
-      node:is(ast.specialized.expr.DynamicCollective) or
-      node:is(ast.specialized.expr.DynamicCollectiveGetResult) or
-      node:is(ast.specialized.expr.Advance) or
-      node:is(ast.specialized.expr.Adjust) or
-      node:is(ast.specialized.expr.Arrive) or
-      node:is(ast.specialized.expr.Await) or
-      node:is(ast.specialized.expr.Copy) or
-      node:is(ast.specialized.expr.Fill) or
-      node:is(ast.specialized.expr.Acquire) or
-      node:is(ast.specialized.expr.Release) or
-      node:is(ast.specialized.expr.AttachHDF5) or
-      node:is(ast.specialized.expr.DetachHDF5) or
-      node:is(ast.specialized.expr.AllocateScratchFields) or
-      node:is(ast.specialized.expr.WithScratchFields) or
-      node:is(ast.specialized.expr.RegionRoot) or
-      node:is(ast.specialized.expr.Condition) or
-      node:is(ast.specialized.expr.Unary) or
-      node:is(ast.specialized.expr.Binary) or
-      node:is(ast.specialized.expr.Deref)
-    then
-      return continuation(node, true)
-
-    elseif node:is(ast.specialized.expr.LuaTable) then
-      report.error(node, "unable to specialize value of type table")
-
-    elseif node:is(ast.specialized.stat.If) then
-      local cond = continuation(node.cond)
-
-      cx:push_local_scope()
-      local then_block = continuation(node.then_block)
-      cx:pop_local_scope()
-
-      local elseif_blocks = continuation(node.elseif_blocks)
-
-      cx:push_local_scope()
-      local else_block = continuation(node.else_block)
-      cx:pop_local_scope()
-
-      return node {
-        cond = cond,
-        then_block = then_block,
-        elseif_blocks = elseif_blocks,
-        else_block = else_block,
-      }
-
-    elseif node:is(ast.specialized.stat.Elseif) or
-      node:is(ast.specialized.stat.While)
-    then
-      local cond = continuation(node.cond)
-
-      cx:push_local_scope()
-      local block = continuation(node.block)
-      cx:pop_local_scope()
-
-      return node {
-        cond = cond,
-        block = block,
-      }
-
-    elseif node:is(ast.specialized.stat.ForNum) then
-      local values = continuation(node.values)
-
-      cx:push_local_scope()
-      local symbol = cx:replace_variable(node, node.symbol)
-      local block = continuation(node.block)
-      cx:pop_local_scope()
-
-      return node {
-        symbol = symbol,
-        values = values,
-        block = block,
-      }
-
-    elseif node:is(ast.specialized.stat.ForList) then
-      local value = continuation(node.value)
-
-      cx:push_local_scope()
-      local symbol = cx:replace_variable(node, node.symbol)
-      local block = continuation(node.block)
-      cx:pop_local_scope()
-
-      return node {
-        symbol = symbol,
-        value = value,
-        block = block,
-      }
-
-    elseif node:is(ast.specialized.stat.Repeat) then
-      cx:push_local_scope()
-      local block = continuation(node.block)
-      local until_cond = continuation(node.until_cond)
-      cx:pop_local_scope()
-
-      return node {
-        block = block,
-        until_cond = until_cond,
-      }
-
-    elseif node:is(ast.specialized.stat.MustEpoch) or
-      node:is(ast.specialized.stat.Block) or
-      node:is(ast.specialized.stat.ParallelizeWith)
-    then
-      cx:push_local_scope()
-      local block = continuation(node.block)
-      cx:pop_local_scope()
-
-      return node {
-        block = block,
-      }
-
-    elseif node:is(ast.specialized.stat.Var) then
-      local symbols = terralib.newlist()
-      for i, symbol in ipairs(node.symbols) do
-        if node.values[i] and node.values[i]:is(ast.specialized.expr.Region) then
-          symbols[i] = cx:replace_variable(node, symbol)
-        end
-      end
-
-      local values = continuation(node.values)
-
-      for i, symbol in ipairs(node.symbols) do
-        if not symbols[i] then
-          symbols[i] = cx:replace_variable(node, symbol)
-        end
-      end
-
-      return node {
-        symbols = symbols,
-        values = values,
-      }
-
-    elseif node:is(ast.specialized.stat.VarUnpack) then
-      local value = continuation(node.value)
-      local symbols = node.symbols:map(
-        function(symbol) return cx:replace_variable(node, symbol) end)
-
-      return node {
-        symbols = symbols,
-        value = value,
-      }
-
-    elseif node:is(ast.specialized.stat.Return) or
-      node:is(ast.specialized.stat.Break) or
-      node:is(ast.specialized.stat.Assignment) or
-      node:is(ast.specialized.stat.Reduce) or
-      node:is(ast.specialized.stat.Expr) or
-      node:is(ast.specialized.stat.RawDelete) or
-      node:is(ast.specialized.stat.Fence) or
-      node:is(ast.specialized.Block) or
-      node:is(ast.location) or
-      node:is(ast.annotation)
-    then
-      return continuation(node, true)
-
-    else
-      assert(false, "unexpected node type " .. tostring(node:type()))
-    end
+local function update_symbol(field_name)
+  return function(cx, node, continuation)
+    return continuation(node, true) {
+      [field_name] = cx:update_symbol(node, node[field_name])
+    }
   end
 end
+
+local update_value = update_symbol("value")
+
+local function update_type(field_name)
+  return function(cx, node, continuation)
+    return continuation(node, true) {
+      [field_name] = cx:update_type(node[field_name])
+    }
+  end
+end
+
+local update_pointer_type = update_type("pointer_type")
+local update_expr_type = update_type("expr_type")
+local update_index_type = update_type("index_type")
+local update_fspace_type = update_type("fspace_type")
+
+local function update_block(cx, node, continuation)
+  cx:push_local_scope()
+  local block = continuation(node.block)
+  cx:pop_local_scope()
+
+  return node {
+    block = block,
+  }
+end
+
+local function update_block_with_value(field_name)
+  return function(cx, node, continuation)
+    local value = continuation(node[field_name])
+
+    cx:push_local_scope()
+    local block = continuation(node.block)
+    cx:pop_local_scope()
+
+    return node {
+      [field_name] = value,
+      block = block,
+    }
+  end
+end
+
+local update_block_with_cond = update_block_with_value("cond")
+local update_block_with_until_cond = update_block_with_value("until_cond")
+
+local function update_block_with_symbol_value(symbol_field, value_field)
+  return function(cx, node, continuation)
+    local value = continuation(node[value_field])
+
+    cx:push_local_scope()
+    local symbol = cx:replace_variable(node, node[symbol_field])
+    local block = continuation(node.block)
+    cx:pop_local_scope()
+
+    return node {
+      [symbol_field] = symbol,
+      [value_field] = value,
+      block = block,
+    }
+  end
+end
+
+local update_block_with_loop_value = update_block_with_symbol_value("symbol", "value")
+local update_block_with_loop_values = update_block_with_symbol_value("symbol", "values")
+
+local node_alpha_conversion = {
+  [ast.condition_kind]           = pass_through,
+  [ast.disjointness_kind]        = pass_through,
+  [ast.fence_kind]               = pass_through,
+
+  [ast.specialized.region.Bare]  = update_value,
+  [ast.specialized.region.Root]  = update_value,
+
+  [ast.specialized.region.Field] = pass_through,
+
+  [ast.specialized.expr.ID]      = update_value,
+
+  [ast.specialized.expr.Function] = function(cx, node, continuation)
+    if terralib.types.istype(node.value) then
+      return continuation(node, true) {
+        value = cx:update_type(node.value),
+      }
+    else
+      return continuation(node, true)
+    end
+  end,
+
+  [ast.specialized.expr.New]         = update_pointer_type,
+  [ast.specialized.expr.Null]        = update_pointer_type,
+  [ast.specialized.expr.DynamicCast] = update_expr_type,
+  [ast.specialized.expr.StaticCast]  = update_expr_type,
+  [ast.specialized.expr.UnsafeCast]  = update_expr_type,
+  [ast.specialized.expr.Ispace]      = update_index_type,
+  [ast.specialized.expr.Region]      = update_fspace_type,
+
+  [ast.specialized.expr.Constant]                   = pass_through,
+  [ast.specialized.expr.FieldAccess]                = pass_through,
+  [ast.specialized.expr.IndexAccess]                = pass_through,
+  [ast.specialized.expr.MethodCall]                 = pass_through,
+  [ast.specialized.expr.Call]                       = pass_through,
+  [ast.specialized.expr.Cast]                       = pass_through,
+  [ast.specialized.expr.Ctor]                       = pass_through,
+  [ast.specialized.expr.CtorListField]              = pass_through,
+  [ast.specialized.expr.CtorRecField]               = pass_through,
+  [ast.specialized.expr.RawContext]                 = pass_through,
+  [ast.specialized.expr.RawFields]                  = pass_through,
+  [ast.specialized.expr.RawPhysical]                = pass_through,
+  [ast.specialized.expr.RawRuntime]                 = pass_through,
+  [ast.specialized.expr.RawValue]                   = pass_through,
+  [ast.specialized.expr.Isnull]                     = pass_through,
+  [ast.specialized.expr.Partition]                  = pass_through,
+  [ast.specialized.expr.PartitionEqual]             = pass_through,
+  [ast.specialized.expr.PartitionByField]           = pass_through,
+  [ast.specialized.expr.Image]                      = pass_through,
+  [ast.specialized.expr.Preimage]                   = pass_through,
+  [ast.specialized.expr.CrossProduct]               = pass_through,
+  [ast.specialized.expr.CrossProductArray]          = pass_through,
+  [ast.specialized.expr.ListSlicePartition]         = pass_through,
+  [ast.specialized.expr.ListDuplicatePartition]     = pass_through,
+  [ast.specialized.expr.ListCrossProduct]           = pass_through,
+  [ast.specialized.expr.ListCrossProductComplete]   = pass_through,
+  [ast.specialized.expr.ListPhaseBarriers]          = pass_through,
+  [ast.specialized.expr.ListInvert]                 = pass_through,
+  [ast.specialized.expr.ListRange]                  = pass_through,
+  [ast.specialized.expr.ListIspace]                 = pass_through,
+  [ast.specialized.expr.ListFromElement]            = pass_through,
+  [ast.specialized.expr.PhaseBarrier]               = pass_through,
+  [ast.specialized.expr.DynamicCollective]          = pass_through,
+  [ast.specialized.expr.DynamicCollectiveGetResult] = pass_through,
+  [ast.specialized.expr.Advance]                    = pass_through,
+  [ast.specialized.expr.Adjust]                     = pass_through,
+  [ast.specialized.expr.Arrive]                     = pass_through,
+  [ast.specialized.expr.Await]                      = pass_through,
+  [ast.specialized.expr.Copy]                       = pass_through,
+  [ast.specialized.expr.Fill]                       = pass_through,
+  [ast.specialized.expr.Acquire]                    = pass_through,
+  [ast.specialized.expr.Release]                    = pass_through,
+  [ast.specialized.expr.AttachHDF5]                 = pass_through,
+  [ast.specialized.expr.DetachHDF5]                 = pass_through,
+  [ast.specialized.expr.AllocateScratchFields]      = pass_through,
+  [ast.specialized.expr.WithScratchFields]          = pass_through,
+  [ast.specialized.expr.RegionRoot]                 = pass_through,
+  [ast.specialized.expr.Condition]                  = pass_through,
+  [ast.specialized.expr.Unary]                      = pass_through,
+  [ast.specialized.expr.Binary]                     = pass_through,
+  [ast.specialized.expr.Deref]                      = pass_through,
+
+  [ast.specialized.expr.LuaTable] = function(cx, node, continuation)
+    report.error(node, "unable to specialize value of type table")
+  end,
+
+  [ast.specialized.stat.If] = function(cx, node, continuation)
+    local cond = continuation(node.cond)
+
+    cx:push_local_scope()
+    local then_block = continuation(node.then_block)
+    cx:pop_local_scope()
+
+    local elseif_blocks = continuation(node.elseif_blocks)
+
+    cx:push_local_scope()
+    local else_block = continuation(node.else_block)
+    cx:pop_local_scope()
+
+    return node {
+      cond = cond,
+      then_block = then_block,
+      elseif_blocks = elseif_blocks,
+      else_block = else_block,
+    }
+  end,
+
+  [ast.specialized.stat.Elseif]          = update_block_with_cond,
+  [ast.specialized.stat.While]           = update_block_with_cond,
+  [ast.specialized.stat.ForNum]          = update_block_with_loop_values,
+  [ast.specialized.stat.ForList]         = update_block_with_loop_value,
+  [ast.specialized.stat.Repeat]          = update_block_with_until_cond,
+  [ast.specialized.stat.MustEpoch]       = update_block,
+  [ast.specialized.stat.Block]           = update_block,
+  [ast.specialized.stat.ParallelizeWith] = update_block,
+
+  [ast.specialized.stat.Var] = function(cx, node, continuation)
+    local symbols = terralib.newlist()
+    for i, symbol in ipairs(node.symbols) do
+      if node.values[i] and node.values[i]:is(ast.specialized.expr.Region) then
+        symbols[i] = cx:replace_variable(node, symbol)
+      end
+    end
+
+    local values = continuation(node.values)
+
+    for i, symbol in ipairs(node.symbols) do
+      if not symbols[i] then
+        symbols[i] = cx:replace_variable(node, symbol)
+      end
+    end
+
+    return node {
+      symbols = symbols,
+      values = values,
+    }
+  end,
+
+  [ast.specialized.stat.VarUnpack] = function(cx, node, continuation)
+    local value = continuation(node.value)
+    local symbols = node.symbols:map(
+      function(symbol) return cx:replace_variable(node, symbol) end)
+
+    return node {
+      symbols = symbols,
+      value = value,
+    }
+  end,
+
+  [ast.specialized.stat.Return] = pass_through,
+  [ast.specialized.stat.Break] = pass_through,
+  [ast.specialized.stat.Assignment] = pass_through,
+  [ast.specialized.stat.Reduce] = pass_through,
+  [ast.specialized.stat.Expr] = pass_through,
+  [ast.specialized.stat.RawDelete] = pass_through,
+  [ast.specialized.stat.Fence] = pass_through,
+  [ast.specialized.Block] = pass_through,
+  [ast.location] = pass_through,
+  [ast.annotation] = pass_through,
+}
+
+local alpha_convert_node = ast.make_single_dispatch(
+  node_alpha_conversion,
+  {ast.specialized.expr, ast.specialized.stat})
 
 local function alpha_convert_body(cx, node)
   return ast.map_node_continuation(alpha_convert_node(cx), node)
