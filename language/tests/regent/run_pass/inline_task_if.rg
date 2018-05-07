@@ -53,10 +53,16 @@ task main()
   var id_h = h()
   regentlib.assert(id_h == id_main, "test failed")
   for i = 0, 10 do
-    var ret_f, ret_g = f(i), g(i)
-    regentlib.assert(ret_f.v == ret_g.v, "test failed")
-    regentlib.assert(id_main == ret_f.id, "test failed")
-    regentlib.assert(id_main ~= ret_g.id, "test failed")
+    if f(i).v ~= g(i).v then
+      regentlib.assert(false, "test1 failed")
+    elseif f(i).id ~= id_main then
+      regentlib.assert(false, "test2 failed")
+    elseif f(i).id == id_main then
+      var ret_f, ret_g = f(i), g(i)
+      regentlib.assert(ret_f.v == ret_g.v,  "test3 failed")
+      regentlib.assert(id_main == ret_f.id, "test4 failed")
+      regentlib.assert(id_main ~= ret_g.id, "test5 failed")
+    end
   end
 end
 

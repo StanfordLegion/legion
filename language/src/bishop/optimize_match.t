@@ -113,7 +113,8 @@ local function fetch_call_graph()
       if v:has_primary_variant() then
         local task_ast = v:get_primary_variant():get_ast()
         local function record_callees(node)
-          if node:is(regent_ast.typed.expr.Call) and
+          if (node:is(regent_ast.specialized.expr.Call) or
+              node:is(regent_ast.typed.expr.Call)) and
              regent_std.is_task(node.fn.value) then
             call_graph[k][node.fn.value.name:mkstring()] = true
           end

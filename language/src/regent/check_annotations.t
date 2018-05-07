@@ -59,7 +59,7 @@ local function render_option(option, value)
   return "__" .. value_name .. "(__" .. tostring(option) .. ")"
 end
 
-local function check(cx, node, allowed_set)
+local function check(node, allowed_set)
   -- Sanity check the allowed set.
   for option, _ in pairs(allowed_set) do
     assert(node.annotations[option]:is(ast.annotation))
@@ -76,190 +76,172 @@ local function check(cx, node, allowed_set)
   end
 end
 
-local function check_annotations_node(cx)
+local function allow(allowed_list)
+  local allowed_set = data.set(allowed_list)
   return function(node)
-    -- Expressions:
-    if node:is(ast.typed.expr.Call) then
-      check(cx, node, data.set({"parallel", "inline"}))
-
-    elseif node:is(ast.typed.expr.ID) or
-      node:is(ast.typed.expr.Constant) or
-      node:is(ast.typed.expr.Function) or
-      node:is(ast.typed.expr.FieldAccess) or
-      node:is(ast.typed.expr.IndexAccess) or
-      node:is(ast.typed.expr.MethodCall) or
-      node:is(ast.typed.expr.Cast) or
-      node:is(ast.typed.expr.Ctor) or
-      node:is(ast.typed.expr.CtorListField) or
-      node:is(ast.typed.expr.CtorRecField) or
-      node:is(ast.typed.expr.RawContext) or
-      node:is(ast.typed.expr.RawFields) or
-      node:is(ast.typed.expr.RawPhysical) or
-      node:is(ast.typed.expr.RawRuntime) or
-      node:is(ast.typed.expr.RawValue) or
-      node:is(ast.typed.expr.Isnull) or
-      node:is(ast.typed.expr.Null) or
-      node:is(ast.typed.expr.DynamicCast) or
-      node:is(ast.typed.expr.StaticCast) or
-      node:is(ast.typed.expr.UnsafeCast) or
-      node:is(ast.typed.expr.Ispace) or
-      node:is(ast.typed.expr.Region) or
-      node:is(ast.typed.expr.Partition) or
-      node:is(ast.typed.expr.PartitionEqual) or
-      node:is(ast.typed.expr.PartitionByField) or
-      node:is(ast.typed.expr.Image) or
-      node:is(ast.typed.expr.Preimage) or
-      node:is(ast.typed.expr.CrossProduct) or
-      node:is(ast.typed.expr.CrossProductArray) or
-      node:is(ast.typed.expr.ListSlicePartition) or
-      node:is(ast.typed.expr.ListDuplicatePartition) or
-      node:is(ast.typed.expr.ListCrossProduct) or
-      node:is(ast.typed.expr.ListCrossProductComplete) or
-      node:is(ast.typed.expr.ListPhaseBarriers) or
-      node:is(ast.typed.expr.ListInvert) or
-      node:is(ast.typed.expr.ListRange) or
-      node:is(ast.typed.expr.ListIspace) or
-      node:is(ast.typed.expr.ListFromElement) or
-      node:is(ast.typed.expr.PhaseBarrier) or
-      node:is(ast.typed.expr.DynamicCollective) or
-      node:is(ast.typed.expr.DynamicCollectiveGetResult) or
-      node:is(ast.typed.expr.Advance) or
-      node:is(ast.typed.expr.Adjust) or
-      node:is(ast.typed.expr.Arrive) or
-      node:is(ast.typed.expr.Await) or
-      node:is(ast.typed.expr.Copy) or
-      node:is(ast.typed.expr.Fill) or
-      node:is(ast.typed.expr.Acquire) or
-      node:is(ast.typed.expr.Release) or
-      node:is(ast.typed.expr.AttachHDF5) or
-      node:is(ast.typed.expr.DetachHDF5) or
-      node:is(ast.typed.expr.AllocateScratchFields) or
-      node:is(ast.typed.expr.WithScratchFields) or
-      node:is(ast.typed.expr.RegionRoot) or
-      node:is(ast.typed.expr.Condition) or
-      node:is(ast.typed.expr.Unary) or
-      node:is(ast.typed.expr.Binary) or
-      node:is(ast.typed.expr.Deref) or
-      node:is(ast.typed.expr.ParallelizerConstraint)
-    then
-      check(cx, node, data.set({}))
-
-    -- Statements:
-    elseif node:is(ast.typed.stat.If) or
-      node:is(ast.typed.stat.Elseif)
-    then
-      check(cx, node, data.set({}))
-
-    elseif node:is(ast.typed.stat.While) then
-      check(cx, node, data.set({"spmd", "trace"}))
-
-    elseif node:is(ast.typed.stat.ForNum) then
-      local annotations = {"parallel", "spmd", "trace"}
-      if std.config["vectorize-unsafe"] then
-        annotations[#annotations + 1] = "vectorize"
-      end
-      check(cx, node, data.set(annotations))
-
-    elseif node:is(ast.typed.stat.ForList) then
-      check(cx, node, data.set({"openmp", "parallel", "spmd", "trace", "vectorize"}))
-
-    elseif node:is(ast.typed.stat.Repeat) then
-      check(cx, node, data.set({"spmd", "trace"}))
-
-    elseif node:is(ast.typed.stat.MustEpoch) then
-      check(cx, node, data.set({}))
-
-    elseif node:is(ast.typed.stat.Block) then
-      check(cx, node, data.set({"spmd", "trace"}))
-
-    elseif node:is(ast.typed.stat.Var) or
-      node:is(ast.typed.stat.VarUnpack) or
-      node:is(ast.typed.stat.Return) or
-      node:is(ast.typed.stat.Break) or
-      node:is(ast.typed.stat.Assignment) or
-      node:is(ast.typed.stat.Reduce) or
-      node:is(ast.typed.stat.Expr) or
-      node:is(ast.typed.stat.RawDelete) or
-      node:is(ast.typed.stat.Fence) or
-      node:is(ast.typed.stat.ParallelizeWith)
-    then
-      check(cx, node, data.set({}))
-
-    -- Tasks:
-    elseif node:is(ast.typed.top.TaskParam) then
-      check(cx, node, data.set({}))
-
-    elseif node:is(ast.typed.top.Task) then
-      check(cx, node,
-            data.set({
-              "cuda",
-              "external",
-              "idempotent",
-              "inline",
-              "inner",
-              "leaf",
-              "optimize",
-              "parallel",
-              "replicable",
-            }))
-
-    -- Miscellaneous:
-    elseif node:is(ast.typed.Block) or
-      node:is(ast.location) or
-      node:is(ast.annotation) or
-      node:is(ast.constraint_kind) or
-      node:is(ast.privilege_kind) or
-      node:is(ast.condition_kind) or
-      node:is(ast.disjointness_kind) or
-      node:is(ast.fence_kind) or
-      node:is(ast.constraint) or
-      node:is(ast.privilege) or
-      node:is(ast.TaskConfigOptions)
-    then
-      -- Pass
-
-    else
-      assert(false, "unexpected node type " .. tostring(node.node_type))
-    end
+    check(node, allowed_set)
   end
 end
+local deny_all = allow({})
 
-local function check_annotations_top(cx, node)
-  ast.traverse_node_postorder(check_annotations_node(cx), node)
+local function pass(node)
 end
 
-function check_annotations.top_task(cx, node)
-  check_annotations_top(cx, node)
+local function unreachable(node)
+  assert(false, "unreachable")
 end
 
-function check_annotations.top_fspace(cx, node)
-  check(cx, node, data.set({}))
+local permitted_for_num_annotations = terralib.newlist({"parallel", "spmd", "trace"})
+if std.config["vectorize-unsafe"] then
+  permitted_for_num_annotations:insert("vectorize")
 end
 
-function check_annotations.top_quote_expr(cx, node)
-  check(cx, node, data.set({}))
-end
+local node_allow_annotations = {
+  -- Expressions:
+  [ast.typed.expr.Call] = allow({"parallel", "inline"}),
 
-function check_annotations.top_quote_stat(cx, node)
-  check(cx, node, data.set({}))
-end
+  [ast.typed.expr.ID]                         = deny_all,
+  [ast.typed.expr.Constant]                   = deny_all,
+  [ast.typed.expr.Function]                   = deny_all,
+  [ast.typed.expr.FieldAccess]                = deny_all,
+  [ast.typed.expr.IndexAccess]                = deny_all,
+  [ast.typed.expr.MethodCall]                 = deny_all,
+  [ast.typed.expr.Cast]                       = deny_all,
+  [ast.typed.expr.Ctor]                       = deny_all,
+  [ast.typed.expr.CtorListField]              = deny_all,
+  [ast.typed.expr.CtorRecField]               = deny_all,
+  [ast.typed.expr.RawContext]                 = deny_all,
+  [ast.typed.expr.RawFields]                  = deny_all,
+  [ast.typed.expr.RawPhysical]                = deny_all,
+  [ast.typed.expr.RawRuntime]                 = deny_all,
+  [ast.typed.expr.RawValue]                   = deny_all,
+  [ast.typed.expr.Isnull]                     = deny_all,
+  [ast.typed.expr.Null]                       = deny_all,
+  [ast.typed.expr.DynamicCast]                = deny_all,
+  [ast.typed.expr.StaticCast]                 = deny_all,
+  [ast.typed.expr.UnsafeCast]                 = deny_all,
+  [ast.typed.expr.Ispace]                     = deny_all,
+  [ast.typed.expr.Region]                     = deny_all,
+  [ast.typed.expr.Partition]                  = deny_all,
+  [ast.typed.expr.PartitionEqual]             = deny_all,
+  [ast.typed.expr.PartitionByField]           = deny_all,
+  [ast.typed.expr.Image]                      = deny_all,
+  [ast.typed.expr.ImageByTask]                = deny_all,
+  [ast.typed.expr.Preimage]                   = deny_all,
+  [ast.typed.expr.CrossProduct]               = deny_all,
+  [ast.typed.expr.CrossProductArray]          = deny_all,
+  [ast.typed.expr.ListSlicePartition]         = deny_all,
+  [ast.typed.expr.ListDuplicatePartition]     = deny_all,
+  [ast.typed.expr.ListSliceCrossProduct]      = deny_all,
+  [ast.typed.expr.ListCrossProduct]           = deny_all,
+  [ast.typed.expr.ListCrossProductComplete]   = deny_all,
+  [ast.typed.expr.ListPhaseBarriers]          = deny_all,
+  [ast.typed.expr.ListInvert]                 = deny_all,
+  [ast.typed.expr.ListRange]                  = deny_all,
+  [ast.typed.expr.ListIspace]                 = deny_all,
+  [ast.typed.expr.ListFromElement]            = deny_all,
+  [ast.typed.expr.PhaseBarrier]               = deny_all,
+  [ast.typed.expr.DynamicCollective]          = deny_all,
+  [ast.typed.expr.DynamicCollectiveGetResult] = deny_all,
+  [ast.typed.expr.Advance]                    = deny_all,
+  [ast.typed.expr.Adjust]                     = deny_all,
+  [ast.typed.expr.Arrive]                     = deny_all,
+  [ast.typed.expr.Await]                      = deny_all,
+  [ast.typed.expr.Copy]                       = deny_all,
+  [ast.typed.expr.Fill]                       = deny_all,
+  [ast.typed.expr.Acquire]                    = deny_all,
+  [ast.typed.expr.Release]                    = deny_all,
+  [ast.typed.expr.AttachHDF5]                 = deny_all,
+  [ast.typed.expr.DetachHDF5]                 = deny_all,
+  [ast.typed.expr.AllocateScratchFields]      = deny_all,
+  [ast.typed.expr.WithScratchFields]          = deny_all,
+  [ast.typed.expr.RegionRoot]                 = deny_all,
+  [ast.typed.expr.Condition]                  = deny_all,
+  [ast.typed.expr.Unary]                      = deny_all,
+  [ast.typed.expr.Binary]                     = deny_all,
+  [ast.typed.expr.Deref]                      = deny_all,
+  [ast.typed.expr.ParallelizerConstraint]     = deny_all,
+
+  [ast.typed.expr.Internal]                   = unreachable,
+  [ast.typed.expr.Future]                     = unreachable,
+  [ast.typed.expr.FutureGetResult]            = unreachable,
+
+  -- Statements:
+  [ast.typed.stat.If]        = deny_all,
+  [ast.typed.stat.Elseif]    = deny_all,
+  [ast.typed.stat.While]     = allow({"spmd", "trace"}),
+  [ast.typed.stat.ForNum]    = allow(permitted_for_num_annotations),
+  [ast.typed.stat.ForList]   = allow({"openmp", "parallel", "spmd", "trace", "vectorize"}),
+  [ast.typed.stat.Repeat]    = allow({"spmd", "trace"}),
+  [ast.typed.stat.MustEpoch] = deny_all,
+  [ast.typed.stat.Block]     = allow({"spmd", "trace"}),
+
+  [ast.typed.stat.Var]             = deny_all,
+  [ast.typed.stat.VarUnpack]       = deny_all,
+  [ast.typed.stat.Return]          = deny_all,
+  [ast.typed.stat.Break]           = deny_all,
+  [ast.typed.stat.Assignment]      = deny_all,
+  [ast.typed.stat.Reduce]          = deny_all,
+  [ast.typed.stat.Expr]            = deny_all,
+  [ast.typed.stat.RawDelete]       = deny_all,
+  [ast.typed.stat.Fence]           = deny_all,
+  [ast.typed.stat.ParallelizeWith] = deny_all,
+
+  [ast.typed.stat.Internal]          = unreachable,
+  [ast.typed.stat.ForNumVectorized]  = unreachable,
+  [ast.typed.stat.ForListVectorized] = unreachable,
+  [ast.typed.stat.IndexLaunchNum]    = unreachable,
+  [ast.typed.stat.IndexLaunchList]   = unreachable,
+  [ast.typed.stat.BeginTrace]        = unreachable,
+  [ast.typed.stat.EndTrace]          = unreachable,
+  [ast.typed.stat.MapRegions]        = unreachable,
+  [ast.typed.stat.UnmapRegions]      = unreachable,
+
+  -- Tasks:
+  [ast.typed.top.TaskParam] = deny_all,
+
+  [ast.typed.top.Task] = allow({
+    "cuda",
+    "external",
+    "idempotent",
+    "inline",
+    "inner",
+    "leaf",
+    "optimize",
+    "parallel",
+    "replicable",
+  }),
+
+  [ast.typed.top.Fspace] = deny_all,
+
+  -- Specialized ASTs:
+  [ast.specialized.region] = pass,
+  [ast.specialized.expr] = pass,
+  [ast.specialized.stat] = pass,
+  [ast.specialized.Block] = pass,
+  [ast.specialized.top.QuoteExpr] = deny_all,
+  [ast.specialized.top.QuoteStat] = deny_all,
+
+  -- Miscellaneous:
+  [ast.typed.Block] = pass,
+  [ast.location] = pass,
+  [ast.annotation] = pass,
+  [ast.constraint_kind] = pass,
+  [ast.privilege_kind] = pass,
+  [ast.condition_kind] = pass,
+  [ast.disjointness_kind] = pass,
+  [ast.fence_kind] = pass,
+  [ast.constraint] = pass,
+  [ast.privilege] = pass,
+  [ast.TaskConfigOptions] = pass,
+}
+
+local check_annotations_node = ast.make_single_dispatch(
+  node_allow_annotations,
+  {ast.typed})
 
 function check_annotations.top(cx, node)
-  if node:is(ast.typed.top.Task) then
-    return check_annotations.top_task(cx, node)
-
-  elseif node:is(ast.typed.top.Fspace) then
-    return check_annotations.top_fspace(cx, node)
-
-  elseif node:is(ast.specialized.top.QuoteExpr) then
-    return check_annotations.top_quote_expr(cx, node)
-
-  elseif node:is(ast.specialized.top.QuoteStat) then
-    return check_annotations.top_quote_stat(cx, node)
-
-  else
-    assert(false, "unexpected node type " .. tostring(node:type()))
-  end
+  ast.traverse_node_postorder(check_annotations_node(), node)
 end
 
 function check_annotations.entry(node)
