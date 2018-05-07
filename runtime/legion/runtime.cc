@@ -6080,6 +6080,12 @@ namespace Legion {
               runtime->handle_index_space_colors_response(derez);
               break;
             }
+          case SEND_REMOTE_EXPRESSION_INVALIDATION:
+            {
+              runtime->handle_remote_expression_invalidation(derez,
+                                              remote_address_space);
+              break;
+            }
           case SEND_INDEX_PARTITION_NOTIFICATION:
             {
               runtime->handle_index_partition_notification(derez);
@@ -13653,6 +13659,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_remote_expression_invalidation(AddressSpaceID target,
+                                                      Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, 
+          SEND_REMOTE_EXPRESSION_INVALIDATION, 
+          DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_index_partition_notification(AddressSpaceID target,
                                                     Serializer &rez)
     //--------------------------------------------------------------------------
@@ -14866,6 +14882,15 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       IndexSpaceNode::handle_colors_response(derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_remote_expression_invalidation(Deserializer &derez,
+                                                        AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      IntermediateExpression::handle_expression_invalidation(derez, 
+                                                             forest, source);
     }
 
     //--------------------------------------------------------------------------

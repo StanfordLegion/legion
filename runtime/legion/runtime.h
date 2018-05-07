@@ -2118,6 +2118,8 @@ namespace Legion {
                                            Serializer &rez);
       void send_index_space_colors_response(AddressSpaceID target,
                                             Serializer &rez);
+      void send_remote_expression_invalidation(AddressSpaceID target,
+                                               Serializer &rez);
       void send_index_partition_notification(AddressSpaceID target, 
                                              Serializer &rez);
       void send_index_partition_node(AddressSpaceID target, Serializer &rez);
@@ -2294,6 +2296,8 @@ namespace Legion {
       void handle_index_space_colors_request(Deserializer &derez,
                                              AddressSpaceID source);
       void handle_index_space_colors_response(Deserializer &derez);
+      void handle_remote_expression_invalidation(Deserializer &derez,
+                                                 AddressSpaceID source);
       void handle_index_partition_notification(Deserializer &derez);
       void handle_index_partition_node(Deserializer &derez,
                                        AddressSpaceID source);
