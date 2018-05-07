@@ -257,6 +257,18 @@ def run_test_external(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
              [os.path.join(snap_dir, 'input/mms.in')] + flags]]
     run_cxx(snap, [], launcher, root_dir, None, env, thread_count)
 
+    # Soleil-X
+    # Contact: Manolis Papadakis <mpapadak@stanford.edu>
+    soleil_dir = os.path.join(tmp_dir, 'soleil-x')
+    cmd(['git', 'clone', 'https://github.com/stanfordhpccenter/soleil-x.git', soleil_dir])
+    soleil_env = dict(list(env.items()) + [
+        ('LEGION_DIR', root_dir),
+        ('SOLEIL_DIR', soleil_dir),
+        ('CC', 'gcc'),
+    ])
+    cmd(['make', '-C', os.path.join(soleil_dir, 'src')], env=soleil_env)
+    # FIXME: Actually run it
+
 def run_test_private(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
     flags = ['-logfile', 'out_%.log']
 
@@ -477,7 +489,7 @@ def check_test_legion_cxx(root_dir):
         raise Exception('There are tests that are NOT in the test suite')
 
 def build_cmake(root_dir, tmp_dir, env, thread_count,
-                test_regent, test_legion_cxx, test_perf, test_ctest):
+                test_regent, test_legion_cxx, test_external, test_perf, test_ctest):
     build_dir = os.path.join(tmp_dir, 'build')
     install_dir = os.path.join(tmp_dir, 'install')
     os.mkdir(build_dir)
@@ -498,9 +510,9 @@ def build_cmake(root_dir, tmp_dir, env, thread_count,
         cmdline.append('-DLegion_ENABLE_TESTING=OFF')
     if 'CC_FLAGS' in env:
         cmdline.append('-DCMAKE_CXX_FLAGS=%s' % env['CC_FLAGS'])
-    if test_regent or test_legion_cxx or test_perf or test_ctest:
+    if test_regent or test_legion_cxx or test_external or test_perf or test_ctest:
         cmdline.append('-DLegion_BUILD_ALL=ON')
-    if test_regent:
+    if test_regent or test_external:
         cmdline.append('-DBUILD_SHARED_LIBS=ON')
     # last argument to cmake is the root of the tree
     cmdline.append(root_dir)
@@ -509,6 +521,9 @@ def build_cmake(root_dir, tmp_dir, env, thread_count,
     cmd(['make', '-C', build_dir, '-j', str(thread_count)], env=env)
     cmd(['make', '-C', build_dir, 'install'], env=env)
     return os.path.join(build_dir, 'bin')
+
+def build_regent(root_dir, env):
+    cmd([os.path.join(root_dir, 'language/travis.py'), '--install-only'], env=env)
 
 def clean_cxx(tests, root_dir, env, thread_count):
     env = dict(list(env.items()) + [
@@ -703,7 +718,8 @@ def run_tests(test_modules=None,
             if use_cmake:
                 bin_dir = build_cmake(
                     root_dir, tmp_dir, env, thread_count,
-                    test_regent, test_legion_cxx, test_perf, test_ctest)
+                    test_regent, test_legion_cxx, test_external,
+                    test_perf, test_ctest)
             else:
                 # With GNU Make, builds happen inline. But clean here.
                 build_make_clean(
@@ -735,6 +751,8 @@ def run_tests(test_modules=None,
                 run_test_realm(launcher, root_dir, tmp_dir, bin_dir, env, thread_count)
         if test_external:
             with Stage('external'):
+                if not test_regent:
+                    build_regent(root_dir, env)
                 run_test_external(launcher, root_dir, tmp_dir, bin_dir, env, thread_count)
         if test_private:
             with Stage('private'):
