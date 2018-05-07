@@ -801,7 +801,7 @@ namespace Legion {
       bool empty, has_empty;
     };
 
-    // Shard functionality between index space operation and
+    // Shared functionality between index space operation and
     // remote expressions
     class IntermediateExpression : 
       public IndexSpaceExpression, public Collectable {
