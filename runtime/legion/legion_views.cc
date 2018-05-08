@@ -4333,8 +4333,6 @@ namespace Legion {
       derez.deserialize(user_mask);
       LegionColor child_color;
       derez.deserialize(child_color);
-      LogicalRegion origin_handle;
-      derez.deserialize(origin_handle);
       IndexSpaceExpression *user_expr = 
         IndexSpaceExpression::unpack_expression(derez, forest, source);
       UniqueID op_id;
