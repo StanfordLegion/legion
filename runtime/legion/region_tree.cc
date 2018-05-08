@@ -13687,6 +13687,7 @@ namespace Legion {
         LegionMap<ApEvent,FieldMask>::aligned preconditions;
         FieldMask update_mask; 
         const AddressSpaceID local_space = context->runtime->address_space;
+        IndexSpaceExpression *copy_expr = get_index_space_expression();
         for (LegionMap<MaterializedView*,FieldMask>::aligned::const_iterator 
               it = src_instances.begin(); it != src_instances.end(); it++)
         {
@@ -13694,8 +13695,9 @@ namespace Legion {
           assert(!!it->second);
 #endif
           it->first->find_copy_preconditions(0/*redop*/, true/*reading*/,
-                                             true/*single copy*/, restrict_out,
-                                             it->second, &info.version_info,
+                                             true/*single copy*/, 
+                                             restrict_out, it->second, 
+                                             copy_expr, &info.version_info,
                                              info.op->get_unique_op_id(),
                                              info.index, local_space, 
                                              preconditions,
@@ -13704,8 +13706,9 @@ namespace Legion {
         }
         // Now do the destination
         dst->find_copy_preconditions(0/*redop*/, false/*reading*/,
-                                     true/*single copy*/, restrict_out,
-                                     update_mask, &info.version_info,
+                                     true/*single copy*/, 
+                                     restrict_out, update_mask, 
+                                     copy_expr, &info.version_info,
                                      info.op->get_unique_op_id(),
                                      info.index, local_space, preconditions,
                                      info.map_applied_events);
@@ -13729,7 +13732,7 @@ namespace Legion {
         for (LegionMap<ApEvent,FieldMask>::aligned::const_iterator it = 
               postconditions.begin(); it != postconditions.end(); it++)
         {
-          dst->add_copy_user(0/*redop*/, it->first, &info.version_info, 
+          dst->add_copy_user(0/*redop*/, it->first, &info.version_info,copy_expr,
                              info.op->get_unique_op_id(), info.index,
                              it->second, false/*reading*/, restrict_out,
                              local_space, info.map_applied_events);
@@ -14170,13 +14173,19 @@ namespace Legion {
       if (copy_post.exists())
       {
         const AddressSpaceID local_space = context->runtime->address_space;
+        IndexSpaceExpression *copy_expr = get_index_space_expression();
+        if (intersect != NULL)
+          copy_expr = context->intersect_index_spaces(copy_expr, 
+              intersect->get_index_space_expression());
+        if (mask != NULL)
+          copy_expr = context->subtract_index_spaces(copy_expr, mask);
         // Register copy post with the source views
         // Note it is up to the caller to make sure the event
         // gets registered with the destination
         for (LegionMap<MaterializedView*,FieldMask>::aligned::const_iterator 
               it = update_views.begin(); it != update_views.end(); it++)
         {
-          it->first->add_copy_user(0/*redop*/, copy_post, src_versions,
+          it->first->add_copy_user(0/*redop*/, copy_post,src_versions,copy_expr,
                                    info.op->get_unique_op_id(), info.index,
                                    it->second, true/*reading*/, restrict_out,
                                    local_space, info.map_applied_events);
@@ -14215,8 +14224,14 @@ namespace Legion {
       if (copy_post.exists())
       {
         const AddressSpaceID local_space = context->runtime->address_space;
-        src->add_copy_user(0/*redop*/, copy_post, src_version_tracker,
-                           info.op->get_unique_op_id(), info.index,
+        IndexSpaceExpression *copy_expr = get_index_space_expression();
+        if (intersect != NULL)
+          copy_expr = context->intersect_index_spaces(copy_expr, 
+              intersect->get_index_space_expression());
+        if (mask != NULL)
+          copy_expr = context->subtract_index_spaces(copy_expr, mask);
+        src->add_copy_user(0/*redop*/, copy_post, src_version_tracker, 
+                           copy_expr, info.op->get_unique_op_id(), info.index,
                            copy_mask, true/*reading*/, restrict_out,
                            local_space, info.map_applied_events);
       }
@@ -16449,14 +16464,15 @@ namespace Legion {
       std::set<ApEvent> post_events;
       std::vector<InstanceView*> target_views(instances.size(), NULL);
       convert_target_views(instances, context, target_views);
+      IndexSpaceExpression *fill_expr = get_index_space_expression();
       for (unsigned idx = 0; idx < instances.size(); idx++)
       {
         InstanceView *target = target_views[idx];
         LegionMap<ApEvent,FieldMask>::aligned preconditions;
         target->find_copy_preconditions(0/*redop*/, false/*reading*/, 
                           true/*single copy*/, true/*restrict out*/, fill_mask,
-                          &version_info, op->get_unique_op_id(), index,
-                          local_space, preconditions, map_applied_events);
+                          fill_expr, &version_info, op->get_unique_op_id(), 
+                          index, local_space, preconditions,map_applied_events);
         if (sync_precondition.exists())
           preconditions[sync_precondition] = fill_mask;
         // Sort the preconditions into event sets
@@ -16482,7 +16498,7 @@ namespace Legion {
         }
         // Add user to make record when everyone is done writing
         target->add_copy_user(0/*redop*/, op->get_completion_event(), 
-                              &version_info, op->get_unique_op_id(), 
+                              &version_info, fill_expr, op->get_unique_op_id(),
                               index, fill_mask, false/*reading*/,
                               true/*restrict out*/, local_space, 
                               map_applied_events);

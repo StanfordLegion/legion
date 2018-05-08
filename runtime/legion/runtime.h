@@ -2378,7 +2378,8 @@ namespace Legion {
       void handle_view_request(Deserializer &derez, AddressSpaceID source);
       void handle_view_update_request(Deserializer &derez, 
                                       AddressSpaceID source);
-      void handle_view_update_response(Deserializer &derez);
+      void handle_view_update_response(Deserializer &derez,
+                                       AddressSpaceID source);
       void handle_view_remote_update(Deserializer &derez,
                                      AddressSpaceID source);
       void handle_view_remote_invalidate(Deserializer &derez);

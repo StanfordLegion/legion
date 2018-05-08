@@ -76,8 +76,8 @@ namespace Legion {
     
     //--------------------------------------------------------------------------
     PhysicalUser::PhysicalUser(const RegionUsage &u, const LegionColor c,
-                               UniqueID id, unsigned idx, RegionNode *n)
-      : usage(u), child(c), op_id(id), index(idx), node(n)
+                               UniqueID id, unsigned x, IndexSpaceExpression *e)
+      : usage(u), child(c), op_id(id), index(x), expr(e)
     //--------------------------------------------------------------------------
     {
     }
@@ -106,7 +106,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalUser::pack_user(Serializer &rez)
+    void PhysicalUser::pack_user(Serializer &rez, AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
       rez.serialize(child);
@@ -115,13 +115,12 @@ namespace Legion {
       rez.serialize(usage.redop);
       rez.serialize(op_id);
       rez.serialize(index);
-      rez.serialize(node->handle);
+      expr->pack_expression(rez, target);
     }
 
     //--------------------------------------------------------------------------
     /*static*/ PhysicalUser* PhysicalUser::unpack_user(Deserializer &derez,
-                                                       bool add_reference,
-                                                       RegionTreeForest *forest)
+        bool add_reference, RegionTreeForest *forest, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
       PhysicalUser *result = new PhysicalUser();
@@ -131,11 +130,10 @@ namespace Legion {
       derez.deserialize(result->usage.redop);
       derez.deserialize(result->op_id);
       derez.deserialize(result->index);
-      LogicalRegion handle;
-      derez.deserialize(handle);
-      result->node = forest->get_node(handle);
+      result->expr = 
+        IndexSpaceExpression::unpack_expression(derez, forest, source);
 #ifdef DEBUG_LEGION
-      assert(result != NULL);
+      assert(result->expr != NULL);
 #endif
       if (add_reference)
         result->add_reference();
