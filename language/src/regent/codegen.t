@@ -7344,20 +7344,21 @@ function codegen.stat_for_list(cx, node)
     local index_inits = terralib.newlist()
     local tid = terralib.newsymbol(c.size_t, "tid")
     local offsets = terralib.newlist()
+    local count = terralib.newsymbol(c.size_t, "count")
     local counts = terralib.newlist()
     for idx = 1, #indices do
       offsets:insert(terralib.newsymbol(c.size_t, "offset" .. tostring(idx)))
       counts:insert(terralib.newsymbol(c.size_t, "dim_size_" .. tostring(idx)))
     end
-    local count = counts[1]
+    local prod_count = counts[1]
     for idx = 2, #indices do
-      count = `([count] * [ counts[idx] ])
+      prod_count = `([prod_count] * [ counts[idx] ])
     end
 
     -- Compute a global tid
     index_inits:insert(quote
       var [tid] = [cudahelper.global_thread_id()]
-      if [tid] >= [count] then
+      if [tid] >= [prod_count] then
         return
       end
     end)
@@ -7388,11 +7389,11 @@ function codegen.stat_for_list(cx, node)
     args = data.filter(function(arg) return reductions[arg] == nil end, args)
     local shared_mem_size = cudahelper.compute_reduction_buffer_size(node, reductions)
     local device_ptrs, device_ptrs_map, host_preamble =
-      cudahelper.generate_reduction_preamble(reductions)
+      cudahelper.generate_reduction_preamble(reductions, count)
     local kernel_preamble, kernel_postamble =
       cudahelper.generate_reduction_kernel(reductions, device_ptrs_map)
     local host_postamble =
-      cudahelper.generate_reduction_postamble(reductions, device_ptrs_map)
+      cudahelper.generate_reduction_postamble(reductions, device_ptrs_map, count)
     args:insertall(lower_bounds)
     args:insertall(counts)
     args:insertall(device_ptrs)
@@ -7408,21 +7409,20 @@ function codegen.stat_for_list(cx, node)
     local kernel_id = cx.task_meta:get_cuda_variant():add_cuda_kernel(kernel)
 
     ---- kernel launch
-    local count = terralib.newsymbol(c.size_t, "count")
     local kernel_call =
       cudahelper.codegen_kernel_call(kernel_id, count, args, shared_mem_size)
 
     if ispace_type:is_opaque() then
       return quote
         [actions]
-        [host_preamble]
         while iterator_has_next([it]) do
           var [ counts[1] ] = 0
           var [ lower_bounds[1] ] = iterator_next_span([it], &[ counts[1] ], -1).value
           var [count] = [ counts[1] ]
+          [host_preamble]
           [kernel_call]
+          [host_postamble]
         end
-        [host_postamble]
         [cleanup_actions]
       end
     else
@@ -7443,9 +7443,9 @@ function codegen.stat_for_list(cx, node)
       end
       return quote
         [actions]
-        [host_preamble]
         var [rect] = [domain_get_rect]([domain])
         [bounds_setup]
+        [host_preamble]
         [kernel_call]
         [host_postamble]
         [cleanup_actions]

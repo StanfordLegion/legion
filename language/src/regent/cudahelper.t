@@ -242,7 +242,6 @@ end
 
 local THREAD_BLOCK_SIZE = 128
 local MAX_NUM_BLOCK = 32768
-local GLOBAL_RED_BUFFER = 256
 
 local tid_x   = cudalib.nvvm_read_ptx_sreg_tid_x
 local n_tid_x = cudalib.nvvm_read_ptx_sreg_ntid_x
@@ -387,7 +386,7 @@ function cudahelper.compute_reduction_buffer_size(node, reductions)
   return size
 end
 
-function cudahelper.generate_reduction_preamble(reductions)
+function cudahelper.generate_reduction_preamble(reductions, count)
   local preamble = quote end
   local device_ptrs = terralib.newlist()
   local device_ptrs_map = {}
@@ -399,14 +398,10 @@ function cudahelper.generate_reduction_preamble(reductions)
       [preamble];
       var [device_ptr] = [&red_var.type](nil)
       do
+        var num_blocks = ([count] + [THREAD_BLOCK_SIZE - 1]) / [THREAD_BLOCK_SIZE]
         var r = RuntimeAPI.cudaMalloc([&&opaque](&[device_ptr]),
-                                      [sizeof(red_var.type) * GLOBAL_RED_BUFFER])
+                                      [sizeof(red_var.type)] * num_blocks)
         assert([r] == 0 and [device_ptr] ~= [&red_var.type](nil), "cudaMalloc failed")
-        var v : (red_var.type)[GLOBAL_RED_BUFFER]
-        for i = 0, GLOBAL_RED_BUFFER do v[i] = [init] end
-        RuntimeAPI.cudaMemcpy([device_ptr], [&opaque]([&red_var.type](v)),
-                              [sizeof(red_var.type) * GLOBAL_RED_BUFFER],
-                              RuntimeAPI.cudaMemcpyHostToDevice)
       end
     end
     device_ptrs:insert(device_ptr)
@@ -474,8 +469,7 @@ function cudahelper.generate_reduction_kernel(reductions, device_ptrs_map)
         barrier()
         [reduction_tree]
         if [tid] == 0 then
-          [generate_atomic(red_op, red_var.type)](
-            &[device_ptr][bid % [GLOBAL_RED_BUFFER] ], [shared_mem_ptr][ [tid] ])
+          [device_ptr][bid] = [shared_mem_ptr][ [tid] ]
         end
       end
     end
@@ -483,7 +477,7 @@ function cudahelper.generate_reduction_kernel(reductions, device_ptrs_map)
   return preamble, postamble
 end
 
-function cudahelper.generate_reduction_postamble(reductions, device_ptrs_map)
+function cudahelper.generate_reduction_postamble(reductions, device_ptrs_map, count)
   local postamble = quote end
   for device_ptr, red_var in pairs(device_ptrs_map) do
     local red_op = reductions[red_var]
@@ -491,16 +485,19 @@ function cudahelper.generate_reduction_postamble(reductions, device_ptrs_map)
     postamble = quote
       [postamble]
       do
-        var v : (red_var.type)[GLOBAL_RED_BUFFER]
-        RuntimeAPI.cudaMemcpy([&opaque]([&red_var.type](v)), [device_ptr],
-                              [sizeof(red_var.type) * GLOBAL_RED_BUFFER],
+        var num_blocks = ([count] + [THREAD_BLOCK_SIZE - 1]) / [THREAD_BLOCK_SIZE]
+        var v : &red_var.type =
+          [&red_var.type](C.malloc([sizeof(red_var.type)] * num_blocks))
+        RuntimeAPI.cudaMemcpy([&opaque](v), [device_ptr],
+                              [sizeof(red_var.type)] * num_blocks,
                               RuntimeAPI.cudaMemcpyDeviceToHost)
         var tmp : red_var.type = [init]
-        for i = 0, GLOBAL_RED_BUFFER do
+        for i = 0, num_blocks do
           tmp = [std_base.quote_binary_op(red_op, tmp, `(v[i]))]
         end
         [red_var] = [std_base.quote_binary_op(red_op, red_var, tmp)]
         RuntimeAPI.cudaFree([device_ptr])
+        C.free(v)
       end
     end
   end
