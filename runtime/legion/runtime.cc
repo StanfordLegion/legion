@@ -6639,7 +6639,7 @@ namespace Legion {
             }
           case SEND_VIEW_UPDATE_RESPONSE:
             {
-              runtime->handle_view_update_response(derez);
+              runtime->handle_view_update_response(derez, remote_address_space);
               break;
             }
           case SEND_VIEW_REMOTE_UPDATE:
@@ -16872,11 +16872,12 @@ namespace Legion {
     }
     
     //--------------------------------------------------------------------------
-    void Runtime::handle_view_update_response(Deserializer &derez)
+    void Runtime::handle_view_update_response(Deserializer &derez,
+                                              AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
 #ifdef DISTRIBUTED_INSTANCE_VIEWS
-      InstanceView::handle_view_update_response(derez, this);
+      InstanceView::handle_view_update_response(derez, this, source);
 #else
       assert(false);
 #endif

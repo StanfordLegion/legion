@@ -135,6 +135,7 @@ namespace Legion {
                                            bool single_copy/*only for writing*/,
                                            bool restrict_out,
                                            const FieldMask &copy_mask,
+                                           IndexSpaceExpression *copy_expr,
                                            VersionTracker *version_tracker,
                                            const UniqueID creator_op_id,
                                            const unsigned index,
@@ -144,6 +145,7 @@ namespace Legion {
                                            bool can_filter = true) = 0;
       virtual void add_copy_user(ReductionOpID redop, ApEvent copy_term,
                                  VersionTracker *version_tracker,
+                                 IndexSpaceExpression *copy_expr,
                                  const UniqueID creator_op_id,
                                  const unsigned index, const FieldMask &mask, 
                                  bool reading, bool restrict_out,
@@ -223,6 +225,7 @@ namespace Legion {
                                RtUserEvent done_event, Deserializer &derez) = 0;
       virtual void process_update_response(Deserializer &derez,
                                            RtUserEvent done_event,
+                                           AddressSpaceID source,
                                            RegionTreeForest *forest) = 0;
       virtual void process_remote_update(Deserializer &derez,
                                          AddressSpaceID source,
@@ -232,7 +235,8 @@ namespace Legion {
     public:
       static void handle_view_update_request(Deserializer &derez, 
           Runtime *runtime, AddressSpaceID source); 
-      static void handle_view_update_response(Deserializer &derez, Runtime *rt);
+      static void handle_view_update_response(Deserializer &derez, 
+          Runtime *runtime, AddressSpaceID source);
       static void handle_view_remote_update(Deserializer &derez, Runtime *rt,
                                             AddressSpaceID source);
       static void handle_view_remote_invalidate(Deserializer &derez,  
@@ -351,6 +355,7 @@ namespace Legion {
                                            bool single_copy/*only for writing*/,
                                            bool restrict_out,
                                            const FieldMask &copy_mask,
+                                           IndexSpaceExpression *copy_expr,
                                            VersionTracker *version_tracker,
                                            const UniqueID creator_op_id,
                                            const unsigned index,
@@ -363,7 +368,7 @@ namespace Legion {
                                          bool single_copy, bool restrict_out,
                                          const FieldMask &copy_mask,
                                          const LegionColor child_color,
-                                         RegionNode *origin_node,
+                                         IndexSpaceExpression *user_expr,
                                          VersionTracker *version_tracker,
                                          const UniqueID creator_op_id,
                                          const unsigned index,
@@ -377,7 +382,7 @@ namespace Legion {
                                          bool single_copy, bool restrict_out,
                                          const FieldMask &copy_mask,
                                          const LegionColor child_color,
-                                         RegionNode *origin_node,
+                                         IndexSpaceExpression *user_expr,
                                          VersionTracker *version_tracker,
                                          const UniqueID creator_op_id,
                                          const unsigned index,
@@ -388,7 +393,7 @@ namespace Legion {
                                          bool single_copy, bool restrict_out,
                                          const FieldMask &copy_mask,
                                          const LegionColor child_color,
-                                         RegionNode *origin_node,
+                                         IndexSpaceExpression *user_expr,
                                          VersionTracker *version_tracker,
                                          const UniqueID creator_op_id,
                                          const unsigned index,
@@ -399,6 +404,7 @@ namespace Legion {
     public:
       virtual void add_copy_user(ReductionOpID redop, ApEvent copy_term,
                                  VersionTracker *version_tracker,
+                                 IndexSpaceExpression *copy_expr,
                                  const UniqueID creator_op_id,
                                  const unsigned index,
                                  const FieldMask &mask, 
@@ -408,7 +414,7 @@ namespace Legion {
     protected:
       void add_copy_user_above(const RegionUsage &usage, ApEvent copy_term,
                                const LegionColor child_color,
-                               RegionNode *origin_node,
+                               IndexSpaceExpression *user_expr,
                                VersionTracker *version_tracker,
                                const UniqueID creator_op_id,
                                const unsigned index, const bool restrict_out,
@@ -418,7 +424,7 @@ namespace Legion {
       void add_local_copy_user(const RegionUsage &usage, ApEvent copy_term,
                                bool base_user, bool restrict_out,
                                const LegionColor child_color,
-                               RegionNode *origin_node,
+                               IndexSpaceExpression *user_expr,
                                VersionTracker *version_tracker,
                                const UniqueID creator_op_id,
                                const unsigned index,
@@ -437,7 +443,7 @@ namespace Legion {
       void find_user_preconditions_above(const RegionUsage &usage,
                                          ApEvent term_event,
                                          const LegionColor child_color,
-                                         RegionNode *origin_node,
+                                         IndexSpaceExpression *user_expr,
                                          VersionTracker *version_tracker,
                                          const UniqueID op_id,
                                          const unsigned index,
@@ -447,7 +453,7 @@ namespace Legion {
       void find_local_user_preconditions(const RegionUsage &usage,
                                          ApEvent term_event,
                                          const LegionColor child_color,
-                                         RegionNode *origin_node,
+                                         IndexSpaceExpression *user_expr,
                                          VersionTracker *version_tracker,
                                          const UniqueID op_id,
                                          const unsigned index,
@@ -457,7 +463,7 @@ namespace Legion {
       void find_local_user_preconditions_above(const RegionUsage &usage,
                                          ApEvent term_event,
                                          const LegionColor child_color,
-                                         RegionNode *origin_node,
+                                         IndexSpaceExpression *user_expr,
                                          VersionTracker *version_tracker,
                                          const UniqueID op_id,
                                          const unsigned index,
@@ -480,7 +486,7 @@ namespace Legion {
     protected:
       void add_user_above(const RegionUsage &usage, ApEvent term_event,
                           const LegionColor child_color, 
-                          RegionNode *origin_node,
+                          IndexSpaceExpression *user_expr,
                           VersionTracker *version_tracker,
                           const UniqueID op_id, const unsigned index,
                           const FieldMask &user_mask,
@@ -489,7 +495,8 @@ namespace Legion {
                           std::set<RtEvent> &applied_events);
       bool add_local_user(const RegionUsage &usage, ApEvent term_event,
                           const LegionColor child_color, 
-                          RegionNode *origin_node, const bool base_user,
+                          IndexSpaceExpression *user_expr,
+                          const bool base_user,
                           VersionTracker *version_tracker,
                           const UniqueID op_id, const unsigned index,
                           const FieldMask &user_mask,
@@ -515,7 +522,7 @@ namespace Legion {
     protected:
       void add_user_above_fused(const RegionUsage &usage, ApEvent term_event,
                                 const LegionColor child_color,
-                                RegionNode *origin_node,
+                                IndexSpaceExpression *user_expr,
                                 VersionTracker *version_tracker,
                                 const UniqueID op_id,
                                 const unsigned index,
@@ -585,7 +592,7 @@ namespace Legion {
       void find_current_preconditions(const FieldMask &user_mask,
                                       const RegionUsage &usage,
                                       const LegionColor child_color,
-                                      RegionNode *origin_node,
+                                      IndexSpaceExpression *user_expr,
                                       ApEvent term_event,
                                       const UniqueID op_id,
                                       const unsigned index,
@@ -597,7 +604,7 @@ namespace Legion {
       void find_previous_preconditions(const FieldMask &user_mask,
                                       const RegionUsage &usage,
                                       const LegionColor child_color,
-                                      RegionNode *origin_node,
+                                      IndexSpaceExpression *user_expr,
                                       ApEvent term_event,
                                       const UniqueID op_id,
                                       const unsigned index,
@@ -608,7 +615,7 @@ namespace Legion {
       void find_current_preconditions(const FieldMask &user_mask,
                                       const RegionUsage &usage,
                                       const LegionColor child_color,
-                                      RegionNode *origin_node,
+                                      IndexSpaceExpression *user_expr,
                                       const UniqueID op_id,
                                       const unsigned index,
                   LegionMap<ApEvent,FieldMask>::aligned &preconditions,
@@ -619,7 +626,7 @@ namespace Legion {
       void find_previous_preconditions(const FieldMask &user_mask,
                                       const RegionUsage &usage,
                                       const LegionColor child_color,
-                                      RegionNode *origin_node,
+                                      IndexSpaceExpression *user_expr,
                                       const UniqueID op_id,
                                       const unsigned index,
                   LegionMap<ApEvent,FieldMask>::aligned &preconditions,
@@ -631,7 +638,7 @@ namespace Legion {
                                      const LegionColor child_color,
                                      const UniqueID op_id,
                                      const unsigned index,
-                                     RegionNode *origin_node);
+                                     IndexSpaceExpression *user_expr);
     public:
       void find_atomic_reservations(const FieldMask &mask, 
                                     Operation *op, bool exclusive);
@@ -676,6 +683,7 @@ namespace Legion {
                                RtUserEvent done_event, Deserializer &derez);
       virtual void process_update_response(Deserializer &derez,
                                            RtUserEvent done_event,
+                                           AddressSpaceID source,
                                            RegionTreeForest *forest);
       virtual void process_remote_update(Deserializer &derez,
                                          AddressSpaceID source,
@@ -838,6 +846,7 @@ namespace Legion {
                                            bool single_copy/*only for writing*/,
                                            bool restrict_out,
                                            const FieldMask &copy_mask,
+                                           IndexSpaceExpression *copy_expr,
                                            VersionTracker *version_tracker,
                                            const UniqueID creator_op_id,
                                            const unsigned index,
@@ -847,6 +856,7 @@ namespace Legion {
                                            bool can_filter = true);
       virtual void add_copy_user(ReductionOpID redop, ApEvent copy_term,
                                  VersionTracker *version_tracker,
+                                 IndexSpaceExpression *copy_expr,
                                  const UniqueID creator_op_id,
                                  const unsigned index,
                                  const FieldMask &mask, 
@@ -932,6 +942,7 @@ namespace Legion {
                                RtUserEvent done_event, Deserializer &derez);
       virtual void process_update_response(Deserializer &derez,
                                            RtUserEvent done_event,
+                                           AddressSpaceID source,
                                            RegionTreeForest *forest);
       virtual void process_remote_update(Deserializer &derez,
                                          AddressSpaceID source,
@@ -2342,11 +2353,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     inline bool MaterializedView::has_local_precondition(PhysicalUser *user,
-                                                 const RegionUsage &next_user,
-                                                 const LegionColor child_color,
-                                                 const UniqueID op_id,
-                                                 const unsigned index,
-                                                 RegionNode *origin_node)
+                                               const RegionUsage &next_user,
+                                               const LegionColor child_color,
+                                               const UniqueID op_id,
+                                               const unsigned index,
+                                               IndexSpaceExpression *user_expr)
     //--------------------------------------------------------------------------
     {
       // Different region requirements of the same operation 
@@ -2354,22 +2365,17 @@ namespace Legion {
       // requirement, we'll implicitly wait for all other copies to 
       // finish anyway as the region requirements that generated those
       // copies will catch dependences
+      // We order these tests in a slightly entirely based on cost which
+      // doesn't make the for the most read-able code
       if ((op_id == user->op_id) && (index != user->index))
         return false;
-      if (child_color != INVALID_COLOR)
-      {
-        // Same child, already done the analysis
-        if (child_color == user->child)
-          return false;
-        // Disjoint children means we can skip it
-        if ((user->child != INVALID_COLOR) && (disjoint_children || 
-              logical_node->are_children_disjoint(child_color, user->child)))
-          return false;
-        // See if the two origin nodes don't intersect
-        if (!origin_node->intersects_with(user->node))
-          return false;
-      }
-      // Now do a dependence test for coherence non-interference
+      const bool has_child = (child_color != INVALID_COLOR);
+      // Same child, already done the analysis
+      // Or we have disjoint children from our knowledge of the partition
+      if (has_child && ((child_color == user->child) || 
+            ((user->child != INVALID_COLOR) && disjoint_children)))
+        return false;
+      // Now do a dependence test for privilege non-interference
       DependenceType dt = check_dependence_type(user->usage, next_user);
       switch (dt)
       {
@@ -2383,6 +2389,17 @@ namespace Legion {
         default:
           assert(false); // should never get here
       }
+      // See if we have disjoint children the hard-way
+      if (has_child && (user->child != INVALID_COLOR) && !disjoint_children &&
+            logical_node->are_children_disjoint(child_color, user->child))
+        return false;
+      // This is the most expensive test so we do it last
+      // See if the two user expressions intersect
+      IndexSpaceExpression *overlap = 
+        logical_node->context->intersect_index_spaces(user->expr, user_expr);
+      // If they don't overlap then there is no dependence
+      if (overlap->check_empty())
+        return false;
       return true;
     }
 

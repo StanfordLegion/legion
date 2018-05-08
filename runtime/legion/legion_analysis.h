@@ -465,22 +465,21 @@ namespace Legion {
     public:
       PhysicalUser(void);
       PhysicalUser(const RegionUsage &u, LegionColor child, 
-                   UniqueID op_id, unsigned index, RegionNode *node);
+                   UniqueID op_id, unsigned index, IndexSpaceExpression *expr);
       PhysicalUser(const PhysicalUser &rhs);
       ~PhysicalUser(void);
     public:
       PhysicalUser& operator=(const PhysicalUser &rhs);
     public:
-      void pack_user(Serializer &rez);
-      static PhysicalUser* unpack_user(Deserializer &derez, 
-                                       bool add_reference,
-                                       RegionTreeForest *forest);
+      void pack_user(Serializer &rez, AddressSpaceID target);
+      static PhysicalUser* unpack_user(Deserializer &derez, bool add_reference,
+                               RegionTreeForest *forest, AddressSpaceID source);
     public:
       RegionUsage usage;
       LegionColor child;
       UniqueID op_id;
       unsigned index; // region requirement index
-      RegionNode *node;
+      IndexSpaceExpression *expr;
     }; 
 
     /**
