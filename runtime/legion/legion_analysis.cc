@@ -9713,7 +9713,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InstanceRef::pack_reference(Serializer &rez, AddressSpaceID target)
+    void InstanceRef::pack_reference(Serializer &rez) const
     //--------------------------------------------------------------------------
     {
       rez.serialize(valid_fields);
@@ -10157,8 +10157,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InstanceSet::pack_references(Serializer &rez,
-                                      AddressSpaceID target) const
+    void InstanceSet::pack_references(Serializer &rez) const
     //--------------------------------------------------------------------------
     {
       if (single)
@@ -10169,13 +10168,13 @@ namespace Legion {
           return;
         }
         rez.serialize<size_t>(1);
-        refs.single->pack_reference(rez, target);
+        refs.single->pack_reference(rez);
       }
       else
       {
         rez.serialize<size_t>(refs.multi->vector.size());
         for (unsigned idx = 0; idx < refs.multi->vector.size(); idx++)
-          refs.multi->vector[idx].pack_reference(rez, target);
+          refs.multi->vector[idx].pack_reference(rez);
       }
     }
 

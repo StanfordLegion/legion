@@ -874,7 +874,7 @@ namespace Legion {
             early_mapped_regions.end(); it++)
       {
         rez.serialize(it->first);
-        it->second.pack_references(rez, target);
+        it->second.pack_references(rez);
       }
     }
 
@@ -2550,7 +2550,7 @@ namespace Legion {
       }
       rez.serialize<size_t>(physical_instances.size());
       for (unsigned idx = 0; idx < physical_instances.size(); idx++)
-        physical_instances[idx].pack_references(rez, target);
+        physical_instances[idx].pack_references(rez);
       rez.serialize<size_t>(task_profiling_requests.size());
       for (unsigned idx = 0; idx < task_profiling_requests.size(); idx++)
         rez.serialize(task_profiling_requests[idx]);

@@ -1668,7 +1668,7 @@ namespace Legion {
         LegionRuntime::Accessor::AccessorType::Generic>
           get_field_accessor(FieldID fid) const;
     public:
-      void pack_reference(Serializer &rez, AddressSpaceID target);
+      void pack_reference(Serializer &rez) const;
       void unpack_reference(Runtime *rt, Deserializer &derez, RtEvent &ready);
     protected:
       FieldMask valid_fields; 
@@ -1731,7 +1731,7 @@ namespace Legion {
       void add_instance(const InstanceRef &ref);
       bool is_virtual_mapping(void) const;
     public:
-      void pack_references(Serializer &rez, AddressSpaceID target) const;
+      void pack_references(Serializer &rez) const;
       void unpack_references(Runtime *runtime, Deserializer &derez, 
                              std::set<RtEvent> &ready_events);
     public:
