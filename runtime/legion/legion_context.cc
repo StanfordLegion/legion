@@ -4923,14 +4923,39 @@ namespace Legion {
       }
       if (!to_perform.empty())
       {
-        for (std::vector<PostTaskArgs>::iterator it =
-              to_perform.begin(); it != to_perform.end(); it++)
+        if (launch_next_op == NULL)
         {
-          DeferredPostTaskArgs args(*it);
-          runtime->issue_runtime_meta_task(args, LG_THROUGHPUT_WORK_PRIORITY);
+          // We're not launching the next operation, so we can just kick
+          // these things off as they are without preconditions
+          for (std::vector<PostTaskArgs>::iterator it =
+                to_perform.begin(); it != to_perform.end(); it++)
+          {
+            DeferredPostTaskArgs args(*it, RtUserEvent::NO_RT_USER_EVENT);
+            runtime->issue_runtime_meta_task(args, 
+                  LG_THROUGHPUT_DEFERRED_PRIORITY);
+          }
+        }
+        else
+        {
+          // We're going to launch the next iteration also, but don't do
+          // it until all of our currently kicked off tasks have started 
+          std::set<RtEvent> next_op_preconditions;
+          for (std::vector<PostTaskArgs>::iterator it =
+                to_perform.begin(); it != to_perform.end(); it++)
+          {
+            RtUserEvent start_event = Runtime::create_rt_user_event();
+            DeferredPostTaskArgs args(*it, start_event);
+            runtime->issue_runtime_meta_task(args, 
+                  LG_THROUGHPUT_DEFERRED_PRIORITY);
+            next_op_preconditions.insert(start_event);
+          }
+          // Now we can kick off the next iteration with the right preconditions
+          PostEndArgs args(launch_next_op, this);
+          runtime->issue_runtime_meta_task(args, LG_THROUGHPUT_WORK_PRIORITY,
+                                Runtime::merge_events(next_op_preconditions));
         }
       }
-      if (launch_next_op != NULL)
+      else if (launch_next_op != NULL)
       {
         PostEndArgs args(launch_next_op, this);
         runtime->issue_runtime_meta_task(args, LG_THROUGHPUT_WORK_PRIORITY);
@@ -6859,7 +6884,10 @@ namespace Legion {
                                                                const void *args)
     //--------------------------------------------------------------------------
     {
-      const PostTaskArgs *pargs = &((const DeferredPostTaskArgs*)args)->args;
+      const DeferredPostTaskArgs *pargs = ((const DeferredPostTaskArgs*)args);
+      // If we have a start event, trigger that now
+      if (pargs->started.exists())
+        Runtime::trigger_event(pargs->started);
       if (pargs->instance.exists())
       {
         pargs->context->post_end_task(

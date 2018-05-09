@@ -665,12 +665,17 @@ namespace Legion {
       public:
         static const LgTaskID TASK_ID = LG_DEFERRED_POST_END_ID;
       public:
-        DeferredPostTaskArgs(PostTaskArgs &a)
+        DeferredPostTaskArgs(const PostTaskArgs &a, RtUserEvent s)
           : LgTaskArgs<DeferredPostTaskArgs>(
               a.context->owner_task->get_unique_op_id()),
-            args(a.context, a.result, a.size, a.instance, a.wait_on) { }
+            context(a.context), result(a.result), size(a.size),
+            instance(a.instance), started(s) { }
       public:
-        PostTaskArgs args;
+        TaskContext *context;
+        const void *result;
+        const size_t size;
+        PhysicalInstance instance;
+        RtUserEvent started;
       };
       struct PostDecrementArgs : public LgTaskArgs<PostDecrementArgs> {
       public:
