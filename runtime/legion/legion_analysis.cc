@@ -6262,12 +6262,14 @@ namespace Legion {
           for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator 
                 it = to_add.begin(); it != to_add.end(); it++)
           {
+            ManagerVersions &versions = 
+              current_version_infos[it->first->version_number];
 #ifdef DEBUG_LEGION
-            assert(current_version_infos.find(it->first->version_number) ==
-                   current_version_infos.end());
+            // We shouldn't already have these fields
+            if (!versions.empty())
+              assert(it->second * versions.get_valid_mask());
 #endif
-            current_version_infos[it->first->version_number].insert(
-                it->first, it->second, &mutator);
+            versions.insert(it->first, it->second, &mutator);
           }
         }
 #ifdef DEBUG_LEGION
