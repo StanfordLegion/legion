@@ -186,10 +186,10 @@ namespace Legion {
       RtEvent perform_collective_wait(bool block = true);
       virtual void handle_collective_message(Deserializer &derez);
     protected:
-      bool send_stage(int stage);
+      void initialize_collective(void);
       void construct_message(ShardID target, int stage, Serializer &rez) const;
-      bool arrive_stage(int stage);
-      bool update_current_stage(int stage);
+      bool send_explicit_stage(int stage);
+      bool send_ready_stages(void);
       bool unpack_stage(int stage, Deserializer &derez);
       void complete_exchange(void);
     public: 
@@ -202,11 +202,11 @@ namespace Legion {
       const bool participating; 
     private:
       RtUserEvent done_event;
-      int current_stage;
-      int current_notifications;
-      // Stages have to trigger in order so buffer anything that is not current
-      std::map<int/*stage*/,int/*count*/> pending_notifications;
-      bool prefix_stage_notification; // Only two arrivals so 1 bit necessary
+      std::vector<int> stage_notifications;
+      std::vector<bool> sent_stages;
+      // Handle a small race on deciding who gets to
+      // trigger the done event
+      bool done_triggered;
     };
 
     /**
