@@ -190,7 +190,7 @@ namespace Legion {
       void construct_message(ShardID target, int stage, Serializer &rez) const;
       bool send_explicit_stage(int stage);
       bool send_ready_stages(void);
-      bool unpack_stage(int stage, Deserializer &derez);
+      void unpack_stage(int stage, Deserializer &derez);
       void complete_exchange(void);
     public: 
       const int shard_collective_radix;

@@ -4975,7 +4975,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(participating || (stage == -1));
 #endif
-      unpack_collective_stage(derez, stage);
+      unpack_stage(stage, derez);
       bool all_stages_done = false;
       if (stage == -1)
       {
@@ -5173,6 +5173,30 @@ namespace Legion {
       }
       else
         return false;
+    }
+
+    //--------------------------------------------------------------------------
+    void AllGatherCollective::unpack_stage(int stage, Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock c_lock(collective_lock);
+      // Do the unpack first while holding the lock
+      unpack_collective_stage(derez, stage);
+      // A stage -1 message is counted as part of stage 0 (if it exists
+      //  and we are participating)
+      if ((stage == -1) && participating && (shard_collective_stages > 0))
+	stage = 0;
+      if (stage >= 0)
+      {
+#ifdef DEBUG_LEGION
+	assert(stage < int(stage_notifications.size()));
+        if (stage < (shard_collective_stages-1))
+          assert(stage_notifications[stage] < shard_collective_radix);
+        else
+          assert(stage_notifications[stage] < shard_collective_last_radix);
+#endif
+        stage_notifications[stage]++;
+      }
     }
 
     //--------------------------------------------------------------------------
