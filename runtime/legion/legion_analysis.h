@@ -1669,8 +1669,7 @@ namespace Legion {
           get_field_accessor(FieldID fid) const;
     public:
       void pack_reference(Serializer &rez, AddressSpaceID target);
-      void unpack_reference(Runtime *rt, TaskOp *task,
-                            Deserializer &derez, RtEvent &ready);
+      void unpack_reference(Runtime *rt, Deserializer &derez, RtEvent &ready);
     protected:
       FieldMask valid_fields; 
       ApEvent ready_event;
@@ -1733,8 +1732,8 @@ namespace Legion {
       bool is_virtual_mapping(void) const;
     public:
       void pack_references(Serializer &rez, AddressSpaceID target) const;
-      void unpack_references(Runtime *runtime, TaskOp *task,
-          Deserializer &derez, std::set<RtEvent> &ready_events);
+      void unpack_references(Runtime *runtime, Deserializer &derez, 
+                             std::set<RtEvent> &ready_events);
     public:
       void add_valid_references(ReferenceSource source) const;
       void remove_valid_references(ReferenceSource source) const;
