@@ -4894,7 +4894,7 @@ namespace Legion {
           // non-participating shard , we'll count that as part of 
           // stage 0, it will make it a negative count, but the 
           // type is 'int' so we're good
-          if ((shard_collective_stages > 0) && (int(local_shard) <
+          if ((shard_collective_stages > 0) && (local_shard <
              (manager->total_shards - shard_collective_participating_shards)))
             stage_notifications[0] = -1;
           else
