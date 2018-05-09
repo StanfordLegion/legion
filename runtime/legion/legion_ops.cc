@@ -14737,8 +14737,22 @@ namespace Legion {
                                   std::vector<unsigned> &ranking)
     //--------------------------------------------------------------------------
     {
-      // TODO: Implement this when someone hits it
-      assert(false);
+      // Ship this back to the owner node to do the mapper call there for now
+      Serializer rez;
+      // Make a user event that we'll wait on for the result to be ready
+      RtUserEvent done_event = Runtime::create_rt_user_event();
+      {
+        RezCheck z(rez);
+        rez.serialize(remote_ptr);
+        target.pack_reference(rez);
+        sources.pack_references(rez);
+        rez.serialize(&ranking);
+        rez.serialize(done_event);
+      }
+      // Send the message and wait for the result to come back to us
+      runtime->send_remote_op_select_sources_request(source, rez);
+      // When we return from this call the ranking is populated
+      done_event.wait();
     }
 
     //--------------------------------------------------------------------------
@@ -14753,6 +14767,69 @@ namespace Legion {
       RemoteOp *result = new RemoteOp(runtime, remote_ptr, source);
       result->unpack(derez, runtime);
       return result;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void RemoteOp::handle_remote_sources_request(Deserializer &derez,
+                                        Runtime *runtime, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      Operation *op;
+      derez.deserialize(op);
+      std::set<RtEvent> ready_events;
+      RtEvent target_ready;
+      InstanceRef target;
+      target.unpack_reference(runtime, derez, target_ready);
+      if (target_ready.exists())
+        ready_events.insert(target_ready);
+      InstanceSet sources;
+      sources.unpack_references(runtime, derez, ready_events);
+      void *remote_ranking; // remote pointer, never dereference
+      derez.deserialize(remote_ranking);
+      RtUserEvent done_event;
+      derez.deserialize(done_event);
+      // Wait for the results to be ready if necessary
+      if (!ready_events.empty())
+      {
+        RtEvent wait_on = Runtime::merge_events(ready_events);
+        wait_on.wait();
+      }
+      // Now we can do the actual call
+      std::vector<unsigned> ranking;
+      op->select_sources(target, sources, ranking);
+      if (!ranking.empty())
+      {
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(remote_ranking);
+          rez.serialize<size_t>(ranking.size());
+          for (unsigned idx = 0; idx < ranking.size(); idx++)
+            rez.serialize(ranking[idx]);
+          rez.serialize(done_event);
+        }
+        runtime->send_remote_op_select_sources_response(source, rez);
+      }
+      else // optimization: if we have no ranking, just trigger the event
+        Runtime::trigger_event(done_event);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/void RemoteOp::handle_remote_sources_response(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      std::vector<unsigned> *ranking;
+      derez.deserialize(ranking);
+      size_t num_rankings;
+      derez.deserialize(num_rankings);
+      ranking->resize(num_rankings);
+      for (unsigned idx = 0; idx < num_rankings; idx++)
+        derez.deserialize((*ranking)[idx]);
+      RtUserEvent done_event;
+      derez.deserialize(done_event);
+      Runtime::trigger_event(done_event);
     }
  
   }; // namespace Internal 

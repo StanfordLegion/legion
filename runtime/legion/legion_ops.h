@@ -2939,6 +2939,9 @@ namespace Legion {
     public:
       static RemoteOp* unpack_remote_operation(Deserializer &derez,
                                                Runtime *runtime);
+      static void handle_remote_sources_request(Deserializer &derez,
+                            Runtime *runtime, AddressSpaceID source);
+      static void handle_remote_sources_response(Deserializer &derez);
     public:
       // This is a pointer to an operation on a remote node
       // it should never be dereferenced

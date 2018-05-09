@@ -7147,6 +7147,17 @@ namespace Legion {
               runtime->handle_library_task_response(derez);
               break;
             }
+          case SEND_REMOTE_OP_SOURCES_REQUEST:
+            {
+              runtime->handle_remote_op_sources_request(derez, 
+                                        remote_address_space);
+              break;
+            }
+          case SEND_REMOTE_OP_SOURCES_RESPONSE:
+            {
+              runtime->handle_remote_op_sources_response(derez);
+              break;
+            }
           case SEND_SHUTDOWN_NOTIFICATION:
             {
               // If we have a profiler, we shouldn't have incremented the
@@ -16299,6 +16310,24 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_remote_op_select_sources_request(AddressSpaceID target,
+                                                        Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_REMOTE_OP_SOURCES_REQUEST,
+                                        DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_remote_op_select_sources_response(AddressSpaceID target,
+                                                         Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_REMOTE_OP_SOURCES_RESPONSE,
+                      DEFAULT_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_shutdown_notification(AddressSpaceID target, 
                                              Serializer &rez)
     //--------------------------------------------------------------------------
@@ -17908,6 +17937,21 @@ namespace Legion {
         finder->second.result_set = true;
       }
       Runtime::trigger_event(done);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_remote_op_sources_request(Deserializer &derez,
+                                                   AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      RemoteOp::handle_remote_sources_request(derez, this, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_remote_op_sources_response(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      RemoteOp::handle_remote_sources_response(derez);
     }
 
     //--------------------------------------------------------------------------
