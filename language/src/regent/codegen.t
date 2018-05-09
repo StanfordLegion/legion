@@ -3500,6 +3500,9 @@ function codegen.expr_region(cx, node)
         return terralib.newlist({
             physical_region_get_base_pointer(cx, index_type, field_type, field_id, field_privilege, pr)})
   end))))
+  pr_actions = pr_actions or terralib.newlist()
+  base_pointers = base_pointers or terralib.newlist()
+  strides = strides or terralib.newlist()
 
   cx:add_region_root(region_type, r,
                      field_paths,
