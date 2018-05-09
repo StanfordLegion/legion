@@ -661,6 +661,17 @@ namespace Legion {
         PhysicalInstance instance;
         RtEvent wait_on;
       };
+      struct DeferredPostTaskArgs : public LgTaskArgs<DeferredPostTaskArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_DEFERRED_POST_END_ID;
+      public:
+        DeferredPostTaskArgs(PostTaskArgs &a)
+          : LgTaskArgs<DeferredPostTaskArgs>(
+              a.context->owner_task->get_unique_op_id()),
+            args(a.context, a.result, a.size, a.instance, a.wait_on) { }
+      public:
+        PostTaskArgs args;
+      };
       struct PostDecrementArgs : public LgTaskArgs<PostDecrementArgs> {
       public:
         static const LgTaskID TASK_ID = LG_POST_DECREMENT_TASK_ID;
@@ -1107,6 +1118,7 @@ namespace Legion {
       static void handle_prepipeline_stage(const void *args);
       static void handle_dependence_stage(const void *args);
       static void handle_post_end_task(const void *args);
+      static void handle_deferred_post_end_task(const void *args);
     public:
       const RegionTreeContext tree_context; 
       const UniqueID context_uid;
