@@ -8622,7 +8622,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InstanceRef::unpack_reference(Runtime *runtime, TaskOp *task, 
+    void InstanceRef::unpack_reference(Runtime *runtime,
                                        Deserializer &derez, RtEvent &ready)
     //--------------------------------------------------------------------------
     {
@@ -9077,8 +9077,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InstanceSet::unpack_references(Runtime *runtime, TaskOp *task,
-                           Deserializer &derez, std::set<RtEvent> &ready_events)
+    void InstanceSet::unpack_references(Runtime *runtime, Deserializer &derez, 
+                                        std::set<RtEvent> &ready_events)
     //--------------------------------------------------------------------------
     {
       size_t num_refs;
@@ -9116,7 +9116,7 @@ namespace Legion {
           refs.single->add_reference();
         }
         RtEvent ready;
-        refs.single->unpack_reference(runtime, task, derez, ready);
+        refs.single->unpack_reference(runtime, derez, ready);
         if (ready.exists())
           ready_events.insert(ready);
       }
@@ -9138,7 +9138,7 @@ namespace Legion {
         for (unsigned idx = 0; idx < num_refs; idx++)
         {
           RtEvent ready;
-          refs.multi->vector[idx].unpack_reference(runtime, task, derez, ready);
+          refs.multi->vector[idx].unpack_reference(runtime, derez, ready);
           if (ready.exists())
             ready_events.insert(ready);
         }
