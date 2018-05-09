@@ -909,7 +909,7 @@ namespace Legion {
       {
         unsigned index;
         derez.deserialize(index);
-        early_mapped_regions[index].unpack_references(runtime, this, derez, 
+        early_mapped_regions[index].unpack_references(runtime, derez, 
                                                       ready_events);
       }
     }
@@ -2582,7 +2582,7 @@ namespace Legion {
       derez.deserialize(num_phy);
       physical_instances.resize(num_phy);
       for (unsigned idx = 0; idx < num_phy; idx++)
-        physical_instances[idx].unpack_references(runtime, this,
+        physical_instances[idx].unpack_references(runtime,
                                                   derez, ready_events);
       update_no_access_regions();
       size_t num_task_requests;
