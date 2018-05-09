@@ -1471,7 +1471,6 @@ namespace Legion {
         mutable int legion_collective_log_radix;
         mutable int legion_collective_stages;
         mutable int legion_collective_last_radix;
-        mutable int legion_collective_last_log_radix;
         mutable int legion_collective_participating_spaces;
         int initial_task_window_size;
         unsigned initial_task_window_hysteresis;
@@ -1624,7 +1623,6 @@ namespace Legion {
       const int legion_collective_log_radix;
       const int legion_collective_stages;
       const int legion_collective_last_radix;
-      const int legion_collective_last_log_radix;
       const int legion_collective_participating_spaces;
       MPIRankTable *const mpi_rank_table;
     public:

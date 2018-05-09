@@ -9174,8 +9174,6 @@ namespace Legion {
         legion_collective_log_radix(config.legion_collective_log_radix),
         legion_collective_stages(config.legion_collective_stages),
         legion_collective_last_radix(config.legion_collective_last_radix),
-        legion_collective_last_log_radix(
-                                 config.legion_collective_last_log_radix),
         legion_collective_participating_spaces(
                            config.legion_collective_participating_spaces),
         mpi_rank_table((mpi_rank >= 0) ? new MPIRankTable(this) : NULL),
@@ -9357,8 +9355,6 @@ namespace Legion {
         legion_collective_log_radix(rhs.legion_collective_log_radix),
         legion_collective_stages(rhs.legion_collective_stages),
         legion_collective_last_radix(rhs.legion_collective_last_radix),
-        legion_collective_last_log_radix(
-                                 rhs.legion_collective_last_log_radix),
         legion_collective_participating_spaces(
                            rhs.legion_collective_participating_spaces),
         mpi_rank_table(NULL),
@@ -20523,16 +20519,14 @@ namespace Legion {
       {
         // We have an incomplete last stage
         legion_collective_last_radix = 1 << log_remainder;
-        legion_collective_last_log_radix = log_remainder;
         // Now we can compute the number of participating stages
         legion_collective_participating_spaces = 
           1 << ((legion_collective_stages - 1) * legion_collective_log_radix +
-                 legion_collective_last_log_radix);
+                 log_remainder);
       }
       else
       {
         legion_collective_last_radix = legion_collective_radix;
-        legion_collective_last_log_radix = legion_collective_log_radix;
         legion_collective_participating_spaces = 
           1 << (legion_collective_stages * legion_collective_log_radix);
       }
