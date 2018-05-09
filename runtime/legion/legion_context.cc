@@ -7262,7 +7262,7 @@ namespace Legion {
       configure_collective_settings(total_shards, owner->shard_id,
           shard_collective_radix, shard_collective_log_radix,
           shard_collective_stages, shard_collective_participating_shards,
-          shard_collective_last_radix, shard_collective_last_log_radix);
+          shard_collective_last_radix);
       // Set up some other data structures we might need
       clone_close_creators.resize(CONTROL_REPLICATION_COMMUNICATION_BARRIERS);
       for (unsigned idx = 0; idx < clone_close_creators.size(); idx++)

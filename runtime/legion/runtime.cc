@@ -2391,7 +2391,7 @@ namespace Legion {
         configure_collective_settings(runtime->total_address_spaces,
             runtime->address_space, collective_radix, collective_log_radix,
             collective_stages, collective_participating_spaces, 
-            collective_last_radix, collective_last_log_radix);
+            collective_last_radix);
         participating = 
           (int(runtime->address_space) < collective_participating_spaces);
         // We already have our contributions for each stage so

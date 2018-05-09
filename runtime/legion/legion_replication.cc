@@ -4849,8 +4849,6 @@ namespace Legion {
         shard_collective_participating_shards(
             ctx->get_shard_collective_participating_shards()),
         shard_collective_last_radix(ctx->get_shard_collective_last_radix()),
-        shard_collective_last_log_radix(
-            ctx->get_shard_collective_last_log_radix()),
         participating(int(local_shard) < shard_collective_participating_shards),
         done_triggered(false)
     //--------------------------------------------------------------------------
@@ -4868,8 +4866,6 @@ namespace Legion {
         shard_collective_participating_shards(
             ctx->get_shard_collective_participating_shards()),
         shard_collective_last_radix(ctx->get_shard_collective_last_radix()),
-        shard_collective_last_log_radix(
-            ctx->get_shard_collective_last_log_radix()),
         participating(int(local_shard) < shard_collective_participating_shards),
         done_triggered(false)
     //--------------------------------------------------------------------------

@@ -198,7 +198,6 @@ namespace Legion {
       const int shard_collective_stages;
       const int shard_collective_participating_shards;
       const int shard_collective_last_radix;
-      const int shard_collective_last_log_radix;
       const bool participating; 
     private:
       RtUserEvent done_event;

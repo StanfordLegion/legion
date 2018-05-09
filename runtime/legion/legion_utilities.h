@@ -354,13 +354,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     static inline bool configure_collective_settings(const int participants,
-                                                 const int local_space,
-                                                 int &collective_radix,
-                                                 int &collective_log_radix,
-                                                 int &collective_stages,
-                                                 int &participating_spaces,
-                                                 int &collective_last_radix,
-                                                 int &collective_last_log_radix)
+                                                     const int local_space,
+                                                     int &collective_radix,
+                                                     int &collective_log_radix,
+                                                     int &collective_stages,
+                                                     int &participating_spaces,
+                                                     int &collective_last_radix)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -399,16 +398,14 @@ namespace Legion {
       {
         // We have an incomplete last stage
         collective_last_radix = 1 << log_remainder;
-        collective_last_log_radix = log_remainder;
         // Now we can compute the number of participating stages
         participating_spaces = 
           1 << ((collective_stages - 1) * collective_log_radix +
-                 collective_last_log_radix);
+                 log_remainder);
       }
       else
       {
         collective_last_radix = collective_radix;
-        collective_last_log_radix = collective_log_radix;
         participating_spaces = 1 << (collective_stages * collective_log_radix);
       }
 #ifdef DEBUG_LEGION

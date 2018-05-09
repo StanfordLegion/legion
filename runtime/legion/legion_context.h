@@ -1342,8 +1342,6 @@ namespace Legion {
         { return shard_collective_participating_shards; }
       inline int get_shard_collective_last_radix(void) const
         { return shard_collective_last_radix; }
-      inline int get_shard_collective_last_log_radix(void) const
-        { return shard_collective_last_log_radix; }
     public:
       virtual bool is_replicate_context(void) const;
     public:
@@ -1692,7 +1690,6 @@ namespace Legion {
       int shard_collective_stages;
       int shard_collective_participating_shards;
       int shard_collective_last_radix;
-      int shard_collective_last_log_radix;
     protected:
       mutable LocalLock replication_lock;
       CollectiveID next_available_collective_index;
