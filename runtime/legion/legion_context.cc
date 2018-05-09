@@ -4789,17 +4789,11 @@ namespace Legion {
       }
       if (!to_perform.empty())
       {
-        for (std::vector<PostTaskArgs>::const_iterator it = 
+        for (std::vector<PostTaskArgs>::iterator it =
               to_perform.begin(); it != to_perform.end(); it++)
         {
-          if (it->instance.exists())
-          {
-            it->context->post_end_task(it->result, it->size, false/*owned*/);
-            // Once we've copied the data then we can destroy the instance
-            it->instance.destroy();
-          }
-          else
-            it->context->post_end_task(it->result, it->size, true/*owned*/);
+          DeferredPostTaskArgs args(*it);
+          runtime->issue_runtime_meta_task(args, LG_THROUGHPUT_WORK_PRIORITY);
         }
       }
       if (launch_next_op != NULL)
@@ -6623,6 +6617,24 @@ namespace Legion {
     {
       const PostEndArgs *pargs = (const PostEndArgs*)args;
       pargs->proxy_this->process_post_end_tasks();
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void InnerContext::handle_deferred_post_end_task(
+                                                               const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const PostTaskArgs *pargs = &((const DeferredPostTaskArgs*)args)->args;
+      if (pargs->instance.exists())
+      {
+        pargs->context->post_end_task(
+                                    pargs->result, pargs->size, false/*owned*/);
+        // Once we've copied the data then we can destroy the instance
+        pargs->instance.destroy();
+      }
+      else
+        pargs->context->post_end_task(
+                                     pargs->result, pargs->size, true/*owned*/);
     }
 
     //--------------------------------------------------------------------------
