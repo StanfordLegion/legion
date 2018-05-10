@@ -5068,7 +5068,7 @@ namespace Legion {
 #endif
       // Iterate through the stages and send any that are ready
       // Remember that stages have to be done in order
-      for (int stage = 1; stage < shard_collective_stages; stage++)
+      for (int stage = 0; stage < shard_collective_stages; stage++)
       {
         {
           AutoLock c_lock(collective_lock);
@@ -5078,7 +5078,8 @@ namespace Legion {
           // Check to see if we're sending this stage
           // We need all the notifications from the previous stage before
           // we can send this stage
-          if (stage_notifications[stage-1] < shard_collective_radix)
+          if ((stage > 0) && 
+              (stage_notifications[stage-1] < shard_collective_radix))
             return false;
           // If we get here then we can send the stage
           sent_stages[stage] = true;
