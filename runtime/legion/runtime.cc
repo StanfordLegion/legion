@@ -2131,7 +2131,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     MPIRankTable::MPIRankTable(Runtime *rt)
       : runtime(rt), participating(int(runtime->address_space) <
-          runtime->legion_collective_participating_spaces)
+         runtime->legion_collective_participating_spaces), done_triggered(false)
     //--------------------------------------------------------------------------
     {
       if (runtime->total_address_spaces > 1)
@@ -2357,9 +2357,15 @@ namespace Legion {
       }
       // If we make it here, then we sent the last stage, check to see
       // if we've seen all the notifications for it
-      AutoLock r_lock(reservation,1,false/*exclusive*/);
-      return (stage_notifications.back() == 
-                runtime->legion_collective_last_radix);
+      AutoLock r_lock(reservation);
+      if ((stage_notifications.back() == runtime->legion_collective_last_radix)
+          && !done_triggered)
+      {
+        done_triggered = true;
+        return true;
+      }
+      else
+        return false;
     }
 
     //--------------------------------------------------------------------------

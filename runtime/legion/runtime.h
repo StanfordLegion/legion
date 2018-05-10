@@ -542,6 +542,7 @@ namespace Legion {
       RtUserEvent done_event;
       std::vector<int> stage_notifications;
       std::vector<bool> sent_stages;
+      bool done_triggered;
     }; 
 
     /**
