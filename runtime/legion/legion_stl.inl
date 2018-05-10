@@ -27,59 +27,65 @@ namespace Legion {
     };
 
     template<typename T1>
-    inline size_t get_serialized_size(phantom<T1> t1)
+    inline size_t get_serialized_size_(phantom<T1> t1)
     {
       return sizeof(T1);
     }
 
     template<typename T1, typename ... Ts>
-    inline size_t get_serialized_size(phantom<T1, Ts ...> ts)
+    inline size_t get_serialized_size_(phantom<T1, Ts ...> ts)
     {
-      return sizeof(T1) + get_serialized_size(phantom<Ts ...>());
+      return sizeof(T1) + get_serialized_size_(phantom<Ts ...>());
     }
 
     template<typename ... Ts>
     inline size_t get_serialized_size()
     {
-      return get_serialized_size(phantom<Ts ...>());
+      return get_serialized_size_(phantom<Ts ...>());
     }
 
     template<typename T1>
-    inline void serialize(void *buffer, const T1 &t1)
+    inline void serialize_(void *buffer, const T1 &t1)
     {
       *((T1 *)buffer) = t1;
     }
 
     template<typename T1, typename ... Ts>
-    inline void serialize(void *buffer, const T1 &t1, const Ts & ... ts)
+    inline void serialize_(void *buffer, const T1 &t1, const Ts & ... ts)
     {
       *((T1 *)buffer) = t1;
       buffer = (void *)((char *)buffer + sizeof(T1));
-      serialize(buffer, ts ...);
+      serialize_(buffer, ts ...);
+    }
+
+    template<typename ... Ts>
+    inline void serialize(void *buffer, const Ts & ... ts)
+    {
+      serialize_(buffer, ts ...);
     }
 
     template<typename ... Us>
     inline std::tuple<Us ...>
-    deserialize(const void *buffer, phantom<>, std::tuple<Us ...> &&us)
+    deserialize_(const void *buffer, phantom<>, std::tuple<Us ...> &&us)
     {
       return us;
     }
 
     template<typename T1, typename ... Ts, typename ... Us>
     inline std::tuple<Us ..., T1, Ts ...>
-    deserialize(const void *buffer, phantom<T1, Ts ...>,
+    deserialize_(const void *buffer, phantom<T1, Ts ...>,
                 std::tuple<Us ...> &&us)
     {
       T1 t1 = *((T1 *)buffer);
       buffer = (void *)((char *)buffer + sizeof(T1));
-      return deserialize(buffer, phantom<Ts ...>(),
-                         std::tuple_cat(us, std::make_tuple(t1)));
+      return deserialize_(buffer, phantom<Ts ...>(),
+                          std::tuple_cat(us, std::make_tuple(t1)));
     }
 
     template<typename ... Ts>
     inline std::tuple<Ts ...> deserialize(const void *buffer)
     {
-      return deserialize(buffer, phantom<Ts ...>(), std::make_tuple());
+      return deserialize_(buffer, phantom<Ts ...>(), std::make_tuple());
     }
 
     template<typename ... Ts>
