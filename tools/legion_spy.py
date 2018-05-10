@@ -4802,6 +4802,8 @@ class Requirement(object):
             return "READ-WRITE"
         elif self.priv == WRITE_DISCARD:
             return "WRITE-DISCARD"
+        elif self.priv == WRITE_ONLY:
+            return "WRITE-ONLY"
         else:
             assert self.priv == REDUCE
             return "REDUCE with Reduction Op "+str(self.redop)

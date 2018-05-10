@@ -526,8 +526,9 @@ namespace Legion {
       void perform_rank_exchange(void);
       void handle_mpi_rank_exchange(Deserializer &derez);
     protected:
-      bool send_explicit_stage(int stage);
-      bool send_ready_stages(void);
+      bool initiate_exchange(void);
+      void send_remainder_stage(void);
+      bool send_ready_stages(const int start_stage=1);
       void unpack_exchange(int stage, Deserializer &derez);
       void complete_exchange(void);
     public:

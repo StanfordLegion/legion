@@ -1917,8 +1917,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, REGION_TREE_PREMAP_ONLY_CALL);
-      // If we are a NO_ACCESS, then we are already done 
-      if (IS_NO_ACCESS(req))
+      // If we are a NO_ACCESS or there are no fields then we are already done 
+      if (IS_NO_ACCESS(req) || req.privilege_fields.empty())
         return;
       TaskContext *context = op->find_physical_context(index);
       RegionTreeContext ctx = context->get_context();
@@ -1952,6 +1952,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, REGION_TREE_PHYSICAL_REGISTER_ONLY_CALL);
+      // If we are a NO_ACCESS or there are no fields then we are already done 
+      if (IS_NO_ACCESS(req) || req.privilege_fields.empty())
+        return;
       InnerContext *context = op->find_physical_context(index);
       RegionTreeContext ctx = context->get_context();
 #ifdef DEBUG_LEGION

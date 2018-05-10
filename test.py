@@ -60,6 +60,7 @@ legion_cxx_tests = [
 
     # Tests
     ['test/rendering/rendering', ['-i', '2', '-n', '64', '-ll:cpu', '4']],
+    # ['test/legion_stl/test_stl', []], # FIXME: Template ambiguity in Clang
 ]
 
 if platform.system() != 'Darwin':
