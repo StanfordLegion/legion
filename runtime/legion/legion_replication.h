@@ -188,7 +188,8 @@ namespace Legion {
     protected:
       void initialize_collective(void);
       void construct_message(ShardID target, int stage, Serializer &rez) const;
-      bool send_explicit_stage(int stage);
+      bool initiate_collective(void);
+      void send_remainder_stage(void);
       bool send_ready_stages(void);
       void unpack_stage(int stage, Deserializer &derez);
       void complete_exchange(void);
