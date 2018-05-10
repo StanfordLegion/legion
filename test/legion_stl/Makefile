@@ -34,10 +34,12 @@ GEN_GPU_SRC	?=		# .cu files
 
 # You can modify these variables, some will be appended to by the runtime makefile
 INC_FLAGS	?=
-CC_FLAGS	?= -std=c++11
+CC_FLAGS	?=
 NVCC_FLAGS	?=
 GASNET_FLAGS	?=
 LD_FLAGS	?=
+
+CC_FLAGS	+= -std=c++11
 
 ###########################################################################
 #
