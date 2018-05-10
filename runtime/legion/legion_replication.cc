@@ -4890,15 +4890,7 @@ namespace Legion {
           stage_notifications.resize(shard_collective_stages, 1);
           // Stage 0 always starts with 0 notifications since we'll 
           // explictcly arrive on it
-          // Special case: if we expect a stage -1 message from a 
-          // non-participating shard , we'll count that as part of 
-          // stage 0, it will make it a negative count, but the 
-          // type is 'int' so we're good
-          if ((shard_collective_stages > 0) && (local_shard <
-             (manager->total_shards - shard_collective_participating_shards)))
-            stage_notifications[0] = -1;
-          else
-            stage_notifications[0] = 0;
+          stage_notifications[0] = 0;
         }
         done_event = Runtime::create_rt_user_event();
       }
@@ -5031,7 +5023,7 @@ namespace Legion {
 #endif
         stage_notifications[0]++;
       }
-      return send_ready_stages();
+      return send_ready_stages(0/*start stage*/);
     }
 
     //--------------------------------------------------------------------------
@@ -5060,7 +5052,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool AllGatherCollective::send_ready_stages(void)
+    bool AllGatherCollective::send_ready_stages(const int start_stage)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -5068,7 +5060,7 @@ namespace Legion {
 #endif
       // Iterate through the stages and send any that are ready
       // Remember that stages have to be done in order
-      for (int stage = 0; stage < shard_collective_stages; stage++)
+      for (int stage = start_stage; stage < shard_collective_stages; stage++)
       {
         {
           AutoLock c_lock(collective_lock);
@@ -5134,10 +5126,6 @@ namespace Legion {
       AutoLock c_lock(collective_lock);
       // Do the unpack first while holding the lock
       unpack_collective_stage(derez, stage);
-      // A stage -1 message is counted as part of stage 0 (if it exists
-      //  and we are participating)
-      if ((stage == -1) && participating && (shard_collective_stages > 0))
-	stage = 0;
       if (stage >= 0)
       {
 #ifdef DEBUG_LEGION
