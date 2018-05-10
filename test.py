@@ -60,7 +60,7 @@ legion_cxx_tests = [
 
     # Tests
     ['test/rendering/rendering', ['-i', '2', '-n', '64', '-ll:cpu', '4']],
-    ['test/test_stl/test_stl', []],
+    ['test/legion_stl/test_stl', []],
 ]
 
 if platform.system() != 'Darwin':
