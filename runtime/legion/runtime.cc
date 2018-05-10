@@ -9283,8 +9283,8 @@ namespace Legion {
         legion_collective_last_radix(rhs.legion_collective_last_radix),
         legion_collective_participating_spaces(
                            rhs.legion_collective_participating_spaces),
-        mpi_rank_table(NULL),
-        local_procs(rhs.local_procs), proc_spaces(rhs.proc_spaces)
+        mpi_rank_table(NULL), local_procs(rhs.local_procs), 
+        local_utils(rhs.local_utils), proc_spaces(rhs.proc_spaces)
     //--------------------------------------------------------------------------
     {
       // should never be called
