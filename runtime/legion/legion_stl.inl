@@ -26,14 +26,13 @@ namespace Legion {
     struct phantom {
     };
 
-    template<typename T1>
-    inline size_t get_serialized_size_(phantom<T1> t1)
+    inline size_t get_serialized_size_(phantom<>)
     {
-      return sizeof(T1);
+      return 0;
     }
 
     template<typename T1, typename ... Ts>
-    inline size_t get_serialized_size_(phantom<T1, Ts ...> ts)
+    inline size_t get_serialized_size_(phantom<T1, Ts ...>)
     {
       return sizeof(T1) + get_serialized_size_(phantom<Ts ...>());
     }
@@ -44,10 +43,8 @@ namespace Legion {
       return get_serialized_size_(phantom<Ts ...>());
     }
 
-    template<typename T1>
-    inline void serialize_(void *buffer, const T1 &t1)
+    inline void serialize_(void *buffer)
     {
-      *((T1 *)buffer) = t1;
     }
 
     template<typename T1, typename ... Ts>
