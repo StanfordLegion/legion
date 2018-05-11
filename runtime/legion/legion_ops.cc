@@ -4425,6 +4425,8 @@ namespace Legion {
     void CopyOp::replay_analysis(void)
     //--------------------------------------------------------------------------
     {
+      if (runtime->legion_spy_enabled)
+        log_copy_requirements();
 #ifdef LEGION_SPY
       LegionSpy::log_replay_operation(unique_op_id);
 #endif
@@ -13610,6 +13612,8 @@ namespace Legion {
     void FillOp::replay_analysis(void)
     //--------------------------------------------------------------------------
     {
+      if (runtime->legion_spy_enabled)
+        log_fill_requirement();
 #ifdef LEGION_SPY
       LegionSpy::log_replay_operation(unique_op_id);
 #endif
