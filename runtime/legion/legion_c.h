@@ -366,8 +366,7 @@ extern "C" {
   typedef
     legion_logical_region_t (*legion_projection_functor_logical_region_t)(
       legion_runtime_t /* runtime */,
-      legion_context_t /* context */,
-      legion_task_t /* task */,
+      const legion_mappable_t /* mappable */,
       unsigned /* index */,
       legion_logical_region_t /* upper_bound */,
       legion_domain_point_t /* point */);
@@ -379,8 +378,7 @@ extern "C" {
   typedef
     legion_logical_region_t (*legion_projection_functor_logical_partition_t)(
       legion_runtime_t /* runtime */,
-      legion_context_t /* context */,
-      legion_task_t /* task */,
+      const legion_mappable_t /* mappable */,
       unsigned /* index */,
       legion_logical_partition_t /* upper_bound */,
       legion_domain_point_t /* point */);
@@ -1371,7 +1369,8 @@ extern "C" {
   legion_logical_region_create(legion_runtime_t runtime,
                                legion_context_t ctx,
                                legion_index_space_t index,
-                               legion_field_space_t fields);
+                               legion_field_space_t fields,
+                               bool task_local);
 
   /**
    * @param handle Caller must have ownership of parameter `handle`.
@@ -3655,11 +3654,23 @@ extern "C" {
       size_t count);
 
   /**
+   * @see Legion::Runtime::preregister_projection_functor()
+   */
+  void
+  legion_runtime_preregister_projection_functor(
+    legion_projection_id_t id,
+    unsigned depth,
+    legion_projection_functor_logical_region_t region_functor,
+    legion_projection_functor_logical_partition_t partition_functor);
+
+  /**
    * @see Legion::Runtime::register_projection_functor()
    */
   void
   legion_runtime_register_projection_functor(
+    legion_runtime_t runtime,
     legion_projection_id_t id,
+    unsigned depth,
     legion_projection_functor_logical_region_t region_functor,
     legion_projection_functor_logical_partition_t partition_functor);
 
@@ -3790,6 +3801,27 @@ extern "C" {
    */
   unsigned long long
   legion_get_current_time_in_nanos(void);
+
+  /**
+   * @see Legion::Runtime::get_current_time()
+   */
+  legion_future_t
+  legion_issue_timing_op_seconds(legion_runtime_t runtime,
+                                 legion_context_t ctx);
+
+  /**
+   * @see Legion::Runtime::get_current_time_in_microseconds()
+   */
+  legion_future_t
+  legion_issue_timing_op_microseconds(legion_runtime_t runtime,
+                                      legion_context_t ctx);
+
+  /**
+   * @see Legion::Runtime::get_current_time_in_nanoseconds()
+   */
+  legion_future_t
+  legion_issue_timing_op_nanoseconds(legion_runtime_t runtime,
+                                     legion_context_t ctx);
 
   // -----------------------------------------------------------------------
   // Machine Operations

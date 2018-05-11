@@ -100,13 +100,40 @@ namespace Legion {
       // Shouldn't need the lock here since we only do this
       // while there is no one else executing
       RezCheck z(rez);
-      rez.serialize<size_t>(created_regions.size());
-      if (!created_regions.empty())
+      if (returning)
       {
-        for (std::set<LogicalRegion>::const_iterator it =
-              created_regions.begin(); it != created_regions.end(); it++)
+        // Only non-local task regions get returned
+        size_t non_local = 0;
+        for (std::map<LogicalRegion,bool>::const_iterator it =
+             created_regions.begin(); it != created_regions.end(); it++)
         {
-          rez.serialize(*it);
+          if (it->second)
+            continue;
+          non_local++;
+        }
+        rez.serialize(non_local);
+        if (non_local > 0)
+        {
+          for (std::map<LogicalRegion,bool>::const_iterator it =
+               created_regions.begin(); it != created_regions.end(); it++)
+            if (!it->second)
+            {
+              rez.serialize(it->first);
+              rez.serialize<bool>(it->second);
+            }
+        }
+      }
+      else
+      {
+        rez.serialize<size_t>(created_regions.size());
+        if (!created_regions.empty())
+        {
+          for (std::map<LogicalRegion,bool>::const_iterator it =
+              created_regions.begin(); it != created_regions.end(); it++)
+          {
+            rez.serialize(it->first);
+            rez.serialize<bool>(it->second);
+          }
         }
       }
       rez.serialize<size_t>(deleted_regions.size());
@@ -134,11 +161,12 @@ namespace Legion {
         {
           for (std::map<std::pair<FieldSpace,FieldID>,bool>::const_iterator it =
                 created_fields.begin(); it != created_fields.end(); it++)
-          {
-            rez.serialize(it->first.first);
-            rez.serialize(it->first.second);
-            rez.serialize<bool>(it->second);
-          }
+            if (!it->second)
+            {
+              rez.serialize(it->first.first);
+              rez.serialize(it->first.second);
+              rez.serialize<bool>(it->second);
+            }
         }
       }
       else
@@ -239,12 +267,14 @@ namespace Legion {
       derez.deserialize(num_created_regions);
       if (num_created_regions > 0)
       {
-        std::set<LogicalRegion> created_regions;
+        std::map<LogicalRegion,bool> created_regions;
         for (unsigned idx = 0; idx < num_created_regions; idx++)
         {
           LogicalRegion reg;
+          bool local;
           derez.deserialize(reg);
-          created_regions.insert(reg);
+          derez.deserialize(local);
+          created_regions[reg] = local;
         }
         target->register_region_creations(created_regions);
       }
@@ -844,7 +874,7 @@ namespace Legion {
             early_mapped_regions.end(); it++)
       {
         rez.serialize(it->first);
-        it->second.pack_references(rez, target);
+        it->second.pack_references(rez);
       }
     }
 
@@ -882,7 +912,7 @@ namespace Legion {
       {
         unsigned index;
         derez.deserialize(index);
-        early_mapped_regions[index].unpack_references(runtime, this, derez, 
+        early_mapped_regions[index].unpack_references(runtime, derez, 
                                                       ready_events);
       }
     }
@@ -1158,8 +1188,8 @@ namespace Legion {
         for (unsigned idx = 0; idx < regions.size(); idx++)
         {
           RegionRequirement &req = regions[idx];
-          if (IS_WRITE_ONLY(req))
-            req.privilege = READ_WRITE;
+          if (HAS_WRITE_DISCARD(req))
+            req.privilege &= ~DISCARD_MASK;
         }
       }
       return output.speculate;
@@ -2512,7 +2542,7 @@ namespace Legion {
       }
       rez.serialize<size_t>(physical_instances.size());
       for (unsigned idx = 0; idx < physical_instances.size(); idx++)
-        physical_instances[idx].pack_references(rez, target);
+        physical_instances[idx].pack_references(rez);
       rez.serialize<size_t>(task_profiling_requests.size());
       for (unsigned idx = 0; idx < task_profiling_requests.size(); idx++)
         rez.serialize(task_profiling_requests[idx]);
@@ -2559,7 +2589,7 @@ namespace Legion {
       derez.deserialize(num_phy);
       physical_instances.resize(num_phy);
       for (unsigned idx = 0; idx < num_phy; idx++)
-        physical_instances[idx].unpack_references(runtime, this,
+        physical_instances[idx].unpack_references(runtime,
                                                   derez, ready_events);
       update_no_access_regions();
       size_t num_task_requests;
@@ -2774,6 +2804,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, FINALIZE_MAP_TASK_CALL);
+      if (mapper == NULL)
+        mapper = runtime->find_mapper(current_proc, map_id);
       // first check the processors to make sure they are all on the
       // same node and of the same kind, if we know we have a must epoch
       // owner then we also know there is only one valid choice
@@ -3877,12 +3909,6 @@ namespace Legion {
 #ifdef DEBUG_LEGION
           assert(regions[idx].handle_type == SINGULAR);
 #endif
-          // Convert any WRITE_ONLY or WRITE_DISCARD privleges to READ_WRITE
-          // This is necessary for any sub-operations which may need to rely
-          // on our privileges for determining their own privileges such
-          // as inline mappings or acquire and release operations
-          if (regions[idx].privilege == WRITE_DISCARD)
-            regions[idx].privilege = READ_WRITE;
           // If it was virtual mapper so it doesn't matter anyway.
           if (virtual_mapped[idx] || no_access_regions[idx])
           {
@@ -8891,17 +8917,17 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void SliceTask::register_region_creations(
-                                            const std::set<LogicalRegion> &regs)
+                                       const std::map<LogicalRegion,bool> &regs)
     //--------------------------------------------------------------------------
     {
       AutoLock o_lock(op_lock);
-      for (std::set<LogicalRegion>::const_iterator it = regs.begin();
+      for (std::map<LogicalRegion,bool>::const_iterator it = regs.begin();
             it != regs.end(); it++)
       {
 #ifdef DEBUG_LEGION
-        assert(created_regions.find(*it) == created_regions.end());
+        assert(created_regions.find(it->first) == created_regions.end());
 #endif
-        created_regions.insert(*it);
+        created_regions[it->first] = it->second;
       }
     }
 

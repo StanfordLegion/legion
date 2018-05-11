@@ -86,11 +86,7 @@ namespace Legion {
             continue;
           if (it->second->destroyed)
             continue;
-#ifdef LEGION_GC
           it->second->add_base_resource_ref(REGION_TREE_REF);
-#else
-          it->second->add_reference();
-#endif
           regions_to_delete.push_back(it->second);
         }
       }
@@ -99,11 +95,7 @@ namespace Legion {
       {
         if (!(*it)->destroyed)
           (*it)->destroy_node(runtime->address_space, true/*root*/);
-#ifdef LEGION_GC
         if ((*it)->remove_base_resource_ref(REGION_TREE_REF))
-#else
-        if ((*it)->remove_reference())
-#endif
           delete (*it);
       }
       // Then do field space nodes
@@ -262,7 +254,8 @@ namespace Legion {
         parent_notified = notified_event;
       }
       RtUserEvent disjointness_event;
-      if (part_kind == COMPUTE_KIND)
+      if ((part_kind == COMPUTE_KIND) || (part_kind == COMPUTE_COMPLETE_KIND) ||
+          (part_kind == COMPUTE_INCOMPLETE_KIND))
       {
         disjointness_event = Runtime::create_rt_user_event();
         create_node(pid, parent_node, color_node, partition_color,
@@ -270,7 +263,9 @@ namespace Legion {
       }
       else
       {
-        const bool disjoint = (part_kind == DISJOINT_KIND);
+        const bool disjoint = (part_kind == DISJOINT_KIND) || 
+                              (part_kind == DISJOINT_COMPLETE_KIND) || 
+                              (part_kind == DISJOINT_INCOMPLETE_KIND);
         create_node(pid, parent_node, color_node, partition_color,
                     disjoint, did, partition_ready, partial_pending);
         if (runtime->legion_spy_enabled)
@@ -279,7 +274,8 @@ namespace Legion {
       }
       // If we need to compute the disjointness, only do that
       // after the partition is actually ready
-      if (part_kind == COMPUTE_KIND)
+      if ((part_kind == COMPUTE_KIND) || (part_kind == COMPUTE_COMPLETE_KIND) ||
+          (part_kind == COMPUTE_INCOMPLETE_KIND))
       {
 #ifdef DEBUG_LEGION
         assert(disjointness_event.exists());
@@ -308,8 +304,17 @@ namespace Legion {
       // If we're supposed to compute this, but we already know that
       // the source is disjoint then we can also conlclude the the 
       // resulting partitions will also be disjoint under intersection
-      if ((kind == COMPUTE_KIND) && source->is_disjoint(true/*from app*/))
-        kind = DISJOINT_KIND;
+      if (((kind == COMPUTE_KIND) || (kind == COMPUTE_COMPLETE_KIND) ||
+           (kind == COMPUTE_INCOMPLETE_KIND)) && 
+          source->is_disjoint(true/*from app*/))
+      {
+        if (kind == COMPUTE_KIND)
+          kind = DISJOINT_KIND;
+        else if (kind == COMPUTE_COMPLETE_KIND)
+          kind = DISJOINT_COMPLETE_KIND;
+        else
+          kind = DISJOINT_INCOMPLETE_KIND;
+      }
       // If we haven't been given a color yet, we need to find
       // one that will be valid for all the child partitions
       if (part_color == INVALID_COLOR)
@@ -1026,14 +1031,26 @@ namespace Legion {
     {
       const AddressSpaceID owner_space = 
         RegionNode::get_owner_space(handle, runtime);
-      // If we're not the owner then we only have to do something if
-      // we actually have a local copy of the node
-      if ((owner_space != runtime->address_space) && 
-          !has_node(handle, true/*local only*/))
-        return;
-      RegionNode *node = get_node(handle);
-      if (node->destroy_node(source, true/*root*/))
-        delete node;
+      if (owner_space != runtime->address_space)
+      {
+        // If we're not the owner then we only have to do something if
+        // we actually have a local copy of the node
+        RegionNode *node = find_local_node(handle);
+        if (node == NULL)
+          return;
+        // We're still holding a reference so don't bother checking
+        // the return value
+        node->destroy_node(source, true/*root*/);
+        if (node->remove_base_resource_ref(REGION_TREE_REF))
+          delete node;
+      }
+      else
+      {
+        // We're the owner so we know the reference still exists
+        RegionNode *node = get_node(handle);
+        if (node->destroy_node(source, true/*root*/))
+          delete node;
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -1043,14 +1060,26 @@ namespace Legion {
     {
       const AddressSpaceID owner_space = 
         PartitionNode::get_owner_space(handle, runtime);
-      // If we're not the owner then we only have to do something if
-      // we actually have a local copy of the node
-      if ((owner_space != runtime->address_space) &&
-          !has_node(handle, true/*local only*/))
-        return;
-      PartitionNode *node = get_node(handle);
-      if (node->destroy_node(source, true/*root*/))
-        delete node;
+      if (owner_space != runtime->address_space)
+      {
+        // If we're not the owner then we only have to do something if
+        // we actually have a local copy of the node
+        PartitionNode *node = find_local_node(handle);
+        if (node == NULL)
+          return;
+        // We're still holding a reference so don't bother checking
+        // the return value
+        node->destroy_node(source, true/*root*/);
+        if (node->remove_base_resource_ref(REGION_TREE_REF))
+          delete node;
+      }
+      else
+      {
+        // We're the owner so we know the reference still exists
+        PartitionNode *node = get_node(handle);
+        if (node->destroy_node(source, true/*root*/))
+          delete node;
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -1446,11 +1475,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Check to see if this has already been deleted
-      if (!has_node(handle, true/*local only*/))
+      RegionNode *node = find_local_node(handle);
+      if (node == NULL)
         return;
-      RegionNode *node = get_node(handle);
       VersioningInvalidator invalidator(ctx);
       node->visit_node(&invalidator);
+      if (node->remove_base_resource_ref(REGION_TREE_REF))
+        delete node;
     }
 
     //--------------------------------------------------------------------------
@@ -1461,11 +1492,18 @@ namespace Legion {
       {
         AutoLock l_lock(lookup_lock,1,false/*exclusive*/);
         trees = tree_nodes;
+        for (std::map<RegionTreeID,RegionNode*>::const_iterator it = 
+              trees.begin(); it != trees.end(); it++)
+          it->second->add_base_resource_ref(REGION_TREE_REF);
       }
       VersioningInvalidator invalidator(ctx); 
       for (std::map<RegionTreeID,RegionNode*>::const_iterator it = 
             trees.begin(); it != trees.end(); it++)
+      {
         it->second->visit_node(&invalidator);
+        if (it->second->remove_base_resource_ref(REGION_TREE_REF))
+          delete it->second;
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -1583,11 +1621,13 @@ namespace Legion {
     {
       DETAILED_PROFILER(runtime, REGION_TREE_INVALIDATE_CONTEXT_CALL);
       // Handle the case where we already deleted the region tree
-      if (!has_node(handle, true/*local only*/))
+      RegionNode *top_node = find_local_node(handle);
+      if (top_node == NULL)
         return;
-      RegionNode *top_node = get_node(handle);
       CurrentInvalidator invalidator(ctx.get_id(), users_only);
       top_node->visit_node(&invalidator);
+      if (top_node->remove_base_resource_ref(REGION_TREE_REF))
+        delete top_node;
     }
 
     //--------------------------------------------------------------------------
@@ -1856,8 +1896,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, REGION_TREE_PREMAP_ONLY_CALL);
-      // If we are a NO_ACCESS, then we are already done 
-      if (IS_NO_ACCESS(req))
+      // If we are a NO_ACCESS or there are no fields then we are already done 
+      if (IS_NO_ACCESS(req) || req.privilege_fields.empty())
         return;
       TaskContext *context = op->find_physical_context(index);
       RegionTreeContext ctx = context->get_context();
@@ -1892,6 +1932,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, REGION_TREE_PHYSICAL_REGISTER_ONLY_CALL);
+      // If we are a NO_ACCESS or there are no fields then we are already done 
+      if (IS_NO_ACCESS(req) || req.privilege_fields.empty())
+        return;
       InnerContext *context = op->find_physical_context(index);
       RegionTreeContext ctx = context->get_context();
 #ifdef DEBUG_LEGION
@@ -3475,15 +3518,15 @@ namespace Legion {
         {
           // It already exists, delete our copy and return
           // the one that has already been made
-#ifdef LEGION_GC
           if (result->is_owner() || 
               result->remove_base_resource_ref(REMOTE_DID_REF))
-#endif
-          delete result;
+            delete result;
           return it->second;
         }
         // Now we can add it to the map
         region_nodes[r] = result;
+        // Add a resource reference to it that we'll remove later
+        result->add_base_resource_ref(REGION_TREE_REF);
         // If this is a top level region add it to the collection
         // of top level tree IDs
         if (parent == NULL)
@@ -3528,15 +3571,15 @@ namespace Legion {
         {
           // It already exists, delete our copy and
           // return the one that has already been made
-#ifdef LEGION_GC
           if (result->is_owner() || 
               result->remove_base_resource_ref(REMOTE_DID_REF))
-#endif
-          delete result;
+            delete result;
           return it->second;
         }
         // Now we can put the node in the map
         part_nodes[p] = result;
+        // Record a resource reference on it that we'll remove later
+        result->add_base_resource_ref(REGION_TREE_REF);
       }
       result->record_registered();
       
@@ -3946,77 +3989,93 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool RegionTreeForest::has_node(IndexSpace space, bool local_only)
+    RegionNode* RegionTreeForest::find_local_node(LogicalRegion handle)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock l_lock(lookup_lock,1,false/*exclusive*/);
+      std::map<LogicalRegion,RegionNode*>::const_iterator finder = 
+        region_nodes.find(handle);
+      if (finder == region_nodes.end())
+        return NULL;
+      finder->second->add_base_resource_ref(REGION_TREE_REF);
+      return finder->second;
+    }
+
+    //--------------------------------------------------------------------------
+    PartitionNode* RegionTreeForest::find_local_node(LogicalPartition handle)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock l_lock(lookup_lock,1,false/*exclusive*/);
+      std::map<LogicalPartition,PartitionNode*>::const_iterator finder =
+          part_nodes.find(handle);
+      if (finder == part_nodes.end())
+        return NULL;
+      finder->second->add_base_resource_ref(REGION_TREE_REF);
+      return finder->second;
+    }
+
+    //--------------------------------------------------------------------------
+    bool RegionTreeForest::has_node(IndexSpace space)
     //--------------------------------------------------------------------------
     {
       {
         AutoLock l_lock(lookup_lock,1,false/*exclusive*/);
         if (index_nodes.find(space) != index_nodes.end())
           return true;
-        if (local_only)
-          return false;
       }
       return (get_node(space) != NULL);
     }
     
     //--------------------------------------------------------------------------
-    bool RegionTreeForest::has_node(IndexPartition part, bool local_only)
+    bool RegionTreeForest::has_node(IndexPartition part)
     //--------------------------------------------------------------------------
     {
       {
         AutoLock l_lock(lookup_lock,1,false/*exclusive*/);
         if (index_parts.find(part) != index_parts.end())
           return true;
-        if (local_only)
-          return false;
       }
       return (get_node(part) != NULL);
     }
 
     //--------------------------------------------------------------------------
-    bool RegionTreeForest::has_node(FieldSpace space, bool local_only)
+    bool RegionTreeForest::has_node(FieldSpace space)
     //--------------------------------------------------------------------------
     {
       {
         AutoLock l_lock(lookup_lock,1,false/*exclusive*/);
         if (field_nodes.find(space) != field_nodes.end())
           return true;
-        if (local_only)
-          return false;
       }
       return (get_node(space) != NULL);
     }
 
     //--------------------------------------------------------------------------
-    bool RegionTreeForest::has_node(LogicalRegion handle, bool local_only)
+    bool RegionTreeForest::has_node(LogicalRegion handle)
     //--------------------------------------------------------------------------
     {
       // Reflect that we can build these nodes whenever this is true
-      return (has_node(handle.index_space, local_only) && 
-              has_node(handle.field_space, local_only) &&
-              has_tree(handle.tree_id, local_only));
+      return (has_node(handle.index_space) && has_node(handle.field_space) &&
+              has_tree(handle.tree_id));
     }
 
     //--------------------------------------------------------------------------
-    bool RegionTreeForest::has_node(LogicalPartition handle, bool local_only)
+    bool RegionTreeForest::has_node(LogicalPartition handle)
     //--------------------------------------------------------------------------
     {
       // Reflect that we can build these nodes whenever this is true
-      return (has_node(handle.index_partition, local_only) && 
-              has_node(handle.field_space, local_only)
-              && has_tree(handle.tree_id, local_only));
+      return (has_node(handle.index_partition) && has_node(handle.field_space)
+              && has_tree(handle.tree_id));
     }
 
     //--------------------------------------------------------------------------
-    bool RegionTreeForest::has_tree(RegionTreeID tid, bool local_only)
+    bool RegionTreeForest::has_tree(RegionTreeID tid)
     //--------------------------------------------------------------------------
     {
       {
         AutoLock l_lock(lookup_lock,1,false/*exclusive*/);
         if (tree_nodes.find(tid) != tree_nodes.end())
           return true;
-        if (local_only)
-          return false;
       }
       return (get_tree(tid) != NULL);
     }
@@ -4077,39 +4136,50 @@ namespace Legion {
     void RegionTreeForest::remove_node(LogicalRegion handle, bool top)
     //--------------------------------------------------------------------------
     {
-      AutoLock l_lock(lookup_lock);
-#ifdef DEBUG_LEGION
-      if (top)
+      RegionNode *node = NULL;
       {
-        std::map<RegionTreeID,RegionNode*>::iterator finder = 
-          tree_nodes.find(handle.get_tree_id());
-        assert(finder != tree_nodes.end());
-        tree_nodes.erase(finder);
-      }
-      std::map<LogicalRegion,RegionNode*>::iterator finder = 
-        region_nodes.find(handle);
-      assert(finder != region_nodes.end());
-      region_nodes.erase(finder);
+        AutoLock l_lock(lookup_lock);
+#ifdef DEBUG_LEGION
+        if (top)
+        {
+          std::map<RegionTreeID,RegionNode*>::iterator finder = 
+            tree_nodes.find(handle.get_tree_id());
+          assert(finder != tree_nodes.end());
+          tree_nodes.erase(finder);
+        }
 #else
-      if (top)
-        tree_nodes.erase(handle.get_tree_id());
-      region_nodes.erase(handle);
+        if (top)
+          tree_nodes.erase(handle.get_tree_id());
 #endif
+        std::map<LogicalRegion,RegionNode*>::iterator finder = 
+          region_nodes.find(handle);
+#ifdef DEBUG_LEGION
+        assert(finder != region_nodes.end());
+#endif
+        node = finder->second;
+        region_nodes.erase(finder);
+      }
+      if (node->remove_base_resource_ref(REGION_TREE_REF))
+        delete node;
     }
 
     //--------------------------------------------------------------------------
     void RegionTreeForest::remove_node(LogicalPartition handle)
     //--------------------------------------------------------------------------
     {
-      AutoLock l_lock(lookup_lock);
+      PartitionNode *node = NULL;
+      {
+        AutoLock l_lock(lookup_lock);
+        std::map<LogicalPartition,PartitionNode*>::iterator finder = 
+          part_nodes.find(handle);
 #ifdef DEBUG_LEGION
-      std::map<LogicalPartition,PartitionNode*>::iterator finder = 
-        part_nodes.find(handle);
-      assert(finder != part_nodes.end());
-      part_nodes.erase(finder);
-#else
-      part_nodes.erase(handle);
+        assert(finder != part_nodes.end());
 #endif
+        node = finder->second;
+        part_nodes.erase(finder);
+      }
+      if (node->remove_base_resource_ref(REGION_TREE_REF))
+        delete node;
     }
 
     //--------------------------------------------------------------------------
@@ -5497,7 +5567,10 @@ namespace Legion {
               rez.serialize(IndexPartition::NO_PART);
             rez.serialize(color);
             rez.serialize(index_space_ready);
-            pack_index_space(rez);
+            if (realm_index_space_set.has_triggered())
+              pack_index_space(rez, true/*include size*/);
+            else
+              rez.serialize<size_t>(0);
             rez.serialize<size_t>(semantic_info.size());
             for (LegionMap<SemanticTag,SemanticInfo>::aligned::iterator it = 
                   semantic_info.begin(); it != semantic_info.end(); it++)
@@ -9061,19 +9134,17 @@ namespace Legion {
     //--------------------------------------------------------------------------
     RegionTreeNode::RegionTreeNode(RegionTreeForest *ctx, 
                                    FieldSpaceNode *column_src)
-      : 
-#ifdef LEGION_GC
-        DistributedCollectable(ctx->runtime, 
+      : DistributedCollectable(ctx->runtime, 
             LEGION_DISTRIBUTED_HELP_ENCODE(
               ctx->runtime->get_available_distributed_id(),
               REGION_TREE_NODE_DC),
             ctx->runtime->address_space, false/*register with runtime*/),
-#endif
         context(ctx), column_source(column_src), 
-        registered(false), destroyed(false)
-#ifdef LEGION_GC
-        , node_lock(this->gc_lock)
+        registered(false), destroyed(false), 
+#ifdef DEBUG_LEGION
+        currently_active(true),
 #endif
+        node_lock(this->gc_lock)
     //--------------------------------------------------------------------------
     {
     }
@@ -9082,9 +9153,7 @@ namespace Legion {
     RegionTreeNode::~RegionTreeNode(void)
     //--------------------------------------------------------------------------
     {
-#ifdef LEGION_GC
       remote_instances.clear();
-#endif
       for (LegionMap<SemanticTag,SemanticInfo>::aligned::iterator it = 
             semantic_info.begin(); it != semantic_info.end(); it++)
       {
@@ -9097,6 +9166,15 @@ namespace Legion {
               tracking_contexts.begin(); it != tracking_contexts.end(); it++)
           (*it)->notify_region_tree_node_deletion(this);
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeNode::notify_active(ReferenceMutator *mutator)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(currently_active);
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -9962,7 +10040,7 @@ namespace Legion {
       // In the future we might consider breaking this out so that we
       // generate two close operations: a read-only one for the predicate
       // true case, and normal close operation for the predicate false case
-      const bool overwriting = IS_WRITE_ONLY(closer.user.usage) && 
+      const bool overwriting = HAS_WRITE_DISCARD(closer.user.usage) && 
         (next_child == INVALID_COLOR) && !closer.user.op->is_predicated_op();
       // Now we can look at all the children
       for (LegionList<FieldState>::aligned::iterator it = 
@@ -13782,43 +13860,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     RegionNode::~RegionNode(void)
     //--------------------------------------------------------------------------
-    {
-      if (registered)
-      {
-        const bool top_level = (parent == NULL);
-        // Only need to unregister ourselves with the column if we're the top
-        // otherwise we need to unregister ourselves with our parent
-        if (top_level)
-        {
-          column_source->remove_instance(this);
-#ifdef LEGION_GC
-          if (column_source->remove_nested_resource_ref(did))
-#else
-          if (column_source->remove_base_resource_ref(REGION_TREE_REF))
-#endif
-            delete column_source;
-        }
-        else
-        {
-          parent->remove_child(row_source->color);
-#ifdef LEGION_GC
-          if (parent->remove_base_resource_ref(REGION_TREE_REF))
-#else
-          if (parent->remove_reference())
-#endif
-            delete parent;
-        }
-        // Unregister oursleves with the row source
-        row_source->remove_instance(this);
-#ifdef LEGION_GC
-        if (row_source->remove_nested_resource_ref(did))
-#else
-        if (row_source->remove_base_resource_ref(REGION_TREE_REF))
-#endif
-          delete row_source;
-        // Unregister ourselves with the context
-        context->remove_node(handle, top_level);
-      }
+    { 
     }
 
     //--------------------------------------------------------------------------
@@ -13831,6 +13873,40 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void RegionNode::notify_inactive(ReferenceMutator *mutator)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(currently_active);
+      currently_active = false;
+#endif
+      if (registered)
+      {
+        const bool top_level = (parent == NULL);
+        // Only need to unregister ourselves with the column if we're the top
+        // otherwise we need to unregister ourselves with our parent
+        if (top_level)
+        {
+          column_source->remove_instance(this);
+          if (column_source->remove_nested_resource_ref(did))
+            delete column_source;
+        }
+        else
+        {
+          parent->remove_child(row_source->color);
+          if (parent->remove_nested_gc_ref(did))
+            delete parent;
+        }
+        // Unregister oursleves with the row source
+        row_source->remove_instance(this);
+        if (row_source->remove_nested_resource_ref(did))
+          delete row_source;
+        // Unregister ourselves with the context
+        context->remove_node(handle, top_level);
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void RegionNode::record_registered(void)
     //--------------------------------------------------------------------------
     {
@@ -13840,38 +13916,20 @@ namespace Legion {
       LocalReferenceMutator mutator;
       if (parent == NULL)
       {
-#ifdef LEGION_GC
         column_source->add_nested_valid_ref(did, &mutator);
         column_source->add_nested_resource_ref(did);
-#else
-        column_source->add_base_valid_ref(REGION_TREE_REF, &mutator);
-        column_source->add_base_resource_ref(REGION_TREE_REF);
-#endif
         column_source->add_instance(this);
       }
       else
       {
-#ifdef LEGION_GC
-        parent->add_base_resource_ref(REGION_TREE_REF);
-#else
-        parent->add_reference();
-#endif
+        parent->add_nested_gc_ref(did, &mutator);
         parent->add_child(this);
       }
-#ifdef LEGION_GC
       row_source->add_nested_valid_ref(did, &mutator);
       row_source->add_nested_resource_ref(did);
-#else
-      row_source->add_base_valid_ref(REGION_TREE_REF, &mutator);
-      row_source->add_base_resource_ref(REGION_TREE_REF); 
-#endif
       row_source->add_instance(this);
       // Add a reference that will be moved when we're destroyed
-#ifdef LEGION_GC
-      add_base_resource_ref(APPLICATION_REF);
-#else
-      add_reference();
-#endif
+      add_base_gc_ref(APPLICATION_REF);
       registered = true;
     }
 
@@ -13999,25 +14057,13 @@ namespace Legion {
       if (parent == NULL)
       {
         context->runtime->release_tree_instances(handle.get_tree_id());
-#ifdef LEGION_GC
         column_source->remove_nested_valid_ref(did);
-#else
-        column_source->remove_base_valid_ref(REGION_TREE_REF);
-#endif
       }
-#ifdef LEGION_GC
       row_source->remove_nested_valid_ref(did);
-#else
-      row_source->remove_base_valid_ref(REGION_TREE_REF);
-#endif
       // Mark that it is destroyed
       destroyed = true;
       // Remove our reference
-#ifdef LEGION_GC
-      return remove_base_resource_ref(APPLICATION_REF);
-#else
-      return remove_reference();
-#endif
+      return remove_base_gc_ref(APPLICATION_REF);
     }
 
     //--------------------------------------------------------------------------
@@ -14739,7 +14785,7 @@ namespace Legion {
         }
         std::vector<InstanceView*> new_views(targets.size());
         convert_target_views(targets, context, new_views);
-        if (!IS_WRITE_ONLY(info.req))
+        if (!HAS_WRITE_DISCARD(info.req))
         {
           // Any case but write-only
           // All close operations have already been done, so all
@@ -15752,27 +15798,6 @@ namespace Legion {
     PartitionNode::~PartitionNode(void)
     //--------------------------------------------------------------------------
     {
-      if (registered)
-      {
-        // Unregister ourselves with our parent
-        parent->remove_child(row_source->color);
-#ifdef LEGION_GC
-        if (parent->remove_base_resource_ref(REGION_TREE_REF))
-#else
-        if (parent->remove_reference())
-#endif
-          delete parent;
-        // Unregister ourselves with our row source
-        row_source->remove_instance(this);
-#ifdef LEGION_GC
-        if (row_source->remove_nested_resource_ref(did))
-#else
-        if (row_source->remove_base_resource_ref(REGION_TREE_REF))
-#endif
-          delete row_source;
-        // Then unregister ourselves with the context
-        context->remove_node(handle);
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -15785,6 +15810,29 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void PartitionNode::notify_inactive(ReferenceMutator *mutator)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(currently_active);
+      currently_active = false;
+#endif
+      if (registered)
+      {
+        // Unregister ourselves with our parent
+        parent->remove_child(row_source->color);
+        if (parent->remove_nested_gc_ref(did))
+          delete parent;
+        // Unregister ourselves with our row source
+        row_source->remove_instance(this);
+        if (row_source->remove_nested_resource_ref(did))
+          delete row_source;
+        // Then unregister ourselves with the context
+        context->remove_node(handle);
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void PartitionNode::record_registered(void)
     //--------------------------------------------------------------------------
     {
@@ -15792,26 +15840,13 @@ namespace Legion {
       assert(!registered);
 #endif
       LocalReferenceMutator mutator;
-#ifdef LEGION_GC
       row_source->add_nested_valid_ref(did, &mutator);
       row_source->add_nested_resource_ref(did);
-#else
-      row_source->add_base_valid_ref(REGION_TREE_REF, &mutator);
-      row_source->add_base_resource_ref(REGION_TREE_REF);
-#endif
       row_source->add_instance(this);
-#ifdef LEGION_GC
-      parent->add_base_resource_ref(REGION_TREE_REF);
-#else
-      parent->add_reference();
-#endif
+      parent->add_nested_gc_ref(did, &mutator);
       parent->add_child(this);
       // Add a reference that will be moved when we're destroyed
-#ifdef LEGION_GC
-      add_base_resource_ref(APPLICATION_REF);
-#else
-      add_reference();
-#endif
+      add_base_gc_ref(APPLICATION_REF);
       registered = true;
     }
 
@@ -15924,19 +15959,11 @@ namespace Legion {
       // Invalidate our version managers
       invalidate_version_managers();
       // Remove the valid reference that we hold on our row source
-#ifdef LEGION_GC
       row_source->remove_nested_valid_ref(did);
-#else
-      row_source->remove_base_valid_ref(REGION_TREE_REF);
-#endif
       // Make that it is destroyed
       destroyed = true;
       // Remove our reference
-#ifdef LEGION_GC
-      return remove_base_resource_ref(APPLICATION_REF);
-#else
-      return remove_reference();
-#endif
+      return remove_base_gc_ref(APPLICATION_REF);
     }
 
     //--------------------------------------------------------------------------

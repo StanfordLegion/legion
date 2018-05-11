@@ -314,7 +314,7 @@ gcc49_cxx98_32bit_debug_legion:
 gcc49_cxx98_debug_external:
   <<: [*linux_compute, *image, *external_tests]
   variables:
-    <<: [*gcc49, *terra38, *debug, *cxx98_normal]
+    <<: [*gcc49, *terra38, *debug, *cxx98_normal, *hdf5]
 
 # Linux with Clang 3.8
 # * Basic configurations
@@ -424,7 +424,7 @@ clang38_cxx98_32bit_debug_legion:
 clang38_cxx98_debug_external:
   <<: [*linux_compute, *image_clang, *external_tests]
   variables:
-    <<: [*clang38, *terra38, *debug, *cxx98_normal]
+    <<: [*clang38, *terra38, *debug, *cxx98_normal, *hdf5]
 
 # # macOS with Clang 3.5
 # macos_clang38_cxx98_debug:
@@ -488,7 +488,7 @@ clang35_cxx98_debug_legion:
 #     <<: [*clang35, *terra35, *debug, *cxx98_normal, *regent]
 
 # Performance tests:
-n0004_gcc49_cxx98_release_perf:
-  <<: [*linux_n0004, *image, *perf_tests]
-  variables:
-    <<: [*gcc49, *terra38, *release, *cxx98_normal]
+# n0004_gcc49_cxx98_release_perf:
+#   <<: [*linux_n0004, *image, *perf_tests]
+#   variables:
+#     <<: [*gcc49, *terra38, *release, *cxx98_normal]

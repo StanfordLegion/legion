@@ -89,23 +89,30 @@ function parser.annotations(p, allow_expr, allow_stat)
   local level = p:annotation_level()
   if not level then return annotations end
 
-  p:expect("(")
-  local name = p:annotation_name(true)
-  annotations = annotations { [name] = level }
+  local closed = false
+  while level do
+    p:expect("(")
+    local name = p:annotation_name(true)
+    annotations = annotations { [name] = level }
 
-  while p:nextif(",") do
-    local name = p:annotation_name(false)
-    if name then
-      annotations = annotations { [name] = level }
-    elseif allow_expr then
-      local expr = p:expr()
-      p:expect(")")
-      return expr { annotations = annotations }
+    while p:nextif(",") do
+      local name = p:annotation_name(false)
+      if name then
+        annotations = annotations { [name] = level }
+      elseif allow_expr then
+        local expr = p:expr()
+        p:expect(")")
+        return expr { annotations = annotations }
+      end
+    end
+
+    if allow_stat and p:nextif(")") then
+      level = p:annotation_level()
+      closed = not level
     end
   end
 
-  if allow_stat then
-    p:expect(")")
+  if allow_stat and closed then
     return annotations
   else
     assert(allow_expr)

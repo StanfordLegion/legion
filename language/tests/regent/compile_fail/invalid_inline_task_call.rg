@@ -12,6 +12,11 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
+-- fails-with:
+-- invalid_inline_task_call.rg:51: cannot inline a task that does not demand inlining
+--   var ret_f = __demand(__inline, f(r, x))
+--                                     ^
+
 import "regent"
 
 local c = regentlib.c

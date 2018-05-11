@@ -250,9 +250,14 @@ namespace Legion {
 #endif
       r.parent = r.region;
       r.prop = EXCLUSIVE;
-      // Write discard privileges become read-write inside the operation
-      if (r.privilege == WRITE_DISCARD)
-        r.privilege = READ_WRITE;
+      // If we're doing a write discard, then we can add read privileges
+      // inside our task since it is safe to read what we wrote
+      if (HAS_WRITE_DISCARD(r))
+      {
+        r.privilege |= READ_PRIV;
+        // Then remove any discard masks from the privileges
+        r.privilege &= ~DISCARD_MASK;
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -2493,14 +2498,17 @@ namespace Legion {
 #endif
                                                 );
       }
+      if (!IS_NO_ACCESS(requirement) && !requirement.privilege_fields.empty())
+      {
 #ifdef DEBUG_LEGION
-      assert(!mapped_instances.empty());
+        assert(!mapped_instances.empty());
 #endif 
-      // We're done so apply our mapping changes
-      version_info.apply_mapping(map_applied_conditions);
+        // We're done so apply our mapping changes
+        version_info.apply_mapping(map_applied_conditions);
 #ifdef DEBUG_LEGION
-      dump_physical_state(&requirement, 0);
+        dump_physical_state(&requirement, 0);
 #endif
+      }
       // If we have any wait preconditions from phase barriers or 
       // grants then we can add them to the mapping preconditions
       if (!wait_barriers.empty() || !grants.empty())
@@ -2540,7 +2548,7 @@ namespace Legion {
           mapped_events.insert(mapped_instances[idx].get_ready_event());
         map_complete_event = Runtime::merge_events(mapped_events);
       }
-      else
+      else if (!mapped_instances.empty())
         map_complete_event = mapped_instances[0].get_ready_event();
       if (runtime->legion_spy_enabled)
       {
@@ -3286,7 +3294,7 @@ namespace Legion {
         // If our privilege is not reduce, then shift it to write discard
         // since we are going to write all over the region
         if (dst_requirements[idx].privilege != REDUCE)
-          dst_requirements[idx].privilege = WRITE_DISCARD;
+          dst_requirements[idx].privilege = WRITE_ONLY;
       }
       grants = launcher.grants;
       // Register ourselves with all the grants
@@ -3622,8 +3630,8 @@ namespace Legion {
       for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
       {
         RegionRequirement &req = dst_requirements[idx];
-        if (IS_WRITE_ONLY(req))
-          req.privilege = READ_WRITE;
+        if (HAS_WRITE_DISCARD(req))
+          req.privilege &= ~DISCARD_MASK;
       }
       return true;
     }
@@ -4757,7 +4765,7 @@ namespace Legion {
         // If our privilege is not reduce, then shift it to write discard
         // since we are going to write all over the region
         if (dst_requirements[idx].privilege != REDUCE)
-          dst_requirements[idx].privilege = WRITE_DISCARD;
+          dst_requirements[idx].privilege = WRITE_ONLY;
       }
       grants = launcher.grants;
       // Register ourselves with all the grants
@@ -6103,30 +6111,22 @@ namespace Legion {
                                                    privilege_path);
         version_info.clear();
       }
+      // We treat this as a fence on everything that came before it since
+      // we don't know which prior operations might need the names of the
+      // region before it is deleted
+      completion_precondition = parent_ctx->perform_fence_analysis(this, 
+                                    false/*mapping*/, true/*execution*/);
     }
 
     //--------------------------------------------------------------------------
     void DeletionOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
-    {
-      // Iterate over our incoming operations and find the completion 
-      // operations that we need to wait to be done executing before
-      // we can actually perform the deletion
-      std::set<ApEvent> completion_events;
-      for (std::map<Operation*,GenerationID>::const_iterator it = 
-            incoming.begin(); it != incoming.end(); it++)
-      {
-        ApEvent complete = it->first->get_completion_event();
-        if (it->second == it->first->get_generation())
-          completion_events.insert(complete);
-      }
+    { 
       // Mark that we're done mapping and defer the execution as appropriate
       complete_mapping();
-      if (!completion_events.empty())
-      {
-        ApEvent completion_ready = Runtime::merge_events(completion_events);
-        complete_execution(Runtime::protect_event(completion_ready));
-      }
+      if (completion_precondition.exists() && 
+          !completion_precondition.has_triggered())
+        complete_execution(Runtime::protect_event(completion_precondition));
       else
         complete_execution();
     }
@@ -13252,14 +13252,17 @@ namespace Legion {
                                        map_applied_conditions, 
                                        true_guard, false_guard,
                                        trace_info);
-        if (!mapped_instances.empty())
-          runtime->forest->log_mapping_decision(unique_op_id, 0/*idx*/,
-                                                requirement,
-                                                mapped_instances);
+        if (runtime->legion_spy_enabled)
+        {
+          if (!mapped_instances.empty())
+            runtime->forest->log_mapping_decision(unique_op_id, 0/*idx*/,
+                                                  requirement,
+                                                  mapped_instances);
 #ifdef LEGION_SPY
-        LegionSpy::log_operation_events(unique_op_id, done_event, 
-                                        completion_event);
+          LegionSpy::log_operation_events(unique_op_id, done_event, 
+                                          completion_event);
 #endif
+        }
         version_info.apply_mapping(map_applied_conditions);
 #ifdef DEBUG_LEGION
       dump_physical_state(&requirement, 0);

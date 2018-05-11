@@ -115,15 +115,18 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(!realm_index_space_set.has_triggered());
 #endif
+      // We can set this now but triggering the realm_index_space_set
+      // event has to be done while holding the node_lock on the owner
+      // node so that it is serialized with respect to queries from 
+      // remote nodes for copies about the remote instance
       realm_index_space = value;
-      Runtime::trigger_event(realm_index_space_set);
-      // Now we can tighten it
-      tighten_index_space();
       // If we're not the owner, send a message back to the
       // owner specifying that it can set the index space value
       const AddressSpaceID owner_space = get_owner_space();
       if (owner_space != context->runtime->address_space)
       {
+        // We're not the owner so we can trigger the event without the lock
+        Runtime::trigger_event(realm_index_space_set);
         // We're not the owner, if this is not from the owner then
         // send a message there telling the owner that it is set
         if (source != owner_space)
@@ -132,29 +135,37 @@ namespace Legion {
           {
             RezCheck z(rez);
             rez.serialize(handle);
-            pack_index_space(rez);
+            pack_index_space(rez, false/*include size*/);
           }
           context->runtime->send_index_space_set(owner_space, rez);
         }
+        
       }
       else
       {
         // Log subspaces being set on the owner
         if (implicit_runtime->legion_spy_enabled && (parent != NULL))
           this->log_index_space_points(realm_index_space);
-        // We're the owner, send messages to everyone else that we've 
-        // sent this node to except the source
-        Serializer rez;
-        {
-          RezCheck z(rez);
-          rez.serialize(handle);
-          pack_index_space(rez);
-        }
-        IndexSpaceSetFunctor functor(context->runtime, source, rez);
         // Hold the lock while walking over the node set
-        AutoLock n_lock(node_lock,1,false/*exclusive*/);
-        remote_instances.map(functor); 
+        AutoLock n_lock(node_lock);
+        // Now we can trigger the event while holding the lock
+        Runtime::trigger_event(realm_index_space_set);
+        if (!remote_instances.empty())
+        {
+          // We're the owner, send messages to everyone else that we've 
+          // sent this node to except the source
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize(handle);
+            pack_index_space(rez, false/*include size*/);
+          }
+          IndexSpaceSetFunctor functor(context->runtime, source, rez);
+          remote_instances.map(functor); 
+        }
       }
+      // Now we can tighten it
+      tighten_index_space();
     }
 
     //--------------------------------------------------------------------------
@@ -1046,17 +1057,17 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    void IndexSpaceNodeT<DIM,T>::pack_index_space(Serializer &rez) const
+    void IndexSpaceNodeT<DIM,T>::pack_index_space(Serializer &rez,
+                                                  bool include_size) const
     //--------------------------------------------------------------------------
     {
-      if (realm_index_space_set.has_triggered())
-      {
-        // No need for the lock, held by the caller
+#ifdef DEBUG_LEGION
+      assert(realm_index_space_set.has_triggered());
+#endif
+      if (include_size)
         rez.serialize<size_t>(sizeof(realm_index_space));
-        rez.serialize(realm_index_space);
-      }
-      else
-        rez.serialize<size_t>(0); // not ready yet
+      // No need for the lock, held by the caller
+      rez.serialize(realm_index_space);
     }
 
     //--------------------------------------------------------------------------
@@ -1065,12 +1076,7 @@ namespace Legion {
                                                     AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      size_t size;
-      derez.deserialize(size);
       Realm::IndexSpace<DIM,T> result_space;
-#ifdef DEBUG_LEGION
-      assert(size == sizeof(result_space));
-#endif
       derez.deserialize(result_space);
       set_realm_index_space(source, result_space);
     }

@@ -199,8 +199,11 @@ namespace Legion {
      * Normal is a standard physical instance, while specialized
      * values are for indiciating the need for a custom kind of
      * physical instance like a reduction-list or a 
-     * reduction fold instance. We can provide other kinds of 
-     * specializations here in the future. Note the default
+     * reduction fold instance. You can also use redop of 0 with 
+     * either of the reduction specializations to indicate that
+     * you expect a reduction instance, but it does not matter
+     * which reduction instance is required. We can provide other 
+     * kinds of specializations here in the future. Note the default
      * constructor will fall back to the normal case so this
      * kind of constraint won't need to be set in the default case.
      */

@@ -14,6 +14,7 @@
 
 -- Regent Standard Library
 
+local affine_helper = require("regent/affine_helper")
 local ast = require("regent/ast")
 local base = require("regent/std_base")
 local cudahelper = require("regent/cudahelper")
@@ -272,7 +273,101 @@ function std.check_any_privilege(cx, region, field_path)
   return false
 end
 
-function std.search_constraint(cx, region, constraint, visited, reflexive, symmetric)
+local function analyze_uses_variables_node(variables)
+  return function(node)
+    -- Expressions:
+    if node:is(ast.typed.expr.ID) then
+      return variables[node.value]
+
+    elseif node:is(ast.typed.expr.FieldAccess) or
+      node:is(ast.typed.expr.IndexAccess) or
+      node:is(ast.typed.expr.MethodCall) or
+      node:is(ast.typed.expr.Call) or
+      node:is(ast.typed.expr.RawContext) or
+      node:is(ast.typed.expr.RawFields) or
+      node:is(ast.typed.expr.RawPhysical) or
+      node:is(ast.typed.expr.RawRuntime) or
+      node:is(ast.typed.expr.RawValue) or
+      node:is(ast.typed.expr.Isnull) or
+      node:is(ast.typed.expr.Null) or
+      node:is(ast.typed.expr.DynamicCast) or
+      node:is(ast.typed.expr.StaticCast) or
+      node:is(ast.typed.expr.UnsafeCast) or
+      node:is(ast.typed.expr.Ispace) or
+      node:is(ast.typed.expr.Region) or
+      node:is(ast.typed.expr.Partition) or
+      node:is(ast.typed.expr.PartitionEqual) or
+      node:is(ast.typed.expr.PartitionByField) or
+      node:is(ast.typed.expr.Image) or
+      node:is(ast.typed.expr.Preimage) or
+      node:is(ast.typed.expr.CrossProduct) or
+      node:is(ast.typed.expr.ListSlicePartition) or
+      node:is(ast.typed.expr.ListDuplicatePartition) or
+      node:is(ast.typed.expr.ListSliceCrossProduct) or
+      node:is(ast.typed.expr.ListCrossProduct) or
+      node:is(ast.typed.expr.ListCrossProductComplete) or
+      node:is(ast.typed.expr.ListPhaseBarriers) or
+      node:is(ast.typed.expr.ListInvert) or
+      node:is(ast.typed.expr.ListRange) or
+      node:is(ast.typed.expr.PhaseBarrier) or
+      node:is(ast.typed.expr.DynamicCollective) or
+      node:is(ast.typed.expr.DynamicCollectiveGetResult) or
+      node:is(ast.typed.expr.Advance) or
+      node:is(ast.typed.expr.Adjust) or
+      node:is(ast.typed.expr.Arrive) or
+      node:is(ast.typed.expr.Await) or
+      node:is(ast.typed.expr.Copy) or
+      node:is(ast.typed.expr.Fill) or
+      node:is(ast.typed.expr.Acquire) or
+      node:is(ast.typed.expr.Release) or
+      node:is(ast.typed.expr.AllocateScratchFields) or
+      node:is(ast.typed.expr.WithScratchFields) or
+      node:is(ast.typed.expr.RegionRoot) or
+      node:is(ast.typed.expr.Condition) or
+      node:is(ast.typed.expr.Deref)
+    then
+      return false
+
+    elseif node:is(ast.typed.expr.Constant) or
+      node:is(ast.typed.expr.Function) or
+      node:is(ast.typed.expr.Cast) or
+      node:is(ast.typed.expr.Ctor) or
+      node:is(ast.typed.expr.CtorListField) or
+      node:is(ast.typed.expr.CtorRecField) or
+      node:is(ast.typed.expr.Unary) or
+      node:is(ast.typed.expr.Binary)
+    then
+      return false
+
+    -- Miscellaneous:
+    elseif node:is(ast.location) or
+      node:is(ast.annotation) or
+      node:is(ast.condition_kind)
+    then
+      return false
+
+    else
+      assert(false, "unexpected node type " .. tostring(node.node_type))
+    end
+  end
+end
+
+local function analyze_uses_variables(node, variables)
+  return ast.mapreduce_node_postorder(
+    analyze_uses_variables_node(variables),
+    data.any,
+    node, false)
+end
+
+local function uses_variables(region, variables)
+  if region:has_index_expr() then
+    return analyze_uses_variables(region:get_index_expr(), variables)
+  end
+  return false
+end
+
+function std.search_constraint(cx, region, constraint, exclude_variables,
+                               visited, reflexive, symmetric)
   return std.search_constraint_predicate(
     cx, region, visited,
     function(cx, region)
@@ -282,7 +377,10 @@ function std.search_constraint(cx, region, constraint, visited, reflexive, symme
 
       if cx.constraints:has(constraint.op) and
         cx.constraints[constraint.op]:has(region) and
-        cx.constraints[constraint.op][region][constraint.rhs]
+        cx.constraints[constraint.op][region][constraint.rhs] and
+        not (exclude_variables and
+               uses_variables(region, exclude_variables) and
+               uses_variables(constraint.rhs, exclude_variables))
       then
         return true
       end
@@ -293,7 +391,9 @@ function std.search_constraint(cx, region, constraint, visited, reflexive, symme
           rhs = region,
           op = constraint.op,
         }
-        if std.search_constraint(cx, constraint.lhs, constraint, {}, reflexive, false) then
+        if std.search_constraint(cx, constraint.lhs, constraint,
+                                 exclude_variables, {}, reflexive, false)
+        then
           return true
         end
       end
@@ -302,7 +402,7 @@ function std.search_constraint(cx, region, constraint, visited, reflexive, symme
     end)
 end
 
-function std.check_constraint(cx, constraint)
+function std.check_constraint(cx, constraint, exclude_variables)
   local lhs = constraint.lhs
   if lhs == std.wild then
     return true
@@ -327,7 +427,7 @@ function std.check_constraint(cx, constraint)
     op = constraint.op,
   }
   return std.search_constraint(
-    cx, constraint.lhs, constraint, {},
+    cx, constraint.lhs, constraint, exclude_variables, {},
     constraint.op == std.subregion --[[ reflexive ]],
     constraint.op == std.disjointness --[[ symmetric ]])
 end
@@ -500,21 +600,6 @@ function std.type_maybe_eq(a, b, mapping)
     return std.type_maybe_eq(a.element_type, b.element_type, mapping)
   else
     return false
-  end
-end
-
-function std.type_meet(a, b)
-  local function test()
-    local terra query(x : a, y : b)
-      if true then return x end
-      if true then return y end
-    end
-    return query:gettype().returntype
-  end
-  local valid, result_type = pcall(test)
-
-  if valid then
-    return result_type
   end
 end
 
@@ -1171,6 +1256,8 @@ local function compute_serialized_size_inner(value_type, value)
       end
     end
     return actions, result
+  elseif std.is_string(value_type) then
+    return quote end, `(c.strlen([rawstring](value)) + 1)
   else
     return quote end, 0
   end
@@ -1221,6 +1308,12 @@ local function serialize_inner(value_type, value, fixed_ptr, data_ptr)
         @[data_ptr] = @[data_ptr] + terralib.sizeof(element_type)
         [ser_actions]
       end
+    end
+  elseif std.is_string(value_type) then
+    actions = quote
+      [actions]
+      c.strcpy([rawstring](@[data_ptr]), [rawstring]([value]))
+      @[data_ptr] = @[data_ptr] + c.strlen([rawstring]([value])) + 1
     end
   end
 
@@ -1275,6 +1368,12 @@ local function deserialize_inner(value_type, fixed_ptr, data_ptr)
         [deser_actions]
         ([&element_type]([result].__data))[i] = [deser_value]
       end
+    end
+  elseif std.is_string(value_type) then
+    actions = quote
+      [actions]
+      [result] = c.strdup([rawstring](@[data_ptr]))
+      @[data_ptr] = @[data_ptr] + c.strlen([rawstring]([result])) + 1
     end
   end
 
@@ -1377,78 +1476,11 @@ end
 -- ## Codegen Helpers
 -- #################
 
-local gen_optimal = terralib.memoize(
-  function(op, lhs_type, rhs_type)
-    return terra(lhs : lhs_type, rhs : rhs_type)
-      if [std.quote_binary_op(op, lhs, rhs)] then
-        return lhs
-      else
-        return rhs
-      end
-    end
-  end)
-
-std.fmax = macro(
-  function(lhs, rhs)
-    local lhs_type, rhs_type = lhs:gettype(), rhs:gettype()
-    local result_type = std.type_meet(lhs_type, rhs_type)
-    assert(result_type)
-    return `([gen_optimal(">", lhs_type, rhs_type)]([lhs], [rhs]))
-  end)
-
-std.fmin = macro(
-  function(lhs, rhs)
-    local lhs_type, rhs_type = lhs:gettype(), rhs:gettype()
-    local result_type = std.type_meet(lhs_type, rhs_type)
-    assert(result_type)
-    return `([gen_optimal("<", lhs_type, rhs_type)]([lhs], [rhs]))
-  end)
-
-function std.quote_unary_op(op, rhs)
-  if op == "-" then
-    return `(-[rhs])
-  elseif op == "not" then
-    return `(not [rhs])
-  else
-    assert(false, "unknown operator " .. tostring(op))
-  end
-end
-
-function std.quote_binary_op(op, lhs, rhs)
-  if op == "*" then
-    return `([lhs] * [rhs])
-  elseif op == "/" then
-    return `([lhs] / [rhs])
-  elseif op == "%" then
-    return `([lhs] % [rhs])
-  elseif op == "+" then
-    return `([lhs] + [rhs])
-  elseif op == "-" then
-    return `([lhs] - [rhs])
-  elseif op == "<" then
-    return `([lhs] < [rhs])
-  elseif op == ">" then
-    return `([lhs] > [rhs])
-  elseif op == "<=" then
-    return `([lhs] <= [rhs])
-  elseif op == ">=" then
-    return `([lhs] >= [rhs])
-  elseif op == "==" then
-    return `([lhs] == [rhs])
-  elseif op == "~=" then
-    return `([lhs] ~= [rhs])
-  elseif op == "and" then
-    return `([lhs] and [rhs])
-  elseif op == "or" then
-    return `([lhs] or [rhs])
-  elseif op == "max" then
-    return `([std.fmax]([lhs], [rhs]))
-  elseif op == "min" then
-    return `([std.fmin]([lhs], [rhs]))
-  else
-    assert(false, "unknown operator " .. tostring(op))
-  end
-end
+std.type_meet = base.type_meet
+std.fmax = base.fmax
+std.fmin = base.fmin
+std.quote_unary_op = base.quote_unary_op
+std.quote_binary_op = base.quote_binary_op
 
 -- #####################################
 -- ## Types
@@ -1660,7 +1692,7 @@ local bounded_type = terralib.memoize(function(index_type, ...)
     -- Find the smallest bitmask that will fit.
     -- TODO: Would be nice to compress smaller than one byte.
    local bitmask_type
-    if #bounds < bit.lshift(1, 8) - 1 then
+    if #bounds < bit.lshift(1, 8) - 1 and terralib.llvmversion >= 38 then
       bitmask_type = uint8
     elseif #bounds < bit.lshift(1, 16) - 1 then
       bitmask_type = uint16
@@ -2180,6 +2212,7 @@ do
     st.is_region = true
     st.ispace_symbol = ispace_symbol
     st.fspace_type = fspace_type
+    st.index_expr = false
 
     function st:ispace()
       local ispace = self.ispace_symbol:gettype()
@@ -2195,6 +2228,21 @@ do
 
     function st:fspace()
       return st.fspace_type
+    end
+
+    function st:has_index_expr()
+      return st.index_expr
+    end
+
+    function st:get_index_expr()
+      assert(st.index_expr)
+      return st.index_expr
+    end
+
+    function st:set_index_expr(expr)
+      assert(not st.index_expr)
+      assert(ast.is_node(expr))
+      st.index_expr = expr
     end
 
     -- For API compatibility with std.list:
@@ -2243,23 +2291,6 @@ std.wild = std.newsymbol(std.wild_type, "wild")
 std.disjoint = ast.disjointness_kind.Disjoint {}
 std.aliased = ast.disjointness_kind.Aliased {}
 
--- This is used in methods such as subregion_constant where the index
--- of a subregion has to be munged to make it safe to go in a map.
-local function get_subregion_index(i)
-  if type(i) == "number" or std.is_symbol(i) then
-    return i
-  elseif terralib.isconstant(i) and std.is_index_type(i.type) then
-    -- Terra, pretty please give me the value inside this constant
-    local value = (terra() return i end)()
-    return data.newtuple(
-      unpack(
-        i.type.fields:map(
-          function(field_name) return value.__ptr[field_name] end)))
-  else
-    assert(false)
-  end
-end
-
 do
   local next_partition_id = 1
   function std.partition(disjointness, region_symbol, colors_symbol)
@@ -2296,6 +2327,7 @@ do
     st.disjointness = disjointness
     st.parent_region_symbol = region_symbol
     st.colors_symbol = colors_symbol
+    st.index_expr = false
     st.subregions = data.newmap()
 
     function st:is_disjoint()
@@ -2326,16 +2358,32 @@ do
       return self:parent_region():fspace()
     end
 
+    function st:has_index_expr()
+      return st.index_expr
+    end
+
+    function st:get_index_expr()
+      assert(st.index_expr)
+      return st.index_expr
+    end
+
+    function st:set_index_expr(expr)
+      assert(not st.index_expr)
+      assert(ast.is_node(expr))
+      st.index_expr = expr
+    end
+
     function st:subregions_constant()
       return self.subregions
     end
 
-    function st:subregion_constant(i)
-      local i = get_subregion_index(i)
-      if not self.subregions[i] then
-        self.subregions[i] = self:subregion_dynamic()
+    function st:subregion_constant(index_expr)
+      local index = affine_helper.get_subregion_index(index_expr)
+      if not self.subregions[index] then
+        self.subregions[index] = self:subregion_dynamic()
+        self.subregions[index]:set_index_expr(index_expr)
       end
-      return self.subregions[i]
+      return self.subregions[index]
     end
 
     function st:subregion_dynamic()
@@ -2403,6 +2451,7 @@ function std.cross_product(...)
 
   st.is_cross_product = true
   st.partition_symbols = data.newtuple(unpack(partition_symbols))
+  st.index_expr = false
   st.subpartitions = data.newmap()
 
   function st:partitions()
@@ -2432,6 +2481,21 @@ function std.cross_product(...)
     return self:partition():parent_region()
   end
 
+    function st:has_index_expr()
+      return st.index_expr
+    end
+
+    function st:get_index_expr()
+      assert(st.index_expr)
+      return st.index_expr
+    end
+
+    function st:set_index_expr(expr)
+      assert(not st.index_expr)
+      assert(ast.is_node(expr))
+      st.index_expr = expr
+    end
+
   function st:subregion_constant(i)
     local region_type = self:partition():subregion_constant(i)
     return region_type
@@ -2446,14 +2510,15 @@ function std.cross_product(...)
     return region_type
   end
 
-  function st:subpartition_constant(i)
-    local region_type = self:subregion_constant(i)
-    local i = get_subregion_index(i)
-    if not self.subpartitions[i] then
+  function st:subpartition_constant(index_expr)
+    local region_type = self:subregion_constant(index_expr)
+    local index = affine_helper.get_subregion_index(index_expr)
+    if not self.subpartitions[index] then
       local partition = st:subpartition_dynamic(region_type)
-      self.subpartitions[i] = partition
+      self.subpartitions[index] = partition
+      self.subpartitions[index]:set_index_expr(index_expr)
     end
-    return self.subpartitions[i]
+    return self.subpartitions[index]
   end
 
   function st:subpartition_dynamic(region_type)
@@ -2512,7 +2577,7 @@ std.vptr = terralib.memoize(function(width, points_to_type, ...)
   if #bounds > 1 then
     -- Find the smallest bitmask that will fit.
     -- TODO: Would be nice to compress smaller than one byte.
-    if #bounds < bit.lshift(1, 8) - 1 then
+    if #bounds < bit.lshift(1, 8) - 1 and terralib.llvmversion >= 38 then
       bitmask_type = vector(uint8, width)
     elseif #bounds < bit.lshift(1, 16) - 1 then
       bitmask_type = vector(uint16, width)
@@ -3008,6 +3073,29 @@ do
   end
 end
 
+do
+  -- Wrapper for a null-terminated string.
+  local st = terralib.types.newstruct("string")
+  st.entries = terralib.newlist({
+      { "impl", rawstring },
+  })
+  st.is_string = true
+
+  function st.metamethods.__cast(from, to, expr)
+    if std.is_string(to) then
+      if std.type_eq(from, rawstring) then
+        return `([to]{ impl = [expr] })
+      end
+    elseif std.type_eq(to, rawstring) then
+      if std.is_string(from) then
+        return `([expr].impl)
+      end
+    end
+    assert(false)
+  end
+  std.string = st
+end
+
 -- #####################################
 -- ## Tasks
 -- #################
@@ -3145,6 +3233,20 @@ end
 -- #####################################
 -- ## Main
 -- #################
+
+local projection_functors = terralib.newlist()
+
+do
+  local next_id = 1
+  function std.register_projection_functor(depth, region_functor, partition_functor)
+    local id = next_id
+    next_id = next_id + 1
+
+    projection_functors:insert(terralib.newlist({id, depth, region_functor, partition_functor}))
+
+    return id
+  end
+end
 
 local variants = terralib.newlist()
 
@@ -3291,6 +3393,30 @@ function std.setup(main_task, extra_setup_thunk, task_wrappers, registration_nam
     end
   end
 
+  local projection_functor_registrations = projection_functors:map(
+    function(args)
+      local id, depth, region_functor, partition_functor = unpack(args)
+      -- Hack: Work around Terra not wanting to escape nil.
+      if region_functor and partition_functor then
+        return quote
+          c.legion_runtime_preregister_projection_functor(
+            id, depth, region_functor, partition_functor)
+        end
+      elseif region_functor then
+        return quote
+          c.legion_runtime_preregister_projection_functor(
+            id, depth, region_functor, nil)
+        end
+      elseif partition_functor then
+        return quote
+          c.legion_runtime_preregister_projection_functor(
+            id, depth, nil, partition_functor)
+        end
+      else
+        assert(false)
+      end
+    end)
+
   local task_registrations = variants:map(
     function(variant)
       local task = variant.task
@@ -3425,6 +3551,7 @@ function std.setup(main_task, extra_setup_thunk, task_wrappers, registration_nam
   local terra main([argc], [argv])
     [reduction_registrations];
     [layout_registrations];
+    [projection_functor_registrations];
     [task_registrations];
     [cuda_setup];
     [extra_setup];
@@ -3669,6 +3796,11 @@ function std.start(main_task, extra_setup_thunk)
     [argv_setup];
     return main([argc], [argv])
   end
+
+  profile('compile', nil, function() wrapper:compile() end)()
+
+  profile.print_summary()
+
   wrapper()
 end
 
@@ -3708,6 +3840,7 @@ function std.saveobj(main_task, filename, filetype, extra_setup_thunk, link_flag
       terralib.saveobj(filename, names, flags)
     end
   end)()
+  profile.print_summary()
 end
 
 local function generate_task_interfaces()
@@ -3822,6 +3955,7 @@ function std.save_tasks(header_filename, filename, filetype,
       terralib.saveobj(filename, names, flags)
     end
   end)()
+  profile.print_summary()
 end
 
 -- #####################################
