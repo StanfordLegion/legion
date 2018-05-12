@@ -25,6 +25,41 @@ namespace Legion {
   namespace STL {
 
     /*
+     * Helpers for typed serialization.
+     *
+     * WARNING: Currently only supports POD types.
+     */
+
+    template<typename ... Ts>
+    size_t get_serialized_size();
+
+    template<typename ... Ts>
+    void serialize(void *buffer, const Ts & ... ts);
+
+    template<typename ... Ts>
+    std::tuple<Ts ...> deserialize(const void *buffer);
+
+    /*
+     * A helper for building a typed TaskArgument.
+     */
+    template<typename ... Ts>
+    class TypedArgument
+    {
+    public:
+      TypedArgument(const Ts& ... ts);
+      ~TypedArgument();
+
+      operator TaskArgument() const;
+
+      size_t get_size() const;
+      void *get_ptr() const;
+
+    private:
+      void *buffer;
+      size_t buf_size;
+    };
+
+    /*
      * Provide some wrappers for serializing and deserializing STL
      * data structures when returning them as results from Legion tasks
      */

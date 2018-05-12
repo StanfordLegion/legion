@@ -2382,11 +2382,14 @@ namespace Legion {
 #endif
                                                 );
       }
+      if (!IS_NO_ACCESS(requirement) && !requirement.privilege_fields.empty())
+      {
 #ifdef DEBUG_LEGION
-      assert(!mapped_instances.empty());
+        assert(!mapped_instances.empty());
 #endif 
-      // We're done so apply our mapping changes
-      version_info.apply_mapping(map_applied_conditions);
+        // We're done so apply our mapping changes
+        version_info.apply_mapping(map_applied_conditions);
+      }
       // If we have any wait preconditions from phase barriers or 
       // grants then we can add them to the mapping preconditions
       if (!wait_barriers.empty() || !grants.empty())
@@ -2426,7 +2429,7 @@ namespace Legion {
           mapped_events.insert(mapped_instances[idx].get_ready_event());
         map_complete_event = Runtime::merge_events(mapped_events);
       }
-      else
+      else if (!mapped_instances.empty())
         map_complete_event = mapped_instances[0].get_ready_event();
       if (runtime->legion_spy_enabled)
       {

@@ -2405,15 +2405,7 @@ namespace Legion {
           stage_notifications.resize(collective_stages, 1);
           // Stage 0 always starts with 0 notifications since we'll 
           // explictcly arrive on it
-          // Special case: if we expect a stage -1 message from a 
-          // non-participating space, we'll count that as part of 
-          // stage 0, it will make it a negative count, but the 
-          // type is 'int' so we're good
-          if ((collective_stages > 0) && (runtime->address_space <
-             (runtime->total_address_spaces - collective_participating_spaces)))
-            stage_notifications[0] = -1;
-          else
-            stage_notifications[0] = 0;
+          stage_notifications[0] = 0;
         }
         done_event = Runtime::create_rt_user_event();
       }
@@ -2466,7 +2458,7 @@ namespace Legion {
               (runtime->address_space >= (runtime->total_address_spaces -
                 collective_participating_spaces)))
           {
-            const bool all_stages_done = send_explicit_stage(0);
+            const bool all_stages_done = initiate_exchange();
             if (all_stages_done)
               complete_exchange();
           }
@@ -2475,7 +2467,7 @@ namespace Legion {
         {
           // We are not a participating node
           // so we just have to send notification to one node
-          send_explicit_stage(-1);
+          send_remainder_stage();
         }
         // Wait for our done event to be ready
         done_event.wait();
@@ -2490,28 +2482,37 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool MPIRankTable::send_explicit_stage(int stage)
+    bool MPIRankTable::initiate_exchange(void)
     //--------------------------------------------------------------------------
     {
-      bool all_stages_done = false;
+#ifdef DEBUG_LEGION
+      assert(participating); // should only get this for participating shards
+#endif
+      {
+        AutoLock r_lock(reservation);
+#ifdef DEBUG_LEGION
+        assert(!sent_stages.empty());
+        assert(!sent_stages[0]); // stage 0 shouldn't be sent yet
+        assert(!stage_notifications.empty());
+        if (collective_stages == 1)
+          assert(stage_notifications[0] < collective_last_radix); 
+        else
+          assert(stage_notifications[0] < collective_radix);
+#endif
+        stage_notifications[0]++;
+      }
+      return send_ready_stages(0/*start stage*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void MPIRankTable::send_remainder_stage(void)
+    //--------------------------------------------------------------------------
+    {
       Serializer rez;
       {
         RezCheck z(rez);
-        rez.serialize(stage);
-        AutoLock r_lock(reservation);
-#ifdef DEBUG_LEGION
-        {
-          size_t expected_size = 1;
-          for (int idx = 0; idx < stage; idx++)
-            expected_size *= collective_radix;
-          assert(expected_size <= forward_mapping.size());
-        }
-        if (stage >= 0)
-        {
-          assert(stage < int(sent_stages.size()));
-          assert(!sent_stages[stage]);
-        }
-#endif
+        rez.serialize(-1);
+        AutoLock r_lock(reservation, 1, false/*exclusive*/);
         rez.serialize<size_t>(forward_mapping.size());
         for (std::map<int,AddressSpace>::const_iterator it = 
               forward_mapping.begin(); it != forward_mapping.end(); it++)
@@ -2519,93 +2520,28 @@ namespace Legion {
           rez.serialize(it->first);
           rez.serialize(it->second);
         }
-        // Mark that we're sending this stage
-        if (stage >= 0)
-        {
-#ifdef DEBUG_LEGION
-          assert(stage < int(stage_notifications.size()));
-          if (stage == (collective_stages-1))
-            assert(stage_notifications[stage] < collective_last_radix); 
-          else
-            assert(stage_notifications[stage] < collective_radix);
-#endif
-          stage_notifications[stage]++;
-          sent_stages[stage] = true;
-          // Check to see if all the stages are done
-          all_stages_done = 
-            (stage_notifications.back() == collective_last_radix); 
-          if (all_stages_done)
-          {
-            for (int stage = 1; 
-                  stage < collective_stages; stage++)
-            {
-              if (stage_notifications[stage-1] == collective_radix)
-                continue;
-              all_stages_done = false;
-              break;
-            }
-            if (all_stages_done && !done_triggered)
-              done_triggered = true;
-            else
-              all_stages_done = false; // already did the last trigger
-          }
-        }
       }
-      if (stage == -1)
+      if (participating)
       {
-        if (participating)
-        {
-          // Send back to the nodes that are not participating
-          AddressSpaceID target = runtime->address_space +
-            collective_participating_spaces;
+        // Send back to the nodes that are not participating
+        AddressSpaceID target = runtime->address_space +
+          collective_participating_spaces;
 #ifdef DEBUG_LEGION
-          assert(target < runtime->total_address_spaces);
+        assert(target < runtime->total_address_spaces);
 #endif
-          runtime->send_mpi_rank_exchange(target, rez);
-        }
-        else
-        {
-          // Sent to a node that is participating
-          AddressSpaceID target = runtime->address_space % 
-            collective_participating_spaces;
-          runtime->send_mpi_rank_exchange(target, rez);
-        }
+        runtime->send_mpi_rank_exchange(target, rez);
       }
       else
       {
-#ifdef DEBUG_LEGION
-        assert(stage >= 0);
-#endif
-        if (stage == (collective_stages-1))
-        {
-          for (int r = 1; r < collective_last_radix; r++)
-          {
-            AddressSpaceID target = runtime->address_space ^
-              (r << (stage * collective_log_radix));
-#ifdef DEBUG_LEGION
-            assert(int(target) < collective_participating_spaces);
-#endif
-            runtime->send_mpi_rank_exchange(target, rez);
-          }
-        }
-        else
-        {
-          for (int r = 1; r < collective_radix; r++)
-          {
-            AddressSpaceID target = runtime->address_space ^
-              (r << (stage * collective_log_radix));
-#ifdef DEBUG_LEGION
-            assert(int(target) < collective_participating_spaces);
-#endif
-            runtime->send_mpi_rank_exchange(target, rez);
-          }
-        }
+        // Sent to a node that is participating
+        AddressSpaceID target = runtime->address_space % 
+          collective_participating_spaces;
+        runtime->send_mpi_rank_exchange(target, rez);
       }
-      return all_stages_done;
     }
 
     //--------------------------------------------------------------------------
-    bool MPIRankTable::send_ready_stages(void) 
+    bool MPIRankTable::send_ready_stages(const int start_stage) 
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -2613,7 +2549,7 @@ namespace Legion {
 #endif
       // Iterate through the stages and send any that are ready
       // Remember that stages have to be done in order
-      for (int stage = 1; stage < collective_stages; stage++)
+      for (int stage = start_stage; stage < collective_stages; stage++)
       {
         Serializer rez;
         {
@@ -2626,7 +2562,7 @@ namespace Legion {
           // Check to see if we're sending this stage
           // We need all the notifications from the previous stage before
           // we can send this stage
-          if (stage_notifications[stage-1] < collective_radix)
+          if ((stage > 0) && (stage_notifications[stage-1] < collective_radix))
             return false;
           // If we get here then we can send the stage
           sent_stages[stage] = true;
@@ -2675,8 +2611,8 @@ namespace Legion {
       // If we make it here, then we sent the last stage, check to see
       // if we've seen all the notifications for it
       AutoLock r_lock(reservation);
-      if ((stage_notifications.back() == collective_last_radix) && 
-          !done_triggered)
+      if ((stage_notifications.back() == collective_last_radix)
+          && !done_triggered)
       {
         done_triggered = true;
         return true;
@@ -2700,14 +2636,9 @@ namespace Legion {
       if (stage == -1)
       {
         if (!participating)
-        {
-#ifdef DEBUG_LEGION
-          assert(forward_mapping.size() == runtime->total_address_spaces);
-#endif
-          Runtime::trigger_event(done_event);
-        }
+          all_stages_done = true;
         else // we can now send our stage 0
-          all_stages_done = send_explicit_stage(0); 
+          all_stages_done = initiate_exchange();
       }
       else
         all_stages_done = send_ready_stages();
@@ -2736,10 +2667,6 @@ namespace Legion {
 #endif
 	forward_mapping[rank] = space;
       }
-      // A stage -1 message is counted as part of stage 0 (if it exists
-      //  and we are participating)
-      if ((stage == -1) && participating && (collective_stages > 0))
-	stage = 0;
       if (stage >= 0)
       {
 #ifdef DEBUG_LEGION
@@ -2760,15 +2687,15 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(forward_mapping.size() == runtime->total_address_spaces);
 #endif
-      // We are done
-      Runtime::trigger_event(done_event);
       // See if we have to send a message back to a
       // non-participating node
       if ((int(runtime->total_address_spaces) > 
            collective_participating_spaces) &&
           (int(runtime->address_space) < int(runtime->total_address_spaces -
             collective_participating_spaces)))
-        send_explicit_stage(-1);
+        send_remainder_stage();
+      // We are done
+      Runtime::trigger_event(done_event);
     }
 
     /////////////////////////////////////////////////////////////
