@@ -4287,7 +4287,6 @@ namespace Legion {
         assert(mask * normal_close_mask); // shouldn't overlap
 #endif
         disjoint_close_mask |= mask;
-        closed_projections |= mask;
       }
       else
       {
