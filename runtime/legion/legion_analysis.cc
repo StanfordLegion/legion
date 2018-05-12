@@ -3425,7 +3425,7 @@ namespace Legion {
       assert(!!mask);
 #endif
       normal_close_mask |= mask;
-      if (projection)
+      if (projection && !disjoint_close)
         closed_projections |= mask;
       if (disjoint_close)
       {
