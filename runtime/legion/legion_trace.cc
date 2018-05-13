@@ -2466,13 +2466,6 @@ namespace Legion {
       if (rhs_.size() == 0)
         rhs_.insert(fence_completion_id);
 
-      if (rhs_.size() == 1)
-      {
-        unsigned rhs = *rhs_.begin();
-        lhs = events[rhs];
-        return;
-      }
-
 #ifndef LEGION_SPY
       if (!lhs.exists() || (rhs.find(lhs) != rhs.end()))
       {
