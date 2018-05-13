@@ -28,8 +28,7 @@ $PROCS = processors[isa=x86]
 
 task#foo, task#bar
 {
-  map_locally : true;
-  target : $PROCS[1 % $PROCS.size];
+  target : $PROCS[0 % $PROCS.size];
 }
 
 end
