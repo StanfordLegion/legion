@@ -477,6 +477,8 @@ namespace Legion {
       void execute_all(void);
       void finalize(void);
       void optimize(void);
+      void elide_fences(std::vector<unsigned> &gen);
+      void propagate_merges(const std::vector<unsigned> &gen);
       void dump_template(void);
     public:
       inline bool is_recording(void) const { return recording; }

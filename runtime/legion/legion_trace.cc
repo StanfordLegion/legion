@@ -1372,7 +1372,8 @@ namespace Legion {
 
       if (physical_trace->get_current_template() != NULL)
       {
-        if (recurrent && implicit_runtime->no_trace_optimization)
+        if (recurrent && (implicit_runtime->no_fence_elision ||
+                          implicit_runtime->no_trace_optimization))
           execution_precondition =
             parent_ctx->get_current_execution_fence_event();
         physical_trace->initialize_template(get_completion_event(), recurrent);
@@ -1639,7 +1640,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       fence_completion = completion;
-      if (recurrent && !implicit_runtime->no_trace_optimization)
+      if (recurrent)
         for (std::map<unsigned, unsigned>::iterator it = frontiers.begin();
             it != frontiers.end(); ++it)
         {
@@ -1904,12 +1905,12 @@ namespace Legion {
       {
         if (implicit_runtime->dump_physical_traces)
         {
-          optimize();
+          if (!implicit_runtime->no_trace_optimization) optimize();
           dump_template();
         }
         return;
       }
-      optimize();
+      if (!implicit_runtime->no_trace_optimization) optimize();
       if (implicit_runtime->dump_physical_traces) dump_template();
       size_t num_events = events.size();
       events.clear();
@@ -1922,6 +1923,25 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void PhysicalTemplate::optimize(void)
+    //--------------------------------------------------------------------------
+    {
+      std::vector<unsigned> gen;
+      if (!implicit_runtime->no_fence_elision)
+        elide_fences(gen);
+      else
+      {
+#ifdef DEBUG_LEGION
+        assert(instructions.size() == events.size());
+#endif
+        gen.resize(events.size());
+        for (unsigned idx = 0; idx < events.size(); ++idx)
+          gen[idx] = idx;
+      }
+      propagate_merges(gen);
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTemplate::elide_fences(std::vector<unsigned> &gen)
     //--------------------------------------------------------------------------
     {
       // Reserve some events for merges to be added during fence elision
@@ -1988,7 +2008,6 @@ namespace Legion {
       // the generator of events[idx] is instructions[idx].
       // After fence elision, the generator of events[idx] is
       // instructions[gen[idx]].
-      std::vector<unsigned> gen;
       gen.resize(events.size());
       std::vector<Instruction*> new_instructions;
 
@@ -2073,7 +2092,13 @@ namespace Legion {
       }
       instructions.swap(new_instructions);
       new_instructions.clear();
+    }
 
+    //--------------------------------------------------------------------------
+    void PhysicalTemplate::propagate_merges(const std::vector<unsigned> &gen)
+    //--------------------------------------------------------------------------
+    {
+      std::vector<Instruction*> new_instructions;
       std::vector<bool> used(instructions.size(), false);
 
       for (unsigned idx = 0; idx < instructions.size(); ++idx)
@@ -2155,7 +2180,15 @@ namespace Legion {
           if (inst->get_kind() == COMPLETE_REPLAY)
             complete_replays.push_back(inst);
           else
+          {
+            if (inst->get_kind() == MERGE_EVENT)
+            {
+              MergeEvent *merge = inst->as_merge_event();
+              if (merge->rhs.size() > 1)
+                merge->rhs.erase(fence_completion_id);
+            }
             new_instructions.push_back(inst);
+          }
         }
         else
           to_delete.push_back(instructions[idx]);

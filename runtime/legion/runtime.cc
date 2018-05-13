@@ -9087,6 +9087,7 @@ namespace Legion {
         no_tracing(config.no_tracing),
         no_physical_tracing(config.no_physical_tracing),
         no_trace_optimization(config.no_trace_optimization),
+        no_fence_elision(config.no_fence_elision),
         verify_disjointness(config.verify_disjointness),
         runtime_warnings(config.runtime_warnings),
         separate_runtime_instances(config.separate_runtime_instances),
@@ -9276,6 +9277,7 @@ namespace Legion {
         no_tracing(rhs.no_tracing),
         no_physical_tracing(rhs.no_physical_tracing),
         no_trace_optimization(rhs.no_trace_optimization),
+        no_fence_elision(rhs.no_fence_elision),
         verify_disjointness(rhs.verify_disjointness),
         runtime_warnings(rhs.runtime_warnings),
         separate_runtime_instances(rhs.separate_runtime_instances),
@@ -18959,6 +18961,7 @@ namespace Legion {
         BOOL_ARG("-lg:no_tracing",config.no_tracing);
         BOOL_ARG("-lg:no_physical_tracing",config.no_physical_tracing);
         BOOL_ARG("-lg:no_trace_optimization",config.no_trace_optimization);
+        BOOL_ARG("-lg:no_fence_elision",config.no_fence_elision);
         BOOL_ARG("-lg:disjointness",config.verify_disjointness);
         INT_ARG("-lg:window", config.initial_task_window_size);
         INT_ARG("-lg:hysteresis", config.initial_task_window_hysteresis);
