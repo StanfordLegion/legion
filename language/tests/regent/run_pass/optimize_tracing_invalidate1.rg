@@ -13,7 +13,11 @@
 -- limitations under the License.
 
 -- runs-with:
--- [ [ "-dm:memoize" ] ]
+-- [
+--  [ "-dm:memoize" ],
+--  [ "-dm:memoize", "-lg:no_fence_elision" ],
+--  [ "-dm:memoize", "-lg:no_trace_optimization" ]
+-- ]
 
 import "regent"
 import "bishop"
