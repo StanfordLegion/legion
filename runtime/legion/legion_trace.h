@@ -500,13 +500,15 @@ namespace Legion {
                              std::deque<InstanceSet> &physical_instances) const;
     public:
       void record_get_term_event(ApEvent lhs, SingleTask* task);
-      void record_create_ap_user_event(ApUserEvent lhs);
+      void record_create_ap_user_event(ApUserEvent lhs, Operation *owner);
       void record_trigger_event(ApUserEvent lhs, ApEvent rhs);
-      void record_merge_events(ApEvent &lhs, ApEvent rhs);
-      void record_merge_events(ApEvent &lhs, ApEvent e1, ApEvent e2);
+      void record_merge_events(ApEvent &lhs, ApEvent rhs, Operation *owner);
       void record_merge_events(ApEvent &lhs, ApEvent e1, ApEvent e2,
-                               ApEvent e3);
-      void record_merge_events(ApEvent &lhs, const std::set<ApEvent>& rhs);
+                               Operation *owner);
+      void record_merge_events(ApEvent &lhs, ApEvent e1, ApEvent e2,
+                               ApEvent e3, Operation *owner);
+      void record_merge_events(ApEvent &lhs, const std::set<ApEvent>& rhs,
+                               Operation *owner);
       void record_copy_views(InstanceView *src,
                              const FieldMask &src_mask,
                              ContextID src_logical_ctx,
@@ -639,7 +641,7 @@ namespace Legion {
      * This class is an abstract parent class for all template instructions.
      */
     struct Instruction {
-      Instruction(PhysicalTemplate& tpl);
+      Instruction(PhysicalTemplate& tpl, const TraceLocalID &owner);
       virtual ~Instruction(void) {};
       virtual void execute(void) = 0;
       virtual std::string to_string(void) = 0;
@@ -659,12 +661,12 @@ namespace Legion {
       virtual Instruction* clone(PhysicalTemplate& tpl,
                                const std::map<unsigned, unsigned> &rewrite) = 0;
 
-      virtual TraceLocalID get_owner(const TraceLocalID &key) = 0;
-
     protected:
       std::map<TraceLocalID, Operation*> &operations;
       std::vector<ApEvent> &events;
       std::vector<ApUserEvent> &user_events;
+    public:
+      const TraceLocalID owner;
     };
 
     /**
@@ -704,12 +706,9 @@ namespace Legion {
       virtual Instruction* clone(PhysicalTemplate& tpl,
                                  const std::map<unsigned, unsigned> &rewrite);
 
-      virtual TraceLocalID get_owner(const TraceLocalID &key) { return rhs; }
-
     private:
       friend struct PhysicalTemplate;
       unsigned lhs;
-      TraceLocalID rhs;
     };
 
     /**
@@ -718,7 +717,8 @@ namespace Legion {
      *   events[lhs] = Runtime::create_ap_user_event()
      */
     struct CreateApUserEvent : public Instruction {
-      CreateApUserEvent(PhysicalTemplate& tpl, unsigned lhs);
+      CreateApUserEvent(PhysicalTemplate& tpl, unsigned lhs,
+                        const TraceLocalID &owner);
       virtual void execute(void);
       virtual std::string to_string(void);
 
@@ -748,8 +748,6 @@ namespace Legion {
       virtual Instruction* clone(PhysicalTemplate& tpl,
                                  const std::map<unsigned, unsigned> &rewrite);
 
-      virtual TraceLocalID get_owner(const TraceLocalID &key) { return key; }
-
     private:
       friend struct PhysicalTemplate;
       unsigned lhs;
@@ -761,7 +759,8 @@ namespace Legion {
      *   Runtime::trigger_event(events[lhs], events[rhs])
      */
     struct TriggerEvent : public Instruction {
-      TriggerEvent(PhysicalTemplate& tpl, unsigned lhs, unsigned rhs);
+      TriggerEvent(PhysicalTemplate& tpl, unsigned lhs, unsigned rhs,
+                   const TraceLocalID &owner);
       virtual void execute(void);
       virtual std::string to_string(void);
 
@@ -791,8 +790,6 @@ namespace Legion {
       virtual Instruction* clone(PhysicalTemplate& tpl,
                                  const std::map<unsigned, unsigned> &rewrite);
 
-      virtual TraceLocalID get_owner(const TraceLocalID &key) { return key; }
-
     private:
       friend struct PhysicalTemplate;
       unsigned lhs;
@@ -806,7 +803,8 @@ namespace Legion {
      */
     struct MergeEvent : public Instruction {
       MergeEvent(PhysicalTemplate& tpl, unsigned lhs,
-                 const std::set<unsigned>& rhs);
+                 const std::set<unsigned>& rhs,
+                 const TraceLocalID &owner);
       virtual void execute(void);
       virtual std::string to_string(void);
 
@@ -836,8 +834,6 @@ namespace Legion {
       virtual Instruction* clone(PhysicalTemplate& tpl,
                                  const std::map<unsigned, unsigned> &rewrite);
 
-      virtual TraceLocalID get_owner(const TraceLocalID &key) { return key; }
-
     private:
       friend struct PhysicalTemplate;
       unsigned lhs;
@@ -850,7 +846,8 @@ namespace Legion {
      *   events[lhs] = fence_completion
      */
     struct AssignFenceCompletion : public Instruction {
-      AssignFenceCompletion(PhysicalTemplate& tpl, unsigned lhs);
+      AssignFenceCompletion(PhysicalTemplate& tpl, unsigned lhs,
+                            const TraceLocalID &owner);
       virtual void execute(void);
       virtual std::string to_string(void);
 
@@ -879,8 +876,6 @@ namespace Legion {
 
       virtual Instruction* clone(PhysicalTemplate& tpl,
                                  const std::map<unsigned, unsigned> &rewrite);
-
-      virtual TraceLocalID get_owner(const TraceLocalID &key) { return key; }
 
     private:
       friend struct PhysicalTemplate;
@@ -938,13 +933,10 @@ namespace Legion {
       virtual Instruction* clone(PhysicalTemplate& tpl,
                                  const std::map<unsigned, unsigned> &rewrite);
 
-      virtual TraceLocalID get_owner(const TraceLocalID &key) { return op_key; }
-
     private:
       friend struct PhysicalTemplate;
       unsigned lhs;
       RegionNode *node;
-      TraceLocalID op_key;
       std::vector<CopySrcDstField> fields;
       void *fill_buffer;
       size_t fill_size;
@@ -1003,13 +995,10 @@ namespace Legion {
       virtual Instruction* clone(PhysicalTemplate& tpl,
                                  const std::map<unsigned, unsigned> &rewrite);
 
-      virtual TraceLocalID get_owner(const TraceLocalID &key) { return op_key; }
-
     private:
       friend struct PhysicalTemplate;
       unsigned lhs;
       RegionNode *node;
-      TraceLocalID op_key;
       std::vector<CopySrcDstField> src_fields;
       std::vector<CopySrcDstField> dst_fields;
       unsigned precondition_idx;
@@ -1026,7 +1015,7 @@ namespace Legion {
      */
     struct GetOpTermEvent : public Instruction {
       GetOpTermEvent(PhysicalTemplate& tpl, unsigned lhs,
-                       const TraceLocalID& rhs);
+                     const TraceLocalID& rhs);
       virtual void execute(void);
       virtual std::string to_string(void);
 
@@ -1056,12 +1045,9 @@ namespace Legion {
       virtual Instruction* clone(PhysicalTemplate& tpl,
                                  const std::map<unsigned, unsigned> &rewrite);
 
-      virtual TraceLocalID get_owner(const TraceLocalID &key) { return rhs; }
-
     private:
       friend struct PhysicalTemplate;
       unsigned lhs;
-      TraceLocalID rhs;
     };
 
     /**
@@ -1071,7 +1057,7 @@ namespace Legion {
      */
     struct SetOpSyncEvent : public Instruction {
       SetOpSyncEvent(PhysicalTemplate& tpl, unsigned lhs,
-                       const TraceLocalID& rhs);
+                     const TraceLocalID& rhs);
       virtual void execute(void);
       virtual std::string to_string(void);
 
@@ -1101,12 +1087,9 @@ namespace Legion {
       virtual Instruction* clone(PhysicalTemplate& tpl,
                                  const std::map<unsigned, unsigned> &rewrite);
 
-      virtual TraceLocalID get_owner(const TraceLocalID &key) { return rhs; }
-
     private:
       friend struct PhysicalTemplate;
       unsigned lhs;
-      TraceLocalID rhs;
     };
 
     /**
@@ -1116,7 +1099,7 @@ namespace Legion {
      */
     struct CompleteReplay : public Instruction {
       CompleteReplay(PhysicalTemplate& tpl, const TraceLocalID& lhs,
-                            unsigned rhs);
+                     unsigned rhs);
       virtual void execute(void);
       virtual std::string to_string(void);
 
@@ -1146,11 +1129,8 @@ namespace Legion {
       virtual Instruction* clone(PhysicalTemplate& tpl,
                                  const std::map<unsigned, unsigned> &rewrite);
 
-      virtual TraceLocalID get_owner(const TraceLocalID &key) { return lhs; }
-
     private:
       friend struct PhysicalTemplate;
-      TraceLocalID lhs;
       unsigned rhs;
     };
 

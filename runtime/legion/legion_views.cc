@@ -1024,7 +1024,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(trace_info.tpl != NULL && trace_info.tpl->is_recording());
 #endif
-        trace_info.tpl->record_merge_events(result, wait_on_events);
+        trace_info.tpl->record_merge_events(result, wait_on_events,
+            trace_info.op);
       }
       return result;
     }
@@ -1476,7 +1477,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(trace_info.tpl != NULL && trace_info.tpl->is_recording());
 #endif
-        trace_info.tpl->record_merge_events(result, wait_on_events);
+        trace_info.tpl->record_merge_events(result, wait_on_events,
+            trace_info.op);
       }
       // Return the merge of the events
       return result;
@@ -4336,7 +4338,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
             assert(trace_info.tpl != NULL && trace_info.tpl->is_recording());
 #endif
-            trace_info.tpl->record_merge_events(copy_pre, it->preconditions);
+            trace_info.tpl->record_merge_events(copy_pre, it->preconditions,
+                trace_info.op);
           }
         }
 
@@ -4439,7 +4442,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
               assert(trace_info.tpl != NULL && trace_info.tpl->is_recording());
 #endif
-              trace_info.tpl->record_merge_events(post, it->preconditions);
+              trace_info.tpl->record_merge_events(post, it->preconditions,
+                  trace_info.op);
             }
           }
 
@@ -4618,7 +4622,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
               assert(trace_info.tpl != NULL && trace_info.tpl->is_recording());
 #endif
-              trace_info.tpl->record_merge_events(post, it->preconditions);
+              trace_info.tpl->record_merge_events(post, it->preconditions,
+                  trace_info.op);
             }
           }
 
@@ -5684,7 +5689,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
             assert(trace_info.tpl != NULL && trace_info.tpl->is_recording());
 #endif
-            trace_info.tpl->record_merge_events(done_event, it->preconditions);
+            trace_info.tpl->record_merge_events(done_event, it->preconditions,
+                trace_info.op);
           }
         }
 
@@ -7035,7 +7041,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
           assert(trace_info.tpl != NULL && trace_info.tpl->is_recording());
 #endif
-          trace_info.tpl->record_merge_events(fill_pre, pre_set.preconditions);
+          trace_info.tpl->record_merge_events(fill_pre, pre_set.preconditions,
+              trace_info.op);
         }
         // Issue the fill command
         // Only apply an intersection if the destination logical node
@@ -7792,7 +7799,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(trace_info.tpl != NULL && trace_info.tpl->is_recording());
 #endif
-        trace_info.tpl->record_merge_events(reduce_pre, event_preconds);
+        trace_info.tpl->record_merge_events(reduce_pre, event_preconds,
+            trace_info.op);
         ContextID logical_ctx =
           op->find_logical_context(index)->get_context().get_id();
         ContextID physical_ctx =
@@ -7860,7 +7868,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(trace_info.tpl != NULL && trace_info.tpl->is_recording());
 #endif
-        trace_info.tpl->record_merge_events(reduce_pre, preconditions);
+        trace_info.tpl->record_merge_events(reduce_pre, preconditions,
+            trace_info.op);
         ContextID logical_ctx =
           op->find_logical_context(index)->get_context().get_id();
         ContextID physical_ctx =
@@ -8194,7 +8203,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(trace_info.tpl != NULL && trace_info.tpl->is_recording());
 #endif
-        trace_info.tpl->record_merge_events(result, wait_on);
+        trace_info.tpl->record_merge_events(result, wait_on,
+            trace_info.op);
       }
       return result;
     }
@@ -8359,7 +8369,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(trace_info.tpl != NULL && trace_info.tpl->is_recording());
 #endif
-        trace_info.tpl->record_merge_events(result, wait_on);
+        trace_info.tpl->record_merge_events(result, wait_on,
+            trace_info.op);
       }
       // Return our result
       return result;

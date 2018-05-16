@@ -29,6 +29,24 @@ namespace Legion {
     LEGION_EXTERN_LOGGER_DECLARATIONS
 
     /////////////////////////////////////////////////////////////
+    // Utility functions
+    /////////////////////////////////////////////////////////////
+
+    std::ostream& operator<<(std::ostream &out, const TraceLocalID &key)
+    {
+      out << "(" << key.first << ",";
+      if (key.second.dim > 1) out << "(";
+      for (int dim = 0; dim < key.second.dim; ++dim)
+      {
+        if (dim > 0) out << ",";
+        out << key.second[dim];
+      }
+      if (key.second.dim > 1) out << ")";
+      out << ")";
+      return out;
+    }
+
+    /////////////////////////////////////////////////////////////
     // LegionTrace 
     /////////////////////////////////////////////////////////////
 
@@ -1599,7 +1617,7 @@ namespace Legion {
       events.push_back(fence_event);
       event_map[fence_event] = fence_completion_id;
       instructions.push_back(
-          new AssignFenceCompletion(*this, fence_completion_id));
+         new AssignFenceCompletion(*this, fence_completion_id, TraceLocalID()));
     }
 
     //--------------------------------------------------------------------------
@@ -2023,7 +2041,7 @@ namespace Legion {
             {
               CompleteReplay *replay = inst->as_complete_replay();
               std::map<TraceLocalID, std::vector<InstanceReq> >::iterator
-                finder = op_reqs.find(replay->lhs);
+                finder = op_reqs.find(replay->owner);
               if (finder == op_reqs.end())
                 break;
               const std::vector<InstanceReq> &reqs = finder->second;
@@ -2083,7 +2101,8 @@ namespace Legion {
               users.insert(*precondition_idx);
             gen[merging_event_idx] = new_instructions.size();
             new_instructions.push_back(
-                new MergeEvent(*this, merging_event_idx, users));
+                new MergeEvent(*this, merging_event_idx, users,
+                               generator_inst->owner));
             *precondition_idx = merging_event_idx;
           }
         }
@@ -2402,7 +2421,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::record_create_ap_user_event(ApUserEvent lhs)
+    void PhysicalTemplate::record_create_ap_user_event(
+                                              ApUserEvent lhs, Operation *owner)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -2418,7 +2438,13 @@ namespace Legion {
       assert(event_map.find(lhs) == event_map.end());
 #endif
       event_map[lhs] = lhs_;
-      instructions.push_back(new CreateApUserEvent(*this, lhs_));
+
+      Memoizable *memoizable = owner->get_memoizable();
+#ifdef DEBUG_LEGION
+      assert(memoizable != NULL);
+#endif
+      instructions.push_back(new CreateApUserEvent(*this, lhs_,
+            memoizable->get_trace_local_id()));
 #ifdef DEBUG_LEGION
       assert(instructions.size() == events.size());
 #endif
@@ -2443,47 +2469,51 @@ namespace Legion {
 #endif
       unsigned lhs_ = lhs_finder->second;
       unsigned rhs_ = rhs_finder->second;
-      instructions.push_back(new TriggerEvent(*this, lhs_, rhs_));
+      instructions.push_back(new TriggerEvent(*this, lhs_, rhs_,
+            instructions[lhs_]->owner));
 #ifdef DEBUG_LEGION
       assert(instructions.size() == events.size());
 #endif
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::record_merge_events(ApEvent &lhs, ApEvent rhs_)
+    void PhysicalTemplate::record_merge_events(ApEvent &lhs, ApEvent rhs_,
+                                               Operation *owner)
     //--------------------------------------------------------------------------
     {
       std::set<ApEvent> rhs;
       rhs.insert(rhs_);
-      record_merge_events(lhs, rhs);
+      record_merge_events(lhs, rhs, owner);
     }
 
     //--------------------------------------------------------------------------
     void PhysicalTemplate::record_merge_events(ApEvent &lhs, ApEvent e1,
-                                               ApEvent e2)
+                                               ApEvent e2, Operation *owner)
     //--------------------------------------------------------------------------
     {
       std::set<ApEvent> rhs;
       rhs.insert(e1);
       rhs.insert(e2);
-      record_merge_events(lhs, rhs);
+      record_merge_events(lhs, rhs, owner);
     }
 
     //--------------------------------------------------------------------------
     void PhysicalTemplate::record_merge_events(ApEvent &lhs, ApEvent e1,
-                                               ApEvent e2, ApEvent e3)
+                                               ApEvent e2, ApEvent e3,
+                                               Operation *owner)
     //--------------------------------------------------------------------------
     {
       std::set<ApEvent> rhs;
       rhs.insert(e1);
       rhs.insert(e2);
       rhs.insert(e3);
-      record_merge_events(lhs, rhs);
+      record_merge_events(lhs, rhs, owner);
     }
 
     //--------------------------------------------------------------------------
     void PhysicalTemplate::record_merge_events(ApEvent &lhs,
-                                               const std::set<ApEvent>& rhs)
+                                               const std::set<ApEvent>& rhs,
+                                               Operation *owner)
     //--------------------------------------------------------------------------
     {
       AutoLock tpl_lock(template_lock);
@@ -2518,7 +2548,12 @@ namespace Legion {
 #endif
       event_map[lhs] = lhs_;
 
-      instructions.push_back(new MergeEvent(*this, lhs_, rhs_));
+      Memoizable *memoizable = owner->get_memoizable();
+#ifdef DEBUG_LEGION
+      assert(memoizable != NULL);
+#endif
+      instructions.push_back(new MergeEvent(*this, lhs_, rhs_,
+            memoizable->get_trace_local_id()));
 #ifdef DEBUG_LEGION
       assert(instructions.size() == events.size());
 #endif
@@ -3178,9 +3213,9 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    Instruction::Instruction(PhysicalTemplate& tpl)
+    Instruction::Instruction(PhysicalTemplate& tpl, const TraceLocalID &o)
       : operations(tpl.operations), events(tpl.events),
-        user_events(tpl.user_events)
+        user_events(tpl.user_events), owner(o)
     //--------------------------------------------------------------------------
     {
     }
@@ -3192,12 +3227,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     GetTermEvent::GetTermEvent(PhysicalTemplate& tpl, unsigned l,
                                const TraceLocalID& r)
-      : Instruction(tpl), lhs(l), rhs(r)
+      : Instruction(tpl, r), lhs(l)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(lhs < events.size());
-      assert(operations.find(rhs) != operations.end());
+      assert(operations.find(owner) != operations.end());
 #endif
     }
 
@@ -3206,13 +3241,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(operations.find(rhs) != operations.end());
-      assert(operations.find(rhs)->second != NULL);
+      assert(operations.find(owner) != operations.end());
+      assert(operations.find(owner)->second != NULL);
 
-      SingleTask *task = dynamic_cast<SingleTask*>(operations[rhs]);
+      SingleTask *task = dynamic_cast<SingleTask*>(operations[owner]);
       assert(task != NULL);
 #else
-      SingleTask *task = static_cast<SingleTask*>(operations[rhs]);
+      SingleTask *task = static_cast<SingleTask*>(operations[owner]);
 #endif
       ApEvent completion_event = task->get_task_completion();
       events[lhs] = completion_event;
@@ -3224,15 +3259,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       std::stringstream ss;
-      ss << "events[" << lhs << "] = operations[(" << rhs.first << ",";
-      if (rhs.second.dim > 1) ss << "(";
-      for (int dim = 0; dim < rhs.second.dim; ++dim)
-      {
-        if (dim > 0) ss << ",";
-        ss << rhs.second[dim];
-      }
-      if (rhs.second.dim > 1) ss << ")";
-      ss << ")].get_task_termination()";
+      ss << "events[" << lhs << "] = operations[" << owner 
+         << "].get_task_termination()";
       return ss.str();
     }
 
@@ -3245,7 +3273,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(finder != rewrite.end());
 #endif
-      return new GetTermEvent(tpl, finder->second, rhs);
+      return new GetTermEvent(tpl, finder->second, owner);
     }
 
     /////////////////////////////////////////////////////////////
@@ -3253,8 +3281,9 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    CreateApUserEvent::CreateApUserEvent(PhysicalTemplate& tpl, unsigned l)
-      : Instruction(tpl), lhs(l)
+    CreateApUserEvent::CreateApUserEvent(PhysicalTemplate& tpl, unsigned l,
+                                         const TraceLocalID &o)
+      : Instruction(tpl, o), lhs(l)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -3277,7 +3306,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       std::stringstream ss;
-      ss << "events[" << lhs << "] = Runtime::create_ap_user_event()";
+      ss << "events[" << lhs << "] = Runtime::create_ap_user_event()    "
+         << "(owner: " << owner << ")";
       return ss.str();
     }
 
@@ -3291,7 +3321,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(lhs_finder != rewrite.end());
 #endif
-      return new CreateApUserEvent(tpl, lhs_finder->second);
+      return new CreateApUserEvent(tpl, lhs_finder->second, owner);
     }
 
     /////////////////////////////////////////////////////////////
@@ -3299,8 +3329,9 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    TriggerEvent::TriggerEvent(PhysicalTemplate& tpl, unsigned l, unsigned r)
-      : Instruction(tpl), lhs(l), rhs(r)
+    TriggerEvent::TriggerEvent(PhysicalTemplate& tpl, unsigned l, unsigned r,
+                               const TraceLocalID &o)
+      : Instruction(tpl, o), lhs(l), rhs(r)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -3329,7 +3360,7 @@ namespace Legion {
     {
       std::stringstream ss;
       ss << "Runtime::trigger_event(events[" << lhs
-         << "], events[" << rhs << "])";
+         << "], events[" << rhs << "])    (owner: " << owner << ")";
       return ss.str();
     }
 
@@ -3346,7 +3377,8 @@ namespace Legion {
       assert(lhs_finder != rewrite.end());
       assert(rhs_finder != rewrite.end());
 #endif
-      return new TriggerEvent(tpl, lhs_finder->second, rhs_finder->second);
+      return new TriggerEvent(tpl, lhs_finder->second, rhs_finder->second,
+                              owner);
     }
 
     /////////////////////////////////////////////////////////////
@@ -3355,8 +3387,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     MergeEvent::MergeEvent(PhysicalTemplate& tpl, unsigned l,
-                           const std::set<unsigned>& r)
-      : Instruction(tpl), lhs(l), rhs(r)
+                           const std::set<unsigned>& r, const TraceLocalID &o)
+      : Instruction(tpl, o), lhs(l), rhs(r)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -3398,7 +3430,7 @@ namespace Legion {
         if (count++ != 0) ss << ",";
         ss << "events[" << *it << "]";
       }
-      ss << ")";
+      ss << ")    (owner: " << owner << ")";
       return ss.str();
     }
 
@@ -3417,8 +3449,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     AssignFenceCompletion::AssignFenceCompletion(
-                                              PhysicalTemplate& tpl, unsigned l)
-      : Instruction(tpl), fence_completion(tpl.fence_completion), lhs(l)
+                       PhysicalTemplate& tpl, unsigned l, const TraceLocalID &o)
+      : Instruction(tpl, o), fence_completion(tpl.fence_completion), lhs(l)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -3451,7 +3483,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(finder != rewrite.end());
 #endif
-      return new AssignFenceCompletion(tpl, finder->second);
+      return new AssignFenceCompletion(tpl, finder->second, owner);
     }
 
     /////////////////////////////////////////////////////////////
@@ -3466,14 +3498,14 @@ namespace Legion {
                          const std::vector<CopySrcDstField>& d,
                          unsigned pi, PredEvent pg, RegionTreeNode *i,
                          ReductionOpID ro, bool rf)
-      : Instruction(tpl), lhs(l), node(n), op_key(key), src_fields(s),
+      : Instruction(tpl, key), lhs(l), node(n), src_fields(s),
         dst_fields(d), precondition_idx(pi), predicate_guard(pg),
         intersect(i), redop(ro), reduction_fold(rf)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(lhs < events.size());
-      assert(operations.find(op_key) != operations.end());
+      assert(operations.find(owner) != operations.end());
       assert(src_fields.size() > 0);
       assert(dst_fields.size() > 0);
       assert(precondition_idx < events.size());
@@ -3485,10 +3517,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(operations.find(op_key) != operations.end());
-      assert(operations.find(op_key)->second != NULL);
+      assert(operations.find(owner) != operations.end());
+      assert(operations.find(owner)->second != NULL);
 #endif
-      Operation *op = operations[op_key];
+      Operation *op = operations[owner];
       ApEvent precondition = events[precondition_idx];
       PhysicalTraceInfo trace_info;
       events[lhs] = node->issue_copy(op, src_fields, dst_fields, precondition,
@@ -3500,15 +3532,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       std::stringstream ss;
-      ss << "events[" << lhs << "] = copy(operations[(" << op_key.first << ",";
-      if (op_key.second.dim > 1) ss << "(";
-      for (int dim = 0; dim < op_key.second.dim; ++dim)
-      {
-        if (dim > 0) ss << ",";
-        ss << op_key.second[dim];
-      }
-      if (op_key.second.dim > 1) ss << ")";
-      ss << ")], {";
+      ss << "events[" << lhs << "] = copy(operations[" << owner << "], {";
       for (unsigned idx = 0; idx < src_fields.size(); ++idx)
       {
         ss << "(" << std::hex << src_fields[idx].inst.id
@@ -3548,7 +3572,7 @@ namespace Legion {
       assert(lfinder != rewrite.end());
       assert(pfinder != rewrite.end());
 #endif
-      return new IssueCopy(tpl, lfinder->second, node, op_key, src_fields,
+      return new IssueCopy(tpl, lfinder->second, node, owner, src_fields,
         dst_fields, pfinder->second, predicate_guard, intersect, redop,
         reduction_fold);
     }
@@ -3567,7 +3591,7 @@ namespace Legion {
                          UniqueID u,
 #endif
                          RegionTreeNode *i)
-      : Instruction(tpl), lhs(l), node(n), op_key(key), fields(f),
+      : Instruction(tpl, key), lhs(l), node(n), fields(f),
         precondition_idx(pi), predicate_guard(pg),
 #ifdef LEGION_SPY
         fill_uid(u),
@@ -3577,7 +3601,7 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(lhs < events.size());
-      assert(operations.find(op_key) != operations.end());
+      assert(operations.find(owner) != operations.end());
       assert(fields.size() > 0);
       assert(precondition_idx < events.size());
 #endif
@@ -3598,10 +3622,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(operations.find(op_key) != operations.end());
-      assert(operations.find(op_key)->second != NULL);
+      assert(operations.find(owner) != operations.end());
+      assert(operations.find(owner)->second != NULL);
 #endif
-      Operation *op = operations[op_key];
+      Operation *op = operations[owner];
       ApEvent precondition = events[precondition_idx];
 
       PhysicalTraceInfo trace_info;
@@ -3628,7 +3652,8 @@ namespace Legion {
            << "," << fields[idx].serdez_id << ")";
         if (idx != fields.size() - 1) ss << ",";
       }
-      ss << "}, events[" << precondition_idx << "])";
+      ss << "}, events[" << precondition_idx << "])    (owner: "
+         << owner << ")";
       return ss.str();
     }
 
@@ -3644,7 +3669,7 @@ namespace Legion {
       assert(lfinder != rewrite.end());
       assert(pfinder != rewrite.end());
 #endif
-      return new IssueFill(tpl, lfinder->second, node, op_key, fields,
+      return new IssueFill(tpl, lfinder->second, node, owner, fields,
           fill_buffer, fill_size, pfinder->second, predicate_guard,
 #ifdef LEGION_SPY
           fill_uid,
@@ -3659,12 +3684,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     GetOpTermEvent::GetOpTermEvent(PhysicalTemplate& tpl, unsigned l,
                                        const TraceLocalID& r)
-      : Instruction(tpl), lhs(l), rhs(r)
+      : Instruction(tpl, r), lhs(l)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(lhs < events.size());
-      assert(operations.find(rhs) != operations.end());
+      assert(operations.find(owner) != operations.end());
 #endif
     }
 
@@ -3673,10 +3698,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(operations.find(rhs) != operations.end());
-      assert(operations.find(rhs)->second != NULL);
+      assert(operations.find(owner) != operations.end());
+      assert(operations.find(owner)->second != NULL);
 #endif
-      events[lhs] = operations[rhs]->get_completion_event();
+      events[lhs] = operations[owner]->get_completion_event();
     }
 
     //--------------------------------------------------------------------------
@@ -3684,16 +3709,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       std::stringstream ss;
-      ss << "events[" << lhs << "] = operations[(" << rhs.first << ",";
-      if (rhs.second.dim > 1) ss << "(";
-      for (int dim = 0; dim < rhs.second.dim; ++dim)
-      {
-        if (dim > 0) ss << ",";
-        ss << rhs.second[dim];
-      }
-      if (rhs.second.dim > 1) ss << ")";
-      ss << ")].get_completion_event()    (op kind: "
-         << Operation::op_names[operations[rhs]->get_operation_kind()] << ")";
+      ss << "events[" << lhs << "] = operations[" << owner
+         << "].get_completion_event()    (op kind: "
+         << Operation::op_names[operations[owner]->get_operation_kind()] << ")";
       return ss.str();
     }
 
@@ -3706,7 +3724,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(finder != rewrite.end());
 #endif
-      return new GetOpTermEvent(tpl, finder->second, rhs);
+      return new GetOpTermEvent(tpl, finder->second, owner);
     }
 
     /////////////////////////////////////////////////////////////
@@ -3716,12 +3734,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     SetOpSyncEvent::SetOpSyncEvent(PhysicalTemplate& tpl, unsigned l,
                                        const TraceLocalID& r)
-      : Instruction(tpl), lhs(l), rhs(r)
+      : Instruction(tpl, r), lhs(l)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(lhs < events.size());
-      assert(operations.find(rhs) != operations.end());
+      assert(operations.find(owner) != operations.end());
 #endif
     }
 
@@ -3730,10 +3748,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(operations.find(rhs) != operations.end());
-      assert(operations.find(rhs)->second != NULL);
+      assert(operations.find(owner) != operations.end());
+      assert(operations.find(owner)->second != NULL);
 #endif
-      Memoizable *memoizable = operations[rhs]->get_memoizable();
+      Memoizable *memoizable = operations[owner]->get_memoizable();
 #ifdef DEBUG_LEGION
       assert(memoizable != NULL);
 #endif
@@ -3746,16 +3764,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       std::stringstream ss;
-      ss << "events[" << lhs << "] = operations[(" << rhs.first << ",";
-      if (rhs.second.dim > 1) ss << "(";
-      for (int dim = 0; dim < rhs.second.dim; ++dim)
-      {
-        if (dim > 0) ss << ",";
-        ss << rhs.second[dim];
-      }
-      if (rhs.second.dim > 1) ss << ")";
-      ss << ")].compute_sync_precondition()    (op kind: "
-         << Operation::op_names[operations[rhs]->get_operation_kind()] << ")";
+      ss << "events[" << lhs << "] = operations[" << owner
+         << "].compute_sync_precondition()    (op kind: "
+         << Operation::op_names[operations[owner]->get_operation_kind()] << ")";
       return ss.str();
     }
 
@@ -3768,7 +3779,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(finder != rewrite.end());
 #endif
-      return new SetOpSyncEvent(tpl, finder->second, rhs);
+      return new SetOpSyncEvent(tpl, finder->second, owner);
     }
 
     /////////////////////////////////////////////////////////////
@@ -3778,11 +3789,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     CompleteReplay::CompleteReplay(PhysicalTemplate& tpl,
                                               const TraceLocalID& l, unsigned r)
-      : Instruction(tpl), lhs(l), rhs(r)
+      : Instruction(tpl, l), rhs(r)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(operations.find(lhs) != operations.end());
+      assert(operations.find(owner) != operations.end());
       assert(rhs < events.size());
 #endif
     }
@@ -3792,10 +3803,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(operations.find(lhs) != operations.end());
-      assert(operations.find(lhs)->second != NULL);
+      assert(operations.find(owner) != operations.end());
+      assert(operations.find(owner)->second != NULL);
 #endif
-      Memoizable *memoizable = operations[lhs]->get_memoizable();
+      Memoizable *memoizable = operations[owner]->get_memoizable();
 #ifdef DEBUG_LEGION
       assert(memoizable != NULL);
 #endif
@@ -3807,16 +3818,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       std::stringstream ss;
-      ss << "operations[" << lhs.first << ",";
-      if (lhs.second.dim > 1) ss << "(";
-      for (int dim = 0; dim < lhs.second.dim; ++dim)
-      {
-        if (dim > 0) ss << ",";
-        ss << lhs.second[dim];
-      }
-      if (lhs.second.dim > 1) ss << ")";
-      ss << ")].complete_replay(events[" << rhs << "])    (op kind: "
-         << Operation::op_names[operations[lhs]->get_operation_kind()] << ")";
+      ss << "operations[" << owner
+         << "].complete_replay(events[" << rhs << "])    (op kind: "
+         << Operation::op_names[operations[owner]->get_operation_kind()] << ")";
       return ss.str();
     }
 
@@ -3829,7 +3833,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(finder != rewrite.end());
 #endif
-      return new CompleteReplay(tpl, lhs, finder->second);
+      return new CompleteReplay(tpl, owner, finder->second);
     }
 
     /////////////////////////////////////////////////////////////

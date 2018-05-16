@@ -3870,7 +3870,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
           assert(tpl != NULL && tpl->is_recording());
 #endif
-          tpl->record_merge_events(ready_event, ready_events);
+          tpl->record_merge_events(ready_event, ready_events, this);
           tpl->record_complete_replay(this, ready_event);
         }
         wait_on_events.insert(ready_event);
