@@ -14079,8 +14079,8 @@ namespace Legion {
                           LegionMap<ApEvent,FieldMask>::aligned &postconditions,
                                              CopyAcrossHelper *helper/*= NULL*/,
                                              RegionTreeNode *intersect/*=NULL*/,
-      const LegionMap<IndexSpaceExpression*,FieldMask>::aligned *masks/*=NULL*/,
-            LegionMap<IndexSpaceExpression*,FieldMask>::aligned *perf/*=NULL*/)
+                                             const WriteMasks *masks/*=NULL*/,
+                                             WriteSet *performed/*=NULL*/)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(context->runtime,REGION_NODE_ISSUE_GROUPED_COPIES_CALL);
@@ -14103,15 +14103,15 @@ namespace Legion {
         {
           // Find any write masks that we overlap with 
           // and issue copies for them specifically
-          for (LegionMap<IndexSpaceExpression*,FieldMask>::aligned::
-                const_iterator it = masks->begin(); it != masks->end(); it++)
+          for (WriteMasks::const_iterator it = masks->begin(); 
+                it != masks->end(); it++)
           {
             const FieldMask overlap = pre_set.set_mask & it->second;
             if (!overlap)
               continue;
             issue_masked_copy(info, overlap, dst, restrict_out,
                 predicate_guard, copy_pre, src_instances, src_versions,
-                postconditions, helper, intersect, it->first, perf);
+                postconditions, helper, intersect, it->first, performed);
             pre_set.set_mask -= overlap;
             if (!pre_set.set_mask)
               break;
@@ -14124,7 +14124,7 @@ namespace Legion {
         }
         issue_masked_copy(info, pre_set.set_mask, dst, restrict_out,
             predicate_guard, copy_pre, src_instances, src_versions,
-            postconditions, helper, intersect, NULL/*mask*/, perf);
+            postconditions, helper, intersect, NULL/*mask*/, performed);
       }
     }
 
@@ -14141,7 +14141,7 @@ namespace Legion {
                                            CopyAcrossHelper *helper,
                                            RegionTreeNode *intersect,
                                            IndexSpaceExpression *mask,
-                 LegionMap<IndexSpaceExpression*,FieldMask>::aligned *perf)
+                                           WriteSet *performed)
     //--------------------------------------------------------------------------
     {
       // Build the src and dst fields vectors
@@ -14171,7 +14171,7 @@ namespace Legion {
       // can now issue the copy to the low-level runtime
       ApEvent copy_post = issue_copy(info.op, src_fields, dst_fields, 
                            copy_pre, predicate_guard, intersect, mask,
-                           0/*redop*/, false/*fold*/, perf, &copy_mask);
+                           0/*redop*/, false/*fold*/, performed, &copy_mask);
       // Save the copy post in the post conditions
       if (copy_post.exists())
       {
@@ -15543,8 +15543,7 @@ namespace Legion {
                       ApEvent precondition, PredEvent predicate_guard,
                       RegionTreeNode *intersect, IndexSpaceExpression *mask,
                       ReductionOpID redop /*=0*/,bool reduction_fold/*=true*/,
-                      LegionMap<IndexSpaceExpression*,FieldMask>::aligned *perf,
-                      const FieldMask *performed_mask)
+                      WriteSet *performed, const FieldMask *performed_mask)
     //--------------------------------------------------------------------------
     {
 #ifdef LEGION_SPY
@@ -15558,7 +15557,7 @@ namespace Legion {
       ApEvent result = row_source->issue_copy(op, realm_src_fields, 
           realm_dst_fields, precondition, predicate_guard, 
           (intersect == NULL) ? NULL : intersect->get_row_source(),
-          mask, redop, reduction_fold, perf, performed_mask);
+          mask, redop, reduction_fold, performed, performed_mask);
       if ((op != NULL) && op->has_execution_fence_event())
         precondition= Runtime::merge_events(precondition,
                                             op->get_execution_fence_event());
@@ -15590,7 +15589,7 @@ namespace Legion {
       return row_source->issue_copy(op, src_fields, dst_fields,
           precondition, predicate_guard, 
           (intersect == NULL) ? NULL : intersect->get_row_source(),
-          mask, redop, reduction_fold, perf, performed_mask);
+          mask, redop, reduction_fold, performed, performed_mask);
 #endif
     }
 
@@ -15603,8 +15602,7 @@ namespace Legion {
                       UniqueID fill_uid,
 #endif
                       RegionTreeNode *intersect, IndexSpaceExpression *mask,
-                      LegionMap<IndexSpaceExpression*,FieldMask>::aligned *perf,
-                      const FieldMask *performed_mask)
+                      WriteSet *performed, const FieldMask *performed_mask)
     //--------------------------------------------------------------------------
     {
       
@@ -15616,7 +15614,7 @@ namespace Legion {
       ApEvent result = row_source->issue_fill(op, realm_dst_fields,
           fill_value, fill_size, precondition, predicate_guard,
           (intersect == NULL) ? NULL : intersect->get_row_source(), 
-          mask, perf, performed_mask);
+          mask, performed, performed_mask);
       if ((op != NULL) && op->has_execution_fence_event())
         precondition = Runtime::merge_events(precondition,
                                              op->get_execution_fence_event());
@@ -15646,7 +15644,7 @@ namespace Legion {
       return row_source->issue_fill(op, dst_fields,
           fill_value, fill_size, precondition, predicate_guard,
           (intersect == NULL) ? NULL : intersect->get_row_source(),
-          mask, perf, performed_mask);
+          mask, performed, performed_mask);
 #endif
     }
 
@@ -17358,13 +17356,12 @@ namespace Legion {
                       ApEvent precondition, PredEvent predicate_guard,
                       RegionTreeNode *intersect, IndexSpaceExpression *mask,
                       ReductionOpID redop /*=0*/,bool reduction_fold/*=true*/,
-                      LegionMap<IndexSpaceExpression*,FieldMask>::aligned *perf,
-                      const FieldMask *performed_mask)
+                      WriteSet *performed, const FieldMask *performed_mask)
     //--------------------------------------------------------------------------
     {
       return parent->issue_copy(op, src_fields, dst_fields, precondition,
                                 predicate_guard, intersect, mask, redop, 
-                                reduction_fold, perf, performed_mask);
+                                reduction_fold, performed, performed_mask);
     }
 
     //--------------------------------------------------------------------------
@@ -17376,8 +17373,7 @@ namespace Legion {
                       UniqueID fill_uid,
 #endif
                       RegionTreeNode *intersect, IndexSpaceExpression *mask,
-                      LegionMap<IndexSpaceExpression*,FieldMask>::aligned *perf,
-                      const FieldMask *performed_mask)
+                      WriteSet *performed, const FieldMask *performed_mask)
     //--------------------------------------------------------------------------
     {
       return parent->issue_fill(op, dst_fields, fill_value, fill_size, 
@@ -17385,7 +17381,7 @@ namespace Legion {
 #ifdef LEGION_SPY
                                 fill_uid,
 #endif
-                                intersect, mask, perf, performed_mask);
+                                intersect, mask, performed, performed_mask);
     }
 
     //--------------------------------------------------------------------------

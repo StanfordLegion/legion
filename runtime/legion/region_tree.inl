@@ -2742,7 +2742,7 @@ namespace Legion {
                       ApEvent precondition, PredEvent predicate_guard,
                       IndexTreeNode *intersect, IndexSpaceExpression *mask,
                       ReductionOpID redop /*=0*/,bool reduction_fold/*=true*/,
-                      LegionMap<IndexSpaceExpression*,FieldMask>::aligned *perf,
+                      WriteSet *performed /*=NULL*/, 
                       const FieldMask *performed_mask/*=NULL*/)
     //--------------------------------------------------------------------------
     {
@@ -2789,17 +2789,16 @@ namespace Legion {
           Runtime::merge_events(precondition, op->get_execution_fence_event());
       
       // If we make it here then record our performed write
-      if (perf != NULL)
+      if (performed != NULL)
       {
 #ifdef DEBUG_LEGION
         assert(performed_mask != NULL);
 #endif
-        LegionMap<IndexSpaceExpression*,FieldMask>::aligned::iterator
-          finder = perf->find(copy_expr);
-        if (finder == perf->end())
-          (*perf)[copy_expr] = *performed_mask;
+        WriteSet::iterator finder = performed->find(copy_expr);
+        if (finder == performed->end())
+          performed->insert(copy_expr, *performed_mask);
         else
-          finder->second |= *performed_mask;
+          finder.merge(*performed_mask);
       }
       ApEvent result;
       // Now that we know we're going to do this copy add any profling requests
@@ -2841,7 +2840,7 @@ namespace Legion {
                       const void *fill_value, size_t fill_size,
                       ApEvent precondition, PredEvent predicate_guard,
                       IndexTreeNode *intersect, IndexSpaceExpression *mask,
-                      LegionMap<IndexSpaceExpression*,FieldMask>::aligned *perf,
+                      WriteSet *performed /*=NULL*/,
                       const FieldMask *performed_mask/*=NULL*/)
     //--------------------------------------------------------------------------
     {
@@ -2887,17 +2886,16 @@ namespace Legion {
         precondition = 
           Runtime::merge_events(precondition, op->get_execution_fence_event());
       // If we make it here then record our performed write
-      if (perf != NULL)
+      if (performed != NULL)
       {
 #ifdef DEBUG_LEGION
         assert(performed_mask != NULL);
 #endif
-        LegionMap<IndexSpaceExpression*,FieldMask>::aligned::iterator
-          finder = perf->find(fill_expr);
-        if (finder == perf->end())
-          (*perf)[fill_expr] = *performed_mask;
+        WriteSet::iterator finder = performed->find(fill_expr);
+        if (finder == performed->end())
+          performed->insert(fill_expr, *performed_mask);
         else
-          finder->second |= *performed_mask;
+          finder.merge(*performed_mask);
       }
       ApEvent result;
       // Now that we know we're going to do this fill add any profiling requests

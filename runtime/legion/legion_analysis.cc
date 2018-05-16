@@ -151,6 +151,21 @@ namespace Legion {
     {
     }
 
+    //--------------------------------------------------------------------------
+    void WriteMasks::merge(const WriteMasks &other_writes)
+    //--------------------------------------------------------------------------
+    {
+      for (WriteMasks::const_iterator it = other_writes.begin();
+            it != other_writes.end(); it++)
+      {
+        WriteMasks::iterator finder = find(it->first);
+        if (finder == end())
+          insert(it->first, it->second);
+        else
+          finder.merge(it->second);
+      }
+    }
+
     /////////////////////////////////////////////////////////////
     // VersioningSet
     /////////////////////////////////////////////////////////////
@@ -194,6 +209,7 @@ namespace Legion {
     {
       // should never be called
       assert(false);
+      return *this;
     }
 
     //--------------------------------------------------------------------------

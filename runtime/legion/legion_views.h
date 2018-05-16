@@ -940,7 +940,7 @@ namespace Legion {
                 LegionMap<ApEvent,FieldMask>::aligned &preconditions);
       void buffer_reductions(VersionTracker *tracker, PredEvent pred_guard, 
                              RegionTreeNode *intersect,
-         const LegionMap<IndexSpaceExpression*,FieldMask>::aligned &write_masks,
+                             const WriteMasks &write_masks,
                LegionMap<ReductionView*,FieldMask>::aligned &source_reductions);
       void begin_guard_protection(void);
       void end_guard_protection(void);
@@ -1103,8 +1103,8 @@ namespace Legion {
                                          bool restrict_out) = 0;
       virtual void issue_deferred_copies(DeferredCopier &copier,
                                          const FieldMask &local_copy_mask,
-         const LegionMap<IndexSpaceExpression*,FieldMask>::aligned &write_masks,
-               LegionMap<IndexSpaceExpression*,FieldMask>::aligned &perf_writes,
+                                         const WriteMasks &write_masks,
+                                         WriteSet &performed_writes,
                                          PredEvent pred_guard) = 0;
       virtual bool issue_deferred_copies_single(DeferredSingleCopier &copier,
                                          IndexSpaceExpression *write_mask,
@@ -1138,15 +1138,13 @@ namespace Legion {
       CompositeBase(LocalLock &base_lock);
       virtual ~CompositeBase(void);
     protected:
-      typedef LegionMap<IndexSpaceExpression*,FieldMask>::aligned WriteMasks;
-    protected:
       void issue_composite_updates(DeferredCopier &copier,
                                    RegionTreeNode *logical_node,
                                    const FieldMask &copy_mask,
                                    VersionTracker *src_version_tracker,
                                    PredEvent pred_guard, 
                                    const WriteMasks &write_masks,
-                                   WriteMasks &performed_writes/*write-only*/);
+                                   WriteSet &performed_writes/*write-only*/);
       // Single field version of the method above
       bool issue_composite_updates_single(DeferredSingleCopier &copier,
                                    RegionTreeNode *logical_node,
@@ -1163,10 +1161,7 @@ namespace Legion {
                const LegionMap<LogicalView*,FieldMask>::aligned &source_views,
                                // previous_writes Should be field unique
                                const WriteMasks &previous_writes,
-                                     WriteMasks &performed_writes);
-      // Merge two write sets into one and deduplicate where necessary
-      static void merge_write_sets(WriteMasks &dst_writes, 
-                                   const WriteMasks &src_writes);
+                                     WriteSet &performed_writes);
       // Write combining unions together all index space expressions for
       // the same field so that we get one index expression for each field
       static void combine_writes(WriteMasks &write_masks,
@@ -1274,8 +1269,8 @@ namespace Legion {
                                          bool restrict_out);
       virtual void issue_deferred_copies(DeferredCopier &copier,
                                          const FieldMask &local_copy_mask,
-         const LegionMap<IndexSpaceExpression*,FieldMask>::aligned &write_masks,
-               LegionMap<IndexSpaceExpression*,FieldMask>::aligned &perf_writes,
+                                         const WriteMasks &write_masks,
+                                         WriteSet &performed_writes,
                                          PredEvent pred_guard);
       virtual bool issue_deferred_copies_single(DeferredSingleCopier &copier,
                                          IndexSpaceExpression *write_mask,
@@ -1482,8 +1477,8 @@ namespace Legion {
                                          bool restrict_out);
       virtual void issue_deferred_copies(DeferredCopier &copier,
                                          const FieldMask &local_copy_mask,
-         const LegionMap<IndexSpaceExpression*,FieldMask>::aligned &write_masks,
-               LegionMap<IndexSpaceExpression*,FieldMask>::aligned &perf_writes,
+                                         const WriteMasks &write_masks,
+                                         WriteSet &performed_writes,
                                          PredEvent pred_guard);
       virtual bool issue_deferred_copies_single(DeferredSingleCopier &copier,
                                          IndexSpaceExpression *write_mask,
@@ -1493,7 +1488,7 @@ namespace Legion {
       void issue_update_fills(DeferredCopier &copier,
                               const FieldMask &fill_mask,
                               IndexSpaceExpression *mask,
-               LegionMap<IndexSpaceExpression*,FieldMask>::aligned &perf_writes,
+                              WriteSet &performed_writes,
                               PredEvent pred_guard) const;
       void issue_internal_fills(const TraversalInfo &info,
                                 MaterializedView *dst,
@@ -1503,7 +1498,7 @@ namespace Legion {
                                 PredEvent pred_guard,
                                 CopyAcrossHelper *helper = NULL,
                                 IndexSpaceExpression *mask = NULL,
-       LegionMap<IndexSpaceExpression*,FieldMask>::aligned *perf = NULL) const;
+                                WriteSet *perf = NULL) const;
     public:
       static void handle_send_fill_view(Runtime *runtime, Deserializer &derez,
                                         AddressSpaceID source);
@@ -1593,8 +1588,8 @@ namespace Legion {
                                          bool restrict_out);
       virtual void issue_deferred_copies(DeferredCopier &copier,
                                          const FieldMask &local_copy_mask,
-         const LegionMap<IndexSpaceExpression*,FieldMask>::aligned &write_masks,
-               LegionMap<IndexSpaceExpression*,FieldMask>::aligned &perf_writes,
+                                         const WriteMasks &write_masks,
+                                         WriteSet &performed_writes,
                                          PredEvent pred_guard);
       virtual bool issue_deferred_copies_single(DeferredSingleCopier &copier,
                                          IndexSpaceExpression *write_mask,

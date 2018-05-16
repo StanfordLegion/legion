@@ -72,7 +72,7 @@ namespace Legion {
     };
 
     /**
-     * \struct VersioningSet
+     * \class VersioningSet
      * A small helper class for tracking collections of 
      * version state objects and their sets of fields
      * This is the same as the above class, but specialized
@@ -487,6 +487,37 @@ namespace Legion {
     };
 
     /**
+     * \class WriteMasks
+     * This is an instantiation of FieldMaskSet with an 
+     * IndexSpaceExpression to delineate a set of writes which
+     * we no longer need to perform, think of it like a photographic
+     * negative that prevents writing in some cases. Even though
+     * this has the same base type as WriteSet (see below) we have
+     * WriteSet inherit form WriteMask, which allows a write set to
+     * be treated as a WriteMask, but never the other direction.
+     * Hopefully this keeps us from being confused and the type
+     * system will check things for us.
+     */
+    class WriteMasks : public FieldMaskSet<IndexSpaceExpression> {
+    public:
+      // Merge two write masks into one and deduplicate where necessary
+      void merge(const WriteMasks &other);
+    };
+
+    /**
+     * \class WriteSet
+     * This is an instantiation of FieldMaskSet with an 
+     * IndexSpaceExpression to track the set of writes which have
+     * been performed. This is in contrast to a WriteMask set which
+     * is the set of things for which we are not performing writes
+     * (see above). Even though the types are identical we have
+     * WriteSet inherit from WriteMask so a WriteSet can be used
+     * as a WriteMask, but never the other way around.
+     */
+    class WriteSet : public WriteMasks {
+    };
+
+    /**
      * \struct ChildState
      * Tracks the which fields have open children
      * and then which children are open for each
@@ -617,6 +648,9 @@ namespace Legion {
       // Fields that we know have been written at the current level
       // (reductions don't count, we want to know they were actually written)
       FieldMask dirty_fields;
+      // Furthermore keep track of any partial writes that we see,
+      // either from projection writes or from close operations
+      //LegionMap<IndexSpaceExpression*,FieldMask>::aligned partial_writes;
       // Keep track of which fields we've done a reduction to here
       FieldMask reduction_fields;
       LegionMap<ReductionOpID,FieldMask>::aligned outstanding_reductions;
