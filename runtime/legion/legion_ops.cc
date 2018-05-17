@@ -4487,7 +4487,7 @@ namespace Legion {
       // Handle the case for marking when the copy completes
       Runtime::trigger_event(completion_event, copy_complete_event);
       need_completion_trigger = false;
-      complete_execution(Runtime::protect_event(copy_complete_event));
+      complete_execution();
     }
 
     //--------------------------------------------------------------------------
@@ -8492,7 +8492,7 @@ namespace Legion {
       // Handle the case for marking when the copy completes
       Runtime::trigger_event(completion_event, acquire_complete_event);
       need_completion_trigger = false;
-      complete_execution(Runtime::protect_event(acquire_complete_event));
+      complete_execution();
     }
 
     //--------------------------------------------------------------------------
@@ -9251,7 +9251,7 @@ namespace Legion {
       // Handle the case for marking when the copy completes
       Runtime::trigger_event(completion_event, release_complete_event);
       need_completion_trigger = false;
-      complete_execution(Runtime::protect_event(release_complete_event));
+      complete_execution();
     }
 
     //--------------------------------------------------------------------------
