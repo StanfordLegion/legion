@@ -115,8 +115,12 @@ def build_terra(terra_dir, thread_count, llvm):
         (['REEXPORT_LLVM_COMPONENTS=irreader mcjit x86'] if llvm else []),
         cwd=terra_dir)
 
-def install_terra(terra_dir, external_terra_dir, thread_count, llvm):
+def install_terra(terra_dir, terra_url, terra_branch, external_terra_dir,
+                  thread_count, llvm):
     if external_terra_dir is not None:
+        if terra_url is not None or terra_branch is not None:
+            raise Exception('Terra URL/branch are incompatible with setting an external installation directory')
+
         external_terra_dir = os.path.expanduser(external_terra_dir)
         if not os.path.isdir(external_terra_dir):
             print('Error: No such directory %s' %
@@ -137,14 +141,23 @@ def install_terra(terra_dir, external_terra_dir, thread_count, llvm):
             os.symlink(external_terra_dir, terra_dir)
         return
     elif os.path.islink(terra_dir):
+        if terra_url is not None or terra_branch is not None:
+            raise Exception('Terra URL/branch are incompatible with setting an external installation directory')
+
         print('Reusing existing external Terra:')
         print('    %s' % os.path.realpath(terra_dir))
         print()
         return
 
     if not os.path.exists(terra_dir):
-        git_clone(terra_dir, 'https://github.com/zdevito/terra.git')
+        if terra_url is None:
+            terra_url = 'https://github.com/zdevito/terra.git'
+        if terra_branch is None:
+            terra_branch = 'master'
+        git_clone(terra_dir, terra_url, terra_branch)
     else:
+        if terra_url is not None or terra_branch is not None:
+            raise Exception('Terra URL/branch must be set on first install, please delete the terra directory and try again')
         git_update(terra_dir)
     build_terra(terra_dir, thread_count, llvm)
 
@@ -268,7 +281,8 @@ def get_cmake_config(cmake, regent_dir, default=None):
 
 def install(gasnet=False, cuda=False, openmp=False, hdf=False, llvm=False,
             spy=False, conduit=None, cmake=None, rdir=None,
-            cmake_exe=None, cmake_build_dir=None, external_terra_dir=None,
+            cmake_exe=None, cmake_build_dir=None,
+            terra_url=None, terra_branch=None, external_terra_dir=None,
             gasnet_dir=None, debug=False, clean_first=True, extra_flags=[],
             thread_count=None, verbose=False):
     regent_dir = os.path.dirname(os.path.realpath(__file__))
@@ -301,7 +315,8 @@ def install(gasnet=False, cuda=False, openmp=False, hdf=False, llvm=False,
     install_rdir(rdir, legion_dir, regent_dir)
 
     terra_dir = os.path.join(regent_dir, 'terra')
-    install_terra(terra_dir, external_terra_dir, thread_count, llvm)
+    install_terra(terra_dir, terra_url, terra_branch, external_terra_dir,
+                  thread_count, llvm)
 
     bindings_dir = os.path.join(legion_dir, 'bindings', 'regent')
     install_bindings(regent_dir, legion_dir, bindings_dir, runtime_dir,
@@ -314,10 +329,17 @@ def driver():
     parser = argparse.ArgumentParser(
         description='Install Regent front end.')
     parser.add_argument(
+        '--terra-url', dest='terra_url', metavar='URL', required=False,
+        help='URL to Terra repository to clone (optional).')
+    parser.add_argument(
+        '--terra-branch', dest='terra_branch', metavar='BRANCH', required=False,
+        help='Name of Terra branch to clone (optional).')
+    parser.add_argument(
         '--with-terra', dest='external_terra_dir', metavar='DIR', required=False,
         help='Path to Terra installation directory (optional).')
     parser.add_argument(
         '--debug', dest='debug', action='store_true', required=False,
+        default=os.environ.get('DEBUG') == '1',
         help='Build Legion with debugging enabled.')
     parser.add_argument(
         '--gasnet', dest='gasnet', action='store_true', required=False,

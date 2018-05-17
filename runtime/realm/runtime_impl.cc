@@ -39,6 +39,7 @@
 #define GASNET_PAR
 #endif
 #include <gasnet.h>
+#include <gasnet_coll.h>
 // eliminate GASNet warnings for unused static functions
 static const void *ignore_gasnet_warning1 __attribute__((unused)) = (void *)_gasneti_threadkey_init;
 #ifdef _INCLUDED_GASNET_TOOLS_H

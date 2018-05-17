@@ -13,7 +13,11 @@
 -- limitations under the License.
 
 -- runs-with:
--- [ [ "-dm:memoize" ] ]
+-- [
+--  [ "-dm:memoize" ],
+--  [ "-dm:memoize", "-lg:no_fence_elision" ],
+--  [ "-dm:memoize", "-lg:no_trace_optimization" ]
+-- ]
 
 import "regent"
 import "bishop"
@@ -24,8 +28,7 @@ $PROCS = processors[isa=x86]
 
 task#foo, task#bar
 {
-  map_locally : true;
-  target : $PROCS[1 % $PROCS.size];
+  target : $PROCS[0 % $PROCS.size];
 }
 
 end

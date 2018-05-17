@@ -2128,13 +2128,15 @@ namespace Legion {
      *  - FT read(const Point<N,T>&) const
      *  - const FT* ptr(const Point<N,T>&) const (Affine Accessor only)
      *  - const FT* ptr(const Rect<N,T>&) const (Affine Accessor only)
+     *  - FT* ptr(const Rect<N,T>&, size_t strides[N]) const (Affine only)
      *  - const FT& operator[](const Point<N,T>&) const (Affine Accessor only)
      *
      * READ_WRITE
      *  - FT read(const Point<N,T>&) const
      *  - void write(const Point<N,T>&, FT val) const
      *  - FT* ptr(const Point<N,T>&) const (Affine Accessor only)
-     *  - FT* ptr(const Rect<N,T>&) const (Affine Accessor only)
+     *  - FT* ptr(const Rect<N,T>&) const (Affine Accessor only, must be dense)
+     *  - FT* ptr(const Rect<N,T>&, size_t strides[N]) const (Affine only)
      *  - FT& operator[](const Point<N,T>&) const (Affine Accessor only)
      *  - template<typename REDOP, bool EXCLUSIVE> 
      *      void reduce(const Point<N,T>&, REDOP::RHS); (Affine Accessor only)
@@ -2143,6 +2145,7 @@ namespace Legion {
      *  - void write(const Point<N,T>&, FT val) const
      *  - FT* ptr(const Point<N,T>&) const (Affine Accessor only)
      *  - FT* ptr(const Rect<N,T>&) const (Affine Accessor only)
+     *  - FT* ptr(const Rect<N,T>&, size_t strides[N]) const (Affine only)
      *  - FT& operator[](const Point<N,T>&) const (Affine Accessor only)
      */
     template<PrivilegeMode MODE, typename FT, int N, typename COORD_T = coord_t,
@@ -2214,7 +2217,11 @@ namespace Legion {
      * A field accessor is a class used to perform reductions to a given
      * field inside a PhysicalRegion object for a specific field. Reductions
      * can be performed directly or array indexing can be used along with 
-     * the <<= operator to perform the reduction.
+     * the <<= operator to perform the reduction. We also provide the same
+     * variants of the 'ptr' method as normal accessors to obtain a pointer 
+     * to the underlying allocation. This seems to be useful when we need
+     * to do reductions directly to a buffer as is often necessary when
+     * invoking external libraries like BLAS.
      * This method currently only works with the Realm::AffineAccessor layout
      */
     template<typename REDOP, bool EXCLUSIVE, int N, typename COORD_T = coord_t,
@@ -4511,12 +4518,14 @@ namespace Legion {
        * @return handle for the logical region created
        */
       LogicalRegion create_logical_region(Context ctx, IndexSpace index, 
-                                          FieldSpace fields);
+                                          FieldSpace fields,
+                                          bool task_local = false);
       // Template version
       template<int DIM, typename COORD_T>
       LogicalRegionT<DIM,COORD_T> create_logical_region(Context ctx,
                                       IndexSpaceT<DIM,COORD_T> index,
-                                      FieldSpace fields);
+                                      FieldSpace fields,
+                                      bool task_local = false);
       /**
        * Destroy a logical region and all of its logical sub-regions.
        * @param ctx enclosing task context

@@ -46,7 +46,7 @@ namespace Legion {
       ResourceTracker& operator=(const ResourceTracker &rhs);
     public:
       virtual void register_region_creations(
-                          const std::set<LogicalRegion> &regions) = 0;
+                     const std::map<LogicalRegion,bool> &regions) = 0;
       virtual void register_region_deletions(
                           const std::set<LogicalRegion> &regions) = 0;
     public:
@@ -76,7 +76,8 @@ namespace Legion {
       static void unpack_privilege_state(Deserializer &derez,
                                          ResourceTracker *target);
     protected:
-      std::set<LogicalRegion>                   created_regions;
+      std::map<LogicalRegion,
+               bool/*local*/>                   created_regions;
       std::map<std::pair<FieldSpace,FieldID>,
                bool/*local*/>                   created_fields;
       std::set<FieldSpace>                      created_field_spaces;
@@ -533,6 +534,9 @@ namespace Legion {
                                  size_t res_size, bool owned) = 0; 
       virtual void handle_post_mapped(RtEvent pre = RtEvent::NO_RT_EVENT) = 0;
       virtual void handle_misspeculation(void) = 0;
+    public:
+      // From Memoizable
+      virtual void complete_replay(ApEvent completion_event);
     protected:
       // Boolean for each region saying if it is virtual mapped
       std::vector<bool> virtual_mapped;
@@ -910,7 +914,8 @@ namespace Legion {
       virtual void activate(void);
       virtual void deactivate(void);
     public:
-      virtual bool has_prepipeline_stage(void) const { return true; }
+      virtual bool has_prepipeline_stage(void) const
+        { return need_prepipeline_stage; }
       virtual void trigger_prepipeline_stage(void);
       virtual void trigger_dependence_analysis(void);
       virtual void report_interfering_requirements(unsigned idx1,unsigned idx2);
@@ -1096,7 +1101,7 @@ namespace Legion {
       static void handle_slice_return(Runtime *rt, Deserializer &derez);
     public: // Privilege tracker methods
       virtual void register_region_creations(
-                          const std::set<LogicalRegion> &regions);
+                     const std::map<LogicalRegion,bool> &regions);
       virtual void register_region_deletions(
                           const std::set<LogicalRegion> &regions);
     public:

@@ -24,6 +24,7 @@ function ast.make_factory(name)
   return setmetatable(
     {
       parent = false,
+      children = terralib.newlist(),
       name = name,
       expected_fields = false,
       expected_field_set = false,
@@ -282,6 +283,7 @@ function ast_factory:inner(ctor_name, expected_fields, print_collapsed, print_hi
   local ctor = setmetatable(
     {
       parent = self,
+      children = terralib.newlist(),
       name = ctor_name,
       expected_fields = fields,
       expected_field_set = data.set(fields),
@@ -292,6 +294,7 @@ function ast_factory:inner(ctor_name, expected_fields, print_collapsed, print_hi
   assert(rawget(self, ctor_name) == nil,
          "multiple definitions of constructor " .. ctor_name)
   self[ctor_name] = ctor
+  self.children:insert(ctor)
   return ctor
 end
 
@@ -300,6 +303,7 @@ function ast_factory:leaf(ctor_name, expected_fields, print_collapsed, print_hid
   local ctor = setmetatable(
     {
       parent = self,
+      children = terralib.newlist(),
       name = ctor_name,
       expected_fields = fields,
       expected_field_set = data.set(fields),
@@ -312,6 +316,7 @@ function ast_factory:leaf(ctor_name, expected_fields, print_collapsed, print_hid
   assert(rawget(self, ctor_name) == nil,
          "multiple definitions of constructor " .. ctor_name)
   self[ctor_name] = ctor
+  self.children:insert(ctor)
   return ctor
 end
 
@@ -324,6 +329,59 @@ function ast_factory:__tostring()
     return tostring(self.parent) .. "." .. self.name
   end
   return self.name
+end
+
+-- Dispatch
+
+local function check_dispatch_completeness(table, node_type)
+  if table[node_type] then
+    return true
+  end
+
+  if #node_type.children > 0 and data.all(unpack(
+      node_type.children:map(
+        function(child_type) return check_dispatch_completeness(table, child_type) end)))
+  then
+    return true
+  end
+
+  assert(false, "dispatch table is missing node type " .. tostring(node_type))
+end
+
+function ast.make_single_dispatch(table, required_cases)
+  assert(table and required_cases)
+
+  for _, parent_type in ipairs(required_cases) do
+    check_dispatch_completeness(table, parent_type)
+  end
+
+  return function(cx)
+    if cx then
+      return function(node, ...)
+        local node_type = node.node_type
+        while node_type and not table[node_type] do
+          node_type = node_type.parent
+        end
+        if table[node_type] then
+          return table[node_type](cx, node, ...)
+        else
+          assert(false, "unexpected node type " .. tostring(node.node_type))
+        end
+      end
+    else
+      return function(node, ...)
+        local node_type = node.node_type
+        while node_type and not table[node_type] do
+          node_type = node_type.parent
+        end
+        if table[node_type] then
+          return table[node_type](node, ...)
+        else
+          assert(false, "unexpected node type " .. tostring(node.node_type))
+        end
+      end
+    end
+  end
 end
 
 -- Traversal

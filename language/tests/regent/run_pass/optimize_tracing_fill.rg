@@ -13,7 +13,11 @@
 -- limitations under the License.
 
 -- runs-with:
--- [ [ "-dm:memoize", "-ll:cpu", "2" ] ]
+-- [
+--  [ "-dm:memoize", "-ll:cpu", "2" ],
+--  [ "-dm:memoize", "-ll:cpu", "2", "-lg:no_fence_elision" ],
+--  [ "-dm:memoize", "-ll:cpu", "2", "-lg:no_trace_optimization" ]
+-- ]
 
 import "regent"
 

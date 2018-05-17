@@ -270,6 +270,7 @@ namespace Legion {
       LG_DEFERRED_COMPLETE_ID,
       LG_DEFERRED_COMMIT_ID,
       LG_DEFERRED_COLLECT_ID,
+      LG_DEFERRED_POST_END_ID,
       LG_PRE_PIPELINE_ID,
       LG_TRIGGER_DEPENDENCE_ID,
       LG_TRIGGER_COMPLETE_ID,
@@ -353,6 +354,7 @@ namespace Legion {
         "Deferred Execute",                                       \
         "Deferred Complete",                                      \
         "Deferred Commit",                                        \
+        "Deferred Post-Task Execution",                           \
         "Garbage Collection",                                     \
         "Prepipeline Stage",                                      \
         "Logical Dependence Analysis",                            \
@@ -1388,10 +1390,9 @@ namespace Legion {
     struct AssignFenceCompletion;
     struct IssueCopy;
     struct IssueFill;
-    struct SetReadyEvent;
-    struct GetCopyTermEvent;
-    struct SetCopySyncEvent;
-    struct TriggerCopyCompletion;
+    struct GetOpTermEvent;
+    struct SetOpSyncEvent;
+    struct CompleteReplay;
 
     // region_tree.h
     class RegionTreeForest;

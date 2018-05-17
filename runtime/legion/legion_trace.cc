@@ -38,7 +38,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       physical_trace = logical_only ? NULL
-                                    : new PhysicalTrace(c->owner_task->runtime);
+                                    : new PhysicalTrace(c->owner_task->runtime,
+                                                        this);
     }
 
     //--------------------------------------------------------------------------
@@ -1371,6 +1372,10 @@ namespace Legion {
 
       if (physical_trace->get_current_template() != NULL)
       {
+        if (recurrent && (implicit_runtime->no_fence_elision ||
+                          implicit_runtime->no_trace_optimization))
+          execution_precondition =
+            parent_ctx->get_current_execution_fence_event();
         physical_trace->initialize_template(get_completion_event(), recurrent);
         local_trace->set_state_replay();
       }
@@ -1475,8 +1480,9 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    PhysicalTrace::PhysicalTrace(Runtime *rt)
-      : runtime(rt), current_template(NULL), nonreplayable_count(0)
+    PhysicalTrace::PhysicalTrace(Runtime *rt, LegionTrace *lt)
+      : runtime(rt), logical_trace(lt), current_template(NULL),
+        nonreplayable_count(0)
     //--------------------------------------------------------------------------
     {
     }
@@ -1524,9 +1530,10 @@ namespace Legion {
           REPORT_LEGION_WARNING(LEGION_WARNING_NON_REPLAYABLE_COUNT_EXCEEDED,
               "WARNING: The runtime has failed to memoize the trace more than "
               "%u times, due to the absence of a replayable template. It is "
-              "highly likely that your trace will not be memoized for the rest "
+              "highly likely that trace %u will not be memoized for the rest "
               "of execution. Please change the mapper to stop making "
-              "memoization requests.", LEGION_NON_REPLAYABLE_WARNING)
+              "memoization requests.", LEGION_NON_REPLAYABLE_WARNING,
+              logical_trace->get_trace_id())
           nonreplayable_count = 0;
         }
       }
@@ -1558,10 +1565,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    PhysicalTemplate* PhysicalTrace::start_new_template()
+    PhysicalTemplate* PhysicalTrace::start_new_template(ApEvent fence_event)
     //--------------------------------------------------------------------------
     {
-      current_template = new PhysicalTemplate();
+      current_template = new PhysicalTemplate(fence_event);
+#ifdef DEBUG_LEGION
+      assert(fence_event.exists());
+#endif
       return current_template;
     }
 
@@ -1581,12 +1591,13 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    PhysicalTemplate::PhysicalTemplate(void)
+    PhysicalTemplate::PhysicalTemplate(ApEvent fence_event)
       : recording(true), replayable(true), has_block(false),
         fence_completion_id(0)
     //--------------------------------------------------------------------------
     {
-      events.push_back(ApEvent());
+      events.push_back(fence_event);
+      event_map[fence_event] = fence_completion_id;
       instructions.push_back(
           new AssignFenceCompletion(*this, fence_completion_id));
     }
@@ -1656,9 +1667,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       std::set<ApEvent> to_merge;
-      for (std::map<unsigned, unsigned>::const_iterator it = frontiers.begin();
-           it != frontiers.end(); ++it)
-        to_merge.insert(events[it->first]);
+      for (std::map<InstanceAccess, UserInfo>::const_iterator it =
+           last_users.begin(); it != last_users.end(); ++it)
+        for (std::set<unsigned>::const_iterator uit = it->second.users.begin();
+             uit != it->second.users.end(); ++uit)
+          to_merge.insert(events[*uit]);
       return Runtime::merge_events(to_merge);
     }
 
@@ -1892,12 +1905,12 @@ namespace Legion {
       {
         if (implicit_runtime->dump_physical_traces)
         {
-          optimize();
+          if (!implicit_runtime->no_trace_optimization) optimize();
           dump_template();
         }
         return;
       }
-      optimize();
+      if (!implicit_runtime->no_trace_optimization) optimize();
       if (implicit_runtime->dump_physical_traces) dump_template();
       size_t num_events = events.size();
       events.clear();
@@ -1912,263 +1925,56 @@ namespace Legion {
     void PhysicalTemplate::optimize(void)
     //--------------------------------------------------------------------------
     {
-      std::vector<unsigned> generate;
-      std::vector<std::set<unsigned> > preconditions;
-      std::vector<std::set<unsigned> > simplified;
-      std::map<TraceLocalID, std::set<unsigned> > ready_preconditions;
-      generate.resize(instructions.size());
-      preconditions.resize(instructions.size());
-      simplified.resize(instructions.size());
-
-      for (unsigned idx = 0; idx < instructions.size(); ++idx)
-      {
-        std::set<unsigned> &pre = preconditions[idx];
-        switch (instructions[idx]->get_kind())
-        {
-          case ASSIGN_FENCE_COMPLETION:
-          case GET_TERM_EVENT:
-          case CREATE_AP_USER_EVENT:
-            {
-              generate[idx] = idx;
-              break;
-            }
-          case TRIGGER_EVENT:
-            {
-              TriggerEvent *inst = instructions[idx]->as_trigger_event();
-              unsigned rhs = inst->rhs;
-              pre.insert(preconditions[rhs].begin(), preconditions[rhs].end());
-              pre.insert(generate[rhs]);
-              generate[idx] = idx;
-              break;
-            }
-          case MERGE_EVENT:
-            {
-              MergeEvent *inst = instructions[idx]->as_merge_event();
-              for (std::set<unsigned>::iterator it = inst->rhs.begin();
-                   it != inst->rhs.end(); ++it)
-              {
-                pre.insert(preconditions[*it].begin(),
-                           preconditions[*it].end());
-                unsigned rhs_gen = generate[*it];
-                pre.insert(preconditions[rhs_gen].begin(),
-                           preconditions[rhs_gen].end());
-              }
-              std::set<unsigned> gen;
-              for (std::set<unsigned>::iterator it = inst->rhs.begin();
-                   it != inst->rhs.end(); ++it)
-                if (pre.find(*it) == pre.end()) gen.insert(generate[*it]);
-              if (gen.size() > 1)
-              {
-                pre.insert(gen.begin(), gen.end());
-                generate[idx] = idx;
-
-                std::set<unsigned> &simpl = simplified[idx];
-                std::set<unsigned> pre_pre;
-                for (std::set<unsigned>::iterator it = pre.begin(); it != pre.end();
-                    ++it)
-                  pre_pre.insert(preconditions[*it].begin(),
-                                 preconditions[*it].end());
-                for (std::set<unsigned>::iterator it = pre.begin(); it != pre.end();
-                    ++it)
-                  if (pre_pre.find(*it) == pre_pre.end())
-                    simpl.insert(*it);
-              }
-              else
-              {
-#ifdef DEBUG_LEGION
-                assert(gen.size() == 1);
-#endif
-                generate[idx] = *gen.begin();
-              }
-              break;
-            }
-          case ISSUE_COPY:
-            {
-              generate[idx] = idx;
-              IssueCopy *inst = instructions[idx]->as_issue_copy();
-              std::set<unsigned> &pre_pre = preconditions[inst->precondition_idx];
-              pre.insert(generate[inst->precondition_idx]);
-              pre.insert(pre_pre.begin(), pre_pre.end());
-              break;
-            }
-          case ISSUE_FILL:
-            {
-              generate[idx] = idx;
-              IssueFill *inst = instructions[idx]->as_issue_fill();
-              std::set<unsigned> &pre_pre = preconditions[inst->precondition_idx];
-              pre.insert(generate[inst->precondition_idx]);
-              pre.insert(pre_pre.begin(), pre_pre.end());
-              break;
-            }
-          case SET_READY_EVENT:
-            {
-              SetReadyEvent *inst = instructions[idx]->as_set_ready_event();
-              std::set<unsigned> &ready_pre = preconditions[inst->ready_event_idx];
-              {
-                std::map<TraceLocalID, unsigned>::iterator finder =
-                  task_entries.find(inst->op_key);
-#ifdef DEBUG_LEGION
-                assert(finder != task_entries.end());
-#endif
-                std::set<unsigned> &task_pre = preconditions[finder->second];
-                task_pre.insert(generate[inst->ready_event_idx]);
-                task_pre.insert(ready_pre.begin(), ready_pre.end());
-              }
-              {
-                std::map<TraceLocalID, std::set<unsigned> >::iterator finder =
-                  ready_preconditions.find(inst->op_key);
-                if (finder == ready_preconditions.end())
-                  ready_preconditions[inst->op_key] = ready_pre;
-                else
-                  finder->second.insert(ready_pre.begin(), ready_pre.end());
-              }
-              break;
-            }
-          case GET_COPY_TERM_EVENT:
-          case SET_COPY_SYNC_EVENT:
-            {
-              generate[idx] = idx;
-              break;
-            }
-          case TRIGGER_COPY_COMPLETION:
-            {
-              generate[idx] = idx;
-              TriggerCopyCompletion *inst =
-                instructions[idx]->as_triger_copy_completion();
-              std::set<unsigned> &rhs_pre = preconditions[inst->rhs];
-              std::map<TraceLocalID, unsigned>::iterator finder =
-                task_entries.find(inst->lhs);
-#ifdef DEBUG_LEGION
-              assert(finder != task_entries.end());
-#endif
-              std::set<unsigned> &copy_pre = preconditions[finder->second];
-              copy_pre.insert(generate[inst->rhs]);
-              copy_pre.insert(rhs_pre.begin(), rhs_pre.end());
-              break;
-            }
-          case LAUNCH_TASK:
-            {
-              assert(false);
-              break;
-            }
-#ifdef DEBUG_LEGION
-          default:
-            {
-              assert(false);
-              break;
-            }
-#endif
-        }
-      }
-
-      std::vector<Instruction*> new_instructions;
-      unsigned count = 0;
-      std::map<unsigned, unsigned> rewrite;
-      for (unsigned idx = 0; idx < instructions.size(); ++idx)
+      std::vector<unsigned> gen;
+      if (!implicit_runtime->no_fence_elision)
+        elide_fences(gen);
+      else
       {
 #ifdef DEBUG_LEGION
-        assert(rewrite.find(idx) == rewrite.end());
-        assert(rewrite.size() == idx);
+        assert(instructions.size() == events.size());
 #endif
-        switch (instructions[idx]->get_kind())
-        {
-          case ASSIGN_FENCE_COMPLETION:
-          case GET_TERM_EVENT:
-          case CREATE_AP_USER_EVENT:
-          case TRIGGER_EVENT:
-          case ISSUE_COPY:
-          case ISSUE_FILL:
-          case GET_COPY_TERM_EVENT:
-          case SET_COPY_SYNC_EVENT:
-          case TRIGGER_COPY_COMPLETION:
-            {
-#ifdef DEBUG_LEGION
-              assert(generate[idx] == idx);
-#endif
-              rewrite[idx] = count;
-              new_instructions.push_back(
-                  instructions[idx]->clone(*this, rewrite));
-              ++count;
-              break;
-            }
-          case SET_READY_EVENT:
-            {
-              SetReadyEvent *inst = instructions[idx]->as_set_ready_event();
-              rewrite[idx] = count;
-              new_instructions.push_back(inst->clone(*this, rewrite));
-              ++count;
-              break;
-            }
-          case MERGE_EVENT:
-            {
-              if (generate[idx] == idx)
-              {
-                if (simplified[idx].size() > 1)
-                {
-                  std::set<unsigned> rhs;
-                  for (std::set<unsigned>::iterator it =
-                       simplified[idx].begin(); it !=
-                       simplified[idx].end(); ++it)
-                  {
-#ifdef DEBUG_LEGION
-                    assert(rewrite.find(*it) != rewrite.end());
-#endif
-                    rhs.insert(rewrite[*it]);
-                  }
-                  rewrite[idx] = count;
-                  new_instructions.push_back(new MergeEvent(*this, count, rhs));
-                  ++count;
-                }
-                else
-                  rewrite[idx] = rewrite[*simplified[idx].begin()];
-              }
-              else
-                rewrite[idx] = rewrite[generate[idx]];
-              break;
-            }
-          case LAUNCH_TASK:
-            {
-              assert(false);
-              break;
-            }
-#ifdef DEBUG_LEGION
-          default:
-            {
-              assert(false);
-              break;
-            }
-#endif
-        }
+        gen.resize(events.size());
+        for (unsigned idx = 0; idx < events.size(); ++idx)
+          gen[idx] = idx;
       }
+      propagate_merges(gen);
+    }
 
-      instructions.swap(new_instructions);
-
-      for (std::vector<Instruction*>::iterator it = new_instructions.begin();
-           it != new_instructions.end(); ++it)
-        delete (*it);
-
-      size_t num_origins = 0;
+    //--------------------------------------------------------------------------
+    void PhysicalTemplate::elide_fences(std::vector<unsigned> &gen)
+    //--------------------------------------------------------------------------
+    {
+      // Reserve some events for merges to be added during fence elision
+      unsigned num_merges = 0;
       for (std::vector<Instruction*>::iterator it = instructions.begin();
            it != instructions.end(); ++it)
         switch ((*it)->get_kind())
         {
           case ISSUE_COPY:
             {
-              num_origins +=
-                (*it)->as_issue_copy()->precondition_idx == fence_completion_id;
+              unsigned precondition_idx =
+                (*it)->as_issue_copy()->precondition_idx;
+              InstructionKind generator_kind =
+                instructions[precondition_idx]->get_kind();
+              num_merges += generator_kind != MERGE_EVENT;
               break;
             }
           case ISSUE_FILL:
             {
-              num_origins +=
-                (*it)->as_issue_fill()->precondition_idx == fence_completion_id;
+              unsigned precondition_idx =
+                (*it)->as_issue_fill()->precondition_idx;
+              InstructionKind generator_kind =
+                instructions[precondition_idx]->get_kind();
+              num_merges += generator_kind != MERGE_EVENT;
               break;
             }
-          case SET_READY_EVENT:
+          case COMPLETE_REPLAY:
             {
-              num_origins +=
-                (*it)->as_set_ready_event()->ready_event_idx ==
-                fence_completion_id;
+              unsigned completion_event_idx =
+                (*it)->as_complete_replay()->rhs;
+              InstructionKind generator_kind =
+                instructions[completion_event_idx]->get_kind();
+              num_merges += generator_kind != MERGE_EVENT;
               break;
             }
           default:
@@ -2176,114 +1982,84 @@ namespace Legion {
               break;
             }
         }
-      events.resize(instructions.size() + num_origins);
-      std::map<InstanceAccess, UserInfo> new_last_users;
+
+      unsigned merge_starts = events.size();
+      events.resize(events.size() + num_merges);
+
+      // Reserve space for completion events of the previously replayed trace
+      // - frontiers[idx] == (event idx from the previous trace)
+      // - after each replay, we do assignment events[frontiers[idx]] = idx
+      // Note that 'frontiers' is used in 'find_last_users()'
       for (std::map<InstanceAccess, UserInfo>::iterator it = last_users.begin();
            it != last_users.end(); ++it)
-      {
-        std::set<unsigned> pre;
         for (std::set<unsigned>::iterator uit = it->second.users.begin(); uit !=
              it->second.users.end(); ++uit)
-          pre.insert(preconditions[*uit].begin(), preconditions[*uit].end());
-        for (std::set<unsigned>::iterator uit = it->second.users.begin(); uit !=
-             it->second.users.end(); ++uit)
-          if (pre.find(*uit) == pre.end())
+        {
+          unsigned frontier = *uit;
+          if (frontiers.find(frontier) == frontiers.end())
           {
-#ifdef DEBUG_LEGION
-            assert(rewrite.find(*uit) != rewrite.end());
-#endif
-            unsigned frontier = rewrite[*uit];
-            if (frontiers.find(frontier) == frontiers.end())
-            {
-              unsigned next_event_id = events.size();
-              frontiers[frontier] = next_event_id;
-              events.resize(next_event_id + 1);
-            }
-            new_last_users[it->first].users.insert(frontier);
+            unsigned next_event_id = events.size();
+            frontiers[frontier] = next_event_id;
+            events.resize(next_event_id + 1);
           }
-      }
-      last_users.swap(new_last_users);
+        }
 
-      new_instructions.clear();
-      unsigned next_instruction_id = instructions.size();
+      // We are now going to break the invariant that
+      // the generator of events[idx] is instructions[idx].
+      // After fence elision, the generator of events[idx] is
+      // instructions[gen[idx]].
+      gen.resize(events.size());
+      std::vector<Instruction*> new_instructions;
+
       for (unsigned idx = 0; idx < instructions.size(); ++idx)
       {
         Instruction *inst = instructions[idx];
-        MergeEvent *new_merge = NULL;
+        InstructionKind kind = inst->get_kind();
         std::set<unsigned> users;
-
-        switch (inst->get_kind())
+        unsigned *precondition_idx = NULL;
+        switch (kind)
         {
+          case COMPLETE_REPLAY:
+            {
+              CompleteReplay *replay = inst->as_complete_replay();
+              std::map<TraceLocalID, std::vector<InstanceReq> >::iterator
+                finder = op_reqs.find(replay->lhs);
+              if (finder == op_reqs.end())
+                break;
+              const std::vector<InstanceReq> &reqs = finder->second;
+              for (std::vector<InstanceReq>::const_iterator it = reqs.begin();
+                   it != reqs.end(); ++it)
+                for (std::vector<FieldID>::const_iterator fit =
+                     it->fields.begin(); fit != it->fields.end(); ++fit)
+                  find_last_users(it->instance, *fit, users);
+              precondition_idx = &replay->rhs;
+              break;
+            }
           case ISSUE_COPY:
             {
               IssueCopy *copy = inst->as_issue_copy();
-              if (copy->precondition_idx == fence_completion_id)
+              for (unsigned idx = 0; idx < copy->src_fields.size(); ++idx)
               {
-                for (unsigned idx = 0; idx < copy->src_fields.size(); ++idx)
-                {
-                  const CopySrcDstField &field = copy->src_fields[idx];
-                  find_last_users(field.inst, field.field_id, users);
-                }
-                for (unsigned idx = 0; idx < copy->dst_fields.size(); ++idx)
-                {
-                  const CopySrcDstField &field = copy->dst_fields[idx];
-                  find_last_users(field.inst, field.field_id, users);
-                }
-                if (users.size() == 1)
-                  copy->precondition_idx = *users.begin();
-                else
-                {
-                  new_merge = new MergeEvent(*this, next_instruction_id, users);
-                  copy->precondition_idx = next_instruction_id;
-                  ++next_instruction_id;
-                }
+                const CopySrcDstField &field = copy->src_fields[idx];
+                find_last_users(field.inst, field.field_id, users);
               }
+              for (unsigned idx = 0; idx < copy->dst_fields.size(); ++idx)
+              {
+                const CopySrcDstField &field = copy->dst_fields[idx];
+                find_last_users(field.inst, field.field_id, users);
+              }
+              precondition_idx = &copy->precondition_idx;
               break;
             }
           case ISSUE_FILL:
             {
               IssueFill *fill = inst->as_issue_fill();
-              if (fill->precondition_idx == fence_completion_id)
+              for (unsigned idx = 0; idx < fill->fields.size(); ++idx)
               {
-                for (unsigned idx = 0; idx < fill->fields.size(); ++idx)
-                {
-                  const CopySrcDstField &field = fill->fields[idx];
-                  find_last_users(field.inst, field.field_id, users);
-                }
-                if (users.size() == 1)
-                  fill->precondition_idx = *users.begin();
-                else
-                {
-                  new_merge = new MergeEvent(*this, next_instruction_id, users);
-                  fill->precondition_idx = next_instruction_id;
-                  ++next_instruction_id;
-                }
+                const CopySrcDstField &field = fill->fields[idx];
+                find_last_users(field.inst, field.field_id, users);
               }
-              break;
-            }
-          case SET_READY_EVENT:
-            {
-              SetReadyEvent *ready = inst->as_set_ready_event();
-              if (ready->ready_event_idx == fence_completion_id)
-              {
-                std::vector<FieldID> field_ids;
-                InstanceView *view = ready->view;
-                view->logical_node->get_column_source()
-                  ->get_field_set(ready->fields, field_ids);
-                const PhysicalInstance &inst =
-                  view->get_manager()->get_instance();
-                for (std::vector<FieldID>::iterator it = field_ids.begin();
-                    it != field_ids.end(); ++it)
-                  find_last_users(inst, *it, users);
-                if (users.size() == 1)
-                  ready->ready_event_idx = *users.begin();
-                else
-                {
-                  new_merge = new MergeEvent(*this, next_instruction_id, users);
-                  ready->ready_event_idx = next_instruction_id;
-                  ++next_instruction_id;
-                }
-              }
+              precondition_idx = &fill->precondition_idx;
               break;
             }
           default:
@@ -2292,16 +2068,137 @@ namespace Legion {
             }
         }
 
-        if (new_merge != NULL)
-          new_instructions.push_back(new_merge);
+        if (users.size() > 0)
+        {
+          Instruction *generator_inst = instructions[*precondition_idx];
+          if (generator_inst->get_kind() == MERGE_EVENT)
+          {
+            MergeEvent *merge = generator_inst->as_merge_event();
+            merge->rhs.insert(users.begin(), users.end());
+          }
+          else
+          {
+            unsigned merging_event_idx = merge_starts++;
+            if (*precondition_idx != fence_completion_id)
+              users.insert(*precondition_idx);
+            gen[merging_event_idx] = new_instructions.size();
+            new_instructions.push_back(
+                new MergeEvent(*this, merging_event_idx, users));
+            *precondition_idx = merging_event_idx;
+          }
+        }
+        gen[idx] = new_instructions.size();
         new_instructions.push_back(inst);
       }
       instructions.swap(new_instructions);
+      new_instructions.clear();
+    }
 
-      for (std::map<TraceLocalID, Operation*>::iterator it =
-           operations.begin(); it != operations.end(); ++it)
-        if (it->second->get_operation_kind() == Operation::TASK_OP_KIND)
-          instructions.push_back(new LaunchTask(*this, it->first));
+    //--------------------------------------------------------------------------
+    void PhysicalTemplate::propagate_merges(const std::vector<unsigned> &gen)
+    //--------------------------------------------------------------------------
+    {
+      std::vector<Instruction*> new_instructions;
+      std::vector<bool> used(instructions.size(), false);
+
+      for (unsigned idx = 0; idx < instructions.size(); ++idx)
+      {
+        Instruction *inst = instructions[idx];
+        InstructionKind kind = inst->get_kind();
+        used[idx] = kind != MERGE_EVENT;
+        switch (kind)
+        {
+          case MERGE_EVENT:
+            {
+              MergeEvent *merge = inst->as_merge_event();
+              std::set<unsigned> new_rhs;
+              bool changed = false;
+              for (std::set<unsigned>::iterator it = merge->rhs.begin();
+                   it != merge->rhs.end(); ++it)
+              {
+                Instruction *generator = instructions[gen[*it]];
+                if (generator ->get_kind() == MERGE_EVENT)
+                {
+                  MergeEvent *to_splice = generator->as_merge_event();
+                  new_rhs.insert(to_splice->rhs.begin(), to_splice->rhs.end());
+                  changed = true;
+                }
+                else
+                  new_rhs.insert(*it);
+              }
+              if (changed)
+                merge->rhs.swap(new_rhs);
+              break;
+            }
+          case TRIGGER_EVENT:
+            {
+              TriggerEvent *trigger = inst->as_trigger_event();
+              used[gen[trigger->rhs]] = true;
+              break;
+            }
+          case ISSUE_COPY:
+            {
+              IssueCopy *copy = inst->as_issue_copy();
+              used[gen[copy->precondition_idx]] = true;
+              break;
+            }
+          case ISSUE_FILL:
+            {
+              IssueFill *fill = inst->as_issue_fill();
+              used[gen[fill->precondition_idx]] = true;
+              break;
+            }
+          case COMPLETE_REPLAY:
+            {
+              CompleteReplay *complete = inst->as_complete_replay();
+              used[gen[complete->rhs]] = true;
+              break;
+            }
+          case GET_TERM_EVENT:
+          case GET_OP_TERM_EVENT:
+          case CREATE_AP_USER_EVENT:
+          case SET_OP_SYNC_EVENT:
+          case ASSIGN_FENCE_COMPLETION:
+            {
+              break;
+            }
+          default:
+            {
+              // unreachable
+              assert(false);
+            }
+        }
+      }
+
+      std::vector<Instruction*> complete_replays;
+      std::vector<Instruction*> to_delete;
+
+      for (unsigned idx = 0; idx < instructions.size(); ++idx)
+        if (used[idx])
+        {
+          Instruction *inst = instructions[idx];
+          if (inst->get_kind() == COMPLETE_REPLAY)
+            complete_replays.push_back(inst);
+          else
+          {
+            if (inst->get_kind() == MERGE_EVENT)
+            {
+              MergeEvent *merge = inst->as_merge_event();
+              if (merge->rhs.size() > 1)
+                merge->rhs.erase(fence_completion_id);
+            }
+            new_instructions.push_back(inst);
+          }
+        }
+        else
+          to_delete.push_back(instructions[idx]);
+
+      new_instructions.insert(new_instructions.end(),
+                              complete_replays.begin(),
+                              complete_replays.end());
+      instructions.swap(new_instructions);
+      for (unsigned idx = 0; idx < to_delete.size(); ++idx)
+        delete to_delete[idx];
     }
 
     //--------------------------------------------------------------------------
@@ -2589,6 +2486,19 @@ namespace Legion {
                                                const std::set<ApEvent>& rhs)
     //--------------------------------------------------------------------------
     {
+      AutoLock tpl_lock(template_lock);
+
+      std::set<unsigned> rhs_;
+      for (std::set<ApEvent>::const_iterator it = rhs.begin(); it != rhs.end();
+           it++)
+      {
+        std::map<ApEvent, unsigned>::iterator finder = event_map.find(*it);
+        if (finder != event_map.end() && finder->second != fence_completion_id)
+          rhs_.insert(finder->second);
+      }
+      if (rhs_.size() == 0)
+        rhs_.insert(fence_completion_id);
+
 #ifndef LEGION_SPY
       if (!lhs.exists() || (rhs.find(lhs) != rhs.end()))
       {
@@ -2601,27 +2511,12 @@ namespace Legion {
       }
 #endif
 
-      AutoLock tpl_lock(template_lock);
-
       unsigned lhs_ = events.size();
       events.push_back(lhs);
 #ifdef DEBUG_LEGION
       assert(event_map.find(lhs) == event_map.end());
 #endif
       event_map[lhs] = lhs_;
-
-      std::set<unsigned> rhs_;
-      rhs_.insert(fence_completion_id);
-      for (std::set<ApEvent>::const_iterator it = rhs.begin(); it != rhs.end();
-           it++)
-      {
-        std::map<ApEvent, unsigned>::iterator finder = event_map.find(*it);
-        if (finder != event_map.end())
-          rhs_.insert(finder->second);
-      }
-#ifdef DEBUG_LEGION
-      assert(rhs_.size() > 0);
-#endif
 
       instructions.push_back(new MergeEvent(*this, lhs_, rhs_));
 #ifdef DEBUG_LEGION
@@ -2851,7 +2746,7 @@ namespace Legion {
     void PhysicalTemplate::record_set_ready_event(Operation *op,
                                                   unsigned region_idx,
                                                   unsigned inst_idx,
-                                                  ApEvent ready_event,
+                                                  ApEvent &ready_event,
                                                   const RegionRequirement &req,
                                                   InstanceView *view,
                                                   const FieldMask &fields,
@@ -2859,8 +2754,6 @@ namespace Legion {
                                                   ContextID physical_ctx)
     //--------------------------------------------------------------------------
     {
-      if (op->get_operation_kind() == Operation::COPY_OP_KIND) return;
-
       AutoLock tpl_lock(template_lock);
 
       Memoizable *memoizable = op->get_memoizable();
@@ -2871,13 +2764,6 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(operations.find(op_key) != operations.end());
 #endif
-
-      std::map<ApEvent, unsigned>::iterator ready_finder =
-        event_map.find(ready_event);
-#ifdef DEBUG_LEGION
-      assert(ready_finder != event_map.end());
-#endif
-      unsigned ready_event_idx = ready_finder->second;
 
       RegionNode *region_node = view->logical_node->as_region_node();
       if (view->is_reduction_view())
@@ -2895,14 +2781,26 @@ namespace Legion {
           layout->compute_copy_offsets(fill_fields, manager, fields);
         }
 
-        unsigned lhs_ = events.size();
-        events.push_back(ApEvent());
-
         void *fill_buffer = malloc(reduction_op->sizeof_rhs);
         reduction_op->init(fill_buffer, 1);
 #ifdef DEBUG_LEGION
         assert(view->logical_node->is_region());
 #endif
+
+        std::map<ApEvent, unsigned>::iterator ready_finder =
+          event_map.find(ready_event);
+#ifdef DEBUG_LEGION
+        assert(ready_finder != event_map.end());
+#endif
+        unsigned ready_event_idx = ready_finder->second;
+
+        ApUserEvent lhs = Runtime::create_ap_user_event();
+        unsigned lhs_ = events.size();
+        events.push_back(lhs);
+        event_map[lhs] = lhs_;
+        Runtime::trigger_event(lhs, ready_event);
+        ready_event = lhs;
+
         instructions.push_back(
             new IssueFill(*this, lhs_, region_node,
                           op_key, fields, fill_buffer, reduction_op->sizeof_rhs,
@@ -2917,16 +2815,7 @@ namespace Legion {
           record_last_user(field.inst, region_node, field.field_id, lhs_, true);
         }
         free(fill_buffer);
-        ready_event_idx = lhs_;
       }
-
-      events.push_back(ApEvent());
-      instructions.push_back(
-          new SetReadyEvent(*this, op_key, region_idx, inst_idx,
-                            ready_event_idx, view, fields));
-#ifdef DEBUG_LEGION
-      assert(instructions.size() == events.size());
-#endif
 
       record_ready_view(req, view, fields, logical_ctx, physical_ctx);
 
@@ -2935,21 +2824,23 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(finder != task_entries.end());
 #endif
-      std::vector<FieldID> field_ids;
-      region_node->get_column_source()->get_field_set(fields, field_ids);
-      const PhysicalInstance &inst = view->get_manager()->get_instance();
-      for (std::vector<FieldID>::iterator it = field_ids.begin(); it !=
-           field_ids.end(); ++it)
-        record_last_user(inst, region_node, *it, finder->second,
-                         IS_READ_ONLY(req));
+      InstanceReq inst_req;
+      inst_req.instance = view->get_manager()->get_instance();
+      region_node->get_column_source()->get_field_set(fields, inst_req.fields);
+      inst_req.read = IS_READ_ONLY(req);
+      op_reqs[op_key].push_back(inst_req);
+      for (std::vector<FieldID>::iterator it = inst_req.fields.begin(); it !=
+           inst_req.fields.end(); ++it)
+        record_last_user(inst_req.instance, region_node, *it, finder->second,
+                         inst_req.read);
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::record_get_copy_term_event(ApEvent lhs, CopyOp* copy)
+    void PhysicalTemplate::record_get_op_term_event(ApEvent lhs, Operation* op)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(copy->is_memoizing());
+      assert(op->is_memoizing());
 #endif
       AutoLock tpl_lock(template_lock);
 
@@ -2960,23 +2851,25 @@ namespace Legion {
 #endif
       event_map[lhs] = lhs_;
 
-      TraceLocalID key = copy->get_trace_local_id();
+#ifdef DEBUG_LEGION
+      assert(op->get_memoizable() != NULL);
+#endif
+      TraceLocalID key = op->get_memoizable()->get_trace_local_id();
 #ifdef DEBUG_LEGION
       assert(operations.find(key) == operations.end());
       assert(task_entries.find(key) == task_entries.end());
 #endif
-      operations[key] = copy;
+      operations[key] = op;
       task_entries[key] = instructions.size();
 
-      instructions.push_back(new GetCopyTermEvent(*this, lhs_, key));
+      instructions.push_back(new GetOpTermEvent(*this, lhs_, key));
 #ifdef DEBUG_LEGION
       assert(instructions.size() == events.size());
 #endif
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::record_set_copy_sync_event(
-                                                     ApEvent &lhs, CopyOp* copy)
+    void PhysicalTemplate::record_set_op_sync_event(ApEvent &lhs, Operation* op)
     //--------------------------------------------------------------------------
     {
       if (!lhs.exists())
@@ -2986,7 +2879,7 @@ namespace Legion {
         lhs = ApEvent(rename);
       }
 #ifdef DEBUG_LEGION
-      assert(copy->is_memoizing());
+      assert(op->is_memoizing());
 #endif
       AutoLock tpl_lock(template_lock);
 
@@ -2997,29 +2890,34 @@ namespace Legion {
 #endif
       event_map[lhs] = lhs_;
 
-      TraceLocalID key = copy->get_trace_local_id();
+#ifdef DEBUG_LEGION
+      assert(op->get_memoizable() != NULL);
+#endif
+      TraceLocalID key = op->get_memoizable()->get_trace_local_id();
 #ifdef DEBUG_LEGION
       assert(operations.find(key) != operations.end());
       assert(task_entries.find(key) != task_entries.end());
 #endif
-      instructions.push_back(new SetCopySyncEvent(*this, lhs_, key));
+      instructions.push_back(new SetOpSyncEvent(*this, lhs_, key));
 #ifdef DEBUG_LEGION
       assert(instructions.size() == events.size());
 #endif
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::record_trigger_copy_completion(
-                                                      CopyOp* copy, ApEvent rhs)
+    void PhysicalTemplate::record_complete_replay(Operation* op, ApEvent rhs)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(copy->is_memoizing());
+      assert(op->is_memoizing());
 #endif
       AutoLock tpl_lock(template_lock);
 
       events.push_back(ApEvent());
-      TraceLocalID lhs_ = copy->get_trace_local_id();
+#ifdef DEBUG_LEGION
+      assert(op->get_memoizable() != NULL);
+#endif
+      TraceLocalID lhs_ = op->get_memoizable()->get_trace_local_id();
 #ifdef DEBUG_LEGION
       assert(event_map.find(rhs) != event_map.end());
 #endif
@@ -3029,7 +2927,7 @@ namespace Legion {
       assert(operations.find(lhs_) != operations.end());
       assert(task_entries.find(lhs_) != task_entries.end());
 #endif
-      instructions.push_back(new TriggerCopyCompletion(*this, lhs_, rhs_));
+      instructions.push_back(new CompleteReplay(*this, lhs_, rhs_));
 
 #ifdef DEBUG_LEGION
       assert(instructions.size() == events.size());
@@ -3755,88 +3653,11 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
-    // SetReadyEvent
+    // GetOpTermEvent
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    SetReadyEvent::SetReadyEvent(PhysicalTemplate& tpl,
-                                 const TraceLocalID& key, unsigned ri,
-                                 unsigned ii, unsigned rei, InstanceView *v,
-                                 const FieldMask &f)
-      : Instruction(tpl), op_key(key), region_idx(ri), inst_idx(ii),
-        ready_event_idx(rei), view(v), fields(f)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(operations.find(op_key) != operations.end());
-      assert(ready_event_idx < events.size());
-#endif
-    }
-
-    //--------------------------------------------------------------------------
-    void SetReadyEvent::execute(void)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(ready_event_idx < events.size());
-      assert(operations.find(op_key) != operations.end());
-      assert(operations.find(op_key)->second != NULL);
-
-      SingleTask *task = dynamic_cast<SingleTask*>(operations[op_key]);
-      assert(task != NULL);
-#else
-      SingleTask *task = static_cast<SingleTask*>(operations[op_key]);
-#endif
-      const std::deque<InstanceSet> &physical_instances =
-        task->get_physical_instances();
-      InstanceRef &ref =
-        const_cast<InstanceRef&>(physical_instances[region_idx][inst_idx]);
-      ApEvent ready_event = events[ready_event_idx];
-      ref.set_ready_event(ready_event);
-    }
-
-    //--------------------------------------------------------------------------
-    std::string SetReadyEvent::to_string(void)
-    //--------------------------------------------------------------------------
-    {
-      std::stringstream ss;
-      ss << "operations[(" << op_key.first << ",";
-      if (op_key.second.dim > 1) ss << "(";
-      for (int dim = 0; dim < op_key.second.dim; ++dim)
-      {
-        if (dim > 0) ss << ",";
-        ss << op_key.second[dim];
-      }
-      if (op_key.second.dim > 1) ss << ")";
-      ss << ")].get_physical_instances()["
-         << region_idx << "]["
-         << inst_idx << "].set_ready_event(events["
-         << ready_event_idx << "])  (pointer: "
-         << std::hex << view << ", instance id: "
-         << std::hex << view->get_manager()->get_instance().id << ")";
-      return ss.str();
-    }
-
-    //--------------------------------------------------------------------------
-    Instruction* SetReadyEvent::clone(PhysicalTemplate& tpl,
-                                    const std::map<unsigned, unsigned> &rewrite)
-    //--------------------------------------------------------------------------
-    {
-      std::map<unsigned, unsigned>::const_iterator finder =
-        rewrite.find(ready_event_idx);
-#ifdef DEBUG_LEGION
-      assert(finder != rewrite.end());
-#endif
-      return new SetReadyEvent(tpl, op_key, region_idx, inst_idx,
-        finder->second, view, fields);
-    }
-
-    /////////////////////////////////////////////////////////////
-    // GetCopyTermEvent
-    /////////////////////////////////////////////////////////////
-
-    //--------------------------------------------------------------------------
-    GetCopyTermEvent::GetCopyTermEvent(PhysicalTemplate& tpl, unsigned l,
+    GetOpTermEvent::GetOpTermEvent(PhysicalTemplate& tpl, unsigned l,
                                        const TraceLocalID& r)
       : Instruction(tpl), lhs(l), rhs(r)
     //--------------------------------------------------------------------------
@@ -3848,23 +3669,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void GetCopyTermEvent::execute(void)
+    void GetOpTermEvent::execute(void)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(operations.find(rhs) != operations.end());
       assert(operations.find(rhs)->second != NULL);
-
-      CopyOp *copy = dynamic_cast<CopyOp*>(operations[rhs]);
-      assert(copy != NULL);
-#else
-      CopyOp *copy = static_cast<CopyOp*>(operations[rhs]);
 #endif
-      events[lhs] = copy->get_completion_event();
+      events[lhs] = operations[rhs]->get_completion_event();
     }
 
     //--------------------------------------------------------------------------
-    std::string GetCopyTermEvent::to_string(void)
+    std::string GetOpTermEvent::to_string(void)
     //--------------------------------------------------------------------------
     {
       std::stringstream ss;
@@ -3876,12 +3692,13 @@ namespace Legion {
         ss << rhs.second[dim];
       }
       if (rhs.second.dim > 1) ss << ")";
-      ss << ")].get_completion_event()";
+      ss << ")].get_completion_event()    (op kind: "
+         << Operation::op_names[operations[rhs]->get_operation_kind()] << ")";
       return ss.str();
     }
 
     //--------------------------------------------------------------------------
-    Instruction* GetCopyTermEvent::clone(PhysicalTemplate& tpl,
+    Instruction* GetOpTermEvent::clone(PhysicalTemplate& tpl,
                                     const std::map<unsigned, unsigned> &rewrite)
     //--------------------------------------------------------------------------
     {
@@ -3889,15 +3706,15 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(finder != rewrite.end());
 #endif
-      return new GetCopyTermEvent(tpl, finder->second, rhs);
+      return new GetOpTermEvent(tpl, finder->second, rhs);
     }
 
     /////////////////////////////////////////////////////////////
-    // SetCopySyncEvent
+    // SetOpSyncEvent
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    SetCopySyncEvent::SetCopySyncEvent(PhysicalTemplate& tpl, unsigned l,
+    SetOpSyncEvent::SetOpSyncEvent(PhysicalTemplate& tpl, unsigned l,
                                        const TraceLocalID& r)
       : Instruction(tpl), lhs(l), rhs(r)
     //--------------------------------------------------------------------------
@@ -3909,24 +3726,23 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void SetCopySyncEvent::execute(void)
+    void SetOpSyncEvent::execute(void)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(operations.find(rhs) != operations.end());
       assert(operations.find(rhs)->second != NULL);
-
-      CopyOp *copy = dynamic_cast<CopyOp*>(operations[rhs]);
-      assert(copy != NULL);
-#else
-      CopyOp *copy = static_cast<CopyOp*>(operations[rhs]);
 #endif
-      ApEvent sync_condition = copy->compute_sync_precondition();
+      Memoizable *memoizable = operations[rhs]->get_memoizable();
+#ifdef DEBUG_LEGION
+      assert(memoizable != NULL);
+#endif
+      ApEvent sync_condition = memoizable->compute_sync_precondition();
       events[lhs] = sync_condition;
     }
 
     //--------------------------------------------------------------------------
-    std::string SetCopySyncEvent::to_string(void)
+    std::string SetOpSyncEvent::to_string(void)
     //--------------------------------------------------------------------------
     {
       std::stringstream ss;
@@ -3938,12 +3754,13 @@ namespace Legion {
         ss << rhs.second[dim];
       }
       if (rhs.second.dim > 1) ss << ")";
-      ss << ")].compute_sync_precondition()";
+      ss << ")].compute_sync_precondition()    (op kind: "
+         << Operation::op_names[operations[rhs]->get_operation_kind()] << ")";
       return ss.str();
     }
 
     //--------------------------------------------------------------------------
-    Instruction* SetCopySyncEvent::clone(PhysicalTemplate& tpl,
+    Instruction* SetOpSyncEvent::clone(PhysicalTemplate& tpl,
                                     const std::map<unsigned, unsigned> &rewrite)
     //--------------------------------------------------------------------------
     {
@@ -3951,15 +3768,15 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(finder != rewrite.end());
 #endif
-      return new SetCopySyncEvent(tpl, finder->second, rhs);
+      return new SetOpSyncEvent(tpl, finder->second, rhs);
     }
 
     /////////////////////////////////////////////////////////////
-    // TriggerCopyCompletion
+    // CompleteReplay
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    TriggerCopyCompletion::TriggerCopyCompletion(PhysicalTemplate& tpl,
+    CompleteReplay::CompleteReplay(PhysicalTemplate& tpl,
                                               const TraceLocalID& l, unsigned r)
       : Instruction(tpl), lhs(l), rhs(r)
     //--------------------------------------------------------------------------
@@ -3971,23 +3788,22 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TriggerCopyCompletion::execute(void)
+    void CompleteReplay::execute(void)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(operations.find(lhs) != operations.end());
       assert(operations.find(lhs)->second != NULL);
-
-      CopyOp *copy = dynamic_cast<CopyOp*>(operations[lhs]);
-      assert(copy != NULL);
-#else
-      CopyOp *copy = static_cast<CopyOp*>(operations[lhs]);
 #endif
-      copy->complete_copy_execution(events[rhs]);
+      Memoizable *memoizable = operations[lhs]->get_memoizable();
+#ifdef DEBUG_LEGION
+      assert(memoizable != NULL);
+#endif
+      memoizable->complete_replay(events[rhs]);
     }
 
     //--------------------------------------------------------------------------
-    std::string TriggerCopyCompletion::to_string(void)
+    std::string CompleteReplay::to_string(void)
     //--------------------------------------------------------------------------
     {
       std::stringstream ss;
@@ -3999,12 +3815,13 @@ namespace Legion {
         ss << lhs.second[dim];
       }
       if (lhs.second.dim > 1) ss << ")";
-      ss << ")].complete_copy_execution(events[" << rhs << "])";
+      ss << ")].complete_replay(events[" << rhs << "])    (op kind: "
+         << Operation::op_names[operations[lhs]->get_operation_kind()] << ")";
       return ss.str();
     }
 
     //--------------------------------------------------------------------------
-    Instruction* TriggerCopyCompletion::clone(PhysicalTemplate& tpl,
+    Instruction* CompleteReplay::clone(PhysicalTemplate& tpl,
                                     const std::map<unsigned, unsigned> &rewrite)
     //--------------------------------------------------------------------------
     {
@@ -4012,74 +3829,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(finder != rewrite.end());
 #endif
-      return new TriggerCopyCompletion(tpl, lhs, finder->second);
-    }
-
-    /////////////////////////////////////////////////////////////
-    // LaunchTask
-    /////////////////////////////////////////////////////////////
-
-    //--------------------------------------------------------------------------
-    LaunchTask::LaunchTask(PhysicalTemplate& tpl, const TraceLocalID& op)
-      : Instruction(tpl), op_key(op)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(operations.find(op_key) != operations.end());
-#endif
-    }
-
-    //--------------------------------------------------------------------------
-    void LaunchTask::execute(void)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(operations.find(op_key) != operations.end());
-      assert(operations.find(op_key)->second != NULL);
-
-      SingleTask *task = dynamic_cast<SingleTask*>(operations[op_key]);
-      assert(task != NULL);
-#else
-      SingleTask *task = static_cast<SingleTask*>(operations[op_key]);
-#endif
-      if (!task->arrive_barriers.empty())
-      {
-        ApEvent done_event = task->get_task_completion();
-        for (std::vector<PhaseBarrier>::const_iterator it = 
-             task->arrive_barriers.begin(); it != 
-             task->arrive_barriers.end(); it++)
-          Runtime::phase_barrier_arrive(*it, 1/*count*/, done_event);
-      }
-#ifdef DEBUG_LEGION
-      assert(task->is_leaf() && !task->has_virtual_instances());
-#endif
-      task->update_no_access_regions();
-      task->launch_task();
-    }
-
-    //--------------------------------------------------------------------------
-    std::string LaunchTask::to_string(void)
-    //--------------------------------------------------------------------------
-    {
-      std::stringstream ss;
-      ss << "operations[" << op_key.first << ",";
-      if (op_key.second.dim > 1) ss << "(";
-      for (int dim = 0; dim < op_key.second.dim; ++dim)
-      {
-        if (dim > 0) ss << ",";
-        ss << op_key.second[dim];
-      }
-      if (op_key.second.dim > 1) ss << ")";
-      ss << ")].launch_task()";
-      return ss.str();
-    }
-
-    //--------------------------------------------------------------------------
-    Instruction* LaunchTask::clone(PhysicalTemplate& tpl,
-                                    const std::map<unsigned, unsigned> &rewrite)
-    //--------------------------------------------------------------------------
-    {
-      return new LaunchTask(tpl, op_key);
+      return new CompleteReplay(tpl, lhs, finder->second);
     }
 
     /////////////////////////////////////////////////////////////

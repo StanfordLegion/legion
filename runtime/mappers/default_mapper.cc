@@ -2459,13 +2459,7 @@ namespace Legion {
           machine.get_mem_mem_affinity(affinity, location, destination_memory,
 				       false /*not just local affinities*/);
           unsigned memory_bandwidth = 0;
-          if (affinity.empty()) {
-            // TODO: More graceful way of dealing with multi-hop copies
-            log_mapper.warning("Default mapper is potentially "
-                               "requesting a multi-hop copy between memories "
-                               IDFMT " and " IDFMT "!", location.id,
-                               destination_memory.id);
-          } else {
+          if (!affinity.empty()) {
             assert(affinity.size() == 1);
             memory_bandwidth = affinity[0].bandwidth;
           }

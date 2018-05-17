@@ -2169,7 +2169,7 @@ namespace Realm {
 	// can we directly access the source data?
 	const void *src_ptr = src_mem->get_direct_ptr(src_info.base_offset,
 						      src_info.bytes_per_chunk);
-	if(src_ptr == 0) {
+	if((src_ptr == 0) || (src_mem->kind == MemoryImpl::MKIND_GPUFB)) {
 	  // nope, make a local copy via get_bytes
 	  if(src_info.bytes_per_chunk > src_scratch_size) {
 	    if(src_scratch_size > 0)
@@ -2201,7 +2201,7 @@ namespace Realm {
 	  // case 2: destination is directly accessible
 	  void *dst_ptr = dst_mem->get_direct_ptr(dst_info.base_offset,
 						  dst_info.bytes_per_chunk);
-	  if(dst_ptr) {
+	  if(dst_ptr && (dst_mem->kind != MemoryImpl::MKIND_GPUFB)) {
 	    if(red_fold)
 	      redop->fold(dst_ptr, src_ptr, num_elems, false /*!excl*/);
 	    else
@@ -2487,6 +2487,125 @@ namespace Realm {
       TransferIterator *iter = domain->create_iterator(dst.inst,
 						       RegionInstance::NO_INST,
 						       dst_field);
+#ifdef USE_CUDA
+      // fills to GPU FB memory are offloaded to the GPU itself
+      if (mem_impl->lowlevel_kind == Memory::GPU_FB_MEM) {
+	Cuda::GPU *gpu = static_cast<Cuda::GPUFBMemory *>(mem_impl)->gpu;
+	size_t total_bytes = 0;
+	while(!iter->done()) {
+	  TransferIterator::AddressInfo info;
+
+	  size_t max_bytes = (size_t)-1;
+	  // gpu memset supports 1d or 2d, but not 3d (yet)
+	  unsigned flags = TransferIterator::LINES_OK;
+	  size_t act_bytes = iter->step(max_bytes, info, flags);
+	  assert(act_bytes >= 0);
+	  total_bytes += act_bytes;
+
+	  if(info.num_lines == 1) {
+	    gpu->fill_within_fb(info.base_offset, info.bytes_per_chunk,
+				fill_buffer, fill_size);
+	  } else {
+	    gpu->fill_within_fb_2d(info.base_offset, info.line_stride,
+				   info.bytes_per_chunk, info.num_lines,
+				   fill_buffer, fill_size);
+	  }
+	}
+
+	// if we did any asynchronous operations, insert a fence
+	if(total_bytes > 0)
+	  gpu->fence_within_fb(this);
+
+	// fall through so the clean-up is the same
+      }
+#endif
+
+#ifdef USE_HDF
+      // fills of an HDF5 instance are also handled specially
+      if (mem_impl->lowlevel_kind == Memory::HDF_MEM) {
+	hid_t file_id = -1;
+	hid_t dset_id = -1;
+	hid_t dtype_id = -1;
+	const std::string *prev_filename = 0;
+	const std::string *prev_dsetname = 0;
+	while(!iter->done()) {
+	  TransferIterator::AddressInfoHDF5 info;
+	  size_t act_bytes = iter->step(size_t(-1), // max_bytes
+					info);
+	  assert(act_bytes >= 0);
+
+	  // compare the pointers, not the string contents...
+	  if(info.filename != prev_filename) {
+	    // close dataset too
+	    if(dset_id != -1) {
+	      CHECK_HDF5( H5Tclose(dtype_id) );
+	      CHECK_HDF5( H5Dclose(dset_id) );
+	      prev_dsetname = 0;
+	    }
+	    if(file_id != -1)
+	      CHECK_HDF5( H5Fclose(file_id) );
+
+	    CHECK_HDF5( file_id = H5Fopen(info.filename->c_str(),
+					  H5F_ACC_RDWR, H5P_DEFAULT) );
+	    prev_filename = info.filename;
+	  }
+
+	  if(info.dsetname != prev_dsetname) {
+	    if(dset_id != -1) {
+	      CHECK_HDF5( H5Tclose(dtype_id) );
+	      CHECK_HDF5( H5Dclose(dset_id) );
+	    }
+	    CHECK_HDF5( dset_id = H5Dopen2(file_id, info.dsetname->c_str(),
+					   H5P_DEFAULT) );
+	    CHECK_HDF5( dtype_id = H5Dget_type(dset_id) );
+	    size_t dtype_size = H5Tget_size(dtype_id);
+	    assert(dtype_size == fill_size);
+	    prev_dsetname = info.dsetname;
+	  }
+
+	  // HDF5 doesn't seem to offer a way to fill a file without building
+	  //  an equivalently-sized memory buffer first, so just do point-wise
+	  //  iteration and hope that libhdf5 does some buffering
+	  int dims = info.extent.size();
+	  std::vector<hsize_t> mem_dims(dims, 1);
+	  hid_t mem_space_id, file_space_id;
+	  CHECK_HDF5( mem_space_id = H5Screate_simple(dims, mem_dims.data(),
+						      NULL) );
+	  CHECK_HDF5( file_space_id = H5Dget_space(dset_id) );
+
+	  std::vector<hsize_t> cur_pos(info.offset);
+	  std::vector<hsize_t> cur_size(dims, 1);
+	  while(true) {
+	    CHECK_HDF5( H5Sselect_hyperslab(file_space_id, H5S_SELECT_SET,
+					    cur_pos.data(), 0,
+					    cur_size.data(), 0) );
+	    CHECK_HDF5( H5Dwrite(dset_id, dtype_id,
+				 mem_space_id, file_space_id,
+				 H5P_DEFAULT, fill_buffer) );
+	    // advance to next position
+	    int d = 0;
+	    while(d < dims) {
+	      if(++cur_pos[d] < (info.offset[d] + info.extent[d]))
+		break;
+	      cur_pos[d] = info.offset[d];
+	      d++;
+	    }
+	    if(d >= dims) break;
+	  }
+
+	  CHECK_HDF5( H5Sclose(mem_space_id) );
+	  CHECK_HDF5( H5Sclose(file_space_id) );
+	}
+
+	// close the last dset and file we touched
+	if(dset_id != -1) {
+	  CHECK_HDF5( H5Tclose(dtype_id) );
+	  CHECK_HDF5( H5Dclose(dset_id) );
+	}
+	if(file_id != -1)
+	  CHECK_HDF5( H5Fclose(file_id) );
+      }
+#endif
 
       while(!iter->done()) {
 	TransferIterator::AddressInfo info;
@@ -2573,6 +2692,10 @@ namespace Realm {
         usage.target = dst.inst.get_location();
         measurements.add_measurement(usage);
       }
+
+      log_dma.info() << "dma request " << (void *)this << " finished - is="
+		     << *domain << " fill dst=" << dst.inst << "[" << dst.field_id << "+" << dst.subfield_offset << "] size="
+		     << fill_size << " before=" << before_fill << " after=" << get_finish_event();
     }
 
     size_t FillRequest::optimize_fill_buffer(RegionInstanceImpl *inst_impl, int &fill_elmts)

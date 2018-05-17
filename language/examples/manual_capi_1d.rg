@@ -93,7 +93,7 @@ terra top_level_task(task : c.legion_task_t,
     })
   var is = c.legion_index_space_create_domain(runtime, ctx, d)
   var fs = c.legion_field_space_create(runtime, ctx)
-  var r = c.legion_logical_region_create(runtime, ctx, is, fs)
+  var r = c.legion_logical_region_create(runtime, ctx, is, fs, true)
 
   do
     var fsa = c.legion_field_allocator_create(runtime, ctx, fs)

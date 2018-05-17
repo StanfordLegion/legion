@@ -526,8 +526,9 @@ namespace Legion {
       void perform_rank_exchange(void);
       void handle_mpi_rank_exchange(Deserializer &derez);
     protected:
-      bool send_explicit_stage(int stage);
-      bool send_ready_stages(void);
+      bool initiate_exchange(void);
+      void send_remainder_stage(void);
+      bool send_ready_stages(const int start_stage=1);
       void unpack_exchange(int stage, Deserializer &derez);
       void complete_exchange(void);
     public:
@@ -541,6 +542,7 @@ namespace Legion {
       RtUserEvent done_event;
       std::vector<int> stage_notifications;
       std::vector<bool> sent_stages;
+      bool done_triggered;
     }; 
 
     /**
@@ -1376,6 +1378,8 @@ namespace Legion {
       // Return a trace local unique ID for this operation
       typedef std::pair<unsigned, DomainPoint> TraceLocalID;
       virtual TraceLocalID get_trace_local_id(void) const = 0;
+      virtual ApEvent compute_sync_precondition(void) const = 0;
+      virtual void complete_replay(ApEvent complete_event) = 0;
     };
 
     /**
@@ -1450,6 +1454,8 @@ namespace Legion {
             dump_physical_traces(false),
             no_tracing(false),
             no_physical_tracing(false),
+            no_trace_optimization(false),
+            no_fence_elision(false),
             verify_disjointness(false),
             runtime_warnings(false),
             separate_runtime_instances(false),
@@ -1486,7 +1492,6 @@ namespace Legion {
         mutable int legion_collective_log_radix;
         mutable int legion_collective_stages;
         mutable int legion_collective_last_radix;
-        mutable int legion_collective_last_log_radix;
         mutable int legion_collective_participating_spaces;
         int initial_task_window_size;
         unsigned initial_task_window_hysteresis;
@@ -1500,6 +1505,8 @@ namespace Legion {
         bool dump_physical_traces;
         bool no_tracing;
         bool no_physical_tracing;
+        bool no_trace_optimization;
+        bool no_fence_elision;
         bool verify_disjointness;
         bool runtime_warnings;
         bool separate_runtime_instances;
@@ -1618,6 +1625,8 @@ namespace Legion {
       const bool dump_physical_traces;
       const bool no_tracing;
       const bool no_physical_tracing;
+      const bool no_trace_optimization;
+      const bool no_fence_elision;
       const bool verify_disjointness;
       const bool runtime_warnings;
       const bool separate_runtime_instances;
@@ -1645,7 +1654,6 @@ namespace Legion {
       const int legion_collective_log_radix;
       const int legion_collective_stages;
       const int legion_collective_last_radix;
-      const int legion_collective_last_log_radix;
       const int legion_collective_participating_spaces;
       MPIRankTable *const mpi_rank_table;
     public:
@@ -1861,7 +1869,7 @@ namespace Legion {
                                   const std::set<FieldID> &to_free);
     public:
       LogicalRegion create_logical_region(Context ctx, IndexSpace index,
-                                          FieldSpace fields);
+                                          FieldSpace fields, bool task_local);
       void destroy_logical_region(Context ctx, LogicalRegion handle);
       void destroy_logical_partition(Context ctx, LogicalPartition handle);
       // Called from deletion ops

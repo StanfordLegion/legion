@@ -12,6 +12,7 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
+local std_base = require("regent/std_base")
 local config = require("regent/config").args()
 local report = require("common/report")
 
@@ -105,6 +106,7 @@ end
 
 local c = terralib.includec("unistd.h")
 
+local lua_assert = assert
 local terra assert(x : bool, message : rawstring)
   if not x then
     var stderr = C.fdopen(2, "w")
@@ -238,7 +240,274 @@ function cudahelper.jit_compile_kernels_and_register(kernels)
   return register
 end
 
-function cudahelper.codegen_kernel_call(kernel_id, count, args)
+local THREAD_BLOCK_SIZE = 128
+local MAX_NUM_BLOCK = 32768
+local GLOBAL_RED_BUFFER = 256
+
+local tid_x   = cudalib.nvvm_read_ptx_sreg_tid_x
+local n_tid_x = cudalib.nvvm_read_ptx_sreg_ntid_x
+local bid_x   = cudalib.nvvm_read_ptx_sreg_ctaid_x
+local n_bid_x = cudalib.nvvm_read_ptx_sreg_nctaid_x
+
+local tid_y   = cudalib.nvvm_read_ptx_sreg_tid_y
+local n_tid_y = cudalib.nvvm_read_ptx_sreg_ntid_y
+local bid_y   = cudalib.nvvm_read_ptx_sreg_ctaid_y
+local n_bid_y = cudalib.nvvm_read_ptx_sreg_nctaid_y
+
+local tid_z   = cudalib.nvvm_read_ptx_sreg_tid_z
+local n_tid_z = cudalib.nvvm_read_ptx_sreg_ntid_z
+local bid_z   = cudalib.nvvm_read_ptx_sreg_ctaid_z
+local n_bid_z = cudalib.nvvm_read_ptx_sreg_nctaid_z
+
+local barrier = cudalib.nvvm_barrier0
+
+local supported_scalar_red_ops = {
+  ["+"]   = true,
+  ["*"]   = true,
+  ["max"] = true,
+  ["min"] = true,
+}
+
+function cudahelper.global_thread_id()
+  --local bid = `(bid_x() + n_bid_x() * bid_y() + n_bid_x() * n_bid_y() * bid_z())
+  --local num_threads = `(n_tid_x() * n_tid_y() * n_tid_z())
+  --return `([bid] * [num_threads] +
+  --         tid_x() +
+  --         n_tid_x() * tid_y() +
+  --         n_tid_x() * n_tid_y() * tid_z())
+  local bid = `(bid_x() + n_bid_x() * bid_y() + n_bid_x() * n_bid_y() * bid_z())
+  local num_threads = `(n_tid_x())
+  return `([bid] * [num_threads] + tid_x())
+end
+
+function cudahelper.global_block_id()
+  return `(bid_x() + n_bid_x() * bid_y() + n_bid_x() * n_bid_y() * bid_z())
+end
+
+-- Slow atomic operation implementations (copied and modified from Ebb)
+local terra cas_uint64(address : &uint64, compare : uint64, value : uint64)
+  return terralib.asm(terralib.types.uint64,
+                      "atom.global.cas.b64 $0, [$1], $2, $3;",
+                      "=l,l,l,l", true, address, compare, value)
+end
+cas_uint64:setinlined(true)
+
+local terra cas_uint32(address : &uint32, compare : uint32, value : uint32)
+  return terralib.asm(terralib.types.uint32,
+                      "atom.global.cas.b32 $0, [$1], $2, $3;",
+                      "=r,l,r,r", true, address, compare, value)
+end
+cas_uint32:setinlined(true)
+
+local function generate_atomic(op, typ)
+  if op == "+" and typ == float then
+    return terralib.intrinsic("llvm.nvvm.atomic.load.add.f32.p0f32",
+                              {&float,float} -> {float})
+  end
+
+  local cas_type
+  local cas_func
+  if sizeof(typ) == 4 then
+    cas_type = uint32
+    cas_func = cas_uint32
+  else
+    lua_assert(sizeof(typ) == 8)
+    cas_type = uint64
+    cas_func = cas_uint64
+  end
+  local terra atomic_op(address : &typ, operand : typ)
+    var old : typ = @address
+    var assumed : typ
+    var new     : typ
+
+    var new_b     : &cas_type = [&cas_type](&new)
+    var assumed_b : &cas_type = [&cas_type](&assumed)
+    var res       :  cas_type
+
+    var mask = false
+    repeat
+      if not mask then
+        assumed = old
+        new     = [std_base.quote_binary_op(op, assumed, operand)]
+        res     = cas_func([&cas_type](address), @assumed_b, @new_b)
+        old     = @[&typ](&res)
+        mask    = assumed == old
+      end
+    until mask
+  end
+  atomic_op:setinlined(true)
+  return atomic_op
+end
+
+local vprintf = ef("cudart:vprintf", {&int8,&int8} -> int)
+
+local function createbuffer(args)
+  local Buf = terralib.types.newstruct()
+  for i,e in ipairs(args) do
+    local typ = e:gettype()
+    local field = "_"..tonumber(i)
+    typ = typ == float and double or typ
+    table.insert(Buf.entries,{field,typ})
+  end
+  return quote
+    var buf : Buf
+    escape
+        for i,e in ipairs(args) do
+            emit quote
+               buf.["_"..tonumber(i)] = e
+            end
+        end
+    end
+  in
+    [&int8](&buf)
+  end
+end
+
+local cuda_printf = macro(function(fmt,...)
+  local buf = createbuffer({...})
+  return `vprintf(fmt,buf)
+end)
+
+function cudahelper.compute_reduction_buffer_size(node, reductions)
+  local size = 0
+  for k, v in pairs(reductions) do
+    if size ~= 0 then
+      -- TODO: We assume there is only one scalar reduction for now
+      report.error(node,
+          "Multiple scalar reductions in a CUDA task are not supported yet")
+    elseif not supported_scalar_red_ops[v] then
+      report.error(node,
+          "Scalar reduction with operator " .. v .. " is not supported yet")
+    elseif not (sizeof(k.type) == 4 or sizeof(k.type) == 8) then
+      report.error(node,
+          "Scalar reduction for type " .. tostring(k.type) .. " is not supported yet")
+    end
+    size = size + THREAD_BLOCK_SIZE * sizeof(k.type)
+  end
+  return size
+end
+
+function cudahelper.generate_reduction_preamble(reductions)
+  local preamble = quote end
+  local device_ptrs = terralib.newlist()
+  local device_ptrs_map = {}
+
+  for red_var, red_op in pairs(reductions) do
+    local device_ptr = terralib.newsymbol(&red_var.type, red_var.displayname)
+    local init = std_base.reduction_op_init[red_op][red_var.type]
+    preamble = quote
+      [preamble];
+      var [device_ptr] = [&red_var.type](nil)
+      do
+        var r = RuntimeAPI.cudaMalloc([&&opaque](&[device_ptr]),
+                                      [sizeof(red_var.type) * GLOBAL_RED_BUFFER])
+        assert([r] == 0 and [device_ptr] ~= [&red_var.type](nil), "cudaMalloc failed")
+        var v : (red_var.type)[GLOBAL_RED_BUFFER]
+        for i = 0, GLOBAL_RED_BUFFER do v[i] = [init] end
+        RuntimeAPI.cudaMemcpy([device_ptr], [&opaque]([&red_var.type](v)),
+                              [sizeof(red_var.type) * GLOBAL_RED_BUFFER],
+                              RuntimeAPI.cudaMemcpyHostToDevice)
+      end
+    end
+    device_ptrs:insert(device_ptr)
+    device_ptrs_map[device_ptr] = red_var
+  end
+
+  return device_ptrs, device_ptrs_map, preamble
+end
+
+function cudahelper.generate_reduction_kernel(reductions, device_ptrs_map)
+  local preamble = quote end
+  local postamble = quote end
+  for device_ptr, red_var in pairs(device_ptrs_map) do
+    local red_op = reductions[red_var]
+    local shared_mem_ptr =
+      cudalib.sharedmemory(red_var.type, THREAD_BLOCK_SIZE)
+    local init = std_base.reduction_op_init[red_op][red_var.type]
+    preamble = quote
+      [preamble]
+      var [red_var] = [init]
+      [shared_mem_ptr][ tid_x() ] = [red_var]
+    end
+
+    local tid = terralib.newsymbol(c.size_t, "tid")
+    local reduction_tree = quote end
+    local step = THREAD_BLOCK_SIZE
+    while step > 64 do
+      step = step / 2
+      reduction_tree = quote
+        [reduction_tree]
+        if [tid] < step then
+          var v = [std_base.quote_binary_op(red_op,
+                                            `([shared_mem_ptr][ [tid] ]),
+                                            `([shared_mem_ptr][ [tid] + [step] ]))]
+
+          terralib.attrstore(&[shared_mem_ptr][ [tid] ], v, { isvolatile = true })
+        end
+        barrier()
+      end
+    end
+    local unrolled_reductions = terralib.newlist()
+    while step > 1 do
+      step = step / 2
+      unrolled_reductions:insert(quote
+        do
+          var v = [std_base.quote_binary_op(red_op,
+                                            `([shared_mem_ptr][ [tid] ]),
+                                            `([shared_mem_ptr][ [tid] + [step] ]))]
+          terralib.attrstore(&[shared_mem_ptr][ [tid] ], v, { isvolatile = true })
+        end
+        barrier()
+      end)
+    end
+    reduction_tree = quote
+      [reduction_tree]
+      if [tid] < 32 then
+        [unrolled_reductions]
+      end
+    end
+    postamble = quote
+      do
+        var [tid] = tid_x()
+        var bid = [cudahelper.global_block_id()]
+        [shared_mem_ptr][ [tid] ] = [red_var]
+        barrier()
+        [reduction_tree]
+        if [tid] == 0 then
+          [generate_atomic(red_op, red_var.type)](
+            &[device_ptr][bid % [GLOBAL_RED_BUFFER] ], [shared_mem_ptr][ [tid] ])
+        end
+      end
+    end
+  end
+  return preamble, postamble
+end
+
+function cudahelper.generate_reduction_postamble(reductions, device_ptrs_map)
+  local postamble = quote end
+  for device_ptr, red_var in pairs(device_ptrs_map) do
+    local red_op = reductions[red_var]
+    local init = std_base.reduction_op_init[red_op][red_var.type]
+    postamble = quote
+      [postamble]
+      do
+        var v : (red_var.type)[GLOBAL_RED_BUFFER]
+        RuntimeAPI.cudaMemcpy([&opaque]([&red_var.type](v)), [device_ptr],
+                              [sizeof(red_var.type) * GLOBAL_RED_BUFFER],
+                              RuntimeAPI.cudaMemcpyDeviceToHost)
+        var tmp : red_var.type = [init]
+        for i = 0, GLOBAL_RED_BUFFER do
+          tmp = [std_base.quote_binary_op(red_op, tmp, `(v[i]))]
+        end
+        [red_var] = [std_base.quote_binary_op(red_op, red_var, tmp)]
+        RuntimeAPI.cudaFree([device_ptr])
+      end
+    end
+  end
+  return postamble
+end
+
+function cudahelper.codegen_kernel_call(kernel_id, count, args, shared_mem_size)
   local setupArguments = terralib.newlist()
 
   local offset = 0
@@ -258,8 +527,6 @@ function cudahelper.codegen_kernel_call(kernel_id, count, args)
     return `((v + (n - 1)) / n)
   end
 
-  local THREAD_BLOCK_SIZE = 128
-  local MAX_NUM_BLOCK = 32768
   local launch_domain_init = quote
     [block].x, [block].y, [block].z = THREAD_BLOCK_SIZE, 1, 1
     var num_blocks = [round_exp(count, THREAD_BLOCK_SIZE)]
@@ -270,14 +537,15 @@ function cudahelper.codegen_kernel_call(kernel_id, count, args)
         MAX_NUM_BLOCK, [round_exp(num_blocks, MAX_NUM_BLOCK)], 1
     else
       [grid].x, [grid].y, [grid].z =
-        MAX_NUM_BLOCK, MAX_NUM_BLOCK, [round_exp(num_blocks, MAX_NUM_BLOCK, MAX_NUM_BLOCK)]
+        MAX_NUM_BLOCK, MAX_NUM_BLOCK,
+        [round_exp(num_blocks, MAX_NUM_BLOCK, MAX_NUM_BLOCK)]
     end
   end
 
   return quote
     var [grid], [block]
     [launch_domain_init]
-    RuntimeAPI.cudaConfigureCall([grid], [block], 0, nil)
+    RuntimeAPI.cudaConfigureCall([grid], [block], shared_mem_size, nil)
     [setupArguments]
     RuntimeAPI.cudaLaunch([&int8](kernel_id))
   end

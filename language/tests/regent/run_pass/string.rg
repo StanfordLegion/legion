@@ -16,8 +16,19 @@ import "regent"
 
 local cstdio = terralib.includec("stdio.h")
 
+task needs_string(x : regentlib.string)
+  cstdio.printf("from subtask: %s", [rawstring](x))
+end
+
 task main()
-  var x = "hello, world!\n"
+  -- A Terra rawstring
+  var x = "hello, rawstring!\n"
   cstdio.printf(x)
+
+  -- A Regent string
+  var y : regentlib.string = "hello, string!\n"
+  cstdio.printf([rawstring](y))
+
+  needs_string(y)
 end
 regentlib.start(main)

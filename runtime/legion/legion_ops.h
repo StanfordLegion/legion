@@ -536,10 +536,10 @@ namespace Legion {
       static void prepare_for_mapping(const InstanceSet &valid,
                            const std::set<Memory> &filter_memories,
                            std::vector<MappingInstance> &input_valid);
-      static void compute_ranking(
+      void compute_ranking(MapperManager            *mapper,
           const std::deque<MappingInstance>         &output,
           const InstanceSet                         &sources,
-          std::vector<unsigned>                     &ranking);
+          std::vector<unsigned>                     &ranking) const;
     public:
       // Perform the versioning analysis for a projection requirement
       void perform_projection_version_analysis(const ProjectionInfo &proj_info,
@@ -785,6 +785,10 @@ namespace Legion {
     public:
       // From Memoizable
       virtual TraceLocalID get_trace_local_id() const;
+      virtual ApEvent compute_sync_precondition(void) const
+        { assert(false); return ApEvent::NO_AP_EVENT; }
+      virtual void complete_replay(ApEvent complete_event)
+        { assert(false); }
     protected:
       void invoke_memoize_operation(MapperID mapper_id);
       void set_memoize(bool memoize);
@@ -963,8 +967,9 @@ namespace Legion {
       // From MemoizableOp
       virtual void replay_analysis(void);
     public:
-      ApEvent compute_sync_precondition(void) const;
-      void complete_copy_execution(ApEvent copy_complete_event);
+      // From Memoizable
+      virtual ApEvent compute_sync_precondition(void) const;
+      virtual void complete_replay(ApEvent copy_complete_event);
     protected:
       template<bool IS_SRC>
       int perform_conversion(unsigned idx, const RegionRequirement &req,
@@ -1226,6 +1231,7 @@ namespace Legion {
       LogicalPartition logical_part;
       std::set<FieldID> free_fields;
       std::vector<unsigned> parent_req_indexes;
+      ApEvent completion_precondition;
     }; 
 
     /**
@@ -1615,7 +1621,7 @@ namespace Legion {
      * user-level software coherence when tasks own
      * regions with simultaneous coherence.
      */
-    class AcquireOp : public Acquire, public SpeculativeOp,
+    class AcquireOp : public Acquire, public MemoizableOp<SpeculativeOp>,
                       public LegionHeapify<AcquireOp> {
     public:
       static const AllocationType alloc_type = ACQUIRE_OP_ALLOC;
@@ -1658,6 +1664,13 @@ namespace Legion {
       virtual int get_depth(void) const;
     public:
       const RegionRequirement& get_requirement(void) const;
+    public:
+      // From MemoizableOp
+      virtual void replay_analysis(void);
+    public:
+      // From Memoizable
+      virtual ApEvent compute_sync_precondition(void) const;
+      virtual void complete_replay(ApEvent acquire_complete_event);
     protected:
       void check_acquire_privilege(void);
       void compute_parent_index(void);
@@ -1689,7 +1702,7 @@ namespace Legion {
      * user-level software coherence when tasks own
      * regions with simultaneous coherence.
      */
-    class ReleaseOp : public Release, public SpeculativeOp,
+    class ReleaseOp : public Release, public MemoizableOp<SpeculativeOp>,
                       public LegionHeapify<ReleaseOp> {
     public:
       static const AllocationType alloc_type = RELEASE_OP_ALLOC;
@@ -1737,6 +1750,13 @@ namespace Legion {
       virtual int get_depth(void) const;
     public:
       const RegionRequirement& get_requirement(void) const;
+    public:
+      // From MemoizableOp
+      virtual void replay_analysis(void);
+    public:
+      // From Memoizable
+      virtual ApEvent compute_sync_precondition(void) const;
+      virtual void complete_replay(ApEvent release_complete_event);
     protected:
       void check_release_privilege(void);
       void compute_parent_index(void);

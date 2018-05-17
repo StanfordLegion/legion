@@ -349,12 +349,6 @@ namespace Legion {
         else
           ready_event.wait();
       }
-      if (empty)
-        REPORT_LEGION_ERROR(ERROR_ACCESSING_EMPTY_FUTURE, 
-                            "Accessing empty future! (UID %lld)",
-                            (producer_op == NULL) ? 0 : 
-                              producer_op->get_unique_op_id())
-      mark_sampled();
     }
 
     //--------------------------------------------------------------------------
@@ -1666,6 +1660,7 @@ namespace Legion {
                             fid, context->get_task_name())
             break;
           }
+        case WRITE_ONLY:
         case WRITE_DISCARD:
           {
             if (!(WRITE_DISCARD & req.privilege))
@@ -1824,6 +1819,7 @@ namespace Legion {
                           context->get_task_name())
             break;
           }
+        case WRITE_ONLY:
         case WRITE_DISCARD:
           {
             REPORT_LEGION_ERROR(ERROR_ACCESSOR_BOUNDS_CHECK, 
@@ -2147,34 +2143,26 @@ namespace Legion {
     //--------------------------------------------------------------------------
     MPIRankTable::MPIRankTable(Runtime *rt)
       : runtime(rt), participating(int(runtime->address_space) <
-          runtime->legion_collective_participating_spaces)
+         runtime->legion_collective_participating_spaces), done_triggered(false)
     //--------------------------------------------------------------------------
     {
-      // We already have our contributions for each stage so
-      // we can set the inditial participants to 1
-      if (participating)
-      {
-        sent_stages.resize(runtime->legion_collective_stages, false);
-#ifdef DEBUG_LEGION
-        assert(runtime->legion_collective_stages > 0);
-#endif
-        stage_notifications.resize(runtime->legion_collective_stages, 1);
-        // Stage 0 always starts with 0 notifications since we'll 
-        // explictcly arrive on it
-	// Special case: if we expect a stage -1 message from a 
-        // non-participating space, we'll count that as part of 
-        // stage 0, it will make it a negative count, but the 
-        // type is 'int' so we're good
-	if ((runtime->legion_collective_stages > 0) &&
-	    (runtime->address_space <
-	     (runtime->total_address_spaces -
-	      runtime->legion_collective_participating_spaces)))
-	  stage_notifications[0] = -1;
-        else
-          stage_notifications[0] = 0;
-      }
       if (runtime->total_address_spaces > 1)
+      {
+        // We already have our contributions for each stage so
+        // we can set the inditial participants to 1
+        if (participating)
+        {
+          sent_stages.resize(runtime->legion_collective_stages, false);
+#ifdef DEBUG_LEGION
+          assert(runtime->legion_collective_stages > 0);
+#endif
+          stage_notifications.resize(runtime->legion_collective_stages, 1);
+          // Stage 0 always starts with 0 notifications since we'll 
+          // explictcly arrive on it
+          stage_notifications[0] = 0;
+        }
         done_event = Runtime::create_rt_user_event();
+      }
       // Add ourselves to the set before any exchanges start
 #ifdef DEBUG_LEGION
       assert(Runtime::mpi_rank >= 0);
@@ -2224,7 +2212,7 @@ namespace Legion {
               (runtime->address_space >= (runtime->total_address_spaces -
                 runtime->legion_collective_participating_spaces)))
           {
-            const bool all_stages_done =  send_explicit_stage(0);
+            const bool all_stages_done = initiate_exchange();
             if (all_stages_done)
               complete_exchange();
           }
@@ -2233,7 +2221,7 @@ namespace Legion {
         {
           // We are not a participating node
           // so we just have to send notification to one node
-          send_explicit_stage(-1);
+          send_remainder_stage();
         }
         // Wait for our done event to be ready
         done_event.wait();
@@ -2248,28 +2236,38 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool MPIRankTable::send_explicit_stage(int stage)
+    bool MPIRankTable::initiate_exchange(void)
     //--------------------------------------------------------------------------
     {
-      bool all_stages_done = false;
+#ifdef DEBUG_LEGION
+      assert(participating); // should only get this for participating shards
+#endif
+      {
+        AutoLock r_lock(reservation);
+#ifdef DEBUG_LEGION
+        assert(!sent_stages.empty());
+        assert(!sent_stages[0]); // stage 0 shouldn't be sent yet
+        assert(!stage_notifications.empty());
+        if (runtime->legion_collective_stages == 1)
+          assert(stage_notifications[0] < 
+                  runtime->legion_collective_last_radix); 
+        else
+          assert(stage_notifications[0] < runtime->legion_collective_radix);
+#endif
+        stage_notifications[0]++;
+      }
+      return send_ready_stages(0/*start stage*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void MPIRankTable::send_remainder_stage(void)
+    //--------------------------------------------------------------------------
+    {
       Serializer rez;
       {
         RezCheck z(rez);
-        rez.serialize(stage);
-        AutoLock r_lock(reservation);
-#ifdef DEBUG_LEGION
-        {
-          size_t expected_size = 1;
-          for (int idx = 0; idx < stage; idx++)
-            expected_size *= runtime->legion_collective_radix;
-          assert(expected_size <= forward_mapping.size());
-        }
-        if (stage >= 0)
-        {
-          assert(stage < int(sent_stages.size()));
-          assert(!sent_stages[stage]);
-        }
-#endif
+        rez.serialize(-1);
+        AutoLock r_lock(reservation, 1, false/*exclusive*/);
         rez.serialize<size_t>(forward_mapping.size());
         for (std::map<int,AddressSpace>::const_iterator it = 
               forward_mapping.begin(); it != forward_mapping.end(); it++)
@@ -2277,94 +2275,28 @@ namespace Legion {
           rez.serialize(it->first);
           rez.serialize(it->second);
         }
-        // Mark that we're sending this stage
-        if (stage >= 0)
-        {
-#ifdef DEBUG_LEGION
-          assert(stage < int(stage_notifications.size()));
-          if (stage == (runtime->legion_collective_stages-1))
-            assert(stage_notifications[stage] < 
-                  runtime->legion_collective_last_radix); 
-          else
-            assert(stage_notifications[stage] <
-                  runtime->legion_collective_radix);
-#endif
-          stage_notifications[stage]++;
-          sent_stages[stage] = true;
-          // Check to see if all the stages are done
-          all_stages_done = (stage_notifications.back() == 
-                      runtime->legion_collective_last_radix); 
-          if (all_stages_done)
-          {
-            for (int stage = 1; 
-                  stage < runtime->legion_collective_stages; stage++)
-            {
-              if (stage_notifications[stage-1] == 
-                    runtime->legion_collective_radix)
-                continue;
-              all_stages_done = false;
-              break;
-            }
-          }
-        }
       }
-      if (stage == -1)
+      if (participating)
       {
-        if (participating)
-        {
-          // Send back to the nodes that are not participating
-          AddressSpaceID target = runtime->address_space +
-            runtime->legion_collective_participating_spaces;
+        // Send back to the nodes that are not participating
+        AddressSpaceID target = runtime->address_space +
+          runtime->legion_collective_participating_spaces;
 #ifdef DEBUG_LEGION
-          assert(target < runtime->total_address_spaces);
+        assert(target < runtime->total_address_spaces);
 #endif
-          runtime->send_mpi_rank_exchange(target, rez);
-        }
-        else
-        {
-          // Sent to a node that is participating
-          AddressSpaceID target = runtime->address_space % 
-            runtime->legion_collective_participating_spaces;
-          runtime->send_mpi_rank_exchange(target, rez);
-        }
+        runtime->send_mpi_rank_exchange(target, rez);
       }
       else
       {
-#ifdef DEBUG_LEGION
-        assert(stage >= 0);
-#endif
-        if (stage == (runtime->legion_collective_stages-1))
-        {
-          for (int r = 1; r < runtime->legion_collective_last_radix; r++)
-          {
-            AddressSpaceID target = runtime->address_space ^
-              (r << (stage * runtime->legion_collective_log_radix));
-#ifdef DEBUG_LEGION
-            assert(int(target) < 
-                    runtime->legion_collective_participating_spaces);
-#endif
-            runtime->send_mpi_rank_exchange(target, rez);
-          }
-        }
-        else
-        {
-          for (int r = 1; r < runtime->legion_collective_radix; r++)
-          {
-            AddressSpaceID target = runtime->address_space ^
-              (r << (stage * runtime->legion_collective_log_radix));
-#ifdef DEBUG_LEGION
-            assert(int(target) < 
-                    runtime->legion_collective_participating_spaces);
-#endif
-            runtime->send_mpi_rank_exchange(target, rez);
-          }
-        }
+        // Sent to a node that is participating
+        AddressSpaceID target = runtime->address_space % 
+          runtime->legion_collective_participating_spaces;
+        runtime->send_mpi_rank_exchange(target, rez);
       }
-      return all_stages_done;
     }
 
     //--------------------------------------------------------------------------
-    bool MPIRankTable::send_ready_stages(void) 
+    bool MPIRankTable::send_ready_stages(const int start_stage) 
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -2372,7 +2304,8 @@ namespace Legion {
 #endif
       // Iterate through the stages and send any that are ready
       // Remember that stages have to be done in order
-      for (int stage = 1; stage < runtime->legion_collective_stages; stage++)
+      for (int stage = start_stage; 
+            stage < runtime->legion_collective_stages; stage++)
       {
         Serializer rez;
         {
@@ -2385,7 +2318,8 @@ namespace Legion {
           // Check to see if we're sending this stage
           // We need all the notifications from the previous stage before
           // we can send this stage
-          if (stage_notifications[stage-1] < runtime->legion_collective_radix)
+          if ((stage > 0) && 
+              (stage_notifications[stage-1] < runtime->legion_collective_radix))
             return false;
           // If we get here then we can send the stage
           sent_stages[stage] = true;
@@ -2435,9 +2369,15 @@ namespace Legion {
       }
       // If we make it here, then we sent the last stage, check to see
       // if we've seen all the notifications for it
-      AutoLock r_lock(reservation,1,false/*exclusive*/);
-      return (stage_notifications.back() == 
-                runtime->legion_collective_last_radix);
+      AutoLock r_lock(reservation);
+      if ((stage_notifications.back() == runtime->legion_collective_last_radix)
+          && !done_triggered)
+      {
+        done_triggered = true;
+        return true;
+      }
+      else
+        return false;
     }
 
     //--------------------------------------------------------------------------
@@ -2455,14 +2395,9 @@ namespace Legion {
       if (stage == -1)
       {
         if (!participating)
-        {
-#ifdef DEBUG_LEGION
-          assert(forward_mapping.size() == runtime->total_address_spaces);
-#endif
-          Runtime::trigger_event(done_event);
-        }
+          all_stages_done = true;
         else // we can now send our stage 0
-          all_stages_done = send_explicit_stage(0); 
+          all_stages_done = initiate_exchange();
       }
       else
         all_stages_done = send_ready_stages();
@@ -2491,11 +2426,6 @@ namespace Legion {
 #endif
 	forward_mapping[rank] = space;
       }
-      // A stage -1 message is counted as part of stage 0 (if it exists
-      //  and we are participating)
-      if ((stage == -1) && participating &&
-	  (runtime->legion_collective_stages > 0))
-	stage = 0;
       if (stage >= 0)
       {
 #ifdef DEBUG_LEGION
@@ -2518,15 +2448,15 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(forward_mapping.size() == runtime->total_address_spaces);
 #endif
-      // We are done
-      Runtime::trigger_event(done_event);
       // See if we have to send a message back to a
       // non-participating node
       if ((int(runtime->total_address_spaces) > 
            runtime->legion_collective_participating_spaces) &&
           (int(runtime->address_space) < int(runtime->total_address_spaces -
             runtime->legion_collective_participating_spaces)))
-        send_explicit_stage(-1);
+        send_remainder_stage();
+      // We are done
+      Runtime::trigger_event(done_event);
     }
 
     /////////////////////////////////////////////////////////////
@@ -7992,10 +7922,24 @@ namespace Legion {
       {
         // This is a debug case for when we have one runtime instance
         // for each processor
-        Processor proc = Processor::get_executing_processor();
-        Realm::ProfilingRequestSet profiling_requests;
-        ready_event = ApEvent(proc.register_task(descriptor_id,
-            *realm_descriptor, profiling_requests, user_data, user_data_size));
+        std::set<Processor::Kind> handled_kinds;
+        Machine::ProcessorQuery local_procs(runtime->machine);
+        local_procs.local_address_space();
+        std::set<ApEvent> ready_events;
+        for (Machine::ProcessorQuery::iterator it = 
+              local_procs.begin(); it != local_procs.end(); it++)
+        {
+          const Processor::Kind kind = it->kind();
+          if (handled_kinds.find(kind) != handled_kinds.end())
+            continue;
+          Realm::ProfilingRequestSet profiling_requests;
+          ready_events.insert(ApEvent(Processor::register_task_by_kind(kind,
+                          false/*global*/, descriptor_id, *realm_descriptor, 
+                          profiling_requests, user_data, user_data_size)));
+          handled_kinds.insert(kind);
+        }
+        if (!ready_events.empty())
+          ready_event = Runtime::merge_events(ready_events);
       }
       // If we have a variant name, then record it
       if (registrar.task_variant_name == NULL)
@@ -9142,6 +9086,8 @@ namespace Legion {
         dump_physical_traces(config.dump_physical_traces),
         no_tracing(config.no_tracing),
         no_physical_tracing(config.no_physical_tracing),
+        no_trace_optimization(config.no_trace_optimization),
+        no_fence_elision(config.no_fence_elision),
         verify_disjointness(config.verify_disjointness),
         runtime_warnings(config.runtime_warnings),
         separate_runtime_instances(config.separate_runtime_instances),
@@ -9171,8 +9117,6 @@ namespace Legion {
         legion_collective_log_radix(config.legion_collective_log_radix),
         legion_collective_stages(config.legion_collective_stages),
         legion_collective_last_radix(config.legion_collective_last_radix),
-        legion_collective_last_log_radix(
-                                 config.legion_collective_last_log_radix),
         legion_collective_participating_spaces(
                            config.legion_collective_participating_spaces),
         mpi_rank_table((mpi_rank >= 0) ? new MPIRankTable(this) : NULL),
@@ -9332,6 +9276,8 @@ namespace Legion {
         dump_physical_traces(rhs.dump_physical_traces),
         no_tracing(rhs.no_tracing),
         no_physical_tracing(rhs.no_physical_tracing),
+        no_trace_optimization(rhs.no_trace_optimization),
+        no_fence_elision(rhs.no_fence_elision),
         verify_disjointness(rhs.verify_disjointness),
         runtime_warnings(rhs.runtime_warnings),
         separate_runtime_instances(rhs.separate_runtime_instances),
@@ -9357,12 +9303,10 @@ namespace Legion {
         legion_collective_log_radix(rhs.legion_collective_log_radix),
         legion_collective_stages(rhs.legion_collective_stages),
         legion_collective_last_radix(rhs.legion_collective_last_radix),
-        legion_collective_last_log_radix(
-                                 rhs.legion_collective_last_log_radix),
         legion_collective_participating_spaces(
                            rhs.legion_collective_participating_spaces),
-        mpi_rank_table(NULL),
-        local_procs(rhs.local_procs), proc_spaces(rhs.proc_spaces)
+        mpi_rank_table(NULL), local_procs(rhs.local_procs), 
+        local_utils(rhs.local_utils), proc_spaces(rhs.proc_spaces)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -10343,8 +10287,9 @@ namespace Legion {
       IndexPartition result = 
         ctx->create_partition_by_union(forest, parent, handle1, handle2,
                                        color_space, kind, color);
-      if (verify_disjointness && (kind == DISJOINT_KIND) && 
-          !forest->is_disjoint(result))
+      if (verify_disjointness && ((kind == DISJOINT_KIND) || 
+            (kind == DISJOINT_COMPLETE_KIND) || 
+            (kind == DISJOINT_INCOMPLETE_KIND)) && !forest->is_disjoint(result))
         REPORT_LEGION_ERROR(ERROR_DISJOINTNESS_TEST_FAILURE,
                             "Disjointness test failure for create partition "
                             "by union in task %s (UID %lld)",
@@ -10369,8 +10314,9 @@ namespace Legion {
         ctx->create_partition_by_intersection(forest, parent, handle1,
                                               handle2, color_space,
                                               kind, color);
-      if (verify_disjointness && (kind == DISJOINT_KIND) && 
-          !forest->is_disjoint(result))
+      if (verify_disjointness && ((kind == DISJOINT_KIND) ||
+            (kind == DISJOINT_COMPLETE_KIND) ||
+            (kind == DISJOINT_INCOMPLETE_KIND)) && !forest->is_disjoint(result))
         REPORT_LEGION_ERROR(ERROR_DISJOINTNESS_TEST_FAILURE,
                             "Disjointness test failure for create partition "
                             "by intersection in task %s (UID %lld)",
@@ -10395,8 +10341,9 @@ namespace Legion {
         ctx->create_partition_by_difference(forest, parent, handle1, 
                                             handle2, color_space,
                                             kind, color);
-      if (verify_disjointness && (kind == DISJOINT_KIND) && 
-          !forest->is_disjoint(result))
+      if (verify_disjointness && ((kind == DISJOINT_KIND) ||
+            (kind == DISJOINT_COMPLETE_KIND) ||
+            (kind == DISJOINT_INCOMPLETE_KIND)) && !forest->is_disjoint(result))
         REPORT_LEGION_ERROR(ERROR_DISJOINTNESS_TEST_FAILURE,
                             "Disjointness test failure for create partition "
                             "by difference in task %s (UID %lld)",
@@ -10418,7 +10365,9 @@ namespace Legion {
       Color result = 
         ctx->create_cross_product_partitions(forest, handle1, handle2, 
                                              handles, kind, color);
-      if (verify_disjointness && (kind == DISJOINT_KIND))
+      if (verify_disjointness && 
+          ((kind == DISJOINT_KIND) || (kind == DISJOINT_COMPLETE_KIND) ||
+           (kind == DISJOINT_INCOMPLETE_KIND)))
       {
         Domain color_space = get_index_partition_color_space(handle1);
         // This code will only work if the color space has type coord_t
@@ -10516,7 +10465,9 @@ namespace Legion {
                                          transform, transform_size,
                                          extent, extent_size,
                                          part_kind, color);
-      if (verify_disjointness && (part_kind == DISJOINT_KIND) && 
+      if (verify_disjointness && ((part_kind == DISJOINT_KIND) ||
+           (part_kind == DISJOINT_COMPLETE_KIND) ||
+           (part_kind == DISJOINT_INCOMPLETE_KIND)) && 
           !forest->is_disjoint(result))
         REPORT_LEGION_ERROR(ERROR_DISJOINTNESS_TEST_FAILURE,
                             "Disjointness test failure for create restricted "
@@ -10561,7 +10512,9 @@ namespace Legion {
         ctx->create_partition_by_image(forest, handle, projection, parent,
                                        fid, color_space, part_kind, 
                                        color, id, tag);
-      if (verify_disjointness && (part_kind == DISJOINT_KIND) && 
+      if (verify_disjointness && ((part_kind == DISJOINT_KIND) ||
+           (part_kind == DISJOINT_COMPLETE_KIND) ||
+           (part_kind == DISJOINT_INCOMPLETE_KIND)) && 
           !forest->is_disjoint(result))
         REPORT_LEGION_ERROR(ERROR_DISJOINTNESS_TEST_FAILURE,
                             "Disjointness test failure for create partition "
@@ -10590,7 +10543,9 @@ namespace Legion {
         ctx->create_partition_by_image_range(forest, handle, projection, 
                                   parent, fid, color_space, part_kind, 
                                   color, id, tag);
-      if (verify_disjointness && (part_kind == DISJOINT_KIND) && 
+      if (verify_disjointness && ((part_kind == DISJOINT_KIND) ||
+           (part_kind == DISJOINT_COMPLETE_KIND) ||
+           (part_kind == DISJOINT_INCOMPLETE_KIND)) && 
           !forest->is_disjoint(result))
         REPORT_LEGION_ERROR(ERROR_DISJOINTNESS_TEST_FAILURE,
                             "Disjointness test failure for create partition "
@@ -10619,7 +10574,9 @@ namespace Legion {
         ctx->create_partition_by_preimage(forest, projection, handle,
                               parent, fid, color_space, part_kind, 
                               color, id, tag);
-      if (verify_disjointness && (part_kind == DISJOINT_KIND) && 
+      if (verify_disjointness && ((part_kind == DISJOINT_KIND) ||
+           (part_kind == DISJOINT_COMPLETE_KIND) ||
+           (part_kind == DISJOINT_INCOMPLETE_KIND)) && 
           !forest->is_disjoint(result))
         REPORT_LEGION_ERROR(ERROR_DISJOINTNESS_TEST_FAILURE,
                             "Disjointness test failure for create partition "
@@ -10647,7 +10604,9 @@ namespace Legion {
         ctx->create_partition_by_preimage_range(forest, projection, handle,
                                     parent, fid, color_space, part_kind, 
                                     color, id, tag);
-      if (verify_disjointness && (part_kind == DISJOINT_KIND) && 
+      if (verify_disjointness && ((part_kind == DISJOINT_KIND) || 
+           (part_kind == DISJOINT_COMPLETE_KIND) ||
+           (part_kind == DISJOINT_INCOMPLETE_KIND)) && 
           !forest->is_disjoint(result))
         REPORT_LEGION_ERROR(ERROR_DISJOINTNESS_TEST_FAILURE,
                             "Disjointness test failure for create partition "
@@ -11246,13 +11205,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     LogicalRegion Runtime::create_logical_region(Context ctx, 
-                                IndexSpace index_space, FieldSpace field_space)
+                IndexSpace index_space, FieldSpace field_space, bool task_local)
     //--------------------------------------------------------------------------
     {
       if (ctx == DUMMY_CONTEXT)
         REPORT_DUMMY_CONTEXT(
             "Illegal dummy context create logical region!");
-      return ctx->create_logical_region(forest, index_space, field_space); 
+      return ctx->create_logical_region(forest, index_space, field_space,
+                                        task_local); 
     }
 
     //--------------------------------------------------------------------------
@@ -19000,6 +18960,8 @@ namespace Legion {
         BOOL_ARG("-lg:dump_physical_traces",config.dump_physical_traces);
         BOOL_ARG("-lg:no_tracing",config.no_tracing);
         BOOL_ARG("-lg:no_physical_tracing",config.no_physical_tracing);
+        BOOL_ARG("-lg:no_trace_optimization",config.no_trace_optimization);
+        BOOL_ARG("-lg:no_fence_elision",config.no_fence_elision);
         BOOL_ARG("-lg:disjointness",config.verify_disjointness);
         INT_ARG("-lg:window", config.initial_task_window_size);
         INT_ARG("-lg:hysteresis", config.initial_task_window_hysteresis);
@@ -19893,6 +19855,11 @@ namespace Legion {
             InnerContext::handle_post_end_task(args); 
             break;
           }
+        case LG_DEFERRED_POST_END_ID:
+          {
+            InnerContext::handle_deferred_post_end_task(args);
+            break;
+          }
         case LG_DEFERRED_READY_TRIGGER_ID:
           {
             const Operation::DeferredReadyArgs *deferred_ready_args = 
@@ -20519,16 +20486,14 @@ namespace Legion {
       {
         // We have an incomplete last stage
         legion_collective_last_radix = 1 << log_remainder;
-        legion_collective_last_log_radix = log_remainder;
         // Now we can compute the number of participating stages
         legion_collective_participating_spaces = 
           1 << ((legion_collective_stages - 1) * legion_collective_log_radix +
-                 legion_collective_last_log_radix);
+                 log_remainder);
       }
       else
       {
         legion_collective_last_radix = legion_collective_radix;
-        legion_collective_last_log_radix = legion_collective_log_radix;
         legion_collective_participating_spaces = 
           1 << (legion_collective_stages * legion_collective_log_radix);
       }

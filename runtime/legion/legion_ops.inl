@@ -99,7 +99,8 @@ namespace Legion {
         if (tpl == NULL)
         {
           OP::trace->set_state_record();
-          tpl = physical_trace->start_new_template();
+          tpl = physical_trace->start_new_template(
+              OP::parent_ctx->get_current_execution_fence_event());
           assert(tpl != NULL);
         }
 
@@ -142,6 +143,7 @@ namespace Legion {
       Mapper::MemoizeInput  input;
       Mapper::MemoizeOutput output;
       input.traced = OP::trace != NULL;
+      input.trace_id = input.traced ? OP::trace->get_trace_id() : -1U;
       output.memoize = false;
       Processor mapper_proc = OP::parent_ctx->get_executing_processor();
       MapperManager *mapper = OP::runtime->find_mapper(mapper_proc, mapper_id);
