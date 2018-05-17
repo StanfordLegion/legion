@@ -1935,6 +1935,9 @@ namespace Legion {
     void PhysicalTemplate::execute_slice(unsigned slice_idx)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(slice_idx < slices.size());
+#endif
       std::vector<Instruction*> &instructions = slices[slice_idx];
       for (std::vector<Instruction*>::const_iterator it = instructions.begin();
            it != instructions.end(); ++it)
@@ -1959,12 +1962,12 @@ namespace Legion {
       {
         if (implicit_runtime->dump_physical_traces)
         {
-          if (!implicit_runtime->no_trace_optimization) optimize();
+          optimize();
           dump_template();
         }
         return;
       }
-      if (!implicit_runtime->no_trace_optimization) optimize();
+      optimize();
       if (implicit_runtime->dump_physical_traces) dump_template();
       size_t num_events = events.size();
       events.clear();
@@ -1980,7 +1983,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       std::vector<unsigned> gen;
-      if (!implicit_runtime->no_fence_elision)
+      if (!(implicit_runtime->no_trace_optimization ||
+            implicit_runtime->no_fence_elision))
         elide_fences(gen);
       else
       {
@@ -1991,7 +1995,7 @@ namespace Legion {
         for (unsigned idx = 0; idx < events.size(); ++idx)
           gen[idx] = idx;
       }
-      propagate_merges(gen);
+      if (!implicit_runtime->no_trace_optimization) propagate_merges(gen);
       prepare_parallel_replay(gen);
       push_complete_replays();
     }
