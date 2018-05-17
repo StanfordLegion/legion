@@ -9159,7 +9159,11 @@ namespace Legion {
           utility_group = *(locals.begin());
         else
         {
-          std::vector<Processor> util_group(locals.begin(), locals.end());
+          std::vector<Processor> util_group;
+          for (std::set<Processor>::const_iterator it = locals.begin();
+               it != locals.end(); ++it)
+            if (it->kind() == Processor::LOC_PROC)
+              util_group.push_back(*it);
           utility_group = Processor::create_group(util_group);
         }
       }
@@ -13245,7 +13249,7 @@ namespace Legion {
           Processor::Kind k = it->first.kind();
           if (k == Processor::UTIL_PROC)
             remote_util_procs.insert(it->first);
-          else
+          else if (k == Processor::LOC_PROC)
             remote_procs.insert(it->first);
         }
 #ifdef DEBUG_LEGION
