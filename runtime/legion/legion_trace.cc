@@ -1507,6 +1507,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PhysicalTrace::PhysicalTrace(const PhysicalTrace &rhs)
+      : runtime(NULL), logical_trace(NULL), current_template(NULL),
+        nonreplayable_count(0)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -1601,7 +1603,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(current_template != NULL);
 #endif
-      current_template->initialize(fence_completion, recurrent);
+      current_template->initialize(runtime, fence_completion, recurrent);
     }
 
     /////////////////////////////////////////////////////////////
@@ -1611,7 +1613,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     PhysicalTemplate::PhysicalTemplate(ApEvent fence_event)
       : recording(true), replayable(true), has_block(false),
-        fence_completion_id(0)
+        fence_completion_id(0),
+        replay_parallelism(implicit_runtime->max_replay_parallelism)
     //--------------------------------------------------------------------------
     {
       events.push_back(fence_event);
@@ -1647,6 +1650,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PhysicalTemplate::PhysicalTemplate(const PhysicalTemplate &rhs)
+      : recording(true), replayable(true), has_block(false),
+        fence_completion_id(0), replay_parallelism(1)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -1654,7 +1659,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::initialize(ApEvent completion, bool recurrent)
+    void PhysicalTemplate::initialize(
+                           Runtime *runtime, ApEvent completion, bool recurrent)
     //--------------------------------------------------------------------------
     {
       fence_completion = completion;
@@ -1673,6 +1679,27 @@ namespace Legion {
           events[it->second] = completion;
 
       events[fence_completion_id] = fence_completion;
+
+      for (std::vector<unsigned>::iterator it = crossing_events.begin();
+           it != crossing_events.end(); ++it)
+      {
+        ApUserEvent ev = Runtime::create_ap_user_event();
+        events[*it] = ev;
+        user_events[*it] = ev;
+      }
+
+      replay_ready = Runtime::create_rt_user_event();
+      std::set<RtEvent> replay_done_events;
+      for (unsigned idx = 0; idx < replay_parallelism; ++idx)
+      {
+        ReplaySliceArgs args(this, idx);
+        RtEvent done =
+          runtime->issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY,
+            replay_ready);
+        replay_done_events.insert(done);
+      }
+      replay_done = Runtime::merge_events(replay_done_events);
+
 #ifdef DEBUG_LEGION
       for (std::map<TraceLocalID, Operation*>::iterator it =
            operations.begin(); it != operations.end(); ++it)
@@ -1900,6 +1927,15 @@ namespace Legion {
     void PhysicalTemplate::execute_all(void)
     //--------------------------------------------------------------------------
     {
+      Runtime::trigger_event(replay_ready);
+      replay_done.wait();
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTemplate::execute_slice(unsigned slice_idx)
+    //--------------------------------------------------------------------------
+    {
+      std::vector<Instruction*> &instructions = slices[slice_idx];
       for (std::vector<Instruction*>::const_iterator it = instructions.begin();
            it != instructions.end(); ++it)
         (*it)->execute();
@@ -1956,6 +1992,8 @@ namespace Legion {
           gen[idx] = idx;
       }
       propagate_merges(gen);
+      prepare_parallel_replay(gen);
+      push_complete_replays();
     }
 
     //--------------------------------------------------------------------------
@@ -2114,7 +2152,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::propagate_merges(const std::vector<unsigned> &gen)
+    void PhysicalTemplate::propagate_merges(std::vector<unsigned> &gen)
     //--------------------------------------------------------------------------
     {
       std::vector<Instruction*> new_instructions;
@@ -2189,35 +2227,146 @@ namespace Legion {
         }
       }
 
-      std::vector<Instruction*> complete_replays;
+      std::vector<unsigned> inv_gen;
+      inv_gen.resize(instructions.size());
+      for (unsigned idx = 0; idx < gen.size(); ++idx)
+        inv_gen[gen[idx]] = idx;
       std::vector<Instruction*> to_delete;
-
+      std::vector<unsigned> new_gen;
+      new_gen.resize(gen.size());
+      new_gen[fence_completion_id] = 0;
+      for (std::map<unsigned, unsigned>::iterator it = frontiers.begin();
+          it != frontiers.end(); ++it)
+        new_gen[it->second] = 0;
       for (unsigned idx = 0; idx < instructions.size(); ++idx)
         if (used[idx])
         {
           Instruction *inst = instructions[idx];
-          if (inst->get_kind() == COMPLETE_REPLAY)
-            complete_replays.push_back(inst);
-          else
+          if (inst->get_kind() == MERGE_EVENT)
           {
-            if (inst->get_kind() == MERGE_EVENT)
-            {
-              MergeEvent *merge = inst->as_merge_event();
-              if (merge->rhs.size() > 1)
-                merge->rhs.erase(fence_completion_id);
-            }
-            new_instructions.push_back(inst);
+            MergeEvent *merge = inst->as_merge_event();
+            if (merge->rhs.size() > 1)
+              merge->rhs.erase(fence_completion_id);
           }
+          new_gen[inv_gen[idx]] = new_instructions.size();
+          new_instructions.push_back(inst);
         }
         else
           to_delete.push_back(instructions[idx]);
-
-      new_instructions.insert(new_instructions.end(),
-                              complete_replays.begin(),
-                              complete_replays.end());
       instructions.swap(new_instructions);
+      gen.swap(new_gen);
       for (unsigned idx = 0; idx < to_delete.size(); ++idx)
         delete to_delete[idx];
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTemplate::prepare_parallel_replay(
+                                               const std::vector<unsigned> &gen)
+    //--------------------------------------------------------------------------
+    {
+      slices.resize(replay_parallelism);
+      std::map<TraceLocalID, unsigned> slice_indices_by_owner;
+      std::vector<unsigned> slice_indices_by_inst;
+      slice_indices_by_inst.resize(instructions.size());
+#ifdef DEBUG_LEGION
+      for (unsigned idx = 1; idx < instructions.size(); ++idx)
+        slice_indices_by_inst[idx] = -1U;
+#endif
+      for (unsigned idx = 1; idx < instructions.size(); ++idx)
+      {
+        Instruction *inst = instructions[idx];
+        const TraceLocalID &owner = inst->owner;
+        unsigned slice_index = -1U;
+        std::map<TraceLocalID, unsigned>::iterator finder =
+          slice_indices_by_owner.find(owner);
+        if (finder == slice_indices_by_owner.end())
+        {
+          unsigned min_index = -1U;
+          unsigned min_size = UINT_MAX;
+          for (unsigned sidx = 0; sidx < replay_parallelism; ++sidx)
+          {
+            unsigned size = slices[sidx].size();
+            if (size < min_size)
+            {
+              min_index = sidx;
+              min_size = size;
+            }
+          }
+#ifdef DEBUG_LEGION
+          assert(min_index != -1U);
+          assert(min_size != UINT_MAX);
+#endif
+          slice_index = min_index;
+          slice_indices_by_owner[owner] = slice_index;
+        }
+        else
+          slice_index = finder->second;
+        slices[slice_index].push_back(inst);
+        slice_indices_by_inst[idx] = slice_index;
+
+        if (inst->get_kind() == MERGE_EVENT)
+        {
+          MergeEvent *merge = inst->as_merge_event();
+          unsigned crossing_found = false;
+          std::set<unsigned> new_rhs;
+          for (std::set<unsigned>::iterator it = merge->rhs.begin();
+               it != merge->rhs.end(); ++it)
+          {
+            unsigned rh = *it;
+            if (gen[rh] == 0)
+              new_rhs.insert(rh);
+            else
+            {
+              unsigned generator_slice = slice_indices_by_inst[gen[rh]];
+#ifdef DEBUG_LEGION
+              assert(generator_slice != -1U);
+#endif
+              if (generator_slice != slice_index)
+              {
+                crossing_found = true;
+                unsigned new_crossing_event = events.size();
+                events.resize(events.size() + 1);
+                user_events.resize(events.size());
+                crossing_events.push_back(new_crossing_event);
+                new_rhs.insert(new_crossing_event);
+                slices[generator_slice].push_back(
+                    new TriggerEvent(*this, new_crossing_event, rh,
+                      instructions[gen[rh]]->owner));
+              }
+              else
+                new_rhs.insert(rh);
+            }
+          }
+
+          if (crossing_found)
+            merge->rhs.swap(new_rhs);
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTemplate::push_complete_replays()
+    //--------------------------------------------------------------------------
+    {
+      for (unsigned idx = 0; idx < slices.size(); ++idx)
+      {
+        std::vector<Instruction*> &instructions = slices[idx];
+        std::vector<Instruction*> new_instructions;
+        new_instructions.reserve(instructions.size());
+        std::vector<Instruction*> complete_replays;
+        for (unsigned iidx = 0; iidx < instructions.size(); ++iidx)
+        {
+          Instruction *inst = instructions[iidx];
+          if (inst->get_kind() == COMPLETE_REPLAY)
+            complete_replays.push_back(inst);
+          else
+            new_instructions.push_back(inst);
+        }
+        new_instructions.insert(new_instructions.end(),
+                                complete_replays.begin(),
+                                complete_replays.end());
+        instructions.swap(new_instructions);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -2260,10 +2409,11 @@ namespace Legion {
     {
       std::cerr << "#### " << (replayable ? "Replayable" : "Non-replayable")
                 << " Template " << this << " ####" << std::endl;
-      std::cerr << "[Instructions]" << std::endl;
-      for (std::vector<Instruction*>::iterator it = instructions.begin();
-           it != instructions.end(); ++it)
-        std::cerr << "  " << (*it)->to_string() << std::endl;
+      for (unsigned sidx = 0; sidx < replay_parallelism; ++sidx)
+      {
+        std::cerr << "[Slice " << sidx << "]" << std::endl;
+        dump_instructions(slices[sidx]);
+      }
       for (std::map<unsigned, unsigned>::iterator it = frontiers.begin();
            it != frontiers.end(); ++it)
         std::cerr << "  events[" << it->second << "] = events["
@@ -2326,6 +2476,16 @@ namespace Legion {
                   << " " << std::endl;
         free(mask);
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTemplate::dump_instructions(
+                                  const std::vector<Instruction*> &instructions)
+    //--------------------------------------------------------------------------
+    {
+      for (std::vector<Instruction*>::const_iterator it = instructions.begin();
+           it != instructions.end(); ++it)
+        std::cerr << "  " << (*it)->to_string() << std::endl;
     }
 
     //--------------------------------------------------------------------------
@@ -3126,6 +3286,14 @@ namespace Legion {
     {
       AutoLock tpl_lock(template_lock);
       outstanding_gc_events[view].insert(term_event);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void PhysicalTemplate::handle_replay_slice(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const ReplaySliceArgs *pargs = (const ReplaySliceArgs*)args;
+      pargs->tpl->execute_slice(pargs->slice_index);
     }
 
     //--------------------------------------------------------------------------
