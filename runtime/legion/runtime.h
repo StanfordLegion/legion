@@ -1450,6 +1450,7 @@ namespace Legion {
             max_message_size(DEFAULT_MAX_MESSAGE_SIZE),
             gc_epoch_size(DEFAULT_GC_EPOCH_SIZE),
             max_local_fields(DEFAULT_LOCAL_FIELDS),
+            max_replay_parallelism(DEFAULT_MAX_REPLAY_PARALLELISM),
             program_order_execution(false),
             dump_physical_traces(false),
             no_tracing(false),
@@ -1500,6 +1501,7 @@ namespace Legion {
         unsigned max_message_size;
         unsigned gc_epoch_size;
         unsigned max_local_fields;
+        unsigned max_replay_parallelism;
       public:
         bool program_order_execution;
         bool dump_physical_traces;
@@ -1620,6 +1622,7 @@ namespace Legion {
       const unsigned max_message_size;
       const unsigned gc_epoch_size;
       const unsigned max_local_fields;
+      const unsigned max_replay_parallelism;
     public:
       const bool program_order_execution;
       const bool dump_physical_traces;

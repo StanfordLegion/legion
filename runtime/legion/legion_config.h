@@ -116,6 +116,10 @@
 #ifndef DEFAULT_META_TASK_VECTOR_WIDTH
 #define DEFAULT_META_TASK_VECTOR_WIDTH  16
 #endif
+// Default number of replay tasks to run in parallel
+#ifndef DEFAULT_MAX_REPLAY_PARALLELISM
+#define DEFAULT_MAX_REPLAY_PARALLELISM  2
+#endif
 // The maximum size of active messages sent by the runtime in bytes
 // Note this value was picked based on making a tradeoff between
 // latency and bandwidth numbers on both Cray and Infiniband

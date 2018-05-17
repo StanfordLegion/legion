@@ -9082,6 +9082,7 @@ namespace Legion {
         max_message_size(config.max_message_size),
         gc_epoch_size(config.gc_epoch_size),
         max_local_fields(config.max_local_fields),
+        max_replay_parallelism(config.max_replay_parallelism),
         program_order_execution(config.program_order_execution),
         dump_physical_traces(config.dump_physical_traces),
         no_tracing(config.no_tracing),
@@ -9272,6 +9273,7 @@ namespace Legion {
         max_message_size(rhs.max_message_size),
         gc_epoch_size(rhs.gc_epoch_size), 
         max_local_fields(rhs.max_local_fields),
+        max_replay_parallelism(rhs.max_replay_parallelism),
         program_order_execution(rhs.program_order_execution),
         dump_physical_traces(rhs.dump_physical_traces),
         no_tracing(rhs.no_tracing),
@@ -18970,6 +18972,7 @@ namespace Legion {
         INT_ARG("-lg:message",config.max_message_size);
         INT_ARG("-lg:epoch", config.gc_epoch_size);
         INT_ARG("-lg:local", config.max_local_fields);
+        INT_ARG("-lg:parallel_replay", config.max_replay_parallelism);
         if (!strcmp(argv[i],"-lg:no_dyn"))
           config.dynamic_independence_tests = false;
         BOOL_ARG("-lg:spy",config.legion_spy_enabled);
@@ -20379,6 +20382,11 @@ namespace Legion {
         case LG_REMOTE_PHYSICAL_RESPONSE_TASK_ID:
           {
             RemoteContext::defer_physical_response(args);
+            break;
+          }
+        case LG_REPLAY_SLICE_ID:
+          {
+            PhysicalTemplate::handle_replay_slice(args);
             break;
           }
         case LG_RETRY_SHUTDOWN_TASK_ID:

@@ -3803,7 +3803,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
           assert(tpl != NULL && tpl->is_recording());
 #endif
-          tpl->record_create_ap_user_event(local_completion);
+          tpl->record_create_ap_user_event(local_completion, this);
         }
 
         // Do the conversion and check for errors
@@ -3957,7 +3957,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(tpl != NULL && tpl->is_recording());
 #endif
-        tpl->record_merge_events(copy_complete_event, copy_complete_events);
+        tpl->record_merge_events(copy_complete_event, copy_complete_events,
+                                 this);
       }
 
       if (!restrict_postconditions.empty())
@@ -3966,7 +3967,7 @@ namespace Legion {
         copy_complete_event = Runtime::merge_events(restrict_postconditions);
         if (is_recording())
           tpl->record_merge_events(copy_complete_event,
-              restrict_postconditions);
+              restrict_postconditions, this);
       }
 #ifdef LEGION_SPY
       if (runtime->legion_spy_enabled)
@@ -8317,7 +8318,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(tpl != NULL && tpl->is_recording());
 #endif
-        tpl->record_merge_events(acquire_complete, acquire_preconditions);
+        tpl->record_merge_events(acquire_complete, acquire_preconditions, this);
       }
       if (runtime->legion_spy_enabled)
       {
@@ -9020,7 +9021,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(tpl != NULL && tpl->is_recording());
 #endif
-        tpl->record_merge_events(release_complete, release_preconditions);
+        tpl->record_merge_events(release_complete, release_preconditions, this);
       }
       if (runtime->legion_spy_enabled)
       {

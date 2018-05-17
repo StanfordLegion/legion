@@ -2562,7 +2562,7 @@ namespace Legion {
               assert(trace_info.tpl != NULL && trace_info.tpl->is_recording());
 #endif
               trace_info.tpl->record_merge_events(copy_pre, src_precondition,
-                  dst_precondition, precondition);
+                  dst_precondition, precondition, trace_info.op);
             }
             ApEvent copy_post = dst_node->issue_copy(op, src_it->second,
                                        dst_it->second, copy_pre, guard,
@@ -2579,7 +2579,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(trace_info.tpl != NULL && trace_info.tpl->is_recording());
 #endif
-        trace_info.tpl->record_merge_events(result, result_events);
+        trace_info.tpl->record_merge_events(result, result_events,
+            trace_info.op);
       }
       // Return the merge of all the result events
       return result;
@@ -2700,7 +2701,7 @@ namespace Legion {
           assert(trace_info.tpl != NULL && trace_info.tpl->is_recording());
 #endif
           trace_info.tpl->record_merge_events(copy_pre,
-              fold_copy_preconditions);
+              fold_copy_preconditions, trace_info.op);
         }
         ApEvent copy_post = dst_node->issue_copy(op, 
                             src_fields_fold, dst_fields_fold, copy_pre, 
@@ -2719,7 +2720,7 @@ namespace Legion {
           assert(trace_info.tpl != NULL && trace_info.tpl->is_recording());
 #endif
           trace_info.tpl->record_merge_events(copy_pre,
-              list_copy_preconditions);
+              list_copy_preconditions, trace_info.op);
         }
         ApEvent copy_post = dst_node->issue_copy(op, 
                             src_fields_list, dst_fields_list, copy_pre, 
@@ -2734,7 +2735,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(trace_info.tpl != NULL && trace_info.tpl->is_recording());
 #endif
-        trace_info.tpl->record_merge_events(result, result_events);
+        trace_info.tpl->record_merge_events(result, result_events,
+            trace_info.op);
       }
       return result;
     }
@@ -12708,7 +12710,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
           assert(trace_info.tpl != NULL && trace_info.tpl->is_recording());
 #endif
-          trace_info.tpl->record_merge_events(copy_pre, pre_set.preconditions);
+          trace_info.tpl->record_merge_events(copy_pre, pre_set.preconditions,
+              trace_info.op);
         }
         ApEvent copy_post = issue_copy(info.op, src_fields, dst_fields, 
                                        copy_pre, predicate_guard, trace_info,
