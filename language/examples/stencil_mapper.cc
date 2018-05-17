@@ -50,6 +50,9 @@ public:
                                     MapperContext ctx,
                                     const Task &task,
                                     std::vector<Processor> &target_procs);
+  virtual Memory default_policy_select_target_memory(MapperContext ctx, 
+                                Processor target_proc,
+                                const RegionRequirement &req);
   virtual LogicalRegion default_policy_select_instance_region(
                                 MapperContext ctx, Memory target_memory,
                                 const RegionRequirement &req,
@@ -174,6 +177,26 @@ void StencilMapper::default_policy_select_target_processors(
                                     std::vector<Processor> &target_procs)
 {
   target_procs.push_back(task.target_proc);
+}
+
+static bool is_ghost(MapperRuntime *runtime,
+                     const MapperContext ctx,
+                     LogicalRegion leaf)
+{
+  return !runtime->has_parent_logical_partition(ctx, leaf);
+}
+
+Memory StencilMapper::default_policy_select_target_memory(
+                                                   MapperContext ctx,
+                                                   Processor target_proc,
+                                                   const RegionRequirement &req)
+{
+  Memory target_memory = proc_sysmems[target_proc];
+  if (is_ghost(runtime, ctx, req.region)) {
+    std::map<Processor, Memory>::iterator finder = proc_regmems.find(target_proc);
+    if (finder != proc_regmems.end()) target_memory = finder->second;
+  }
+  return target_memory;
 }
 
 LogicalRegion StencilMapper::default_policy_select_instance_region(
