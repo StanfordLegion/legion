@@ -2775,7 +2775,8 @@ namespace Legion {
         else if (restrict_info.has_restrictions())
           prepare_for_mapping(restrict_info.get_instances(),
                               input.valid_instances[idx]);
-        else
+        // There are no valid instances for reduction-only cases
+        else if (regions[idx].privilege != REDUCE)
           prepare_for_mapping(current_valid, visible_memories,
                               input.valid_instances[idx]);
       }
