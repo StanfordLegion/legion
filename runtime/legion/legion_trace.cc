@@ -1691,12 +1691,12 @@ namespace Legion {
 
       events[fence_completion_id] = fence_completion;
 
-      for (std::vector<unsigned>::iterator it = crossing_events.begin();
+      for (std::map<unsigned, unsigned>::iterator it = crossing_events.begin();
            it != crossing_events.end(); ++it)
       {
         ApUserEvent ev = Runtime::create_ap_user_event();
-        events[*it] = ev;
-        user_events[*it] = ev;
+        events[it->second] = ev;
+        user_events[it->second] = ev;
       }
 
       replay_ready = Runtime::create_rt_user_event();
@@ -2290,35 +2290,40 @@ namespace Legion {
       for (unsigned idx = 1; idx < instructions.size(); ++idx)
         slice_indices_by_inst[idx] = -1U;
 #endif
+      unsigned next_slice_id = 0;
+      for (std::map<TraceLocalID, Operation*>::iterator it =
+           operations.begin(); it != operations.end(); ++it)
+      {
+        if (it->second->get_operation_kind() == Operation::TASK_OP_KIND)
+        {
+          CachedMappings::iterator finder = cached_mappings.find(it->first);
+#ifdef DEBUG_LEGION
+          assert(finder != cached_mappings.end());
+          assert(finder->second.target_procs.size() > 0);
+#endif
+          slice_indices_by_owner[it->first] =
+            finder->second.target_procs[0].id % replay_parallelism;
+        }
+        else
+        {
+#ifdef DEBUG_LEGION
+          assert(slice_indices_by_owner.find(it->first) ==
+              slice_indices_by_owner.end());
+#endif
+          slice_indices_by_owner[it->first] = next_slice_id;
+          next_slice_id = (next_slice_id + 1) % replay_parallelism;
+        }
+      }
       for (unsigned idx = 1; idx < instructions.size(); ++idx)
       {
         Instruction *inst = instructions[idx];
         const TraceLocalID &owner = inst->owner;
-        unsigned slice_index = -1U;
         std::map<TraceLocalID, unsigned>::iterator finder =
           slice_indices_by_owner.find(owner);
-        if (finder == slice_indices_by_owner.end())
-        {
-          unsigned min_index = -1U;
-          unsigned min_size = UINT_MAX;
-          for (unsigned sidx = 0; sidx < replay_parallelism; ++sidx)
-          {
-            unsigned size = slices[sidx].size();
-            if (size < min_size)
-            {
-              min_index = sidx;
-              min_size = size;
-            }
-          }
 #ifdef DEBUG_LEGION
-          assert(min_index != -1U);
-          assert(min_size != UINT_MAX);
+        asset(finder != slice_indices_by_owner.end());
 #endif
-          slice_index = min_index;
-          slice_indices_by_owner[owner] = slice_index;
-        }
-        else
-          slice_index = finder->second;
+        unsigned slice_index = finder->second;
         slices[slice_index].push_back(inst);
         slice_indices_by_inst[idx] = slice_index;
 
@@ -2342,14 +2347,21 @@ namespace Legion {
               if (generator_slice != slice_index)
               {
                 crossing_found = true;
-                unsigned new_crossing_event = events.size();
-                events.resize(events.size() + 1);
-                user_events.resize(events.size());
-                crossing_events.push_back(new_crossing_event);
-                new_rhs.insert(new_crossing_event);
-                slices[generator_slice].push_back(
-                    new TriggerEvent(*this, new_crossing_event, rh,
-                      instructions[gen[rh]]->owner));
+                std::map<unsigned, unsigned>::iterator finder =
+                  crossing_events.find(rh);
+                if (finder != crossing_events.end())
+                  new_rhs.insert(finder->second);
+                else
+                {
+                  unsigned new_crossing_event = events.size();
+                  events.resize(events.size() + 1);
+                  user_events.resize(events.size());
+                  crossing_events[rh] = new_crossing_event;
+                  new_rhs.insert(new_crossing_event);
+                  slices[generator_slice].push_back(
+                      new TriggerEvent(*this, new_crossing_event, rh,
+                        instructions[gen[rh]]->owner));
+                }
               }
               else
                 new_rhs.insert(rh);
