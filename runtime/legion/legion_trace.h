@@ -398,19 +398,6 @@ namespace Legion {
       virtual OpKind get_operation_kind(void) const;
     };
 
-    struct CachedMapping
-    {
-      VariantID               chosen_variant;
-      TaskPriority            task_priority;
-      bool                    postmap_task;
-      std::vector<Processor>  target_procs;
-      std::deque<InstanceSet> physical_instances;
-    };
-
-    typedef
-      LegionMap<std::pair<unsigned, DomainPoint>, CachedMapping>::aligned
-      CachedMappings;
-
     /**
      * \class PhysicalTrace
      * This class is used for memoizing the dynamic physical dependence
@@ -447,7 +434,16 @@ namespace Legion {
       std::vector<Processor> replay_targets;
     };
 
+    struct CachedMapping
+    {
+      VariantID               chosen_variant;
+      TaskPriority            task_priority;
+      bool                    postmap_task;
+      std::vector<Processor>  target_procs;
+      std::deque<InstanceSet> physical_instances;
+    };
     typedef Memoizable::TraceLocalID TraceLocalID;
+    typedef LegionMap<TraceLocalID, CachedMapping>::aligned CachedMappings;
 
     /**
      * \class PhysicalTemplate
@@ -630,7 +626,7 @@ namespace Legion {
       std::map<TraceLocalID, Operation*> operations;
       std::vector<ApEvent> events;
       std::vector<ApUserEvent> user_events;
-      std::vector<unsigned> crossing_events;
+      std::map<unsigned, unsigned> crossing_events;
       CachedMappings                                  cached_mappings;
       LegionMap<InstanceView*, FieldMask>::aligned    previous_valid_views;
       LegionMap<std::pair<RegionTreeNode*, ContextID>,
