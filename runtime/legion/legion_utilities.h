@@ -10675,6 +10675,8 @@ namespace Legion {
     class FieldMaskSet : 
       public LegionHeapify<FieldMaskSet<T> > {
     public:
+      // forward declaration
+      class const_iterator;
       class iterator : public std::iterator<std::input_iterator_tag,
                               std::pair<T*,FieldMask> > {
       public:
@@ -10726,6 +10728,7 @@ namespace Legion {
             // Don't filter valid fields since its unsound
           }
       private:
+        friend class const_iterator;
         FieldMaskSet *set;
         std::pair<T*,FieldMask> *result;
         bool single;
@@ -10740,10 +10743,16 @@ namespace Legion {
       public:
         const_iterator(const const_iterator &rhs)
           : set(rhs.set), result(rhs.result), single(rhs.single) { }
+        // We can also make a const_iterator from a normal iterator
+        const_iterator(const iterator &rhs)
+          : set(rhs.set), result(rhs.result), single(rhs.single) { }
         ~const_iterator(void) { }
       public:
         inline const_iterator& operator=(const const_iterator &rhs)
           { set = rhs.set; result = rhs.result; 
+            single = rhs.single; return *this; }
+        inline const_iterator& operator=(const iterator &rhs)
+          { set = rhs.set; result = rhs.result;
             single = rhs.single; return *this; }
       public:
         inline bool operator==(const const_iterator &rhs) const
@@ -10801,13 +10810,14 @@ namespace Legion {
     public:
       // Return true if we actually added the entry, false if it already existed
       inline bool insert(T *entry, const FieldMask &mask); 
+      inline void filter(const FieldMask &filter);
       inline void erase(T *to_erase);
       inline void clear(void);
       inline size_t size(void) const;
     public:
       inline std::pair<T*,FieldMask>* next(T *current) const;
     public:
-      inline void move(FieldMaskSet &other);
+      inline void swap(FieldMaskSet &other);
     public:
       inline iterator begin(void);
       inline iterator find(T *entry);
@@ -10912,6 +10922,67 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<typename T>
+    inline void FieldMaskSet<T>::filter(const FieldMask &filter)
+    //--------------------------------------------------------------------------
+    {
+      if (single)
+      {
+        if (entries.single_entry != NULL)
+        {
+          valid_fields -= filter;
+          if (!valid_fields)
+            entries.single_entry = NULL;
+        }
+      }
+      else
+      {
+        valid_fields -= filter;
+        if (!valid_fields)
+        {
+          // No fields left so just clean everything up
+          delete entries.multi_entries;
+          entries.multi_entries = NULL;
+        }
+        else
+        {
+          // Manually remove entries
+          typename std::vector<T*> to_delete;
+          for (typename LegionMap<T*,FieldMask>::aligned::iterator it = 
+                entries.multi_entries->begin(); it !=
+                entries.multi_entries->end(); it++)
+          {
+            it->second -= filter;
+            if (!it->second)
+              to_delete.push_back(it->first);
+          }
+          if (!to_delete.empty())
+          {
+            for (typename std::vector<T*>::const_iterator it = 
+                  to_delete.begin(); it != to_delete.end(); it++)
+              entries.multi_entries->erase(*it);
+            if (entries.multi_entries->empty())
+            {
+              delete entries.multi_entries;
+              entries.multi_entries = NULL;
+              single = true;
+            }
+            else if (entries.multi_entries->size() == 1)
+            {
+              typename LegionMap<T*,FieldMask>::aligned::iterator last = 
+                entries.multi_entries->begin();     
+              T *temp = last->first; 
+              valid_fields = last->second;
+              delete entries.multi_entries;
+              entries.single_entry = temp;
+              single = true;
+            }
+          }
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T>
     inline void FieldMaskSet<T>::erase(T *to_erase)
     //--------------------------------------------------------------------------
     {
@@ -11009,27 +11080,21 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<typename T>
-    inline void FieldMaskSet<T>::move(FieldMaskSet &other)
+    inline void FieldMaskSet<T>::swap(FieldMaskSet &other)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(other.empty());
-#endif
-      if (single)
-      {
-        other.entries.single_entry = entries.single_entry;
-        other.single = true;
-        entries.single_entry = NULL;
-      }
-      else
-      {
-        other.entries.multi_entries = entries.multi_entries;
-        other.single = false;
-        entries.multi_entries = NULL;
-        single = true;
-      }
+      // Just use single, doesn't matter for swap
+      T *temp_entry = other.entries.single_entry;
+      other.entries.single_entry = entries.single_entry;
+      entries.single_entry = temp_entry;
+
+      bool temp_single = other.single;
+      other.single = single;
+      single = temp_single;
+
+      FieldMask temp_valid_fields = other.valid_fields;
       other.valid_fields = valid_fields;
-      valid_fields.clear();
+      valid_fields = temp_valid_fields;
     }
 
     //--------------------------------------------------------------------------

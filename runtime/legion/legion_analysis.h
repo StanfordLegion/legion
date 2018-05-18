@@ -621,6 +621,31 @@ namespace Legion {
     public:
       LogicalState& operator=(const LogicalState &rhs);
     public:
+      inline void keep_dirty_fields(FieldMask &to_keep) const
+      {
+        FieldMask dirty_fields = write_fields | reduction_fields;
+        if (!partial_writes.empty())
+          dirty_fields |= partial_writes.get_valid_mask();
+        to_keep &= dirty_fields;
+      }
+      inline void filter_dirty_fields(FieldMask &to_filter) const
+      {
+        FieldMask dirty_fields = write_fields | reduction_fields;
+        if (!partial_writes.empty())
+          dirty_fields |= partial_writes.get_valid_mask();
+        to_filter -= dirty_fields;
+      }
+      inline void update_write_fields(const FieldMask &update)
+      {
+        write_fields |= update;
+        // we can also filter out any partial writes once we
+        // get a write at this level too
+        if (partial_writes.empty() ||
+            (partial_writes.get_valid_mask() * update))
+          return;
+        partial_writes.filter(update);
+      }
+    public:
       void check_init(void);
       void clear_logical_users(void);
       void reset(void);
@@ -629,8 +654,6 @@ namespace Legion {
       void advance_projection_epochs(const FieldMask &advance_mask);
       void capture_projection_epochs(FieldMask capture_mask,
                                      ProjectionInfo &info);
-      void capture_close_epochs(FieldMask capture_mask,
-                                ClosedNode *closed_node) const;
       void update_projection_epochs(FieldMask update_mask,
                                     const ProjectionInfo &info);
     public:
@@ -647,10 +670,10 @@ namespace Legion {
       FieldMask dirty_below;
       // Fields that we know have been written at the current level
       // (reductions don't count, we want to know they were actually written)
-      FieldMask dirty_fields;
+      FieldMask write_fields;
       // Furthermore keep track of any partial writes that we see,
       // either from projection writes or from close operations
-      //LegionMap<IndexSpaceExpression*,FieldMask>::aligned partial_writes;
+      WriteSet partial_writes;
       // Keep track of which fields we've done a reduction to here
       FieldMask reduction_fields;
       LegionMap<ReductionOpID,FieldMask>::aligned outstanding_reductions;
@@ -660,66 +683,6 @@ namespace Legion {
 
     typedef DynamicTableAllocator<LogicalState,10,8> LogicalStateAllocator;
 
-    /**
-     * \class ClosedNode
-     * A closed node is the type used for constructing trees that 
-     * mirror the region tree and summarize all the nodes that
-     * are captured by a close operation. They are concrete down
-     * to the level of projection functions at which point they
-     * capture the projection information.
-     */
-    class ClosedNode : public Collectable,
-                       public LegionHeapify<ClosedNode> {
-    public:
-      ClosedNode(RegionTreeNode *node);
-      ClosedNode(const ClosedNode &rhs);
-      ~ClosedNode(void);
-    public:
-      ClosedNode& operator=(const ClosedNode &rhs);
-    public:
-      inline const FieldMask& get_valid_fields(void) const 
-        { return valid_fields; }
-      inline const FieldMask& get_covered_fields(void) const
-        { return covered_fields; }
-    public:
-      // For performing disjoint close operations
-      ClosedNode* clone_disjoint_projection(RegionTreeNode *child_node,
-                                            const FieldMask &close_mask) const;
-    public:
-      void add_child_node(ClosedNode *child);
-      void record_closed_fields(const FieldMask &closed_fields);
-      void record_reduced_fields(const FieldMask &reduced_fields);
-      void record_projections(const ProjectionEpoch *epoch,
-                              const FieldMask &closed_fields);
-      void record_projection(ProjectionFunction *function,
-                             IndexSpaceNode *domain, const FieldMask &mask);
-    public:
-      void fix_closed_tree(void);
-      void filter_dominated_fields(const ClosedNode *old_tree,
-                                   FieldMask &non_dominated_mask) const;
-    protected:
-      void filter_dominated_projection_fields(FieldMask &non_dominated_mask,
-          const std::map<ProjectionFunction*,
-             LegionMap<IndexSpaceNode*,
-                       FieldMask>::aligned> &new_projections) const;
-      void filter_dominated_children(FieldMask &non_dominated_mask,
-          const std::map<RegionTreeNode*,ClosedNode*> &new_children) const;
-    public:
-      void pack_closed_node(Serializer &rez) const;
-      void perform_unpack(Deserializer &derez, Runtime *runtime,bool is_region);
-      static ClosedNode* unpack_closed_node(Deserializer &derez, 
-                                            Runtime *runtime, bool is_region);
-    public:
-      RegionTreeNode *const node;
-    protected:
-      FieldMask valid_fields; // Fields that are summarized in this tree
-      FieldMask covered_fields; // Fields totally written to at this node
-      FieldMask reduced_fields; // Fields purely reduced to at this node
-      std::map<RegionTreeNode*,ClosedNode*> children;
-      std::map<ProjectionFunction*,
-               LegionMap<IndexSpaceNode*,FieldMask>::aligned> projections;
-    };
- 
     /**
      * \struct LogicalCloser
      * This structure helps keep track of the state
@@ -744,9 +707,9 @@ namespace Legion {
       void record_overwriting_close(const FieldMask &mask, bool projection);
       void record_read_only_close(const FieldMask &mask, bool projection);
       void record_flush_only_close(const FieldMask &mask);
-      ClosedNode* find_closed_node(RegionTreeNode *node);
       void record_closed_user(const LogicalUser &user, 
                               const FieldMask &mask, bool read_only);
+      
 #ifndef LEGION_SPY
       void pop_closed_user(bool read_only);
 #endif
@@ -758,6 +721,16 @@ namespace Legion {
                                        const FieldMask &open_below,
              LegionList<LogicalUser,CURR_LOGICAL_ALLOC>::track_aligned &cusers,
              LegionList<LogicalUser,PREV_LOGICAL_ALLOC>::track_aligned &pusers);
+      void begin_close_children(const FieldMask &closing_mask,
+                                RegionTreeNode *closing_node,
+                                const FieldMask &complete_writes,
+                                const WriteSet &partial_writes);
+      void end_close_children(FieldMask closed_mask,
+                              RegionTreeNode *closed_node);
+      void update_close_writes(const FieldMask &closing_mask,
+                               RegionTreeNode *closing_node,
+                               const FieldMask &complete_writes,
+                               const WriteSet &partial_writes);
       void update_state(LogicalState &state);
       void register_close_operations(
               LegionList<LogicalUser,CURR_LOGICAL_ALLOC>::track_aligned &users);
@@ -784,10 +757,19 @@ namespace Legion {
       FieldMask normal_close_mask;
       FieldMask read_only_close_mask;
       FieldMask flush_only_close_mask;
+      // Read-only closes because we're overwriting without reading
       FieldMask overwriting_close_mask;
-      std::map<RegionTreeNode*,ClosedNode*> closed_nodes;
-      FieldMask closed_projections;
+      // Closes for which we are actually closing up individual children
       FieldMask disjoint_close_mask;
+      // Fields which closed up a projection operation from this level 
+      FieldMask closed_projections;
+      // Fields that we did complete writes to from for this close operation
+      FieldMask complete_writes;
+    protected:
+      // Use these for computing the close summaries of what has been written
+      LegionDeque<FieldMaskSet<RegionTreeNode> >::aligned written_children;
+      LegionDeque<WriteSet>::aligned partial_writes;
+      LegionDeque<FieldMask>::aligned written_above;
     protected:
       // At most we will ever generate three close operations at a node
       InterCloseOp *normal_close_op;

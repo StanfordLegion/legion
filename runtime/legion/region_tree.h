@@ -385,9 +385,10 @@ namespace Legion {
       void physical_perform_close(const RegionRequirement &req,
                                   VersionInfo &version_info,
                                   Operation *op, unsigned index,
-                                  ClosedNode *closed_tree,
                                   RegionTreeNode *close_node,
                                   const FieldMask &closing_mask,
+                                  const FieldMask &complete_mask,
+                                  WriteSet &partial_writes,
                                   std::set<RtEvent> &map_applied,
                                   const RestrictInfo &restrict_info,
                                   const InstanceSet &targets,
@@ -2486,9 +2487,10 @@ namespace Legion {
     public:
       void send_back_logical_state(ContextID ctx, UniqueID context_uid,
                                    AddressSpaceID target);
-      void process_logical_state_return(ContextID ctx, Deserializer &derez);
+      void process_logical_state_return(ContextID ctx, Deserializer &derez,
+                                        AddressSpaceID source);
       static void handle_logical_state_return(Runtime *runtime,
-                                              Deserializer &derez);
+                              Deserializer &derez, AddressSpaceID source);
     public:
       void compute_version_numbers(ContextID ctx, 
                                    const RegionTreePath &path,
@@ -2529,7 +2531,8 @@ namespace Legion {
                                      VersionInfo &version_info,
                                      UniqueID logical_context_uid,
                                      InnerContext *owner_context,
-                                     ClosedNode *closed_tree,
+                                     const FieldMask &complete_mask,
+                                     WriteSet &partial_writes,
                                      std::set<RtEvent> &ready_events,
                                      const ProjectionInfo *proj_info);
       // This method will always add valid references to the set of views

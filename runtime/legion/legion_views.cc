@@ -5284,20 +5284,28 @@ namespace Legion {
     //--------------------------------------------------------------------------
     CompositeView::CompositeView(RegionTreeForest *ctx, DistributedID did,
                               AddressSpaceID owner_proc, RegionTreeNode *node,
-                              DeferredVersionInfo *info, ClosedNode *tree, 
-                              InnerContext *context, bool register_now)
+                              DeferredVersionInfo *info, const FieldMask &comp, 
+                              WriteSet &partial, InnerContext *context,
+                              bool register_now)
       : DeferredView(ctx, encode_composite_did(did), owner_proc, 
                      node, register_now), CompositeBase(view_lock),
-        version_info(info), closed_tree(tree), owner_context(context)
+        version_info(info), complete_fields(comp), owner_context(context)
     {
       // Add our references
       version_info->add_reference();
-      closed_tree->add_reference();
       owner_context->add_reference();
+      // See if we have any partial writes
+      if (!partial.empty())
+      {
+        // Copy swap in the write set
+        partial_writes.swap(partial);
+        // Add our expression references
+        for (WriteSet::const_iterator it = partial_writes.begin();
+              it != partial_writes.end(); it++)
+          it->first->add_expression_reference();
+      }
 #ifdef DEBUG_LEGION
       assert(owner_context != NULL);
-      assert(closed_tree != NULL);
-      assert(closed_tree->node == node);
 #endif
 #ifdef LEGION_GC
       log_garbage.info("GC Composite View %lld %d", 
@@ -5308,7 +5316,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     CompositeView::CompositeView(const CompositeView &rhs)
       : DeferredView(NULL, 0, 0, NULL, false), CompositeBase(view_lock),
-        version_info(NULL), closed_tree(NULL), owner_context(NULL)
+        version_info(NULL), complete_fields(rhs.complete_fields), 
+        owner_context(NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -5349,12 +5358,18 @@ namespace Legion {
       // Remove our references and delete if necessary
       if (version_info->remove_reference())
         delete version_info;
-      // Remove our references and delete if necessary
-      if (closed_tree->remove_reference())
-        delete closed_tree;
       // Remove the reference on our context
       if (owner_context->remove_reference())
         delete owner_context;
+      // Remove any expression references
+      if (!partial_writes.empty())
+      {
+        for (WriteSet::iterator it = partial_writes.begin();
+              it != partial_writes.end(); it++)
+          if (it->first->remove_expression_reference())
+            delete it->first;
+        partial_writes.clear();
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -5373,8 +5388,22 @@ namespace Legion {
     {
       Runtime *runtime = context->runtime; 
       DistributedID result_did = runtime->get_available_distributed_id();
+      // See if we need to compute a new partial write set 
+      WriteSet clone_partial_writes;
+      if (!partial_writes.empty())
+      {
+        for (WriteSet::const_iterator it = partial_writes.begin();
+              it != partial_writes.end(); it++)
+        {
+          const FieldMask overlap = it->second & clone_mask;
+          if (!overlap)
+            continue;
+          clone_partial_writes.insert(it->first, overlap);
+        }
+      }
       CompositeView *result = new CompositeView(context, result_did,
-          runtime->address_space, logical_node, version_info, closed_tree, 
+          runtime->address_space, logical_node, version_info, 
+          complete_fields & clone_mask, clone_partial_writes, 
           owner_context, true/*register now*/);
       // Clone the children
       for (LegionMap<CompositeNode*,FieldMask>::aligned::const_iterator it = 
@@ -5488,7 +5517,17 @@ namespace Legion {
         else
           rez.serialize(logical_node->as_partition_node()->handle);
         version_info->pack_version_numbers(rez);
-        closed_tree->pack_closed_node(rez);
+        rez.serialize(complete_fields);
+        rez.serialize<size_t>(partial_writes.size());
+        if (!partial_writes.empty())
+        {
+          for (WriteSet::const_iterator it = partial_writes.begin();
+                it != partial_writes.end(); it++)
+          {
+            it->first->pack_expression(rez, target);
+            rez.serialize(it->second);
+          }
+        }
         pack_composite_view(rez);
       }
       runtime->send_composite_view(target, rez);
@@ -5504,9 +5543,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void CompositeView::prune(ClosedNode *new_tree, FieldMask &valid_mask,
-                     LegionMap<CompositeView*,FieldMask>::aligned &replacements, 
-                     unsigned prune_depth)
+    void CompositeView::prune(
+                const WriteMasks &partial_write_masks, FieldMask &valid_mask,
+                LegionMap<CompositeView*,FieldMask>::aligned &replacements, 
+                unsigned prune_depth)
     //--------------------------------------------------------------------------
     {
       if (prune_depth >= LEGION_PRUNE_DEPTH_WARNING)
@@ -5514,13 +5554,37 @@ namespace Legion {
                         "WARNING: Composite View Tree has depth %d which "
                         "is larger than LEGION_PRUNE_DEPTH_WARNING of %d. "
                         "Please report this use case to the Legion developers "
-                        "mailing list as it could be an important "
-                        "runtime performance bug.", prune_depth,
+                        "mailing list as it is a highly unusual case or could "
+                        "be a runtime performance bug.", prune_depth,
                         LEGION_PRUNE_DEPTH_WARNING)
-      // Figure out which fields are not dominated
-      FieldMask non_dominated = valid_mask;
-      new_tree->filter_dominated_fields(closed_tree, non_dominated);
-      FieldMask dominated = valid_mask - non_dominated;
+      // First check to see if we can be pruned      
+      FieldMask dominated; 
+      RegionTreeForest *forest = logical_node->context;
+      if (!partial_writes.empty() && 
+          !(partial_writes.get_valid_mask() * valid_mask))
+      {
+        for (WriteSet::const_iterator pit = partial_writes.begin();
+              pit != partial_writes.end(); pit++)
+        {
+          FieldMask remaining = pit->second & valid_mask;
+          if (!remaining)
+            continue;
+          for (WriteMasks::const_iterator it = partial_write_masks.begin();
+                it != partial_write_masks.end(); it++)
+          {
+            const FieldMask overlap = it->second & remaining;
+            if (!overlap)
+              continue;
+            IndexSpaceExpression *diff_expr = 
+              forest->subtract_index_spaces(pit->first, it->first);
+            if (diff_expr->is_empty())
+              dominated |= overlap;
+            remaining -= overlap;
+            if (!remaining)
+              break;
+          }
+        }
+      }
       if (!!dominated)
       {
         // If we had any dominated fields then we try to prune our
@@ -5533,7 +5597,8 @@ namespace Legion {
           FieldMask overlap = it->second & dominated;
           if (!overlap)
             continue;
-          it->first->prune(new_tree, overlap, replacements, prune_depth+1);
+          it->first->prune(partial_write_masks, overlap, 
+                           replacements, prune_depth+1);
           if (!!overlap)
           {
             // Some fields are still valid so add them to the replacements
@@ -5558,11 +5623,11 @@ namespace Legion {
             nested_composite_views.begin(); it != 
             nested_composite_views.end(); it++)
       {
-        FieldMask overlap = it->second & non_dominated;
+        const FieldMask overlap = it->second & valid_mask;
         if (!overlap)
           continue;
         FieldMask still_valid = overlap;
-        it->first->prune(new_tree, still_valid, 
+        it->first->prune(partial_write_masks, still_valid, 
                          local_replacements, prune_depth+1);
         // See if any fields were pruned, if so they are changed
         FieldMask changed = overlap - still_valid;
@@ -5817,8 +5882,20 @@ namespace Legion {
       }
       DeferredVersionInfo *version_info = new DeferredVersionInfo();
       version_info->unpack_version_numbers(derez, runtime->forest);
-      ClosedNode *closed_tree = 
-        ClosedNode::unpack_closed_node(derez, runtime, is_region);
+      FieldMask complete_mask;
+      derez.deserialize(complete_mask);
+      size_t num_partial_writes;
+      derez.deserialize(num_partial_writes);
+      WriteSet partial_writes;
+      for (unsigned idx = 0; idx < num_partial_writes; idx++)
+      {
+        IndexSpaceExpression *expr =   
+          IndexSpaceExpression::unpack_expression(derez, 
+                                runtime->forest, source);
+        FieldMask expr_mask;
+        derez.deserialize(expr_mask);
+        partial_writes.insert(expr, expr_mask);
+      }
       InnerContext *owner_context = runtime->find_context(owner_uid);
       // Make the composite view, but don't register it yet
       void *location;
@@ -5826,13 +5903,14 @@ namespace Legion {
       if (runtime->find_pending_collectable_location(did, location))
         view = new(location) CompositeView(runtime->forest, 
                                            did, owner, target_node, 
-                                           version_info, closed_tree,
-                                           owner_context,
+                                           version_info, complete_mask,
+                                           partial_writes, owner_context,
                                            false/*register now*/);
       else
         view = new CompositeView(runtime->forest, did, owner, 
-                           target_node, version_info, closed_tree, 
-                           owner_context, false/*register now*/);
+                           target_node, version_info, complete_mask,
+                           partial_writes, owner_context, 
+                           false/*register now*/);
       // Unpack all the internal data structures
       std::set<RtEvent> ready_events;
       view->unpack_composite_view(derez, ready_events);
@@ -5869,9 +5947,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void CompositeView::record_valid_view(LogicalView *view, const FieldMask &m)
+    void CompositeView::record_valid_view(LogicalView *view, FieldMask mask)
     //--------------------------------------------------------------------------
     {
+      // If our composite view represents a complete write of this
+      // logical region for any fields then there is no need to capture
+      // this view for any of those fields
+      if (!!complete_fields)
+      {
+        mask -= complete_fields;
+        if (!mask)
+          return;
+      }
       // For now we'll just record it, we'll add references later
       // during the call to finalize_capture
       if (view->is_instance_view())
@@ -5883,9 +5970,9 @@ namespace Legion {
         LegionMap<LogicalView*,FieldMask>::aligned::iterator finder = 
           valid_views.find(mat_view);
         if (finder == valid_views.end())
-          valid_views[mat_view] = m;
+          valid_views[mat_view] = mask;
         else
-          finder->second |= m;
+          finder->second |= mask;
       }
       else
       {
@@ -5900,9 +5987,9 @@ namespace Legion {
             LegionMap<CompositeView*,FieldMask>::aligned::iterator finder = 
               nested_composite_views.find(composite_view);
             if (finder == nested_composite_views.end())
-              nested_composite_views[composite_view] = m;
+              nested_composite_views[composite_view] = mask;
             else
-              finder->second |= m;
+              finder->second |= mask;
           }
           else
           {
@@ -5914,9 +6001,9 @@ namespace Legion {
             LegionMap<LogicalView*,FieldMask>::aligned::iterator finder = 
               valid_views.find(composite_view);
             if (finder == valid_views.end())
-              valid_views[composite_view] = m;
+              valid_views[composite_view] = mask;
             else
-              finder->second |= m;
+              finder->second |= mask;
           }
         }
         else
@@ -5925,9 +6012,9 @@ namespace Legion {
           LegionMap<LogicalView*,FieldMask>::aligned::iterator finder = 
             valid_views.find(def_view);
           if (finder == valid_views.end())
-            valid_views[def_view] = m;
+            valid_views[def_view] = mask;
           else
-            finder->second |= m;
+            finder->second |= mask;
         }
       }
     }
@@ -5998,19 +6085,12 @@ namespace Legion {
               nested_composite_views.begin(); it != 
               nested_composite_views.end(); it++)
         {
-          // If the composite view is above in the tree we don't
-          // need to worry about pruning it for resource reasons
-          if (it->first->logical_node != logical_node)
-          {
 #ifdef DEBUG_LEGION
-            // Should be above us in the region tree
-            assert(logical_node->get_depth() > 
-                    it->first->logical_node->get_depth());
+          // Should be the same node in the region tree
+          assert(logical_node == it->first->logical_node);
 #endif
-            it->first->add_nested_resource_ref(did);
-            continue;
-          }
-          it->first->prune(closed_tree, it->second, replacements, 0/*depth*/);
+          it->first->prune(partial_writes, it->second,
+                           replacements, 0/*depth*/);
           if (!it->second)
             to_erase.push_back(it->first);
           else

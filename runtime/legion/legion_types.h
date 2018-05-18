@@ -1435,7 +1435,6 @@ namespace Legion {
     struct LogicalUser;
     struct PhysicalUser;
     struct TraceInfo;
-    class ClosedNode;
     class LogicalCloser;
     class TreeCloseImpl;
     class TreeClose;

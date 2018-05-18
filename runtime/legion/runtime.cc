@@ -6241,7 +6241,8 @@ namespace Legion {
             }
           case SEND_BACK_LOGICAL_STATE:
             {
-              runtime->handle_send_back_logical_state(derez);
+              runtime->handle_send_back_logical_state(derez, 
+                                                      remote_address_space);
               break;
             }
           case SEND_MATERIALIZED_VIEW:
@@ -15133,10 +15134,11 @@ namespace Legion {
     }
     
     //--------------------------------------------------------------------------
-    void Runtime::handle_send_back_logical_state(Deserializer &derez)
+    void Runtime::handle_send_back_logical_state(Deserializer &derez,
+                                                 AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      RegionTreeNode::handle_logical_state_return(this, derez); 
+      RegionTreeNode::handle_logical_state_return(this, derez, source); 
     }
 
     //--------------------------------------------------------------------------

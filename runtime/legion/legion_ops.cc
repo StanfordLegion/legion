@@ -6506,9 +6506,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void InterCloseOp::initialize(TaskContext *ctx,const RegionRequirement &req,
-                              ClosedNode *closed_t, const TraceInfo &trace_info,
-                              int close_idx, const VersionInfo &clone_info,
-                              const FieldMask &close_m, Operation *creator)
+                            const TraceInfo &trace_info, int close_idx, 
+                            const VersionInfo &clone_info, RegionTreeNode *node,
+                            const FieldMask &close_m, Operation *creator,
+                            const FieldMask &complete, WriteSet &partial)
     //--------------------------------------------------------------------------
     {
       if (runtime->legion_spy_enabled)
@@ -6517,8 +6518,9 @@ namespace Legion {
       parent_req_index = creator->find_parent_index(close_idx);
       initialize_close(creator, close_idx, parent_req_index, req, trace_info);
       close_mask = close_m;
-      closed_tree = closed_t;
-      version_info.clone_logical(clone_info, close_m, closed_t->node);
+      complete_mask = complete;
+      partial_writes.swap(partial);
+      version_info.clone_logical(clone_info, close_m, node);
       if (parent_ctx->has_restrictions())
         parent_ctx->perform_restricted_analysis(requirement, restrict_info);
       if (runtime->legion_spy_enabled)
@@ -6542,10 +6544,9 @@ namespace Legion {
       if (runtime->legion_spy_enabled)
       {
         std::set<FieldID> disjoint_close_fields;
-#ifdef DEBUG_LEGION
-        assert(closed_tree != NULL);
-#endif
-        closed_tree->node->column_source->get_field_set(disjoint_close_mask,
+        FieldSpaceNode *field_space = 
+          runtime->forest->get_node(requirement.parent.get_field_space());
+        field_space->get_field_set(disjoint_close_mask,
             requirement.privilege_fields, disjoint_close_fields);
         for (std::set<FieldID>::const_iterator it = 
               disjoint_close_fields.begin(); it != 
@@ -6593,12 +6594,29 @@ namespace Legion {
 #endif
       version_info.clone_to_depth(child_depth-1, close_info.close_mask,
                         context, close_info.version_info, ready_events);
+      WriteSet child_partial_writes;
+      if (!partial_writes.empty())
+      {
+        // Compute the set of partial writes
+        IndexSpaceExpression *child_expr = 
+          child_to_close->get_index_space_expression();
+        for (WriteSet::const_iterator it = partial_writes.begin();
+              it != partial_writes.end(); it++)
+        {
+          IndexSpaceExpression *intersect = 
+            child_to_close->context->intersect_index_spaces(
+                child_expr, it->first);
+          if (!intersect->is_empty())
+            child_partial_writes.insert(intersect, it->second);
+        }
+      }
       runtime->forest->physical_perform_close(requirement,
                                               close_info.version_info,
                                               this, 0/*idx*/, 
-                                              close_info.close_node,
                                               child_to_close, 
                                               close_info.close_mask,
+                                              complete_mask,
+                                              child_partial_writes,
                                               ready_events,
                                               restrict_info,
                                               chosen_instances, 
@@ -6617,7 +6635,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       activate_close();  
-      closed_tree = NULL;
       mapper = NULL;
       outstanding_profiling_requests = 1; // start at 1 to guard
       profiling_reported = RtUserEvent::NO_RT_USER_EVENT;
@@ -6635,11 +6652,8 @@ namespace Legion {
       acquired_instances.clear();
       map_applied_conditions.clear();
       close_mask.clear();
-      if (closed_tree != NULL)
-      {
-        delete closed_tree;
-        closed_tree = NULL;
-      }
+      complete_mask.clear();
+      partial_writes.clear();
       chosen_instances.clear();
       disjoint_close_mask.clear();
       projection_info.clear();
@@ -6726,9 +6740,6 @@ namespace Legion {
       }
       else
         chosen_instances = restrict_info.get_instances();
-#ifdef DEBUG_LEGION
-      assert(closed_tree != NULL);
-#endif
       RegionTreeNode *close_node = (
           requirement.handle_type == PART_PROJECTION) ?
               static_cast<RegionTreeNode*>(
@@ -6752,9 +6763,6 @@ namespace Legion {
                 it = children_to_close.begin(); it != 
                 children_to_close.end(); it++)
           {
-            // Make our copies of the closed tree now
-            it->second.close_node = closed_tree->clone_disjoint_projection(
-                                          it->first, it->second.close_mask);
             // See if we need to defer it
             if (!it->second.ready_events.empty())
             {
@@ -6784,8 +6792,8 @@ namespace Legion {
         // Now we can perform our close operation
         runtime->forest->physical_perform_close(requirement,
                                                 version_info, this, 0/*idx*/,
-                                                closed_tree, 
                                                 close_node, close_mask,
+                                                complete_mask, partial_writes,
                                                 map_applied_conditions,
                                                 restrict_info,
                                                 chosen_instances, NULL
@@ -6794,8 +6802,6 @@ namespace Legion {
                                                 , unique_op_id
 #endif
                                                 );
-        // The physical perform close call took ownership
-        closed_tree = NULL;
       }
       if (runtime->legion_spy_enabled)
       {

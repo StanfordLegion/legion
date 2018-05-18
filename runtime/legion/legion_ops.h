@@ -1313,7 +1313,6 @@ namespace Legion {
       public:
         FieldMask close_mask;
         VersionInfo version_info;
-        ClosedNode *close_node;
         std::set<RtEvent> ready_events;
       };
       struct DisjointCloseArgs : public LgTaskArgs<DisjointCloseArgs> {
@@ -1337,9 +1336,10 @@ namespace Legion {
       InterCloseOp& operator=(const InterCloseOp &rhs);
     public:
       void initialize(TaskContext *ctx, const RegionRequirement &req,
-                      ClosedNode *closed_tree, const TraceInfo &trace_info,
-                      int close_idx, const VersionInfo &version_info,
-                      const FieldMask &close_mask, Operation *create_op);
+                      const TraceInfo &trace_info, int close_idx, 
+                      const VersionInfo &version_info, RegionTreeNode *node,
+                      const FieldMask &close_mask, Operation *create_op,
+                      const FieldMask &complete_mask, WriteSet &partial);
       ProjectionInfo& initialize_disjoint_close(const FieldMask &disjoint_mask,
                                                 IndexSpace launch_space);
       DisjointCloseInfo* find_disjoint_close_child(unsigned index,
@@ -1375,7 +1375,10 @@ namespace Legion {
       static void handle_disjoint_close(const void *args);
     protected:
       FieldMask close_mask;
-      ClosedNode *closed_tree;
+      // Fields which we are doing complete writes for
+      FieldMask complete_mask;
+      // Any partial writes that we have
+      WriteSet partial_writes;
       InstanceSet chosen_instances;
     protected:
       // For disjoint partition closes with projections

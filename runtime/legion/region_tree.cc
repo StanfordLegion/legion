@@ -2186,8 +2186,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void RegionTreeForest::physical_perform_close(const RegionRequirement &req,
                 VersionInfo &version_info, Operation *op, unsigned index, 
-                ClosedNode *closed_tree, RegionTreeNode *close_node,
-                const FieldMask &closing_mask, std::set<RtEvent> &map_applied, 
+                RegionTreeNode *close_node, const FieldMask &closing_mask, 
+                const FieldMask &complete_mask, WriteSet &partial_writes,
+                std::set<RtEvent> &map_applied, 
                 const RestrictInfo &restrict_info, const InstanceSet &targets,
                 const ProjectionInfo *projection_info
 #ifdef DEBUG_LEGION
@@ -2210,7 +2211,8 @@ namespace Legion {
       // update copies to the target instances from the composite instance
       CompositeView *result = close_node->create_composite_instance(info.ctx, 
                           closing_mask, version_info, logical_ctx_uid, 
-                          context, closed_tree, map_applied, projection_info);
+                          context, complete_mask, partial_writes, 
+                          map_applied, projection_info);
       if (targets.empty())
         return;
       PhysicalState *physical_state = NULL;
@@ -10707,7 +10709,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       LogicalState &state = get_logical_state(ctx);
-      state.dirty_fields |= init_dirty;
+      state.write_fields |= init_dirty;
     }
 
     //--------------------------------------------------------------------------
@@ -10837,8 +10839,8 @@ namespace Legion {
         // might be multiple reductions that need this so we make an
         // advance operation to handle it for all users. We can skip
         // this if some other user has already written or reduced
-        FieldMask advance_mask = 
-          user.field_mask - (state.dirty_fields | state.reduction_fields);
+        FieldMask advance_mask = user.field_mask;
+        state.filter_dirty_fields(advance_mask);
         if (!!advance_mask)
         {
           // See which ones we've handled from above
@@ -10916,8 +10918,8 @@ namespace Legion {
                  (proj_info.projection->depth == 0))))
           {
             // Figure out which advances need to come to this level
-            FieldMask advance_here =
-              user.field_mask - (state.dirty_fields | state.reduction_fields);
+            FieldMask advance_here = user.field_mask;
+            state.filter_dirty_fields(advance_here);
             RegionTreeNode *parent = get_parent();
             if (parent == NULL)
             {
@@ -10995,7 +10997,96 @@ namespace Legion {
           // If we're writing, then record our projection info in 
           // the current projection epoch
           if (IS_WRITE(user.usage))
+          {
             state.update_projection_epochs(user.field_mask, proj_info);
+            // Now we need to update the write fields or the partial
+            // write set depending on whether this is a complete write
+            // to this node in the region tree or not. If this is a depth
+            // 0 projection functor and either we're a region on a partition
+            // with the same number of subregions as the color space then
+            // we can trivially prove that this is a complete write.
+            if ((proj_info.projection->depth == 0) && 
+                (is_region() || (get_num_children() == 
+                                 proj_info.projection_space->get_volume())))
+            {
+              // Fast path: we know that this a complete write of this node
+              // so we can just do the obvious thing
+              state.update_write_fields(user.field_mask);
+            }
+            else
+            {
+              // This is the slow path where we actually have to enumerate
+              // all the points in the projection operation and evaluate
+              // the union of their subregion accesses so we can get a 
+              // precise measure of the points that are written
+              // Issue a performance warning since this is very suboptimal
+              // without any kind of projection functor analysis
+              if (proj_info.projection->depth == 0)
+                REPORT_LEGION_WARNING(LEGION_WARNING_EAGER_PROJECTION_EVALUATION
+                    ,"Legion is eagerly evaluating a projection functor for "
+                    "region requirement %d of operation %s (uid %lld) because "
+                    "it has an incomplete index space for the partition being "
+                    "projected. If this is a large index space (in this case "
+                    "%zd points) then this could lead to a noticeable "
+                    "performance degradation. Please report this use case to "
+                    "the Legion developers mailing list.", user.idx, 
+                    user.op->get_logging_name(), user.op->get_unique_op_id(),
+                    proj_info.projection_space->get_volume())
+              else
+                REPORT_LEGION_WARNING(LEGION_WARNING_EAGER_PROJECTION_EVALUATION
+                    ,"Legion is eagerly evaluating a projection functor with "
+                    "region requirement %d of operation %s (uid %lld) because "
+                    "it has projection functor with depth greater than zero "
+                    "and Legion cannot prove the completeness of its write."
+                    "If this is a large index space (in this case "
+                    "%zd points) then this could lead to a noticeable "
+                    "performance degradation. Please report this use case to "
+                    "the Legion developers mailing list.", user.idx, 
+                    user.op->get_logging_name(), user.op->get_unique_op_id(),
+                    proj_info.projection_space->get_volume())
+              Domain launch_dom;
+              proj_info.projection_space->get_launch_space_domain(launch_dom);
+              std::set<IndexSpaceExpression*> write_expressions;
+              ProjectionFunctor *functor = proj_info.projection->functor; 
+              if (is_region())
+              {
+                const LogicalRegion upper_bound = 
+                  this->as_region_node()->handle;
+                for (Domain::DomainPointIterator itr(launch_dom); itr; itr++)
+                {
+                  LogicalRegion handle = functor->project(
+                      reinterpret_cast<Mappable*>(user.op), user.idx,
+                      upper_bound, itr.p);
+                  RegionNode *node = context->get_node(handle);
+                  write_expressions.insert(node->get_index_space_expression());
+                }
+              }
+              else
+              {
+                const LogicalPartition upper_bound = 
+                  this->as_partition_node()->handle;
+                for (Domain::DomainPointIterator itr(launch_dom); itr; itr++)
+                {
+                  LogicalRegion handle = functor->project(
+                      reinterpret_cast<Mappable*>(user.op), user.idx,
+                      upper_bound, itr.p);
+                  RegionNode *node = context->get_node(handle);
+                  write_expressions.insert(node->get_index_space_expression());
+                }
+              }
+              // Now we can union these together
+              IndexSpaceExpression *union_expr = 
+                context->union_index_spaces(write_expressions);
+              // Do a test to see if it is complete or not
+              IndexSpaceExpression *diff_expr = 
+                context->subtract_index_spaces(
+                    this->get_index_space_expression(), union_expr);
+              if (diff_expr->is_empty())
+                state.update_write_fields(user.field_mask); 
+              else
+                state.partial_writes.insert(union_expr, user.field_mask);
+            }
+          }
         }
         else if (user.usage.redop > 0)
         {
@@ -11006,7 +11097,7 @@ namespace Legion {
         {
           // If we're not projecting and writing, indicating that
           // we have written this logical region
-          state.dirty_fields |= user.field_mask;
+          state.update_write_fields(user.field_mask);
         }
       }
       else 
@@ -11204,8 +11295,8 @@ namespace Legion {
       // Only have to do this at the root of the advance
       if (advance_root)
       {
-        FieldMask previous_dirty = advance_user.field_mask & 
-                                  (state.dirty_fields | state.reduction_fields);
+        FieldMask previous_dirty = advance_user.field_mask;
+        state.keep_dirty_fields(previous_dirty);
         if (!!previous_dirty)
           advance_op->record_dirty_previous(get_depth(), previous_dirty);
       }
@@ -11273,66 +11364,65 @@ namespace Legion {
                                      state.curr_epoch_users, closing_mask);
       perform_closing_checks<PREV_LOGICAL_ALLOC>(closer, read_only_close,
                                      state.prev_epoch_users, closing_mask);
-      // If this is not a read-only close, then capture the 
-      // close information
-      ClosedNode *closed_node = NULL;
-      if (!read_only_close)
+      if (!state.field_states.empty())
       {
-        // Always make the node so that we can know it was open
-        closed_node = closer.find_closed_node(this);
-        // We only fields that we've actually fully written
-        if (!!state.dirty_fields)
-          closed_node->record_closed_fields(closing_mask & state.dirty_fields);
-      }
-      // Recursively traverse any open children and close them as well
-      for (std::list<FieldState>::iterator it = state.field_states.begin();
-            it != state.field_states.end(); /*nothing*/)
-      {
-        FieldMask overlap = it->valid_fields & closing_mask;
-        if (!overlap)
+        if (this != closer.root_node)
+          closer.begin_close_children(closing_mask, this, 
+                state.write_fields, state.partial_writes);
+        // Recursively traverse any open children and close them as well
+        for (std::list<FieldState>::iterator it = state.field_states.begin();
+              it != state.field_states.end(); /*nothing*/)
         {
-          it++;
-          continue;
-        }
-        if (it->is_projection_state())
-        {
-          // If this was a projection field state then we need to 
-          // advance the epoch version numbers
-          if (!read_only_close && (it->open_state != OPEN_READ_ONLY_PROJ))
+          FieldMask overlap = it->valid_fields & closing_mask;
+          if (!overlap)
           {
-#ifdef DEBUG_LEGION
-            assert(closed_node != NULL);
-#endif
-            state.capture_close_epochs(overlap, closed_node);
+            it++;
+            continue;
           }
-          // If this is a writing or reducing 
-          state.advance_projection_epochs(overlap);
-          it->valid_fields -= overlap;
+          if (it->is_projection_state())
+          {
+            // If this was a projection field state then we need to 
+            // advance the epoch version numbers
+            // If this is a writing or reducing 
+            state.advance_projection_epochs(overlap);
+            it->valid_fields -= overlap;
+          }
+          else
+          {
+            // Recursively perform any close operations
+            FieldMask already_open;
+            perform_close_operations(closer, overlap, *it,
+                                     INVALID_COLOR/*next child*/,
+                                     false/*allow next*/,
+                                     NULL/*aliased children*/,
+                                     false/*upgrade*/,
+                                     read_only_close,
+                                     false/*overwiting close*/,
+                                     false/*record close operations*/,
+                                     false/*record closed fields*/,
+                                     already_open);
+          }
+          // Remove the state if it is now empty
+          if (!it->valid_fields)
+            it = state.field_states.erase(it);
+          else
+            it++;
         }
-        else
-        {
-          // Recursively perform any close operations
-          FieldMask already_open;
-          perform_close_operations(closer, overlap, *it,
-                                   INVALID_COLOR/*next child*/,
-                                   false/*allow next*/,
-                                   NULL/*aliased children*/,
-                                   false/*upgrade*/,
-                                   read_only_close,
-                                   false/*overwiting close*/,
-                                   false/*record close operations*/,
-                                   false/*record closed fields*/,
-                                   already_open);
-        }
-        // Remove the state if it is now empty
-        if (!it->valid_fields)
-          it = state.field_states.erase(it);
-        else
-          it++;
+        if (this != closer.root_node)
+          closer.end_close_children(closing_mask, this); 
       }
-      // We can clear out our dirty fields 
-      if (!!state.dirty_fields)
-        state.dirty_fields -= closing_mask;
+      // No children, so just update any local writes
+      else if (!!state.write_fields || !state.partial_writes.empty())
+      {
+        closer.update_close_writes(closing_mask, this,
+            state.write_fields, state.partial_writes);
+        // We can clear out our dirty fields 
+        if (!!state.write_fields)
+          state.write_fields -= closing_mask;
+        // Filter out any partial writes that we have too
+        if (!state.partial_writes.empty())
+          state.partial_writes.filter(closing_mask);
+      }
       // We can clear out our reduction fields
       if (!!state.reduction_fields)
         state.reduction_fields -= closing_mask;
@@ -11687,11 +11777,7 @@ namespace Legion {
                 if (overwriting)
                   closer.record_overwriting_close(overlap, true/*projection*/);
                 else
-                {
                   closer.record_close_operation(overlap, true/*projection*/);
-                  state.capture_close_epochs(overlap,
-                                             closer.find_closed_node(this));
-                }
                 // Advance the projection epochs
                 state.advance_projection_epochs(overlap);
               }
@@ -11720,11 +11806,7 @@ namespace Legion {
                   if (overwriting)
                     closer.record_overwriting_close(overlap,true/*projection*/);
                   else
-                  {
                     closer.record_close_operation(overlap, true/*projection*/);
-                    state.capture_close_epochs(overlap,
-                                               closer.find_closed_node(this));
-                  }
                   // Advance the projection epochs
                   state.advance_projection_epochs(overlap);
                 }
@@ -11911,8 +11993,6 @@ namespace Legion {
 #endif
                   closer.record_close_operation(overlap, true/*projection*/,
                                                 disjoint_close);
-                  state.capture_close_epochs(overlap,
-                                             closer.find_closed_node(this));
                   // Advance the projection epochs
                   state.advance_projection_epochs(overlap);
                   // If we are doing a disjoint close, update the open
@@ -11993,8 +12073,6 @@ namespace Legion {
                   //assert(!disjoint_close);
 #endif
                   closer.record_close_operation(overlap, true/*projection*/);
-                  state.capture_close_epochs(overlap,
-                                             closer.find_closed_node(this));
                   // Advance the projection epochs
                   state.advance_projection_epochs(overlap);
                 }
@@ -12022,8 +12100,6 @@ namespace Legion {
 #endif
                   closer.record_close_operation(overlap, true/*projection*/,
                                                 disjoint_close);
-                  state.capture_close_epochs(overlap,
-                                             closer.find_closed_node(this));
                   // Advance the projection epochs
                   state.advance_projection_epochs(overlap);
                   // If we're doing a disjoint close update the open
@@ -12117,10 +12193,6 @@ namespace Legion {
           if (it->is_projection_state())
           {
             closer.record_close_operation(overlap, true/*projection*/);
-            ClosedNode *closed_node = closer.find_closed_node(this); 
-            if (!!state.dirty_fields)
-              closed_node->record_closed_fields(overlap & state.dirty_fields);
-            state.capture_close_epochs(overlap, closed_node);
             state.advance_projection_epochs(overlap);
             it->valid_fields -= overlap;
             flushed_fields |= overlap;
@@ -12391,12 +12463,6 @@ namespace Legion {
             RegionTreeNode *child_node = get_tree_child(it->first);
             child_node->close_logical_node(closer, child_close, 
                                            false/*read only close*/);
-            if (state.open_state == OPEN_SINGLE_REDUCE ||
-                state.open_state == OPEN_MULTI_REDUCE)
-            {
-              ClosedNode *closed_tree = closer.find_closed_node(child_node);
-              closed_tree->record_reduced_fields(child_close);
-            }
             // Remove the close fields
             it->second -= child_close;
             removed_fields = true;
@@ -13006,8 +13072,6 @@ namespace Legion {
             {
               // Do the close here 
               closer.record_close_operation(overlap, true/*projection*/);
-              state.capture_close_epochs(overlap,
-                                         closer.find_closed_node(this));
               // Advance the projection epochs
               state.advance_projection_epochs(overlap);
               it->valid_fields -= current_mask;
@@ -13050,7 +13114,17 @@ namespace Legion {
           rez.serialize(as_partition_node()->handle);
         }
         rez.serialize(state.dirty_below);
-        rez.serialize(state.dirty_fields);
+        rez.serialize(state.write_fields);
+        rez.serialize<size_t>(state.partial_writes.size());
+        if (!state.partial_writes.empty())
+        {
+          for (WriteSet::const_iterator it = state.partial_writes.begin();
+                it != state.partial_writes.end(); it++)
+          {
+            it->first->pack_expression(rez, target);
+            rez.serialize(it->second);
+          }
+        }
         rez.serialize(state.reduction_fields);
         rez.serialize<size_t>(state.outstanding_reductions.size());
         for (LegionMap<ReductionOpID,FieldMask>::aligned::const_iterator it = 
@@ -13121,12 +13195,22 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RegionTreeNode::process_logical_state_return(ContextID ctx,
-                                                      Deserializer &derez)
+                                     Deserializer &derez, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
       LogicalState &state = get_logical_state(ctx);
       derez.deserialize(state.dirty_below);
-      derez.deserialize(state.dirty_fields);
+      derez.deserialize(state.write_fields);
+      size_t num_partial;
+      derez.deserialize(num_partial);
+      for (unsigned idx = 0; idx < num_partial; idx++)
+      {
+        IndexSpaceExpression *expr = 
+          IndexSpaceExpression::unpack_expression(derez, context, source);
+        FieldMask expr_mask;
+        derez.deserialize(expr_mask);
+        state.partial_writes.insert(expr, expr_mask);
+      }
       derez.deserialize(state.reduction_fields);
       size_t num_reductions;
       derez.deserialize(num_reductions);
@@ -13195,7 +13279,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ void RegionTreeNode::handle_logical_state_return(
-                                          Runtime *runtime, Deserializer &derez)
+                   Runtime *runtime, Deserializer &derez, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
@@ -13219,7 +13303,7 @@ namespace Legion {
         node = runtime->forest->get_node(handle);
       }
       node->process_logical_state_return(outermost->get_context().get_id(),
-                                         derez);
+                                         derez, source);
     }
 
     //--------------------------------------------------------------------------
@@ -13360,7 +13444,8 @@ namespace Legion {
                                                 VersionInfo &version_info, 
                                                 UniqueID logical_context_uid,
                                                 InnerContext *owner_ctx,
-                                                ClosedNode *closed_tree,
+                                                const FieldMask &complete_mask,
+                                                WriteSet &partial_writes,
                                                 std::set<RtEvent> &ready_events,
                                                 const ProjectionInfo *proj_info)
     //--------------------------------------------------------------------------
@@ -13406,8 +13491,6 @@ namespace Legion {
       // Now we can record our advance versions
       manager.record_advance_versions(closing_mask, owner_ctx, 
                                       version_info, ready_events);
-      // Fix the closed tree
-      closed_tree->fix_closed_tree();
       // Prepare to make the new view
       DistributedID did = context->runtime->get_available_distributed_id();
       // Copy the version info that we need
@@ -13416,8 +13499,8 @@ namespace Legion {
       const AddressSpace local_space = context->runtime->address_space;
       // Make the view
       CompositeView *result = new CompositeView(context, did, 
-                           local_space, this, view_info, 
-                           closed_tree, owner_ctx, true/*register now*/);
+                           local_space, this, view_info, complete_mask, 
+                           partial_writes, owner_ctx, true/*register now*/);
       // Capture the state of the top of the composite view
       PhysicalState *state = get_physical_state(version_info);
       LegionMap<LogicalView*,FieldMask>::aligned valid_above;

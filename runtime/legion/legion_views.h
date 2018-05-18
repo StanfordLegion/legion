@@ -1234,8 +1234,8 @@ namespace Legion {
     public:
       CompositeView(RegionTreeForest *ctx, DistributedID did,
                     AddressSpaceID owner_proc, RegionTreeNode *node, 
-                    DeferredVersionInfo *info,
-                    ClosedNode *closed_tree, InnerContext *context,
+                    DeferredVersionInfo *info, const FieldMask &complete_mask,
+                    WriteSet &partial_writes, InnerContext *context,
                     bool register_now);
       CompositeView(const CompositeView &rhs);
       virtual ~CompositeView(void);
@@ -1259,7 +1259,7 @@ namespace Legion {
       virtual InnerContext* get_context(void) const
         { return owner_context; }
     public:
-      void prune(ClosedNode *closed_tree, FieldMask &valid_mask,
+      void prune(const WriteMasks &partial_write_masks, FieldMask &valid_mask,
                  LegionMap<CompositeView*,FieldMask>::aligned &replacements,
                  unsigned prune_depth);
       virtual void issue_deferred_copies(const TraversalInfo &info,
@@ -1304,7 +1304,7 @@ namespace Legion {
       static void handle_deferred_view_registration(const void *args);
     public:
       void record_dirty_fields(const FieldMask &dirty_mask);
-      void record_valid_view(LogicalView *view, const FieldMask &mask);
+      void record_valid_view(LogicalView *view, FieldMask mask);
       void record_reduction_fields(const FieldMask &reduction_fields);
       void record_reduction_view(ReductionView *view, const FieldMask &mask);
       void record_child_version_state(const LegionColor child_color, 
@@ -1320,8 +1320,13 @@ namespace Legion {
     public:
       // The path version info for this composite instance
       DeferredVersionInfo *const version_info;
-      // The abstraction of the tree that we closed
-      ClosedNode *const closed_tree;
+      // Fields for which this composite view represents a complete
+      // write of the root logical region
+      const FieldMask complete_fields;
+      // If we only have partial writes then we record it in this
+      // write set data structure, we also keep references to all
+      // the index space expressions and remove them when we're deleted
+      WriteSet partial_writes;
       // The translation context if any
       InnerContext *const owner_context;
     protected:
