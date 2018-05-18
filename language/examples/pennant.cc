@@ -993,6 +993,9 @@ public:
                                     MapperContext ctx,
                                     const Task &task,
                                     std::vector<Processor> &target_procs);
+  virtual Memory default_policy_select_target_memory(MapperContext ctx,
+                                    Processor target_proc,
+                                    const RegionRequirement &req);
   virtual LogicalRegion default_policy_select_instance_region(
                                     MapperContext ctx, Memory target_memory,
                                     const RegionRequirement &req,
@@ -1018,7 +1021,7 @@ private:
   std::map<Memory, std::vector<Processor> >& sysmem_local_io_procs;
 #endif
   std::map<Processor, Memory>& proc_sysmems;
-  // std::map<Processor, Memory>& proc_regmems;
+  std::map<Processor, Memory>& proc_regmems;
 };
 
 PennantMapper::PennantMapper(MapperRuntime *rt, Machine machine, Processor local,
@@ -1038,8 +1041,8 @@ PennantMapper::PennantMapper(MapperRuntime *rt, Machine machine, Processor local
 #if SPMD_SHARD_USE_IO_PROC
     sysmem_local_io_procs(*_sysmem_local_io_procs),
 #endif
-    proc_sysmems(*_proc_sysmems)// ,
-    // proc_regmems(*_proc_regmems)
+    proc_sysmems(*_proc_sysmems),
+    proc_regmems(*_proc_regmems)
 {
 }
 
@@ -1103,6 +1106,37 @@ void PennantMapper::default_policy_select_target_processors(
                                     std::vector<Processor> &target_procs)
 {
   target_procs.push_back(task.target_proc);
+}
+
+static bool is_ghost(MapperRuntime *runtime,
+                     const MapperContext ctx,
+                     LogicalRegion leaf)
+{
+  // If the region has no parent then it was from a duplicated
+  // partition and therefore must be a ghost.
+  if (!runtime->has_parent_logical_partition(ctx, leaf)) {
+    return true;
+  }
+
+  // Otherwise it is a ghost if the parent region has multiple
+  // partitions.
+  LogicalPartition part = runtime->get_parent_logical_partition(ctx, leaf);
+  LogicalRegion parent = runtime->get_parent_logical_region(ctx, part);
+  std::set<Color> colors;
+  runtime->get_index_space_partition_colors(ctx, parent.get_index_space(), colors);
+  return colors.size() > 1;
+}
+
+Memory PennantMapper::default_policy_select_target_memory(MapperContext ctx,
+                                                   Processor target_proc,
+                                                   const RegionRequirement &req)
+{
+  Memory target_memory = proc_sysmems[target_proc];
+  if (is_ghost(runtime, ctx, req.region)) {
+    std::map<Processor, Memory>::iterator finder = proc_regmems.find(target_proc);
+    if (finder != proc_regmems.end()) target_memory = finder->second;
+  }
+  return target_memory;
 }
 
 LogicalRegion PennantMapper::default_policy_select_instance_region(
@@ -1277,7 +1311,9 @@ void PennantMapper::map_must_epoch(const MapperContext           ctx,
     const Task* task = constraint.constrained_tasks[owner_id];
     const RegionRequirement& req =
       task->regions[constraint.requirement_indexes[owner_id]];
-    Memory target_memory = sysmems_list[task_indices[task]];
+    Memory target_memory = default_policy_select_target_memory(ctx,
+                             output.task_processors[task_indices[task]],
+                             req);
     LayoutConstraintSet layout_constraints;
     default_policy_select_constraints(ctx, layout_constraints, target_memory, req);
     layout_constraints.add_constraint(
