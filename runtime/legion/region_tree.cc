@@ -11055,8 +11055,7 @@ namespace Legion {
                 for (Domain::DomainPointIterator itr(launch_dom); itr; itr++)
                 {
                   LogicalRegion handle = functor->project(
-                      reinterpret_cast<Mappable*>(user.op), user.idx,
-                      upper_bound, itr.p);
+                      user.op->get_mappable(), user.idx, upper_bound, itr.p);
                   RegionNode *node = context->get_node(handle);
                   write_expressions.insert(node->get_index_space_expression());
                 }
@@ -11068,8 +11067,7 @@ namespace Legion {
                 for (Domain::DomainPointIterator itr(launch_dom); itr; itr++)
                 {
                   LogicalRegion handle = functor->project(
-                      reinterpret_cast<Mappable*>(user.op), user.idx,
-                      upper_bound, itr.p);
+                      user.op->get_mappable(), user.idx, upper_bound, itr.p);
                   RegionNode *node = context->get_node(handle);
                   write_expressions.insert(node->get_index_space_expression());
                 }

@@ -10942,6 +10942,7 @@ namespace Legion {
           // No fields left so just clean everything up
           delete entries.multi_entries;
           entries.multi_entries = NULL;
+          single = true;
         }
         else
         {
