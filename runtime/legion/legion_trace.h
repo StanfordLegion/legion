@@ -443,6 +443,8 @@ namespace Legion {
       PhysicalTemplate* current_template;
       std::vector<PhysicalTemplate*> templates;
       unsigned nonreplayable_count;
+    public:
+      std::vector<Processor> replay_targets;
     };
 
     typedef Memoizable::TraceLocalID TraceLocalID;
@@ -468,8 +470,8 @@ namespace Legion {
         unsigned slice_index;
       };
     public:
-      PhysicalTemplate(ApEvent fence_event);
-      PhysicalTemplate(const PhysicalTemplate &rhs);
+      PhysicalTemplate(PhysicalTrace *trace, ApEvent fence_event);
+      PhysicalTemplate(PhysicalTrace *trace, const PhysicalTemplate &rhs);
     private:
       friend class PhysicalTrace;
       ~PhysicalTemplate(void);
@@ -595,6 +597,7 @@ namespace Legion {
       void find_last_users(const PhysicalInstance &inst, unsigned field,
                            std::set<unsigned> &users);
     private:
+      PhysicalTrace *trace;
       bool recording;
       bool replayable;
       bool has_block;

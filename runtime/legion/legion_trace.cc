@@ -1503,6 +1503,17 @@ namespace Legion {
         nonreplayable_count(0)
     //--------------------------------------------------------------------------
     {
+      if (runtime->replay_on_cpus)
+      {
+        Machine::ProcessorQuery local_procs(runtime->machine);
+        local_procs.local_address_space();
+        for (Machine::ProcessorQuery::iterator it =
+             local_procs.begin(); it != local_procs.end(); it++)
+          if (it->kind() == Processor::LOC_PROC)
+            replay_targets.push_back(*it);
+      }
+      else
+        replay_targets.push_back(runtime->utility_group);
     }
 
     //--------------------------------------------------------------------------
@@ -1588,7 +1599,7 @@ namespace Legion {
     PhysicalTemplate* PhysicalTrace::start_new_template(ApEvent fence_event)
     //--------------------------------------------------------------------------
     {
-      current_template = new PhysicalTemplate(fence_event);
+      current_template = new PhysicalTemplate(this, fence_event);
 #ifdef DEBUG_LEGION
       assert(fence_event.exists());
 #endif
@@ -1611,8 +1622,8 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    PhysicalTemplate::PhysicalTemplate(ApEvent fence_event)
-      : recording(true), replayable(true), has_block(false),
+    PhysicalTemplate::PhysicalTemplate(PhysicalTrace *t, ApEvent fence_event)
+      : trace(t), recording(true), replayable(true), has_block(false),
         fence_completion_id(0),
         replay_parallelism(implicit_runtime->max_replay_parallelism)
     //--------------------------------------------------------------------------
@@ -1649,8 +1660,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    PhysicalTemplate::PhysicalTemplate(const PhysicalTemplate &rhs)
-      : recording(true), replayable(true), has_block(false),
+    PhysicalTemplate::PhysicalTemplate(PhysicalTrace *t, const PhysicalTemplate &rhs)
+      : trace(t), recording(true), replayable(true), has_block(false),
         fence_completion_id(0), replay_parallelism(1)
     //--------------------------------------------------------------------------
     {
@@ -1690,12 +1701,15 @@ namespace Legion {
 
       replay_ready = Runtime::create_rt_user_event();
       std::set<RtEvent> replay_done_events;
+      std::vector<Processor> &replay_targets = trace->replay_targets;
       for (unsigned idx = 0; idx < replay_parallelism; ++idx)
       {
         ReplaySliceArgs args(this, idx);
         RtEvent done =
-          runtime->issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY,
-            replay_ready);
+          runtime->issue_runtime_meta_task(args,
+            runtime->replay_on_cpus ? LG_LOW_PRIORITY
+                                    : LG_THROUGHPUT_WORK_PRIORITY,
+            replay_ready, replay_targets[idx % replay_targets.size()]);
         replay_done_events.insert(done);
       }
       replay_done = Runtime::merge_events(replay_done_events);

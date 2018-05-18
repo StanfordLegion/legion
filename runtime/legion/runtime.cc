@@ -9089,6 +9089,7 @@ namespace Legion {
         no_physical_tracing(config.no_physical_tracing),
         no_trace_optimization(config.no_trace_optimization),
         no_fence_elision(config.no_fence_elision),
+        replay_on_cpus(config.replay_on_cpus),
         verify_disjointness(config.verify_disjointness),
         runtime_warnings(config.runtime_warnings),
         separate_runtime_instances(config.separate_runtime_instances),
@@ -9284,6 +9285,7 @@ namespace Legion {
         no_physical_tracing(rhs.no_physical_tracing),
         no_trace_optimization(rhs.no_trace_optimization),
         no_fence_elision(rhs.no_fence_elision),
+        replay_on_cpus(rhs.replay_on_cpus),
         verify_disjointness(rhs.verify_disjointness),
         runtime_warnings(rhs.runtime_warnings),
         separate_runtime_instances(rhs.separate_runtime_instances),
@@ -18968,6 +18970,7 @@ namespace Legion {
         BOOL_ARG("-lg:no_physical_tracing",config.no_physical_tracing);
         BOOL_ARG("-lg:no_trace_optimization",config.no_trace_optimization);
         BOOL_ARG("-lg:no_fence_elision",config.no_fence_elision);
+        BOOL_ARG("-lg:replay_on_cpus",config.replay_on_cpus);
         BOOL_ARG("-lg:disjointness",config.verify_disjointness);
         INT_ARG("-lg:window", config.initial_task_window_size);
         INT_ARG("-lg:hysteresis", config.initial_task_window_hysteresis);
@@ -19421,8 +19424,9 @@ namespace Legion {
         // them otherwise register them on the CPU processors
         if ((!local_util_procs.empty() && 
               (it->first.kind() == Processor::UTIL_PROC)) ||
-            (local_util_procs.empty() &&
-              (it->first.kind() == Processor::LOC_PROC)))
+            ((local_util_procs.empty() || config.replay_on_cpus) &&
+              (it->first.kind() == Processor::LOC_PROC ||
+               it->first.kind() == Processor::IO_PROC)))
         {
           registered_events.insert(RtEvent(
                 it->first.register_task(LG_SHUTDOWN_TASK_ID, shutdown_task,
@@ -19433,7 +19437,8 @@ namespace Legion {
         }
         // Profiling tasks get registered on CPUs and utility processors
         if ((it->first.kind() == Processor::LOC_PROC) ||
-            (it->first.kind() == Processor::UTIL_PROC))
+            (it->first.kind() == Processor::UTIL_PROC) ||
+            (it->first.kind() == Processor::IO_PROC))
           registered_events.insert(RtEvent(
               it->first.register_task(LG_LEGION_PROFILING_ID, rt_profiling_task,
                 no_requests, &it->second, sizeof(it->second))));
