@@ -19418,7 +19418,8 @@ namespace Legion {
         if ((!local_util_procs.empty() && 
               (it->first.kind() == Processor::UTIL_PROC)) ||
             (local_util_procs.empty() &&
-              (it->first.kind() == Processor::LOC_PROC)))
+              (it->first.kind() == Processor::LOC_PROC ||
+               it->first.kind() == Processor::IO_PROC)))
         {
           registered_events.insert(RtEvent(
                 it->first.register_task(LG_SHUTDOWN_TASK_ID, shutdown_task,
@@ -19429,7 +19430,8 @@ namespace Legion {
         }
         // Profiling tasks get registered on CPUs and utility processors
         if ((it->first.kind() == Processor::LOC_PROC) ||
-            (it->first.kind() == Processor::UTIL_PROC))
+            (it->first.kind() == Processor::UTIL_PROC) ||
+            (it->first.kind() == Processor::IO_PROC))
           registered_events.insert(RtEvent(
               it->first.register_task(LG_LEGION_PROFILING_ID, rt_profiling_task,
                 no_requests, &it->second, sizeof(it->second))));
