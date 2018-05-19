@@ -57,6 +57,9 @@ public:
                                     MapperContext ctx,
                                     const Task &task,
                                     std::vector<Processor> &target_procs);
+  virtual Memory default_policy_select_target_memory(MapperContext ctx,
+                                Processor target_proc,
+                                const RegionRequirement &req);
 private:
   // std::vector<Processor>& procs_list;
   // std::vector<Memory>& sysmems_list;
@@ -65,7 +68,7 @@ private:
   std::map<Memory, std::vector<Processor> >& sysmem_local_io_procs;
 #endif
   std::map<Processor, Memory>& proc_sysmems;
-  // std::map<Processor, Memory>& proc_regmems;
+  std::map<Processor, Memory>& proc_regmems;
 };
 
 CircuitMapper::CircuitMapper(MapperRuntime *rt, Machine machine, Processor local,
@@ -85,8 +88,8 @@ CircuitMapper::CircuitMapper(MapperRuntime *rt, Machine machine, Processor local
 #if SPMD_SHARD_USE_IO_PROC
     sysmem_local_io_procs(*_sysmem_local_io_procs),
 #endif
-    proc_sysmems(*_proc_sysmems)// ,
-    // proc_regmems(*_proc_regmems)
+    proc_sysmems(*_proc_sysmems),
+    proc_regmems(*_proc_regmems)
 {
 }
 
@@ -147,6 +150,38 @@ void CircuitMapper::default_policy_select_target_processors(
                                     std::vector<Processor> &target_procs)
 {
   target_procs.push_back(task.target_proc);
+}
+
+static bool is_ghost(MapperRuntime *runtime,
+                     const MapperContext ctx,
+                     LogicalRegion leaf)
+{
+  // If the region has no parent then it was from a duplicated
+  // partition and therefore must be a ghost.
+  if (!runtime->has_parent_logical_partition(ctx, leaf)) {
+    return true;
+  }
+
+  // Otherwise it is a ghost if the parent region has multiple
+  // partitions.
+  LogicalPartition part = runtime->get_parent_logical_partition(ctx, leaf);
+  LogicalRegion parent = runtime->get_parent_logical_region(ctx, part);
+  std::set<Color> colors;
+  runtime->get_index_space_partition_colors(ctx, parent.get_index_space(), colors);
+  return colors.size() > 1;
+}
+
+Memory CircuitMapper::default_policy_select_target_memory(
+                                                   MapperContext ctx,
+                                                   Processor target_proc,
+                                                   const RegionRequirement &req)
+{
+  Memory target_memory = proc_sysmems[target_proc];
+  if (is_ghost(runtime, ctx, req.region)) {
+    std::map<Processor, Memory>::iterator finder = proc_regmems.find(target_proc);
+    if (finder != proc_regmems.end()) target_memory = finder->second;
+  }
+  return target_memory;
 }
 
 static void create_mappers(Machine machine, HighLevelRuntime *runtime, const std::set<Processor> &local_procs)
