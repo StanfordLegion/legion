@@ -2321,7 +2321,7 @@ namespace Legion {
         std::map<TraceLocalID, unsigned>::iterator finder =
           slice_indices_by_owner.find(owner);
 #ifdef DEBUG_LEGION
-        asset(finder != slice_indices_by_owner.end());
+        assert(finder != slice_indices_by_owner.end());
 #endif
         unsigned slice_index = finder->second;
         slices[slice_index].push_back(inst);
