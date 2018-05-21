@@ -47,7 +47,6 @@ std.assert = base.assert
 std.domain_from_bounds_1d = base.domain_from_bounds_1d
 std.domain_from_bounds_2d = base.domain_from_bounds_2d
 std.domain_from_bounds_3d = base.domain_from_bounds_3d
-std.max_num_bounds = (terra() return -1U end)() + 1 -- 2^32
 
 -- #####################################
 -- ## Kinds
@@ -1698,13 +1697,15 @@ local bounded_type = terralib.memoize(function(index_type, ...)
         bitmask_type = uint8
       elseif #bounds <= bit.lshift(1, 16) then
         bitmask_type = uint16
-      elseif #bounds <= std.max_num_bounds then
+      -- XXX: What we really want here is bit.lshift(1ULL, 32),
+      --      which is supported only in LuaJIT 2.1 or higher
+      elseif #bounds <= bit.lshift(1, 30) then
         bitmask_type = uint32
       else
         assert(false) -- really?
       end
     else
-      assert(#bounds <= std.max_num_bounds)
+      assert(#bounds <= bit.lshift(1, 30))
       bitmask_type = uint32
     end
     st.entries:insert({ "__index", bitmask_type })
