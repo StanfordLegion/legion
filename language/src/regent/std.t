@@ -47,6 +47,7 @@ std.assert = base.assert
 std.domain_from_bounds_1d = base.domain_from_bounds_1d
 std.domain_from_bounds_2d = base.domain_from_bounds_2d
 std.domain_from_bounds_3d = base.domain_from_bounds_3d
+std.max_num_bounds = (terra() return -1U end)() + 1 -- 2^32
 
 -- #####################################
 -- ## Kinds
@@ -1692,14 +1693,19 @@ local bounded_type = terralib.memoize(function(index_type, ...)
     -- Find the smallest bitmask that will fit.
     -- TODO: Would be nice to compress smaller than one byte.
    local bitmask_type
-    if #bounds < bit.lshift(1, 8) - 1 and terralib.llvmversion >= 38 then
-      bitmask_type = uint8
-    elseif #bounds < bit.lshift(1, 16) - 1 then
-      bitmask_type = uint16
-    elseif #bounds < bit.lshift(1, 32) - 1 then
-      bitmask_type = uint32
+    if terralib.llvmversion >= 38 then
+      if #bounds <= bit.lshift(1, 8) then
+        bitmask_type = uint8
+      elseif #bounds <= bit.lshift(1, 16) then
+        bitmask_type = uint16
+      elseif #bounds <= std.max_num_bounds then
+        bitmask_type = uint32
+      else
+        assert(false) -- really?
+      end
     else
-      assert(false) -- really?
+      assert(#bounds <= std.max_num_bounds)
+      bitmask_type = uint32
     end
     st.entries:insert({ "__index", bitmask_type })
   end
