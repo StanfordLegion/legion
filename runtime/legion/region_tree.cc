@@ -11364,9 +11364,8 @@ namespace Legion {
                                      state.prev_epoch_users, closing_mask);
       if (!state.field_states.empty())
       {
-        if (this != closer.root_node)
-          closer.begin_close_children(closing_mask, this, 
-                state.write_fields, state.partial_writes);
+        closer.begin_close_children(closing_mask, this, 
+              state.write_fields, state.partial_writes);
         // Recursively traverse any open children and close them as well
         for (std::list<FieldState>::iterator it = state.field_states.begin();
               it != state.field_states.end(); /*nothing*/)
@@ -11406,8 +11405,7 @@ namespace Legion {
           else
             it++;
         }
-        if (this != closer.root_node)
-          closer.end_close_children(closing_mask, this); 
+        closer.end_close_children(closing_mask, this); 
       }
       // No children, so just update any local writes
       else if (!!state.write_fields || !state.partial_writes.empty())
