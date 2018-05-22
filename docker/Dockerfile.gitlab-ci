@@ -38,8 +38,14 @@ RUN wget https://cmake.org/files/v3.6/cmake-3.6.2-Linux-x86_64.tar.gz && \
     rm cmake-3.6.2-Linux-x86_64.tar.gz
 
 RUN git clone -b luajit2.1 https://github.com/StanfordLegion/terra.git && \
-    cp -r terra /usr/local/terra35 && \
-    LLVM_CONFIG=llvm-config-3.5 make -C /usr/local/terra35 REEXPORT_LLVM_COMPONENTS="irreader jit mcjit x86" && \
-    cp -r terra /usr/local/terra38 && \
-    LLVM_CONFIG=llvm-config-3.8 make -C /usr/local/terra38 REEXPORT_LLVM_COMPONENTS="irreader mcjit x86" && \
+    cp -r terra terra35 && \
+    LLVM_CONFIG=llvm-config-3.5 make -C terra35 REEXPORT_LLVM_COMPONENTS="irreader jit mcjit x86" && \
+    mkdir /usr/local/terra35 && \
+    make -C terra35 install PREFIX=/usr/local/terra35 && \
+    rm -rf terra35 && \
+    cp -r terra terra38 && \
+    LLVM_CONFIG=llvm-config-3.8 make -C terra38 REEXPORT_LLVM_COMPONENTS="irreader mcjit x86" && \
+    mkdir /usr/local/terra38 && \
+    make -C terra38 install PREFIX=/usr/local/terra38 && \
+    rm -rf terra38 && \
     rm -rf terra

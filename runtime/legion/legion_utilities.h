@@ -10735,6 +10735,620 @@ namespace Legion {
         output_sets.push_front(FieldSet<T>(universe_mask));
     }
 
+    /**
+     * \class FieldMaskSet 
+     * A template helper class for tracking collections of 
+     * objects associated with different sets of fields
+     */
+    template<typename T>
+    class FieldMaskSet : 
+      public LegionHeapify<FieldMaskSet<T> > {
+    public:
+      // forward declaration
+      class const_iterator;
+      class iterator : public std::iterator<std::input_iterator_tag,
+                              std::pair<T*,FieldMask> > {
+      public:
+        iterator(FieldMaskSet *_set, 
+            std::pair<T*,FieldMask> *_result, bool _single)
+          : set(_set), result(_result), single(_single) { }
+      public:
+        iterator(const iterator &rhs)
+          : set(rhs.set), result(rhs.result), single(rhs.single) { }
+        ~iterator(void) { }
+      public:
+        inline iterator& operator=(const iterator &rhs)
+          { set = rhs.set; result = rhs.result; 
+            single = rhs.single; return *this; }
+      public:
+        inline bool operator==(const iterator &rhs) const
+          { return (set == rhs.set) && (result == rhs.result) && 
+                    (single == rhs.single); }
+        inline bool operator!=(const iterator &rhs) const
+          { return (set != rhs.set) || (result != rhs.result) || 
+                    (single != rhs.single); }
+      public:
+        inline const std::pair<T*,FieldMask> operator*(void) 
+          { return *result; }
+        inline const std::pair<T*,FieldMask>* operator->(void)
+          { return result; }
+        inline iterator& operator++(/*prefix*/void)
+          { if (single) result = NULL; 
+            else result = set->next(result->first); 
+            return *this; }
+        inline iterator operator++(/*postfix*/int)
+          { iterator copy(*this); 
+            if (single) result = NULL; 
+            else result = set->next(result->first); 
+            return copy; }
+      public:
+        inline operator bool(void) const
+          { return (result != NULL); }
+      public:
+        inline void merge(const FieldMask &mask)
+          {
+            result->second |= mask;
+            if (!single)
+              set->valid_fields |= mask;
+          }
+        inline void filter(const FieldMask &mask)
+          {
+            result->second -= mask;
+            // Don't filter valid fields since its unsound
+          }
+      private:
+        friend class const_iterator;
+        FieldMaskSet *set;
+        std::pair<T*,FieldMask> *result;
+        bool single;
+      };
+    public:
+      class const_iterator : public std::iterator<std::input_iterator_tag,
+                              std::pair<T*,FieldMask> > {
+      public:
+        const_iterator(const FieldMaskSet *_set, 
+            const std::pair<T*,FieldMask> *_result, bool _single)
+          : set(_set), result(_result), single(_single) { }
+      public:
+        const_iterator(const const_iterator &rhs)
+          : set(rhs.set), result(rhs.result), single(rhs.single) { }
+        // We can also make a const_iterator from a normal iterator
+        const_iterator(const iterator &rhs)
+          : set(rhs.set), result(rhs.result), single(rhs.single) { }
+        ~const_iterator(void) { }
+      public:
+        inline const_iterator& operator=(const const_iterator &rhs)
+          { set = rhs.set; result = rhs.result; 
+            single = rhs.single; return *this; }
+        inline const_iterator& operator=(const iterator &rhs)
+          { set = rhs.set; result = rhs.result;
+            single = rhs.single; return *this; }
+      public:
+        inline bool operator==(const const_iterator &rhs) const
+          { return (set == rhs.set) && (result == rhs.result) && 
+                    (single == rhs.single); }
+        inline bool operator!=(const const_iterator &rhs) const
+          { return (set != rhs.set) || (result != rhs.result) || 
+                    (single != rhs.single); }
+      public:
+        inline const std::pair<T*,FieldMask> operator*(void) 
+          { return *result; }
+        inline const std::pair<T*,FieldMask>* operator->(void)
+          { return result; }
+        inline const_iterator& operator++(/*prefix*/void)
+          { if (single) result = NULL; 
+            else result = set->next(result->first); 
+            return *this; }
+        inline const_iterator operator++(/*postfix*/int)
+          { const_iterator copy(*this); 
+            if (single) result = NULL; 
+            else result = set->next(result->first); 
+            return copy; }
+      public:
+        inline operator bool(void) const
+          { return (result != NULL); }
+      private:
+        const FieldMaskSet *set;
+        const std::pair<T*,FieldMask> *result;
+        bool single;
+      };
+    public:
+      FieldMaskSet(void)
+        : single(true) { entries.single_entry = NULL; }
+      FieldMaskSet(const FieldMaskSet &rhs)
+        : single(true)
+      {
+        // must be empty
+#ifdef DEBUG_LEGION
+        assert(rhs.single);
+        assert(rhs.entries.single_entry == NULL);
+#endif
+        entries.single_entry = NULL;
+      }
+      ~FieldMaskSet(void) { clear(); }
+    public:
+      FieldMaskSet& operator=(const FieldMaskSet &rhs)
+        { assert(false); return *this; }
+    public:
+      inline bool empty(void) const 
+        { return single && (entries.single_entry == NULL); }
+      inline const FieldMask& get_valid_mask(void) const 
+        { return valid_fields; }
+    public:
+      inline const FieldMask& operator[](T *entry) const;
+    public:
+      // Return true if we actually added the entry, false if it already existed
+      inline bool insert(T *entry, const FieldMask &mask); 
+      inline void filter(const FieldMask &filter);
+      inline void erase(T *to_erase);
+      inline void clear(void);
+      inline size_t size(void) const;
+    public:
+      inline std::pair<T*,FieldMask>* next(T *current) const;
+    public:
+      inline void swap(FieldMaskSet &other);
+    public:
+      inline iterator begin(void);
+      inline iterator find(T *entry);
+      inline void erase(iterator &it);
+      inline iterator end(void) { return iterator(this, NULL, single); }
+    public:
+      inline const_iterator begin(void) const;
+      inline const_iterator find(T *entry) const;
+      inline const_iterator end(void) const 
+        { return const_iterator(this, NULL, single); }
+    public:
+      inline void compute_field_sets(FieldMask universe_mask,
+          typename LegionList<FieldSet<T*> >::aligned &output_sets) const;
+    protected:
+      // Fun with C, keep these two fields first and in this order
+      // so that a FieldMaskSet of size 1 looks the same as an entry
+      // in the STL Map in the multi-entries case, 
+      // provides goodness for the iterator
+      union {
+        T *single_entry;
+        typename LegionMap<T*,FieldMask>::aligned *multi_entries;
+      } entries;
+      // This can be an overapproximation if we have multiple entries
+      FieldMask valid_fields;
+      bool single;
+    };
+
+    //--------------------------------------------------------------------------
+    template<typename T>
+    inline const FieldMask& FieldMaskSet<T>::operator[](T *entry) const
+    //--------------------------------------------------------------------------
+    {
+      if (single)
+      {
+#ifdef DEBUG_LEGION
+        assert(entry == entries.single_entry);
+#endif
+        return valid_fields;
+      }
+      else
+      {
+        typename LegionMap<T*,FieldMask>::aligned::const_iterator finder =
+          entries.multi_entries->find(entry);
+#ifdef DEBUG_LEGION
+        assert(finder != entries.multi_entries->end());
+#endif
+        return finder->second;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T>
+    inline bool FieldMaskSet<T>::insert(T *entry, const FieldMask &mask)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!!mask);
+#endif
+      bool result = true;
+      if (single)
+      {
+        if (entries.single_entry == NULL)
+        {
+          entries.single_entry = entry;
+          valid_fields = mask;
+        }
+        else if (entries.single_entry == entry)
+        {
+          valid_fields |= mask;
+          result = false;
+        }
+        else
+        {
+          // Go to multi
+          typename LegionMap<T*,FieldMask>::aligned *multi = 
+            new typename LegionMap<T*,FieldMask>::aligned();
+          (*multi)[entries.single_entry] = valid_fields;
+          (*multi)[entry] = mask;
+          entries.multi_entries = multi;
+          single = false;
+          valid_fields |= mask;
+        }
+      }
+      else
+      {
+ #ifdef DEBUG_LEGION
+        assert(entries.multi_entries != NULL);
+#endif   
+        typename LegionMap<T*,FieldMask>::aligned::iterator finder = 
+          entries.multi_entries->find(entry);
+        if (finder == entries.multi_entries->end())
+          (*entries.multi_entries)[entry] = mask;
+        else
+        {
+          finder->second |= mask;
+          result = false;
+        }
+        valid_fields |= mask;
+      }
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T>
+    inline void FieldMaskSet<T>::filter(const FieldMask &filter)
+    //--------------------------------------------------------------------------
+    {
+      if (single)
+      {
+        if (entries.single_entry != NULL)
+        {
+          valid_fields -= filter;
+          if (!valid_fields)
+            entries.single_entry = NULL;
+        }
+      }
+      else
+      {
+        valid_fields -= filter;
+        if (!valid_fields)
+        {
+          // No fields left so just clean everything up
+          delete entries.multi_entries;
+          entries.multi_entries = NULL;
+          single = true;
+        }
+        else
+        {
+          // Manually remove entries
+          typename std::vector<T*> to_delete;
+          for (typename LegionMap<T*,FieldMask>::aligned::iterator it = 
+                entries.multi_entries->begin(); it !=
+                entries.multi_entries->end(); it++)
+          {
+            it->second -= filter;
+            if (!it->second)
+              to_delete.push_back(it->first);
+          }
+          if (!to_delete.empty())
+          {
+            for (typename std::vector<T*>::const_iterator it = 
+                  to_delete.begin(); it != to_delete.end(); it++)
+              entries.multi_entries->erase(*it);
+            if (entries.multi_entries->empty())
+            {
+              delete entries.multi_entries;
+              entries.multi_entries = NULL;
+              single = true;
+            }
+            else if (entries.multi_entries->size() == 1)
+            {
+              typename LegionMap<T*,FieldMask>::aligned::iterator last = 
+                entries.multi_entries->begin();     
+              T *temp = last->first; 
+              valid_fields = last->second;
+              delete entries.multi_entries;
+              entries.single_entry = temp;
+              single = true;
+            }
+          }
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T>
+    inline void FieldMaskSet<T>::erase(T *to_erase)
+    //--------------------------------------------------------------------------
+    {
+      if (single)
+      {
+#ifdef DEBUG_LEGION
+        assert(entries.single_entry == to_erase);
+#endif
+        entries.single_entry = NULL;
+        valid_fields.clear();
+      }
+      else
+      {
+        typename LegionMap<T*,FieldMask>::aligned::iterator finder = 
+          entries.multi_entries->find(to_erase);
+#ifdef DEBUG_LEGION
+        assert(finder != entries.multi_entries->end());
+#endif
+        valid_fields -= finder->second;
+        entries.multi_entries->erase(finder);
+        if (entries.multi_entries->size() == 1)
+        {
+          // go back to single
+          finder = entries.multi_entries->begin();
+          valid_fields = finder->second;
+          T *first = finder->first;
+          delete entries.multi_entries;
+          entries.single_entry = first;
+          single = true;
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T>
+    inline void FieldMaskSet<T>::clear(void)
+    //--------------------------------------------------------------------------
+    {
+      if (single)
+        entries.single_entry = NULL;
+      else
+      {
+#ifdef DEBUG_LEGION
+        assert(entries.multi_entries != NULL);
+#endif
+        delete entries.multi_entries;
+        entries.multi_entries = NULL;
+        single = true;
+      }
+      valid_fields.clear();
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T>
+    inline size_t FieldMaskSet<T>::size(void) const
+    //--------------------------------------------------------------------------
+    {
+      if (single)
+      {
+        if (entries.single_entry == NULL)
+          return 0;
+        else
+          return 1;
+      }
+      else
+        return entries.multi_entries->size();
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T>
+    inline std::pair<T*,FieldMask>* FieldMaskSet<T>::next(T *current) const
+    //--------------------------------------------------------------------------
+    {
+      if (single)
+      {
+#ifdef DEBUG_LEGION
+        assert(current == entries.single_entry);
+#endif
+        return NULL; 
+      }
+      else
+      {
+        typename LegionMap<T*,FieldMask>::aligned::iterator finder = 
+          entries.multi_entries->find(current);
+#ifdef DEBUG_LEGION
+        assert(finder != entries.multi_entries->end());
+#endif
+        finder++;
+        if (finder == entries.multi_entries->end())
+          return NULL;
+        else
+          return reinterpret_cast<std::pair<T*,FieldMask>*>(&(*finder));
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T>
+    inline void FieldMaskSet<T>::swap(FieldMaskSet &other)
+    //--------------------------------------------------------------------------
+    {
+      // Just use single, doesn't matter for swap
+      T *temp_entry = other.entries.single_entry;
+      other.entries.single_entry = entries.single_entry;
+      entries.single_entry = temp_entry;
+
+      bool temp_single = other.single;
+      other.single = single;
+      single = temp_single;
+
+      FieldMask temp_valid_fields = other.valid_fields;
+      other.valid_fields = valid_fields;
+      valid_fields = temp_valid_fields;
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T>
+    inline typename FieldMaskSet<T>::iterator FieldMaskSet<T>::begin(void)
+    //--------------------------------------------------------------------------
+    {
+      // Scariness!
+      if (single)
+      {
+        // If we're empty return end
+        if (entries.single_entry == NULL)
+          return end();
+        return iterator(this, 
+            reinterpret_cast<std::pair<T*,FieldMask>*>(
+              const_cast<FieldMaskSet<T>*>(this)), true/*single*/);
+      }
+      else
+        return iterator(this,
+            reinterpret_cast<std::pair<T*,FieldMask>*>(
+              &(*(entries.multi_entries->begin()))), false);
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T>
+    inline typename FieldMaskSet<T>::iterator FieldMaskSet<T>::find(T *e)
+    //--------------------------------------------------------------------------
+    {
+      if (single)
+      {
+        if ((entries.single_entry == NULL) || (entries.single_entry != e))
+          return end();
+        return iterator(this, 
+            reinterpret_cast<std::pair<T*,FieldMask>*>(
+              const_cast<FieldMaskSet<T>*>(this)), true/*single*/);
+      }
+      else
+      {
+        typename LegionMap<T*,FieldMask>::aligned::iterator finder = 
+          entries.multi_entries->find(e);
+        if (finder == entries.multi_entries->end())
+          return end();
+        return iterator(this,
+            reinterpret_cast<std::pair<T*,FieldMask>*>(&(*finder)), false);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T>
+    inline void FieldMaskSet<T>::erase(iterator &it)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(it != end());
+#endif
+      erase(it->first);
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T>
+    inline typename FieldMaskSet<T>::const_iterator 
+                                              FieldMaskSet<T>::begin(void) const
+    //--------------------------------------------------------------------------
+    {
+      // Scariness!
+      if (single)
+      {
+        // If we're empty return end
+        if (entries.single_entry == NULL)
+          return end();
+        return const_iterator(this, 
+            reinterpret_cast<std::pair<T*,FieldMask>*>(
+              const_cast<FieldMaskSet<T>*>(this)), true/*single*/);
+      }
+      else
+        return const_iterator(this,
+            reinterpret_cast<std::pair<T*,FieldMask>*>(
+              &(*(entries.multi_entries->begin()))), false);
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T>
+    inline typename FieldMaskSet<T>::const_iterator 
+                                               FieldMaskSet<T>::find(T *e) const
+    //--------------------------------------------------------------------------
+    {
+      if (single)
+      {
+        if ((entries.single_entry == NULL) || (entries.single_entry != e))
+          return end();
+        return const_iterator(this, 
+            reinterpret_cast<std::pair<T*,FieldMask>*>(
+              const_cast<FieldMaskSet<T>*>(this)), true/*single*/);
+      }
+      else
+      {
+        typename LegionMap<T*,FieldMask>::aligned::const_iterator finder = 
+          entries.multi_entries->find(e);
+        if (finder == entries.multi_entries->end())
+          return end();
+        return const_iterator(this,
+            reinterpret_cast<std::pair<T*,FieldMask>*>(&(*finder)), false);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T>
+    inline void FieldMaskSet<T>::compute_field_sets(FieldMask universe_mask,
+                 typename LegionList<FieldSet<T*> >::aligned &output_sets) const
+    //--------------------------------------------------------------------------
+    {
+      for (const_iterator pit = this->begin(); pit != this->end(); pit++)
+      {
+        bool inserted = false;
+        // Also keep track of which fields have updates
+        // but don't have any members 
+        if (!!universe_mask)
+          universe_mask -= pit->second;
+        FieldMask remaining = pit->second;
+        // Insert this event into the precondition sets 
+        for (typename LegionList<FieldSet<T*> >::aligned::iterator it = 
+              output_sets.begin(); it != output_sets.end(); it++)
+        {
+          // Easy case, check for equality
+          if (remaining == it->set_mask)
+          {
+            it->elements.insert(pit->first);
+            inserted = true;
+            break;
+          }
+          FieldMask overlap = remaining & it->set_mask;
+          // Easy case, they are disjoint so keep going
+          if (!overlap)
+            continue;
+          // Moderate case, we are dominated, split into two sets
+          // reusing existing set and making a new set
+          if (overlap == remaining)
+          {
+            // Leave the existing set and make it the difference 
+            it->set_mask -= overlap;
+            output_sets.push_back(FieldSet<T*>(overlap));
+            FieldSet<T*> &last = output_sets.back();
+            last.elements = it->elements;
+            last.elements.insert(pit->first);
+            inserted = true;
+            break;
+          }
+          // Moderate case, we dominate the existing set
+          if (overlap == it->set_mask)
+          {
+            // Add ourselves to the existing set and then
+            // keep going for the remaining fields
+            it->elements.insert(pit->first);
+            remaining -= overlap;
+            // Can't consider ourselves added yet
+            continue;
+          }
+          // Hard case, neither dominates, compute three
+          // distinct sets of fields, keep left one in
+          // place and reduce scope, add new one at the
+          // end for overlap, continue iterating for right one
+          it->set_mask -= overlap;
+          const std::set<T*> &temp_elements = it->elements;
+          it = output_sets.insert(it, FieldSet<T*>(overlap));
+          it->elements = temp_elements;
+          it->elements.insert(pit->first);
+          remaining -= overlap;
+          continue;
+        }
+        if (!inserted)
+        {
+          output_sets.push_back(FieldSet<T*>(remaining));
+          FieldSet<T*> &last = output_sets.back();
+          last.elements.insert(pit->first);
+        }
+      }
+      // For any fields which need copies but don't have
+      // any elements, but them in their own set.
+      // Put it on the front because it is the copy with
+      // no elements so it can start right away!
+      if (!!universe_mask)
+        output_sets.push_front(FieldSet<T*>(universe_mask));
+    }
+
   }; // namespace Internal
 }; // namespace Legion 
 

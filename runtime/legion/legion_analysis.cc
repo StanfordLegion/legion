@@ -220,6 +220,21 @@ namespace Legion {
                                      context_uid, remote_applied);
     }
 
+    //--------------------------------------------------------------------------
+    void WriteMasks::merge(const WriteMasks &other_writes)
+    //--------------------------------------------------------------------------
+    {
+      for (WriteMasks::const_iterator it = other_writes.begin();
+            it != other_writes.end(); it++)
+      {
+        WriteMasks::iterator finder = find(it->first);
+        if (finder == end())
+          insert(it->first, it->second);
+        else
+          finder.merge(it->second);
+      }
+    }
+
     /////////////////////////////////////////////////////////////
     // VersioningSet
     /////////////////////////////////////////////////////////////
@@ -263,6 +278,7 @@ namespace Legion {
     {
       // should never be called
       assert(false);
+      return *this;
     }
 
     //--------------------------------------------------------------------------
@@ -2640,7 +2656,8 @@ namespace Legion {
       assert(curr_epoch_users.empty());
       assert(prev_epoch_users.empty());
       assert(projection_epochs.empty());
-      assert(!dirty_fields);
+      assert(!write_fields);
+      assert(partial_writes.empty());
       assert(!dirty_below);
       assert(!reduction_fields);
 #endif
@@ -2679,7 +2696,8 @@ namespace Legion {
       field_states.clear();
       clear_logical_users(); 
       dirty_below.clear();
-      dirty_fields.clear();
+      write_fields.clear();
+      partial_writes.clear();
       reduction_fields.clear();
       outstanding_reductions.clear();
       for (std::list<ProjectionEpoch*>::const_iterator it = 
@@ -2740,7 +2758,9 @@ namespace Legion {
         }
       }
       dirty_below -= deleted_mask;
-      dirty_fields -= deleted_mask;
+      write_fields -= deleted_mask;
+      if (!partial_writes.empty())
+        partial_writes.filter(deleted_mask);
     }
 
     //--------------------------------------------------------------------------
@@ -2819,7 +2839,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void LogicalState::capture_close_epochs(FieldMask capture_mask, 
-                                 OpenState state, ClosedNode *closed_node) const
+                                   OpenState state, LogicalCloser &closer) const
     //--------------------------------------------------------------------------
     {
       for (std::list<ProjectionEpoch*>::const_iterator it = 
@@ -2828,7 +2848,7 @@ namespace Legion {
         FieldMask overlap = (*it)->valid_fields & capture_mask;
         if (!overlap)
           continue;
-        closed_node->record_projections(*it, state, overlap);
+        closer.record_projections(*it, state, owner, overlap);  
         capture_mask -= overlap;
         if (!capture_mask)
           return;
@@ -2961,6 +2981,139 @@ namespace Legion {
       derez.deserialize(pid);
       result.projection = context->runtime->find_projection_function(pid);
       return result;
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Sharding Summary 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    ShardingSummary::ShardingSummary(const ProjectionSummary &rhs, 
+                                     RegionTreeNode *n)
+      : ProjectionSummary(rhs), node(n)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    ShardingSummary::ShardingSummary(const ShardingSummary &rhs)
+      : ProjectionSummary(rhs), node(NULL)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    ShardingSummary::~ShardingSummary(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    ShardingSummary& ShardingSummary::operator=(const ShardingSummary &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Composite View Summary 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    CompositeViewSummary::CompositeViewSummary(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    CompositeViewSummary::CompositeViewSummary(const FieldMask &complete,
+                                               WriteSet &partial)
+      : complete_writes(complete)
+    //--------------------------------------------------------------------------
+    {
+      if (!partial.empty())
+        partial_writes.swap(partial);
+    }
+
+    //--------------------------------------------------------------------------
+    CompositeViewSummary::CompositeViewSummary(const FieldMask &complete,
+                                        WriteSet &partial, 
+                                        FieldMaskSet<ShardingSummary> &writes,
+                                        FieldMaskSet<ShardingSummary> &reduces)
+      : complete_writes(complete)
+    //--------------------------------------------------------------------------
+    {
+      if (!partial.empty())
+        partial_writes.swap(partial);
+      if (!writes.empty())
+        write_projections.swap(writes);
+      if (!reduces.empty())
+        reduce_projections.swap(reduces);
+    }
+
+    //--------------------------------------------------------------------------
+    CompositeViewSummary::CompositeViewSummary(CompositeViewSummary &rhs)
+    //--------------------------------------------------------------------------
+    {
+      swap(rhs);
+    }
+
+    //--------------------------------------------------------------------------
+    CompositeViewSummary::~CompositeViewSummary(void)
+    //--------------------------------------------------------------------------
+    {
+      clear();
+    }
+
+    //--------------------------------------------------------------------------
+    CompositeViewSummary& CompositeViewSummary::operator=(
+                                                const CompositeViewSummary &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void CompositeViewSummary::swap(CompositeViewSummary &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // xor swap the complete writes
+      complete_writes ^= rhs.complete_writes;
+      rhs.complete_writes ^= complete_writes;
+      complete_writes ^= rhs.complete_writes;
+      // Everything else gets swapped normally
+      partial_writes.swap(rhs.partial_writes);
+      write_projections.swap(rhs.write_projections);
+      reduce_projections.swap(rhs.reduce_projections);
+    }
+
+    //--------------------------------------------------------------------------
+    void CompositeViewSummary::clear(void)
+    //--------------------------------------------------------------------------
+    {
+      complete_writes.clear();
+      partial_writes.clear();
+      // Clean up the sharding summaries that we own
+      if (!write_projections.empty())
+      {
+        for (FieldMaskSet<ShardingSummary>::const_iterator it = 
+              write_projections.begin(); it != write_projections.end(); it++)
+          delete it->first;
+        write_projections.clear();
+      }
+      if (!reduce_projections.empty())
+      {
+        for (FieldMaskSet<ShardingSummary>::const_iterator it = 
+              reduce_projections.begin(); it != reduce_projections.end(); it++)
+          delete it->first;
+        reduce_projections.clear();
+      }
     }
 
     /////////////////////////////////////////////////////////////
@@ -3379,878 +3532,26 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
-    // Closed Node
-    /////////////////////////////////////////////////////////////
-
-    //--------------------------------------------------------------------------
-    ClosedNode::ClosedNode(RegionTreeNode *n)
-      : node(n)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    ClosedNode::ClosedNode(const ClosedNode &rhs)
-      : node(rhs.node)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    ClosedNode::~ClosedNode(void)
-    //--------------------------------------------------------------------------
-    {
-      // Recursively delete the rest of the tree
-      for (std::map<RegionTreeNode*,ClosedNode*>::const_iterator it = 
-            children.begin(); it != children.end(); it++)
-        delete it->second;
-      children.clear();
-    }
-
-    //--------------------------------------------------------------------------
-    ClosedNode& ClosedNode::operator=(const ClosedNode &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
-    }
-
-    //--------------------------------------------------------------------------
-    ClosedNode* ClosedNode::clone_disjoint_projection(
-                  RegionTreeNode *child_node, const FieldMask &close_mask) const
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(children.empty()); // should never have any children here
-#endif
-      ClosedNode *result = new ClosedNode(child_node);
-      for (LegionMap<ProjectionSummary,FieldMask>::aligned::const_iterator pit =
-            write_projections.begin(); pit != write_projections.end(); pit++)
-      {
-        const FieldMask overlap = pit->second & close_mask;
-        if (!overlap)
-          continue;
-#ifdef DEBUG_LEGION
-        // Shouldn't be doing this in a control replication context
-        assert(pit->first.sharding == NULL);
-#endif
-        result->record_projection(pit->first.projection, OPEN_READ_WRITE_PROJ,
-                                  pit->first.domain, overlap);
-      }
-      for (LegionMap<ProjectionSummary,FieldMask>::aligned::const_iterator pit =
-            reduce_projections.begin(); pit != reduce_projections.end(); pit++)
-      {
-        const FieldMask overlap = pit->second & close_mask;
-        if (!overlap)
-          continue;
-#ifdef DEBUG_LEGION
-        // Shouldn't be doing this in a control replication context
-        assert(pit->first.sharding == NULL);
-#endif
-        result->record_projection(pit->first.projection, OPEN_REDUCE_PROJ,
-                                  pit->first.domain, overlap);
-      }
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    void ClosedNode::record_projection(ProjectionFunction *function,
-                  OpenState state, IndexSpaceNode *space, const FieldMask &mask)
-    //--------------------------------------------------------------------------
-    {
-      ProjectionSummary key(space, function, NULL);
-      switch (state)
-      {
-        case OPEN_READ_WRITE_PROJ:
-        case OPEN_REDUCE_PROJ_DIRTY:
-          {
-            write_projections[key] |= mask;
-            break;
-          }
-        case OPEN_REDUCE_PROJ:
-          {
-            reduce_projections[key] |= mask;
-            break;
-          }
-        default:
-          assert(false); // shouldn't see any other states
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void ClosedNode::add_child_node(ClosedNode *child)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(children.find(child->node) == children.end());
-#endif
-      children[child->node] = child; 
-    }
-
-    //--------------------------------------------------------------------------
-    ClosedNode* ClosedNode::get_child_node(RegionTreeNode *child) const
-    //--------------------------------------------------------------------------
-    {
-      std::map<RegionTreeNode*,ClosedNode*>::const_iterator finder = 
-        children.find(child);
-      if (finder != children.end())
-        return finder->second;
-      else
-        return NULL;
-    }
-
-    //--------------------------------------------------------------------------
-    void ClosedNode::record_closed_fields(const FieldMask &fields)
-    //--------------------------------------------------------------------------
-    {
-      covered_fields |= fields;
-    }
-
-    //--------------------------------------------------------------------------
-    void ClosedNode::record_reduced_fields(const FieldMask &fields)
-    //--------------------------------------------------------------------------
-    {
-      reduced_fields |= fields;
-    }
-
-    //--------------------------------------------------------------------------
-    void ClosedNode::record_projections(const ProjectionEpoch *epoch,
-                                        OpenState state,const FieldMask &fields)
-    //--------------------------------------------------------------------------
-    {
-      switch (state)
-      {
-        case OPEN_READ_WRITE_PROJ:
-        case OPEN_REDUCE_PROJ_DIRTY:
-          {
-            for (std::set<ProjectionSummary>::const_iterator pit = 
-                  epoch->projections.begin(); pit != 
-                  epoch->projections.end(); pit++)
-            {
-              LegionMap<ProjectionSummary,FieldMask>::aligned::iterator finder =
-                write_projections.find(*pit);
-              if (finder != write_projections.end())
-                finder->second |= fields;
-              else // Didn't exist before so we can just insert it
-                write_projections[*pit] = fields;
-            }
-            break;
-          }
-        case OPEN_REDUCE_PROJ:
-          {
-            for (std::set<ProjectionSummary>::const_iterator pit = 
-                  epoch->projections.begin(); pit != 
-                  epoch->projections.end(); pit++)
-            {
-              LegionMap<ProjectionSummary,FieldMask>::aligned::iterator finder =
-                reduce_projections.find(*pit);
-              if (finder != reduce_projections.end())
-                finder->second |= fields;
-              else // Didn't exist before so we can just insert it
-                reduce_projections[*pit] = fields;
-            }
-            break;
-          }
-        default:
-          assert(false); // shouldn't see any other states
-      
-      }
-    }
-
-#ifndef DISABLE_CVOPT
-    //--------------------------------------------------------------------------
-    void ClosedNode::find_needed_shards(FieldMask mask, ShardID origin_shard,
-                  IndexSpaceExpression *target, const WriteMasks &write_masks,
-                  std::map<ShardID,WriteMasks> &needed_shards,
-                  std::map<ShardID,WriteMasks> &reduction_shards) const
-    //--------------------------------------------------------------------------
-    {
-      // See if we have valid fields that overlap
-      mask &= valid_fields;
-      if (!mask)
-        return;
-      // See if we have any write projections to test against first
-      if (!write_projections.empty())
-        find_interfering_shards(mask, origin_shard, target, write_masks, 
-                                write_projections, needed_shards);
-      // Then see if we have any reduction projections
-      if (!reduce_projections.empty())
-        find_interfering_shards(mask, origin_shard, target, write_masks,
-                                reduce_projections, reduction_shards);
-      // Then traverse any children
-      for (std::map<RegionTreeNode*,ClosedNode*>::const_iterator it = 
-            children.begin(); it != children.end(); it++)
-      {
-        IndexSpaceExpression *child_target_expr = 
-          node->context->intersect_index_spaces(target,
-              it->first->get_index_space_expression());
-        if (child_target_expr->is_empty())
-          continue;
-        it->second->find_needed_shards(mask, origin_shard, child_target_expr,
-                                write_masks, needed_shards, reduction_shards);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void ClosedNode::find_needed_shards_single(const unsigned field_index,
-        const ShardID origin_shard, IndexSpaceExpression *write_mask,
-        std::map<ShardID,IndexSpaceExpression*> &needed_shards,
-        std::map<ShardID,IndexSpaceExpression*> &reduction_shards) const
-    //--------------------------------------------------------------------------
-    {
-      // See if we need to consider anything at this node
-      if (!valid_fields.is_set(field_index))
-        return;
-      // See if we have any write projections first
-      if (!write_projections.empty())
-        find_interfering_shards_single(field_index, origin_shard, write_mask,
-                                       write_projections, needed_shards);
-      // Also check for any reduction projections
-      if (!reduce_projections.empty())
-        find_interfering_shards_single(field_index, origin_shard, write_mask,
-                                       reduce_projections, reduction_shards);
-      // Then traverse any children
-      for (std::map<RegionTreeNode*,ClosedNode*>::const_iterator it = 
-            children.begin(); it != children.end(); it++)
-      {
-        IndexSpaceExpression *child_write_mask = 
-          node->context->intersect_index_spaces(write_mask,
-              it->first->get_index_space_expression());
-        if (child_write_mask->is_empty())
-          continue;
-        it->second->find_needed_shards_single(field_index, origin_shard,
-                      child_write_mask, needed_shards, reduction_shards);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void ClosedNode::find_interfering_shards(FieldMask mask,
-            const ShardID origin_shard, IndexSpaceExpression *target_expr,
-            const WriteMasks &write_masks,
-            const LegionMap<ProjectionSummary,FieldMask>::aligned &projections,
-                  std::map<ShardID,WriteMasks> &needed_shards) const
-    //--------------------------------------------------------------------------
-    {
-      // Iterate over the write masks and find ones that we care about
-      for (WriteMasks::const_iterator wit = write_masks.begin();
-            wit != write_masks.end(); wit++)
-      {
-        const FieldMask mask_overlap = wit->second & mask;
-        if (!mask_overlap)
-          continue;
-        mask -= mask_overlap;
-        IndexSpaceExpression *mask_expr = 
-          node->context->subtract_index_spaces(target_expr, wit->first);
-        if (mask_expr->is_empty())
-        {
-          if (!mask)
-            return;
-          continue;
-        }
-        // We have an interesting write mask so find the interfering projections
-        for (LegionMap<ProjectionSummary,FieldMask>::aligned::const_iterator
-              pit = projections.begin(); pit != projections.end(); pit++)
-        {
-          // More intersection testing
-          const FieldMask overlap = pit->second & mask_overlap;
-          if (!overlap)
-            continue;
-          Domain full_space;
-          pit->first.domain->get_launch_space_domain(full_space);
-          // Invert the projection function to find the interfering points
-          std::map<DomainPoint,IndexSpaceExpression*> interfering_points;
-          pit->first.projection->find_interfering_points(node->context, node,
-                                      pit->first.domain->handle, full_space,
-                                      mask_expr, interfering_points);
-          if (!interfering_points.empty())
-          {
-            for (std::map<DomainPoint,IndexSpaceExpression*>::const_iterator 
-                  dit = interfering_points.begin(); 
-                  dit != interfering_points.end(); dit++)
-            {
-              const ShardID shard = 
-                pit->first.sharding->find_owner(dit->first, full_space);
-              // Skip our origin shard since we know about that
-              if (shard == origin_shard)
-                continue;
-              // Now we have to insert it into all the right places
-              std::map<ShardID,WriteMasks>::iterator shard_finder =
-                needed_shards.find(shard);
-              if (shard_finder != needed_shards.end())
-              {
-                WriteMasks::iterator finder = 
-                  shard_finder->second.find(dit->second);
-                if (finder != shard_finder->second.end())
-                  finder->second |= overlap;
-                else
-                  shard_finder->second[dit->second] = overlap;
-              }
-              else
-                needed_shards[shard][dit->second] = overlap;
-            }
-          }
-        }
-        // If we did all the fields we are done
-        if (!mask)
-          return;
-      }
-      // should only get here if we still have fields to do
-#ifdef DEBUG_LEGION
-      assert(!!mask);
-#endif
-      // We have an interesting write mask so find the interfering projections
-      for (LegionMap<ProjectionSummary,FieldMask>::aligned::const_iterator
-            pit = projections.begin(); pit != projections.end(); pit++)
-      {
-        // More intersection testing
-        const FieldMask overlap = pit->second & mask;
-        if (!overlap)
-          continue;
-        Domain full_space;
-        pit->first.domain->get_launch_space_domain(full_space);
-        // Invert the projection function to find the interfering points
-        std::map<DomainPoint,IndexSpaceExpression*> interfering_points;
-        pit->first.projection->find_interfering_points(node->context, node,
-                                    pit->first.domain->handle, full_space,
-                                    target_expr, interfering_points);
-        if (!interfering_points.empty())
-        {
-          for (std::map<DomainPoint,IndexSpaceExpression*>::const_iterator 
-                dit = interfering_points.begin(); 
-                dit != interfering_points.end(); dit++)
-          {
-            const ShardID shard = 
-              pit->first.sharding->find_owner(dit->first, full_space);
-            // Skip our origin shard since we know about that
-            if (shard == origin_shard)
-              continue;
-            // Now we have to insert it into all the right places
-            std::map<ShardID,WriteMasks>::iterator shard_finder =
-              needed_shards.find(shard);
-            if (shard_finder != needed_shards.end())
-            {
-              WriteMasks::iterator finder = 
-                shard_finder->second.find(dit->second);
-              if (finder != shard_finder->second.end())
-                finder->second |= overlap;
-              else
-                shard_finder->second[dit->second] = overlap;
-            }
-            else
-              needed_shards[shard][dit->second] = overlap;
-          }
-        }
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void ClosedNode::find_interfering_shards_single(const unsigned field_index,
-        const ShardID origin_shard, IndexSpaceExpression *target_expr,
-        const LegionMap<ProjectionSummary,FieldMask>::aligned &projections,
-        std::map<ShardID,IndexSpaceExpression*> &needed_shards) const
-    //--------------------------------------------------------------------------
-    {
-      for (LegionMap<ProjectionSummary,FieldMask>::aligned::const_iterator
-            pit = projections.begin(); pit != projections.end(); pit++)
-      {
-#ifdef DEBUG_LEGION
-        // Should always have a sharding function
-        assert(pit->first.sharding != NULL);
-#endif
-        if (!pit->second.is_set(field_index))
-          continue;
-        Domain full_space;
-        pit->first.domain->get_launch_space_domain(full_space);
-        // Invert the projection function to find the interfering points
-        std::map<DomainPoint,IndexSpaceExpression*> interfering_points;
-        pit->first.projection->find_interfering_points(node->context, node,
-                                     pit->first.domain->handle, full_space, 
-                                     target_expr, interfering_points);
-        if (!interfering_points.empty())
-        {
-          for (std::map<DomainPoint,IndexSpaceExpression*>::const_iterator 
-                dit = interfering_points.begin(); 
-                dit != interfering_points.end(); dit++)
-          {
-            const ShardID shard = 
-              pit->first.sharding->find_owner(dit->first, full_space);
-            // Skip our origin shard since we know about that
-            if (shard == origin_shard)
-              continue;
-            std::map<ShardID,IndexSpaceExpression*>::iterator finder = 
-              needed_shards.find(shard);
-            if (finder != needed_shards.end())
-              // Union the index space expressions together
-              finder->second = node->context->union_index_spaces(
-                                      finder->second, dit->second);
-            else
-              needed_shards[shard] = dit->second;
-          }
-        }
-      }
-    }
-#else
-    //--------------------------------------------------------------------------
-    void ClosedNode::find_needed_shards(FieldMask mask, RegionTreeNode *target,
-                                        std::set<ShardID> &needed_shards) const
-    //--------------------------------------------------------------------------
-    {
-      // See if we have valid fields that overlap
-      mask &= valid_fields;
-      if (!mask)
-        return;
-      // See if we have any projections that we need to find other shards for
-      if (!write_projections.empty())
-      {
-        for (LegionMap<ProjectionSummary,FieldMask>::aligned::const_iterator
-              pit = write_projections.begin(); 
-              pit != write_projections.end(); pit++)
-        {
-#ifdef DEBUG_LEGION
-          // Should always have a sharding function
-          assert(pit->first.sharding != NULL);
-#endif
-          if (pit->second * mask)
-            continue;
-          Domain full_space;
-          pit->first.domain->get_launch_space_domain(full_space);
-          // Invert the projection function to find the interfering points
-          std::set<DomainPoint> interfering_points;
-          pit->first.projection->find_interfering_points(target->context, node,
-            pit->first.domain->handle, full_space, target, interfering_points);
-          if (!interfering_points.empty())
-          {
-            for (std::set<DomainPoint>::const_iterator dit = 
-                  interfering_points.begin(); dit != 
-                  interfering_points.end(); dit++)
-            {
-              ShardID shard = pit->first.sharding->find_owner(*dit, full_space);
-              needed_shards.insert(shard);
-            }
-          }
-        }
-      }
-      if (!reduce_projections.empty())
-      {
-        for (LegionMap<ProjectionSummary,FieldMask>::aligned::const_iterator
-              pit = reduce_projections.begin(); 
-              pit != reduce_projections.end(); pit++)
-        {
-#ifdef DEBUG_LEGION
-          // Should always have a sharding function
-          assert(pit->first.sharding != NULL);
-#endif
-          if (pit->second * mask)
-            continue;
-          Domain full_space;
-          pit->first.domain->get_launch_space_domain(full_space);
-          // Invert the projection function to find the interfering points
-          std::set<DomainPoint> interfering_points;
-          pit->first.projection->find_interfering_points(target->context, node,
-            pit->first.domain->handle, full_space, target, interfering_points);
-          if (!interfering_points.empty())
-          {
-            for (std::set<DomainPoint>::const_iterator dit = 
-                  interfering_points.begin(); dit != 
-                  interfering_points.end(); dit++)
-            {
-              ShardID shard = pit->first.sharding->find_owner(*dit, full_space);
-              needed_shards.insert(shard);
-            }
-          }
-        }
-      }
-      // Now traverse any children that intersect with our target
-      for (std::map<RegionTreeNode*,ClosedNode*>::const_iterator it = 
-            children.begin(); it != children.end(); it++)
-      {
-        if (!it->first->intersects_with(target, false/*compute*/))
-          continue;
-        it->second->find_needed_shards(mask, target, needed_shards);
-      }
-    }
-#endif
-
-    //--------------------------------------------------------------------------
-    void ClosedNode::fix_closed_tree(void)
-    //--------------------------------------------------------------------------
-    {
-      // If we are complete and have all our children, that we can also
-      // infer covering at this node
-      if (!children.empty())
-      {
-        const bool local_complete = node->is_complete() && 
-          (children.size() == node->get_num_children());
-        bool first_child = true;
-        FieldMask child_covered;
-        // Do all our sub-trees first
-        for (std::map<RegionTreeNode*,ClosedNode*>::const_iterator it = 
-              children.begin(); it != children.end(); it++)
-        {
-          // Recurse down the tree
-          it->second->fix_closed_tree();
-          // Update our valid mask
-          valid_fields |= it->second->get_valid_fields();
-          // If the child is complete we can also update covered
-          if (it->second->node->is_complete())
-            covered_fields |= it->second->get_covered_fields();
-          if (local_complete)
-          {
-            if (first_child)
-            {
-              child_covered = it->second->get_covered_fields();
-              first_child = false;
-            }
-            else
-              child_covered &= it->second->get_covered_fields();
-          }
-        }
-        if (local_complete && !!child_covered)
-          covered_fields |= child_covered;
-      }
-      // All our covered fields are always valid
-      if (!!covered_fields)
-        valid_fields |= covered_fields;
-      if (!!reduced_fields)
-        valid_fields |= reduced_fields;
-      // Finally update our valid fields based on any projections
-      if (!write_projections.empty())
-      {
-        for (LegionMap<ProjectionSummary,FieldMask>::aligned::const_iterator
-              pit = write_projections.begin(); 
-              pit != write_projections.end(); pit++)
-          valid_fields |= pit->second;
-      }
-      if (!reduce_projections.empty())
-      {
-        for (LegionMap<ProjectionSummary,FieldMask>::aligned::const_iterator
-              pit = reduce_projections.begin(); 
-              pit != reduce_projections.end(); pit++)
-          valid_fields |= pit->second;
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void ClosedNode::filter_dominated_fields(const ClosedNode *old_tree, 
-                                            FieldMask &non_dominated_mask) const
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(node == old_tree->node); // should always be the same
-#endif
-      // We can remove any fields we are covered by here
-      if (!!covered_fields)
-      {
-        non_dominated_mask -= covered_fields;
-        if (!non_dominated_mask)
-          return;
-      }
-      // If we have any projections, we can also try to filter by that
-      if (!write_projections.empty())
-      {
-        old_tree->filter_dominated_projection_fields(non_dominated_mask, 
-                                                     write_projections); 
-        if (!non_dominated_mask)
-          return;
-      }
-      // Otherwise try to see if the children zip well, this only
-      // works if we actually have children that can dominate other children
-      if (!children.empty())
-        old_tree->filter_dominated_children(non_dominated_mask, children);
-    }
-
-    //--------------------------------------------------------------------------
-    void ClosedNode::filter_dominated_projection_fields(
-        FieldMask &non_dominated_mask,
-        const LegionMap<ProjectionSummary,
-                        FieldMask>::aligned &new_projections) const
-    //--------------------------------------------------------------------------
-    {
-      // In order to remove a dominated field, for each of our projection
-      // operations, we need to find one in the new set that dominates it
-      FieldMask dominated_mask = non_dominated_mask;
-      for (LegionMap<ProjectionSummary,FieldMask>::aligned::const_iterator
-            pit = write_projections.begin(); 
-            pit != write_projections.end(); pit++)
-      {
-        // Find the set of fields that are still dominated for everything
-        // that overlap with this projection so we can check that they
-        // are still dominated
-        const FieldMask need_dominated = pit->second & dominated_mask;
-        if (!need_dominated)
-          continue;
-        FieldMask actually_dominated;
-        // See if we can find one in the new set that dominates 
-        for (LegionMap<ProjectionSummary,FieldMask>::aligned::const_iterator
-              it = new_projections.begin(); it != new_projections.end(); it++)
-        {
-          // If the projection functions don't match then we can't
-          // do anything about dominance
-          if (pit->first.projection != it->first.projection)
-            continue;
-          // The overlap are fields that can be dominated
-          FieldMask overlap = it->second & need_dominated;
-          if (!overlap)
-            continue;
-          // Now check to see if the index space dominates
-          // Types have to match, if they don't we don't care
-          if (it->first.domain->handle.get_type_tag() !=
-              pit->first.domain->handle.get_type_tag())
-            continue;
-          if (it->first.domain->dominates(pit->first.domain))
-          {
-            actually_dominated |= overlap;
-            if (actually_dominated == need_dominated)
-              break;
-          }
-        }
-        // Remove any fields that should have been dominated that weren't
-        dominated_mask -= (need_dominated - actually_dominated);
-        if (!dominated_mask)
-          break;
-      }
-      // Remove the dominated fields from the set
-      if (!!dominated_mask)
-        non_dominated_mask -= dominated_mask;
-    }
-
-    //--------------------------------------------------------------------------
-    void ClosedNode::filter_dominated_children(FieldMask &non_dominated_mask,
-               const std::map<RegionTreeNode*,ClosedNode*> &new_children) const
-    //--------------------------------------------------------------------------
-    {
-      // If the child is created for a complete partition with an identity
-      // projection over the entire color space, we are dominated for its fields
-      // TODO: Any bijective projections can use this optimization
-      ProjectionFunction *identity =
-        node->context->runtime->find_projection_function(0);
-      for (std::map<RegionTreeNode*,ClosedNode*>::const_iterator it =
-            new_children.begin(); it != new_children.end(); it++)
-      {
-        if (it->first->is_region() || it->second->write_projections.empty()) 
-          continue;
-        PartitionNode *node = it->first->as_partition_node();
-        if (!node->is_complete()) 
-          continue;
-        IndexSpaceNode *color_space = node->row_source->color_space;
-        // Iterate over the projections and look for anything with an 
-        // identity projection function for which we can do something
-        for (LegionMap<ProjectionSummary,FieldMask>::aligned::const_iterator
-              pit = it->second->write_projections.begin();
-              pit != it->second->write_projections.end(); pit++)
-        {
-          if (pit->first.projection != identity)
-            continue;
-          FieldMask new_child_dominated = non_dominated_mask & pit->second;
-          if (!new_child_dominated)
-            continue;
-          if ((color_space->get_num_dims() != pit->first.domain->get_num_dims())
-              || ! pit->first.domain->dominates(color_space))
-            continue;
-          // If there are any reduction fields they can't be dominated
-          if (!!it->second->reduced_fields)
-          {
-            new_child_dominated -= it->second->reduced_fields;
-            if (!new_child_dominated)
-              continue;
-          }
-          // Remove the fields dominated by this new child
-          non_dominated_mask -= new_child_dominated;
-          if (!!non_dominated_mask) 
-            return;
-        }
-      }
-      // In order to remove a field, it has to be dominated in all our children
-      FieldMask dominated_fields = non_dominated_mask;
-      // If we have projections instead of explicitly closed children then we 
-      // aren't going to directly compare them right now
-      // TODO: make this analysis more precise
-      if (!write_projections.empty())
-      {
-        for (LegionMap<ProjectionSummary,FieldMask>::aligned::const_iterator
-              pit = write_projections.begin(); 
-              pit != write_projections.end(); pit++)
-        {
-          const FieldMask overlap = pit->second & dominated_fields;
-          if (!overlap)
-            continue;
-          dominated_fields -= overlap;
-          if (!dominated_fields)
-            return;
-        }
-      }
-      FieldMask not_dominated_by_all;
-      for (std::map<RegionTreeNode*,ClosedNode*>::const_iterator it = 
-            children.begin(); it != children.end(); it++)
-      {
-        FieldMask overlap = it->second->get_valid_fields() & non_dominated_mask;
-        if (!overlap)
-          continue;
-        std::map<RegionTreeNode*,ClosedNode*>::const_iterator finder = 
-          new_children.find(it->first);
-        // If we can't find it, then we are not dominated for those fields
-        if (finder == new_children.end())
-        {
-          dominated_fields -= overlap;
-          if (!dominated_fields)
-            return;
-          continue;
-        }
-        FieldMask child_non_dominated = overlap;
-        finder->second->filter_dominated_fields(it->second,child_non_dominated);
-        not_dominated_by_all |= child_non_dominated;
-      }
-      non_dominated_mask -= dominated_fields - not_dominated_by_all;
-    }
-
-    //--------------------------------------------------------------------------
-    void ClosedNode::pack_closed_node(Serializer &rez) const 
-    //--------------------------------------------------------------------------
-    {
-      if (node->is_region())
-        rez.serialize(node->as_region_node()->handle);
-      else
-        rez.serialize(node->as_partition_node()->handle);
-      rez.serialize(valid_fields);
-      rez.serialize(covered_fields);
-      rez.serialize<size_t>(write_projections.size());
-      for (LegionMap<ProjectionSummary,FieldMask>::aligned::const_iterator pit =
-            write_projections.begin(); pit != write_projections.end(); pit++)
-      {
-        rez.serialize(pit->first.projection->projection_id);
-        if (pit->first.sharding!= NULL)
-        {
-          rez.serialize<bool>(true);
-          rez.serialize(pit->first.sharding->sharding_id);
-        }
-        else
-          rez.serialize<bool>(false);
-        rez.serialize(pit->first.domain->handle);
-        rez.serialize(pit->second);
-      }
-      rez.serialize<size_t>(reduce_projections.size());
-      for (LegionMap<ProjectionSummary,FieldMask>::aligned::const_iterator pit =
-            reduce_projections.begin(); pit != reduce_projections.end(); pit++)
-      {
-        rez.serialize(pit->first.projection->projection_id);
-        if (pit->first.sharding!= NULL)
-        {
-          rez.serialize<bool>(true);
-          rez.serialize(pit->first.sharding->sharding_id);
-        }
-        else
-          rez.serialize<bool>(false);
-        rez.serialize(pit->first.domain->handle);
-        rez.serialize(pit->second);
-      }
-      rez.serialize<size_t>(children.size());
-      for (std::map<RegionTreeNode*,ClosedNode*>::const_iterator it = 
-            children.begin(); it != children.end(); it++)
-        it->second->pack_closed_node(rez);
-    }
-
-    //--------------------------------------------------------------------------
-    void ClosedNode::perform_unpack(Deserializer &derez, InnerContext *ctx, 
-                                    Runtime *runtime, bool is_region)
-    //--------------------------------------------------------------------------
-    {
-      derez.deserialize(valid_fields);
-      derez.deserialize(covered_fields);
-      size_t num_write_projections;
-      derez.deserialize(num_write_projections);
-      for (unsigned idx = 0; idx < num_write_projections; idx++)
-      {
-        ProjectionSummary summary;
-        ProjectionID pid;
-        derez.deserialize(pid);
-        summary.projection = runtime->find_projection_function(pid);
-        bool has_sharding_function;
-        derez.deserialize(has_sharding_function);
-        if (has_sharding_function)
-        {
-          ShardingID sid;
-          derez.deserialize(sid);
-          summary.sharding = ctx->find_sharding_function(sid);
-        }
-        IndexSpace handle;
-        derez.deserialize(handle);
-        summary.domain = runtime->forest->get_node(handle);
-        derez.deserialize(write_projections[summary]);
-      }
-      size_t num_reduce_projections;
-      derez.deserialize(num_reduce_projections);
-      for (unsigned idx = 0; idx < num_reduce_projections; idx++)
-      {
-        ProjectionSummary summary;
-        ProjectionID pid;
-        derez.deserialize(pid);
-        summary.projection = runtime->find_projection_function(pid);
-        bool has_sharding_function;
-        derez.deserialize(has_sharding_function);
-        if (has_sharding_function)
-        {
-          ShardingID sid;
-          derez.deserialize(sid);
-          summary.sharding = ctx->find_sharding_function(sid);
-        }
-        IndexSpace handle;
-        derez.deserialize(handle);
-        summary.domain = runtime->forest->get_node(handle);
-        derez.deserialize(reduce_projections[summary]);
-      }
-      size_t num_children;
-      derez.deserialize(num_children);
-      for (unsigned idx = 0; idx < num_children; idx++)
-      {
-        ClosedNode *child = unpack_closed_node(derez, ctx, runtime, !is_region);
-        children[child->node] = child;
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ ClosedNode* ClosedNode::unpack_closed_node(Deserializer &derez,
-                            InnerContext *ctx, Runtime *runtime, bool is_region)
-    //--------------------------------------------------------------------------
-    {
-      RegionTreeNode *node = NULL;
-      if (is_region)
-      {
-        LogicalRegion handle;
-        derez.deserialize(handle);
-        node = runtime->forest->get_node(handle);
-      }
-      else
-      {
-        LogicalPartition handle;
-        derez.deserialize(handle);
-        node = runtime->forest->get_node(handle);
-      }
-      ClosedNode *result = new ClosedNode(node);
-      result->perform_unpack(derez, ctx, runtime, is_region);
-      return result;
-    }
-
-    /////////////////////////////////////////////////////////////
     // Logical Closer 
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
     LogicalCloser::LogicalCloser(ContextID c, const LogicalUser &u, 
-                                 RegionTreeNode *r, bool val, bool capture)
+                           RegionTreeNode *r, bool val, bool capture, bool repl)
       : ctx(c), user(u), root_node(r), validates(val), capture_users(capture),
-        normal_close_op(NULL), index_close_op(NULL),
+        replicate_context(repl), normal_close_op(NULL), index_close_op(NULL),
         read_only_close_op(NULL), flush_only_close_op(NULL)
     //--------------------------------------------------------------------------
     {
+      written_children.resize(1);
+      partial_writes.resize(1);
+      written_above.resize(1);
     }
 
     //--------------------------------------------------------------------------
     LogicalCloser::LogicalCloser(const LogicalCloser &rhs)
       : user(rhs.user), root_node(rhs.root_node), validates(rhs.validates),
-        capture_users(rhs.capture_users)
+      capture_users(rhs.capture_users), replicate_context(rhs.replicate_context)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -4337,26 +3638,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ClosedNode* LogicalCloser::find_closed_node(RegionTreeNode *node)
-    //--------------------------------------------------------------------------
-    {
-      std::map<RegionTreeNode*,ClosedNode*>::const_iterator finder = 
-        closed_nodes.find(node);
-      if (finder != closed_nodes.end())
-        return finder->second;
-      // Otherwise we need to make it
-      ClosedNode *result = new ClosedNode(node);
-      closed_nodes[node] = result;
-      // Make it up the tree if necessary
-      if (node != root_node)
-      {
-        ClosedNode *parent = find_closed_node(node->get_parent());
-        parent->add_child_node(result);
-      }
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
     void LogicalCloser::record_closed_user(const LogicalUser &user,
                                           const FieldMask &mask, bool read_only)
     //--------------------------------------------------------------------------
@@ -4372,6 +3653,40 @@ namespace Legion {
         normal_closed_users.push_back(user);
         LogicalUser &closed_user = normal_closed_users.back();
         closed_user.field_mask = mask;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void LogicalCloser::record_projections(const ProjectionEpoch *epoch,
+                 OpenState state, RegionTreeNode *node, const FieldMask &fields)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      // We should only be doing this for control replication context
+      assert(replicate_context);
+#endif
+      switch (state)
+      {
+        case OPEN_READ_WRITE_PROJ:
+        case OPEN_REDUCE_PROJ_DIRTY:
+          {
+            for (std::set<ProjectionSummary>::const_iterator pit = 
+                  epoch->projections.begin(); pit != 
+                  epoch->projections.end(); pit++)
+              write_projections.insert(new ShardingSummary(*pit, node), fields);
+            break;
+          }
+        case OPEN_REDUCE_PROJ:
+          {
+            for (std::set<ProjectionSummary>::const_iterator pit = 
+                  epoch->projections.begin(); pit != 
+                  epoch->projections.end(); pit++)
+              reduce_projections.insert(new ShardingSummary(*pit, node),fields);
+            break;
+          }
+        default:
+          assert(false); // shouldn't see any other states
+      
       }
     }
 
@@ -4420,17 +3735,42 @@ namespace Legion {
         root_node->column_source->get_field_set(normal_close_mask,
                                                trace_info.req.privilege_fields,
                                                req.privilege_fields);
-        std::map<RegionTreeNode*,ClosedNode*>::const_iterator finder = 
-          closed_nodes.find(root_node);
-#ifdef DEBUG_LEGION
-        assert(finder != closed_nodes.end()); // better have a closed tree
-#endif
         // Now initialize the operation
-        normal_close_op->initialize(creator->get_context(), req, finder->second,
-                                    trace_info, trace_info.req_idx, 
-                                    ver_info, normal_close_mask, creator);
-        // We can clear this now
-        closed_nodes.clear();
+        // If we also have some disjoint close fields then we need to
+        // figure which things belong to the normal close
+        if (!!disjoint_close_mask)
+        {
+          WriteSet local_writes;
+          if (!partial_writes[0].empty())
+          {
+            WriteSet disjoint_writes;
+            for (WriteSet::const_iterator it = partial_writes[0].begin();
+                  it != partial_writes[0].end(); it++)
+            {
+              const FieldMask overlap = normal_close_mask & it->second;
+              if (!!overlap)
+                local_writes.insert(it->first, overlap);
+              const FieldMask diff = it->second & disjoint_close_mask;
+              if (!!diff)
+                disjoint_writes.insert(it->first, diff);
+            }
+            // Swap this so the disjoint close op can just use it
+            partial_writes[0].swap(disjoint_writes);
+          }
+          CompositeViewSummary view_summary(complete_writes & normal_close_mask,
+                           local_writes, write_projections, reduce_projections);
+          normal_close_op->initialize(creator->get_context(), req, trace_info, 
+                                      trace_info.req_idx, ver_info, root_node, 
+                                      normal_close_mask, creator, view_summary);
+        }
+        else // it's all the normal close
+        {
+          CompositeViewSummary view_summary(complete_writes, partial_writes[0],
+                                        write_projections, reduce_projections);
+          normal_close_op->initialize(creator->get_context(), req, trace_info, 
+                                      trace_info.req_idx, ver_info, root_node, 
+                                      normal_close_mask, creator, view_summary);
+        }
       }
       if (!!disjoint_close_mask)
       {
@@ -4444,20 +3784,19 @@ namespace Legion {
         root_node->column_source->get_field_set(disjoint_close_mask,
                                                trace_info.req.privilege_fields,
                                                req.privilege_fields);
-        std::map<RegionTreeNode*,ClosedNode*>::const_iterator finder = 
-          closed_nodes.find(root_node);
 #ifdef DEBUG_LEGION
-        assert(finder != closed_nodes.end()); // better have a closed tree
         assert(!root_node->is_region());
 #endif
         IndexPartNode *part_node = root_node->as_partition_node()->row_source;
         // Perform the close over the whole domain
-        index_close_op->initialize(creator->get_context(), req, finder->second, 
-                                   trace_info, trace_info.req_idx, 
-                                   ver_info, disjoint_close_mask, creator,
-                                   part_node->color_space);
+        CompositeViewSummary view_summary(complete_writes & disjoint_close_mask,
+                                          partial_writes[0]);
+        index_close_op->initialize(creator->get_context(), req, trace_info, 
+                                   trace_info.req_idx, ver_info, root_node, 
+                                   disjoint_close_mask, creator,
+                                   part_node->color_space, view_summary);
         // We need to record which projection epoch we are in
-        state.capture_projection_epochs(disjoint_close_mask, 
+        state.capture_projection_epochs(disjoint_close_mask,
                                         index_close_op->projection_info);
       }
       if (!!read_only_close_mask)
@@ -4491,12 +3830,11 @@ namespace Legion {
         root_node->column_source->get_field_set(flush_only_close_mask,
                                                trace_info.req.privilege_fields,
                                                req.privilege_fields);
-        // Make a closed tree of just the root node
-        // There are no dirty fields here since we just flushing reductions
-        ClosedNode *closed_tree = new ClosedNode(root_node);
+        // We're only flushing reductions so there are no writes
+        CompositeViewSummary empty_summary;
         flush_only_close_op->initialize(creator->get_context(), req, 
-            closed_tree, trace_info, trace_info.req_idx, 
-            ver_info, flush_only_close_mask, creator);
+            trace_info, trace_info.req_idx, ver_info, root_node, 
+            flush_only_close_mask, creator, empty_summary);
       }
     }
 
@@ -4607,6 +3945,241 @@ namespace Legion {
     // be found in region_tree.cc to make sure the templates are instantiated
 
     //--------------------------------------------------------------------------
+    void LogicalCloser::begin_close_children(const FieldMask &closing_mask,
+                                           RegionTreeNode *closing_node,
+                                           const FieldMask &complete_writes, 
+                                           const WriteSet &state_partial_writes)
+    //--------------------------------------------------------------------------
+    {
+      const size_t depth = written_children.size();
+#ifdef DEBUG_LEGION
+      assert(depth > 0);
+      // Should never be doing this at the root
+      assert(closing_node != root_node);
+      assert(depth == partial_writes.size());
+      assert(depth == written_above.size());
+#endif
+      // First increase the size of our stacks
+      written_children.resize(depth + 1);
+      partial_writes.resize(depth + 1);
+      written_above.resize(depth + 1);
+      // Record any local writes that we have which will serve as an 
+      // optimization for eliding analysis for things lower in the tree
+      const FieldMask &from_above = written_above[depth-1] & closing_mask;
+      FieldMask unwritten = closing_mask;
+      if (!!from_above)
+        unwritten -= from_above;
+      if (!!unwritten && !!complete_writes)
+      {
+        // First record any updates that we have at this level, we can skip
+        // anything that was already recorded as written above
+        const FieldMask local_writes = complete_writes & unwritten;
+        if (!!local_writes)
+        {
+          written_children[depth-1].insert(closing_node, local_writes);
+          written_above[depth] = from_above | local_writes;
+          unwritten -= local_writes;
+        }
+      }
+      else if (!!from_above) // Only have fields written from above
+        written_above[depth] = from_above; 
+      // If we still have unwritten fields then save any partial writes
+      if (!!unwritten && !state_partial_writes.empty())
+      {
+        WriteSet &local_partial = partial_writes[depth-1];
+        for (WriteSet::const_iterator it = state_partial_writes.begin();
+              it != state_partial_writes.end(); it++)
+        {
+          const FieldMask overlap = it->second & unwritten;
+          if (!overlap)
+            continue;
+          local_partial.insert(it->first, overlap);
+          unwritten -= overlap;
+          if (!unwritten)
+            break;
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void LogicalCloser::end_close_children(FieldMask closed_mask,
+                                           RegionTreeNode *closed_node)
+    //--------------------------------------------------------------------------
+    {
+      const size_t depth = written_children.size() - 1;
+#ifdef DEBUG_LEGION
+      assert(depth > 0);
+      // We should never be doing this on the root node
+      assert(closed_node != root_node);
+      assert(written_children.size() == partial_writes.size());
+      assert(written_children.size() == written_above.size());
+#endif
+      FieldMaskSet<RegionTreeNode> &local_writes = written_children[depth-1];
+      WriteSet &local_partial_writes = partial_writes[depth-1];
+      const FieldMask &from_above = written_above[depth-1];
+      // If we already have fields written above then there is nothing to do
+      if (!!from_above)
+        closed_mask -= from_above;
+      if (!!closed_mask)
+      {
+        const FieldMaskSet<RegionTreeNode> &child_writes =
+          written_children[depth];
+        WriteSet &partial_children = partial_writes[depth];
+        bool done = false;
+        if (closed_node->is_region())
+        {
+          // This is a region, so if we have any complete children we 
+          // can mark them as being a complete write to this node
+          for (FieldMaskSet<RegionTreeNode>::const_iterator it = 
+                child_writes.begin(); it != child_writes.end(); it++)
+          {
+#ifdef DEBUG_LEGION
+            assert(it->first->get_depth() == (closed_node->get_depth() + 1));
+#endif
+            if (it->first->as_partition_node()->is_complete())
+            {
+              local_writes.insert(closed_node, it->second);
+              closed_mask -= it->second;
+              if (!closed_mask)
+              {
+                done = true;
+                break;
+              }
+            }
+            else // Otherwise add it to the partial set
+              partial_children.insert(
+                it->first->get_index_space_expression(), it->second);
+          }
+        }
+        else
+        {
+          // Partition, see if we have any fields for which we have
+          // writes to all our children, begin by sorting into field sets
+          LegionList<FieldSet<RegionTreeNode*> >::aligned child_sets;
+          child_writes.compute_field_sets(FieldMask(), child_sets);
+          const size_t num_children = root_node->get_num_children();
+          for (LegionList<FieldSet<RegionTreeNode*> >::aligned::const_iterator
+                cit = child_sets.begin(); cit != child_sets.end(); cit++)
+          {
+            // Check to see if the set of children is the same size as our
+            // number of children, if so then that is a complete write also
+            if (cit->elements.size() == num_children)
+            {
+              local_writes.insert(closed_node, cit->set_mask);
+              closed_mask -= cit->set_mask;
+              if (!closed_mask)
+              {
+                done = true;
+                break;
+              }
+            }
+            else
+            {
+              // Add all the children expressions to the partial writes
+              for (std::set<RegionTreeNode*>::const_iterator it = 
+                    cit->elements.begin(); it != cit->elements.end(); it++)
+                partial_children.insert(
+                    (*it)->get_index_space_expression(), cit->set_mask);
+            }
+          }
+        }
+        // See if we still have partial write sets to handle, 
+        // these are the same regardless of our node type
+        if (!done && !partial_children.empty())
+        {
+          // Sort into field sets and then union together and test against 
+          // the index space expression for this node to see if it covers
+          LegionList<FieldSet<IndexSpaceExpression*> >::aligned write_sets;
+          partial_children.compute_field_sets(FieldMask(), write_sets);
+          IndexSpaceExpression *local_expr = 
+            root_node->get_index_space_expression();
+          RegionTreeForest *context = root_node->context;
+          for (LegionList<FieldSet<IndexSpaceExpression*> >::aligned::
+                const_iterator it = write_sets.begin(); 
+                it != write_sets.end(); it++)
+          {
+            // Skip anything that doesn't overlap with 
+            // fields we're still handling
+            const FieldMask overlap = it->set_mask & closed_mask;
+            if (!overlap)
+              continue;
+            IndexSpaceExpression *union_expr = 
+              context->union_index_spaces(it->elements);
+            // Check to see if this dominates the local expression
+            IndexSpaceExpression *diff_expr = 
+              context->subtract_index_spaces(local_expr, union_expr);
+            if (diff_expr->is_empty())
+              local_writes.insert(closed_node, overlap);
+            else // We don't cover so this is a partial update
+              local_partial_writes.insert(union_expr, overlap);
+            // This is our last step, so we can filter the closed_mask
+            closed_mask -= overlap; 
+            if (!closed_mask)
+              break;
+          }
+        }
+      }
+      // Once we get here then we can pop the sets of the back
+      written_children.pop_back();
+      partial_writes.pop_back();
+      written_above.pop_back();
+    }
+
+    //--------------------------------------------------------------------------
+    void LogicalCloser::update_close_writes(const FieldMask &closing_mask,
+                                           RegionTreeNode *closing_node,
+                                           const FieldMask &complete_writes,
+                                           const WriteSet &state_partial_writes)
+    //--------------------------------------------------------------------------
+    {
+      const size_t depth = written_children.size();
+#ifdef DEBUG_LEGION
+      assert(depth > 0);
+      assert(depth == partial_writes.size());
+      assert(depth == written_above.size());
+#endif
+      // Record any local writes that we have which will serve as an 
+      // optimization for eliding analysis for things lower in the tree
+      const FieldMask &from_above = written_above[depth-1] & closing_mask;
+      FieldMask unwritten = closing_mask;
+      if (!!from_above)
+      {
+        unwritten -= from_above;
+        if (!unwritten)
+          return;
+      }
+      if (!!complete_writes)
+      {
+        // First record any updates that we have at this level, we can skip
+        // anything that was already recorded as written above
+        const FieldMask local_writes = complete_writes & unwritten;
+        if (!!local_writes)
+        {
+          written_children[depth-1].insert(closing_node, local_writes);
+          unwritten -= local_writes;
+          if (!unwritten)
+            return;
+        }
+      }
+      // If we still have unwritten fields then save any partial writes
+      if (!state_partial_writes.empty())
+      {
+        WriteSet &local_partial = partial_writes[depth-1];
+        for (WriteSet::const_iterator it = state_partial_writes.begin();
+              it != state_partial_writes.end(); it++)
+        {
+          const FieldMask overlap = it->second & unwritten;
+          if (!overlap)
+            continue;
+          local_partial.insert(it->first, overlap);
+          unwritten -= overlap;
+          if (!unwritten)
+            return;
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void LogicalCloser::update_state(LogicalState &state)
     //--------------------------------------------------------------------------
     {
@@ -4634,9 +4207,116 @@ namespace Legion {
         if (!closed_mask)
           return;
       }
-      // the dirty data now resides at this level
-      state.dirty_fields |= closed_mask;
+      // We don't have any more dirty data below now things have been pulled up
       state.dirty_below -= closed_mask;
+      // At this point we need to compute the fields that are complete writes
+      // for this close operation. If we are doing no normal close operations
+      // then there is nothing more for us to do here
+      if (!normal_close_mask)
+        return;
+      // Reset the closed mask to be just our normal closes
+      if (!!disjoint_close_mask)
+      {
+        closed_mask = normal_close_mask - disjoint_close_mask;
+        if (!closed_mask)
+          return;
+      }
+      else
+        closed_mask = normal_close_mask;
+      // Update the write masks based on the close operations that we did
+#ifdef DEBUG_LEGION
+      assert(written_children.size() == 1);
+      assert(partial_writes.size() == 1);
+#endif
+      const FieldMaskSet<RegionTreeNode> &child_writes =written_children.back();
+      WriteSet &partial_children = partial_writes.back();
+      if (root_node->is_region())
+      {
+        // This is a region, so if we have any complete children we 
+        // can mark them as being a complete write to this node
+        for (FieldMaskSet<RegionTreeNode>::const_iterator it = 
+              child_writes.begin(); it != child_writes.end(); it++)
+        {
+          if (it->first->as_partition_node()->is_complete())
+          {
+            state.update_write_fields(it->second);
+            complete_writes |= it->second;
+            closed_mask -= it->second;
+            if (!closed_mask)
+              return;
+          }
+          else // Otherwise add it to the partial set
+            partial_children.insert(
+              it->first->get_index_space_expression(), it->second);
+        }
+      }
+      else
+      {
+        // Partition, see if we have any fields for which we have
+        // writes to all our children, begin by sorting into field sets
+        LegionList<FieldSet<RegionTreeNode*> >::aligned child_sets;
+        child_writes.compute_field_sets(FieldMask(), child_sets);
+        const size_t num_children = root_node->get_num_children();
+        for (LegionList<FieldSet<RegionTreeNode*> >::aligned::const_iterator 
+              cit = child_sets.begin(); cit != child_sets.end(); cit++)
+        {
+          // Check to see if the set of children is the same size as our
+          // number of children, if so then that is a complete write also
+          if (cit->elements.size() == num_children)
+          {
+            state.update_write_fields(cit->set_mask);
+            complete_writes |= cit->set_mask;
+            closed_mask -= cit->set_mask;
+            if (!closed_mask)
+              return;
+          }
+          else
+          {
+            // Add all the children expressions to the partial writes
+            for (std::set<RegionTreeNode*>::const_iterator it = 
+                  cit->elements.begin(); it != cit->elements.end(); it++)
+              partial_children.insert(
+                  (*it)->get_index_space_expression(), cit->set_mask);
+          }
+        }
+      }
+      // See if we still have partial write sets to handle, these are the same
+      // regardless of our node type
+      if (!partial_children.empty())
+      {
+        // Sort into field sets and then union together and test against 
+        // the index space expression for this node to see if it covers
+        LegionList<FieldSet<IndexSpaceExpression*> >::aligned write_sets;
+        partial_children.compute_field_sets(FieldMask(), write_sets);
+        IndexSpaceExpression *local_expr = 
+          root_node->get_index_space_expression();
+        RegionTreeForest *context = root_node->context;
+        for (LegionList<FieldSet<IndexSpaceExpression*> >::aligned::
+              const_iterator it = write_sets.begin(); 
+              it != write_sets.end(); it++)
+        {
+          // Skip anything that doesn't overlap with fields we're still handling
+          const FieldMask overlap = it->set_mask & closed_mask;
+          if (!overlap)
+            continue;
+          IndexSpaceExpression *union_expr = 
+            context->union_index_spaces(it->elements);
+          // Check to see if this dominates the local expression
+          IndexSpaceExpression *diff_expr = 
+            context->subtract_index_spaces(local_expr, union_expr);
+          if (diff_expr->is_empty())
+          {
+            state.update_write_fields(overlap);
+            complete_writes |= overlap;
+          }
+          else // We don't cover so this is a partial update
+            state.partial_writes.insert(union_expr, overlap); 
+          // This is our last step, so we can filter the closed_mask
+          closed_mask -= overlap; 
+          if (!closed_mask)
+            return;
+        }
+      }
     }
 
     //--------------------------------------------------------------------------

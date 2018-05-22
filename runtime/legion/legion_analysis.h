@@ -23,8 +23,6 @@
 
 namespace Legion {
   namespace Internal {
-    // This is a commonly used typedef throughout the analysis
-    typedef LegionMap<IndexSpaceExpression*,FieldMask>::aligned WriteMasks;
 
     /**
      * \struct GenericUser
@@ -74,7 +72,7 @@ namespace Legion {
     };
 
     /**
-     * \struct VersioningSet
+     * \class VersioningSet
      * A small helper class for tracking collections of 
      * version state objects and their sets of fields
      * This is the same as the above class, but specialized
@@ -523,6 +521,37 @@ namespace Legion {
     };
 
     /**
+     * \class WriteMasks
+     * This is an instantiation of FieldMaskSet with an 
+     * IndexSpaceExpression to delineate a set of writes which
+     * we no longer need to perform, think of it like a photographic
+     * negative that prevents writing in some cases. Even though
+     * this has the same base type as WriteSet (see below) we have
+     * WriteSet inherit form WriteMask, which allows a write set to
+     * be treated as a WriteMask, but never the other direction.
+     * Hopefully this keeps us from being confused and the type
+     * system will check things for us.
+     */
+    class WriteMasks : public FieldMaskSet<IndexSpaceExpression> {
+    public:
+      // Merge two write masks into one and deduplicate where necessary
+      void merge(const WriteMasks &other);
+    };
+
+    /**
+     * \class WriteSet
+     * This is an instantiation of FieldMaskSet with an 
+     * IndexSpaceExpression to track the set of writes which have
+     * been performed. This is in contrast to a WriteMask set which
+     * is the set of things for which we are not performing writes
+     * (see above). Even though the types are identical we have
+     * WriteSet inherit from WriteMask so a WriteSet can be used
+     * as a WriteMask, but never the other way around.
+     */
+    class WriteSet : public WriteMasks {
+    };
+
+    /**
      * \struct ChildState
      * Tracks the which fields have open children
      * and then which children are open for each
@@ -576,6 +605,56 @@ namespace Legion {
       IndexSpaceNode *domain;
       ProjectionFunction *projection;
       ShardingFunction *sharding;
+    };
+
+    /**
+     * \struct ShardingSummary
+     * An extension of the ProjectionSummary that is also used
+     * to track the region tree node origin of the summary and
+     * also be capable of inverting the projection functions so
+     * we can find the needed set of shards for communcation.
+     */
+    struct ShardingSummary : public ProjectionSummary {
+    public:
+      ShardingSummary(const ProjectionSummary &rhs, RegionTreeNode *node);
+      ShardingSummary(const ShardingSummary &rhs);
+      ~ShardingSummary(void);
+    public:
+      ShardingSummary& operator=(const ShardingSummary &rhs); 
+    public:
+      RegionTreeNode *const node;
+    };
+
+    /**
+     * \struct CompositeViewSummary
+     * This is a structure for holding all the summary data for 
+     * constructing a composite view. Specifically it has the 
+     * set of fields which are completely written for the view
+     * as well as a WriteSet for any partial writes. If the view
+     * is being constructed in a control-replicated context then
+     * we also capture the sharding summary objects for the view.
+     */
+    struct CompositeViewSummary {
+    public:
+      CompositeViewSummary(void);
+      CompositeViewSummary(const FieldMask &complete, WriteSet &partial);
+      CompositeViewSummary(const FieldMask &complete, WriteSet &partial,
+                           FieldMaskSet<ShardingSummary> &writes,
+                           FieldMaskSet<ShardingSummary> &reduces);
+      CompositeViewSummary(CompositeViewSummary &rhs);
+      ~CompositeViewSummary(void);
+    public:
+      CompositeViewSummary& operator=(const CompositeViewSummary &rhs);
+    public:
+      void swap(CompositeViewSummary &rhs);
+      void clear(void);
+    public:
+      FieldMask complete_writes;
+      WriteSet partial_writes;
+    public:
+      // Control replicated contexts only
+      FieldMaskSet<ShardingSummary> write_projections;
+      FieldMaskSet<ShardingSummary> reduce_projections;
     };
 
     /**
@@ -687,6 +766,31 @@ namespace Legion {
     public:
       LogicalState& operator=(const LogicalState &rhs);
     public:
+      inline void keep_dirty_fields(FieldMask &to_keep) const
+      {
+        FieldMask dirty_fields = write_fields | reduction_fields;
+        if (!partial_writes.empty())
+          dirty_fields |= partial_writes.get_valid_mask();
+        to_keep &= dirty_fields;
+      }
+      inline void filter_dirty_fields(FieldMask &to_filter) const
+      {
+        FieldMask dirty_fields = write_fields | reduction_fields;
+        if (!partial_writes.empty())
+          dirty_fields |= partial_writes.get_valid_mask();
+        to_filter -= dirty_fields;
+      }
+      inline void update_write_fields(const FieldMask &update)
+      {
+        write_fields |= update;
+        // we can also filter out any partial writes once we
+        // get a write at this level too
+        if (partial_writes.empty() ||
+            (partial_writes.get_valid_mask() * update))
+          return;
+        partial_writes.filter(update);
+      }
+    public:
       void check_init(void);
       void clear_logical_users(void);
       void reset(void);
@@ -696,7 +800,7 @@ namespace Legion {
       void capture_projection_epochs(FieldMask capture_mask,
                                      ProjectionInfo &info);
       void capture_close_epochs(FieldMask capture_mask, OpenState state,
-                                ClosedNode *closed_node) const;
+                                LogicalCloser &closer) const;
       void update_projection_epochs(FieldMask update_mask,
                                     const ProjectionInfo &info);
     public:
@@ -713,7 +817,10 @@ namespace Legion {
       FieldMask dirty_below;
       // Fields that we know have been written at the current level
       // (reductions don't count, we want to know they were actually written)
-      FieldMask dirty_fields;
+      FieldMask write_fields;
+      // Furthermore keep track of any partial writes that we see,
+      // either from projection writes or from close operations
+      WriteSet partial_writes;
       // Keep track of which fields we've done a reduction to here
       FieldMask reduction_fields;
       LegionMap<ReductionOpID,FieldMask>::aligned outstanding_reductions;
@@ -724,92 +831,6 @@ namespace Legion {
     typedef DynamicTableAllocator<LogicalState,10,8> LogicalStateAllocator;
 
     /**
-     * \class ClosedNode
-     * A closed node is the type used for constructing trees that 
-     * mirror the region tree and summarize all the nodes that
-     * are captured by a close operation. They are concrete down
-     * to the level of projection functions at which point they
-     * capture the projection information.
-     */
-    class ClosedNode : public Collectable,
-                       public LegionHeapify<ClosedNode> {
-    public:
-      ClosedNode(RegionTreeNode *node);
-      ClosedNode(const ClosedNode &rhs);
-      ~ClosedNode(void);
-    public:
-      ClosedNode& operator=(const ClosedNode &rhs);
-    public:
-      inline const FieldMask& get_valid_fields(void) const 
-        { return valid_fields; }
-      inline const FieldMask& get_covered_fields(void) const
-        { return covered_fields; }
-    public:
-      // For performing disjoint close operations
-      ClosedNode* clone_disjoint_projection(RegionTreeNode *child_node,
-                                            const FieldMask &close_mask) const;
-    public:
-      void add_child_node(ClosedNode *child);
-      ClosedNode* get_child_node(RegionTreeNode *child) const;
-      void record_closed_fields(const FieldMask &closed_fields);
-      void record_reduced_fields(const FieldMask &reduced_fields);
-      void record_projections(const ProjectionEpoch *epoch, OpenState state,
-                              const FieldMask &closed_fields);
-      void record_projection(ProjectionFunction *function, OpenState state,
-                             IndexSpaceNode *domain, const FieldMask &mask);
-#ifndef DISABLE_CVOPT
-      void find_needed_shards(FieldMask mask, ShardID origin_shard,
-                          IndexSpaceExpression *target, 
-                          const WriteMasks &write_masks,
-                          std::map<ShardID,WriteMasks> &needed_shards,
-                          std::map<ShardID,WriteMasks> &reduction_shards) const;
-      void find_needed_shards_single(const unsigned field_index, 
-          const ShardID origin_shard, IndexSpaceExpression *target_expr,
-          std::map<ShardID,IndexSpaceExpression*> &needed_shards,
-          std::map<ShardID,IndexSpaceExpression*> &reduction_shards) const;
-    protected:
-      void find_interfering_shards(FieldMask mask, 
-          const ShardID origin_shard, IndexSpaceExpression *target_expr,
-          const WriteMasks &write_masks,
-          const LegionMap<ProjectionSummary,FieldMask>::aligned &projections,
-          std::map<ShardID,WriteMasks> &needed_shards) const;
-      void find_interfering_shards_single(const unsigned field_index, 
-          const ShardID origin_shard, IndexSpaceExpression *target_expr,
-          const LegionMap<ProjectionSummary,FieldMask>::aligned &projections,
-          std::map<ShardID,IndexSpaceExpression*> &needed_shards) const;
-#else
-      void find_needed_shards(FieldMask mask, RegionTreeNode *target,
-                              std::set<ShardID> &needed_shards) const;
-#endif
-    public:
-      void fix_closed_tree(void);
-      void filter_dominated_fields(const ClosedNode *old_tree,
-                                   FieldMask &non_dominated_mask) const;
-    protected:
-      void filter_dominated_projection_fields(FieldMask &non_dominated_mask,
-          const LegionMap<ProjectionSummary,
-                          FieldMask>::aligned &new_projections) const;
-      void filter_dominated_children(FieldMask &non_dominated_mask,
-          const std::map<RegionTreeNode*,ClosedNode*> &new_children) const;
-    public:
-      void pack_closed_node(Serializer &rez) const;
-      void perform_unpack(Deserializer &derez, InnerContext *ctx,
-                          Runtime *runtime, bool is_region);
-      static ClosedNode* unpack_closed_node(Deserializer &derez, 
-                          InnerContext *ctx, Runtime *runtime, bool is_region);
-    public:
-      RegionTreeNode *const node;
-    protected:
-      FieldMask valid_fields; // Fields that are summarized in this tree
-      FieldMask covered_fields; // Fields totally written to at this node
-      FieldMask reduced_fields; // Fields purely reduced to at this node
-      std::map<RegionTreeNode*,ClosedNode*> children;
-      // For tracking index space projections 
-      LegionMap<ProjectionSummary,FieldMask>::aligned write_projections;
-      LegionMap<ProjectionSummary,FieldMask>::aligned reduce_projections;
-    };
- 
-    /**
      * \class LogicalCloser
      * This structure helps keep track of the state
      * necessary for performing a close operation
@@ -817,8 +838,8 @@ namespace Legion {
      */
     class LogicalCloser {
     public:
-      LogicalCloser(ContextID ctx, const LogicalUser &u,
-                    RegionTreeNode *root, bool validates, bool captures);
+      LogicalCloser(ContextID ctx, const LogicalUser &u, RegionTreeNode *root, 
+                    bool validates, bool captures, bool replicate_context);
       LogicalCloser(const LogicalCloser &rhs);
       ~LogicalCloser(void);
     public:
@@ -833,9 +854,11 @@ namespace Legion {
       void record_overwriting_close(const FieldMask &mask, bool projection);
       void record_read_only_close(const FieldMask &mask, bool projection);
       void record_flush_only_close(const FieldMask &mask);
-      ClosedNode* find_closed_node(RegionTreeNode *node);
       void record_closed_user(const LogicalUser &user, 
                               const FieldMask &mask, bool read_only);
+      // Used for control replication only
+      void record_projections(const ProjectionEpoch *epoch, OpenState state,
+                      RegionTreeNode *node, const FieldMask &closed_fields);
 #ifndef LEGION_SPY
       void pop_closed_user(bool read_only);
 #endif
@@ -847,6 +870,16 @@ namespace Legion {
                                        const FieldMask &open_below,
              LegionList<LogicalUser,CURR_LOGICAL_ALLOC>::track_aligned &cusers,
              LegionList<LogicalUser,PREV_LOGICAL_ALLOC>::track_aligned &pusers);
+      void begin_close_children(const FieldMask &closing_mask,
+                                RegionTreeNode *closing_node,
+                                const FieldMask &complete_writes,
+                                const WriteSet &partial_writes);
+      void end_close_children(FieldMask closed_mask,
+                              RegionTreeNode *closed_node);
+      void update_close_writes(const FieldMask &closing_mask,
+                               RegionTreeNode *closing_node,
+                               const FieldMask &complete_writes,
+                               const WriteSet &partial_writes);
       void update_state(LogicalState &state);
       void register_close_operations(
               LegionList<LogicalUser,CURR_LOGICAL_ALLOC>::track_aligned &users);
@@ -865,6 +898,7 @@ namespace Legion {
       RegionTreeNode *const root_node;
       const bool validates;
       const bool capture_users;
+      const bool replicate_context;
       LegionList<LogicalUser,CLOSE_LOGICAL_ALLOC>::track_aligned 
                                                       normal_closed_users;
       LegionList<LogicalUser,CLOSE_LOGICAL_ALLOC>::track_aligned 
@@ -873,10 +907,19 @@ namespace Legion {
       FieldMask normal_close_mask;
       FieldMask read_only_close_mask;
       FieldMask flush_only_close_mask;
+      // Read-only closes because we're overwriting without reading
       FieldMask overwriting_close_mask;
-      std::map<RegionTreeNode*,ClosedNode*> closed_nodes;
-      FieldMask closed_projections;
+      // Closes for which we are actually closing up individual children
       FieldMask disjoint_close_mask;
+      // Fields which closed up a projection operation from this level 
+      FieldMask closed_projections;
+      // Fields that we did complete writes to from for this close operation
+      FieldMask complete_writes;
+    protected:
+      // Use these for computing the close summaries of what has been written
+      LegionDeque<FieldMaskSet<RegionTreeNode> >::aligned written_children;
+      LegionDeque<WriteSet>::aligned partial_writes;
+      LegionDeque<FieldMask>::aligned written_above;
     protected:
       // At most we will ever generate four close operations at a node
       InterCloseOp *normal_close_op;
@@ -888,6 +931,10 @@ namespace Legion {
       GenerationID normal_close_gen;
       GenerationID read_only_close_gen;
       GenerationID flush_only_close_gen;
+    protected:
+      // These are only used for control-replicated contexts 
+      FieldMaskSet<ShardingSummary> write_projections;
+      FieldMaskSet<ShardingSummary> reduce_projections;
     }; 
 
     /**

@@ -2597,7 +2597,8 @@ namespace Legion {
       void handle_did_create_add(Deserializer &derez);
       void handle_did_create_remove(Deserializer &derez);
       void handle_did_remote_unregister(Deserializer &derez);
-      void handle_send_back_logical_state(Deserializer &derez);
+      void handle_send_back_logical_state(Deserializer &derez,
+                                          AddressSpaceID source);
       void handle_send_atomic_reservation_request(Deserializer &derez,
                                                   AddressSpaceID source);
       void handle_send_atomic_reservation_response(Deserializer &derez);

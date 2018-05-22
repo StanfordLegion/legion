@@ -1082,9 +1082,9 @@ namespace Legion {
     public:
       virtual ShardingFunction* find_sharding_function(ShardingID sid);
       virtual CompositeView* create_composite_view(RegionTreeNode *node,
-                                      DeferredVersionInfo *version_info, 
-                                      ClosedNode *closed_tree, 
-                                      InterCloseOp *op, bool clone);
+                                    DeferredVersionInfo *version_info, 
+                                    InterCloseOp *op, bool clone,
+                                    CompositeViewSummary &summary);
 #ifndef DISABLE_CVOPT
       virtual AddressSpaceID find_shard_space(ShardID sid) const;
       virtual void send_composite_view_shard_copy_request(ShardID sid,
@@ -1598,9 +1598,9 @@ namespace Legion {
     public:
       virtual ShardingFunction* find_sharding_function(ShardingID sid);
       virtual CompositeView* create_composite_view(RegionTreeNode *node,
-                                      DeferredVersionInfo *version_info, 
-                                      ClosedNode *closed_tree, 
-                                      InterCloseOp *op, bool clone);
+                                    DeferredVersionInfo *version_info, 
+                                    InterCloseOp *op, bool clone,
+                                    CompositeViewSummary &summary);
 #ifndef DISABLE_CVOPT
       virtual AddressSpaceID find_shard_space(ShardID sid) const;
       virtual void send_composite_view_shard_copy_request(ShardID sid,

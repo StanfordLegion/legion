@@ -1333,9 +1333,10 @@ namespace Legion {
       InterCloseOp& operator=(const InterCloseOp &rhs);
     public:
       void initialize(TaskContext *ctx, const RegionRequirement &req,
-                      ClosedNode *closed_tree, const TraceInfo &trace_info,
-                      int close_idx, const VersionInfo &version_info,
-                      const FieldMask &close_mask, Operation *create_op);
+                      const TraceInfo &trace_info, int close_idx, 
+                      const VersionInfo &version_info, RegionTreeNode *node,
+                      const FieldMask &close_mask, Operation *create_op,
+                      CompositeViewSummary &view_summary);
       void activate_inter_close(void);
       void deactivate_inter_close(void);
       inline const RegionRequirement& get_requirement(void) const 
@@ -1373,7 +1374,8 @@ namespace Legion {
     protected:
       friend class PointCloseOp;
       FieldMask close_mask;
-      ClosedNode *closed_tree;
+      // Track the composite view summary we are making
+      CompositeViewSummary view_summary;
       InstanceSet chosen_instances;
     protected:
       unsigned parent_req_index;
@@ -1403,10 +1405,10 @@ namespace Legion {
       IndexCloseOp& operator=(const IndexCloseOp &rhs);
     public:
       void initialize(TaskContext *ctx, const RegionRequirement &req,
-                      ClosedNode *closed_tree, const TraceInfo &trace_info,
-                      int close_idx, const VersionInfo &version_info,
+                      const TraceInfo &trace_info, int close_idx, 
+                      const VersionInfo &version_info, RegionTreeNode *node,
                       const FieldMask &close_mask, Operation *create_op,
-                      IndexSpaceNode* launch_node);
+                      IndexSpaceNode* launch_node, CompositeViewSummary &sum);
     public:
       virtual void activate(void);
       virtual void deactivate(void);

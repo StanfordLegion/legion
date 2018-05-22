@@ -271,8 +271,8 @@ namespace Legion {
       LG_DEFERRED_EXECUTE_ID,
       LG_DEFERRED_COMPLETE_ID,
       LG_DEFERRED_COMMIT_ID,
-      LG_DEFERRED_COLLECT_ID,
       LG_DEFERRED_POST_END_ID,
+      LG_DEFERRED_COLLECT_ID,
       LG_PRE_PIPELINE_ID,
       LG_TRIGGER_DEPENDENCE_ID,
       LG_TRIGGER_COMPLETE_ID,
@@ -1786,7 +1786,6 @@ namespace Legion {
     struct LogicalUser;
     struct PhysicalUser;
     struct TraceInfo;
-    class ClosedNode;
     class LogicalCloser;
     class TreeCloseImpl;
     class TreeClose;

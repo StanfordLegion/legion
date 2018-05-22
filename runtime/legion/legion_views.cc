@@ -4567,7 +4567,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void DeferredCopier::buffer_reductions(VersionTracker *version_tracker,
                                PredEvent pred_guard, RegionTreeNode *intersect,
-        const LegionMap<IndexSpaceExpression*,FieldMask>::aligned &write_masks,
+                               const WriteMasks &write_masks,
               LegionMap<ReductionView*,FieldMask>::aligned &source_reductions)
     //--------------------------------------------------------------------------
     {
@@ -4595,8 +4595,7 @@ namespace Legion {
         // First look for any write masks that we need to filter by
         if (!has_prev_write_mask || !(prev_write_mask * rit->second))
         {
-          for (LegionMap<IndexSpaceExpression*,FieldMask>::aligned::
-                const_iterator it = write_masks.begin(); 
+          for (WriteMasks::const_iterator it = write_masks.begin(); 
                 it != write_masks.end(); it++)
           {
             // If this is the first time through we're computing the summary
@@ -5845,14 +5844,14 @@ namespace Legion {
       }
       else
       {
-        LegionMap<IndexSpaceExpression*,FieldMask>::aligned write_masks; 
-        LegionMap<IndexSpaceExpression*,FieldMask>::aligned performed_masks;
+        WriteMasks write_masks; 
+        WriteSet performed_writes;
         if (perfect)
         {
           DeferredCopier copier(&info, get_shard_context(), dst, 
                                 src_mask, precondition);
           issue_deferred_copies(copier, src_mask, write_masks, 
-                                performed_masks, guard);
+                                performed_writes, guard);
           copier.finalize(&postconditions);
         }
         else
@@ -5864,7 +5863,7 @@ namespace Legion {
           DeferredCopier copier(&info, get_shard_context(), dst,
                                 src_mask, precondition, &across_helper);
           issue_deferred_copies(copier, src_mask, write_masks,
-                                performed_masks, guard);
+                                performed_writes, guard);
           copier.finalize(&postconditions);
         }
       }
@@ -6106,7 +6105,7 @@ namespace Legion {
                                           VersionTracker *src_version_tracker,
                                           PredEvent pred_guard, 
                                           const WriteMasks &write_masks,
-                                                WriteMasks &performed_writes,
+                                                WriteSet &performed_writes,
                                                 bool need_shard_check/*=true*/)
     //--------------------------------------------------------------------------
     { 
@@ -6126,10 +6125,10 @@ namespace Legion {
         if (!shard_writes.empty())
         {
           // Add our shard writes to the performed write set
-          merge_write_sets(performed_writes, shard_writes);
+          performed_writes.merge(shard_writes);
           // Now build a new write set for going down
           if (!write_masks.empty())
-            merge_write_sets(shard_writes, write_masks);
+            shard_writes.merge(write_masks);
           combine_writes(shard_writes, copier);
           // Check to see if we still have fields to issue copies for
           if (!!global_copy_mask)
@@ -6187,7 +6186,7 @@ namespace Legion {
       if (!children_to_traverse.empty())
       {
         // Do the child traversals and record any writes that we do
-        WriteMasks child_writes;
+        WriteSet child_writes;
         for (LegionMap<CompositeNode*,FieldMask>::aligned::iterator it =
               children_to_traverse.begin(); it != 
               children_to_traverse.end(); it++)
@@ -6229,7 +6228,7 @@ namespace Legion {
           else
           {
             previous_writes = child_writes;
-            merge_write_sets(previous_writes, write_masks);
+            previous_writes.merge(write_masks);
             // Do write combining which can reduce the global copy mask
             combine_writes(previous_writes, copier);
             all_previous_writes = &previous_writes;
@@ -6237,7 +6236,7 @@ namespace Legion {
           // Issue our writes from our physical instances
           // If global copy mask is empty though we don't need to 
           // do this as we've already done all the writes
-          WriteMasks local_writes;
+          WriteSet local_writes;
           if (!!global_copy_mask)
             issue_update_copies(copier, logical_node, 
                 global_copy_mask & local_copy_mask, src_version_tracker,
@@ -6249,36 +6248,36 @@ namespace Legion {
           {
             // No need to write combine ourselves, just merge
             if (!local_writes.empty())
-              merge_write_sets(performed_writes, local_writes);
+              performed_writes.merge(local_writes);
           }
           else
           {
             if (!local_writes.empty())
             {
               // Need to merge everything together and write combine them
-              merge_write_sets(local_writes, child_writes);
+              local_writes.merge(child_writes);
               combine_writes(local_writes, copier);
-              merge_write_sets(performed_writes, local_writes);
+              performed_writes.merge(local_writes);
             }
             else // children are already write combined, no need to do it again
-              merge_write_sets(performed_writes, child_writes); 
+              performed_writes.merge(child_writes);
           }
         }
         else if (!child_writes.empty())
           // Propagate child writes up the tree
-          merge_write_sets(performed_writes, child_writes);
+          performed_writes.merge(child_writes);
       }
       else if (!source_views.empty())
       {
         // We didn't do any child traversals so things are a little easier
         // Issue our writes from our physical instances
-        WriteMasks local_writes;
+        WriteSet local_writes;
         issue_update_copies(copier, logical_node, local_copy_mask, 
                            src_version_tracker, pred_guard, source_views, 
                            write_masks, local_writes);
         // Finally merge our write updates into the performed set
         if (!local_writes.empty())
-          merge_write_sets(performed_writes, local_writes);
+          performed_writes.merge(local_writes);
       }
       // Lastly no matter what we do, we have to record our reductions
       // to be performed after all the updates to the instance
@@ -6563,7 +6562,7 @@ namespace Legion {
           assert(needed_child_reductions.find(child_mask) == 
                   needed_child_reductions.end());
 #endif
-          needed_child_reductions[child_mask] = overlap;
+          needed_child_reductions.insert(child_mask, overlap);
         }
         it->first->issue_composite_reductions(reducer, it->second,
               needed_child_reductions, it->first->logical_node,
@@ -6655,7 +6654,7 @@ namespace Legion {
                                             PredEvent predicate_guard,
               const LegionMap<LogicalView*,FieldMask>::aligned &source_views,
                                             const WriteMasks &previous_writes,
-                                            WriteMasks &performed_writes)
+                                            WriteSet &performed_writes)
     //--------------------------------------------------------------------------
     {
       MaterializedView *dst = copier.dst;
@@ -6707,12 +6706,11 @@ namespace Legion {
               // Construct the expression, intersect then subtract
               IndexSpaceExpression *expr = 
                 context->subtract_index_spaces(intersect_is, pit->first);
-              LegionMap<IndexSpaceExpression*,FieldMask>::aligned::iterator
-                finder = performed_writes.find(expr);
+              WriteMasks::iterator finder = performed_writes.find(expr);
               if (finder == performed_writes.end())
-                performed_writes[expr] = prev_overlap;
+                performed_writes.insert(expr, prev_overlap);
               else
-                finder->second |= prev_overlap;
+                finder.merge(prev_overlap);
               overlap -= prev_overlap;
               if (!overlap)
                 break;
@@ -6720,12 +6718,11 @@ namespace Legion {
             if (!!overlap)
             {
               // No prior writes so we can just record the overlap
-              LegionMap<IndexSpaceExpression*,FieldMask>::aligned::iterator
-                finder = performed_writes.find(intersect_is);
+              WriteMasks::iterator finder = performed_writes.find(intersect_is);
               if (finder == performed_writes.end())
-                performed_writes[intersect_is] = overlap;
+                performed_writes.insert(intersect_is, overlap);
               else
-                finder->second |= overlap;
+                finder.merge(overlap);
             }
             if (!copy_mask)
               return;
@@ -6829,22 +6826,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void CompositeBase::merge_write_sets(WriteMasks &dst_writes,
-                                                   const WriteMasks &src_writes)
-    //--------------------------------------------------------------------------
-    {
-      for (WriteMasks::const_iterator it = src_writes.begin();
-            it != src_writes.end(); it++)
-      {
-        WriteMasks::iterator finder = dst_writes.find(it->first);
-        if (finder == dst_writes.end())
-          dst_writes.insert(*it);
-        else
-          finder->second |= it->second;
-      }
-    }
-
-    //--------------------------------------------------------------------------
     /*static*/ void CompositeBase::combine_writes(WriteMasks &write_masks,
                                       DeferredCopier &copier, bool prune_global)
     //--------------------------------------------------------------------------
@@ -6855,8 +6836,7 @@ namespace Legion {
       // Compute the write sets for different fields
       // We use an empty universe mask since we don't care about fields
       // that we don't find in the input set
-      compute_field_sets<IndexSpaceExpression*>(FieldMask(), 
-                                                write_masks, write_sets);
+      write_masks.compute_field_sets(FieldMask(), write_sets);
       // Clear out the write masks set since we're rebuilding it
       write_masks.clear();
       IndexSpaceExpression *dst_is = 
@@ -6881,7 +6861,7 @@ namespace Legion {
         IndexSpaceExpression *diff_is = 
           context->subtract_index_spaces(dst_is, union_is);
         if (!diff_is->is_empty())
-          write_masks[union_is] = it->set_mask;
+          write_masks.insert(union_is, it->set_mask);
         else if (prune_global)
           global_copy_mask -= it->set_mask;
       }
@@ -7006,17 +6986,17 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     CompositeView::CompositeView(RegionTreeForest *ctx, DistributedID did,
-                              AddressSpaceID owner_proc, RegionTreeNode *node,
-                              DeferredVersionInfo *info, ClosedNode *tree, 
-                              InnerContext *context, bool register_now,
-                              ReplicationID repl/*=0*/,
-                              RtBarrier invalid_bar/*= NO_RT_BARRIER*/,
-                              ShardID origin/*=0*/)
+                          AddressSpaceID owner_proc, RegionTreeNode *node,
+                          DeferredVersionInfo *info, CompositeViewSummary &sum,
+                          InnerContext *context, bool register_now, 
+                          ReplicationID repl/*=0*/,
+                          RtBarrier invalid_bar/*= NO_RT_BARRIER*/,
+                          ShardID origin/*=0*/) 
       : DeferredView(ctx, encode_composite_did(did), owner_proc, 
                      node, register_now), 
         CompositeBase(view_lock, invalid_bar.exists()),
-        version_info(info), closed_tree(tree), owner_context(context),
-        repl_id(repl), shard_invalid_barrier(invalid_bar), origin_shard(origin)
+        version_info(info), summary(sum), owner_context(context), repl_id(repl),
+        shard_invalid_barrier(invalid_bar), origin_shard(origin)
 #ifdef DISABLE_CVOPT
         , packed_shard(NULL)
 #endif
@@ -7024,13 +7004,18 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(owner_context != NULL);
-      assert(closed_tree != NULL);
-      assert(closed_tree->node == node);
 #endif
       // Add our references
       version_info->add_reference();
-      closed_tree->add_reference();
       owner_context->add_reference();
+      // See if we have any partial writes
+      if (!summary.partial_writes.empty())
+      {
+        // Add our expression references
+        for (WriteSet::const_iterator it = summary.partial_writes.begin();
+              it != summary.partial_writes.end(); it++)
+          it->first->add_expression_reference();
+      }
       // If we are the owner in a control replicated context then we add a 
       // GC reference that will be removed once all the shards are done 
       // with the view, no mutator since we know we're the owner
@@ -7045,9 +7030,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     CompositeView::CompositeView(const CompositeView &rhs)
       : DeferredView(NULL, 0, 0, NULL, false), CompositeBase(view_lock, false),
-        version_info(NULL), closed_tree(NULL), owner_context(NULL),
-        repl_id(0), shard_invalid_barrier(RtBarrier::NO_RT_BARRIER), 
-        origin_shard(0)
+        version_info(NULL), 
+        summary(*const_cast<CompositeViewSummary*>(&rhs.summary)),
+        owner_context(NULL), repl_id(0), 
+        shard_invalid_barrier(RtBarrier::NO_RT_BARRIER), origin_shard(0)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -7061,9 +7047,6 @@ namespace Legion {
       // Remove our references and delete if necessary
       if (version_info->remove_reference())
         delete version_info;
-      // Remove our references and delete if necessary
-      if (closed_tree->remove_reference())
-        delete closed_tree;
       // Remove the reference on our context
       if (owner_context->remove_reference())
         delete owner_context;
@@ -7100,6 +7083,14 @@ namespace Legion {
         assert(reduction_views.empty());
       }
 #endif
+      // Remove any expression references
+      if (!summary.partial_writes.empty())
+      {
+        for (WriteSet::const_iterator it = summary.partial_writes.begin();
+              it != summary.partial_writes.end(); it++)
+          if (it->first->remove_expression_reference())
+            delete it->first;
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -7117,8 +7108,51 @@ namespace Legion {
                               ReferenceMutator *mutator, InterCloseOp *op) const
     //--------------------------------------------------------------------------
     {
+      // See if we need to compute a new partial write set 
+      CompositeViewSummary clone_summary;
+      clone_summary.complete_writes = summary.complete_writes & clone_mask;
+      if (!summary.partial_writes.empty())
+      {
+        for (WriteSet::const_iterator it = summary.partial_writes.begin();
+              it != summary.partial_writes.end(); it++)
+        {
+          const FieldMask overlap = it->second & clone_mask;
+          if (!overlap)
+            continue;
+          clone_summary.partial_writes.insert(it->first, overlap);
+        }
+      }
+      // Make copies of any sharding summaries if necessary
+      if (!summary.write_projections.empty() &&
+          !(clone_mask * summary.write_projections.get_valid_mask()))
+      {
+        for (FieldMaskSet<ShardingSummary>::const_iterator it = 
+              summary.write_projections.begin(); it != 
+              summary.write_projections.end(); it++)
+        {
+          const FieldMask overlap = it->second & clone_mask;
+          if (!overlap)
+            continue;
+          clone_summary.write_projections.insert(
+              new ShardingSummary(*(it->first)), overlap);
+        }
+      }
+      if (!summary.reduce_projections.empty() &&
+          !(clone_mask & summary.reduce_projections.get_valid_mask()))
+      {
+        for (FieldMaskSet<ShardingSummary>::const_iterator it = 
+              summary.reduce_projections.begin(); it != 
+              summary.reduce_projections.end(); it++)
+        {
+          const FieldMask overlap = it->second & clone_mask;
+          if (!overlap)
+            continue;
+          clone_summary.reduce_projections.insert(
+              new ShardingSummary(*(it->first)), overlap);
+        }
+      }
       CompositeView *result = owner_context->create_composite_view(logical_node,
-          version_info, closed_tree, op, true/*clone*/);
+                                version_info, op, true/*clone*/, clone_summary);
       // Clone the children
       for (LegionMap<CompositeNode*,FieldMask>::aligned::const_iterator it = 
             children.begin(); it != children.end(); it++)
@@ -7274,12 +7308,22 @@ namespace Legion {
         else
           rez.serialize(logical_node->as_partition_node()->handle);
         version_info->pack_version_numbers(rez);
-        closed_tree->pack_closed_node(rez);
         rez.serialize(shard_invalid_barrier);
         if (shard_invalid_barrier.exists())
         {
           rez.serialize(repl_id);
           rez.serialize(origin_shard);
+        }
+        rez.serialize(summary.complete_writes);
+        rez.serialize<size_t>(summary.partial_writes.size());
+        if (!summary.partial_writes.empty())
+        {
+          for (WriteSet::const_iterator it = summary.partial_writes.begin();
+                it != summary.partial_writes.end(); it++)
+          {
+            it->first->pack_expression(rez, target);
+            rez.serialize(it->second);
+          }
         }
         pack_composite_view(rez);
       }
@@ -7296,7 +7340,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void CompositeView::prune(ClosedNode *new_tree, FieldMask &valid_mask,
+    void CompositeView::prune(
+                   const WriteMasks &partial_write_masks, FieldMask &valid_mask,
                               NestedViewMap &replacements, unsigned prune_depth,
                               ReferenceMutator *mutator, InterCloseOp *op)
     //--------------------------------------------------------------------------
@@ -7306,13 +7351,37 @@ namespace Legion {
                         "WARNING: Composite View Tree has depth %d which "
                         "is larger than LEGION_PRUNE_DEPTH_WARNING of %d. "
                         "Please report this use case to the Legion developers "
-                        "mailing list as it could be an important "
-                        "runtime performance bug.", prune_depth,
+                        "mailing list as it is a highly unusual case or could "
+                        "be a runtime performance bug.", prune_depth,
                         LEGION_PRUNE_DEPTH_WARNING)
-      // Figure out which fields are not dominated
-      FieldMask non_dominated = valid_mask;
-      new_tree->filter_dominated_fields(closed_tree, non_dominated);
-      FieldMask dominated = valid_mask - non_dominated;
+      // First check to see if we can be pruned      
+      FieldMask dominated; 
+      RegionTreeForest *forest = logical_node->context;
+      if (!summary.partial_writes.empty() && 
+          !(summary.partial_writes.get_valid_mask() * valid_mask))
+      {
+        for (WriteSet::const_iterator pit = summary.partial_writes.begin();
+              pit != summary.partial_writes.end(); pit++)
+        {
+          FieldMask remaining = pit->second & valid_mask;
+          if (!remaining)
+            continue;
+          for (WriteMasks::const_iterator it = partial_write_masks.begin();
+                it != partial_write_masks.end(); it++)
+          {
+            const FieldMask overlap = it->second & remaining;
+            if (!overlap)
+              continue;
+            IndexSpaceExpression *diff_expr = 
+              forest->subtract_index_spaces(pit->first, it->first);
+            if (diff_expr->is_empty())
+              dominated |= overlap;
+            remaining -= overlap;
+            if (!remaining)
+              break;
+          }
+        }
+      }
       if (!!dominated)
       {
         // If we had any dominated fields then we try to prune our
@@ -7325,7 +7394,7 @@ namespace Legion {
           FieldMask overlap = it->second & dominated;
           if (!overlap)
             continue;
-          it->first->prune(new_tree, overlap, replacements, 
+          it->first->prune(partial_write_masks, overlap, replacements, 
                            prune_depth+1, mutator, op);
           if (!!overlap)
           {
@@ -7351,11 +7420,11 @@ namespace Legion {
             nested_composite_views.begin(); it != 
             nested_composite_views.end(); it++)
       {
-        FieldMask overlap = it->second & non_dominated;
+        const FieldMask overlap = it->second & valid_mask;
         if (!overlap)
           continue;
         FieldMask still_valid = overlap;
-        it->first->prune(new_tree, still_valid, 
+        it->first->prune(partial_write_masks, still_valid, 
                          local_replacements, prune_depth+1, mutator, op);
         // See if any fields were pruned, if so they are changed
         FieldMask changed = overlap - still_valid;
@@ -7398,25 +7467,25 @@ namespace Legion {
       {
         DeferredCopier copier(&info, owner_context, dst, copy_mask, 
                               restrict_info, restrict_out);
-        LegionMap<IndexSpaceExpression*,FieldMask>::aligned write_masks;
-        LegionMap<IndexSpaceExpression*,FieldMask>::aligned performed_masks;
+        WriteMasks write_masks;
+        WriteSet performed_writes;
         issue_deferred_copies(copier, copy_mask, write_masks, 
-                              performed_masks, PredEvent::NO_PRED_EVENT);
+                              performed_writes, PredEvent::NO_PRED_EVENT);
       }
     }
 
     //--------------------------------------------------------------------------
     void CompositeView::issue_deferred_copies(DeferredCopier &copier,
                                               const FieldMask &local_copy_mask,
-         const LegionMap<IndexSpaceExpression*,FieldMask>::aligned &write_masks,
-               LegionMap<IndexSpaceExpression*,FieldMask>::aligned &perf_writes,
+                                              const WriteMasks &write_masks,
+                                              WriteSet &performed_writes,
                                               PredEvent pred_guard)
     //--------------------------------------------------------------------------
     {
       // Each composite view depth is its own reduction epoch
       copier.begin_reduction_epoch();
       issue_composite_updates(copier, logical_node, local_copy_mask,
-                              this, pred_guard, write_masks, perf_writes);
+                              this, pred_guard, write_masks, performed_writes);
       copier.end_reduction_epoch();
     }
 
@@ -7627,7 +7696,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(!dst_expr->is_empty());
 #endif
-      closed_tree->find_needed_shards(local_copy_mask, origin_shard, 
+      find_needed_shards(local_copy_mask, origin_shard, 
           dst_expr, write_masks, needed_shards, reduction_shards);
       for (std::map<ShardID,WriteMasks>::iterator it = 
             needed_shards.begin(); it != needed_shards.end(); it++)
@@ -7647,8 +7716,7 @@ namespace Legion {
         // Compute the common field sets and combine them, don't
         // give a universal mask since we only care about the
         // fields we have.
-        compute_field_sets<IndexSpaceExpression*>(FieldMask(),
-                                                  it->second, write_sets);
+        it->second.compute_field_sets(FieldMask(), write_sets);
         it->second.clear();
         FieldMask shard_copy_mask;
         for (LegionList<FieldSet<IndexSpaceExpression*> >::aligned::
@@ -7661,7 +7729,7 @@ namespace Legion {
           IndexSpaceExpression *union_is = (wit->elements.size() > 1) ?
             context->union_index_spaces(wit->elements) :
             *(wit->elements.begin());
-          it->second[union_is] = wit->set_mask;
+          it->second.insert(union_is, wit->set_mask);
           shard_copy_mask |= wit->set_mask;
         }
 #ifdef DEBUG_LEGION
@@ -7711,9 +7779,9 @@ namespace Legion {
           // Also update the performed writes set here
           WriteMasks::iterator finder = performed_writes.find(wit->first);
           if (finder != performed_writes.end())
-            finder->second |= wit->second;
+            finder.merge(wit->second);
           else
-            performed_writes.insert(*wit);
+            performed_writes.insert(wit->first, wit->second);
         }
         // Now we can send the copy message to the remote node
         owner_context->send_composite_view_shard_copy_request(it->first, rez);
@@ -7751,7 +7819,7 @@ namespace Legion {
           return NULL;
       }
       std::map<ShardID,IndexSpaceExpression*> needed_shards, reduction_shards;
-      closed_tree->find_needed_shards_single(copier.field_index, origin_shard,
+      find_needed_shards_single(copier.field_index, origin_shard,
                                 target_expr, needed_shards, reduction_shards);
       std::set<IndexSpaceExpression*> shard_writes;
       for (std::map<ShardID,IndexSpaceExpression*>::const_iterator it = 
@@ -7827,7 +7895,7 @@ namespace Legion {
         }
         // Compute the set of shards that we need locally 
         std::set<ShardID> needed_shards;
-        closed_tree->find_needed_shards(check_mask, target, needed_shards);
+        find_needed_shards(check_mask, target, needed_shards);
         if (!needed_shards.empty())
         {
           std::set<RtEvent> wait_on;
@@ -7878,6 +7946,292 @@ namespace Legion {
       }
 #endif
     }
+
+#ifndef DISABLE_CVOPT
+    //--------------------------------------------------------------------------
+    void CompositeView::find_needed_shards(const FieldMask &mask,ShardID origin,
+                  IndexSpaceExpression *target, const WriteMasks &write_masks,
+                  std::map<ShardID,WriteMasks> &needed_shards,
+                  std::map<ShardID,WriteMasks> &reduction_shards) const
+    //--------------------------------------------------------------------------
+    {
+      // See if we have any write projections to test against first
+      if (!write_projections.empty())
+      {
+        const FieldMask overlap = mask & write_projections.get_valid_mask();
+        if (!!overlap)
+          find_interfering_shards(overlap, origin, target, write_masks, 
+                                  write_projections, needed_shards);
+      }
+      // Then see if we have any reduction projections
+      if (!reduce_projections.empty())
+      {
+        const FieldMask overlap = mask & reduce_projections.get_valid_mask();
+        if (!!overlap)
+          find_interfering_shards(overlap, origin, target, write_masks,
+                                  reduce_projections, reduction_shards);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void CompositeView::find_needed_shards_single(const unsigned field_index,
+        const ShardID origin_shard, IndexSpaceExpression *write_mask,
+        std::map<ShardID,IndexSpaceExpression*> &needed_shards,
+        std::map<ShardID,IndexSpaceExpression*> &reduction_shards) const
+    //--------------------------------------------------------------------------
+    {
+      // See if we have any write projections first
+      if (!write_projections.empty() && 
+          write_projections.get_valid_mask().is_set(field_index))
+        find_interfering_shards_single(field_index, origin_shard, write_mask,
+                                       write_projections, needed_shards);
+      // Also check for any reduction projections
+      if (!reduce_projections.empty() &&
+          reduce_projections.get_valid_mask().is_set(field_index))
+        find_interfering_shards_single(field_index, origin_shard, write_mask,
+                                       reduce_projections, reduction_shards);
+    }
+
+    //--------------------------------------------------------------------------
+    void CompositeView::find_interfering_shards(FieldMask mask,
+            const ShardID origin_shard, IndexSpaceExpression *target_expr,
+            const WriteMasks &write_masks,
+            const FieldMaskSet<ShardingSummary> &projections,
+                  std::map<ShardID,WriteMasks> &needed_shards) const
+    //--------------------------------------------------------------------------
+    {
+      // Iterate over the write masks and find ones that we care about
+      for (WriteMasks::const_iterator wit = write_masks.begin();
+            wit != write_masks.end(); wit++)
+      {
+        const FieldMask mask_overlap = wit->second & mask;
+        if (!mask_overlap)
+          continue;
+        mask -= mask_overlap;
+        IndexSpaceExpression *mask_expr = 
+          logical_node->context->subtract_index_spaces(target_expr, wit->first);
+        if (mask_expr->is_empty())
+        {
+          if (!mask)
+            return;
+          continue;
+        }
+        // We have an interesting write mask so find the interfering projections
+        for (FieldMaskSet<ShardingSummary>::const_iterator
+              pit = projections.begin(); pit != projections.end(); pit++)
+        {
+          // More intersection testing
+          const FieldMask overlap = pit->second & mask_overlap;
+          if (!overlap)
+            continue;
+          RegionTreeNode *node = pit->first->node;
+          Domain full_space;
+          pit->first->domain->get_launch_space_domain(full_space);
+          // Invert the projection function to find the interfering points
+          std::map<DomainPoint,IndexSpaceExpression*> interfering_points;
+          pit->first->projection->find_interfering_points(node->context, node,
+                                        pit->first->domain->handle, full_space,
+                                        mask_expr, interfering_points);
+          if (!interfering_points.empty())
+          {
+            for (std::map<DomainPoint,IndexSpaceExpression*>::const_iterator 
+                  dit = interfering_points.begin(); 
+                  dit != interfering_points.end(); dit++)
+            {
+              const ShardID shard = 
+                pit->first->sharding->find_owner(dit->first, full_space);
+              // Skip our origin shard since we know about that
+              if (shard == origin_shard)
+                continue;
+              // Now we have to insert it into all the right places
+              std::map<ShardID,WriteMasks>::iterator shard_finder =
+                needed_shards.find(shard);
+              if (shard_finder != needed_shards.end())
+              {
+                WriteMasks::iterator finder = 
+                  shard_finder->second.find(dit->second);
+                if (finder != shard_finder->second.end())
+                  finder.merge(overlap);
+                else
+                  shard_finder->second.insert(dit->second, overlap);
+              }
+              else
+                needed_shards[shard].insert(dit->second, overlap);
+            }
+          }
+        }
+        // If we did all the fields we are done
+        if (!mask)
+          return;
+      }
+      // should only get here if we still have fields to do
+#ifdef DEBUG_LEGION
+      assert(!!mask);
+#endif
+      // We have no interesting write mask
+      for (FieldMaskSet<ShardingSummary>::const_iterator
+            pit = projections.begin(); pit != projections.end(); pit++)
+      {
+        // More intersection testing
+        const FieldMask overlap = pit->second & mask;
+        if (!overlap)
+          continue;
+        Domain full_space;
+        pit->first->domain->get_launch_space_domain(full_space);
+        RegionTreeNode *node = pit->first->node;
+        // Invert the projection function to find the interfering points
+        std::map<DomainPoint,IndexSpaceExpression*> interfering_points;
+        pit->first->projection->find_interfering_points(node->context, node,
+                                    pit->first->domain->handle, full_space,
+                                    target_expr, interfering_points);
+        if (!interfering_points.empty())
+        {
+          for (std::map<DomainPoint,IndexSpaceExpression*>::const_iterator 
+                dit = interfering_points.begin(); 
+                dit != interfering_points.end(); dit++)
+          {
+            const ShardID shard = 
+              pit->first->sharding->find_owner(dit->first, full_space);
+            // Skip our origin shard since we know about that
+            if (shard == origin_shard)
+              continue;
+            // Now we have to insert it into all the right places
+            std::map<ShardID,WriteMasks>::iterator shard_finder =
+              needed_shards.find(shard);
+            if (shard_finder != needed_shards.end())
+            {
+              WriteMasks::iterator finder = 
+                shard_finder->second.find(dit->second);
+              if (finder != shard_finder->second.end())
+                finder.merge(overlap);
+              else
+                shard_finder->second.insert(dit->second, overlap);
+            }
+            else
+              needed_shards[shard].insert(dit->second, overlap);
+          }
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void CompositeView::find_interfering_shards_single(const unsigned fidx,
+        const ShardID origin_shard, IndexSpaceExpression *target_expr,
+        const FieldMaskSet<ShardingSummary> &projections,
+        std::map<ShardID,IndexSpaceExpression*> &needed_shards) const
+    //--------------------------------------------------------------------------
+    {
+      for (FieldMaskSet<ShardingSummary>::const_iterator
+            pit = projections.begin(); pit != projections.end(); pit++)
+      {
+#ifdef DEBUG_LEGION
+        // Should always have a sharding function
+        assert(pit->first->sharding != NULL);
+#endif
+        if (!pit->second.is_set(fidx))
+          continue;
+        Domain full_space;
+        pit->first->domain->get_launch_space_domain(full_space);
+        RegionTreeNode *node = pit->first->node;
+        // Invert the projection function to find the interfering points
+        std::map<DomainPoint,IndexSpaceExpression*> interfering_points;
+        pit->first->projection->find_interfering_points(node->context, node,
+                                     pit->first->domain->handle, full_space, 
+                                     target_expr, interfering_points);
+        if (!interfering_points.empty())
+        {
+          for (std::map<DomainPoint,IndexSpaceExpression*>::const_iterator 
+                dit = interfering_points.begin(); 
+                dit != interfering_points.end(); dit++)
+          {
+            const ShardID shard = 
+              pit->first->sharding->find_owner(dit->first, full_space);
+            // Skip our origin shard since we know about that
+            if (shard == origin_shard)
+              continue;
+            std::map<ShardID,IndexSpaceExpression*>::iterator finder = 
+              needed_shards.find(shard);
+            if (finder != needed_shards.end())
+              // Union the index space expressions together
+              finder->second = node->context->union_index_spaces(
+                                      finder->second, dit->second);
+            else
+              needed_shards[shard] = dit->second;
+          }
+        }
+      }
+    }
+#else
+    //--------------------------------------------------------------------------
+    void CompositeView::find_needed_shards(FieldMask mask, 
+                 RegionTreeNode *target, std::set<ShardID> &needed_shards) const
+    //--------------------------------------------------------------------------
+    {
+      // See if we have any projections that we need to find other shards for
+      if (!write_projections.empty())
+      {
+        for (FieldMaskSet<ShardingSummary>::const_iterator
+              pit = write_projections.begin(); 
+              pit != write_projections.end(); pit++)
+        {
+#ifdef DEBUG_LEGION
+          // Should always have a sharding function
+          assert(pit->first->sharding != NULL);
+#endif
+          if (pit->second * mask)
+            continue;
+          Domain full_space;
+          pit->first->domain->get_launch_space_domain(full_space);
+          RegionTreeNode *node = pit->first->node;
+          // Invert the projection function to find the interfering points
+          std::set<DomainPoint> interfering_points;
+          pit->first->projection->find_interfering_points(target->context, node,
+            pit->first->domain->handle, full_space, target, interfering_points);
+          if (!interfering_points.empty())
+          {
+            for (std::set<DomainPoint>::const_iterator dit = 
+                  interfering_points.begin(); dit != 
+                  interfering_points.end(); dit++)
+            {
+              ShardID shard = pit->first->sharding->find_owner(*dit, full_space);
+              needed_shards.insert(shard);
+            }
+          }
+        }
+      }
+      if (!reduce_projections.empty())
+      {
+        for (FieldMaskSet<ShardingSummary>::const_iterator
+              pit = reduce_projections.begin(); 
+              pit != reduce_projections.end(); pit++)
+        {
+#ifdef DEBUG_LEGION
+          // Should always have a sharding function
+          assert(pit->first->sharding != NULL);
+#endif
+          if (pit->second * mask)
+            continue;
+          Domain full_space;
+          pit->first->domain->get_launch_space_domain(full_space);
+          RegionTreeNode *node = pit->first->node;
+          // Invert the projection function to find the interfering points
+          std::set<DomainPoint> interfering_points;
+          pit->first->projection->find_interfering_points(target->context, node,
+            pit->first->domain->handle, full_space, target, interfering_points);
+          if (!interfering_points.empty())
+          {
+            for (std::set<DomainPoint>::const_iterator dit = 
+                  interfering_points.begin(); dit != 
+                  interfering_points.end(); dit++)
+            {
+              ShardID shard = pit->first->sharding->find_owner(*dit,full_space);
+              needed_shards.insert(shard);
+            }
+          }
+        }
+      }
+    }
+#endif
 
     //--------------------------------------------------------------------------
     void CompositeView::find_valid_views(const FieldMask &update_mask,
@@ -7945,8 +8299,6 @@ namespace Legion {
       DeferredVersionInfo *version_info = new DeferredVersionInfo();
       version_info->unpack_version_numbers(derez, runtime->forest);
       InnerContext *owner_context = runtime->find_context(owner_uid);
-      ClosedNode *closed_tree = 
-        ClosedNode::unpack_closed_node(derez, owner_context, runtime,is_region);
       RtBarrier shard_invalid_barrier;
       derez.deserialize(shard_invalid_barrier);
       ReplicationID repl_id = 0;
@@ -7956,20 +8308,32 @@ namespace Legion {
         derez.deserialize(repl_id);
         derez.deserialize(origin_shard);
       }
+      CompositeViewSummary summary;
+      derez.deserialize(summary.complete_writes);
+      size_t num_partial_writes;
+      derez.deserialize(num_partial_writes);
+      for (unsigned idx = 0; idx < num_partial_writes; idx++)
+      {
+        IndexSpaceExpression *expr =   
+          IndexSpaceExpression::unpack_expression(derez, 
+                                runtime->forest, source);
+        FieldMask expr_mask;
+        derez.deserialize(expr_mask);
+        summary.partial_writes.insert(expr, expr_mask);
+      }
       // Make the composite view, but don't register it yet
       void *location;
       CompositeView *view = NULL;
       if (runtime->find_pending_collectable_location(did, location))
         view = new(location) CompositeView(runtime->forest, 
                                            did, owner, target_node, 
-                                           version_info, closed_tree,
-                                           owner_context,
-                                           false/*register now*/,
+                                           version_info, summary,
+                                           owner_context, false/*register now*/,
                                            repl_id, shard_invalid_barrier,
                                            origin_shard);
       else
         view = new CompositeView(runtime->forest, did, owner, 
-                           target_node, version_info, closed_tree, 
+                           target_node, version_info, summary, 
                            owner_context, false/*register now*/,
                            repl_id, shard_invalid_barrier, origin_shard);
       // Unpack all the internal data structures
@@ -8008,13 +8372,24 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void CompositeView::record_valid_view(LogicalView *view, const FieldMask &m,
+    void CompositeView::record_valid_view(LogicalView *view, FieldMask mask,
                                           ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(is_owner());
 #endif
+      // If our composite view represents a complete write of this
+      // logical region for any fields then there is no need to capture
+      // this view for any of those fields
+      if (!!summary.complete_writes)
+      {
+        mask -= summary.complete_writes;
+        if (!mask)
+          return;
+      }
+      // For now we'll just record it, we'll add references later
+      // during the call to finalize_capture
       if (view->is_instance_view())
       {
 #ifdef DEBUG_LEGION
@@ -8025,12 +8400,12 @@ namespace Legion {
           valid_views.find(mat_view);
         if (finder == valid_views.end())
         {
-          valid_views[mat_view] = m;
+          valid_views[mat_view] = mask;
           // Just need valid references for materialized views
           mat_view->add_nested_valid_ref(did, mutator);
         }
         else
-          finder->second |= m;
+          finder->second |= mask;
       }
       else
       {
@@ -8046,13 +8421,13 @@ namespace Legion {
               nested_composite_views.find(composite_view);
             if (finder == nested_composite_views.end())
             {
-              nested_composite_views[composite_view] = m;
+              nested_composite_views[composite_view] = mask;
               // Need gc and valid references for deferred things
               composite_view->add_nested_gc_ref(did, mutator);
               composite_view->add_nested_valid_ref(did, mutator);
             }
             else
-              finder->second |= m;
+              finder->second |= mask;
           }
           else
           {
@@ -8065,13 +8440,13 @@ namespace Legion {
               valid_views.find(composite_view);
             if (finder == valid_views.end())
             {
-              valid_views[composite_view] = m;
+              valid_views[composite_view] = mask;
               // Need gc and valid references for deferred things
               composite_view->add_nested_gc_ref(did, mutator);
               composite_view->add_nested_valid_ref(did, mutator);
             }
             else
-              finder->second |= m;
+              finder->second |= mask;
           }
         }
         else
@@ -8081,13 +8456,13 @@ namespace Legion {
             valid_views.find(def_view);
           if (finder == valid_views.end())
           {
-            valid_views[def_view] = m;
+            valid_views[def_view] = mask;
             // Need gc and valid references for deferred things
             def_view->add_nested_gc_ref(did, mutator);
             def_view->add_nested_valid_ref(did, mutator);
           }
           else
-            finder->second |= m;
+            finder->second |= mask;
         }
       }
     }
@@ -8162,18 +8537,11 @@ namespace Legion {
               nested_composite_views.begin(); it != 
               nested_composite_views.end(); it++)
         {
-          // If the composite view is above in the tree we don't
-          // need to worry about pruning it for resource reasons
-          if (it->first->logical_node != logical_node)
-          {
 #ifdef DEBUG_LEGION
-            // Should be above us in the region tree
-            assert(logical_node->get_depth() > 
-                    it->first->logical_node->get_depth());
+          // Should be the same node in the region tree
+          assert(logical_node == it->first->logical_node);
 #endif
-            continue;
-          }
-          it->first->prune(closed_tree, it->second, replacements, 
+          it->first->prune(summary.partial_writes, it->second, replacements, 
                            0/*depth*/, mutator, op);
           if (!it->second)
             to_erase.push_back(it->first);
@@ -8418,7 +8786,7 @@ namespace Legion {
             IndexSpaceExpression::unpack_expression(derez, 
                                   runtime->forest, source);
           expression->add_expression_reference();
-          FieldMask &expr_mask = write_masks[expression];
+          FieldMask expr_mask;
           size_t field_count;
           derez.deserialize(field_count);
           for (unsigned fidx = 0; fidx < field_count; fidx++)
@@ -8433,9 +8801,11 @@ namespace Legion {
 #endif
             done_events[field_index] = field_done;
           }
+          if (!!expr_mask)
+            write_masks.insert(expression, expr_mask);
         }
         // Now we can perform our copies
-        WriteMasks performed_writes;
+        WriteSet performed_writes;
         issue_deferred_copies(*copier, copy_mask, write_masks,
                               performed_writes, pred_guard);
         // Do the finalization
@@ -8527,7 +8897,7 @@ namespace Legion {
                                    reduction_mask, across_helper);
           reducer.unpack(derez);
           WriteMasks reduce_masks;
-          reduce_masks[expression] = reduction_mask;
+          reduce_masks.insert(expression, reduction_mask);
           issue_composite_reductions(reducer, reduction_mask, reduce_masks, 
                                      logical_node, pred_guard, this);
           reducer.finalize(done_events);
@@ -9577,8 +9947,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void FillView::issue_deferred_copies(DeferredCopier &copier,
                                          const FieldMask &local_copy_mask,
-         const LegionMap<IndexSpaceExpression*,FieldMask>::aligned &write_masks,
-               LegionMap<IndexSpaceExpression*,FieldMask>::aligned &perf_writes,
+                                         const WriteMasks &write_masks,
+                                         WriteSet &performed_writes,
                                          PredEvent pred_guard)
     //--------------------------------------------------------------------------
     {
@@ -9589,8 +9959,8 @@ namespace Legion {
 #endif
       FieldMask remaining_fill_mask = local_copy_mask;
       // First issue any masked fills for things that have been written before
-      for (LegionMap<IndexSpaceExpression*,FieldMask>::aligned::const_iterator
-            it = write_masks.begin(); it != write_masks.end(); it++)
+      for (WriteMasks::const_iterator it = write_masks.begin(); 
+            it != write_masks.end(); it++)
       {
 #ifdef DEBUG_LEGION
         assert(previous_writes_mask * it->second);
@@ -9600,7 +9970,8 @@ namespace Legion {
         if (!overlap)
           continue;
         // Issue our update fills
-        issue_update_fills(copier, overlap, it->first, perf_writes, pred_guard);
+        issue_update_fills(copier, overlap, it->first, 
+                           performed_writes, pred_guard);
         remaining_fill_mask -= overlap;
         if (!remaining_fill_mask)
           return;
@@ -9610,7 +9981,7 @@ namespace Legion {
 #endif
       // Then issue a remaining fill for any remainder events
       issue_update_fills(copier, remaining_fill_mask, 
-                         NULL/*mask*/, perf_writes, pred_guard);
+                         NULL/*mask*/, performed_writes, pred_guard);
     }
 
     //--------------------------------------------------------------------------
@@ -9633,7 +10004,7 @@ namespace Legion {
       std::set<ApEvent> dst_preconditions;
       copier.merge_destination_preconditions(dst_preconditions);
       ApEvent fill_pre = Runtime::merge_events(dst_preconditions);
-      LegionMap<IndexSpaceExpression*,FieldMask>::aligned fill_writes;
+      WriteSet fill_writes;
       // Issue the fill command
       ApEvent fill_post = dst->logical_node->issue_fill(copier.info->op, 
           dst_fields, value->value, value->value_size, fill_pre, pred_guard,
@@ -9659,7 +10030,7 @@ namespace Legion {
     void FillView::issue_update_fills(DeferredCopier &copier,
                                       const FieldMask &fill_mask,
                                       IndexSpaceExpression *mask,
-               LegionMap<IndexSpaceExpression*,FieldMask>::aligned &perf_writes,
+                                      WriteSet &performed_writes,
                                       PredEvent pred_guard) const
     //--------------------------------------------------------------------------
     {
@@ -9668,7 +10039,7 @@ namespace Legion {
       copier.merge_destination_preconditions(fill_mask, preconditions);
       issue_internal_fills(*copier.info, copier.dst, fill_mask, preconditions,
                            copier.copy_postconditions, pred_guard, 
-                           copier.across_helper, mask, &perf_writes);
+                           copier.across_helper, mask, &performed_writes);
     }
 
     //--------------------------------------------------------------------------
@@ -9680,7 +10051,7 @@ namespace Legion {
                                         PredEvent pred_guard,
                                         CopyAcrossHelper *across_helper,
                                         IndexSpaceExpression *mask,
-                LegionMap<IndexSpaceExpression*,FieldMask>::aligned *perf) const
+                                        WriteSet *performed_writes) const
     //--------------------------------------------------------------------------
     {
       LegionList<FieldSet<ApEvent> >::aligned precondition_sets;
@@ -9708,7 +10079,7 @@ namespace Legion {
                         fill_op_uid,
 #endif
                     (logical_node == dst->logical_node) ? NULL : logical_node,
-                    mask, perf, &pre_set.set_mask);
+                    mask, performed_writes, &pre_set.set_mask);
         if (fill_post.exists())
           postconditions[fill_post] = pre_set.set_mask;
       }
@@ -9918,26 +10289,25 @@ namespace Legion {
       {
         DeferredCopier copier(&info, owner_context, dst,
                               copy_mask, restrict_info, restrict_out);
-        LegionMap<IndexSpaceExpression*,FieldMask>::aligned write_masks;
-        LegionMap<IndexSpaceExpression*,FieldMask>::aligned performed_masks;
+        WriteMasks write_masks;
+        WriteSet performed_writes;
         issue_deferred_copies(copier, copy_mask, write_masks, 
-                              performed_masks, PredEvent::NO_PRED_EVENT);
+                              performed_writes, PredEvent::NO_PRED_EVENT);
       }
     }
 
     //--------------------------------------------------------------------------
     void PhiView::issue_deferred_copies(DeferredCopier &copier,
                                         const FieldMask &local_copy_mask,
-         const LegionMap<IndexSpaceExpression*,FieldMask>::aligned &write_masks,
-               LegionMap<IndexSpaceExpression*,FieldMask>::aligned &perf_writes,
+                                        const WriteMasks &write_masks,
+                                        WriteSet &performed_writes,
                                         PredEvent pred_guard)
     //--------------------------------------------------------------------------
     {
-      LegionMap<IndexSpaceExpression*,FieldMask>::aligned true_writes;
+      WriteSet true_writes, false_writes;
       copier.begin_guard_protection();
       issue_update_copies(copier, logical_node, local_copy_mask, this,
                           true_guard, true_views, write_masks, true_writes);
-      LegionMap<IndexSpaceExpression*,FieldMask>::aligned false_writes; 
       issue_update_copies(copier, logical_node, local_copy_mask, this,
                           false_guard, false_views, write_masks, false_writes);
       copier.end_guard_protection();
@@ -9945,12 +10315,10 @@ namespace Legion {
       combine_writes(true_writes, copier, false/*prune*/);
       combine_writes(false_writes, copier, false/*prune*/);
       // Iterate over the two sets and check for equivalence of expressions 
-      for (LegionMap<IndexSpaceExpression*,FieldMask>::aligned::iterator
-            true_it = true_writes.begin(); 
+      for (WriteSet::iterator true_it = true_writes.begin(); 
             true_it != true_writes.end(); true_it++)
       {
-        for (LegionMap<IndexSpaceExpression*,FieldMask>::aligned::iterator
-              false_it = false_writes.begin(); 
+        for (WriteSet::iterator false_it = false_writes.begin(); 
               false_it != false_writes.end(); false_it++)
         {
           const FieldMask overlap = true_it->second & false_it->second;
@@ -9969,15 +10337,14 @@ namespace Legion {
                 "unsupported. Please report this use case to the Legion "
                 "developers mailing list.")
           // For now we'll add the true expression to the write set
-          LegionMap<IndexSpaceExpression*,FieldMask>::aligned::iterator 
-            finder = perf_writes.find(true_it->first);
-          if (finder == perf_writes.end())
-            perf_writes[true_it->first] = overlap;
+          WriteSet::iterator finder = performed_writes.find(true_it->first);
+          if (finder == performed_writes.end())
+            performed_writes.insert(true_it->first, overlap);
           else
-            finder->second |= overlap;
+            finder.merge(overlap);
           // Filter out anything we can
-          true_it->second -= overlap;
-          false_it->second -= overlap;
+          true_it.filter(overlap);
+          false_it.filter(overlap);
           if (!true_it->second)
           {
             // Can prune in this case since we're about to break

@@ -1058,7 +1058,7 @@ namespace Legion {
                 LegionMap<ApEvent,FieldMask>::aligned &preconditions);
       void buffer_reductions(VersionTracker *tracker, PredEvent pred_guard, 
                              RegionTreeNode *intersect,
-         const LegionMap<IndexSpaceExpression*,FieldMask>::aligned &write_masks,
+                             const WriteMasks &write_masks,
                LegionMap<ReductionView*,FieldMask>::aligned &source_reductions);
 #ifndef DISABLE_CVOPT
       void buffer_reduction_shards(PredEvent pred_guard, 
@@ -1354,8 +1354,8 @@ namespace Legion {
                                          bool restrict_out) = 0;
       virtual void issue_deferred_copies(DeferredCopier &copier,
                                          const FieldMask &local_copy_mask,
-         const LegionMap<IndexSpaceExpression*,FieldMask>::aligned &write_masks,
-               LegionMap<IndexSpaceExpression*,FieldMask>::aligned &perf_writes,
+                                         const WriteMasks &write_masks,
+                                         WriteSet &performed_writes,
                                          PredEvent pred_guard) = 0;
       virtual bool issue_deferred_copies_single(DeferredSingleCopier &copier,
                                          IndexSpaceExpression *write_mask,
@@ -1464,7 +1464,7 @@ namespace Legion {
                                    VersionTracker *src_version_tracker,
                                    PredEvent pred_guard, 
                                    const WriteMasks &write_masks,
-                                   WriteMasks &performed_writes/*write-only*/,
+                                   WriteSet &performed_writes/*write-only*/,
                                    bool need_shard_check = true);
       // Single field version of the method above
       bool issue_composite_updates_single(DeferredSingleCopier &copier,
@@ -1496,10 +1496,7 @@ namespace Legion {
                const LegionMap<LogicalView*,FieldMask>::aligned &source_views,
                                // previous_writes Should be field unique
                                const WriteMasks &previous_writes,
-                                     WriteMasks &performed_writes);
-      // Merge two write sets into one and deduplicate where necessary
-      static void merge_write_sets(WriteMasks &dst_writes, 
-                                   const WriteMasks &src_writes);
+                                     WriteSet &performed_writes);
       // Write combining unions together all index space expressions for
       // the same field so that we get one index expression for each field
       static void combine_writes(WriteMasks &write_masks,
@@ -1625,9 +1622,9 @@ namespace Legion {
     public:
       CompositeView(RegionTreeForest *ctx, DistributedID did,
                     AddressSpaceID owner_proc, RegionTreeNode *node, 
-                    DeferredVersionInfo *info,
-                    ClosedNode *closed_tree, InnerContext *context,
-                    bool register_now, ReplicationID repl_id = 0,
+                    DeferredVersionInfo *info, CompositeViewSummary &summary,
+                    InnerContext *context, bool register_now, 
+                    ReplicationID repl_id = 0,
                     RtBarrier shard_invalid_barrier = RtBarrier::NO_RT_BARRIER,
                     ShardID origin_shard = 0);
       CompositeView(const CompositeView &rhs);
@@ -1647,11 +1644,11 @@ namespace Legion {
       virtual void notify_owner_inactive(ReferenceMutator *mutator);
       virtual void notify_owner_invalid(ReferenceMutator *mutator);
     public:
-      virtual void send_view(AddressSpaceID target); 
+      virtual void send_view(AddressSpaceID target);
       virtual InnerContext* get_shard_context(void) const
         { return owner_context; }
     public:
-      void prune(ClosedNode *closed_tree, FieldMask &valid_mask,
+      void prune(const WriteMasks &partial_write_masks, FieldMask &valid_mask,
                  NestedViewMap &replacements, unsigned prune_depth, 
                  ReferenceMutator *mutator, InterCloseOp *op);
       virtual void issue_deferred_copies(const TraversalInfo &info,
@@ -1661,8 +1658,8 @@ namespace Legion {
                                          bool restrict_out);
       virtual void issue_deferred_copies(DeferredCopier &copier,
                                          const FieldMask &local_copy_mask,
-         const LegionMap<IndexSpaceExpression*,FieldMask>::aligned &write_masks,
-               LegionMap<IndexSpaceExpression*,FieldMask>::aligned &perf_writes,
+                                         const WriteMasks &write_masks,
+                                         WriteSet &performed_writes,
                                          PredEvent pred_guard);
       virtual bool issue_deferred_copies_single(DeferredSingleCopier &copier,
                                          IndexSpaceExpression *write_mask,
@@ -1718,6 +1715,30 @@ namespace Legion {
                                               RegionTreeNode *logical_node,
                                               PredEvent pred_guard,
                                               IndexSpaceExpression *write_mask); 
+#ifndef DISABLE_CVOPT
+      void find_needed_shards(const FieldMask &mask, ShardID origin_shard,
+                          IndexSpaceExpression *target, 
+                          const WriteMasks &write_masks,
+                          std::map<ShardID,WriteMasks> &needed_shards,
+                          std::map<ShardID,WriteMasks> &reduction_shards) const;
+      void find_needed_shards_single(const unsigned field_index, 
+          const ShardID origin_shard, IndexSpaceExpression *target_expr,
+          std::map<ShardID,IndexSpaceExpression*> &needed_shards,
+          std::map<ShardID,IndexSpaceExpression*> &reduction_shards) const;
+    protected:
+      void find_interfering_shards(FieldMask mask, 
+          const ShardID origin_shard, IndexSpaceExpression *target_expr,
+          const WriteMasks &write_masks,
+          const FieldMaskSet<ShardingSummary> &projections,
+          std::map<ShardID,WriteMasks> &needed_shards) const;
+      void find_interfering_shards_single(const unsigned field_index, 
+          const ShardID origin_shard, IndexSpaceExpression *target_expr,
+          const FieldMaskSet<ShardingSummary> &projections,
+          std::map<ShardID,IndexSpaceExpression*> &needed_shards) const;
+#else
+      void find_needed_shards(FieldMask mask, RegionTreeNode *target,
+                              std::set<ShardID> &needed_shards) const;
+#endif
     public:
       static void handle_send_composite_view(Runtime *runtime, 
                               Deserializer &derez, AddressSpaceID source);
@@ -1725,7 +1746,7 @@ namespace Legion {
       static void handle_deferred_view_invalidation(const void *args);
     public:
       void record_dirty_fields(const FieldMask &dirty_mask);
-      void record_valid_view(LogicalView *view, const FieldMask &mask,
+      void record_valid_view(LogicalView *view, FieldMask mask,
                              ReferenceMutator *mutator);
       void record_reduction_fields(const FieldMask &reduction_fields);
       void record_reduction_view(ReductionView *view, const FieldMask &mask,
@@ -1757,14 +1778,16 @@ namespace Legion {
     public:
       // The path version info for this composite instance
       DeferredVersionInfo *const version_info;
-      // The abstraction of the tree that we closed
-      ClosedNode *const closed_tree;
+      // A summary of our composite view information
+      const CompositeViewSummary summary;
       // The translation context if any
       InnerContext *const owner_context;
       // Things used for control replication of composite views
       const ReplicationID repl_id;
       const RtBarrier shard_invalid_barrier;
       const ShardID origin_shard;
+      FieldMaskSet<ShardingSummary> write_projections;
+      FieldMaskSet<ShardingSummary> reduce_projections;
     protected:
       // Note that we never record any version state names here, we just
       // record the views and children we immediately depend on and that
@@ -1965,8 +1988,8 @@ namespace Legion {
                                          bool restrict_out);
       virtual void issue_deferred_copies(DeferredCopier &copier,
                                          const FieldMask &local_copy_mask,
-         const LegionMap<IndexSpaceExpression*,FieldMask>::aligned &write_masks,
-               LegionMap<IndexSpaceExpression*,FieldMask>::aligned &perf_writes,
+                                         const WriteMasks &write_masks,
+                                         WriteSet &performed_writes,
                                          PredEvent pred_guard);
       virtual bool issue_deferred_copies_single(DeferredSingleCopier &copier,
                                          IndexSpaceExpression *write_mask,
@@ -1976,7 +1999,7 @@ namespace Legion {
       void issue_update_fills(DeferredCopier &copier,
                               const FieldMask &fill_mask,
                               IndexSpaceExpression *mask,
-               LegionMap<IndexSpaceExpression*,FieldMask>::aligned &perf_writes,
+                              WriteSet &performed_writes,
                               PredEvent pred_guard) const;
       void issue_internal_fills(const TraversalInfo &info,
                                 MaterializedView *dst,
@@ -1986,7 +2009,7 @@ namespace Legion {
                                 PredEvent pred_guard,
                                 CopyAcrossHelper *helper = NULL,
                                 IndexSpaceExpression *mask = NULL,
-       LegionMap<IndexSpaceExpression*,FieldMask>::aligned *perf = NULL) const;
+                                WriteSet *perf = NULL) const;
     public:
       static void handle_send_fill_view(Runtime *runtime, Deserializer &derez,
                                         AddressSpaceID source);
@@ -2076,8 +2099,8 @@ namespace Legion {
                                          bool restrict_out);
       virtual void issue_deferred_copies(DeferredCopier &copier,
                                          const FieldMask &local_copy_mask,
-         const LegionMap<IndexSpaceExpression*,FieldMask>::aligned &write_masks,
-               LegionMap<IndexSpaceExpression*,FieldMask>::aligned &perf_writes,
+                                         const WriteMasks &write_masks,
+                                         WriteSet &performed_writes,
                                          PredEvent pred_guard);
       virtual bool issue_deferred_copies_single(DeferredSingleCopier &copier,
                                          IndexSpaceExpression *write_mask,

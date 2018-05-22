@@ -5941,16 +5941,20 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     CompositeView* InnerContext::create_composite_view(RegionTreeNode *node,
-                                            DeferredVersionInfo *version_info,
-                                            ClosedNode *closed_tree,
-                                            InterCloseOp *op, bool clone)
+                                    DeferredVersionInfo *version_info,
+                                    InterCloseOp *op, bool clone,
+                                    CompositeViewSummary &view_summary)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(view_summary.write_projections.empty());
+      assert(view_summary.reduce_projections.empty());
+#endif
       // Just do the normal thing here, we mainly have this call back so
       // that control replication contexts can make their views special
       DistributedID did = runtime->get_available_distributed_id();
       return new CompositeView(runtime->forest, did, runtime->address_space,
-                   node, version_info, closed_tree, this, true/*register now*/);
+              node, version_info, view_summary, this, true/*register now*/);
     }
 
 #ifndef DISABLE_CVOPT
@@ -10538,9 +10542,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     CompositeView* ReplicateContext::create_composite_view(RegionTreeNode *node,
-                                            DeferredVersionInfo *version_info,
-                                            ClosedNode *closed_tree,
-                                            InterCloseOp *op, bool clone)
+                                    DeferredVersionInfo *version_info,
+                                    InterCloseOp *op, bool clone,
+                                    CompositeViewSummary &view_summary)
     //--------------------------------------------------------------------------
     {
       // We can have non-control replication close operations here in the
@@ -10549,7 +10553,7 @@ namespace Legion {
       // InnerContext creation of the composite view
       if (!op->is_replicate_close())
         return InnerContext::create_composite_view(node, version_info,
-                                                   closed_tree, op, clone);
+                                                   op, clone, view_summary);
 #ifdef DEBUG_LEGION
       ReplInterCloseOp *close = dynamic_cast<ReplInterCloseOp*>(op);
       assert(close != NULL);
@@ -10605,10 +10609,9 @@ namespace Legion {
       else // Not cloning so the close op knows the name
         close_bar = close->get_view_barrier();
       DistributedID did = runtime->get_available_distributed_id();
-      return new CompositeView(runtime->forest, did,
-          runtime->address_space, node, version_info, closed_tree, this,
-          true/*register now*/, shard_manager->repl_id, close_bar,
-          owner_shard->shard_id);
+      return new CompositeView(runtime->forest, did, runtime->address_space, 
+          node, version_info, view_summary, this, true/*register now*/, 
+          shard_manager->repl_id, close_bar, owner_shard->shard_id);
     }
 
 #ifndef DISABLE_CVOPT

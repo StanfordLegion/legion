@@ -6570,9 +6570,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void InterCloseOp::initialize(TaskContext *ctx,const RegionRequirement &req,
-                              ClosedNode *closed_t, const TraceInfo &trace_info,
-                              int close_idx, const VersionInfo &clone_info,
-                              const FieldMask &close_m, Operation *creator)
+                            const TraceInfo &trace_info, int close_idx, 
+                            const VersionInfo &clone_info, RegionTreeNode *node,
+                            const FieldMask &close_m, Operation *creator,
+                            CompositeViewSummary &summary)
     //--------------------------------------------------------------------------
     {
       if (runtime->legion_spy_enabled)
@@ -6581,8 +6582,8 @@ namespace Legion {
       parent_req_index = creator->find_parent_index(close_idx);
       initialize_close(creator, close_idx, parent_req_index, req, trace_info);
       close_mask = close_m;
-      closed_tree = closed_t;
-      version_info.clone_logical(clone_info, close_m, closed_t->node);
+      view_summary.swap(summary);
+      version_info.clone_logical(clone_info, close_m, node);
       if (parent_ctx->has_restrictions())
         parent_ctx->perform_restricted_analysis(requirement, restrict_info);
       if (runtime->legion_spy_enabled)
@@ -6594,7 +6595,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       activate_close();  
-      closed_tree = NULL;
       mapper = NULL;
       outstanding_profiling_requests = 1; // start at 1 to guard
       profiling_reported = RtUserEvent::NO_RT_USER_EVENT;
@@ -6612,11 +6612,7 @@ namespace Legion {
       acquired_instances.clear();
       map_applied_conditions.clear();
       close_mask.clear();
-      if (closed_tree != NULL)
-      {
-        delete closed_tree;
-        closed_tree = NULL;
-      }
+      view_summary.clear();
       chosen_instances.clear();
       profiling_requests.clear();
     }
@@ -6692,9 +6688,6 @@ namespace Legion {
       }
       else
         chosen_instances = restrict_info.get_instances();
-#ifdef DEBUG_LEGION
-      assert(closed_tree != NULL);
-#endif
       RegionTreeNode *close_node = (
           requirement.handle_type == PART_PROJECTION) ?
               static_cast<RegionTreeNode*>(
@@ -6704,8 +6697,8 @@ namespace Legion {
       // Now we can perform our close operation
       CompositeView *view = runtime->forest->physical_perform_close(requirement,
                                                   version_info, this, 0/*idx*/,
-                                                  closed_tree, 
                                                   close_node, close_mask,
+                                                  view_summary,
                                                   map_applied_conditions,
                                                   restrict_info,
                                                   chosen_instances
@@ -6713,9 +6706,7 @@ namespace Legion {
                                                   , get_logging_name()
                                                   , unique_op_id
 #endif
-                                                  );
-      // The physical perform close call took ownership
-      closed_tree = NULL;
+                                                );
       if (runtime->legion_spy_enabled)
       {
         runtime->forest->log_mapping_decision(unique_op_id, 0/*idx*/,
@@ -7011,21 +7002,22 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void IndexCloseOp::initialize(TaskContext *ctx,const RegionRequirement &req,
-                           ClosedNode *closed_tree, const TraceInfo &trace_info,
-                           int close_idx, const VersionInfo &ver_info,
+                           const TraceInfo &trace_info, int close_idx, 
+                           const VersionInfo &ver_info, RegionTreeNode *node,
                            const FieldMask &close_mask, Operation *create_op,
-                           IndexSpaceNode* launch_node)
+                           IndexSpaceNode* launch_node, 
+                           CompositeViewSummary &summary)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(req.handle_type == PART_PROJECTION);
       assert(req.projection == 0); // should be the default projection funciton
 #endif
-      InterCloseOp::initialize(ctx, req, closed_tree, trace_info, close_idx, 
-                               ver_info, close_mask, create_op);
+      InterCloseOp::initialize(ctx, req, trace_info, close_idx, ver_info, node,
+                               close_mask, create_op, summary);
       // We need to record the split fields on the version info since it 
       // hasn't been done yet in this particular case or we wouldn't be closing
-      version_info.record_split_fields(closed_tree->node, close_mask);
+      version_info.record_split_fields(node, close_mask);
       launch_node->get_launch_space_domain(point_domain);
       projection_info = ProjectionInfo(runtime,requirement,launch_node->handle);
 #ifdef LEGION_SPY
@@ -7225,6 +7217,7 @@ namespace Legion {
       tag         = owner->tag;
       // From InterCloseOp
       close_mask       = owner->close_mask;
+      view_summary.complete_writes = owner->view_summary.complete_writes;
       parent_req_index = owner->parent_req_index;
       restrict_info    = owner->restrict_info;
       if (runtime->legion_spy_enabled)
@@ -7299,14 +7292,33 @@ namespace Legion {
     void PointCloseOp::set_projection_result(unsigned idx, LogicalRegion result)
     //--------------------------------------------------------------------------
     {
+      const CompositeViewSummary &owner_summary = owner->view_summary;
 #ifdef DEBUG_LEGION
       assert(idx == 0);
+      // We shouldn't be doing this in a control replicated context
+      assert(owner_summary.write_projections.empty());
+      assert(owner_summary.reduce_projections.empty());
 #endif
       requirement.region = result;
       requirement.handle_type = SINGULAR;
-      // Now get the close node
-      closed_tree = owner->closed_tree->clone_disjoint_projection(
-          runtime->forest->get_node(result), close_mask);
+      // If the owner has any partial writes then compute the partial
+      // writes which we are responsible for
+      const WriteSet &owner_partial_writes = owner_summary.partial_writes;
+      if (!owner_partial_writes.empty())
+      {
+        RegionTreeForest *forest = runtime->forest;
+        RegionTreeNode *node = forest->get_node(result);
+        IndexSpaceExpression *point_expr = node->get_index_space_expression();
+        WriteSet &partial_writes = view_summary.partial_writes;
+        for (WriteSet::const_iterator it = owner_partial_writes.begin();
+              it != owner_partial_writes.end(); it++)
+        {
+          IndexSpaceExpression *point_intersection = 
+            forest->intersect_index_spaces(point_expr, it->first);
+          if (!point_intersection->is_empty())
+            partial_writes.insert(point_intersection, it->second);
+        }
+      }
     }
 
     /////////////////////////////////////////////////////////////

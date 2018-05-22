@@ -414,9 +414,9 @@ namespace Legion {
       CompositeView* physical_perform_close(const RegionRequirement &req,
                                   VersionInfo &version_info,
                                   InterCloseOp *op, unsigned index,
-                                  ClosedNode *closed_tree,
                                   RegionTreeNode *close_node,
                                   const FieldMask &closing_mask,
+                                  CompositeViewSummary &summary,
                                   std::set<RtEvent> &map_applied,
                                   const RestrictInfo &restrict_info,
                                   const InstanceSet &targets
@@ -1424,8 +1424,7 @@ namespace Legion {
               ApEvent precondition, PredEvent predicate_guard,
               IndexTreeNode *intersect, IndexSpaceExpression *mask,
               ReductionOpID redop = 0, bool reduction_fold = true,
-              LegionMap<IndexSpaceExpression*,FieldMask>::aligned *perf = NULL,
-              const FieldMask *performed_mask = NULL) = 0;
+              WriteSet *perf = NULL,const FieldMask *performed_mask = NULL) = 0;
       virtual ApEvent issue_fill(Operation *op,
 #ifdef LEGION_SPY
               const std::vector<Realm::CopySrcDstField> &dst_fields,
@@ -1436,8 +1435,7 @@ namespace Legion {
               ApEvent precondition, PredEvent predicate_guard,
               IndexTreeNode *intersect = NULL,
               IndexSpaceExpression *mask = NULL,
-              LegionMap<IndexSpaceExpression*,FieldMask>::aligned *perf = NULL,
-              const FieldMask *performed_mask = NULL) = 0;
+              WriteSet *perf = NULL,const FieldMask *performed_mask = NULL) = 0;
     public:
       virtual Realm::InstanceLayoutGeneric* create_layout(
                            const Realm::InstanceLayoutConstraints &ilc,
@@ -1683,8 +1681,7 @@ namespace Legion {
               ApEvent precondition, PredEvent predicate_guard,
               IndexTreeNode *intersect, IndexSpaceExpression *mask,
               ReductionOpID redop = 0, bool reduction_fold = true,
-              LegionMap<IndexSpaceExpression*,FieldMask>::aligned *perf = NULL,
-              const FieldMask *performed_mask = NULL);
+              WriteSet *perf = NULL, const FieldMask *performed_mask = NULL);
       virtual ApEvent issue_fill(Operation *op,
 #ifdef LEGION_SPY
               const std::vector<Realm::CopySrcDstField> &dst_fields,
@@ -1695,8 +1692,7 @@ namespace Legion {
               ApEvent precondition, PredEvent predicate_guard,
               IndexTreeNode *intersect = NULL,
               IndexSpaceExpression *mask = NULL,
-              LegionMap<IndexSpaceExpression*,FieldMask>::aligned *perf = NULL,
-              const FieldMask *performed_mask = NULL);
+              WriteSet *perf = NULL, const FieldMask *performed_mask = NULL);
     public:
       virtual Realm::InstanceLayoutGeneric* create_layout(
                            const Realm::InstanceLayoutConstraints &ilc,
@@ -2493,7 +2489,8 @@ namespace Legion {
                                  VersionInfo &version_info,
                                  ProjectionInfo &projection_info,
                                  FieldMask &unopened_field_mask,
-                     LegionMap<AdvanceOp*,LogicalUser>::aligned &advances);
+                     LegionMap<AdvanceOp*,LogicalUser>::aligned &advances,
+                                 const bool replicate_context);
       void create_logical_open(ContextID ctx,
                                const FieldMask &open_mask,
                                const LogicalUser &creator,
@@ -2582,7 +2579,8 @@ namespace Legion {
                                      RegionTreePath &path,
                                      RestrictInfo &restrict_info,
                                      VersionInfo &version_info,
-                                     const TraceInfo &trace_info);
+                                     const TraceInfo &trace_info,
+                                     const bool replicate_context);
       void siphon_logical_deletion(LogicalCloser &closer,
                                    LogicalState &state,
                                    const FieldMask &current_mask,
@@ -2592,9 +2590,10 @@ namespace Legion {
     public:
       void send_back_logical_state(ContextID ctx, UniqueID context_uid,
                                    AddressSpaceID target);
-      void process_logical_state_return(ContextID ctx, Deserializer &derez);
+      void process_logical_state_return(ContextID ctx, Deserializer &derez,
+                                        AddressSpaceID source);
       static void handle_logical_state_return(Runtime *runtime,
-                                              Deserializer &derez);
+                              Deserializer &derez, AddressSpaceID source);
     public:
       void compute_version_numbers(ContextID ctx, 
                                    const RegionTreePath &path,
@@ -2634,7 +2633,7 @@ namespace Legion {
                                      VersionInfo &version_info,
                                      UniqueID logical_context_uid,
                                      InnerContext *owner_context,
-                                     ClosedNode *closed_tree,
+                                     CompositeViewSummary &summary,
                                      InterCloseOp *op,
                                      std::set<RtEvent> &ready_events);
       // This method will always add valid references to the set of views
@@ -2691,8 +2690,8 @@ namespace Legion {
                       LegionMap<ApEvent,FieldMask>::aligned &postconditions,
                                 CopyAcrossHelper *across_helper = NULL,
                                 RegionTreeNode *intersect = NULL,
-       const LegionMap<IndexSpaceExpression*,FieldMask>::aligned *masks = NULL,
-             LegionMap<IndexSpaceExpression*,FieldMask>::aligned *perf = NULL);
+                                const WriteMasks *masks = NULL,
+                                WriteSet *perf = NULL);
       // Helper method for the above to issue copies with a mask
       void issue_masked_copy(const TraversalInfo &info, 
                              const FieldMask &copy_mask,
@@ -2704,7 +2703,7 @@ namespace Legion {
                              CopyAcrossHelper *across_helper,
                              RegionTreeNode *intersect,
                              IndexSpaceExpression* mask,
-                  LegionMap<IndexSpaceExpression*,FieldMask>::aligned *perf);
+                             WriteSet *performed);
       ApEvent issue_single_copy(const TraversalInfo &info,
                                 MaterializedView *dst, bool restrict_out,
                                 PredEvent predicate_guard, ApEvent copy_pre,
@@ -2806,8 +2805,7 @@ namespace Legion {
                   ApEvent precondition, PredEvent predicate_guard,
                   RegionTreeNode *intersect, IndexSpaceExpression *mask,
                   ReductionOpID redop = 0, bool reduction_fold = true,
-                  LegionMap<IndexSpaceExpression*,
-                            FieldMask>::aligned *perf = NULL,
+                  WriteSet *perf = NULL,
                   const FieldMask *performed_mask = NULL) = 0;
       virtual ApEvent issue_fill(Operation *op,
                   const std::vector<CopySrcDstField> &dst_fields,
@@ -2818,8 +2816,7 @@ namespace Legion {
 #endif
                   RegionTreeNode *intersect = NULL,
                   IndexSpaceExpression *mask = NULL,
-                  LegionMap<IndexSpaceExpression*,
-                            FieldMask>::aligned *perf = NULL,
+                  WriteSet *perf = NULL,
                   const FieldMask *performed_mask = NULL) = 0;
     public:
       virtual bool are_children_disjoint(const LegionColor c1, 
@@ -2958,9 +2955,7 @@ namespace Legion {
                   ApEvent precondition, PredEvent predicate_guard,
                   RegionTreeNode *intersect, IndexSpaceExpression *mask,
                   ReductionOpID redop = 0, bool reduction_fold = true,
-                  LegionMap<IndexSpaceExpression*,
-                            FieldMask>::aligned *perf = NULL,
-                  const FieldMask *performed_mask = NULL);
+                  WriteSet *perf = NULL,const FieldMask *performed_mask = NULL);
       virtual ApEvent issue_fill(Operation *op,
                   const std::vector<CopySrcDstField> &dst_fields,
                   const void *fill_value, size_t fill_size,
@@ -2970,9 +2965,7 @@ namespace Legion {
 #endif
                   RegionTreeNode *intersect = NULL,
                   IndexSpaceExpression *mask = NULL,
-                  LegionMap<IndexSpaceExpression*,
-                            FieldMask>::aligned *perf = NULL,
-                  const FieldMask *performed_mask = NULL);
+                  WriteSet *perf = NULL,const FieldMask *performed_mask = NULL);
     public:
       virtual bool are_children_disjoint(const LegionColor c1, 
                                          const LegionColor c2);
@@ -3162,9 +3155,7 @@ namespace Legion {
                   ApEvent precondition, PredEvent predicate_guard,
                   RegionTreeNode *intersect, IndexSpaceExpression *mask,
                   ReductionOpID redop = 0, bool reduction_fold = true,
-                  LegionMap<IndexSpaceExpression*,
-                            FieldMask>::aligned *perf = NULL,
-                  const FieldMask *performed_mask = NULL);
+                  WriteSet *perf = NULL,const FieldMask *performed_mask = NULL);
       virtual ApEvent issue_fill(Operation *op,
                   const std::vector<CopySrcDstField> &dst_fields,
                   const void *fill_value, size_t fill_size,
@@ -3174,9 +3165,7 @@ namespace Legion {
 #endif
                   RegionTreeNode *intersect = NULL,
                   IndexSpaceExpression *mask = NULL,
-                  LegionMap<IndexSpaceExpression*,
-                            FieldMask>::aligned *perf = NULL,
-                  const FieldMask *performed_mask = NULL);
+                  WriteSet *perf = NULL,const FieldMask *performed_mask = NULL);
     public:
       virtual bool are_children_disjoint(const LegionColor c1, 
                                          const LegionColor c2);
