@@ -382,6 +382,8 @@ namespace Legion {
       virtual TaskPriority get_current_priority(void) const = 0;
       virtual void set_current_priority(TaskPriority priority) = 0;
     public:
+      virtual void repurpose_context(SingleTask *new_owner_task);
+    public:
       PhysicalRegion get_physical_region(unsigned idx);
       void get_physical_references(unsigned idx, InstanceSet &refs);
     public:
@@ -515,7 +517,7 @@ namespace Legion {
                                    void (*destructor)(void*));
     public:
       Runtime *const runtime;
-      TaskOp *const owner_task;
+      TaskOp *owner_task;
       const std::vector<RegionRequirement> &regions;
     protected:
       // For profiling information
@@ -1006,6 +1008,8 @@ namespace Legion {
     public:
       virtual TaskPriority get_current_priority(void) const;
       virtual void set_current_priority(TaskPriority priority);
+    public:
+      virtual void repurpose_context(SingleTask *new_owner_task);
     public:
       static void handle_version_owner_request(Deserializer &derez,
                             Runtime *runtime, AddressSpaceID source);
@@ -1598,6 +1602,8 @@ namespace Legion {
     public:
       virtual TaskPriority get_current_priority(void) const;
       virtual void set_current_priority(TaskPriority priority);
+    public:
+      virtual void repurpose_context(SingleTask *new_owner_task);
     };
 
     /**
@@ -1909,6 +1915,8 @@ namespace Legion {
     public:
       virtual TaskPriority get_current_priority(void) const;
       virtual void set_current_priority(TaskPriority priority);
+    public:
+      virtual void repurpose_context(SingleTask *new_owner_task);
     protected:
       TaskContext *const enclosing;
       TaskOp *const inline_task;

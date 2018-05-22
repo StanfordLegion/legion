@@ -532,6 +532,11 @@ namespace Legion {
                                  size_t res_size, bool owned) = 0; 
       virtual void handle_post_mapped(RtEvent pre = RtEvent::NO_RT_EVENT) = 0;
       virtual void handle_misspeculation(void) = 0;
+    public:
+      TaskContext* get_execution_context(void) { return execution_context; }
+    public:
+      void set_captured(void) { is_captured = true; }
+      void clear_captured(void) { is_captured = false; }
     protected:
       // Boolean for each region saying if it is virtual mapped
       std::vector<bool> virtual_mapped;
@@ -554,6 +559,8 @@ namespace Legion {
       mutable bool leaf_cached, is_leaf_result;
       mutable bool inner_cached, is_inner_result;
       mutable bool has_virtual_instances_cached, has_virtual_instances_result;
+    protected:
+      bool is_captured;
     protected:
       // Profiling information
       std::vector<ProfilingMeasurementID> task_profiling_requests;

@@ -123,6 +123,51 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void TaskContext::repurpose_context(SingleTask *new_owner_task)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(new_owner_task->is_leaf());
+      assert(owner_task->task_id == new_owner_task->task_id);
+      assert(regions == new_owner_task->regions);
+#endif
+      created_requirements.clear();
+      returnable_privileges.clear();
+      executing_processor = Processor::NO_PROC;
+      total_tunable_count = 0;
+      overhead_tracker = NULL;
+      task_executed = false;
+      has_inline_accessor = false;
+      mutable_priority = false;
+      children_complete_invoked = false;
+      children_commit_invoked = false;
+      task_local_variables.clear();
+      safe_cast_spaces.clear();
+
+      owner_task = new_owner_task;
+      const std::deque<InstanceSet>& physical_instances =
+        new_owner_task->get_physical_instances();
+      const std::vector<bool> &no_access_regions =
+        new_owner_task->get_no_access_regions();
+#ifdef DEBUG_LEGION
+      std::vector<bool> virtual_mapped;
+      new_owner_task->clone_virtual_mapped(virtual_mapped);
+#endif
+      for (unsigned idx = 0; idx < physical_regions.size(); idx++)
+      {
+#ifdef DEBUG_LEGION
+        assert(!virtual_mapped[idx]);
+#endif
+        bool mapped = !no_access_regions[idx];
+        PhysicalRegionImpl *impl = physical_regions[idx].impl;
+        impl->reset_physical_region(ApEvent::NO_AP_EVENT, mapped);
+        if (mapped)
+          impl->reset_references(physical_instances[idx],
+              Runtime::create_ap_user_event());
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void TaskContext::add_physical_region(const RegionRequirement &req,
                                    bool mapped, MapperID mid, MappingTagID tag,
                                    ApUserEvent unmap_event, bool virtual_mapped,
@@ -5781,6 +5826,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void InnerContext::repurpose_context(SingleTask *new_owner_task)
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
     void InnerContext::configure_context(MapperManager *mapper, TaskPriority p)
     //--------------------------------------------------------------------------
     {
@@ -8961,6 +9013,13 @@ namespace Legion {
       assert(false);
     }
 
+    //--------------------------------------------------------------------------
+    void LeafContext::repurpose_context(SingleTask *new_owner_task)
+    //--------------------------------------------------------------------------
+    {
+      TaskContext::repurpose_context(new_owner_task);
+    }
+
     /////////////////////////////////////////////////////////////
     // Inline Context 
     /////////////////////////////////////////////////////////////
@@ -10029,6 +10088,12 @@ namespace Legion {
       enclosing->set_current_priority(priority);
     }
 
+    //--------------------------------------------------------------------------
+    void InlineContext::repurpose_context(SingleTask *new_owner_task)
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+    }
   };
 };
 
