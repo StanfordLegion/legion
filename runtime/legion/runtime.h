@@ -405,8 +405,6 @@ namespace Legion {
       void fail_bounds_check(DomainPoint p, FieldID fid, PrivilegeMode mode);
       void fail_bounds_check(Domain d, FieldID fid, PrivilegeMode mode);
     public:
-      void reset_physical_region(ApEvent ready_event, bool mapped);
-    public:
       Runtime *const runtime;
       TaskContext *const context;
       const MapperID map_id;

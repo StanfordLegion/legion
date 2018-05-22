@@ -3806,7 +3806,6 @@ namespace Legion {
       // If we're a leaf task and we have virtual mappings
       // then it's possible for the application to do inline
       // mappings which require a physical context
-      if (execution_context == NULL)
       {
         if (!variant->is_leaf() || has_virtual_instances())
         {
@@ -3890,10 +3889,6 @@ namespace Legion {
         execution_context->initialize_region_tree_contexts(clone_requirements,
             unmap_events, wait_on_events, map_applied_conditions);
       }
-#ifdef DEBUG_LEGION
-      else
-        assert(variant->is_leaf() && !has_virtual_instances());
-#endif
       // Merge together all the events for the start condition 
       ApEvent start_condition = Runtime::merge_events(wait_on_events);
       // Take all the locks in order in the proper way
@@ -4633,7 +4628,6 @@ namespace Legion {
     void IndividualTask::deactivate(void)
     //--------------------------------------------------------------------------
     {
-      if (is_captured) return;
       DETAILED_PROFILER(runtime, DEACTIVATE_INDIVIDUAL_CALL);
       deactivate_single();
       if (!remote_instances.empty())
@@ -5789,7 +5783,6 @@ namespace Legion {
     void PointTask::deactivate(void)
     //--------------------------------------------------------------------------
     {
-      if (is_captured) return;
       DETAILED_PROFILER(runtime, POINT_DEACTIVATE_CALL);
       if (runtime->profiler != NULL)
         runtime->profiler->register_slice_owner(

@@ -1879,17 +1879,6 @@ namespace Legion {
       }
     }
 
-    //--------------------------------------------------------------------------
-    void PhysicalRegionImpl::reset_physical_region(ApEvent ready, bool m)
-    //--------------------------------------------------------------------------
-    {
-      ready_event = ready;
-      mapped = m;
-      valid = false;
-      trigger_on_unmap = false;
-      made_accessor = false;
-    }
-
     /////////////////////////////////////////////////////////////
     // Grant Impl 
     /////////////////////////////////////////////////////////////
