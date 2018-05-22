@@ -1692,14 +1692,21 @@ local bounded_type = terralib.memoize(function(index_type, ...)
     -- Find the smallest bitmask that will fit.
     -- TODO: Would be nice to compress smaller than one byte.
    local bitmask_type
-    if #bounds < bit.lshift(1, 8) - 1 and terralib.llvmversion >= 38 then
-      bitmask_type = uint8
-    elseif #bounds < bit.lshift(1, 16) - 1 then
-      bitmask_type = uint16
-    elseif #bounds < bit.lshift(1, 32) - 1 then
-      bitmask_type = uint32
+    if terralib.llvmversion >= 38 then
+      if #bounds <= bit.lshift(1, 8) then
+        bitmask_type = uint8
+      elseif #bounds <= bit.lshift(1, 16) then
+        bitmask_type = uint16
+      -- XXX: What we really want here is bit.lshift(1ULL, 32),
+      --      which is supported only in LuaJIT 2.1 or higher
+      elseif #bounds <= bit.lshift(1, 30) then
+        bitmask_type = uint32
+      else
+        assert(false) -- really?
+      end
     else
-      assert(false) -- really?
+      assert(#bounds <= bit.lshift(1, 30))
+      bitmask_type = uint32
     end
     st.entries:insert({ "__index", bitmask_type })
   end

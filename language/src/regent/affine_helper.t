@@ -46,6 +46,11 @@ function affine.is_constant_expr(node)
     return affine.is_constant_expr(node.rhs)
   end
 
+  if node:is(ast.typed.expr.Binary) then
+    return node.lhs:is(ast.typed.expr.Constant) and
+           node.rhs:is(ast.typed.expr.Constant)
+  end
+
   return false
 end
 
@@ -78,6 +83,21 @@ local function convert_ctor_to_constant(node)
   end)))
 end
 
+local evaluate_cache = data.newmap()
+local function evaluate(node)
+  assert(node.lhs:is(ast.typed.expr.Constant) and node.rhs:is(ast.typed.expr.Constant))
+  local key = data.newtuple(node.lhs.value, node.op, node.rhs.value)
+  local value = evaluate_cache[key]
+  if value == nil then
+    value = (terra()
+      return [base.quote_binary_op(node.op, node.lhs.value, node.rhs.value)]
+    end)()
+    evaluate_cache[key] = value
+  end
+  assert(value ~= nil)
+  return value
+end
+
 function convert_constant_expr(node)
   if node:is(ast.typed.expr.Constant) then
     return convert_terra_constant(node.value)
@@ -87,6 +107,8 @@ function convert_constant_expr(node)
     return convert_constant_expr(node.arg)
   elseif node:is(ast.typed.expr.Unary) and node.op == "-" then
     return -convert_constant_expr(node.rhs)
+  elseif node:is(ast.typed.expr.Binary) then
+    return evaluate(node)
   else
     assert(false)
   end
