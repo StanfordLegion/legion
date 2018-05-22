@@ -11334,24 +11334,54 @@ namespace Legion {
               {
                 const LogicalRegion upper_bound = 
                   this->as_region_node()->handle;
-                for (Domain::DomainPointIterator itr(launch_dom); itr; itr++)
+                if (proj_info.projection->is_functional)
                 {
-                  LogicalRegion handle = functor->project(
-                      user.op->get_mappable(), user.idx, upper_bound, itr.p);
-                  RegionNode *node = context->get_node(handle);
-                  write_expressions.insert(node->get_index_space_expression());
+                  for (Domain::DomainPointIterator itr(launch_dom); itr; itr++)
+                  {
+                    LogicalRegion handle = 
+                      functor->project(upper_bound, itr.p, launch_dom);
+                    RegionNode *node = context->get_node(handle);
+                    write_expressions.insert(
+                        node->get_index_space_expression());
+                  }
+                }
+                else
+                {
+                  for (Domain::DomainPointIterator itr(launch_dom); itr; itr++)
+                  {
+                    LogicalRegion handle = functor->project(
+                        user.op->get_mappable(), user.idx, upper_bound, itr.p);
+                    RegionNode *node = context->get_node(handle);
+                    write_expressions.insert(
+                        node->get_index_space_expression());
+                  }
                 }
               }
               else
               {
                 const LogicalPartition upper_bound = 
                   this->as_partition_node()->handle;
-                for (Domain::DomainPointIterator itr(launch_dom); itr; itr++)
+                if (proj_info.projection->is_functional)
                 {
-                  LogicalRegion handle = functor->project(
-                      user.op->get_mappable(), user.idx, upper_bound, itr.p);
-                  RegionNode *node = context->get_node(handle);
-                  write_expressions.insert(node->get_index_space_expression());
+                  for (Domain::DomainPointIterator itr(launch_dom); itr; itr++)
+                  {
+                    LogicalRegion handle = 
+                      functor->project(upper_bound, itr.p, launch_dom);
+                    RegionNode *node = context->get_node(handle);
+                    write_expressions.insert(
+                        node->get_index_space_expression());
+                  }
+                }
+                else
+                {
+                  for (Domain::DomainPointIterator itr(launch_dom); itr; itr++)
+                  {
+                    LogicalRegion handle = functor->project(
+                        user.op->get_mappable(), user.idx, upper_bound, itr.p);
+                    RegionNode *node = context->get_node(handle);
+                    write_expressions.insert(
+                        node->get_index_space_expression());
+                  }
                 }
               }
               // Now we can union these together
