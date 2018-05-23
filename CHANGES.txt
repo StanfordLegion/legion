@@ -9,6 +9,16 @@ Version 18.05.0 (May ??, 2018)
   * Realm
     - Added support for "fast" reservations that have better
       performance characteristics for reservations local to a node
+  * Regent
+    - Regent now generates disjointness constraints for affine
+        expressions in partition accesses. E.g. p[i] and p[i+1] are
+        now known to be disjoint at compile time as long as p is a
+        disjoint partition
+    - Support for non-trivial projection functors in index space launches
+        such as f(p[i+1])
+    - Improvements to compile time spent in various optimization passes
+    - Support for parallel compilation with the flag -fjobs N
+    - Miscellaneous fixes
 
 Version 18.02.0 (February 2, 2018)
   * Legion
