@@ -7024,10 +7024,7 @@ namespace Legion {
       if (runtime->legion_spy_enabled)
       {
         std::set<FieldID> disjoint_close_fields;
-#ifdef DEBUG_LEGION
-        assert(closed_tree != NULL);
-#endif
-        closed_tree->node->column_source->get_field_set(close_mask,
+        node->column_source->get_field_set(close_mask,
             requirement.privilege_fields, disjoint_close_fields);
         for (std::set<FieldID>::const_iterator it = 
               disjoint_close_fields.begin(); it != 
