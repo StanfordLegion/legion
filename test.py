@@ -176,14 +176,20 @@ def precompile_regent(tests, flags, launcher, root_dir, env, thread_count):
 
 def run_test_legion_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
     flags = ['-logfile', 'out_%.log']
+    if env['USE_CUDA'] == '1':
+        flags.extend(['-ll:gpu', '1'])
     run_cxx(legion_cxx_tests, flags, launcher, root_dir, bin_dir, env, thread_count)
 
 def run_test_legion_gasnet_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
     flags = ['-logfile', 'out_%.log']
+    if env['USE_CUDA'] == '1':
+        flags.extend(['-ll:gpu', '1'])
     run_cxx(legion_gasnet_cxx_tests, flags, launcher, root_dir, bin_dir, env, thread_count)
 
 def run_test_legion_openmp_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
     flags = ['-logfile', 'out_%.log']
+    if env['USE_CUDA'] == '1':
+        flags.extend(['-ll:gpu', '1'])
     run_cxx(legion_openmp_cxx_tests, flags, launcher, root_dir, bin_dir, env, thread_count)
 
 def run_test_legion_python_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
@@ -198,6 +204,8 @@ def run_test_legion_python_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread
 
 def run_test_legion_hdf_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
     flags = ['-logfile', 'out_%.log']
+    if env['USE_CUDA'] == '1':
+        flags.extend(['-ll:gpu', '1'])
     run_cxx(legion_hdf_cxx_tests, flags, launcher, root_dir, bin_dir, env, thread_count)
 
 def run_test_fuzzer(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
