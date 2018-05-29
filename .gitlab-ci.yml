@@ -521,7 +521,7 @@ n0003_gcc48_cxx98_release_legion_cuda:
   <<: [*n0003, *image, *tests]
   variables:
     <<: [*gcc48, *terra38, *release, *cxx98_normal, *cuda, *legion]
-n0003_gcc48_cxx98_release_regent_cuda:
-  <<: [*n0003, *image, *tests]
-  variables:
-    <<: [*gcc48, *terra38, *release, *cxx98_normal, *cuda, *regent]
+# n0003_gcc48_cxx98_release_regent_cuda:
+#   <<: [*n0003, *image, *tests]
+#   variables:
+#     <<: [*gcc48, *terra38, *release, *cxx98_normal, *cuda, *regent]
