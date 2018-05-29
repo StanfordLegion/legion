@@ -18,7 +18,7 @@
 from __future__ import print_function
 import argparse, os, platform, subprocess
 
-def test(root_dir, install_only, debug, short, spy, gcov, hdf5, openmp, jobs, env):
+def test(root_dir, install_only, debug, short, spy, gcov, hdf5, cuda, openmp, jobs, env):
     threads = ['-j', '2'] if 'TRAVIS' in env else []
     terra = ['--with-terra', env['TERRA_DIR']] if 'TERRA_DIR' in env else []
     build = (['--with-cmake-build', env['CMAKE_BUILD_DIR']]
@@ -27,7 +27,6 @@ def test(root_dir, install_only, debug, short, spy, gcov, hdf5, openmp, jobs, en
     debug_flag = ['--debug'] if debug else []
     short_flag = ['--short'] if short else []
     inner_flag = ['--extra=-flegion-inner', '--extra=0'] if 'DISABLE_INNER' in env else []
-    gpu = ['--extra=-ll:gpu', '--extra=1'] if env.get('USE_CUDA') == '1' else []
     if 'USE_RDIR' in env:
         regent_dir = os.path.dirname(os.path.realpath(__file__))
         rdir_config = os.path.join(regent_dir, '.rdir.json')
@@ -47,12 +46,13 @@ def test(root_dir, install_only, debug, short, spy, gcov, hdf5, openmp, jobs, en
         if spy: extra_flags.append('--spy')
         if gcov: extra_flags.append('--run')
         if hdf5: extra_flags.append('--hdf5')
+        if cuda: extra_flags.extend(['--extra=-ll:gpu', '--extra=1'])
         if openmp: extra_flags.append('--openmp')
         extra_flags.extend(['--extra=-fjobs', '--extra=%s' % jobs])
         if not spy and not gcov and not hdf5 and not openmp: extra_flags.append('--debug')
 
         subprocess.check_call(
-            ['./test.py', '-q'] + threads + short_flag + extra_flags + inner_flag + gpu,
+            ['./test.py', '-q'] + threads + short_flag + extra_flags + inner_flag,
             env = env,
             cwd = root_dir)
 
@@ -75,10 +75,11 @@ if __name__ == '__main__':
     })
 
     debug = env['DEBUG'] == '1'
-    short = 'SHORT' in env and env['SHORT'] == '1'
-    spy = 'TEST_SPY' in env and env['TEST_SPY'] == '1'
-    gcov = 'TEST_GCOV' in env and env['TEST_GCOV'] == '1'
-    hdf5 = 'TEST_HDF' in env and env['TEST_HDF'] == '1'
-    openmp = 'TEST_OPENMP' in env and env['TEST_OPENMP'] == '1'
+    short = env.get('SHORT') == '1'
+    spy = env.get('TEST_SPY') == '1'
+    gcov = env.get('TEST_GCOV') == '1'
+    hdf5 = env.get('TEST_HDF') == '1'
+    cuda = env.get('TEST_CUDA') == '1'
+    openmp = env.get('TEST_OPENMP') == '1'
     jobs = int(env['REGENT_JOBS']) if 'REGENT_JOBS' in env else 1
-    test(root_dir, args.install_only, debug, short, spy, gcov, hdf5, openmp, jobs, env)
+    test(root_dir, args.install_only, debug, short, spy, gcov, hdf5, cuda, openmp, jobs, env)
