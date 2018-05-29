@@ -7,7 +7,7 @@ export CC_FLAGS="-std=c++98"
 export DEBUG=0
 
 # Run perf test for each branch
-for branch in performance_test master deppart; do
+for branch in master; do
     if [[ -d _legion_$branch ]]; then
         pushd _legion_$branch
         git clean -fdx

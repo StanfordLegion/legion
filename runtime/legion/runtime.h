@@ -526,8 +526,9 @@ namespace Legion {
       void perform_rank_exchange(void);
       void handle_mpi_rank_exchange(Deserializer &derez);
     protected:
-      bool send_explicit_stage(int stage);
-      bool send_ready_stages(void);
+      bool initiate_exchange(void);
+      void send_remainder_stage(void);
+      bool send_ready_stages(const int start_stage=1);
       void unpack_exchange(int stage, Deserializer &derez);
       void complete_exchange(void);
     public:
@@ -541,6 +542,7 @@ namespace Legion {
       RtUserEvent done_event;
       std::vector<int> stage_notifications;
       std::vector<bool> sent_stages;
+      bool done_triggered;
     }; 
 
     /**
@@ -1471,7 +1473,6 @@ namespace Legion {
         mutable int legion_collective_log_radix;
         mutable int legion_collective_stages;
         mutable int legion_collective_last_radix;
-        mutable int legion_collective_last_log_radix;
         mutable int legion_collective_participating_spaces;
         int initial_task_window_size;
         unsigned initial_task_window_hysteresis;
@@ -1624,7 +1625,6 @@ namespace Legion {
       const int legion_collective_log_radix;
       const int legion_collective_stages;
       const int legion_collective_last_radix;
-      const int legion_collective_last_log_radix;
       const int legion_collective_participating_spaces;
       MPIRankTable *const mpi_rank_table;
     public:

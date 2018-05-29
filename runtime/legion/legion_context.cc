@@ -4789,20 +4789,39 @@ namespace Legion {
       }
       if (!to_perform.empty())
       {
-        for (std::vector<PostTaskArgs>::const_iterator it = 
-              to_perform.begin(); it != to_perform.end(); it++)
+        if (launch_next_op == NULL)
         {
-          if (it->instance.exists())
+          // We're not launching the next operation, so we can just kick
+          // these things off as they are without preconditions
+          for (std::vector<PostTaskArgs>::iterator it =
+                to_perform.begin(); it != to_perform.end(); it++)
           {
-            it->context->post_end_task(it->result, it->size, false/*owned*/);
-            // Once we've copied the data then we can destroy the instance
-            it->instance.destroy();
+            DeferredPostTaskArgs args(*it, RtUserEvent::NO_RT_USER_EVENT);
+            runtime->issue_runtime_meta_task(args, 
+                  LG_THROUGHPUT_DEFERRED_PRIORITY);
           }
-          else
-            it->context->post_end_task(it->result, it->size, true/*owned*/);
+        }
+        else
+        {
+          // We're going to launch the next iteration also, but don't do
+          // it until all of our currently kicked off tasks have started 
+          std::set<RtEvent> next_op_preconditions;
+          for (std::vector<PostTaskArgs>::iterator it =
+                to_perform.begin(); it != to_perform.end(); it++)
+          {
+            RtUserEvent start_event = Runtime::create_rt_user_event();
+            DeferredPostTaskArgs args(*it, start_event);
+            runtime->issue_runtime_meta_task(args, 
+                  LG_THROUGHPUT_DEFERRED_PRIORITY);
+            next_op_preconditions.insert(start_event);
+          }
+          // Now we can kick off the next iteration with the right preconditions
+          PostEndArgs args(launch_next_op, this);
+          runtime->issue_runtime_meta_task(args, LG_THROUGHPUT_WORK_PRIORITY,
+                                Runtime::merge_events(next_op_preconditions));
         }
       }
-      if (launch_next_op != NULL)
+      else if (launch_next_op != NULL)
       {
         PostEndArgs args(launch_next_op, this);
         runtime->issue_runtime_meta_task(args, LG_THROUGHPUT_WORK_PRIORITY);
@@ -6623,6 +6642,27 @@ namespace Legion {
     {
       const PostEndArgs *pargs = (const PostEndArgs*)args;
       pargs->proxy_this->process_post_end_tasks();
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void InnerContext::handle_deferred_post_end_task(
+                                                               const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const DeferredPostTaskArgs *pargs = ((const DeferredPostTaskArgs*)args);
+      // If we have a start event, trigger that now
+      if (pargs->started.exists())
+        Runtime::trigger_event(pargs->started);
+      if (pargs->instance.exists())
+      {
+        pargs->context->post_end_task(
+                                    pargs->result, pargs->size, false/*owned*/);
+        // Once we've copied the data then we can destroy the instance
+        pargs->instance.destroy();
+      }
+      else
+        pargs->context->post_end_task(
+                                     pargs->result, pargs->size, true/*owned*/);
     }
 
     //--------------------------------------------------------------------------

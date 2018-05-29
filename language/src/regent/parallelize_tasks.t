@@ -3305,6 +3305,7 @@ function parallelize_tasks.top_task(global_cx, node)
     },
     span = node.span,
   }
+  variant:set_ast(task_ast)
 
   -- Hack: prevents parallelized verions from going through parallelizer again
   global_cx[task] = {}
