@@ -37,7 +37,7 @@ function ast.flatmap_node_continuation(fn, node)
       elseif continuing then
         local tmp = {}
         for k, child in pairs(node) do
-          if k ~= "node_type" then
+          if k ~= "node_type" and k ~= "node_id" then
             tmp[k] = continuation(child)
             local is_src_list = terralib.islist(child)
             local is_dst_list = terralib.islist(tmp[k])
@@ -68,7 +68,7 @@ function ast.flatmap_node_postorder(fn, node)
   if ast.is_node(node) then
     local tmp = {}
     for k, child in pairs(node) do
-      if k ~= "node_type" then
+       if k ~= "node_type" and k ~= "node_id" then
         tmp[k] = ast.flatmap_node_postorder(fn, child)
         local is_src_list = terralib.islist(child)
         local is_dst_list = terralib.islist(tmp[k])
