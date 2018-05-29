@@ -127,11 +127,12 @@ before_script:
       source /usr/local/modules-3.2.10/init/bash
       module load cmake/3.8.2
       module load mpi/openmpi/1.10.4
-      module load gasnet/1.30.0-openmpi
       module load cuda/8.0
 
-      # OpenMPI:
-      export LAUNCHER="mpirun -n 2 -x TERRA_PATH -x INCLUDE_PATH -x LD_LIBRARY_PATH -x LG_RT_DIR -x USE_RDIR"
+      if [[ "$USE_GASNET" -eq 1 ]]; then
+        module load gasnet/1.30.0-openmpi
+        export LAUNCHER="mpirun -n 2 -x TERRA_PATH -x INCLUDE_PATH -x LD_LIBRARY_PATH -x LG_RT_DIR -x USE_RDIR"
+      fi
     fi
 
 ###
@@ -519,8 +520,8 @@ clang35_cxx98_debug_legion:
 n0003_gcc48_cxx98_release_legion_cuda:
   <<: [*n0003, *image, *tests]
   variables:
-    <<: [*gcc48, *terra38, *release, *cxx98_normal, *hdf5, *cuda, *gasnet, *legion]
+    <<: [*gcc48, *terra38, *release, *cxx98_normal, *hdf5, *cuda, *legion]
 n0003_gcc48_cxx98_release_regent_cuda:
   <<: [*n0003, *image, *tests]
   variables:
-    <<: [*gcc48, *terra38, *release, *cxx98_normal, *hdf5, *cuda, *gasnet, *regent]
+    <<: [*gcc48, *terra38, *release, *cxx98_normal, *hdf5, *cuda, *regent]
