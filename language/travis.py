@@ -27,6 +27,7 @@ def test(root_dir, install_only, debug, short, spy, gcov, hdf5, openmp, jobs, en
     debug_flag = ['--debug'] if debug else []
     short_flag = ['--short'] if short else []
     inner_flag = ['--extra=-flegion-inner', '--extra=0'] if 'DISABLE_INNER' in env else []
+    gpu = ['--extra=-ll:gpu', '--extra=1'] if env.get('USE_CUDA') == '1' else []
     if 'USE_RDIR' in env:
         regent_dir = os.path.dirname(os.path.realpath(__file__))
         rdir_config = os.path.join(regent_dir, '.rdir.json')
@@ -51,7 +52,7 @@ def test(root_dir, install_only, debug, short, spy, gcov, hdf5, openmp, jobs, en
         if not spy and not gcov and not hdf5 and not openmp: extra_flags.append('--debug')
 
         subprocess.check_call(
-            ['./test.py', '-q'] + threads + short_flag + extra_flags + inner_flag,
+            ['./test.py', '-q'] + threads + short_flag + extra_flags + inner_flag + gpu,
             env = env,
             cwd = root_dir)
 
