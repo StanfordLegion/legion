@@ -70,6 +70,8 @@ variables:
   USE_HDF: "1"
 .llvm: &llvm
   USE_LLVM: "1"
+.cuda: &cuda
+  USE_CUDA: "1"
 .gasnet: &gasnet
   USE_GASNET: "1"
 .cmake: &cmake
@@ -109,7 +111,7 @@ before_script:
   #     brew install pypy homebrew/versions/llvm35
   #   fi
   - |
-    if [[ "$USE_GASNET" -eq 1 ]]; then
+    if [[ "$USE_GASNET" -eq 1 && "$(hostname)" != n0003 ]]; then
       export CONDUIT=mpi
       export GASNET_ROOT="$PWD/gasnet/release"
       # OpenMPI:
@@ -118,9 +120,17 @@ before_script:
       export LAUNCHER="mpirun -n 2"
       unset WARN_AS_ERROR
       git clone https://github.com/StanfordLegion/gasnet.git gasnet
-      pushd gasnet
-      make -j$THREADS
-      popd
+      make -C gasnet -j$THREADS
+    fi
+  - |
+    if [[ "$(hostname)" = n0003 ]]; then
+      module load cmake/3.8.2
+      module load mpi/openmpi/1.10.4
+      module load gasnet/1.30.0-openmpi
+      module load cuda/8.0
+
+      # OpenMPI:
+      export LAUNCHER="mpirun -n 2 -x TERRA_PATH -x INCLUDE_PATH -x LD_LIBRARY_PATH -x LG_RT_DIR -x USE_RDIR"
     fi
 
 ###
@@ -145,6 +155,11 @@ before_script:
   tags:
     - linux
     - n0004
+
+# For CUDA tests, always use a specific machine:
+.n0003: &n0003
+  tags:
+    - n0003
 
 ###
 ### Docker Image
@@ -492,3 +507,19 @@ clang35_cxx98_debug_legion:
 #   <<: [*linux_n0004, *image, *perf_tests]
 #   variables:
 #     <<: [*gcc49, *terra38, *release, *cxx98_normal]
+
+# Performance tests:
+# n0004_gcc49_cxx98_release_perf:
+#   <<: [*linux_n0004, *image, *perf_tests]
+#   variables:
+#     <<: [*gcc49, *terra38, *release, *cxx98_normal]
+
+# CUDA tests:
+n0003_gcc48_cxx98_release_legion_cuda:
+  <<: [*linux_n0004, *image, *tests]
+  variables:
+    <<: [*gcc48, *terra38, *release, *cxx98_normal, *hdf5, *cuda, *gasnet, *legion]
+n0003_gcc48_cxx98_release_regent_cuda:
+  <<: [*linux_n0004, *image, *tests]
+  variables:
+    <<: [*gcc48, *terra38, *release, *cxx98_normal, *hdf5, *cuda, *gasnet, *regent]
