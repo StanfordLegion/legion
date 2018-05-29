@@ -2466,11 +2466,14 @@ namespace Realm {
 	  info->index = i;
 	  CHECK_CU( cuDeviceGet(&info->device, i) );
 	  CHECK_CU( cuDeviceGetName(info->name, GPUInfo::MAX_NAME_LEN, info->device) );
+          CHECK_CU( cuDeviceGetAttribute(&info->compute_major,
+                         CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MAJOR, info->device) );
+          CHECK_CU( cuDeviceGetAttribute(&info->compute_minor,
+                         CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MINOR, info->device) );
 	  CHECK_CU( cuDeviceComputeCapability(&info->compute_major,
 					      &info->compute_minor,
 					      info->device) );
 	  CHECK_CU( cuDeviceTotalMem(&info->total_mem, info->device) );
-	  CHECK_CU( cuDeviceGetProperties(&info->props, info->device) );
 
 	  log_gpu.info() << "GPU #" << i << ": " << info->name << " ("
 			 << info->compute_major << '.' << info->compute_minor
