@@ -127,7 +127,7 @@ before_script:
       source /usr/local/modules-3.2.10/init/bash
       module load cmake/3.8.2
       module load mpi/openmpi/1.10.4
-      module load gasnet/1.30.0-openmpi
+      module load gasnet/1.28.0-openmpi
       module load cuda/8.0
 
       # OpenMPI:
