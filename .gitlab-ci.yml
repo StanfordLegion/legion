@@ -124,6 +124,7 @@ before_script:
     fi
   - |
     if [[ "$(hostname)" = n0003 ]]; then
+      source /usr/local/modules-3.2.10/init/bash
       module load cmake/3.8.2
       module load mpi/openmpi/1.10.4
       module load gasnet/1.30.0-openmpi
