@@ -52,18 +52,6 @@ end
 local inline = "inline"
 local remote = "remote"
 
-local region_usage = {}
-region_usage.__index = region_usage
-
-function region_usage:__tostring()
-  local result = "region_usage(\n"
-  for region_type, polarity in pairs(self) do
-    result = result .. "  " .. tostring(region_type) .. " = " .. tostring(polarity) .. ",\n"
-  end
-  result = result .. ")"
-  return result
-end
-
 local function uses(cx, region_type, polarity)
   -- In order for this to be sound, we need to unmap *all* regions
   -- that could potentially alias with this one, not just just the
@@ -72,7 +60,9 @@ local function uses(cx, region_type, polarity)
   -- ignoring anything that isn't a root in the region forest.
 
   assert(std.type_supports_privileges(region_type))
-  local usage = { [region_type] = polarity }
+  local usage = data.newmap()
+  usage[region_type] = polarity
+
   for other_region_type, _ in cx.region_universe:items() do
     if std.is_region(other_region_type) then -- Skip lists of regions
       local constraint = std.constraint(
@@ -86,7 +76,7 @@ local function uses(cx, region_type, polarity)
       end
     end
   end
-  return setmetatable(usage, region_usage)
+  return usage
 end
 
 local function usage_meet_polarity(a, b)
@@ -107,15 +97,15 @@ local function usage_meet_polarity(a, b)
 end
 
 local function usage_meet(...)
-  local usage = {}
+  local usage = data.newmap()
   for _, a in pairs({...}) do
     if a then
-      for region_type, polarity in pairs(a) do
+      for region_type, polarity in a:items() do
         usage[region_type] = usage_meet_polarity(usage[region_type], polarity)
       end
     end
   end
-  return setmetatable(usage, region_usage)
+  return usage
 end
 
 local function usage_diff_polarity(a, b)
@@ -130,15 +120,15 @@ local function usage_diff(a, b)
   if not a or not b then
     return nil
   end
-  local usage = {}
-  for region_type, a_polarity in pairs(a) do
+  local usage = data.newmap()
+  for region_type, a_polarity in a:items() do
     local b_polarity = b[region_type]
     local diff = usage_diff_polarity(a_polarity, b_polarity)
     if diff then
       usage[region_type] = diff
     end
   end
-  return setmetatable(usage, region_usage)
+  return usage
 end
 
 local function usage_apply_polarity(a, b)
@@ -152,15 +142,15 @@ local function usage_apply_polarity(a, b)
 end
 
 local function usage_apply(...)
-  local usage = {}
+  local usage = data.newmap()
   for _, a in pairs({...}) do
     if a then
-      for region_type, polarity in pairs(a) do
+      for region_type, polarity in a:items() do
         usage[region_type] = usage_apply_polarity(usage[region_type], polarity)
       end
     end
   end
-  return setmetatable(usage, region_usage)
+  return usage
 end
 
 local function analyze_usage_node(cx)
@@ -251,7 +241,7 @@ local function map_regions(diff)
   local result = terralib.newlist()
   if diff then
     local region_types_by_polarity = {}
-    for region_type, polarity in pairs(diff) do
+    for region_type, polarity in diff:items() do
       if not region_types_by_polarity[polarity] then
         region_types_by_polarity[polarity] = terralib.newlist()
       end
