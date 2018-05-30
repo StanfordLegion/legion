@@ -133,7 +133,6 @@ namespace Realm {
 
       int compute_major, compute_minor;
       size_t total_mem;
-      CUdevprop props;
       std::set<CUdevice> peers;  // other GPUs we can do p2p copies with
     };
 

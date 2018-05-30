@@ -509,7 +509,7 @@ local function can_alias(node, cx, updates)
 
     else
       for k, child in pairs(node) do
-        if k ~= "node_type" then
+        if k ~= "node_type" and k ~= "node_id" then
           if can_alias(child, cx, updates) then
             return true
           end
