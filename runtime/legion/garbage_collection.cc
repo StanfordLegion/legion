@@ -354,10 +354,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock gc(gc_lock);
-#ifdef DEBUG_LEGION
-      // This should always be true here
-      assert(has_resource_references);
-#endif
       // Check to see if we lost the race for changing state
       if (__sync_fetch_and_add(&resource_references, 0) == 0)
       {
