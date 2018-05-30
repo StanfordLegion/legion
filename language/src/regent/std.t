@@ -3812,12 +3812,38 @@ function std.start(main_task, extra_setup_thunk)
   wrapper()
 end
 
+local function infer_filetype(filename)
+  if filename:match("%.o$") then
+    return "object"
+  elseif filename:match("%.bc$") then
+    return "bitcode"
+  elseif filename:match("%.ll$") then
+    return "llvmir"
+  elseif filename:match("%.so$") or filename:match("%.dylib$") or filename:match("%.dll$") then
+    return "sharedlibrary"
+  elseif filename:match("%.s") then
+    return "asm"
+  else
+    return "executable"
+  end
+end
+
 function std.saveobj(main_task, filename, filetype, extra_setup_thunk, link_flags)
   assert(std.is_task(main_task))
-  local flags = terralib.newlist()
+  filetype = filetype or infer_filetype(filename)
+  assert(not link_flags or filetype == 'sharedlibrary' or filetype == 'executable',
+         'Link flags are ignored unless saving to shared library or executable')
+
   local objfiles,task_wrappers = compile_tasks_in_parallel()
-  flags:insertall(objfiles)
+  if #objfiles > 0 then
+    assert(filetype == "object" or filetype == "executable",
+           'Parallel compilation only supported for object or executable output')
+  end
+
   local main, names = std.setup(main_task, extra_setup_thunk, task_wrappers)
+
+  local flags = terralib.newlist()
+  flags:insertall(objfiles)
   local use_cmake = os.getenv("USE_CMAKE") == "1"
   local lib_dir = os.getenv("LG_RT_DIR") .. "/../bindings/regent"
   if use_cmake then
@@ -3841,11 +3867,25 @@ function std.saveobj(main_task, filename, filetype, extra_setup_thunk, link_flag
   if use_cmake then
     flags:insertall({"-llegion", "-lrealm"})
   end
+
   profile('compile', nil, function()
-    if filetype ~= nil then
-      terralib.saveobj(filename, filetype, names, flags)
+    if #objfiles > 0 and filetype == 'object' then
+      -- Terra will not read the link flags in this case, to collect the code
+      -- that was compiled on different processes, so we have to combine all
+      -- the object files manually.
+      local mainobj = os.tmpname()
+      terralib.saveobj(mainobj, 'object', names)
+      local cmd = os.getenv('CXX') or 'c++'
+      cmd = cmd .. ' -Wl,-r'
+      cmd = cmd .. ' ' .. mainobj
+      for _,f in ipairs(objfiles) do
+        cmd = cmd .. ' ' .. f
+      end
+      cmd = cmd .. ' -o ' .. filename
+      cmd = cmd .. ' -nostdlib'
+      assert(os.execute(cmd) == 0)
     else
-      terralib.saveobj(filename, names, flags)
+      terralib.saveobj(filename, filetype, names, flags)
     end
   end)()
   profile.print_summary()

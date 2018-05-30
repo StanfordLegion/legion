@@ -21,6 +21,18 @@ local base = {}
 
 base.config, base.args = config.args()
 
+
+-- Hack: Terra symbols don't support the hash() method so monkey patch
+-- it in here. This allows deterministic hashing of Terra symbols,
+-- which is currently required by OpenMP codegen.
+do
+  local terralib_symbol = getmetatable(terralib.newsymbol(int))
+  function terralib_symbol:hash()
+    local hash_value = "__terralib_symbol_#" .. tostring(self.id)
+    return hash_value
+  end
+end
+
 -- #####################################
 -- ## Legion Bindings
 -- #################

@@ -3723,6 +3723,108 @@ namespace Legion {
         req = RegionRequirement(root_node->as_partition_node()->handle, 0,
                                 READ_WRITE, EXCLUSIVE, trace_info.req.parent);
       TaskContext *ctx = creator->get_context(); 
+      if (!!normal_close_mask || !!disjoint_close_mask)
+      {
+        // Before doing anything else for the normal close up, we have to 
+        // fold up any information that we have from closed children about
+        // complete writes so we know which fields are actually closed and
+        // which ones only have partial writes
+#ifdef DEBUG_LEGION
+        assert(written_children.size() == 1);
+        assert(partial_writes.size() == 1);
+#endif
+        const FieldMaskSet<RegionTreeNode> &child_writes =
+          written_children.back();
+        WriteSet &partial_children = partial_writes.back();
+        FieldMask closed_mask = normal_close_mask | disjoint_close_mask;
+        if (root_node->is_region())
+        {
+          // This is a region, so if we have any complete children we 
+          // can mark them as being a complete write to this node
+          for (FieldMaskSet<RegionTreeNode>::const_iterator it = 
+                child_writes.begin(); it != child_writes.end(); it++)
+          {
+            if (it->first->as_partition_node()->is_complete())
+            {
+              state.update_write_fields(it->second);
+              complete_writes |= it->second;
+              closed_mask -= it->second;
+              if (!closed_mask)
+                break;
+            }
+            else // Otherwise add it to the partial set
+              partial_children.insert(
+                it->first->get_index_space_expression(), it->second);
+          }
+        }
+        else
+        {
+          // Partition, see if we have any fields for which we have
+          // writes to all our children, begin by sorting into field sets
+          LegionList<FieldSet<RegionTreeNode*> >::aligned child_sets;
+          child_writes.compute_field_sets(FieldMask(), child_sets);
+          const size_t num_children = root_node->get_num_children();
+          for (LegionList<FieldSet<RegionTreeNode*> >::aligned::const_iterator
+                cit = child_sets.begin(); cit != child_sets.end(); cit++)
+          {
+            // Check to see if the set of children is the same size as our
+            // number of children, if so then that is a complete write also
+            if (cit->elements.size() == num_children)
+            {
+              state.update_write_fields(cit->set_mask);
+              complete_writes |= cit->set_mask;
+              closed_mask -= cit->set_mask;
+              if (!closed_mask)
+                break;
+            }
+            else
+            {
+              // Add all the children expressions to the partial writes
+              for (std::set<RegionTreeNode*>::const_iterator it = 
+                    cit->elements.begin(); it != cit->elements.end(); it++)
+                partial_children.insert(
+                    (*it)->get_index_space_expression(), cit->set_mask);
+            }
+          }
+        }
+        // See if we still have partial write sets to handle, these are the same
+        // regardless of our node type
+        if (!partial_children.empty())
+        {
+          // Sort into field sets and then union together and test against 
+          // the index space expression for this node to see if it covers
+          LegionList<FieldSet<IndexSpaceExpression*> >::aligned write_sets;
+          partial_children.compute_field_sets(FieldMask(), write_sets);
+          IndexSpaceExpression *local_expr = 
+            root_node->get_index_space_expression();
+          RegionTreeForest *context = root_node->context;
+          for (LegionList<FieldSet<IndexSpaceExpression*> >::aligned::
+                const_iterator it = write_sets.begin(); 
+                it != write_sets.end(); it++)
+          {
+            // Skip anything that doesn't overlap with fields we're handling
+            const FieldMask overlap = it->set_mask & closed_mask;
+            if (!overlap)
+              continue;
+            IndexSpaceExpression *union_expr = 
+              context->union_index_spaces(it->elements);
+            // Check to see if this dominates the local expression
+            IndexSpaceExpression *diff_expr = 
+              context->subtract_index_spaces(local_expr, union_expr);
+            if (diff_expr->is_empty())
+            {
+              state.update_write_fields(overlap);
+              complete_writes |= overlap;
+            }
+            else // We don't cover so this is a partial update
+              state.partial_writes.insert(union_expr, overlap); 
+            // This is our last step, so we can filter the closed_mask
+            closed_mask -= overlap; 
+            if (!closed_mask)
+              break;
+          }
+        }
+      }
       if (!!normal_close_mask)
       {
 #ifdef DEBUG_LEGION_COLLECTIVES
@@ -4209,114 +4311,6 @@ namespace Legion {
       }
       // We don't have any more dirty data below now things have been pulled up
       state.dirty_below -= closed_mask;
-      // At this point we need to compute the fields that are complete writes
-      // for this close operation. If we are doing no normal close operations
-      // then there is nothing more for us to do here
-      if (!normal_close_mask)
-        return;
-      // Reset the closed mask to be just our normal closes
-      if (!!disjoint_close_mask)
-      {
-        closed_mask = normal_close_mask - disjoint_close_mask;
-        if (!closed_mask)
-          return;
-      }
-      else
-        closed_mask = normal_close_mask;
-      // Update the write masks based on the close operations that we did
-#ifdef DEBUG_LEGION
-      assert(written_children.size() == 1);
-      assert(partial_writes.size() == 1);
-#endif
-      const FieldMaskSet<RegionTreeNode> &child_writes =written_children.back();
-      WriteSet &partial_children = partial_writes.back();
-      if (root_node->is_region())
-      {
-        // This is a region, so if we have any complete children we 
-        // can mark them as being a complete write to this node
-        for (FieldMaskSet<RegionTreeNode>::const_iterator it = 
-              child_writes.begin(); it != child_writes.end(); it++)
-        {
-          if (it->first->as_partition_node()->is_complete())
-          {
-            state.update_write_fields(it->second);
-            complete_writes |= it->second;
-            closed_mask -= it->second;
-            if (!closed_mask)
-              return;
-          }
-          else // Otherwise add it to the partial set
-            partial_children.insert(
-              it->first->get_index_space_expression(), it->second);
-        }
-      }
-      else
-      {
-        // Partition, see if we have any fields for which we have
-        // writes to all our children, begin by sorting into field sets
-        LegionList<FieldSet<RegionTreeNode*> >::aligned child_sets;
-        child_writes.compute_field_sets(FieldMask(), child_sets);
-        const size_t num_children = root_node->get_num_children();
-        for (LegionList<FieldSet<RegionTreeNode*> >::aligned::const_iterator 
-              cit = child_sets.begin(); cit != child_sets.end(); cit++)
-        {
-          // Check to see if the set of children is the same size as our
-          // number of children, if so then that is a complete write also
-          if (cit->elements.size() == num_children)
-          {
-            state.update_write_fields(cit->set_mask);
-            complete_writes |= cit->set_mask;
-            closed_mask -= cit->set_mask;
-            if (!closed_mask)
-              return;
-          }
-          else
-          {
-            // Add all the children expressions to the partial writes
-            for (std::set<RegionTreeNode*>::const_iterator it = 
-                  cit->elements.begin(); it != cit->elements.end(); it++)
-              partial_children.insert(
-                  (*it)->get_index_space_expression(), cit->set_mask);
-          }
-        }
-      }
-      // See if we still have partial write sets to handle, these are the same
-      // regardless of our node type
-      if (!partial_children.empty())
-      {
-        // Sort into field sets and then union together and test against 
-        // the index space expression for this node to see if it covers
-        LegionList<FieldSet<IndexSpaceExpression*> >::aligned write_sets;
-        partial_children.compute_field_sets(FieldMask(), write_sets);
-        IndexSpaceExpression *local_expr = 
-          root_node->get_index_space_expression();
-        RegionTreeForest *context = root_node->context;
-        for (LegionList<FieldSet<IndexSpaceExpression*> >::aligned::
-              const_iterator it = write_sets.begin(); 
-              it != write_sets.end(); it++)
-        {
-          // Skip anything that doesn't overlap with fields we're still handling
-          const FieldMask overlap = it->set_mask & closed_mask;
-          if (!overlap)
-            continue;
-          IndexSpaceExpression *union_expr = 
-            context->union_index_spaces(it->elements);
-          // Check to see if this dominates the local expression
-          IndexSpaceExpression *diff_expr = 
-            context->subtract_index_spaces(local_expr, union_expr);
-          if (diff_expr->is_empty())
-          {
-            state.update_write_fields(overlap);
-            complete_writes |= overlap;
-          }
-          else // We don't cover so this is a partial update
-            state.partial_writes.insert(union_expr, overlap); 
-          // This is our last step, so we can filter the closed_mask
-          closed_mask -= overlap; 
-          if (!closed_mask)
-            return;
-        }
-      }
     }
 
     //--------------------------------------------------------------------------
