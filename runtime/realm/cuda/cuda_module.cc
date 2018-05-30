@@ -1873,6 +1873,25 @@ namespace Realm {
       return ThreadLocal::current_gpu_proc;
     }
 
+    void GPUProcessor::push_call_configuration(dim3 grid_dim, dim3 block_dim,
+                                               size_t shared_size, void *stream)
+    {
+      call_configs.push_back(CallConfig(grid_dim, block_dim,
+                                        shared_size, (cudaStream_t)stream));
+    }
+
+    void GPUProcessor::pop_call_configuration(dim3 *grid_dim, dim3 *block_dim,
+                                              size_t *shared_size, void *stream)
+    {
+      assert(!call_configs.empty());
+      const CallConfig &config = call_configs.back();
+      *grid_dim = config.grid;
+      *block_dim = config.block;
+      *shared_size = config.shared;
+      *((cudaStream_t*)stream) = config.stream;
+      call_configs.pop_back();
+    }
+
     void GPUProcessor::stream_synchronize(cudaStream_t stream)
     {
       // same as device_synchronize for now
@@ -1962,6 +1981,11 @@ namespace Realm {
       
     GPUProcessor::LaunchConfig::LaunchConfig(dim3 _grid, dim3 _block, size_t _shared)
       : grid(_grid), block(_block), shared(_shared)
+    {}
+
+    GPUProcessor::CallConfig::CallConfig(dim3 _grid, dim3 _block, 
+                                         size_t _shared, cudaStream_t _stream)
+      : LaunchConfig(_grid, _block, _shared), stream(_stream)
     {}
 
     void GPUProcessor::configure_call(dim3 grid_dim,
