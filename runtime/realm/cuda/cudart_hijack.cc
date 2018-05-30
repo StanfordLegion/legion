@@ -108,7 +108,7 @@ namespace Realm {
 
 	// don't care - return 1 to make caller happy
 	return 1;
-      }
+      } 
 
       // All the following methods are cuda runtime API calls that we 
       // intercept and then either execute using the driver API or 
@@ -125,6 +125,34 @@ namespace Realm {
 	  assert(false);
 	}
 	return p;
+      }
+
+      unsigned __cudaPushCallConfiguration(dim3 gridDim,
+                                           dim3 blockDim,
+                                           size_t sharedSize = 0,
+                                           void *stream = 0)
+      {
+        // mark that the hijack code is active
+	cudart_hijack_active = true;
+
+        GPUProcessor *p = get_gpu_or_die("__cudaPushCallConfigration");
+        p->push_call_configuration(gridDim, blockDim, sharedSize, stream);
+        // This should always succeed so return 0
+        return 0;
+      }
+
+      cudaError_t __cudaPopCallConfiguration(dim3 *gridDim,
+                                             dim3 *blockDim,
+                                             size_t *sharedSize,
+                                             void *stream)
+      {
+        // mark that the hijack code is active
+	cudart_hijack_active = true;
+
+        GPUProcessor *p = get_gpu_or_die("__cudaPopCallConfigration");
+        p->pop_call_configuration(gridDim, blockDim, sharedSize, stream);
+        // If this failed it would have died with an assertion internally
+        return cudaSuccess;
       }
 
       cudaError_t cudaEventCreate(cudaEvent_t *event)
