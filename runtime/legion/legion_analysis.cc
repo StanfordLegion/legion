@@ -3667,6 +3667,9 @@ namespace Legion {
 #endif
       switch (state)
       {
+        // No need to capture this one at all
+        case OPEN_READ_ONLY_PROJ:
+          break;
         case OPEN_READ_WRITE_PROJ:
         case OPEN_REDUCE_PROJ_DIRTY:
           {
