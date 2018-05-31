@@ -2988,6 +2988,7 @@ namespace Legion {
               wit != (*pit)->write_projections.end(); wit++)
         {
           ProjectionFunction *projection = wit->first;
+          bool complete_done = false;
           for (std::set<IndexSpaceNode*>::const_iterator it = 
                 wit->second.begin(); it != wit->second.end(); it++)
           {
@@ -3004,8 +3005,7 @@ namespace Legion {
               state.update_write_fields(overlap);
               // We can also mark that we have a complete write here
               complete_writes |= overlap;
-              // We found a complete write, so ignore everything else
-              projection_writes.clear();
+              complete_done = true;
               break;
             }
             else
@@ -3047,31 +3047,33 @@ namespace Legion {
               }
             }
           }
-          // If we had any partial writes then we handle them now
-          if (!projection_writes.empty())
+          if (complete_done)
+            break;
+        }
+        // If we had any partial writes then we handle them now
+        if (!projection_writes.empty())
+        {
+          // Now we can union these together
+          IndexSpaceExpression *union_expr = 
+            context->union_index_spaces(projection_writes);
+          // Do a test to see if it is complete or not
+          IndexSpaceExpression *diff_expr = 
+            context->subtract_index_spaces(
+                root_node->get_index_space_expression(), union_expr);
+          if (diff_expr->is_empty())
           {
-            // Now we can union these together
-            IndexSpaceExpression *union_expr = 
-              context->union_index_spaces(projection_writes);
-            // Do a test to see if it is complete or not
-            IndexSpaceExpression *diff_expr = 
-              context->subtract_index_spaces(
-                  root_node->get_index_space_expression(), union_expr);
-            if (diff_expr->is_empty())
-            {
-              // Record that we have a complete write of the root
-              state.update_write_fields(overlap); 
-              // We can also mark that we have a complete write here
-              complete_writes |= overlap;
-            }
-            else
-            {
-              state.partial_writes.insert(union_expr, overlap);
+            // Record that we have a complete write of the root
+            state.update_write_fields(overlap); 
+            // We can also mark that we have a complete write here
+            complete_writes |= overlap;
+          }
+          else
+          {
+            state.partial_writes.insert(union_expr, overlap);
 #ifdef DEBUG_LEGION
-              assert(partial_writes.size() == 1);
+            assert(partial_writes.size() == 1);
 #endif
-              partial_writes.back().insert(diff_expr, overlap); 
-            }
+            partial_writes.back().insert(diff_expr, overlap); 
           }
         }
       }
