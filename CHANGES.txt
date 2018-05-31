@@ -1,7 +1,7 @@
 This file lists the major changes as they appear in the stable branch.  No
 attempt is made to keep this list accurate for the master branch.
 
-Version 18.05.0 (May ??, 2018)
+Version 18.05.0 (May 31, 2018)
   * Legion
     - Migrated all node-local Legion reservations to use Realm
       fast reservations and removed no longer necessary continuations

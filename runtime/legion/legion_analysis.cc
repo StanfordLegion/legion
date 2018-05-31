@@ -2444,7 +2444,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(!!valid_fields);
 #endif
-      projections.insert(ProjectionSummary(node, function, shard));
+      write_projections.insert(ProjectionSummary(node, function, shard));
     }
 
     /////////////////////////////////////////////////////////////
@@ -2856,8 +2856,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LogicalState::update_projection_epochs(FieldMask update_mask,
-                                                const ProjectionInfo &info)
+    void LogicalState::update_write_projection_epochs(FieldMask update_mask,
+                                                     const ProjectionInfo &info)
     //--------------------------------------------------------------------------
     {
       for (std::list<ProjectionEpoch*>::const_iterator it = 
@@ -3574,8 +3574,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LogicalCloser::record_close_operation(const FieldMask &mask, 
-                                           bool projection, bool disjoint_close)
+    void LogicalCloser::record_close_operation(const FieldMask &mask) 
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!!mask);
+#endif
+      normal_close_mask |= mask;
+    }
+
+    //--------------------------------------------------------------------------
+    void LogicalCloser::record_projection_close(const FieldMask &mask,
+                                       LogicalState &state, bool disjoint_close)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -3584,7 +3594,6 @@ namespace Legion {
       if (disjoint_close)
       {
 #ifdef DEBUG_LEGION
-        assert(projection); // should only happen with projections
         assert(mask * normal_close_mask); // shouldn't overlap
 #endif
         disjoint_close_mask |= mask;
@@ -3595,8 +3604,111 @@ namespace Legion {
         assert(mask * disjoint_close_mask); // shouldn't overlap
 #endif
         normal_close_mask |= mask;
-        if (projection)
-          closed_projections |= mask;
+        closed_projections |= mask;
+      }
+      // This is the point where we also want to evaluate all the
+      // projection users to figure out the complete and partial writes
+      const bool is_root_region = root_node->is_region();
+      const size_t root_num_children = root_node->get_num_children();
+      RegionTreeForest *context = root_node->context;
+      for (std::list<ProjectionEpoch*>::const_iterator pit = 
+            state.projection_epochs.begin(); pit !=
+            state.projection_epochs.end(); pit++)
+      {
+        const FieldMask overlap = mask & (*pit)->valid_fields;
+        if (!overlap)
+          continue;
+        // Now iterate over the write projections and update the state
+        // and complete information based on what we find
+        std::set<IndexSpaceExpression*> projection_writes;
+        for (std::set<ProjectionSummary>::const_iterator wit = 
+              (*pit)->write_projections.begin(); wit !=
+              (*pit)->write_projections.end(); wit++)
+        {
+          ProjectionFunction *projection = wit->projection;
+          IndexSpaceNode *domain = wit->domain;
+          // Now we need to update the write fields or the partial
+          // write set depending on whether this is a complete write
+          // to this node in the region tree or not. If this is a depth
+          // 0 projection functor and either we're a region on a partition
+          // with the same number of subregions as the color space then
+          // we can trivially prove that this is a complete write.
+          if ((projection->depth == 0) && 
+              (is_root_region || (root_num_children == domain->get_volume())))
+          {
+            // This is a complete write so we can record it as such
+            state.update_write_fields(overlap);
+            // We can also mark that we have a complete write here
+            complete_writes |= overlap;
+            // We found a complete write, so ignore everything else
+            projection_writes.clear();
+            break;
+          }
+          else
+          {
+            // This is the slow path where we actually have to enumerate
+            // all the points in the projection operation and evaluate
+            // the union of their subregion accesses so we can get a 
+            // precise measure of the points that are written
+            // Issue a performance warning since this is very suboptimal
+            // without any kind of projection functor analysis
+            // No need to issue the warning here, we already did it
+            // in register_logical_user
+            Domain launch_dom;
+            domain->get_launch_space_domain(launch_dom);
+            ProjectionFunctor *functor = projection->functor; 
+            if (is_root_region)
+            {
+              const LogicalRegion upper_bound = 
+                root_node->as_region_node()->handle;
+              for (Domain::DomainPointIterator itr(launch_dom); itr; itr++)
+              {
+                LogicalRegion handle = functor->project(
+                    user.op->get_mappable(), user.idx, upper_bound, itr.p);
+                RegionNode *node = context->get_node(handle);
+                projection_writes.insert(node->get_index_space_expression());
+              }
+            }
+            else
+            {
+              const LogicalPartition upper_bound = 
+                root_node->as_partition_node()->handle;
+              for (Domain::DomainPointIterator itr(launch_dom); itr; itr++)
+              {
+                LogicalRegion handle = functor->project(
+                    user.op->get_mappable(), user.idx, upper_bound, itr.p);
+                RegionNode *node = context->get_node(handle);
+                projection_writes.insert(node->get_index_space_expression());
+              }
+            }
+          }
+        }
+        // If we had any partial writes then we handle them now
+        if (!projection_writes.empty())
+        {
+          // Now we can union these together
+          IndexSpaceExpression *union_expr = 
+            context->union_index_spaces(projection_writes);
+          // Do a test to see if it is complete or not
+          IndexSpaceExpression *diff_expr = 
+            context->subtract_index_spaces(
+                root_node->get_index_space_expression(), union_expr);
+          if (diff_expr->is_empty())
+          {
+            // Record that we have a complete write of the root
+            state.update_write_fields(overlap); 
+            // We can also mark that we have a complete write here
+            complete_writes |= overlap;
+          }
+          else
+          {
+            state.partial_writes.insert(union_expr, overlap);
+#ifdef DEBUG_LEGION
+            assert(partial_writes.size() == 1);
+#endif
+            partial_writes.back().insert(diff_expr, overlap); 
+          }
+        }
       }
     }
 
@@ -3656,6 +3768,7 @@ namespace Legion {
       }
     }
 
+#if 0
     //--------------------------------------------------------------------------
     void LogicalCloser::record_projections(const ProjectionEpoch *epoch,
                  OpenState state, RegionTreeNode *node, const FieldMask &fields)
@@ -3692,6 +3805,7 @@ namespace Legion {
       
       }
     }
+#endif
 
 #ifndef LEGION_SPY
     //--------------------------------------------------------------------------
