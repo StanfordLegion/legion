@@ -838,16 +838,16 @@ function check_vectorizability.expr(cx, node)
 
     if cx:lookup_expr_type(node.index) == V then
       local value_type = std.as_read(node.value.expr_type)
-      ---- TODO: We currently don't support scattered reads from structured regions
-      ----       Update on 06/20/17: index types are no longer sliced. will reject
-      ----                           all scattered reads for now. (wclee)
+      -- TODO: We currently don't support scattered reads from structured regions
+      --       Update on 06/20/17: index types are no longer sliced. will reject
+      --                           all scattered reads for now. (wclee)
       if std.is_region(value_type) then
         cx:report_error_when_demanded(node, error_prefix ..
           "a scattered read from a structured region")
         return false
       -- TODO: This should be supported
       elseif std.is_region(value_type) and value_type:is_opaque() and
-         not std.is_bounded_type(std.as_read(node.index.expr_type)) then
+             not std.is_bounded_type(std.as_read(node.index.expr_type)) then
         cx:report_error_when_demanded(node, error_prefix ..
           "a scattered read from a different region")
         return false
@@ -943,7 +943,7 @@ function check_vectorizability.expr(cx, node)
     -- TODO: We currently don't support scattered reads from structured regions
     --       Update on 06/20/17: index types are no longer sliced. will reject
     --                           all scattered reads for now. (wclee)
-    elseif fact == V and not std.as_read(node.value.expr_type).index_type:is_opaque() then
+    elseif fact == V then
       cx:report_error_when_demanded(node, error_prefix ..
         "a scattered read from a structured region")
       return false
@@ -1049,7 +1049,7 @@ end
 function check_vectorizability.type(ty)
   if (std.is_bounded_type(ty) and std.is_index_type(ty.index_type)) or
      std.is_index_type(ty) or std.is_rect_type(ty) then
-    return ty.dim == 0
+    return false
   elseif ty:isprimitive() then
     return true
   elseif ty:isstruct() then
