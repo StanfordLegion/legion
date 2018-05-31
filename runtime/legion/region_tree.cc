@@ -11685,13 +11685,13 @@ namespace Legion {
           FieldMask overlap = it->valid_fields & closing_mask;
           if (!overlap)
           {
-            if (closer.replicate_context)
-              state.capture_close_epochs(overlap, it->open_state, closer);
             it++;
             continue;
           }
           if (it->is_projection_state())
           {
+            if (closer.replicate_context)
+              state.capture_close_epochs(overlap, it->open_state, closer);
             // If this was a projection field state then we need to 
             // advance the epoch version numbers
             // If this is a writing or reducing 
