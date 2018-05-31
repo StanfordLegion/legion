@@ -601,7 +601,10 @@ namespace Legion {
       const ProjectionEpochID epoch_id;
       FieldMask valid_fields;
     public:
-      std::map<ProjectionFunction*,std::set<IndexSpaceNode*> > projections;
+      // For now we only record the write projections since we use them
+      // for constructing composite view write sets
+      std::map<ProjectionFunction*,
+               std::set<IndexSpaceNode*> > write_projections;
     };
 
     /**
@@ -654,8 +657,8 @@ namespace Legion {
       void advance_projection_epochs(const FieldMask &advance_mask);
       void capture_projection_epochs(FieldMask capture_mask,
                                      ProjectionInfo &info);
-      void update_projection_epochs(FieldMask update_mask,
-                                    const ProjectionInfo &info);
+      void update_write_projection_epochs(FieldMask update_mask,
+                                          const ProjectionInfo &info);
     public:
       RegionTreeNode *const owner;
     public:
@@ -702,8 +705,9 @@ namespace Legion {
         { return (!!normal_close_mask) || (!!read_only_close_mask) ||
                   (!!flush_only_close_mask); }
       // Record normal closes like this
-      void record_close_operation(const FieldMask &mask, bool projection,
-                                  bool disjoint_close = false);
+      void record_close_operation(const FieldMask &mask);
+      void record_projection_close(const FieldMask &mask, LogicalState &state,
+                                   bool disjoint_close = false);
       void record_overwriting_close(const FieldMask &mask, bool projection);
       void record_read_only_close(const FieldMask &mask, bool projection);
       void record_flush_only_close(const FieldMask &mask);
