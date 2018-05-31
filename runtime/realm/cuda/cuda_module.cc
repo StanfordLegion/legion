@@ -2494,9 +2494,6 @@ namespace Realm {
                          CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MAJOR, info->device) );
           CHECK_CU( cuDeviceGetAttribute(&info->compute_minor,
                          CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MINOR, info->device) );
-	  CHECK_CU( cuDeviceComputeCapability(&info->compute_major,
-					      &info->compute_minor,
-					      info->device) );
 	  CHECK_CU( cuDeviceTotalMem(&info->total_mem, info->device) );
 
 	  log_gpu.info() << "GPU #" << i << ": " << info->name << " ("
