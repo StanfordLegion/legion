@@ -7956,20 +7956,22 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // See if we have any write projections to test against first
-      if (!write_projections.empty())
+      if (!summary.write_projections.empty())
       {
-        const FieldMask overlap = mask & write_projections.get_valid_mask();
+        const FieldMask overlap = mask & 
+          summary.write_projections.get_valid_mask();
         if (!!overlap)
           find_interfering_shards(overlap, origin, target, write_masks, 
-                                  write_projections, needed_shards);
+                                  summary.write_projections, needed_shards);
       }
       // Then see if we have any reduction projections
-      if (!reduce_projections.empty())
+      if (!summary.reduce_projections.empty())
       {
-        const FieldMask overlap = mask & reduce_projections.get_valid_mask();
+        const FieldMask overlap = 
+          mask & summary.reduce_projections.get_valid_mask();
         if (!!overlap)
           find_interfering_shards(overlap, origin, target, write_masks,
-                                  reduce_projections, reduction_shards);
+                                  summary.reduce_projections, reduction_shards);
       }
     }
 
@@ -7981,15 +7983,15 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // See if we have any write projections first
-      if (!write_projections.empty() && 
-          write_projections.get_valid_mask().is_set(field_index))
+      if (!summary.write_projections.empty() && 
+          summary.write_projections.get_valid_mask().is_set(field_index))
         find_interfering_shards_single(field_index, origin_shard, write_mask,
-                                       write_projections, needed_shards);
+                                       summary.write_projections,needed_shards);
       // Also check for any reduction projections
-      if (!reduce_projections.empty() &&
-          reduce_projections.get_valid_mask().is_set(field_index))
+      if (!summary.reduce_projections.empty() &&
+          summary.reduce_projections.get_valid_mask().is_set(field_index))
         find_interfering_shards_single(field_index, origin_shard, write_mask,
-                                       reduce_projections, reduction_shards);
+                               summary.reduce_projections, reduction_shards);
     }
 
     //--------------------------------------------------------------------------
@@ -8168,11 +8170,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // See if we have any projections that we need to find other shards for
-      if (!write_projections.empty())
+      if (!summary.write_projections.empty())
       {
         for (FieldMaskSet<ShardingSummary>::const_iterator
-              pit = write_projections.begin(); 
-              pit != write_projections.end(); pit++)
+              pit = summary.write_projections.begin(); 
+              pit != summary.write_projections.end(); pit++)
         {
 #ifdef DEBUG_LEGION
           // Should always have a sharding function
@@ -8199,11 +8201,11 @@ namespace Legion {
           }
         }
       }
-      if (!reduce_projections.empty())
+      if (!summary.reduce_projections.empty())
       {
         for (FieldMaskSet<ShardingSummary>::const_iterator
-              pit = reduce_projections.begin(); 
-              pit != reduce_projections.end(); pit++)
+              pit = summary.reduce_projections.begin(); 
+              pit != summary.reduce_projections.end(); pit++)
         {
 #ifdef DEBUG_LEGION
           // Should always have a sharding function

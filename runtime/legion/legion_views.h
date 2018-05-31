@@ -1786,8 +1786,6 @@ namespace Legion {
       const ReplicationID repl_id;
       const RtBarrier shard_invalid_barrier;
       const ShardID origin_shard;
-      FieldMaskSet<ShardingSummary> write_projections;
-      FieldMaskSet<ShardingSummary> reduce_projections;
     protected:
       // Note that we never record any version state names here, we just
       // record the views and children we immediately depend on and that
