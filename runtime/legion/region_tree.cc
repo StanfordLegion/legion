@@ -10997,42 +10997,8 @@ namespace Legion {
           // If we're writing, then record our projection info in 
           // the current projection epoch
           if (IS_WRITE(user.usage))
-          {
-            state.update_write_projection_epochs(user.field_mask, proj_info);
-            // We check for the case where we're not going to be able to 
-            // issue the close operation without enumerating the points here
-            // because we have much more context information to provide to
-            // the user. We do this in advance of recording the projection
-            // close information (see LogicalCloser::record_projection_close)
-            if ((proj_info.projection->depth > 0) ||
-                (!is_region() && (get_num_children() != 
-                                  proj_info.projection_space->get_volume())))
-            {
-              if (proj_info.projection->depth == 0)
-                REPORT_LEGION_WARNING(LEGION_WARNING_EAGER_PROJECTION_EVALUATION
-                    ,"Legion is eagerly evaluating a projection functor for "
-                    "region requirement %d of operation %s (uid %lld) because "
-                    "it has an incomplete index space for the partition being "
-                    "projected. If this is a large index space (in this case "
-                    "%zd points) then this could lead to a noticeable "
-                    "performance degradation. Please report this use case to "
-                    "the Legion developers mailing list.", user.idx, 
-                    user.op->get_logging_name(), user.op->get_unique_op_id(),
-                    proj_info.projection_space->get_volume())
-              else
-                REPORT_LEGION_WARNING(LEGION_WARNING_EAGER_PROJECTION_EVALUATION
-                    ,"Legion is eagerly evaluating a projection functor with "
-                    "region requirement %d of operation %s (uid %lld) because "
-                    "it has projection functor with depth greater than zero "
-                    "and Legion cannot prove the completeness of its write."
-                    "If this is a large index space (in this case "
-                    "%zd points) then this could lead to a noticeable "
-                    "performance degradation. Please report this use case to "
-                    "the Legion developers mailing list.", user.idx, 
-                    user.op->get_logging_name(), user.op->get_unique_op_id(),
-                    proj_info.projection_space->get_volume())
-            }
-          }
+            state.update_write_projection_epochs(user.field_mask, 
+                                                 user, proj_info);
         }
         else if (user.usage.redop > 0)
         {
@@ -11355,16 +11321,20 @@ namespace Legion {
         closer.end_close_children(closing_mask, this); 
       }
       // No children, so just update any local writes
-      else if (!!state.write_fields || !state.partial_writes.empty())
+      else
       {
-        closer.update_close_writes(closing_mask, this,
-            state.write_fields, state.partial_writes);
+        closer.update_close_writes(closing_mask, this, state);
         // We can clear out our dirty fields 
         if (!!state.write_fields)
           state.write_fields -= closing_mask;
         // Filter out any partial writes that we have too
         if (!state.partial_writes.empty())
           state.partial_writes.filter(closing_mask);
+        // Clear out any projection inforamtion also
+        if (!!state.projection_write_fields)
+          state.projection_write_fields -= closing_mask;
+        if (!state.projection_partial_writes.empty())
+          state.projection_partial_writes.filter(closing_mask);
       }
       // We can clear out our reduction fields
       if (!!state.reduction_fields)
@@ -13094,6 +13064,15 @@ namespace Legion {
               rez.serialize((*it)->handle);
           }
         }
+        rez.serialize(state.projection_write_fields);
+        rez.serialize<size_t>(state.projection_partial_writes.size());
+        for (WriteSet::const_iterator it = 
+              state.projection_partial_writes.begin(); it != 
+              state.projection_partial_writes.end(); it++)
+        {
+          it->first->pack_expression(rez, target);
+          rez.serialize(it->second);
+        }
         rez.serialize<size_t>(state.field_states.size());
         for (LegionList<FieldState>::aligned::const_iterator fit = 
               state.field_states.begin(); fit != 
@@ -13189,6 +13168,17 @@ namespace Legion {
             spaces.insert(context->get_node(handle));
           }
         }
+      }
+      derez.deserialize(state.projection_write_fields);
+      size_t num_proj_partial;
+      derez.deserialize(num_proj_partial);
+      for (unsigned idx = 0; idx < num_proj_partial; idx++)
+      {
+        IndexSpaceExpression *expr = 
+          IndexSpaceExpression::unpack_expression(derez, context, source);
+        FieldMask expr_mask;
+        derez.deserialize(expr_mask);
+        state.projection_partial_writes.insert(expr, expr_mask);
       }
       size_t num_field_states;
       derez.deserialize(num_field_states);

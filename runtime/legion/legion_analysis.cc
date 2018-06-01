@@ -2478,6 +2478,8 @@ namespace Legion {
       assert(curr_epoch_users.empty());
       assert(prev_epoch_users.empty());
       assert(projection_epochs.empty());
+      assert(!projection_write_fields);
+      assert(projection_partial_writes.empty());
       assert(!write_fields);
       assert(partial_writes.empty());
       assert(!dirty_below);
@@ -2526,6 +2528,8 @@ namespace Legion {
             projection_epochs.begin(); it != projection_epochs.end(); it++)
         delete *it;
       projection_epochs.clear();
+      projection_write_fields.clear();
+      projection_partial_writes.clear();
     } 
 
     //--------------------------------------------------------------------------
@@ -2583,6 +2587,9 @@ namespace Legion {
       write_fields -= deleted_mask;
       if (!partial_writes.empty())
         partial_writes.filter(deleted_mask);
+      projection_write_fields -= deleted_mask;
+      if (!projection_partial_writes.empty())
+        projection_partial_writes.filter(deleted_mask);
     }
 
     //--------------------------------------------------------------------------
@@ -2659,9 +2666,82 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void LogicalState::update_write_projection_epochs(FieldMask update_mask,
-                                                     const ProjectionInfo &info)
+                            const LogicalUser &user, const ProjectionInfo &info)
     //--------------------------------------------------------------------------
     {
+      // First update our projection fields
+      if ((info.projection->depth > 0) ||
+          (!owner->is_region() && (owner->get_num_children() != 
+                            info.projection_space->get_volume())))
+      {
+        // This is the slow path where we actually have to enumerate
+        // all the points in the projection operation and evaluate
+        // the union of their subregion accesses so we can get a 
+        // precise measure of the points that are written
+        // Issue a performance warning since this is very suboptimal
+        // without any kind of projection functor analysis
+        // No need to issue the warning here, we already did it
+        // in register_logical_user
+        if (info.projection->depth == 0)
+          REPORT_LEGION_WARNING(LEGION_WARNING_EAGER_PROJECTION_EVALUATION
+              ,"Legion is eagerly evaluating a projection functor for "
+              "region requirement %d of operation %s (uid %lld) because "
+              "it has an incomplete index space for the partition being "
+              "projected. If this is a large index space (in this case "
+              "%zd points) then this could lead to a noticeable "
+              "performance degradation. Please report this use case to "
+              "the Legion developers mailing list.", user.idx, 
+              user.op->get_logging_name(), user.op->get_unique_op_id(),
+              info.projection_space->get_volume())
+        else
+          REPORT_LEGION_WARNING(LEGION_WARNING_EAGER_PROJECTION_EVALUATION
+              ,"Legion is eagerly evaluating a projection functor with "
+              "region requirement %d of operation %s (uid %lld) because "
+              "it has projection functor with depth greater than zero "
+              "and Legion cannot prove the completeness of its write."
+              "If this is a large index space (in this case "
+              "%zd points) then this could lead to a noticeable "
+              "performance degradation. Please report this use case to "
+              "the Legion developers mailing list.", user.idx, 
+              user.op->get_logging_name(), user.op->get_unique_op_id(),
+              info.projection_space->get_volume())
+        Domain launch_dom;
+        info.projection_space->get_launch_space_domain(launch_dom);
+        ProjectionFunctor *functor = info.projection->functor; 
+        RegionTreeForest *context = owner->context;
+        if (owner->is_region())
+        {
+          const LogicalRegion upper_bound = 
+            owner->as_region_node()->handle;
+          for (Domain::DomainPointIterator itr(launch_dom); itr; itr++)
+          {
+            Mappable *mappable = user.op->get_mappable();
+            LogicalRegion handle = 
+              functor->project(mappable, user.idx, upper_bound, itr.p);
+            RegionNode *node = context->get_node(handle);
+            projection_partial_writes.insert(
+                node->get_index_space_expression(), update_mask);
+          }
+        }
+        else
+        {
+          const LogicalPartition upper_bound = 
+            owner->as_partition_node()->handle;
+          for (Domain::DomainPointIterator itr(launch_dom); itr; itr++)
+          {
+            Mappable *mappable = user.op->get_mappable();
+            LogicalRegion handle = 
+              functor->project(mappable, user.idx, upper_bound, itr.p);
+            RegionNode *node = context->get_node(handle);
+            projection_partial_writes.insert(
+                node->get_index_space_expression(), update_mask);
+          }
+        }
+      }
+      else
+        // This is the fast path where we know that everything is complete
+        projection_write_fields |= update_mask; 
+      // Now we can record the projection epochs
       for (std::list<ProjectionEpoch*>::const_iterator it = 
             projection_epochs.begin(); it != projection_epochs.end(); it++)
       {
@@ -2681,6 +2761,39 @@ namespace Legion {
         new ProjectionEpoch(ProjectionEpoch::first_epoch, update_mask);
       new_epoch->insert(info.projection, info.projection_space);
       projection_epochs.push_back(new_epoch);
+    }
+
+    //--------------------------------------------------------------------------
+    void LogicalState::find_projection_writes(FieldMask mask,
+             FieldMask &complete_writes_out, WriteSet &partial_writes_out) const
+    //--------------------------------------------------------------------------
+    {
+      if (!!projection_write_fields)
+        complete_writes_out = projection_write_fields & mask;
+      if (!projection_partial_writes.empty())
+      {
+        RegionTreeForest *context = owner->context; 
+        LegionList<FieldSet<IndexSpaceExpression*> >::aligned partial_sets;
+        projection_partial_writes.compute_field_sets(mask, partial_sets);
+        for (LegionList<FieldSet<IndexSpaceExpression*> >::aligned::
+              const_iterator it = partial_sets.begin(); 
+              it != partial_sets.end(); it++)
+        {
+          if (it->elements.empty())
+            continue;
+          // Now we can union these together
+          IndexSpaceExpression *union_expr = 
+            context->union_index_spaces(it->elements);
+          // Do a test to see if it is complete or not
+          IndexSpaceExpression *diff_expr = 
+            context->subtract_index_spaces(
+                owner->get_index_space_expression(), union_expr);
+          if (diff_expr->is_empty())
+            complete_writes_out |= it->set_mask;
+          else
+            partial_writes_out.insert(diff_expr, it->set_mask);
+        }
+      }
     }
 
     /////////////////////////////////////////////////////////////
@@ -2961,119 +3074,37 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(!!mask);
+      assert(state.owner == root_node);
 #endif
       normal_close_mask |= mask;
       if (!disjoint_close)
         closed_projections |= mask;
       if (disjoint_close)
         disjoint_close_mask |= mask;
-      // This is the point where we also want to evaluate all the
-      // projection users to figure out the complete and partial writes
-      const bool is_root_region = root_node->is_region();
-      const size_t root_num_children = root_node->get_num_children();
-      RegionTreeForest *context = root_node->context;
-      for (std::list<ProjectionEpoch*>::const_iterator pit = 
-            state.projection_epochs.begin(); pit !=
-            state.projection_epochs.end(); pit++)
+      // Compute the write sets so we can update them
+      FieldMask state_complete;
+      WriteSet state_partial;
+      state.find_projection_writes(mask, state_complete, state_partial);
+      if (!!state_complete)
       {
-        const FieldMask overlap = mask & (*pit)->valid_fields;
-        if (!overlap)
-          continue;
-        // Now iterate over the write projections and update the state
-        // and complete information based on what we find
-        std::set<IndexSpaceExpression*> projection_writes;
-        for (std::map<ProjectionFunction*,std::set<IndexSpaceNode*> >::
-              const_iterator wit = (*pit)->write_projections.begin();
-              wit != (*pit)->write_projections.end(); wit++)
-        {
-          ProjectionFunction *projection = wit->first;
-          bool complete_done = false;
-          for (std::set<IndexSpaceNode*>::const_iterator it = 
-                wit->second.begin(); it != wit->second.end(); it++)
-          {
-            // Now we need to update the write fields or the partial
-            // write set depending on whether this is a complete write
-            // to this node in the region tree or not. If this is a depth
-            // 0 projection functor and either we're a region on a partition
-            // with the same number of subregions as the color space then
-            // we can trivially prove that this is a complete write.
-            if ((projection->depth == 0) && 
-                (is_root_region || (root_num_children == (*it)->get_volume())))
-            {
-              // This is a complete write so we can record it as such
-              state.update_write_fields(overlap);
-              // We can also mark that we have a complete write here
-              complete_writes |= overlap;
-              complete_done = true;
-              break;
-            }
-            else
-            {
-              // This is the slow path where we actually have to enumerate
-              // all the points in the projection operation and evaluate
-              // the union of their subregion accesses so we can get a 
-              // precise measure of the points that are written
-              // Issue a performance warning since this is very suboptimal
-              // without any kind of projection functor analysis
-              // No need to issue the warning here, we already did it
-              // in register_logical_user
-              Domain launch_dom;
-              (*it)->get_launch_space_domain(launch_dom);
-              ProjectionFunctor *functor = projection->functor; 
-              if (is_root_region)
-              {
-                const LogicalRegion upper_bound = 
-                  root_node->as_region_node()->handle;
-                for (Domain::DomainPointIterator itr(launch_dom); itr; itr++)
-                {
-                  LogicalRegion handle = functor->project(
-                      user.op->get_mappable(), user.idx, upper_bound, itr.p);
-                  RegionNode *node = context->get_node(handle);
-                  projection_writes.insert(node->get_index_space_expression());
-                }
-              }
-              else
-              {
-                const LogicalPartition upper_bound = 
-                  root_node->as_partition_node()->handle;
-                for (Domain::DomainPointIterator itr(launch_dom); itr; itr++)
-                {
-                  LogicalRegion handle = functor->project(
-                      user.op->get_mappable(), user.idx, upper_bound, itr.p);
-                  RegionNode *node = context->get_node(handle);
-                  projection_writes.insert(node->get_index_space_expression());
-                }
-              }
-            }
-          }
-          if (complete_done)
-            break;
-        }
-        // If we had any partial writes then we handle them now
-        if (!projection_writes.empty())
-        {
-          // Now we can union these together
-          IndexSpaceExpression *union_expr = 
-            context->union_index_spaces(projection_writes);
-          // Do a test to see if it is complete or not
-          IndexSpaceExpression *diff_expr = 
-            context->subtract_index_spaces(
-                root_node->get_index_space_expression(), union_expr);
-          if (diff_expr->is_empty())
-          {
-            // Record that we have a complete write of the root
-            state.update_write_fields(overlap); 
-            // We can also mark that we have a complete write here
-            complete_writes |= overlap;
-          }
-          else
-          {
-            state.partial_writes.insert(union_expr, overlap);
+        // Record the complete write on the state
+        state.update_write_fields(state_complete);
+        // We can alsomark that we have a complete write here
+        complete_writes |= state_complete;
+      }
+      if (!state_partial.empty())
+      {
 #ifdef DEBUG_LEGION
-            assert(partial_writes.size() == 1);
+        assert(partial_writes.size() == 1);
 #endif
-            partial_writes.back().insert(diff_expr, overlap); 
-          }
+        WriteSet &local_partial = partial_writes.back();
+        for (WriteSet::const_iterator it = state_partial.begin();
+              it != state_partial.end(); it++)
+        {
+          // Record the partial writes for the close operation
+          local_partial.insert(it->first, it->second);
+          // Also record it on the state itself
+          state.partial_writes.insert(it->first, it->second);
         }
       }
     }
@@ -3485,115 +3516,24 @@ namespace Legion {
       // Finally see if we have any projection writes to handle
       if (!!unwritten && !state.projection_epochs.empty())
       {
-        const bool is_region = closing_node->is_region(); 
-        const size_t num_children = closing_node->get_num_children();
-        RegionTreeForest *context = root_node->context;
-        for (std::list<ProjectionEpoch*>::const_iterator pit = 
-              state.projection_epochs.begin(); pit !=
-              state.projection_epochs.end(); pit++)
+        FieldMask complete_mask;
+        WriteSet local_partial;
+        state.find_projection_writes(unwritten, complete_mask, local_partial);
+        if (!!complete_mask)
         {
-          const FieldMask overlap = unwritten & (*pit)->valid_fields;
-          if (!overlap)
-            continue;
-          // Now iterate over the write projections and update the state
-          // and complete information based on what we find
-          bool complete_done = false;
-          std::set<IndexSpaceExpression*> projection_writes;
-          for (std::map<ProjectionFunction*,std::set<IndexSpaceNode*> >::
-                const_iterator wit = (*pit)->write_projections.begin();
-                wit != (*pit)->write_projections.end(); wit++)
-          {
-            ProjectionFunction *projection = wit->first;
-            for (std::set<IndexSpaceNode*>::const_iterator it = 
-                  wit->second.begin(); it != wit->second.end(); it++)
-            {
-              // Now we need to update the write fields or the partial
-              // write set depending on whether this is a complete write
-              // to this node in the region tree or not. If this is a depth
-              // 0 projection functor and either we're a region on a partition
-              // with the same number of subregions as the color space then
-              // we can trivially prove that this is a complete write.
-              if ((projection->depth == 0) && 
-                  (is_region || (num_children == (*it)->get_volume())))
-              {
-                written_children[depth-1].insert(closing_node, overlap);
-                written_above[depth] = from_above | overlap;
-                unwritten -= overlap;
-                complete_done = true;
-                break;
-              }
-              else
-              {
-                // This is the slow path where we actually have to enumerate
-                // all the points in the projection operation and evaluate
-                // the union of their subregion accesses so we can get a 
-                // precise measure of the points that are written
-                // Issue a performance warning since this is very suboptimal
-                // without any kind of projection functor analysis
-                // No need to issue the warning here, we already did it
-                // in register_logical_user
-                Domain launch_dom;
-                (*it)->get_launch_space_domain(launch_dom);
-                ProjectionFunctor *functor = projection->functor; 
-                if (is_region)
-                {
-                  const LogicalRegion upper_bound = 
-                    root_node->as_region_node()->handle;
-                  for (Domain::DomainPointIterator itr(launch_dom); itr; itr++)
-                  {
-                    LogicalRegion handle = functor->project(
-                        user.op->get_mappable(), user.idx, upper_bound, itr.p);
-                    RegionNode *node = context->get_node(handle);
-                    projection_writes.insert(node->get_index_space_expression());
-                  }
-                }
-                else
-                {
-                  const LogicalPartition upper_bound = 
-                    root_node->as_partition_node()->handle;
-                  for (Domain::DomainPointIterator itr(launch_dom); itr; itr++)
-                  {
-                    LogicalRegion handle = functor->project(
-                        user.op->get_mappable(), user.idx, upper_bound, itr.p);
-                    RegionNode *node = context->get_node(handle);
-                    projection_writes.insert(node->get_index_space_expression());
-                  }
-                }
-              }
-            }
-            if (complete_done)
-              break;
-          }
-          // If we had any partial writes then we handle them now
-          if (!complete_done && !projection_writes.empty())
-          {
-            // Now we can union these together
-            IndexSpaceExpression *union_expr = 
-              context->union_index_spaces(projection_writes);
-            // Do a test to see if it is complete or not
-            IndexSpaceExpression *diff_expr = 
-              context->subtract_index_spaces(
-                  root_node->get_index_space_expression(), union_expr);
-            if (diff_expr->is_empty())
-            {
-              written_children[depth-1].insert(closing_node, overlap);
-              written_above[depth] = from_above | overlap;
-              unwritten -= overlap;
-              if (!unwritten)
-                break;
-            }
-            else
-            {
+          written_children[depth-1].insert(closing_node, complete_mask);
+          written_above[depth] = from_above | complete_mask;
+          unwritten -= complete_mask;
+        }
+        if (!!unwritten && !local_partial.empty())
+        {
 #ifdef DEBUG_LEGION
-              assert(!partial_writes.empty());
+          assert(!partial_writes.empty());
 #endif
-              WriteSet &local_partial = partial_writes[depth-1];
-              local_partial.insert(diff_expr, overlap); 
-            }
-          }
-          // If we've done all the fields then we are done
-          if (!unwritten)
-            break;
+          WriteSet &partial = partial_writes[depth-1];
+          for (WriteSet::const_iterator it = local_partial.begin();
+                it != local_partial.end(); it++)
+            partial.insert(it->first, it->second);
         }
       }
     }
@@ -3725,8 +3665,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void LogicalCloser::update_close_writes(const FieldMask &closing_mask,
                                            RegionTreeNode *closing_node,
-                                           const FieldMask &complete_writes,
-                                           const WriteSet &state_partial_writes)
+                                           const LogicalState &state)
     //--------------------------------------------------------------------------
     {
       const size_t depth = written_children.size();
@@ -3749,7 +3688,7 @@ namespace Legion {
       {
         // First record any updates that we have at this level, we can skip
         // anything that was already recorded as written above
-        const FieldMask local_writes = complete_writes & unwritten;
+        const FieldMask local_writes = state.write_fields & unwritten;
         if (!!local_writes)
         {
           written_children[depth-1].insert(closing_node, local_writes);
@@ -3759,11 +3698,11 @@ namespace Legion {
         }
       }
       // If we still have unwritten fields then save any partial writes
-      if (!state_partial_writes.empty())
+      if (!state.partial_writes.empty())
       {
         WriteSet &local_partial = partial_writes[depth-1];
-        for (WriteSet::const_iterator it = state_partial_writes.begin();
-              it != state_partial_writes.end(); it++)
+        for (WriteSet::const_iterator it = state.partial_writes.begin();
+              it != state.partial_writes.end(); it++)
         {
           const FieldMask overlap = it->second & unwritten;
           if (!overlap)
@@ -3772,6 +3711,29 @@ namespace Legion {
           unwritten -= overlap;
           if (!unwritten)
             return;
+        }
+      }
+      // Finally see if we have any projection writes to handle
+      if (!!unwritten && !state.projection_epochs.empty())
+      {
+        FieldMask complete_mask;
+        WriteSet local_partial;
+        state.find_projection_writes(unwritten, complete_mask, local_partial);
+        if (!!complete_mask)
+        {
+          written_children[depth-1].insert(closing_node, complete_mask);
+          written_above[depth] = from_above | complete_mask;
+          unwritten -= complete_mask;
+        }
+        if (!!unwritten && !local_partial.empty())
+        {
+#ifdef DEBUG_LEGION
+          assert(!partial_writes.empty());
+#endif
+          WriteSet &partial = partial_writes[depth-1];
+          for (WriteSet::const_iterator it = local_partial.begin();
+                it != local_partial.end(); it++)
+            partial.insert(it->first, it->second);
         }
       }
     }
@@ -3786,7 +3748,14 @@ namespace Legion {
       // Advance any closed projection epochs, note that disjoint
       // closes already did this when we made the disjoint close op
       if (!!closed_projections)
+      {
+        state.projection_write_fields -= closed_projections;
+        if (!state.projection_partial_writes.empty() &&
+            !(state.projection_partial_writes.get_valid_mask() 
+              * closed_projections))
+          state.projection_partial_writes.filter(closed_projections);
         state.advance_projection_epochs(closed_projections);
+      }
       // If we had any overwriting close operations remove dirty below bits
       if (!!overwriting_close_mask)
         state.dirty_below -= overwriting_close_mask;

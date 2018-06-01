@@ -658,7 +658,11 @@ namespace Legion {
       void capture_projection_epochs(FieldMask capture_mask,
                                      ProjectionInfo &info);
       void update_write_projection_epochs(FieldMask update_mask,
+                                          const LogicalUser &user,
                                           const ProjectionInfo &info);
+      void find_projection_writes(FieldMask mask,
+                                  FieldMask &complete_writes,
+                                  WriteSet &partial_writes) const;
     public:
       RegionTreeNode *const owner;
     public:
@@ -680,8 +684,12 @@ namespace Legion {
       // Keep track of which fields we've done a reduction to here
       FieldMask reduction_fields;
       LegionMap<ReductionOpID,FieldMask>::aligned outstanding_reductions;
+    public:
       // Keep track of the current projection epoch for each field
       std::list<ProjectionEpoch*> projection_epochs;
+      // Also keep track of any complete projection writes that we've done
+      FieldMask projection_write_fields;
+      WriteSet projection_partial_writes;
     };
 
     typedef DynamicTableAllocator<LogicalState,10,8> LogicalStateAllocator;
@@ -732,8 +740,7 @@ namespace Legion {
                               RegionTreeNode *closed_node);
       void update_close_writes(const FieldMask &closing_mask,
                                RegionTreeNode *closing_node,
-                               const FieldMask &complete_writes,
-                               const WriteSet &partial_writes);
+                               const LogicalState &state);
       void update_state(LogicalState &state);
       void register_close_operations(
               LegionList<LogicalUser,CURR_LOGICAL_ALLOC>::track_aligned &users);
