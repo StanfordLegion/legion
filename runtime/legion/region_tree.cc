@@ -11594,8 +11594,7 @@ namespace Legion {
                                      state.prev_epoch_users, closing_mask);
       if (!state.field_states.empty())
       {
-        closer.begin_close_children(closing_mask, this, 
-              state.write_fields, state.partial_writes);
+        closer.begin_close_children(closing_mask, this, state); 
         // Recursively traverse any open children and close them as well
         for (std::list<FieldState>::iterator it = state.field_states.begin();
               it != state.field_states.end(); /*nothing*/)

@@ -873,8 +873,7 @@ namespace Legion {
              LegionList<LogicalUser,PREV_LOGICAL_ALLOC>::track_aligned &pusers);
       void begin_close_children(const FieldMask &closing_mask,
                                 RegionTreeNode *closing_node,
-                                const FieldMask &complete_writes,
-                                const WriteSet &partial_writes);
+                                const LogicalState &state);
       void end_close_children(FieldMask closed_mask,
                               RegionTreeNode *closed_node);
       void update_close_writes(const FieldMask &closing_mask,
