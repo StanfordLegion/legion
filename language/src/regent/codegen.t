@@ -6915,10 +6915,10 @@ end
 local function collect_symbols(cx, node)
   local result = terralib.newlist()
 
-  local undefined = {}
+  local undefined =  data.newmap()
   local reduction_variables = {}
-  local defined = { [node.symbol] = true }
-  local accesses = {}
+  local defined =  data.map_from_table({ [node.symbol] = true })
+  local accesses = data.newmap()
   local function collect_symbol_pre(node)
     if rawget(node, "node_type") then
       if node:is(ast.typed.stat.Var) then
@@ -6971,9 +6971,9 @@ local function collect_symbols(cx, node)
                                  node.block)
 
   -- Base pointers need a special treatment to find them
-  local base_pointers = {}
-  local strides = {}
-  for node, _ in pairs(accesses) do
+  local base_pointers = data.newmap()
+  local strides = data.newmap()
+  for node, _ in accesses:items() do
     local value_type = std.as_read(node.expr_type)
     node.expr_type:bounds():map(function(region)
       local prefix = node.expr_type.field_path
@@ -6988,12 +6988,12 @@ local function collect_symbols(cx, node)
     end)
   end
 
-  for base_pointer, _ in pairs(base_pointers) do
+  for base_pointer, _ in base_pointers:items() do
     result:insert(base_pointer)
   end
-  for stride, _ in pairs(strides) do
+  for stride, _ in strides:items() do
     result:insert(stride) end
-  for symbol, _ in pairs(undefined) do
+  for symbol, _ in undefined:items() do
     if std.is_symbol(symbol) then symbol = symbol:getsymbol() end
     result:insert(symbol)
   end
@@ -8315,14 +8315,14 @@ function codegen.stat_end_trace(cx, node)
 end
 
 local function find_region_roots(cx, region_types)
-  local roots_by_type = {}
+  local roots_by_type = data.newmap()
   for _, region_type in ipairs(region_types) do
     assert(cx:has_region(region_type))
     local root_region_type = cx:region(region_type).root_region_type
     roots_by_type[root_region_type] = true
   end
   local roots = terralib.newlist()
-  for region_type, _ in pairs(roots_by_type) do
+  for region_type, _ in roots_by_type:items() do
     roots:insert(region_type)
   end
   return roots
