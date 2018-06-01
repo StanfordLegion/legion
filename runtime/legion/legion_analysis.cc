@@ -4292,7 +4292,7 @@ namespace Legion {
             }
           }
           // If we had any partial writes then we handle them now
-          if (!complete_done && !projection_writes.empty())
+          if (!projection_writes.empty())
           {
             // Now we can union these together
             IndexSpaceExpression *union_expr = 
