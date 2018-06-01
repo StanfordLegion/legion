@@ -1023,7 +1023,12 @@ function ref:__ref(cx, expr_type)
     values = data.zip(field_types, base_pointers, strides):map(
       function(field)
         local field_type, base_pointer, stride = unpack(field)
-        local vec = vector(field_type, std.as_read(expr_type).N)
+        local vec
+        if std.type_eq(field_type, std.ptr) then
+          vec = expr_type.impl_type
+        else
+          vec = vector(field_type, std.as_read(expr_type).N)
+        end
         return `(@[&vec](&[get_element_pointer(cx, self.node, region_types, self.value_type, field_type, base_pointer, stride, value)]))
       end)
     value_type = expr_type
@@ -1083,6 +1088,10 @@ function ref:write(cx, value, expr_type)
          local result = value_expr.value
          for _, field_name in ipairs(field_path) do
            result = `([result].[field_name])
+         end
+         if std.is_vptr(expr_type) and std.type_eq(field_type, std.ptr) then
+           field_value = `([field_value].value)
+           result = `([result].__ptr.value)
          end
          if expr_type and
             (expr_type:isvector() or
@@ -1313,8 +1322,9 @@ function vref:read(cx, expr_type)
   actions = quote
     [actions];
     var [value]
-    [field_paths:map(
-       function(field_path)
+    [data.zip(field_paths, field_types):map(
+       function(pair)
+         local field_path, field_type = unpack(pair)
          local result = value
          local field_accesses = vars:map(
           function(v)
@@ -1325,6 +1335,12 @@ function vref:read(cx, expr_type)
           end)
          for _, field_name in ipairs(field_path) do
            result = `([result].[field_name])
+         end
+         if std.is_vptr(expr_type) and std.type_eq(field_type, ptr) then
+           result = `([result].value)
+           field_accesses = field_accesses:map(function(field_access)
+             return `([field_access].__ptr.value)
+           end)
          end
          return quote [result] = vector( [field_accesses] ) end
        end)]
