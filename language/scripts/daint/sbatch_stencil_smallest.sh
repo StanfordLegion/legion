@@ -1,7 +1,7 @@
 #!/bin/sh
-#SBATCH --nodes=256
+#SBATCH --nodes=8
 #SBATCH --constraint=gpu
-#SBATCH --time=00:40:00
+#SBATCH --time=01:00:00
 #SBATCH --mail-type=ALL
 
 root_dir="$PWD"
@@ -11,7 +11,7 @@ export LD_LIBRARY_PATH="$PWD"
 if [[ ! -d tracing ]]; then mkdir tracing; fi
 pushd tracing
 
-for i in 8 7; do
+for i in 3 2 1 0; do
   n=$(( 2 ** i))
   nx=$(( 2 ** ((i+1)/2) ))
   ny=$(( 2 ** (i/2) ))
@@ -26,7 +26,7 @@ popd
 if [[ ! -d notracing ]]; then mkdir notracing; fi
 pushd notracing
 
-for i in 8 7; do
+for i in 3 2 1 0; do
   n=$(( 2 ** i))
   nx=$(( 2 ** ((i+1)/2) ))
   ny=$(( 2 ** (i/2) ))
