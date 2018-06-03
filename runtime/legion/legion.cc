@@ -4200,6 +4200,7 @@ namespace Legion {
                     "replaced with a call to create_partition_by_field.",
                     ctx->get_task_name(), ctx->get_unique_id());
       assert(false);
+      return IndexPartition::NO_PART;
     }
 
     //--------------------------------------------------------------------------
