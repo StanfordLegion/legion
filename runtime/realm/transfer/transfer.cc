@@ -982,6 +982,7 @@ namespace Realm {
   public:
     TransferIteratorIndexSpace(const IndexSpace<N,T> &_is,
 				RegionInstance inst,
+			        const int _dim_order[N],
 				const std::vector<FieldID>& _fields,
 				size_t _extra_elems);
 
@@ -1021,15 +1022,19 @@ namespace Realm {
     size_t field_idx;
     size_t extra_elems;
     bool tentative_valid;
+    int dim_order[N];
   };
 
   template <int N, typename T>
   TransferIteratorIndexSpace<N,T>::TransferIteratorIndexSpace(const IndexSpace<N,T>& _is,
 								RegionInstance inst,
+							        const int _dim_order[N],
 								const std::vector<FieldID>& _fields,
 								size_t _extra_elems)
     : is(_is), field_idx(0), extra_elems(_extra_elems), tentative_valid(false)
   {
+    for(int i = 0; i < N; i++) dim_order[i] = _dim_order[i];
+
     if(is.is_valid()) {
       iter.reset(is);
       iter_init_deferred = false;
@@ -1064,6 +1069,7 @@ namespace Realm {
     RegionInstance inst;
     std::vector<FieldID> fields;
     size_t extra_elems;
+    int dim_order[N];
 
     if(!((deserializer >> is) &&
 	 (deserializer >> inst) &&
@@ -1071,8 +1077,13 @@ namespace Realm {
 	 (deserializer >> extra_elems)))
       return 0;
 
+    for(int i = 0; i < N; i++)
+      if(!(deserializer >> dim_order[i]))
+	return 0;
+
     TransferIteratorIndexSpace<N,T> *tiis = new TransferIteratorIndexSpace<N,T>(is,
 										inst,
+										dim_order,
 										fields,
 										extra_elems);
 
@@ -1175,7 +1186,10 @@ namespace Realm {
 	act_counts[d] = 1;
 	act_strides[d] = 0;
       }
-      for(int d = 0; d < N; d++) {
+      // follow the agreed-upon dimension ordering
+      for(int di = 0; di < N; di++) {
+	int d = dim_order[di];
+
 	// the stride for a degenerate dimensions does not matter - don't cause
 	//   a "break" if it mismatches
 	if((cur_dim < max_dims) &&
@@ -1227,7 +1241,9 @@ namespace Realm {
     //  the iterator rectangle so that iterators using different layouts still
     //  agree
     carry = true;
-    for(int d = 0; d < N; d++) {
+    for(int di = 0; di < N; di++) {
+      int d = dim_order[di];
+
       if(carry) {
 	if(target_subrect.hi[d] == iter.rect.hi[d]) {
 	  next_point[d] = iter.rect.lo[d];
@@ -1316,7 +1332,10 @@ namespace Realm {
 
       bool grow = true;
       cur_bytes = field_size;
-      for(int d = 0; d < N; d++) {
+      // follow the agreed-upon dimension ordering
+      for(int di = 0; di < N; di++) {
+	int d = dim_order[di];
+
 	if(grow) {
 	  size_t len = iter.rect.hi[d] - cur_point[d] + 1;
 	  size_t piece_limit = hlp->bounds.hi[d] - cur_point[d] + 1;
@@ -1331,6 +1350,10 @@ namespace Realm {
 	  }
 	  target_subrect.hi[d] = cur_point[d] + len - 1;
 	  cur_bytes *= len;
+	  // if we didn't start this dimension at the lo point, we can't
+	  //  grow any further
+	  if(cur_point[d] > iter.rect.lo[d])
+	    grow = false;
 	} else
 	  target_subrect.hi[d] = cur_point[d];
       }
@@ -1340,7 +1363,9 @@ namespace Realm {
       info.dset_bounds.resize(N);
       info.offset.resize(N);
       info.extent.resize(N);
-      for(unsigned d = 0; d < N; d++) {
+      for(int di = 0; di < N; di++) {
+	int d = dim_order[di];
+
 	info.offset[N - 1 - d] = (target_subrect.lo[d] - hlp->bounds.lo[d] + hlp->offset[d]);
 	info.extent[N - 1 - d] = (target_subrect.hi[d] - target_subrect.lo[d] + 1);
 	info.dset_bounds[N - 1 - d] = (hlp->offset[d] +
@@ -1355,7 +1380,9 @@ namespace Realm {
     //  the iterator rectangle so that iterators using different layouts still
     //  agree
     carry = true;
-    for(int d = 0; d < N; d++) {
+    for(int di = 0; di < N; di++) {
+      int d = dim_order[di];
+
       if(carry) {
 	if(target_subrect.hi[d] == iter.rect.hi[d]) {
 	  next_point[d] = iter.rect.lo[d];
@@ -1419,11 +1446,18 @@ namespace Realm {
   template <typename S>
   bool TransferIteratorIndexSpace<N,T>::serialize(S& serializer) const
   {
-    return ((serializer << iter.space) &&
-	    (serializer << (inst_impl ? inst_impl->me :
-                                        RegionInstance::NO_INST)) &&
-	    (serializer << fields) &&
-	    (serializer << extra_elems));
+    if(!((serializer << iter.space) &&
+	 (serializer << (inst_impl ? inst_impl->me :
+			 RegionInstance::NO_INST)) &&
+	 (serializer << fields) &&
+	 (serializer << extra_elems)))
+      return false;
+
+    for(int i = 0; i < N; i++)
+      if(!(serializer << dim_order[i]))
+	return false;
+
+    return true;
   }
 
 
@@ -1743,7 +1777,64 @@ namespace Realm {
 #endif
 
     size_t extra_elems = 0;
-    return new TransferIteratorIndexSpace<N,T>(is, inst, fields, extra_elems);
+    int dim_order[N];
+    bool have_ordering = false;
+    bool force_fortran_order = false;
+    std::vector<RegionInstance> insts(1, inst);
+    if(peer.exists()) insts.push_back(peer);
+    for(std::vector<RegionInstance>::iterator ii = insts.begin();
+	ii != insts.end();
+	++ii) {
+      RegionInstanceImpl *impl = get_runtime()->get_instance_impl(*ii);
+      // can't wait for it here - make sure it's valid before calling
+      assert(impl->metadata.is_valid());
+      const InstanceLayout<N,T> *layout = dynamic_cast<const InstanceLayout<N,T> *>(impl->metadata.layout);
+      for(typename std::vector<InstancePieceList<N,T> >::const_iterator it = layout->piece_lists.begin();
+	  it != layout->piece_lists.end();
+	  ++it) {
+	for(typename std::vector<InstanceLayoutPiece<N,T> *>::const_iterator it2 = it->pieces.begin();
+	    it2 != it->pieces.end();
+	    ++it2) {
+	  const AffineLayoutPiece<N,T> *affine = dynamic_cast<const AffineLayoutPiece<N,T> *>(*it2);
+	  if(!affine) {
+	    force_fortran_order = true;
+	    break;
+	  }
+	  int piece_preferred_order[N];
+	  size_t prev_stride = 0;
+	  for(int i = 0; i < N; i++) {
+	    size_t best_stride = size_t(-1);
+	    for(int j = 0; j < N; j++) {
+	      if(affine->strides[j] < prev_stride) continue;
+	      if(affine->strides[j] >= best_stride) continue;
+	      // make sure each dimension with the same stride appears once
+	      if((i > 0) && (affine->strides[j] == prev_stride) &&
+		 (j <= piece_preferred_order[i-1])) continue;
+	      piece_preferred_order[i] = j;
+	      best_stride = affine->strides[j];
+	    }
+	    assert(best_stride < size_t(-1));
+	    prev_stride = best_stride;
+	  }
+	  // log_dma.print() << "order: " << *affine << " -> "
+	  // 		  << piece_preferred_order[0] << ", "
+	  // 		  << ((N > 1) ? piece_preferred_order[1] : -1) << ", "
+	  // 		  << ((N > 2) ? piece_preferred_order[2] : -1);
+	  if(have_ordering) {
+	    if(memcmp(dim_order, piece_preferred_order, N * sizeof(int)) != 0) {
+	      force_fortran_order = true;
+	      break;
+	    }
+	  } else {
+	    memcpy(dim_order, piece_preferred_order, N * sizeof(int));
+	    have_ordering = true;
+	  }
+	}
+      }
+    }
+    if(!have_ordering || force_fortran_order)
+      for(int i = 0; i < N; i++) dim_order[i] = i;
+    return new TransferIteratorIndexSpace<N,T>(is, inst, dim_order, fields, extra_elems);
   }
   
   template <int N, typename T>
