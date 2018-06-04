@@ -205,9 +205,15 @@ function inline_tasks.expr_call(call)
   end, stats)
 
   -- Finally, convert any return statement to an assignment to a temporary variable
-  local task_name = task_ast.name:mkstring("", "_", "")
-  local return_var = std.newsymbol(nil, "__" .. task_name .."_ret")
+  local return_var_expr = nil
   if #stats > 0 and stats[#stats]:is(ast.specialized.stat.Return) then
+    local task_name = task_ast.name:mkstring("", "_", "")
+    local return_var = std.newsymbol(nil, "__" .. task_name .."_ret")
+    return_var_expr = ast.specialized.expr.ID {
+      value = return_var,
+      annotations = ast.default_annotations(),
+      span = call.span,
+    }
     local return_stat = stats[#stats]
     stats[#stats] = ast.specialized.stat.Var {
       symbols = terralib.newlist { return_var },
@@ -218,11 +224,6 @@ function inline_tasks.expr_call(call)
   end
 
   actions:insertall(stats)
-  local return_var_expr = ast.specialized.expr.ID {
-    value = return_var,
-    annotations = ast.default_annotations(),
-    span = call.span,
-  }
   return return_var_expr, true, actions
 end
 
@@ -241,7 +242,7 @@ function inline_tasks.expr(node, no_return)
   if not inlined_any then
     return node, false
   else
-    if no_return then
+    if no_return and new_node ~= nil then
       actions:insert(ast.specialized.stat.Expr {
         expr = new_node,
         annotations = ast.default_annotations(),
