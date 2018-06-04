@@ -19,6 +19,7 @@ local data = require("common/data")
 local std = require("regent/std")
 local report = require("common/report")
 local symbol_table = require("regent/symbol_table")
+local pretty = require("regent/pretty")
 
 local inline_tasks = {}
 
@@ -153,19 +154,24 @@ function inline_tasks.expr_call(call)
 
   -- Do alpha conversion to avoid type collision.
   local stats = ast.map_node_postorder(function(node)
-    if node:is(ast.specialized.stat.Var) then
-      assert(#node.symbols == 1)
-      local symbol = node.symbols[1]
-      -- We should ignore the type of the existing symbol as we want to type check it again.
-      local symbol_type = symbol:hastype()
-      if #node.values > 0 or is_singleton_type(symbol_type) then symbol_type = nil
-      else symbol_type = std.type_sub(symbol_type, symbol_mapping) end
-      local new_symbol = std.newsymbol(symbol_type, symbol:hasname())
-      symbol_mapping[symbol] = new_symbol
-      return node { symbols = terralib.newlist { new_symbol } }
+    if node:is(ast.specialized.stat.Var) or
+       node:is(ast.specialized.stat.VarUnpack)
+    then
+      local symbols = node.symbols:map(function(symbol)
+        -- We should ignore the type of the existing symbol as we want to type check it again.
+        local symbol_type = symbol:hastype()
+        if is_singleton_type(symbol_type) then
+          symbol_type = nil
+        else
+          symbol_type = std.type_sub(symbol_type, symbol_mapping)
+        end
+        local new_symbol = std.newsymbol(symbol_type, symbol:hasname())
+        symbol_mapping[symbol] = new_symbol
+        return new_symbol
+      end)
+      return node { symbols = symbols }
     elseif node:is(ast.specialized.stat.ForList) then
       local symbol = node.symbol
-      local symbol_type = symbol:hastype()
       local new_symbol = std.newsymbol(nil, symbol:hasname())
       symbol_mapping[symbol] = new_symbol
       return node { symbol = new_symbol }
@@ -187,6 +193,8 @@ function inline_tasks.expr_call(call)
            node:is(ast.specialized.expr.UnsafeCast)
     then
       return node { expr_type = std.type_sub(node.expr_type, symbol_mapping) }
+    elseif node:is(ast.specialized.expr.Cast) then
+      return node { fn = node.fn { value = std.type_sub(node.fn.value, symbol_mapping) } }
     elseif node:is(ast.specialized.expr.Null) then
       return node { pointer_type = std.type_sub(node.pointer_type, symbol_mapping) }
     elseif node:is(ast.specialized.expr.Region) then
@@ -196,46 +204,25 @@ function inline_tasks.expr_call(call)
     end
   end, stats)
 
-  -- Finally, convert any return statement to an assignment
-  local return_type = task:get_type().returntype
-  assert(return_type ~= nil)
-  return_type = std.type_sub(return_type, symbol_mapping)
+  -- Finally, convert any return statement to an assignment to a temporary variable
   local task_name = task_ast.name:mkstring("", "_", "")
-  local return_var = std.newsymbol(return_type, "__" .. task_name .."_ret")
-
-  local return_var_expr = ast.specialized.expr.ID {
-    value = return_var,
-    annotations = ast.default_annotations(),
-    span = call.span,
-  }
-  local return_var_decl = ast.specialized.stat.Var {
-    symbols = terralib.newlist { return_var },
-    values = terralib.newlist(),
-    annotations = ast.default_annotations(),
-    span = call.span,
-  }
+  local return_var = std.newsymbol(nil, "__" .. task_name .."_ret")
   if #stats > 0 and stats[#stats]:is(ast.specialized.stat.Return) then
     local return_stat = stats[#stats]
-    stats[#stats] = ast.specialized.stat.Assignment {
-      lhs = terralib.newlist { return_var_expr },
-      rhs = terralib.newlist { return_stat.value },
+    stats[#stats] = ast.specialized.stat.Var {
+      symbols = terralib.newlist { return_var },
+      values = terralib.newlist { return_stat.value },
       annotations = ast.default_annotations(),
       span = return_stat.span,
     }
   end
 
   actions:insertall(stats)
-  local new_block = ast.specialized.stat.Block {
-    block = ast.specialized.Block {
-      stats = actions,
-      span = call.span,
-    },
+  local return_var_expr = ast.specialized.expr.ID {
+    value = return_var,
     annotations = ast.default_annotations(),
     span = call.span,
   }
-  actions = terralib.newlist()
-  actions:insert(return_var_decl)
-  actions:insert(new_block)
   return return_var_expr, true, actions
 end
 
