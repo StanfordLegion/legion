@@ -3024,6 +3024,12 @@ extern "C" {
   legion_physical_region_get_field_accessor_array_1d(
     legion_physical_region_t handle,
     legion_field_id_t fid);
+
+  legion_accessor_array_1d_t
+  legion_physical_region_get_field_accessor_array_1d_with_transform(
+      legion_physical_region_t handle,
+      legion_field_id_t fid,
+      legion_domain_affine_transform_t transform);
   
   /**
    * @return Caller takes ownership of return value.
@@ -3035,6 +3041,12 @@ extern "C" {
     legion_physical_region_t handle,
     legion_field_id_t fid);
 
+  legion_accessor_array_2d_t
+  legion_physical_region_get_field_accessor_array_2d_with_transform(
+    legion_physical_region_t handle,
+    legion_field_id_t fid,
+    legion_domain_affine_transform_t transform);
+
   /**
    * @return Caller takes ownership of return value.
    *
@@ -3044,6 +3056,12 @@ extern "C" {
   legion_physical_region_get_field_accessor_array_3d(
     legion_physical_region_t handle,
     legion_field_id_t fid);
+
+  legion_accessor_array_3d_t
+  legion_physical_region_get_field_accessor_array_3d_with_transform(
+    legion_physical_region_t handle,
+    legion_field_id_t fid,
+    legion_domain_affine_transform_t transform);
 
   void *
   legion_accessor_array_1d_raw_rect_ptr(legion_accessor_array_1d_t handle,

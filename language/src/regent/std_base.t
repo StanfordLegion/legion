@@ -727,7 +727,8 @@ function symbol:getlabel()
 end
 
 function symbol:hash()
-  return self
+  local hash_value = "__symbol_#" .. tostring(self.symbol_id)
+  return hash_value
 end
 
 function symbol:__tostring()

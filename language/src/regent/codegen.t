@@ -1023,7 +1023,12 @@ function ref:__ref(cx, expr_type)
     values = data.zip(field_types, base_pointers, strides):map(
       function(field)
         local field_type, base_pointer, stride = unpack(field)
-        local vec = vector(field_type, std.as_read(expr_type).N)
+        local vec
+        if std.type_eq(field_type, std.ptr) then
+          vec = expr_type.impl_type
+        else
+          vec = vector(field_type, std.as_read(expr_type).N)
+        end
         return `(@[&vec](&[get_element_pointer(cx, self.node, region_types, self.value_type, field_type, base_pointer, stride, value)]))
       end)
     value_type = expr_type
@@ -1083,6 +1088,10 @@ function ref:write(cx, value, expr_type)
          local result = value_expr.value
          for _, field_name in ipairs(field_path) do
            result = `([result].[field_name])
+         end
+         if std.is_vptr(expr_type) and std.type_eq(field_type, std.ptr) then
+           field_value = `([field_value].value)
+           result = `([result].__ptr.value)
          end
          if expr_type and
             (expr_type:isvector() or
@@ -1313,8 +1322,9 @@ function vref:read(cx, expr_type)
   actions = quote
     [actions];
     var [value]
-    [field_paths:map(
-       function(field_path)
+    [data.zip(field_paths, field_types):map(
+       function(pair)
+         local field_path, field_type = unpack(pair)
          local result = value
          local field_accesses = vars:map(
           function(v)
@@ -1325,6 +1335,12 @@ function vref:read(cx, expr_type)
           end)
          for _, field_name in ipairs(field_path) do
            result = `([result].[field_name])
+         end
+         if std.is_vptr(expr_type) and std.type_eq(field_type, ptr) then
+           result = `([result].value)
+           field_accesses = field_accesses:map(function(field_access)
+             return `([field_access].__ptr.value)
+           end)
          end
          return quote [result] = vector( [field_accesses] ) end
        end)]
@@ -6899,10 +6915,10 @@ end
 local function collect_symbols(cx, node)
   local result = terralib.newlist()
 
-  local undefined = {}
+  local undefined =  data.newmap()
   local reduction_variables = {}
-  local defined = { [node.symbol] = true }
-  local accesses = {}
+  local defined =  data.map_from_table({ [node.symbol] = true })
+  local accesses = data.newmap()
   local function collect_symbol_pre(node)
     if rawget(node, "node_type") then
       if node:is(ast.typed.stat.Var) then
@@ -6955,9 +6971,9 @@ local function collect_symbols(cx, node)
                                  node.block)
 
   -- Base pointers need a special treatment to find them
-  local base_pointers = {}
-  local strides = {}
-  for node, _ in pairs(accesses) do
+  local base_pointers = data.newmap()
+  local strides = data.newmap()
+  for node, _ in accesses:items() do
     local value_type = std.as_read(node.expr_type)
     node.expr_type:bounds():map(function(region)
       local prefix = node.expr_type.field_path
@@ -6972,12 +6988,12 @@ local function collect_symbols(cx, node)
     end)
   end
 
-  for base_pointer, _ in pairs(base_pointers) do
+  for base_pointer, _ in base_pointers:items() do
     result:insert(base_pointer)
   end
-  for stride, _ in pairs(strides) do
+  for stride, _ in strides:items() do
     result:insert(stride) end
-  for symbol, _ in pairs(undefined) do
+  for symbol, _ in undefined:items() do
     if std.is_symbol(symbol) then symbol = symbol:getsymbol() end
     result:insert(symbol)
   end
@@ -8299,14 +8315,14 @@ function codegen.stat_end_trace(cx, node)
 end
 
 local function find_region_roots(cx, region_types)
-  local roots_by_type = {}
+  local roots_by_type = data.newmap()
   for _, region_type in ipairs(region_types) do
     assert(cx:has_region(region_type))
     local root_region_type = cx:region(region_type).root_region_type
     roots_by_type[root_region_type] = true
   end
   local roots = terralib.newlist()
-  for region_type, _ in pairs(roots_by_type) do
+  for region_type, _ in roots_by_type:items() do
     roots:insert(region_type)
   end
   return roots
