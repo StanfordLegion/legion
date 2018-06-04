@@ -112,7 +112,7 @@ function inline_tasks.expr_call(call)
 
   -- First, inline any task calls in the argument list.
   local args = call.args:map(function(arg)
-    local new_arg, inlined, arg_actions = inline_tasks.expr(arg, true)
+    local new_arg, inlined, arg_actions = inline_tasks.expr(arg)
     assert(new_arg ~= nil)
     if not inlined then return arg
     else
@@ -226,7 +226,7 @@ function inline_tasks.expr_call(call)
   return return_var_expr, true, actions
 end
 
-function inline_tasks.expr(node)
+function inline_tasks.expr(node, no_return)
   local inlined_any = false
   local actions = terralib.newlist()
   local new_node = ast.map_node_postorder(function(node)
@@ -241,7 +241,16 @@ function inline_tasks.expr(node)
   if not inlined_any then
     return node, false
   else
-    return new_node, true, actions
+    if no_return then
+      actions:insert(ast.specialized.stat.Expr {
+        expr = new_node,
+        annotations = ast.default_annotations(),
+        span = node.span,
+      })
+      return nil, true, actions
+    else
+      return new_node, true, actions
+    end
   end
 end
 
@@ -405,8 +414,9 @@ function inline_tasks.stat_assignment_or_reduce(node)
 end
 
 function inline_tasks.stat_expr(node)
-  local value, inlined, actions = inline_tasks.expr(node.expr)
+  local value, inlined, actions = inline_tasks.expr(node.expr, true)
   if inlined then
+    assert(value == nil)
     local stats = terralib.newlist { preserve_task_call(node) }
     stats:insertall(actions)
     return stats
