@@ -3771,7 +3771,10 @@ local function compile_tasks_in_parallel()
 end
 
 function std.start(main_task, extra_setup_thunk)
-  if std.config["pretty"] then os.exit() end
+  if std.config["pretty"] then
+    profile.print_summary()
+    os.exit()
+  end
 
   assert(std.is_task(main_task))
   local objfiles,task_wrappers = compile_tasks_in_parallel()
