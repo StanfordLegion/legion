@@ -39,9 +39,9 @@ end
 function passes.codegen(node, allow_pretty)
   if allow_pretty == nil then allow_pretty = true end
 
-  if allow_pretty and std.config["pretty"] then print(pretty.entry(node)) end
-  if std.config["validate"] then validate.entry(node) end
-  return codegen.entry(node)
+  if allow_pretty and std.config["pretty"] then print(profile("pretty", node, pretty.entry)(node)) end
+  if std.config["validate"] then profile("validate", node, validate.entry)(node) end
+  return profile("codegen", node, codegen.entry)(node)
 end
 
 function passes.compile(node, allow_pretty)
@@ -60,7 +60,7 @@ function passes.compile(node, allow_pretty)
     node = profile("normalize_after_type_check", node, normalize.entry)(node)
     node = profile("check_annotations", node, check_annotations.entry)(node)
     node = passes.optimize(node)
-    return profile("codegen", node, passes.codegen)(node, allow_pretty)
+    return passes.codegen(node, allow_pretty)
   end
   return ctor
 end
