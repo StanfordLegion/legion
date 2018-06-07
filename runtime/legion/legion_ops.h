@@ -889,18 +889,17 @@ namespace Legion {
       virtual UniqueID get_unique_id(void) const;
       virtual unsigned get_context_index(void) const;
       virtual int get_depth(void) const;
-      virtual const ProjectionInfo* get_projection_info(unsigned idx, bool src);
+      virtual const ProjectionInfo* get_projection_info(unsigned idx);
     protected:
-      void check_copy_privilege(const RegionRequirement &req, 
-                                unsigned idx, bool src,
+      void check_copy_privilege(const RegionRequirement &req, unsigned idx,
                                 bool permit_projection = false);
       void compute_parent_indexes(void);
       template<bool IS_SRC>
       int perform_conversion(unsigned idx, const RegionRequirement &req,
                              std::vector<MappingInstance> &output,
                              InstanceSet &targets, bool is_reduce = false);
-      inline void set_mapping_state(unsigned idx, bool is_src) 
-        { current_index = idx; current_src = is_src; }
+      inline void set_mapping_state(unsigned idx) 
+        { current_index = idx; }
       virtual void add_copy_profiling_request(
                                       Realm::ProfilingRequestSet &reqeusts);
       virtual void handle_profiling_response(
@@ -926,7 +925,6 @@ namespace Legion {
     protected: // for support with mapping
       MapperManager*              mapper;
       unsigned                    current_index;
-      bool                        current_src;
     protected:
       std::map<PhysicalManager*,std::pair<unsigned,bool> > acquired_instances;
       std::vector<std::map<Reservation,bool> > atomic_locks;
@@ -975,7 +973,7 @@ namespace Legion {
       void check_point_requirements(void);
 #endif
     public:
-      virtual const ProjectionInfo* get_projection_info(unsigned idx, bool src);
+      virtual const ProjectionInfo* get_projection_info(unsigned idx);
     public:
       IndexSpace                    launch_space;
     public:
@@ -1027,7 +1025,7 @@ namespace Legion {
       virtual const DomainPoint& get_domain_point(void) const;
       virtual void set_projection_result(unsigned idx,LogicalRegion result);
     public:
-      virtual const ProjectionInfo* get_projection_info(unsigned idx, bool src);
+      virtual const ProjectionInfo* get_projection_info(unsigned idx);
     protected:
       IndexCopyOp*              owner;
     };
