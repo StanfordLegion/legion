@@ -42,6 +42,7 @@ local c = terralib.includecstring([[
 #include "legion.h"
 #include "legion_terra.h"
 #include "legion_terra_partitions.h"
+#include "murmur_hash3.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
