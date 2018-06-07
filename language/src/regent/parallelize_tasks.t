@@ -229,14 +229,6 @@ local function get_intersection(rect_type)
   end
 end
 
-local function shallow_copy(tbl)
-  local new_tbl = {}
-  for k, v in pairs(tbl) do
-    new_tbl[k] = v
-  end
-  return new_tbl
-end
-
 local function parse_dop(line)
   local factors = terralib.newlist()
   assert(string.len(line) > 0)
@@ -310,12 +302,12 @@ end
 local function always(node) return true end
 
 local function extract_symbols(pred, node)
-  local symbol_set = {}
+  local symbol_set = data.newmap()
   extract_expr(node,
     function(node) return node:is(ast.typed.expr.ID) and pred(node) end,
     function(node) symbol_set[node.value] = true end)
   local symbols = terralib.newlist()
-  for sym, _ in pairs(symbol_set) do symbols:insert(sym) end
+  for sym, _ in symbol_set:items() do symbols:insert(sym) end
   return symbols
 end
 
@@ -554,7 +546,7 @@ do
       region = self:region(mapping),
       index = self:index(mapping),
       range = self:range(mapping),
-      fields = shallow_copy(self.__fields),
+      fields = self.__fields:copy(),
     }
   end
 
@@ -607,7 +599,7 @@ do
 
   function stencil:fields()
     local fields = terralib.newlist()
-    for _, field in pairs(self.__fields) do
+    for _, field in self.__fields:items() do
       fields:insert(field)
     end
     return fields
@@ -639,12 +631,12 @@ do
   end
 
   function stencil:has_field(field)
-    return self.__fields[field:hash()] ~= nil
+    return self.__fields[field] ~= nil
   end
 
   function stencil:add_field(field)
     if not self:has_field(field) then
-      self.__fields[field:hash()] = field
+      self.__fields[field] = field
     end
     return self
   end
@@ -659,7 +651,7 @@ do
       region = self:region(),
       index = index,
       range = self:range(),
-      fields = shallow_copy(self.__fields),
+      fields = self.__fields:copy(),
     }
   end
 
@@ -668,7 +660,7 @@ do
       region = self:region(),
       index = self:index(),
       range = range,
-      fields = shallow_copy(self.__fields),
+      fields = self.__fields:copy(),
     }
   end
 
@@ -703,7 +695,7 @@ do
     assert(args.region)
     assert(args.index)
     assert(args.range)
-    assert(args.fields)
+    assert(data.is_map(args.fields))
     return setmetatable({
       __region = args.region,
       __index_expr = args.index,
@@ -719,7 +711,7 @@ do
 
   function stencil_factory.is_singleton(s)
     local cnt = 0
-    for field, _ in pairs(s.__fields) do
+    for field, _ in s.__fields:items() do
       cnt = cnt + 1
       if cnt > 1 then return false end
     end
@@ -764,7 +756,7 @@ function parallel_task_context.new_task_scope(params)
   cx.region_param_map = region_param_map
   cx.region_param_indices = region_param_indices
   cx.task_point_symbol = get_new_tmp_var(c.legion_domain_point_t, "__point")
-  cx.field_accesses = {}
+  cx.field_accesses = data.newmap()
   cx.field_access_stats = {}
   cx.stencils = terralib.newlist()
   cx.ghost_symbols = {}
@@ -1116,10 +1108,10 @@ function caller_context:add_call(expr, task_cx)
 
       if decl ~= nil then
         if self.__call_exprs_by_decl[decl] == nil then
-          self.__call_exprs_by_decl[decl] = data.newmap()
+	   self.__call_exprs_by_decl[decl] = data.newmap()
         end
         if self.__call_exprs_by_decl[decl][param] == nil then
-          self.__call_exprs_by_decl[decl][param] = {}
+	   self.__call_exprs_by_decl[decl][param] = data.newmap()
         end
         -- TODO: This collision case is not yet thoroughly understood
         if self.__call_exprs_by_decl[decl][param][expr] == nil or
@@ -1912,7 +1904,7 @@ local function insert_partition_creation(parallelizable, caller_cx, call_stats)
           end
         end
         for pparam, map in call_exprs_map:items() do
-          for expr, request in pairs(map) do
+          for expr, request in map:items() do
             if request.type == SUBSET then
               region_symbol = request.region
               if not caller_cx:has_primary_partition(pparam, region_symbol) then
@@ -1930,7 +1922,7 @@ local function insert_partition_creation(parallelizable, caller_cx, call_stats)
       for pparam, call_exprs in call_exprs_map:items() do
         local global_stencils = terralib.newlist()
         local global_stencil_indices = {}
-        for call_expr, _ in pairs(call_exprs) do
+        for call_expr, _ in call_exprs:items() do
           local task_cx = parallelizable(call_expr).cx
           local param_arg_mapping =
             task_cx:make_param_arg_mapping(caller_cx, call_expr.args)
@@ -1970,7 +1962,7 @@ local function insert_partition_creation(parallelizable, caller_cx, call_stats)
         end
 
         -- Finally, record ghost partitions that each task call will use
-        for call_expr, _ in pairs(call_exprs) do
+        for call_expr, _ in call_exprs:items() do
           local orig_stencils = parallelizable(call_expr).cx.stencils
           for idx = 1, #orig_stencils do
             local stencil_idx = global_stencil_indices[orig_stencils[idx]]
@@ -2522,7 +2514,7 @@ local function lift_all_accesses(task_cx, normalizer_cx, accesses, stat)
           expr = stencil_expr,
         },
         range = loop_var:gettype().bounds_symbols[1],
-        fields = { [field_path:hash()] = field_path },
+        fields = data.map_from_table { [field_path] = field_path },
       }
       task_cx:add_access(access, stencil)
 
@@ -2812,7 +2804,7 @@ function stencil_analysis.join_stencil(s1, s2)
           binders = s1_binders,
           expr = joined,
         },
-        fields = {},
+        fields = data.newmap(),
       }):add_fields(s1:fields()):add_fields(s2:fields())
     else
       return nil
@@ -2935,7 +2927,7 @@ end
 
 function stencil_analysis.top(cx)
   local sorted_accesses = terralib.newlist()
-  for access, _ in pairs(cx.field_accesses) do
+  for access, _ in cx.field_accesses:items() do
     sorted_accesses:insert(access)
   end
   sorted_accesses:sort(function(a1, a2)
