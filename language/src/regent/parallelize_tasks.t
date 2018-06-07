@@ -1108,10 +1108,10 @@ function caller_context:add_call(expr, task_cx)
 
       if decl ~= nil then
         if self.__call_exprs_by_decl[decl] == nil then
-	   self.__call_exprs_by_decl[decl] = data.newmap()
+           self.__call_exprs_by_decl[decl] = data.newmap()
         end
         if self.__call_exprs_by_decl[decl][param] == nil then
-	   self.__call_exprs_by_decl[decl][param] = data.newmap()
+           self.__call_exprs_by_decl[decl][param] = data.newmap()
         end
         -- TODO: This collision case is not yet thoroughly understood
         if self.__call_exprs_by_decl[decl][param][expr] == nil or
@@ -1310,7 +1310,7 @@ local compute_extent = {
     for k = 0, 3 do extent[k] = 1 end
     for idx = 0, num_factors do
       var next_max = 0
-	    var max_sz = 0
+            var max_sz = 0
       for k = 2, -1, -1 do
         if max_sz < sz_remain[k] then
           next_max = k
@@ -2497,9 +2497,9 @@ local function lift_all_accesses(task_cx, normalizer_cx, accesses, stat)
 
     local stencil_expr =
       extract_stencil_expr(normalized.expr_type.pointer_type, normalized)
-		if stencil_expr:is(ast.typed.expr.Cast) then
-		  stencil_expr = stencil_expr.arg
-		end
+                if stencil_expr:is(ast.typed.expr.Cast) then
+                  stencil_expr = stencil_expr.arg
+                end
 
     if not std.type_eq(std.as_read(loop_var:gettype()),
                        std.as_read(stencil_expr.expr_type)) then
@@ -3248,7 +3248,7 @@ function parallelize_tasks.top_task(global_cx, node)
   -- FIXME: Workaround for the current limitation in SPMD transformation
   local field_set = {}
   for idx = 1, #task_cx.stencils do
-		task_cx.stencils[idx]:fields():map(function(field) field_set[field] = true end)
+                task_cx.stencils[idx]:fields():map(function(field) field_set[field] = true end)
   end
   local fields = terralib.newlist()
   for field, _ in pairs(field_set) do fields:insert(field) end
@@ -3256,8 +3256,8 @@ function parallelize_tasks.top_task(global_cx, node)
   for idx = 1, #task_cx.stencils do
     local stencil = task_cx.stencils[idx]
     if not task_cx.use_primary[stencil] then
-		  local region = task_cx.ghost_symbols[stencil]
-		  --local fields = task_cx.stencils[idx]:fields()
+                  local region = task_cx.ghost_symbols[stencil]
+                  --local fields = task_cx.stencils[idx]:fields()
       -- TODO: handle reductions on ghost regions
       privileges:insert(fields:map(function(field)
         return std.privilege(std.reads, region, field)
