@@ -3254,6 +3254,30 @@ namespace Legion {
         if (dst_requirements[idx].privilege != REDUCE)
           dst_requirements[idx].privilege = WRITE_ONLY;
       }
+      if (!launcher.gather_requirements.empty())
+      {
+        const size_t gather_size = launcher.gather_requirements.size();
+        gather_requirements.resize(gather_size);
+        gather_versions.resize(gather_size);
+        gather_restrict_infos.resize(gather_size);
+        for (unsigned idx = 0; idx < gather_size; idx++)
+        {
+          gather_requirements[idx] = launcher.gather_requirements[idx];
+          gather_requirements[idx].flags |= NO_ACCESS_FLAG;
+        }
+      }
+      if (!launcher.scatter_requirements.empty())
+      {
+        const size_t scatter_size = launcher.scatter_requirements.size();
+        scatter_requirements.resize(scatter_size);
+        scatter_versions.resize(scatter_size);
+        scatter_restrict_infos.resize(scatter_size);
+        for (unsigned idx = 0; idx < scatter_size; idx++)
+        {
+          scatter_requirements[idx] = launcher.scatter_requirements[idx];
+          scatter_requirements[idx].flags |= NO_ACCESS_FLAG;
+        }
+      }
       grants = launcher.grants;
       // Register ourselves with all the grants
       for (unsigned idx = 0; idx < grants.size(); idx++)
@@ -3283,6 +3307,26 @@ namespace Legion {
                         "for copy operation (ID %lld) with parent "
                         "task %s (ID %lld)",
                         src_requirements.size(), dst_requirements.size(),
+                        get_unique_id(), parent_ctx->get_task_name(),
+                        parent_ctx->get_unique_id())
+        if (!gather_requirements.empty() && 
+            (gather_requirements.size() != src_requirements.size()))
+          REPORT_LEGION_ERROR(ERROR_NUMBER_GATHER_REQUIREMENTS,
+                        "Number of gather requirements (%zd) does not "
+                        "match number of source requirements (%zd) "
+                        "for copy operation (ID %lld) with parent "
+                        "task %s (ID %lld)",
+                        gather_requirements.size(), src_requirements.size(),
+                        get_unique_id(), parent_ctx->get_task_name(),
+                        parent_ctx->get_unique_id())
+        if (!scatter_requirements.empty() &&
+            (scatter_requirements.size() != src_requirements.size()))
+          REPORT_LEGION_ERROR(ERROR_NUMBER_SCATTER_REQUIREMENTS,
+                        "Number of scatter requirements (%zd) does not "
+                        "match number of source requriements (%zd) "
+                        "for copy operation ID (%lld) with parent "
+                        "task %s (ID %lld)",
+                        scatter_requirements.size(), src_requirements.size(),
                         get_unique_id(), parent_ctx->get_task_name(),
                         parent_ctx->get_unique_id())
         for (unsigned idx = 0; idx < src_requirements.size(); idx++)
@@ -3336,6 +3380,54 @@ namespace Legion {
                           parent_ctx->get_task_name(),
                           parent_ctx->get_unique_id())
           check_copy_privilege(dst_requirements[idx], idx, false/*src*/);
+        }
+        if (!gather_requirements.empty())
+        {
+          for (unsigned idx = 0; idx < gather_requirements.size(); idx++)
+          {
+            if (gather_requirements[idx].privilege_fields.size() != 1)
+              REPORT_LEGION_ERROR(ERROR_COPY_GATHER_REQUIREMENT,
+                          "Copy gather requirement %d for copy "
+                          "operation (ID %lld) in parent task %s "
+                          "(ID %lld) has %zd privilege fields but "
+                          "gather requirements are only permitted "
+                          "to have one privilege field.", idx,
+                          get_unique_id(), parent_task->get_task_name(),
+                          parent_task->get_unique_id(),
+                          gather_requirements[idx].privilege_fields.size())
+            if (!IS_READ_ONLY(gather_requirements[idx]))
+              REPORT_LEGION_ERROR(ERROR_COPY_GATHER_REQUIREMENT,
+                          "Copy gather requirement %d for copy "
+                          "operation (ID %lld) in parent task %s "
+                          "(ID %lld) must be requested with a "
+                          "read-only privilege.", idx,
+                          get_unique_id(), parent_ctx->get_task_name(),
+                          parent_ctx->get_unique_id())
+          }
+        }
+        if (!scatter_requirements.empty())
+        {
+          for (unsigned idx = 0; idx < scatter_requirements.size(); idx++)
+          {
+            if (scatter_requirements[idx].privilege_fields.size() != 1)
+              REPORT_LEGION_ERROR(ERROR_COPY_SCATTER_REQUIREMENT,
+                          "Copy scatter requirement %d for copy "
+                          "operation (ID %lld) in parent task %s "
+                          "(ID %lld) has %zd privilege fields but "
+                          "scatter requirements are only permitted "
+                          "to have one privilege field.", idx,
+                          get_unique_id(), parent_task->get_task_name(),
+                          parent_task->get_unique_id(),
+                          scatter_requirements[idx].privilege_fields.size())
+            if (!IS_READ_ONLY(scatter_requirements[idx]))
+              REPORT_LEGION_ERROR(ERROR_COPY_SCATTER_REQUIREMENT,
+                          "Copy scatter requirement %d for copy "
+                          "operation (ID %lld) in parent task %s "
+                          "(ID %lld) must be requested with a "
+                          "read-only privilege.", idx,
+                          get_unique_id(), parent_ctx->get_task_name(),
+                          parent_ctx->get_unique_id())
+          }
         }
         for (unsigned idx = 0; idx < src_requirements.size(); idx++)
         {
@@ -3391,17 +3483,27 @@ namespace Legion {
       // Clear out our region tree state
       src_requirements.clear();
       dst_requirements.clear();
+      gather_requirements.clear();
+      scatter_requirements.clear();
       grants.clear();
       wait_barriers.clear();
       arrive_barriers.clear();
       src_privilege_paths.clear();
       dst_privilege_paths.clear();
+      gather_privilege_paths.clear();
+      scatter_privilege_paths.clear();
       src_parent_indexes.clear();
       dst_parent_indexes.clear();
+      gather_parent_indexes.clear();
+      scatter_parent_indexes.clear();
       src_versions.clear();
       dst_versions.clear();
+      gather_versions.clear();
+      scatter_versions.clear();
       src_restrict_infos.clear();
       dst_restrict_infos.clear();
+      gather_restrict_infos.clear();
+      scatter_restrict_infos.clear();
 #ifdef DEBUG_LEGION
       assert(acquired_instances.empty());
 #endif
@@ -3495,6 +3597,41 @@ namespace Legion {
                                           src_requirements.size()+idx, 
                                           req.instance_fields);
       }
+      if (!gather_requirements.empty())
+      {
+        const size_t offset = src_requirements.size() + dst_requirements.size();
+        for (unsigned idx = 0; idx < gather_requirements.size(); idx++)
+        {
+          const RegionRequirement &req = gather_requirements[idx];
+          LegionSpy::log_logical_requirement(unique_op_id, idx, true/*region*/,
+                                             req.region.index_space.id,
+                                             req.region.field_space.id,
+                                             req.region.tree_id,
+                                             req.privilege,
+                                             req.prop, req.redop,
+                                             req.parent.index_space.id);
+          LegionSpy::log_requirement_fields(unique_op_id, offset + idx, 
+                                            req.instance_fields);
+        }
+      }
+      if (!scatter_requirements.empty())
+      {
+        const size_t offset = src_requirements.size() + 
+          dst_requirements.size() + gather_requirements.size();
+        for (unsigned idx = 0; idx < scatter_requirements.size(); idx++)
+        {
+          const RegionRequirement &req = gather_requirements[idx];
+          LegionSpy::log_logical_requirement(unique_op_id, idx, true/*region*/,
+                                             req.region.index_space.id,
+                                             req.region.field_space.id,
+                                             req.region.tree_id,
+                                             req.privilege,
+                                             req.prop, req.redop,
+                                             req.parent.index_space.id);
+          LegionSpy::log_requirement_fields(unique_op_id, offset + idx, 
+                                            req.instance_fields);
+        }
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -3516,6 +3653,24 @@ namespace Legion {
       {
         initialize_privilege_path(dst_privilege_paths[idx],
                                   dst_requirements[idx]);
+      }
+      if (!gather_requirements.empty())
+      {
+        gather_privilege_paths.resize(gather_requirements.size());
+        for (unsigned idx = 0; idx < gather_requirements.size(); idx++)
+        {
+          initialize_privilege_path(gather_privilege_paths[idx],
+                                    gather_requirements[idx]);
+        }
+      }
+      if (!scatter_requirements.empty())
+      {
+        scatter_privilege_paths.resize(scatter_requirements.size());
+        for (unsigned idx = 0; idx < scatter_requirements.size(); idx++)
+        {
+          initialize_privilege_path(scatter_privilege_paths[idx],
+                                    scatter_requirements[idx]);
+        }
       }
       if (runtime->legion_spy_enabled)
         log_copy_requirements();
@@ -3554,6 +3709,30 @@ namespace Legion {
         // Switch the privileges back when we are done
         if (is_reduce_req)
           dst_requirements[idx].privilege = REDUCE;
+      }
+      if (!gather_requirements.size())
+      {
+        gather_versions.resize(gather_requirements.size());
+        const size_t offset = src_requirements.size() + dst_requirements.size();
+        for (unsigned idx = 0; idx < src_requirements.size(); idx++)
+          runtime->forest->perform_dependence_analysis(this, offset + idx, 
+                                                 gather_requirements[idx],
+                                                 gather_restrict_infos[idx],
+                                                 gather_versions[idx],
+                                                 projection_info,
+                                                 gather_privilege_paths[idx]);
+      }
+      if (!scatter_requirements.size())
+      {
+        scatter_versions.resize(scatter_requirements.size());
+        const size_t offset = src_requirements.size() + dst_requirements.size();
+        for (unsigned idx = 0; idx < src_requirements.size(); idx++)
+          runtime->forest->perform_dependence_analysis(this, offset + idx, 
+                                                 scatter_requirements[idx],
+                                                 scatter_restrict_infos[idx],
+                                                 scatter_versions[idx],
+                                                 projection_info,
+                                                 scatter_privilege_paths[idx]);
       }
     }
 
@@ -4295,16 +4474,16 @@ namespace Legion {
         if (parent_index < 0)
           REPORT_LEGION_ERROR(ERROR_PARENT_TASK_COPY,
                            "Parent task %s (ID %lld) of copy operation "
-                                   "(ID %lld) does not have a region "
-                                   "requirement for region (%x,%x,%x) "
-                                   "as a parent of index %d of source region "
-                                   "requirements",
-                                   parent_ctx->get_task_name(), 
-                                   parent_ctx->get_unique_id(),
-                                   unique_op_id, 
-                                   src_requirements[idx].region.index_space.id,
-                                   src_requirements[idx].region.field_space.id, 
-                                   src_requirements[idx].region.tree_id, idx)
+                           "(ID %lld) does not have a region "
+                           "requirement for region (%x,%x,%x) "
+                           "as a parent of index %d of source region "
+                           "requirements",
+                           parent_ctx->get_task_name(), 
+                           parent_ctx->get_unique_id(),
+                           unique_op_id, 
+                           src_requirements[idx].region.index_space.id,
+                           src_requirements[idx].region.field_space.id, 
+                           src_requirements[idx].region.tree_id, idx)
         else
           src_parent_indexes[idx] = unsigned(parent_index);
       }
@@ -4315,18 +4494,66 @@ namespace Legion {
         if (parent_index < 0)
           REPORT_LEGION_ERROR(ERROR_PARENT_TASK_COPY,
                            "Parent task %s (ID %lld) of copy operation "
-                                   "(ID %lld) does not have a region "
-                                   "requirement for region (%x,%x,%x) "
-                                   "as a parent of index %d of destination "
-                                   "region requirements",
-                                   parent_ctx->get_task_name(), 
-                                   parent_ctx->get_unique_id(),
-                                   unique_op_id, 
-                                   dst_requirements[idx].region.index_space.id,
-                                   dst_requirements[idx].region.field_space.id, 
-                                   dst_requirements[idx].region.tree_id, idx)
+                           "(ID %lld) does not have a region "
+                           "requirement for region (%x,%x,%x) "
+                           "as a parent of index %d of destination "
+                           "region requirements",
+                           parent_ctx->get_task_name(), 
+                           parent_ctx->get_unique_id(),
+                           unique_op_id, 
+                           dst_requirements[idx].region.index_space.id,
+                           dst_requirements[idx].region.field_space.id, 
+                           dst_requirements[idx].region.tree_id, idx)
         else
           dst_parent_indexes[idx] = unsigned(parent_index);
+      }
+      if (!gather_requirements.empty())
+      {
+        gather_parent_indexes.resize(gather_requirements.size());
+        for (unsigned idx = 0; idx < gather_requirements.size(); idx++)
+        {
+          int parent_index = 
+            parent_ctx->find_parent_region_req(gather_requirements[idx]);
+          if (parent_index < 0)
+            REPORT_LEGION_ERROR(ERROR_PARENT_TASK_COPY,
+                           "Parent task %s (ID %lld) of copy operation "
+                           "(ID %lld) does not have a region "
+                           "requirement for region (%x,%x,%x) "
+                           "as a parent of index %d of gather region "
+                           "requirements",
+                           parent_ctx->get_task_name(), 
+                           parent_ctx->get_unique_id(),
+                           unique_op_id, 
+                           gather_requirements[idx].region.index_space.id,
+                           gather_requirements[idx].region.field_space.id, 
+                           gather_requirements[idx].region.tree_id, idx)
+          else
+            gather_parent_indexes[idx] = unsigned(parent_index);
+        }
+      }
+      if (!scatter_requirements.empty())
+      {
+        scatter_parent_indexes.resize(scatter_requirements.size());
+        for (unsigned idx = 0; idx < scatter_requirements.size(); idx++)
+        {
+          int parent_index = 
+            parent_ctx->find_parent_region_req(scatter_requirements[idx]);
+          if (parent_index < 0)
+            REPORT_LEGION_ERROR(ERROR_PARENT_TASK_COPY,
+                           "Parent task %s (ID %lld) of copy operation "
+                           "(ID %lld) does not have a region "
+                           "requirement for region (%x,%x,%x) "
+                           "as a parent of index %d of scatter region "
+                           "requirements",
+                           parent_ctx->get_task_name(), 
+                           parent_ctx->get_unique_id(),
+                           unique_op_id, 
+                           scatter_requirements[idx].region.index_space.id,
+                           scatter_requirements[idx].region.field_space.id, 
+                           scatter_requirements[idx].region.tree_id, idx)
+          else
+            scatter_parent_indexes[idx] = unsigned(parent_index);
+        }
       }
     }
 
@@ -4610,6 +4837,32 @@ namespace Legion {
         if (dst_requirements[idx].privilege != REDUCE)
           dst_requirements[idx].privilege = WRITE_ONLY;
       }
+      if (!launcher.gather_requirements.empty())
+      {
+        const size_t gather_size = launcher.gather_requirements.size();
+        gather_requirements.resize(gather_size);
+        gather_versions.resize(gather_size);
+        gather_restrict_infos.resize(gather_size);
+        gather_projection_infos.resize(gather_size);
+        for (unsigned idx = 0; idx < gather_size; idx++)
+        {
+          gather_requirements[idx] = launcher.gather_requirements[idx];
+          gather_requirements[idx].flags |= NO_ACCESS_FLAG;
+        }
+      }
+      if (!launcher.scatter_requirements.empty())
+      {
+        const size_t scatter_size = launcher.scatter_requirements.size();
+        scatter_requirements.resize(scatter_size);
+        scatter_versions.resize(scatter_size);
+        scatter_restrict_infos.resize(scatter_size);
+        scatter_projection_infos.resize(scatter_size);
+        for (unsigned idx = 0; idx < scatter_size; idx++)
+        {
+          scatter_requirements[idx] = launcher.scatter_requirements[idx];
+          scatter_requirements[idx].flags |= NO_ACCESS_FLAG;
+        }
+      }
       grants = launcher.grants;
       // Register ourselves with all the grants
       for (unsigned idx = 0; idx < grants.size(); idx++)
@@ -4638,6 +4891,26 @@ namespace Legion {
                         "for copy operation (ID %lld) with parent "
                         "task %s (ID %lld)",
                         src_requirements.size(), dst_requirements.size(),
+                        get_unique_id(), parent_ctx->get_task_name(),
+                        parent_ctx->get_unique_id())
+        if (!gather_requirements.empty() && 
+            (gather_requirements.size() != src_requirements.size()))
+          REPORT_LEGION_ERROR(ERROR_NUMBER_GATHER_REQUIREMENTS,
+                        "Number of gather requirements (%zd) does not "
+                        "match number of source requirements (%zd) "
+                        "for copy operation (ID %lld) with parent "
+                        "task %s (ID %lld)",
+                        gather_requirements.size(), src_requirements.size(),
+                        get_unique_id(), parent_ctx->get_task_name(),
+                        parent_ctx->get_unique_id())
+        if (!scatter_requirements.empty() &&
+            (scatter_requirements.size() != src_requirements.size()))
+          REPORT_LEGION_ERROR(ERROR_NUMBER_SCATTER_REQUIREMENTS,
+                        "Number of scatter requirements (%zd) does not "
+                        "match number of source requriements (%zd) "
+                        "for copy operation ID (%lld) with parent "
+                        "task %s (ID %lld)",
+                        scatter_requirements.size(), src_requirements.size(),
                         get_unique_id(), parent_ctx->get_task_name(),
                         parent_ctx->get_unique_id())
         for (unsigned idx = 0; idx < src_requirements.size(); idx++)
@@ -4694,6 +4967,54 @@ namespace Legion {
           check_copy_privilege(dst_requirements[idx], idx, 
                                false/*src*/, true/*permit projection*/);
         }
+        if (!gather_requirements.empty())
+        {
+          for (unsigned idx = 0; idx < gather_requirements.size(); idx++)
+          {
+            if (gather_requirements[idx].privilege_fields.size() != 1)
+              REPORT_LEGION_ERROR(ERROR_COPY_GATHER_REQUIREMENT,
+                          "Copy gather requirement %d for copy "
+                          "operation (ID %lld) in parent task %s "
+                          "(ID %lld) has %zd privilege fields but "
+                          "gather requirements are only permitted "
+                          "to have one privilege field.", idx,
+                          get_unique_id(), parent_task->get_task_name(),
+                          parent_task->get_unique_id(),
+                          gather_requirements[idx].privilege_fields.size())
+            if (!IS_READ_ONLY(gather_requirements[idx]))
+              REPORT_LEGION_ERROR(ERROR_COPY_GATHER_REQUIREMENT,
+                          "Copy gather requirement %d for copy "
+                          "operation (ID %lld) in parent task %s "
+                          "(ID %lld) must be requested with a "
+                          "read-only privilege.", idx,
+                          get_unique_id(), parent_ctx->get_task_name(),
+                          parent_ctx->get_unique_id())
+          }
+        }
+        if (!scatter_requirements.empty())
+        {
+          for (unsigned idx = 0; idx < scatter_requirements.size(); idx++)
+          {
+            if (scatter_requirements[idx].privilege_fields.size() != 1)
+              REPORT_LEGION_ERROR(ERROR_COPY_SCATTER_REQUIREMENT,
+                          "Copy scatter requirement %d for copy "
+                          "operation (ID %lld) in parent task %s "
+                          "(ID %lld) has %zd privilege fields but "
+                          "scatter requirements are only permitted "
+                          "to have one privilege field.", idx,
+                          get_unique_id(), parent_task->get_task_name(),
+                          parent_task->get_unique_id(),
+                          scatter_requirements[idx].privilege_fields.size())
+            if (!IS_READ_ONLY(scatter_requirements[idx]))
+              REPORT_LEGION_ERROR(ERROR_COPY_SCATTER_REQUIREMENT,
+                          "Copy scatter requirement %d for copy "
+                          "operation (ID %lld) in parent task %s "
+                          "(ID %lld) must be requested with a "
+                          "read-only privilege.", idx,
+                          get_unique_id(), parent_ctx->get_task_name(),
+                          parent_ctx->get_unique_id())
+          }
+        }
       }
       if (runtime->legion_spy_enabled)
       {
@@ -4721,6 +5042,8 @@ namespace Legion {
       deactivate_copy();
       src_projection_infos.clear();
       dst_projection_infos.clear();
+      gather_projection_infos.clear();
+      scatter_projection_infos.clear();
       // We can deactivate all of our point operations
       for (std::vector<PointCopyOp*>::const_iterator it = points.begin();
             it != points.end(); it++)
@@ -4750,6 +5073,24 @@ namespace Legion {
       {
         initialize_privilege_path(dst_privilege_paths[idx],
                                   dst_requirements[idx]);
+      }
+      if (!gather_requirements.empty())
+      {
+        gather_privilege_paths.resize(gather_requirements.size());
+        for (unsigned idx = 0; idx < gather_requirements.size(); idx++)
+        {
+          initialize_privilege_path(gather_privilege_paths[idx],
+                                    gather_requirements[idx]);
+        }
+      }
+      if (!scatter_requirements.empty())
+      {
+        scatter_privilege_paths.resize(scatter_requirements.size());
+        for (unsigned idx = 0; idx < scatter_requirements.size(); idx++)
+        {
+          initialize_privilege_path(scatter_privilege_paths[idx],
+                                    scatter_requirements[idx]);
+        }
       }
       if (runtime->legion_spy_enabled)
       { 
@@ -4799,6 +5140,60 @@ namespace Legion {
             LegionSpy::log_requirement_projection(unique_op_id,
                 src_requirements.size() + idx, req.projection);
         }
+        if (!gather_requirements.empty())
+        {
+          const size_t offset = 
+            src_requirements.size() + dst_requirements.size();
+          for (unsigned idx = 0; idx < gather_requirements.size(); idx++)
+          {
+            const RegionRequirement &req = gather_requirements[idx];
+            const bool reg = (req.handle_type == SINGULAR) ||
+                             (req.handle_type == REG_PROJECTION);
+            const bool proj = (req.handle_type == REG_PROJECTION) ||
+                              (req.handle_type == PART_PROJECTION); 
+
+            LegionSpy::log_logical_requirement(unique_op_id, offset + idx, reg,
+                reg ? req.region.index_space.id :
+                      req.partition.index_partition.id,
+                reg ? req.region.field_space.id :
+                      req.partition.field_space.id,
+                reg ? req.region.tree_id : 
+                      req.partition.tree_id,
+                req.privilege, req.prop, req.redop, req.parent.index_space.id);
+            LegionSpy::log_requirement_fields(unique_op_id, offset + idx, 
+                                              req.instance_fields);
+            if (proj)
+              LegionSpy::log_requirement_projection(unique_op_id, offset + idx,
+                                                    req.projection);
+          }
+        }
+        if (!scatter_requirements.empty())
+        {
+          const size_t offset = src_requirements.size() + 
+            dst_requirements.size() + gather_requirements.size();
+          for (unsigned idx = 0; idx < scatter_requirements.size(); idx++)
+          {
+            const RegionRequirement &req = scatter_requirements[idx];
+            const bool reg = (req.handle_type == SINGULAR) ||
+                             (req.handle_type == REG_PROJECTION);
+            const bool proj = (req.handle_type == REG_PROJECTION) ||
+                              (req.handle_type == PART_PROJECTION); 
+
+            LegionSpy::log_logical_requirement(unique_op_id, offset + idx, reg,
+                reg ? req.region.index_space.id :
+                      req.partition.index_partition.id,
+                reg ? req.region.field_space.id :
+                      req.partition.field_space.id,
+                reg ? req.region.tree_id : 
+                      req.partition.tree_id,
+                req.privilege, req.prop, req.redop, req.parent.index_space.id);
+            LegionSpy::log_requirement_fields(unique_op_id, offset + idx, 
+                                              req.instance_fields);
+            if (proj)
+              LegionSpy::log_requirement_projection(unique_op_id, offset + idx,
+                                                    req.projection);
+          }
+        }
       }
     }
 
@@ -4840,6 +5235,36 @@ namespace Legion {
         // Switch the privileges back when we are done
         if (is_reduce_req)
           dst_requirements[idx].privilege = REDUCE;
+      }
+      if (!gather_requirements.empty())
+      {
+        gather_versions.resize(gather_requirements.size());
+        for (unsigned idx = 0; idx < gather_requirements.size(); idx++)
+        {
+          gather_projection_infos[idx] = 
+            ProjectionInfo(runtime, gather_requirements[idx], launch_space);
+          runtime->forest->perform_dependence_analysis(this, idx, 
+                                                 gather_requirements[idx],
+                                                 gather_restrict_infos[idx],
+                                                 gather_versions[idx],
+                                                 gather_projection_infos[idx],
+                                                 gather_privilege_paths[idx]);
+        }
+      }
+      if (!scatter_requirements.empty())
+      {
+        scatter_versions.resize(scatter_requirements.size());
+        for (unsigned idx = 0; idx < scatter_requirements.size(); idx++)
+        {
+          scatter_projection_infos[idx] = 
+            ProjectionInfo(runtime, scatter_requirements[idx], launch_space);
+          runtime->forest->perform_dependence_analysis(this, idx, 
+                                                 scatter_requirements[idx],
+                                                 scatter_restrict_infos[idx],
+                                                 scatter_versions[idx],
+                                                 scatter_projection_infos[idx],
+                                                 scatter_privilege_paths[idx]);
+        }
       }
     }
 
@@ -5198,20 +5623,26 @@ namespace Legion {
       owner = own;
       execution_fence_event = own->get_execution_fence_event();
       // From Copy
-      src_requirements   = owner->src_requirements;
-      dst_requirements   = owner->dst_requirements;
-      grants             = owner->grants;
-      wait_barriers      = owner->wait_barriers;
-      arrive_barriers    = owner->arrive_barriers;
-      parent_task        = owner->parent_task;
-      map_id             = owner->map_id;
-      tag                = owner->tag;
+      src_requirements        = owner->src_requirements;
+      dst_requirements        = owner->dst_requirements;
+      gather_requirements     = owner->gather_requirements;
+      scatter_requirements    = owner->scatter_requirements;
+      grants                  = owner->grants;
+      wait_barriers           = owner->wait_barriers;
+      arrive_barriers         = owner->arrive_barriers;
+      parent_task             = owner->parent_task;
+      map_id                  = owner->map_id;
+      tag                     = owner->tag;
       // From CopyOp
-      src_parent_indexes = owner->src_parent_indexes;
-      dst_parent_indexes = owner->dst_parent_indexes;
-      src_restrict_infos = owner->src_restrict_infos;
-      dst_restrict_infos = owner->dst_restrict_infos;
-      predication_guard  = owner->predication_guard;
+      src_parent_indexes      = owner->src_parent_indexes;
+      dst_parent_indexes      = owner->dst_parent_indexes;
+      gather_parent_indexes   = owner->gather_parent_indexes;
+      scatter_parent_indexes  = owner->scatter_parent_indexes;
+      src_restrict_infos      = owner->src_restrict_infos;
+      dst_restrict_infos      = owner->dst_restrict_infos;
+      gather_restrict_infos   = owner->gather_restrict_infos;
+      scatter_restrict_infos  = owner->scatter_restrict_infos;
+      predication_guard       = owner->predication_guard;
       if (runtime->legion_spy_enabled)
         LegionSpy::log_index_point(owner->get_unique_op_id(), unique_op_id, p);
     }
@@ -5321,6 +5752,27 @@ namespace Legion {
         if (is_reduce_req)
           dst_requirements[idx].privilege = REDUCE;
       }
+      if (!gather_requirements.empty())
+      {
+        gather_versions = owner->gather_versions;
+        const size_t offset = src_requirements.size() + dst_requirements.size();
+        for (unsigned idx = 0; idx < gather_requirements.size(); idx++)
+          perform_projection_version_analysis(
+            owner->gather_projection_infos[idx],owner->gather_requirements[idx], 
+            gather_requirements[idx], offset + idx, logical_context_uid, 
+            gather_versions[idx], preconditions);
+      }
+      if (!scatter_requirements.empty())
+      {
+        scatter_versions = owner->scatter_versions;
+        const size_t offset = src_requirements.size() + dst_requirements.size();
+        for (unsigned idx = 0; idx < scatter_requirements.size(); idx++)
+          perform_projection_version_analysis(
+            owner->scatter_projection_infos[idx],
+            owner->scatter_requirements[idx], 
+            scatter_requirements[idx], offset + idx, logical_context_uid, 
+            scatter_versions[idx], preconditions);
+      }
       // Then put ourselves in the queue of operations ready to map
       if (!preconditions.empty())
         enqueue_ready_operation(Runtime::merge_events(preconditions));
@@ -5340,6 +5792,18 @@ namespace Legion {
       for (std::vector<VersionInfo>::iterator it = dst_versions.begin();
             it != dst_versions.end(); it++)
         it->clear();
+      if (!gather_versions.empty())
+      {
+        for (std::vector<VersionInfo>::iterator it = gather_versions.begin();
+              it != gather_versions.end(); it++)
+          it->clear();
+      }
+      if (!scatter_versions.empty())
+      {
+        for (std::vector<VersionInfo>::iterator it = scatter_versions.begin();
+              it != scatter_versions.end(); it++)
+          it->clear();
+      }
       // Tell our owner that we are done
       owner->handle_point_commit(profiling_reported);
       // Don't commit this operation until we've reported our profiling
@@ -5366,15 +5830,35 @@ namespace Legion {
         src_requirements[idx].region = result;
         src_requirements[idx].handle_type = SINGULAR;
       }
-      else
+      else if (idx < (src_requirements.size() + dst_requirements.size()))
       {
         idx -= src_requirements.size();
 #ifdef DEBUG_LEGION
-        assert(idx < dst_requirements.size());
         assert(dst_requirements[idx].handle_type != SINGULAR);
 #endif
         dst_requirements[idx].region = result;
         dst_requirements[idx].handle_type = SINGULAR;
+      }
+      else if (idx < (src_requirements.size() + 
+            dst_requirements.size() + gather_requirements.size()))
+      {
+        idx -= (src_requirements.size() + dst_requirements.size());
+#ifdef DEBUG_LEGION
+        assert(gather_requirements[idx].handle_type != SINGULAR);
+#endif
+        gather_requirements[idx].region = result;
+        gather_requirements[idx].handle_type = SINGULAR;
+      }
+      else
+      {
+        idx -= (src_requirements.size() + dst_requirements.size() + 
+                gather_requirements.size());
+#ifdef DEBUG_LEGION
+        assert(idx < scatter_requirements.size());
+        assert(scatter_requirements[idx].handle_type != SINGULAR);
+#endif
+        scatter_requirements[idx].region = result;
+        scatter_requirements[idx].handle_type = SINGULAR;
       }
     }
 

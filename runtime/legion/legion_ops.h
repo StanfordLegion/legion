@@ -914,6 +914,15 @@ namespace Legion {
       std::vector<VersionInfo>    dst_versions;
       std::vector<RestrictInfo>   src_restrict_infos;
       std::vector<RestrictInfo>   dst_restrict_infos;
+    public: // These are only used for indirect copies
+      std::vector<RegionTreePath> gather_privilege_paths;
+      std::vector<RegionTreePath> scatter_privilege_paths;
+      std::vector<unsigned>       gather_parent_indexes;
+      std::vector<unsigned>       scatter_parent_indexes;
+      std::vector<VersionInfo>    gather_versions;
+      std::vector<VersionInfo>    scatter_versions;
+      std::vector<RestrictInfo>   gather_restrict_infos;
+      std::vector<RestrictInfo>   scatter_restrict_infos;
     protected: // for support with mapping
       MapperManager*              mapper;
       unsigned                    current_index;
@@ -972,6 +981,8 @@ namespace Legion {
     public:
       std::vector<ProjectionInfo>   src_projection_infos;
       std::vector<ProjectionInfo>   dst_projection_infos;
+      std::vector<ProjectionInfo>   gather_projection_infos;
+      std::vector<ProjectionInfo>   scatter_projection_infos;
     protected:
       std::vector<PointCopyOp*>     points;
       unsigned                      points_committed;
