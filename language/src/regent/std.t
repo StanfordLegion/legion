@@ -3662,15 +3662,94 @@ terra Pipe:read_string() : &int8
   return str
 end
 
+
+local terra checksum_murmur3(llvm_bitcode: &int8) : &int8
+  var len = c.strlen(llvm_bitcode)
+  var output: uint64[2]
+  c.murmur_hash3_128(llvm_bitcode, len, 0, &(output[0]))
+  -- convert to string of hex values
+  var hex = [&int8](c.malloc(33))
+  c.sprintf(&(hex[0]), "%016lx%016lx", output[0], output[1])
+  return hex
+end
+
+local function incremental_compile_tasks()
+  local pclog = log.make_logger('incr_compile')
+  local objfiles = terralib.newlist()
+  local task_wrappers = {}
+
+  for _, variant in ipairs(variants) do
+    local exports = {}
+    exports[variant:wrapper_name()] = variant:make_wrapper()
+    local llvm_bitcode = {}
+    local checksum_m = {}
+    local checksum = 0
+    profile('incremental_compile:llvmir_with_checksum', variant, function()
+      llvm_bitcode = terralib.saveobj({}, "llvmir", exports, nil, nil, false)
+      local raw_checksum_m = checksum_murmur3(llvm_bitcode)
+      checksum_m = ffi.string(raw_checksum_m)
+      c.free(raw_checksum_m)
+    end)()
+
+    -- if file exists then we add it to the list of object files
+    local checksumfile = {}
+    local cache_filename = {}
+    local homedir = os.getenv('HOME')
+    cache_filename = homedir .. "/.cache/" .. variant:wrapper_name() .. checksum_m .. ".o"
+
+    -- if file doesn't exist then save the object file
+    if c.access(cache_filename, c.F_OK) == -1 then
+      profile('incremental_compile:llvm_object_file_compilation', variant, function()
+        pclog:info('cached file does not exist '  .. cache_filename .. ': task = ' .. variant.definition:getname())
+        local objtmp = os.tmpname() .. ".o"
+        local mvcmd = {}
+        terralib.saveobj(objtmp, "object", exports)
+        mvcmd = "mv " .. objtmp  ..  " " .. cache_filename
+        os.execute(mvcmd)
+      end)()
+
+      -- save the .ll file for debugging
+      -- local llvm_bitcode = {}
+      -- llvm_bitcode =
+      --   terralib.saveobj(variant:wrapper_name() .. checksum_m .. ".ll" , "llvmir", exports)
+    else
+      pclog:info('cached file does exist '  .. cache_filename .. ' : task = ' .. variant.definition:getname())
+    end
+
+    objfiles:insert(cache_filename)
+  end
+
+  -- Declare all task wrappers using a (fake) header file, so the compiler will
+  -- expect them to be linked-in later.
+  local header = [[
+#include "legion.h"
+#include "legion_terra.h"
+#include "legion_terra_partitions.h"
+]] ..
+  table.concat(
+    variants:map(function(variant) return variant:wrapper_sig() .. '\n' end)
+  )
+  task_wrappers = terralib.includecstring(header)
+  return objfiles,task_wrappers
+end
+
 local function compile_tasks_in_parallel()
   -- Force codegen; the main process will need to codegen later anyway, so we
   -- might as well do it now and not duplicate the work on the children.
-  for _,variant in ipairs(variants) do
-    variant.task:complete()
-  end
+
+  profile('task:complete', nil, function()
+    for _, variant in ipairs(variants) do
+      variant.task:complete()
+    end
+  end)()
 
   -- Don't spawn extra processes if jobs == 1.
   local num_slaves = math.max(tonumber(std.config["jobs"]) or 1, 1)
+
+  if std.config["incr-comp"] then
+    return profile('incremental_compile', nil, incremental_compile_tasks)()
+  end
+
   if num_slaves == 1 then
     return terralib.newlist(), make_task_wrappers()
   end
@@ -3711,6 +3790,7 @@ local function compile_tasks_in_parallel()
                    tostring(variant) .. ' to file ' .. filename)
         local exports = {}
         exports[variant:wrapper_name()] = variant:make_wrapper()
+
         profile('compile', variant, function()
           terralib.saveobj(filename, 'object', exports)
         end)()
