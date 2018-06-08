@@ -1283,13 +1283,13 @@ namespace Legion {
       };
     public:
       LayoutConstraints(LayoutConstraintID layout_id, FieldSpace handle, 
-                        Runtime *runtime, 
-                        AddressSpace owner_space, AddressSpaceID local_space);
+                        Runtime *runtime, AddressSpace owner_space, 
+                        AddressSpaceID local_space, bool inter);
       LayoutConstraints(LayoutConstraintID layout_id, Runtime *runtime, 
-                        const LayoutConstraintRegistrar &registrar);
+                        const LayoutConstraintRegistrar &registrar, bool inter);
       LayoutConstraints(LayoutConstraintID layout_id,
                         Runtime *runtime, const LayoutConstraintSet &cons,
-                        FieldSpace handle);
+                        FieldSpace handle, bool inter);
       LayoutConstraints(const LayoutConstraints &rhs);
       virtual ~LayoutConstraints(void);
     public:
@@ -1302,6 +1302,7 @@ namespace Legion {
       void send_constraint_response(AddressSpaceID source,
                                     RtUserEvent done_event);
       void update_constraints(Deserializer &derez);
+      void release(void);
       void release_remote_instances(void);
     public:
       bool entails(LayoutConstraints *other_constraints, unsigned total_dims);
@@ -1327,6 +1328,9 @@ namespace Legion {
       const AddressSpace owner_space;
       const AddressSpace local_space;
       Runtime *const runtime;
+      // True if this layout constraint object was made by the runtime
+      // False if it was made by the application or the mapper
+      const bool internal;
     protected:
       char *constraints_name;
       mutable LocalLock layout_lock;
@@ -3008,7 +3012,7 @@ namespace Legion {
           const LayoutConstraintRegistrar &registrar, 
           LayoutConstraintID id);
       LayoutConstraints* register_layout(FieldSpace handle,
-                                         const LayoutConstraintSet &cons);
+               const LayoutConstraintSet &cons, bool internal);
       bool register_layout(LayoutConstraints *new_constraints);
       void release_layout(LayoutConstraintID layout_id);
       void unregister_layout(LayoutConstraintID layout_id);
