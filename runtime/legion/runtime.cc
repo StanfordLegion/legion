@@ -6607,11 +6607,6 @@ namespace Legion {
               runtime->handle_constraint_release(derez);
               break;
             }
-          case SEND_CONSTRAINT_REMOVAL:
-            {
-              runtime->handle_constraint_removal(derez);
-              break;
-            }
           case SEND_TOP_LEVEL_TASK_REQUEST:
             {
               runtime->handle_top_level_task_request(derez);
@@ -8264,22 +8259,26 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     LayoutConstraints::LayoutConstraints(LayoutConstraintID lay_id,FieldSpace h,
-                                         Runtime *rt, AddressSpaceID owner, 
-                                         AddressSpaceID local, bool inter)
-      : LayoutConstraintSet(), Collectable(), layout_id(lay_id), handle(h), 
-        owner_space(owner), local_space(local), runtime(rt), internal(inter),
-        constraints_name(NULL) 
+                                     Runtime *rt, bool inter, DistributedID did)
+      : LayoutConstraintSet(), DistributedCollectable(rt, (did > 0) ? did : 
+          rt->get_available_distributed_id(), get_owner_space(lay_id, rt), 
+          (did == 0)), layout_id(lay_id), handle(h), internal(inter), 
+        constraints_name(NULL), layout_lock(gc_lock)
     //--------------------------------------------------------------------------
     {
+#ifdef LEGION_GC
+      log_garbage.info("GC Constraints %lld %d", 
+          LEGION_DISTRIBUTED_ID_FILTER(did), local_space);
+#endif
     }
 
     //--------------------------------------------------------------------------
     LayoutConstraints::LayoutConstraints(LayoutConstraintID lay_id, Runtime *rt,
                          const LayoutConstraintRegistrar &registrar, bool inter)
-      : LayoutConstraintSet(registrar.layout_constraints), Collectable(),
-        layout_id(lay_id), handle(registrar.handle), 
-        owner_space(rt->address_space), local_space(rt->address_space),
-        runtime(rt), internal(inter)
+      : LayoutConstraintSet(registrar.layout_constraints), 
+        DistributedCollectable(rt, rt->get_available_distributed_id(), 
+            get_owner_space(lay_id, rt)), layout_id(lay_id), 
+        handle(registrar.handle), internal(inter), layout_lock(gc_lock)
     //--------------------------------------------------------------------------
     {
       if (registrar.layout_name == NULL)
@@ -8289,37 +8288,38 @@ namespace Legion {
       }
       else
         constraints_name = strdup(registrar.layout_name);
+#ifdef LEGION_GC
+      log_garbage.info("GC Constraints %lld %d", 
+          LEGION_DISTRIBUTED_ID_FILTER(did), local_space);
+#endif
     }
 
     //--------------------------------------------------------------------------
     LayoutConstraints::LayoutConstraints(LayoutConstraintID lay_id, Runtime *rt,
                                          const LayoutConstraintSet &cons,
                                          FieldSpace h, bool inter)
-      : LayoutConstraintSet(cons), Collectable(), layout_id(lay_id), handle(h),
-        owner_space(rt->address_space), local_space(rt->address_space), 
-        runtime(rt), internal(inter)
+      : LayoutConstraintSet(cons), DistributedCollectable(rt,
+          rt->get_available_distributed_id(), get_owner_space(lay_id, rt)), 
+        layout_id(lay_id), handle(h), internal(inter), layout_lock(gc_lock)
     //--------------------------------------------------------------------------
     {
       constraints_name = (char*)malloc(64*sizeof(char));
       snprintf(constraints_name,64,"layout constraints %ld", layout_id);
+#ifdef LEGION_GC
+      log_garbage.info("GC Constraints %lld %d", 
+          LEGION_DISTRIBUTED_ID_FILTER(did), local_space);
+#endif
     }
 
     //--------------------------------------------------------------------------
     LayoutConstraints::LayoutConstraints(const LayoutConstraints &rhs)
-      : LayoutConstraintSet(rhs), Collectable(), layout_id(rhs.layout_id), 
-        handle(rhs.handle), owner_space(0), local_space(0), runtime(NULL), 
-        internal(false)
+      : LayoutConstraintSet(rhs), DistributedCollectable(NULL, 0, 0), 
+        layout_id(rhs.layout_id), handle(rhs.handle), internal(false),
+        layout_lock(gc_lock)
     //--------------------------------------------------------------------------
     {
       // should never be called
       assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    void LayoutConstraints::RemoveFunctor::apply(AddressSpaceID target)
-    //--------------------------------------------------------------------------
-    {
-      runtime->send_constraint_removal(target, rez);
     }
 
     //--------------------------------------------------------------------------
@@ -8340,6 +8340,41 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void LayoutConstraints::notify_active(ReferenceMutator *mutator)
+    //--------------------------------------------------------------------------
+    {
+      // If we're not the owner add a remote reference
+      if (!is_owner())
+        send_remote_gc_update(owner_space, mutator, 1/*count*/, true/*add*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void LayoutConstraints::notify_inactive(ReferenceMutator *mutator)
+    //--------------------------------------------------------------------------
+    {
+      if (is_owner())
+        runtime->unregister_layout(layout_id);
+      else
+        send_remote_gc_update(owner_space, mutator, 1/*count*/, false/*add*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void LayoutConstraints::notify_valid(ReferenceMutator *mutator)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void LayoutConstraints::notify_invalid(ReferenceMutator *mutator)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
     void LayoutConstraints::send_constraint_response(AddressSpaceID target,
                                                      RtUserEvent done_event)
     //--------------------------------------------------------------------------
@@ -8348,6 +8383,7 @@ namespace Legion {
       {
         RezCheck z(rez);
         rez.serialize(layout_id);
+        rez.serialize(did);
         rez.serialize(handle);
         rez.serialize<bool>(internal);
         size_t name_len = strlen(constraints_name)+1;
@@ -8377,29 +8413,6 @@ namespace Legion {
       derez.deserialize(constraints_name, name_len);
       // unpack the constraints
       deserialize(derez); 
-    }
-
-    //--------------------------------------------------------------------------
-    void LayoutConstraints::release(void)
-    //--------------------------------------------------------------------------
-    {
-      runtime->release_layout(layout_id);
-    }
-
-    //--------------------------------------------------------------------------
-    void LayoutConstraints::release_remote_instances(void)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(is_owner());
-#endif
-      Serializer rez;
-      {
-        RezCheck z(rez);
-        rez.serialize(layout_id);
-      }
-      RemoveFunctor functor(rez, runtime);
-      remote_instances.map(functor);
     }
 
     //--------------------------------------------------------------------------
@@ -8598,22 +8611,32 @@ namespace Legion {
       DerezCheck z(derez);
       LayoutConstraintID lay_id;
       derez.deserialize(lay_id);
+      DistributedID did;
+      derez.deserialize(did);
       FieldSpace handle;
       derez.deserialize(handle);
       bool internal;
       derez.deserialize(internal);
       // Make it an unpack it, then try to register it 
       LayoutConstraints *new_constraints = 
-        new LayoutConstraints(lay_id, handle, runtime,
-                              source, runtime->address_space, internal);
+        new LayoutConstraints(lay_id, handle, runtime, internal, did);
       new_constraints->update_constraints(derez);
-      if (!runtime->register_layout(new_constraints))
-        delete (new_constraints);
+      std::set<RtEvent> preconditions;
       // Now try to register this with the runtime
+      if (!runtime->register_layout(new_constraints))
+        delete new_constraints;
+      else
+      {
+        WrapperReferenceMutator mutator(preconditions);
+        new_constraints->register_with_runtime(&mutator);
+      }
       // Trigger our done event and then return it
       RtUserEvent done_event;
       derez.deserialize(done_event);
-      Runtime::trigger_event(done_event);
+      if (!preconditions.empty())
+        Runtime::trigger_event(done_event,Runtime::merge_events(preconditions));
+      else
+        Runtime::trigger_event(done_event);
       return lay_id;
     }
 
@@ -9582,7 +9605,7 @@ namespace Legion {
             layout_constraints_table.begin();
           LayoutConstraints *next = next_it->second;
           layout_constraints_table.erase(next_it);
-          if (next->remove_reference())
+          if (!next->internal && next->remove_base_gc_ref(APPLICATION_REF))
             delete (next);
         }
       }
@@ -14613,15 +14636,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_constraint_removal(AddressSpaceID target,
-                                          Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message(rez, SEND_CONSTRAINT_REMOVAL,
-                                        DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
     void Runtime::send_mpi_rank_exchange(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -15763,16 +15777,6 @@ namespace Legion {
       LayoutConstraintID layout_id;
       derez.deserialize(layout_id);
       release_layout(layout_id);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_constraint_removal(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      DerezCheck z(derez);
-      LayoutConstraintID layout_id;
-      derez.deserialize(layout_id);
-      unregister_layout(layout_id);
     }
 
     //--------------------------------------------------------------------------
@@ -18574,7 +18578,11 @@ namespace Legion {
     bool Runtime::register_layout(LayoutConstraints *new_constraints)
     //--------------------------------------------------------------------------
     {
-      new_constraints->add_reference();
+      new_constraints->add_base_resource_ref(RUNTIME_REF);
+      // If we're not internal and we're the owner then we also
+      // add an application reference to prevent early collection
+      if (!new_constraints->internal && new_constraints->is_owner())
+        new_constraints->add_base_gc_ref(APPLICATION_REF);
       AutoLock l_lock(layout_constraints_lock);
       std::map<LayoutConstraintID,LayoutConstraints*>::const_iterator finder =
         layout_constraints_table.find(new_constraints->layout_id);
@@ -18589,11 +18597,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       LayoutConstraints *constraints = find_layout_constraints(layout_id);
+#ifdef DEBUG_LEGION
+      assert(!constraints->internal);
+#endif
       // Check to see if this is the owner
       if (constraints->is_owner())
       {
-        // Send the remove message to all the remove nodes
-        constraints->release_remote_instances();
+        if (constraints->remove_base_gc_ref(APPLICATION_REF))
+          delete constraints;
       }
       else
       {
@@ -18605,7 +18616,6 @@ namespace Legion {
         }
         send_constraint_release(constraints->owner_space, rez);
       }
-      unregister_layout(layout_id);
     }
 
     //--------------------------------------------------------------------------
@@ -18623,7 +18633,8 @@ namespace Legion {
           layout_constraints_table.erase(finder);
         }
       }
-      if ((constraints != NULL) && constraints->remove_reference())
+      if ((constraints != NULL) && 
+          constraints->remove_base_resource_ref(RUNTIME_REF))
         delete (constraints);
     }
 
