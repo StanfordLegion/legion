@@ -8274,11 +8274,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     LayoutConstraints::LayoutConstraints(LayoutConstraintID lay_id, Runtime *rt,
-                         const LayoutConstraintRegistrar &registrar, bool inter)
+      const LayoutConstraintRegistrar &registrar, bool inter, DistributedID did)
       : LayoutConstraintSet(registrar.layout_constraints), 
-        DistributedCollectable(rt, rt->get_available_distributed_id(), 
-            get_owner_space(lay_id, rt)), layout_id(lay_id), 
-        handle(registrar.handle), internal(inter), layout_lock(gc_lock)
+        DistributedCollectable(rt, (did > 0) ? did : 
+            rt->get_available_distributed_id(), get_owner_space(lay_id, rt)), 
+        layout_id(lay_id), handle(registrar.handle), internal(inter), 
+        layout_lock(gc_lock)
     //--------------------------------------------------------------------------
     {
       if (registrar.layout_name == NULL)
@@ -9605,7 +9606,7 @@ namespace Legion {
             layout_constraints_table.begin();
           LayoutConstraints *next = next_it->second;
           layout_constraints_table.erase(next_it);
-          if (!next->internal && next->remove_base_gc_ref(APPLICATION_REF))
+          if (next->remove_base_resource_ref(RUNTIME_REF))
             delete (next);
         }
       }
@@ -9666,11 +9667,47 @@ namespace Legion {
                 pending_constraints.end())
           unique_constraint_id += runtime_stride;
         // Now do the registrations
+        std::map<AddressSpaceID,unsigned> address_counts;
         for (std::map<LayoutConstraintID,LayoutConstraintRegistrar>::
               const_iterator it = pending_constraints.begin(); 
               it != pending_constraints.end(); it++)
         {
-          register_layout(it->second, it->first);
+          // Figure out the distributed ID that we expect and then
+          // check against what we expect on the owner node. This
+          // is slightly brittle, but we'll always catch it when
+          // we break the invariant.
+          const AddressSpaceID owner_space = 
+            LayoutConstraints::get_owner_space(it->first, this);
+          // Compute the expected DID
+          DistributedID expected_did;
+          std::map<AddressSpaceID,unsigned>::iterator finder = 
+            address_counts.find(owner_space);
+          if (finder != address_counts.end())
+          {
+            if (owner_space == 0)
+              expected_did = (finder->second+1) * runtime_stride;
+            else
+              expected_did = owner_space + (finder->second * runtime_stride);
+            finder->second++;
+          }
+          else
+          {
+            if (owner_space == 0)
+              expected_did = runtime_stride;
+            else
+              expected_did = owner_space;
+            address_counts[owner_space] = 1;
+          }
+          // Now if we're the owner we have to actually bump the distributed ID
+          // number to reflect that we allocated, we'll also confirm that it
+          // is what we expected
+          if (owner_space == address_space)
+          {
+            const DistributedID did = get_available_distributed_id();
+            if (did != expected_did)
+              assert(false);
+          }
+          register_layout(it->second, it->first, expected_did);
         }
         // avoid races if we are doing separate runtime creation
         if (!separate_runtime_instances)
@@ -18550,15 +18587,15 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     LayoutConstraintID Runtime::register_layout(
-                                     const LayoutConstraintRegistrar &registrar,
-                                     LayoutConstraintID layout_id)
+                                const LayoutConstraintRegistrar &registrar,
+                                LayoutConstraintID layout_id, DistributedID did)
     //--------------------------------------------------------------------------
     {
       if (layout_id == AUTO_GENERATE_ID)
         layout_id = get_unique_constraint_id();
       // Now make our entry and then return the result
       LayoutConstraints *constraints = 
-        new LayoutConstraints(layout_id, this, registrar, false/*internal*/);
+        new LayoutConstraints(layout_id, this, registrar,false/*internal*/,did);
       register_layout(constraints);
       return layout_id;
     }
