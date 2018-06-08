@@ -3531,6 +3531,21 @@ legion_runtime_end_trace(legion_runtime_t runtime_,
 }
 
 // -----------------------------------------------------------------------
+// Frame Operations
+// -----------------------------------------------------------------------
+
+void
+legion_runtime_complete_frame(legion_runtime_t runtime_,
+                              legion_context_t ctx_)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+
+  runtime->complete_frame(ctx);
+}
+
+
+// -----------------------------------------------------------------------
 // Fence Operations
 // -----------------------------------------------------------------------
 

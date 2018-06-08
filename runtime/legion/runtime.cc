@@ -8272,9 +8272,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     LayoutConstraints::LayoutConstraints(LayoutConstraintID lay_id,FieldSpace h,
                                          Runtime *rt, AddressSpaceID owner, 
-                                         AddressSpaceID local)
+                                         AddressSpaceID local, bool inter)
       : LayoutConstraintSet(), Collectable(), layout_id(lay_id), handle(h), 
-        owner_space(owner), local_space(local), runtime(rt), 
+        owner_space(owner), local_space(local), runtime(rt), internal(inter),
         constraints_name(NULL) 
     //--------------------------------------------------------------------------
     {
@@ -8282,11 +8282,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     LayoutConstraints::LayoutConstraints(LayoutConstraintID lay_id, Runtime *rt,
-                                     const LayoutConstraintRegistrar &registrar)
+                         const LayoutConstraintRegistrar &registrar, bool inter)
       : LayoutConstraintSet(registrar.layout_constraints), Collectable(),
         layout_id(lay_id), handle(registrar.handle), 
         owner_space(rt->address_space), local_space(rt->address_space),
-        runtime(rt)
+        runtime(rt), internal(inter)
     //--------------------------------------------------------------------------
     {
       if (registrar.layout_name == NULL)
@@ -8301,10 +8301,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     LayoutConstraints::LayoutConstraints(LayoutConstraintID lay_id, Runtime *rt,
                                          const LayoutConstraintSet &cons,
-                                         FieldSpace h)
+                                         FieldSpace h, bool inter)
       : LayoutConstraintSet(cons), Collectable(), layout_id(lay_id), handle(h),
         owner_space(rt->address_space), local_space(rt->address_space), 
-        runtime(rt)
+        runtime(rt), internal(inter)
     //--------------------------------------------------------------------------
     {
       constraints_name = (char*)malloc(64*sizeof(char));
@@ -8314,7 +8314,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     LayoutConstraints::LayoutConstraints(const LayoutConstraints &rhs)
       : LayoutConstraintSet(rhs), Collectable(), layout_id(rhs.layout_id), 
-        handle(rhs.handle), owner_space(0), local_space(0), runtime(NULL)
+        handle(rhs.handle), owner_space(0), local_space(0), runtime(NULL), 
+        internal(false)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -8355,6 +8356,7 @@ namespace Legion {
         RezCheck z(rez);
         rez.serialize(layout_id);
         rez.serialize(handle);
+        rez.serialize<bool>(internal);
         size_t name_len = strlen(constraints_name)+1;
         rez.serialize(name_len);
         rez.serialize(constraints_name, name_len);
@@ -8382,6 +8384,13 @@ namespace Legion {
       derez.deserialize(constraints_name, name_len);
       // unpack the constraints
       deserialize(derez); 
+    }
+
+    //--------------------------------------------------------------------------
+    void LayoutConstraints::release(void)
+    //--------------------------------------------------------------------------
+    {
+      runtime->release_layout(layout_id);
     }
 
     //--------------------------------------------------------------------------
@@ -8598,10 +8607,12 @@ namespace Legion {
       derez.deserialize(lay_id);
       FieldSpace handle;
       derez.deserialize(handle);
+      bool internal;
+      derez.deserialize(internal);
       // Make it an unpack it, then try to register it 
       LayoutConstraints *new_constraints = 
         new LayoutConstraints(lay_id, handle, runtime,
-                              source, runtime->address_space);
+                              source, runtime->address_space, internal);
       new_constraints->update_constraints(derez);
       if (!runtime->register_layout(new_constraints))
         delete (new_constraints);
@@ -9988,7 +9999,7 @@ namespace Legion {
       constraint_set.add_constraint(
           SpecializedConstraint(VIRTUAL_SPECIALIZE));
       LayoutConstraints *constraints = 
-        register_layout(FieldSpace::NO_SPACE, constraint_set);
+        register_layout(FieldSpace::NO_SPACE, constraint_set, true/*internal*/);
       FieldMask all_ones(LEGION_FIELD_MASK_FIELD_ALL_ONES);
       std::vector<unsigned> mask_index_map;
       std::vector<CustomSerdezID> serdez;
@@ -18571,18 +18582,18 @@ namespace Legion {
         layout_id = get_unique_constraint_id();
       // Now make our entry and then return the result
       LayoutConstraints *constraints = 
-        new LayoutConstraints(layout_id, this, registrar);
+        new LayoutConstraints(layout_id, this, registrar, false/*internal*/);
       register_layout(constraints);
       return layout_id;
     }
 
     //--------------------------------------------------------------------------
     LayoutConstraints* Runtime::register_layout(FieldSpace handle,
-                                                const LayoutConstraintSet &cons)
+                                 const LayoutConstraintSet &cons, bool internal)
     //--------------------------------------------------------------------------
     {
       LayoutConstraints *constraints = new LayoutConstraints(
-          get_unique_constraint_id(), this, cons, handle);
+          get_unique_constraint_id(), this, cons, handle, internal);
       register_layout(constraints);
       return constraints;
     }

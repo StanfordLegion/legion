@@ -159,6 +159,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       comp_cache.clear();
+      // If this is an internal layout constraint set then it means that
+      // we made it and we can unregister it since we're done with it
+      if (constraints->internal)
+        constraints->release();
       if (constraints->remove_reference())
         delete (constraints);
     }
@@ -2055,7 +2059,8 @@ namespace Legion {
       {
         // First make a new layout constraint
         LayoutConstraints *layout_constraints = 
-         forest->runtime->register_layout(field_node->handle,constraints);
+          forest->runtime->register_layout(field_node->handle,
+                                           constraints, true/*internal*/);
         // Then make our description
         layout = field_node->create_layout_description(instance_mask, num_dims,
                                   layout_constraints, mask_index_map,
