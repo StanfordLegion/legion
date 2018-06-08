@@ -86,7 +86,7 @@ local function ast_node_tostring(node, indent, hide)
     end
     local str = tostring(node.node_type) .. "(" .. newline
     for k, v in pairs(node) do
-      if k ~= "node_type" then
+      if k ~= "node_type" and (not hide or k ~= "node_id") then
         local vstr = ast_node_tostring(v, indent + 1, hide)
         if vstr then
           str = str .. spaces1 .. k .. " = " .. vstr .. "," .. newline
