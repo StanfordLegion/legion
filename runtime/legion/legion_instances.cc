@@ -114,7 +114,7 @@ namespace Legion {
       : allocated_fields(mask), constraints(con), owner(own), total_dims(dims)
     //--------------------------------------------------------------------------
     {
-      constraints->add_reference();
+      constraints->add_base_gc_ref(LAYOUT_DESC_REF);
       field_infos.resize(field_sizes.size());
       // Switch data structures from layout by field order to order
       // of field locations in the bit mask
@@ -141,7 +141,7 @@ namespace Legion {
       : allocated_fields(mask), constraints(con), owner(NULL), total_dims(0)
     //--------------------------------------------------------------------------
     {
-      constraints->add_reference();
+      constraints->add_base_gc_ref(LAYOUT_DESC_REF);
     }
 
     //--------------------------------------------------------------------------
@@ -159,11 +159,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       comp_cache.clear();
-      // If this is an internal layout constraint set then it means that
-      // we made it and we can unregister it since we're done with it
-      if (constraints->internal && constraints->is_owner())
-        constraints->release();
-      if (constraints->remove_reference())
+      if (constraints->remove_base_gc_ref(LAYOUT_DESC_REF))
         delete (constraints);
     }
 

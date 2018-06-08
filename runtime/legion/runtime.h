@@ -1266,27 +1266,16 @@ namespace Legion {
      * variout places so we make it a distributed collectable
      */
     class LayoutConstraints : 
-      public LayoutConstraintSet, public Collectable,
+      public LayoutConstraintSet, public DistributedCollectable,
       public LegionHeapify<LayoutConstraints> {
     public:
       static const AllocationType alloc_type = LAYOUT_CONSTRAINTS_ALLOC; 
-    protected:
-      struct RemoveFunctor {
-      public:
-        RemoveFunctor(Serializer &r, Runtime *rt)
-          : rez(r), runtime(rt) { }
-      public:
-        void apply(AddressSpaceID target);
-      private:
-        Serializer &rez;
-        Runtime *runtime;
-      };
     public:
       LayoutConstraints(LayoutConstraintID layout_id, FieldSpace handle, 
-                        Runtime *runtime, AddressSpace owner_space, 
-                        AddressSpaceID local_space, bool inter);
+                        Runtime *runtime, bool inter, DistributedID did = 0);
       LayoutConstraints(LayoutConstraintID layout_id, Runtime *runtime, 
-                        const LayoutConstraintRegistrar &registrar, bool inter);
+                        const LayoutConstraintRegistrar &registrar, 
+                        bool inter, DistributedID did = 0);
       LayoutConstraints(LayoutConstraintID layout_id,
                         Runtime *runtime, const LayoutConstraintSet &cons,
                         FieldSpace handle, bool inter);
@@ -1295,15 +1284,17 @@ namespace Legion {
     public:
       LayoutConstraints& operator=(const LayoutConstraints &rhs);
     public:
+      virtual void notify_active(ReferenceMutator *mutator);
+      virtual void notify_inactive(ReferenceMutator *mutator);
+      virtual void notify_valid(ReferenceMutator *mutator);
+      virtual void notify_invalid(ReferenceMutator *mutator);
+    public:
       inline FieldSpace get_field_space(void) const { return handle; }
       inline const char* get_name(void) const { return constraints_name; }
-      inline bool is_owner(void) const { return (owner_space == local_space); }
     public:
       void send_constraint_response(AddressSpaceID source,
                                     RtUserEvent done_event);
       void update_constraints(Deserializer &derez);
-      void release(void);
-      void release_remote_instances(void);
     public:
       bool entails(LayoutConstraints *other_constraints, unsigned total_dims);
       bool entails(const LayoutConstraintSet &other, unsigned total_dims) const;
@@ -1325,21 +1316,17 @@ namespace Legion {
     public:
       const LayoutConstraintID layout_id;
       const FieldSpace handle;
-      const AddressSpace owner_space;
-      const AddressSpace local_space;
-      Runtime *const runtime;
       // True if this layout constraint object was made by the runtime
       // False if it was made by the application or the mapper
       const bool internal;
     protected:
       char *constraints_name;
-      mutable LocalLock layout_lock;
+      // Use the base gc_lock as the layout_lock too
+      LocalLock &layout_lock;
     protected:
       std::map<LayoutConstraintID,bool> conflict_cache;
       std::map<LayoutConstraintID,bool> entailment_cache;
       std::map<LayoutConstraintID,bool> no_pointer_entailment_cache;
-    protected:
-      NodeSet remote_instances;
     };
 
     /**
@@ -2272,7 +2259,6 @@ namespace Legion {
       void send_constraint_request(AddressSpaceID target, Serializer &rez);
       void send_constraint_response(AddressSpaceID target, Serializer &rez);
       void send_constraint_release(AddressSpaceID target, Serializer &rez);
-      void send_constraint_removal(AddressSpaceID target, Serializer &rez);
       void send_mpi_rank_exchange(AddressSpaceID target, Serializer &rez);
       void send_library_mapper_request(AddressSpaceID target, Serializer &rez);
       void send_library_mapper_response(AddressSpaceID target, Serializer &rez);
@@ -2464,7 +2450,6 @@ namespace Legion {
       void handle_constraint_request(Deserializer &derez,AddressSpaceID source);
       void handle_constraint_response(Deserializer &derez,AddressSpaceID src);
       void handle_constraint_release(Deserializer &derez);
-      void handle_constraint_removal(Deserializer &derez);
       void handle_top_level_task_request(Deserializer &derez);
       void handle_top_level_task_complete(Deserializer &derez);
       void handle_mpi_rank_exchange(Deserializer &derez);
@@ -3016,7 +3001,7 @@ namespace Legion {
     public:
       LayoutConstraintID register_layout(
           const LayoutConstraintRegistrar &registrar, 
-          LayoutConstraintID id);
+          LayoutConstraintID id, DistributedID did = 0);
       LayoutConstraints* register_layout(FieldSpace handle,
                const LayoutConstraintSet &cons, bool internal);
       bool register_layout(LayoutConstraints *new_constraints);
