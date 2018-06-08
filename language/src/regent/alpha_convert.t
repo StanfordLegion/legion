@@ -154,6 +154,23 @@ end
 local update_block_with_cond = update_block_with_value("cond")
 local update_block_with_until_cond = update_block_with_value("until_cond")
 
+local function update_block_with_values(value_field)
+  return function(cx, node, continuation)
+    local value = continuation(node[value_field])
+
+    cx:push_local_scope()
+    local block = continuation(node.block)
+    cx:pop_local_scope()
+
+    return node {
+      [value_field] = value,
+      block = block,
+    }
+  end
+end
+
+local update_block_with_hints = update_block_with_value("hints")
+
 local function update_block_with_symbol_value(symbol_field, value_field)
   return function(cx, node, continuation)
     local value = continuation(node[value_field])
@@ -288,7 +305,7 @@ local node_alpha_conversion = {
   [ast.specialized.stat.Repeat]          = update_block_with_until_cond,
   [ast.specialized.stat.MustEpoch]       = update_block,
   [ast.specialized.stat.Block]           = update_block,
-  [ast.specialized.stat.ParallelizeWith] = update_block,
+  [ast.specialized.stat.ParallelizeWith] = update_block_with_hints,
 
   [ast.specialized.stat.Var] = function(cx, node, continuation)
     local symbols = terralib.newlist()

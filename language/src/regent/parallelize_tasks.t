@@ -830,6 +830,7 @@ function parallel_param.new(params)
     __dop = false,
     __primary_partitions = false,
     __constraints = false,
+    __block_id = false,
     __hash = false,
   }
   if params.dop ~= nil then tbl.__dop = params.dop end
@@ -838,6 +839,9 @@ function parallel_param.new(params)
   end
   if params.constraints ~= nil then
     tbl.__constraints = params.constraints
+  end
+  if params.block_id ~= nil then
+    tbl.__block_id = params.block_id
   end
   return setmetatable(tbl, parallel_param)
 end
@@ -848,7 +852,6 @@ function parallel_param:hash()
     if self.__dop then str = str .. "dop" .. tostring(self.__dop) end
     if self.__primary_partitions then
       for idx = 1, #self.__primary_partitions do
-        --FIXME: need to distinguish between different partitions for the same region
         str = str .. "#" .. tostring(self.__primary_partitions[idx])
       end
     end
@@ -856,6 +859,9 @@ function parallel_param:hash()
       for idx = 1, #self.__constraints do
         str = str .. "#" .. ast_util.render(self.__constraints[idx])
       end
+    end
+    if self.__block_id then
+      str = str .. "#" .. tostring(self.__block_id)
     end
     self.__hash = str
   end
@@ -1786,6 +1792,7 @@ local function collect_calls(cx, parallelizable)
         local param = parallel_param.new({
           primary_partitions = hints_primary,
           constraints = hints_constraint,
+          block_id = node.node_id,
         })
         cx:push_scope(param)
         if #hints_color_space > 0 then

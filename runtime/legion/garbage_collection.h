@@ -77,10 +77,12 @@ namespace Legion {
       PHYSICAL_MANAGER_REF = 20,
       LOGICAL_VIEW_REF = 21,
       REGION_TREE_REF = 22,
-      COMPOSITE_SHARD_REF = 23,
-      REPLICATION_REF = 24,
+      LAYOUT_DESC_REF = 23,
+      RUNTIME_REF = 24,
       IS_EXPR_REF = 25,
-      LAST_SOURCE_REF = 26,
+      COMPOSITE_SHARD_REF = 26,
+      REPLICATION_REF = 27,
+      LAST_SOURCE_REF = 28,
     };
 
     enum ReferenceKind {
@@ -114,9 +116,11 @@ namespace Legion {
       "Physical Manager Reference",                 \
       "Logical View Reference",                     \
       "Region Tree Reference",                      \
+      "Layout Description Reference",               \
+      "Runtime Reference",                          \
+      "Index Space Expression",                     \
       "Composite Shard Reference",                  \
       "Replication Reference",                      \
-      "Index Space Expression",                     \
     }
 
     extern Realm::Logger log_garbage;
