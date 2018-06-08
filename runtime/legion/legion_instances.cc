@@ -161,7 +161,7 @@ namespace Legion {
       comp_cache.clear();
       // If this is an internal layout constraint set then it means that
       // we made it and we can unregister it since we're done with it
-      if (constraints->internal)
+      if (constraints->internal && constraints->is_owner())
         constraints->release();
       if (constraints->remove_reference())
         delete (constraints);
