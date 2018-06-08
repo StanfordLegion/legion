@@ -17561,7 +17561,7 @@ namespace Legion {
     void Runtime::handle_constraint_removal(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      Deserializer z(derez);
+      DerezCheck z(derez);
       LayoutConstraintID layout_id;
       derez.deserialize(layout_id);
       unregister_layout(layout_id);
