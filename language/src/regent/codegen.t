@@ -8388,11 +8388,21 @@ function codegen.stat_raw_delete(cx, node)
     ispace_getter = function(x) return `([x.value].impl.index_partition) end
   end
 
-  return quote
+  local actions = quote
     [value.actions]
     [region_delete_fn]([cx.runtime], [cx.context], [value.value].impl)
     [ispace_delete_fn]([cx.runtime], [cx.context], [ispace_getter(value)])
   end
+
+  if std.is_region(value_type) then
+    actions = quote
+      [actions]
+      c.legion_field_space_destroy(
+          [cx.runtime], [cx.context], [value.value].impl.field_space)
+    end
+  end
+
+  return actions
 end
 
 local make_dummy_task = terralib.memoize(
