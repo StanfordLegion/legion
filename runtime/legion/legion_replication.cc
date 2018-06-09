@@ -2255,12 +2255,8 @@ namespace Legion {
                 collective.descriptors, all_ready, shard_id, total_shards);
       }
       else // singular so just do the normal thing
-      {
-        // Inform the collective that we're not going to be doing it
-        collective.elide_collective();
         return forest->create_partition_by_field(op, pid, 
                                                  instances, instances_ready);
-      }
     }
 
     //--------------------------------------------------------------------------
