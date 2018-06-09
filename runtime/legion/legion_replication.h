@@ -944,7 +944,7 @@ namespace Legion {
         virtual ApEvent perform(DependentPartitionOp *op,
             RegionTreeForest *forest, ApEvent instances_ready,
             const std::vector<FieldDataDescriptor> &instances);
-        virtual void elide(void) { collective.elide_collective(); }
+        virtual void elide_collective(void) { collective.elide_collective(); }
       protected:
         FieldDescriptorExchange collective; 
         const ShardID shard_id;
@@ -958,7 +958,8 @@ namespace Legion {
         virtual ApEvent perform(DependentPartitionOp *op,
             RegionTreeForest *forest, ApEvent instances_ready,
             const std::vector<FieldDataDescriptor> &instances);
-        virtual void elide(void) { gather_collective.elide_collective(); }
+        virtual void elide_collective(void) 
+          { gather_collective.elide_collective(); }
       protected:
         FieldDescriptorGather gather_collective;
       };
@@ -970,7 +971,8 @@ namespace Legion {
         virtual ApEvent perform(DependentPartitionOp *op,
             RegionTreeForest *forest, ApEvent instances_ready,
             const std::vector<FieldDataDescriptor> &instances);
-        virtual void elide(void) { gather_collective.elide_collective(); }
+        virtual void elide_collective(void) 
+          { gather_collective.elide_collective(); }
       protected:
         FieldDescriptorGather gather_collective;
       };
@@ -982,7 +984,8 @@ namespace Legion {
         virtual ApEvent perform(DependentPartitionOp *op,
             RegionTreeForest *forest, ApEvent instances_ready,
             const std::vector<FieldDataDescriptor> &instances);
-        virtual void elide(void) { gather_collective.elide_collective(); }
+        virtual void elide_collective(void) 
+          { gather_collective.elide_collective(); }
       protected:
         FieldDescriptorGather gather_collective;
       };
@@ -994,7 +997,8 @@ namespace Legion {
         virtual ApEvent perform(DependentPartitionOp *op,
             RegionTreeForest *forest, ApEvent instances_ready,
             const std::vector<FieldDataDescriptor> &instances);
-        virtual void elide(void) { gather_collective.elide_collective(); }
+        virtual void elide_collective(void) 
+          { gather_collective.elide_collective(); }
       protected:
         FieldDescriptorGather gather_collective;
       };

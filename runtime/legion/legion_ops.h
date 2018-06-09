@@ -2405,7 +2405,7 @@ namespace Legion {
         virtual PartitionKind get_kind(void) const = 0;
         virtual IndexPartition get_partition(void) const = 0;
         // This method should only be used by control replication thunks
-        virtual void elide(void) { assert(false); }
+        virtual void elide_collectives(void) { assert(false); }
       };
       class ByFieldThunk : public DepPartThunk {
       public:

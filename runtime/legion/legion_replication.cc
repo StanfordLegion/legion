@@ -2212,14 +2212,15 @@ namespace Legion {
       }
       else
       {
+        // Inform the thunk that we're eliding collectives since this
+        // is a singular operation and not an index operation
+        thunk->elide_collectives();
         // Shard 0 always owns dependent partition operations
         // If we own it we go on the queue, otherwise we complete early
         if (repl_ctx->owner_shard->shard_id != 0)
         {
           // We don't own it, so we can pretend like we
-          // mapped and executed this task already, first though
-          // we have to tell our thunk that we won't be using it
-          thunk->elide();
+          // mapped and executed this task already
           complete_mapping();
           complete_execution();
         }
