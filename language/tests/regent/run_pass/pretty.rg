@@ -24,6 +24,10 @@ local task main()
     if x > 2 then
       x = 1
     end
+    break
   end
 end
 main:printpretty()
+
+-- Still need to run, or else Legion Spy will complain.
+regentlib.start(main)
