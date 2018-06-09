@@ -2252,8 +2252,12 @@ namespace Legion {
                 collective.descriptors, all_ready, shard_id, total_shards);
       }
       else // singular so just do the normal thing
+      {
+        // Inform the collective that we're not going to be doing it
+        collective.elide_collective();
         return forest->create_partition_by_field(op, pid, 
                                                  instances, instances_ready);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -4907,6 +4911,8 @@ namespace Legion {
         for (unsigned idx = 0; idx < sent_stages.size(); idx++)
           assert(sent_stages[idx]);
       }
+      assert(done_triggered);
+      assert(done_event.has_triggered());
 #endif
     }
 
@@ -4989,6 +4995,22 @@ namespace Legion {
       if (all_stages_done)
         complete_exchange();
     } 
+
+    //--------------------------------------------------------------------------
+    void AllGatherCollective::elide_collective(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      // make it look like we sent all the stages
+      for (unsigned idx = 0; idx < sent_stages.size(); idx++)
+        sent_stages[idx] = true;
+      assert(!done_triggered);
+      assert(!done_event.has_triggered());
+#endif
+      // Trigger the user event 
+      Runtime::trigger_event(done_event);
+      done_triggered = true;
+    }
 
     //--------------------------------------------------------------------------
     void AllGatherCollective::construct_message(ShardID target, int stage,

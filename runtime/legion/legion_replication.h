@@ -185,6 +185,8 @@ namespace Legion {
       void perform_collective_async(void);
       RtEvent perform_collective_wait(bool block = true);
       virtual void handle_collective_message(Deserializer &derez);
+      // Use this method in case we don't actually end up using the collective
+      void elide_collective(void);
     protected:
       void initialize_collective(void);
       void construct_message(ShardID target, int stage, Serializer &rez) const;
