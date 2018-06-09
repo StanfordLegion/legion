@@ -2219,6 +2219,7 @@ namespace Legion {
           // We don't own it, so we can pretend like we
           // mapped and executed this task already, first though
           // we have to tell our thunk that we won't be using it
+          thunk->elide();
           complete_mapping();
           complete_execution();
         }
