@@ -2217,7 +2217,8 @@ namespace Legion {
         if (repl_ctx->owner_shard->shard_id != 0)
         {
           // We don't own it, so we can pretend like we
-          // mapped and executed this task already
+          // mapped and executed this task already, first though
+          // we have to tell our thunk that we won't be using it
           complete_mapping();
           complete_execution();
         }
@@ -4736,6 +4737,10 @@ namespace Legion {
     GatherCollective::~GatherCollective(void)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      if (done_event.exists())
+        assert(done_event.has_triggered());
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -4797,6 +4802,14 @@ namespace Legion {
         if (done_event.exists())
           Runtime::trigger_event(done_event);
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void GatherCollective::elide_collective(void)
+    //--------------------------------------------------------------------------
+    {
+      if (done_event.exists())
+        Runtime::trigger_event(done_event);
     }
 
     //--------------------------------------------------------------------------

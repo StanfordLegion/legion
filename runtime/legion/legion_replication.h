@@ -153,6 +153,8 @@ namespace Legion {
       RtEvent perform_collective_wait(bool block = true);
       virtual void handle_collective_message(Deserializer &derez);
       inline bool is_target(void) const { return (target == local_shard); }
+      // Use this method in case we don't actually end up using the collective
+      void elide_collective(void);
     protected:
       void send_message(void);
       int compute_expected_notifications(void) const;
@@ -942,6 +944,7 @@ namespace Legion {
         virtual ApEvent perform(DependentPartitionOp *op,
             RegionTreeForest *forest, ApEvent instances_ready,
             const std::vector<FieldDataDescriptor> &instances);
+        virtual void elide(void) { collective.elide_collective(); }
       protected:
         FieldDescriptorExchange collective; 
         const ShardID shard_id;
@@ -955,6 +958,7 @@ namespace Legion {
         virtual ApEvent perform(DependentPartitionOp *op,
             RegionTreeForest *forest, ApEvent instances_ready,
             const std::vector<FieldDataDescriptor> &instances);
+        virtual void elide(void) { gather_collective.elide_collective(); }
       protected:
         FieldDescriptorGather gather_collective;
       };
@@ -966,6 +970,7 @@ namespace Legion {
         virtual ApEvent perform(DependentPartitionOp *op,
             RegionTreeForest *forest, ApEvent instances_ready,
             const std::vector<FieldDataDescriptor> &instances);
+        virtual void elide(void) { gather_collective.elide_collective(); }
       protected:
         FieldDescriptorGather gather_collective;
       };
@@ -977,6 +982,7 @@ namespace Legion {
         virtual ApEvent perform(DependentPartitionOp *op,
             RegionTreeForest *forest, ApEvent instances_ready,
             const std::vector<FieldDataDescriptor> &instances);
+        virtual void elide(void) { gather_collective.elide_collective(); }
       protected:
         FieldDescriptorGather gather_collective;
       };
@@ -988,6 +994,7 @@ namespace Legion {
         virtual ApEvent perform(DependentPartitionOp *op,
             RegionTreeForest *forest, ApEvent instances_ready,
             const std::vector<FieldDataDescriptor> &instances);
+        virtual void elide(void) { gather_collective.elide_collective(); }
       protected:
         FieldDescriptorGather gather_collective;
       };
