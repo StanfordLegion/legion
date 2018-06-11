@@ -1025,8 +1025,10 @@ namespace Legion {
     void ReplInterCloseOp::invoke_mapper(const InstanceSet &valid_instances)
     //--------------------------------------------------------------------------
     {
-      // Currently we do nothing for this as it is very difficult to shard
+      // Currently we virtually map all fields as it is very difficult to shard
       // a close operation and distributed any instances we want to update
+      chosen_instances.add_instance(
+          InstanceRef(runtime->virtual_manager, close_mask));
     }
 
     //--------------------------------------------------------------------------
