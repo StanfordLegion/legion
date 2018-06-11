@@ -87,7 +87,10 @@ variables:
   TEST_LEGION_CXX: "0"
   TEST_REALM: "0"
   TEST_FUZZER: "0"
+.parallel: &parallel
   REGENT_JOBS: "2"
+.incremental: &incremental
+  REGENT_INCREMENTAL: "1"
 
 ###
 ### Setup
@@ -233,7 +236,7 @@ gcc49_cxx98_release_legion:
 gcc49_cxx98_release_cmake_regent:
   <<: [*linux_compute, *image, *tests]
   variables:
-    <<: [*gcc49, *terra38, *release, *cxx98_normal, *cmake, *regent]
+    <<: [*gcc49, *terra38, *release, *cxx98_normal, *cmake, *regent, *incremental]
 #   * Debug (Privilege and Bounds Checks)
 gcc49_cxx98_debug_checks_legion:
   <<: [*linux, *image, *tests]
@@ -247,7 +250,7 @@ gcc49_cxx98_debug_spy_legion:
 gcc49_cxx98_debug_spy_regent:
   <<: [*linux_compute, *image, *tests]
   variables:
-    <<: [*gcc49, *terra38, *debug, *cxx98_spy, *regent]
+    <<: [*gcc49, *terra38, *debug, *cxx98_spy, *regent, *parallel]
 #   * C++11
 gcc49_cxx11_release_legion:
   <<: [*linux, *image, *tests]
@@ -298,7 +301,7 @@ gcc49_cxx98_debug_gasnet_cmake_legion:
 gcc49_cxx98_debug_gasnet_regent:
   <<: [*linux_compute, *image, *tests]
   variables:
-    <<: [*gcc49, *terra38, *debug, *cxx98_normal, *gasnet, *regent]
+    <<: [*gcc49, *terra38, *debug, *cxx98_normal, *gasnet, *regent, *incremental]
 # * Integration: LLVM + GASNet
 gcc49_cxx98_debug_llvm_gasnet_legion:
   <<: [*linux_compute, *image, *tests]
@@ -307,7 +310,7 @@ gcc49_cxx98_debug_llvm_gasnet_legion:
 gcc49_cxx98_debug_llvm_gasnet_regent:
   <<: [*linux_compute, *image, *tests]
   variables:
-    <<: [*gcc49, *terra38, *debug, *cxx98_normal, *llvm, *gasnet, *regent]
+    <<: [*gcc49, *terra38, *debug, *cxx98_normal, *llvm, *gasnet, *regent, *incremental]
 # * Integration: HDF5 + GASNet
 gcc49_cxx98_debug_hdf5_gasnet_legion:
   <<: [*linux_compute, *image, *tests]
@@ -343,7 +346,7 @@ clang38_cxx98_release_legion:
 clang38_cxx98_release_cmake_regent:
   <<: [*linux_compute, *image_clang, *tests]
   variables:
-    <<: [*clang38, *terra38, *release, *cxx98_normal, *cmake, *regent]
+    <<: [*clang38, *terra38, *release, *cxx98_normal, *cmake, *regent, *incremental]
 #   * Debug (Privilege and Bounds Checks)
 clang38_cxx98_debug_checks_legion:
   <<: [*linux, *image_clang, *tests]
@@ -357,7 +360,7 @@ clang38_cxx98_debug_spy_legion:
 clang38_cxx98_debug_spy_regent:
   <<: [*linux_compute, *image_clang, *tests]
   variables:
-    <<: [*clang38, *terra38, *debug, *cxx98_spy, *regent]
+    <<: [*clang38, *terra38, *debug, *cxx98_spy, *regent, *parallel]
 #   * C++11
 clang38_cxx11_release_legion:
   <<: [*linux, *image_clang, *tests]
@@ -408,7 +411,7 @@ clang38_cxx98_debug_gasnet_cmake_legion:
 clang38_cxx98_debug_gasnet_regent:
   <<: [*linux_compute, *image_clang, *tests]
   variables:
-    <<: [*clang38, *terra38, *debug, *cxx98_normal, *gasnet, *regent]
+    <<: [*clang38, *terra38, *debug, *cxx98_normal, *gasnet, *regent, *incremental]
 # * Integration: LLVM + GASNet
 clang38_cxx98_debug_llvm_gasnet_legion:
   <<: [*linux_compute, *image_clang, *tests]
@@ -417,7 +420,7 @@ clang38_cxx98_debug_llvm_gasnet_legion:
 clang38_cxx98_debug_llvm_gasnet_regent:
   <<: [*linux_compute, *image_clang, *tests]
   variables:
-    <<: [*clang38, *terra38, *debug, *cxx98_normal, *llvm, *gasnet, *regent]
+    <<: [*clang38, *terra38, *debug, *cxx98_normal, *llvm, *gasnet, *regent, *incremental]
 # * Integration: HDF5 + GASNet
 clang38_cxx98_debug_hdf5_gasnet_legion:
   <<: [*linux_compute, *image_clang, *tests]
@@ -426,7 +429,7 @@ clang38_cxx98_debug_hdf5_gasnet_legion:
 clang38_cxx98_debug_hdf5_gasnet_regent:
   <<: [*linux_compute, *image_clang, *tests]
   variables:
-    <<: [*clang38, *terra38, *debug, *cxx98_normal, *hdf5, *gasnet, *regent]
+    <<: [*clang38, *terra38, *debug, *cxx98_normal, *hdf5, *gasnet, *regent, *incremental]
 # * Integration: HDF5 + GASNet
 # clang38_cxx98_debug_spy_gasnet_regent:
 #   <<: [*linux_compute, *image_clang, *tests]

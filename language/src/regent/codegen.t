@@ -9173,6 +9173,7 @@ function codegen.top(cx, node)
           " since the CUDA compiler is unavailable")
       end
       local cpu_variant = task:get_primary_variant()
+      cpu_variant:set_ast(node)
       task:add_complete_thunk(
         function()
           local cx = context.new_global_scope(cpu_variant)
@@ -9182,6 +9183,7 @@ function codegen.top(cx, node)
       return task
     else
       local cpu_variant = task:get_primary_variant()
+      cpu_variant:set_ast(node)
       task:add_complete_thunk(
         function()
           local cx = context.new_global_scope(cpu_variant)

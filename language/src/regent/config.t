@@ -68,7 +68,7 @@ local default_options = {
   ["validate"] = true,
   ["emergency-gc"] = false,
   ["jobs"] = "1",
-  ["incr-comp"] = false, -- incremental compilation
+  ["incr-comp"] = os.getenv('REGENT_INCREMENTAL') == '1' or false, -- incremental compilation
 
   -- Need this here to make the logger happy.
   ["log"] = "",
