@@ -3678,41 +3678,49 @@ local function incremental_compile_tasks()
   local objfiles = terralib.newlist()
   local task_wrappers = {}
 
+  local cache_regent_dir
+  do
+    local home_dir = os.getenv('HOME')
+    local cache_dir = home_dir .. "/.cache"
+    cache_regent_dir = cache_dir .. "/regent"
+
+    -- Attempt to create the cache directory. If this fails, ignore
+    -- it. We'll catch the failure in the next step. It would be pointless
+    -- to try to check if the directory exists first because there would be
+    -- a race condition on its use regardless.
+    c.mkdir(cache_dir, 0x1c0) -- 0700 in octal, but Lua doesn't support octal
+    c.mkdir(cache_regent_dir, 0x1c0)
+  end
+
   for _, variant in ipairs(variants) do
-    local exports = {}
-    exports[variant:wrapper_name()] = variant:make_wrapper()
-    local llvm_bitcode = {}
-    local checksum_m = {}
-    local checksum = 0
-    profile('incremental_compile:llvmir_with_checksum', variant, function()
-      llvm_bitcode = terralib.saveobj({}, "llvmir", exports, nil, nil, false)
+    local exports = { [variant:wrapper_name()] = variant:make_wrapper() }
+    local checksum_m
+    do
+      local llvm_bitcode = terralib.saveobj(nil, "llvmir", exports, nil, nil, false)
       local raw_checksum_m = checksum_murmur3(llvm_bitcode)
       checksum_m = ffi.string(raw_checksum_m)
       c.free(raw_checksum_m)
-    end)()
+    end
 
-    -- if file exists then we add it to the list of object files
-    local checksumfile = {}
-    local cache_filename = {}
-    local homedir = os.getenv('HOME')
-    cache_filename = homedir .. "/.cache/" .. variant:wrapper_name() .. checksum_m .. ".o"
+    local cache_filename = cache_regent_dir .. "/" .. checksum_m .. ".o"
 
-    -- if file doesn't exist then save the object file
     if c.access(cache_filename, c.F_OK) == -1 then
-      profile('incremental_compile:llvm_object_file_compilation', variant, function()
-        pclog:info('cached file does not exist '  .. cache_filename .. ': task = ' .. variant.definition:getname())
-        local objtmp = os.tmpname() .. ".o"
-        local mvcmd = {}
-        terralib.saveobj(objtmp, "object", exports)
-        mvcmd = "mv " .. objtmp  ..  " " .. cache_filename
-        os.execute(mvcmd)
-      end)()
+      -- If object file doesn't exist then create it.
+      pclog:info('cached file does NOT exist '  .. cache_filename .. ': task = ' .. variant.definition:getname())
 
-      -- save the .ll file for debugging
-      -- local llvm_bitcode = {}
-      -- llvm_bitcode =
-      --   terralib.saveobj(variant:wrapper_name() .. checksum_m .. ".ll" , "llvmir", exports)
+      -- Save to a temporary file first. This is important to avoid race
+      -- conditions in case multiple compilations are proceeding concurrently.
+      local objtmp = os.tmpname()
+      terralib.saveobj(objtmp, "object", exports)
+
+      -- Now attempt to move the object file into place. Note: This is atomic,
+      -- so we don't need to worry about races.
+      local ok, err = os.rename(objtmp, cache_filename)
+      if ok == nil then
+        assert(false, err)
+      end
     else
+      -- Otherwise do nothing (will automatically reuse the cached object file).
       pclog:info('cached file does exist '  .. cache_filename .. ' : task = ' .. variant.definition:getname())
     end
 

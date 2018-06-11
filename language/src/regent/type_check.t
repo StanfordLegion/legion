@@ -3833,11 +3833,7 @@ end
 
 function type_check.top(cx, node)
   if node:is(ast.specialized.top.Task) then
-    local new_node = type_check.top_task(cx, node)
-    if new_node.prototype:has_primary_variant() then
-      new_node.prototype:get_primary_variant():set_ast(new_node)
-    end
-    return new_node
+    return type_check.top_task(cx, node)
 
   elseif node:is(ast.specialized.top.Fspace) then
     return type_check.top_fspace(cx, node)
