@@ -4922,7 +4922,8 @@ namespace Legion {
         for (unsigned idx = 0; idx < sent_stages.size(); idx++)
           assert(sent_stages[idx]);
       }
-      assert(done_triggered);
+      if (participating)
+        assert(done_triggered);
       assert(done_event.has_triggered());
 #endif
     }
