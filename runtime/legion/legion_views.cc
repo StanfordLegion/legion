@@ -7314,17 +7314,7 @@ namespace Legion {
           rez.serialize(repl_id);
           rez.serialize(origin_shard);
         }
-        rez.serialize(summary.complete_writes);
-        rez.serialize<size_t>(summary.partial_writes.size());
-        if (!summary.partial_writes.empty())
-        {
-          for (WriteSet::const_iterator it = summary.partial_writes.begin();
-                it != summary.partial_writes.end(); it++)
-          {
-            it->first->pack_expression(rez, target);
-            rez.serialize(it->second);
-          }
-        }
+        summary.pack(rez, target);
         pack_composite_view(rez);
       }
       runtime->send_composite_view(target, rez);
@@ -8311,18 +8301,7 @@ namespace Legion {
         derez.deserialize(origin_shard);
       }
       CompositeViewSummary summary;
-      derez.deserialize(summary.complete_writes);
-      size_t num_partial_writes;
-      derez.deserialize(num_partial_writes);
-      for (unsigned idx = 0; idx < num_partial_writes; idx++)
-      {
-        IndexSpaceExpression *expr =   
-          IndexSpaceExpression::unpack_expression(derez, 
-                                runtime->forest, source);
-        FieldMask expr_mask;
-        derez.deserialize(expr_mask);
-        summary.partial_writes.insert(expr, expr_mask);
-      }
+      summary.unpack(derez, runtime->forest, source);
       // Make the composite view, but don't register it yet
       void *location;
       CompositeView *view = NULL;

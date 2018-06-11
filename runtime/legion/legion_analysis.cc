@@ -3212,6 +3212,48 @@ namespace Legion {
       return *this;
     }
 
+    //--------------------------------------------------------------------------
+    void ShardingSummary::pack_summary(Serializer &rez) const
+    //--------------------------------------------------------------------------
+    {
+      ProjectionSummary::pack_summary(rez);
+      if (node->is_region())
+      {
+        rez.serialize<bool>(true/*region*/);
+        rez.serialize(node->as_region_node()->handle);
+      }
+      else
+      {
+        rez.serialize<bool>(false/*region*/);
+        rez.serialize(node->as_partition_node()->handle);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ ShardingSummary* ShardingSummary::unpack_summary(
+                                 Deserializer &derez, RegionTreeForest *context)
+    //--------------------------------------------------------------------------
+    {
+      const ProjectionSummary summary = 
+        ProjectionSummary::unpack_summary(derez, context);
+      RegionTreeNode *node;
+      bool is_region;
+      derez.deserialize<bool>(is_region);
+      if (is_region)
+      {
+        LogicalRegion handle;
+        derez.deserialize(handle);
+        node = context->get_node(handle);
+      }
+      else
+      {
+        LogicalPartition handle;
+        derez.deserialize(handle);
+        node = context->get_node(handle);
+      }
+      return new ShardingSummary(summary, node); 
+    }
+
     /////////////////////////////////////////////////////////////
     // Composite View Summary 
     /////////////////////////////////////////////////////////////
@@ -3306,6 +3348,81 @@ namespace Legion {
               reduce_projections.begin(); it != reduce_projections.end(); it++)
           delete it->first;
         reduce_projections.clear();
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void CompositeViewSummary::pack(Serializer &rez,AddressSpaceID target) const
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize(complete_writes);
+      rez.serialize<size_t>(partial_writes.size());
+      if (!partial_writes.empty())
+      {
+        for (WriteSet::const_iterator it = partial_writes.begin();
+              it != partial_writes.end(); it++)
+        {
+          it->first->pack_expression(rez, target);
+          rez.serialize(it->second);
+        }
+      }
+      rez.serialize<size_t>(write_projections.size());
+      if (!write_projections.empty())
+      {
+        for (FieldMaskSet<ShardingSummary>::const_iterator it = 
+              write_projections.begin(); it != write_projections.end(); it++)
+        {
+          it->first->pack_summary(rez);
+          rez.serialize(it->second);
+        }
+      }
+      rez.serialize<size_t>(reduce_projections.size());
+      if (!reduce_projections.empty())
+      {
+        for (FieldMaskSet<ShardingSummary>::const_iterator it = 
+              reduce_projections.begin(); it != reduce_projections.end(); it++)
+        {
+          it->first->pack_summary(rez);
+          rez.serialize(it->second);
+        }
+      }
+    }
+    
+    //--------------------------------------------------------------------------
+    void CompositeViewSummary::unpack(Deserializer &derez,
+                                RegionTreeForest *forest, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      derez.deserialize(complete_writes);
+      size_t num_partial_writes;
+      derez.deserialize(num_partial_writes);
+      for (unsigned idx = 0; idx < num_partial_writes; idx++)
+      {
+        IndexSpaceExpression *expr =   
+          IndexSpaceExpression::unpack_expression(derez, forest, source); 
+        FieldMask expr_mask;
+        derez.deserialize(expr_mask);
+        partial_writes.insert(expr, expr_mask);
+      }
+      size_t num_write_projections;
+      derez.deserialize(num_write_projections);
+      for (unsigned idx = 0; idx < num_write_projections; idx++)
+      {
+        ShardingSummary *summary = 
+          ShardingSummary::unpack_summary(derez, forest);
+        FieldMask summary_mask;
+        derez.deserialize(summary_mask);
+        write_projections.insert(summary, summary_mask);
+      }
+      size_t num_reduce_projections;
+      derez.deserialize(num_reduce_projections);
+      for (unsigned idx = 0; idx < num_reduce_projections; idx++)
+      {
+        ShardingSummary *summary = 
+          ShardingSummary::unpack_summary(derez, forest);
+        FieldMask summary_mask;
+        derez.deserialize(summary_mask);
+        reduce_projections.insert(summary, summary_mask);
       }
     }
 

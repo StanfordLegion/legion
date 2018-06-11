@@ -622,6 +622,10 @@ namespace Legion {
     public:
       ShardingSummary& operator=(const ShardingSummary &rhs); 
     public:
+      void pack_summary(Serializer &rez) const;
+      static ShardingSummary* unpack_summary(Deserializer &derez,
+                                             RegionTreeForest *context);
+    public:
       RegionTreeNode *const node;
     };
 
@@ -648,6 +652,9 @@ namespace Legion {
     public:
       void swap(CompositeViewSummary &rhs);
       void clear(void);
+      void pack(Serializer &rez, AddressSpaceID target) const;
+      void unpack(Deserializer &derez, RegionTreeForest *forest, 
+                  AddressSpaceID source);
     public:
       FieldMask complete_writes;
       WriteSet partial_writes;
