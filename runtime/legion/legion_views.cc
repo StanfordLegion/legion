@@ -8301,7 +8301,7 @@ namespace Legion {
         derez.deserialize(origin_shard);
       }
       CompositeViewSummary summary;
-      summary.unpack(derez, runtime->forest, source);
+      summary.unpack(derez, runtime->forest, source, owner_context);
       // Make the composite view, but don't register it yet
       void *location;
       CompositeView *view = NULL;

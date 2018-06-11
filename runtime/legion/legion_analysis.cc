@@ -3158,7 +3158,7 @@ namespace Legion {
     {
       rez.serialize(domain->handle);
       rez.serialize(projection->projection_id);
-      // Never need to pass back the sharding function anyway
+      // We don't handle packing the sharding information
     }
 
     //--------------------------------------------------------------------------
@@ -3217,6 +3217,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       ProjectionSummary::pack_summary(rez);
+#ifdef DEBUG_LEGION
+      assert(sharding != NULL);
+#endif
+      rez.serialize(sharding->sharding_id);
       if (node->is_region())
       {
         rez.serialize<bool>(true/*region*/);
@@ -3231,11 +3235,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ ShardingSummary* ShardingSummary::unpack_summary(
-                                 Deserializer &derez, RegionTreeForest *context)
+           Deserializer &derez, RegionTreeForest *forest, InnerContext *context)
     //--------------------------------------------------------------------------
     {
-      const ProjectionSummary summary = 
-        ProjectionSummary::unpack_summary(derez, context);
+      ProjectionSummary summary = 
+        ProjectionSummary::unpack_summary(derez, forest);
+      ShardingID sid;
+      derez.deserialize(sid);
+      summary.sharding = context->find_sharding_function(sid);
       RegionTreeNode *node;
       bool is_region;
       derez.deserialize<bool>(is_region);
@@ -3243,13 +3250,13 @@ namespace Legion {
       {
         LogicalRegion handle;
         derez.deserialize(handle);
-        node = context->get_node(handle);
+        node = forest->get_node(handle);
       }
       else
       {
         LogicalPartition handle;
         derez.deserialize(handle);
-        node = context->get_node(handle);
+        node = forest->get_node(handle);
       }
       return new ShardingSummary(summary, node); 
     }
@@ -3390,7 +3397,7 @@ namespace Legion {
     
     //--------------------------------------------------------------------------
     void CompositeViewSummary::unpack(Deserializer &derez,
-                                RegionTreeForest *forest, AddressSpaceID source)
+         RegionTreeForest *forest, AddressSpaceID source, InnerContext *context)
     //--------------------------------------------------------------------------
     {
       derez.deserialize(complete_writes);
@@ -3409,7 +3416,7 @@ namespace Legion {
       for (unsigned idx = 0; idx < num_write_projections; idx++)
       {
         ShardingSummary *summary = 
-          ShardingSummary::unpack_summary(derez, forest);
+          ShardingSummary::unpack_summary(derez, forest, context);
         FieldMask summary_mask;
         derez.deserialize(summary_mask);
         write_projections.insert(summary, summary_mask);
@@ -3419,7 +3426,7 @@ namespace Legion {
       for (unsigned idx = 0; idx < num_reduce_projections; idx++)
       {
         ShardingSummary *summary = 
-          ShardingSummary::unpack_summary(derez, forest);
+          ShardingSummary::unpack_summary(derez, forest, context);
         FieldMask summary_mask;
         derez.deserialize(summary_mask);
         reduce_projections.insert(summary, summary_mask);

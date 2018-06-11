@@ -624,7 +624,7 @@ namespace Legion {
     public:
       void pack_summary(Serializer &rez) const;
       static ShardingSummary* unpack_summary(Deserializer &derez,
-                                             RegionTreeForest *context);
+               RegionTreeForest *forest, InnerContext *context);
     public:
       RegionTreeNode *const node;
     };
@@ -654,7 +654,7 @@ namespace Legion {
       void clear(void);
       void pack(Serializer &rez, AddressSpaceID target) const;
       void unpack(Deserializer &derez, RegionTreeForest *forest, 
-                  AddressSpaceID source);
+                  AddressSpaceID source, InnerContext *context);
     public:
       FieldMask complete_writes;
       WriteSet partial_writes;
