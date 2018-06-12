@@ -47,48 +47,61 @@ function context.new_global_scope()
   return setmetatable(cx, context)
 end
 
-local function apply_tracing_node(cx)
-  return function(node)
-    if node:is(ast.typed.stat.While) or
-      node:is(ast.typed.stat.ForNum) or
-      node:is(ast.typed.stat.ForList) or
-      node:is(ast.typed.stat.Repeat) or
-      node:is(ast.typed.stat.Block)
-    then
-      if not node.annotations.trace:is(ast.annotation.Demand) then
-        return node
-      end
-
-      local trace_id = ast.typed.expr.Constant {
-        value = cx.next_trace_id,
-        expr_type = c.legion_trace_id_t,
-        annotations = ast.default_annotations(),
-        span = node.span,
-      }
-      cx.next_trace_id = cx.next_trace_id + 1
-
-      local stats = terralib.newlist()
-      stats:insert(
-        ast.typed.stat.BeginTrace {
-          trace_id = trace_id,
-          annotations = ast.default_annotations(),
-          span = node.span,
-      })
-      stats:insertall(node.block.stats)
-      stats:insert(
-        ast.typed.stat.EndTrace {
-          trace_id = trace_id,
-          annotations = ast.default_annotations(),
-          span = node.span,
-      })
-
-      return node { block = node.block { stats = stats } }
-
-    else
-      return node
-    end
+local function apply_tracing_block(cx, node)
+  if not node.annotations.trace:is(ast.annotation.Demand) then
+    return node
   end
+
+  local trace_id = ast.typed.expr.Constant {
+    value = cx.next_trace_id,
+    expr_type = c.legion_trace_id_t,
+    annotations = ast.default_annotations(),
+    span = node.span,
+  }
+  cx.next_trace_id = cx.next_trace_id + 1
+
+  local stats = terralib.newlist()
+  stats:insert(
+    ast.typed.stat.BeginTrace {
+      trace_id = trace_id,
+      annotations = ast.default_annotations(),
+      span = node.span,
+  })
+  stats:insertall(node.block.stats)
+  stats:insert(
+    ast.typed.stat.EndTrace {
+      trace_id = trace_id,
+      annotations = ast.default_annotations(),
+      span = node.span,
+  })
+
+  return node { block = node.block { stats = stats } }
 end
+
+local function do_nothing(cx, node) return node end
+
+local node_tracing = {
+  [ast.typed.stat.While]   = apply_tracing_block,
+  [ast.typed.stat.ForNum]  = apply_tracing_block,
+  [ast.typed.stat.ForList] = apply_tracing_block,
+  [ast.typed.stat.Repeat]  = apply_tracing_block,
+  [ast.typed.stat.Block]   = apply_tracing_block,
+
+  [ast.typed.expr] = do_nothing,
+  [ast.typed.stat] = do_nothing,
+
+  [ast.typed.Block]             = do_nothing,
+  [ast.IndexLaunchArgsProvably] = do_nothing,
+  [ast.location]                = do_nothing,
+  [ast.annotation]              = do_nothing,
+  [ast.condition_kind]          = do_nothing,
+  [ast.disjointness_kind]       = do_nothing,
+  [ast.fence_kind]              = do_nothing,
+}
+
+local apply_tracing_node = ast.make_single_dispatch(
+  node_tracing,
+  {})
 
 local function apply_tracing(cx, node)
   return ast.map_node_postorder(apply_tracing_node(cx), node)
