@@ -3717,7 +3717,7 @@ namespace Legion {
         if (is_reduce_req)
           dst_requirements[idx].privilege = REDUCE;
       }
-      if (!gather_requirements.size())
+      if (!gather_requirements.empty())
       {
         gather_versions.resize(gather_requirements.size());
         const size_t offset = src_requirements.size() + dst_requirements.size();
@@ -3729,7 +3729,7 @@ namespace Legion {
                                                  projection_info,
                                                  gather_privilege_paths[idx]);
       }
-      if (!scatter_requirements.size())
+      if (!scatter_requirements.empty())
       {
         scatter_versions.resize(scatter_requirements.size());
         const size_t offset = src_requirements.size() + dst_requirements.size();
