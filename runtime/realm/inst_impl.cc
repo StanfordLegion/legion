@@ -81,8 +81,8 @@ namespace Realm {
 
     Memory RegionInstance::get_location(void) const
     {
-      RegionInstanceImpl *i_impl = get_runtime()->get_instance_impl(*this);
-      return i_impl->memory;
+      return ID::make_memory(ID(id).instance.owner_node,
+			     ID(id).instance.mem_idx).convert<Memory>();
     }
 
     /*static*/ Event RegionInstance::create_instance(RegionInstance& inst,

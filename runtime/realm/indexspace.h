@@ -52,15 +52,32 @@ namespace Realm {
   
   struct CopySrcDstField {
   public:
-  CopySrcDstField(void) 
-    : inst(RegionInstance::NO_INST), field_id(FieldID(-1)), size(0), 
-      serdez_id(0), subfield_offset(0) { }
+    CopySrcDstField(void);
+    ~CopySrcDstField(void);
+    CopySrcDstField &set_field(RegionInstance _inst, FieldID _field_id,
+			       size_t _size, size_t _subfield_offset = 0);
+    CopySrcDstField &set_indirect(int _indirect_index, FieldID _field_id,
+				  size_t _size, size_t _subfield_offset = 0);
+    CopySrcDstField &set_redop(ReductionOpID _redop_id, bool _is_fold);
+    CopySrcDstField &set_serdez(CustomSerdezID _serdez_id);
+    CopySrcDstField &set_fill(const void *_data, size_t _size);
+    template <typename T>
+    CopySrcDstField &set_fill(T value);
+
   public:
     RegionInstance inst;
     FieldID field_id;
     size_t size;
+    ReductionOpID redop_id;
+    bool red_fold;
     CustomSerdezID serdez_id;
     size_t subfield_offset;
+    int indirect_index;
+    static const size_t MAX_DIRECT_SIZE = 8;
+    union {
+      char direct[8];
+      void *indirect;
+    } fill_data;
   };
 
   // new stuff here - the "Z" prefix will go away once we delete the old stuff
@@ -71,6 +88,35 @@ namespace Realm {
   template <int N, typename T = int> struct IndexSpace;
   template <int N, typename T = int> struct IndexSpaceIterator;
   template <int N, typename T = int> class SparsityMap;
+
+  template <int N, typename T = int>
+  class CopyIndirection {
+  public:
+    class Base {
+      IndexSpace<N,T> target;
+    };
+
+    template <int N2, typename T2 = int>
+    class Affine : public CopyIndirection<N,T>::Base {
+    public:
+      Matrix<N,N2,T2> transform;
+      Point<N2,T2> offset_lo, offset_hi;
+      Point<N2,T2> divisor;
+      std::vector<IndexSpace<N2,T2> > spaces;
+      std::vector<RegionInstance> insts;
+    };
+
+    template <int N2, typename T2 = int>
+    class Unstructured : public CopyIndirection<N,T>::Base {
+    public:
+      FieldID field_id;
+      RegionInstance inst;
+      bool is_ranges;
+      size_t subfield_offset;
+      std::vector<IndexSpace<N2,T2> > spaces;
+      std::vector<RegionInstance> insts;
+    };
+  };
 
   // a Point is a tuple describing a point in an N-dimensional space - the default "base type"
   //  for each dimension is int, but 64-bit indices are supported as well
@@ -255,6 +301,8 @@ namespace Realm {
     __CUDA_HD__
     PointInRectIterator(const Rect<N,T>& _r, bool _fortran_order = true);
     __CUDA_HD__
+    void reset(const Rect<N,T>& _r, bool _fortran_order = true);
+    __CUDA_HD__
     bool step(void);
   };
 
@@ -352,6 +400,8 @@ namespace Realm {
 
     // copy and fill operations
 
+    // old versions do not support indirection, use explicit arguments for
+    //   fill values, reduction op info
     Event fill(const std::vector<CopySrcDstField> &dsts,
                const ProfilingRequestSet &requests,
                const void *fill_value, size_t fill_value_size,
@@ -360,15 +410,19 @@ namespace Realm {
     Event copy(const std::vector<CopySrcDstField> &srcs,
                const std::vector<CopySrcDstField> &dsts,
                const ProfilingRequestSet &requests,
-               Event wait_on = Event::NO_EVENT,
-               ReductionOpID redop_id = 0, bool red_fold = false) const;
+               Event wait_on,
+               ReductionOpID redop_id, bool red_fold = false) const;
 
     Event copy(const std::vector<CopySrcDstField> &srcs,
-               const std::vector<CopySrcDstField> &dsts,
-               const IndexSpace<N,T> &mask,
-               const ProfilingRequestSet &requests,
-               Event wait_on = Event::NO_EVENT,
-               ReductionOpID redop_id = 0, bool red_fold = false) const;
+	       const std::vector<CopySrcDstField> &dsts,
+	       const ProfilingRequestSet &requests,
+	       Event wait_on = Event::NO_EVENT) const;
+
+    Event copy(const std::vector<CopySrcDstField> &srcs,
+	       const std::vector<CopySrcDstField> &dsts,
+	       const std::vector<const typename CopyIndirection<N,T>::Base *> &indirects,
+	       const ProfilingRequestSet &requests,
+	       Event wait_on = Event::NO_EVENT) const;
 
     // partitioning operations
 

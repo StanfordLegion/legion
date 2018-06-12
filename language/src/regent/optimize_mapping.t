@@ -153,9 +153,24 @@ local function usage_apply(...)
   return usage
 end
 
-local function analyze_usage_node(cx)
-  return function(node)
-    if node:is(ast.typed.expr.Call) and std.is_task(node.fn.value) then
+local uses_expr_input = terralib.memoize(function(field_name, polarity)
+  return function(cx, node)
+    local region_type = std.as_read(node[field_name].expr_type)
+    return uses(cx, region_type, polarity)
+  end
+end)
+
+local uses_expr_result = terralib.memoize(function(polarity)
+  return function(cx, node)
+    return uses(cx, node.expr_type, polarity)
+  end
+end)
+
+local function uses_nothing(cx, node) end
+
+local node_usage = {
+  [ast.typed.expr.Call] = function(cx, node)
+    if std.is_task(node.fn.value) then
       local usage
       for _, arg in ipairs(node.args) do
         local arg_type = std.as_read(arg.expr_type)
@@ -164,56 +179,63 @@ local function analyze_usage_node(cx)
         end
       end
       return usage
-    elseif node:is(ast.typed.expr.RawPhysical) then
-      local region_type = std.as_read(node.region.expr_type)
-      return uses(cx, region_type, inline)
-    elseif node:is(ast.typed.expr.Copy) then
-      local src_type = std.as_read(node.src.expr_type)
-      local dst_type = std.as_read(node.dst.expr_type)
-      return usage_meet(
-        uses(cx, src_type, remote),
-        uses(cx, dst_type, remote))
-    elseif node:is(ast.typed.expr.Fill) then
-      local dst_type = std.as_read(node.dst.expr_type)
-      return uses(cx, dst_type, remote)
-    elseif node:is(ast.typed.expr.Acquire) then
-      local region_type = std.as_read(node.region.expr_type)
-      return uses(cx, region_type, remote)
-    elseif node:is(ast.typed.expr.Release) then
-      local region_type = std.as_read(node.region.expr_type)
-      return uses(cx, region_type, remote)
-    elseif node:is(ast.typed.expr.AttachHDF5) then
-      local region_type = std.as_read(node.region.expr_type)
-      return uses(cx, region_type, remote)
-    elseif node:is(ast.typed.expr.DetachHDF5) then
-      local region_type = std.as_read(node.region.expr_type)
-      return uses(cx, region_type, remote)
-    elseif node:is(ast.typed.expr.Region) then
-      return uses(cx, node.expr_type, inline)
-    elseif node:is(ast.typed.expr.PartitionByField) then
-      return uses(cx, node.region.expr_type, remote)
-    elseif node:is(ast.typed.expr.Image) then
-      return uses(cx, node.region.expr_type, remote)
-    elseif node:is(ast.typed.expr.Preimage) then
-      return uses(cx, node.region.expr_type, remote)
-    elseif node:is(ast.typed.expr.IndexAccess) then
-      local base_type = std.as_read(node.value.expr_type)
-      if std.is_region(base_type) then
-        return uses(cx, base_type, inline)
-      end
-    elseif node:is(ast.typed.expr.FieldAccess) or
-      node:is(ast.typed.expr.Deref)
-    then
-      local ptr_type = std.as_read(node.value.expr_type)
-      if std.is_bounded_type(ptr_type) and ptr_type:is_ptr() then
-        return data.reduce(
-          usage_meet,
-          ptr_type:bounds():map(
-            function(region) return uses(cx, region, inline) end))
-      end
     end
-  end
-end
+  end,
+
+  [ast.typed.expr.RawPhysical] = uses_expr_input("region", inline),
+
+  [ast.typed.expr.Copy] = function(cx, node)
+    local src_type = std.as_read(node.src.expr_type)
+    local dst_type = std.as_read(node.dst.expr_type)
+    return usage_meet(
+      uses(cx, src_type, remote),
+      uses(cx, dst_type, remote))
+  end,
+
+  [ast.typed.expr.Fill]             = uses_expr_input("dst", remote),
+  [ast.typed.expr.Acquire]          = uses_expr_input("region", remote),
+  [ast.typed.expr.Release]          = uses_expr_input("region", remote),
+  [ast.typed.expr.AttachHDF5]       = uses_expr_input("region", remote),
+  [ast.typed.expr.DetachHDF5]       = uses_expr_input("region", remote),
+  [ast.typed.expr.Region]           = uses_expr_result(inline),
+  [ast.typed.expr.PartitionByField] = uses_expr_input("region", remote),
+  [ast.typed.expr.Image]            = uses_expr_input("region", remote),
+  [ast.typed.expr.Preimage]         = uses_expr_input("region", remote),
+
+  [ast.typed.expr.IndexAccess] = function(cx, node)
+    local base_type = std.as_read(node.value.expr_type)
+    if std.is_region(base_type) then
+      return uses(cx, base_type, inline)
+    end
+  end,
+
+  [ast.typed.expr.Deref] = function(cx, node)
+    local ptr_type = std.as_read(node.value.expr_type)
+    if std.is_bounded_type(ptr_type) and ptr_type:is_ptr() then
+      return data.reduce(
+        usage_meet,
+        ptr_type:bounds():map(
+          function(region) return uses(cx, region, inline) end))
+    end
+  end,
+
+  [ast.typed.expr] = uses_nothing,
+  [ast.typed.stat] = uses_nothing,
+
+  [ast.typed.Block]             = uses_nothing,
+  [ast.IndexLaunchArgsProvably] = uses_nothing,
+  [ast.location]                = uses_nothing,
+  [ast.annotation]              = uses_nothing,
+  [ast.condition_kind]          = uses_nothing,
+  [ast.disjointness_kind]       = uses_nothing,
+  [ast.fence_kind]              = uses_nothing,
+}
+
+-- FIXME: Should fill out at least the expr cases, otherwise can't
+-- tell if the pass has been updated for all AST nodes or not.
+local analyze_usage_node = ast.make_single_dispatch(
+  node_usage,
+  {}) -- ast.typed.expr
 
 local function analyze_usage(cx, node)
   assert(node)
