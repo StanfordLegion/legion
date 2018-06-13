@@ -192,6 +192,10 @@ local update_block_with_loop_value = update_block_with_symbol_value("symbol", "v
 local update_block_with_loop_values = update_block_with_symbol_value("symbol", "values")
 
 local node_alpha_conversion = {
+  [ast.condition_kind]           = pass_through,
+  [ast.disjointness_kind]        = pass_through,
+  [ast.fence_kind]               = pass_through,
+
   [ast.specialized.region.Bare]  = update_value,
   [ast.specialized.region.Root]  = update_value,
 
@@ -344,12 +348,6 @@ local node_alpha_conversion = {
   [ast.specialized.stat.RawDelete]  = pass_through,
   [ast.specialized.stat.Fence]      = pass_through,
   [ast.specialized.Block]           = pass_through,
-
-  [ast.location]                    = pass_through,
-  [ast.annotation]                  = pass_through,
-  [ast.condition_kind]              = pass_through,
-  [ast.disjointness_kind]           = pass_through,
-  [ast.fence_kind]                  = pass_through,
 }
 
 local alpha_convert_node = ast.make_single_dispatch(
