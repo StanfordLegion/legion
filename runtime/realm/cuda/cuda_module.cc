@@ -2148,7 +2148,7 @@ namespace Realm {
       // If we fall down to here then the set should be done on the GPU
       CUstream current = gpu->get_current_task_stream()->get_stream();
       CHECK_CU( cuMemsetD32Async((CUdeviceptr)dst, unsigned(value), 
-                                  count, current) );
+                                  count / sizeof(unsigned), current) );
     }
 
     void GPUProcessor::gpu_memset_async(void *dst, int value, 
@@ -2156,7 +2156,7 @@ namespace Realm {
     {
       CUstream current = gpu->get_current_task_stream()->get_stream();
       CHECK_CU( cuMemsetD32Async((CUdeviceptr)dst, unsigned(value),
-                                  count, current) );
+                                  count / sizeof(unsigned), current) );
     }
 
 
