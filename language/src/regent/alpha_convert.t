@@ -340,16 +340,14 @@ local node_alpha_conversion = {
     }
   end,
 
-  [ast.specialized.stat.Return] = pass_through,
-  [ast.specialized.stat.Break] = pass_through,
+  [ast.specialized.stat.Return]     = pass_through,
+  [ast.specialized.stat.Break]      = pass_through,
   [ast.specialized.stat.Assignment] = pass_through,
-  [ast.specialized.stat.Reduce] = pass_through,
-  [ast.specialized.stat.Expr] = pass_through,
-  [ast.specialized.stat.RawDelete] = pass_through,
-  [ast.specialized.stat.Fence] = pass_through,
-  [ast.specialized.Block] = pass_through,
-  [ast.location] = pass_through,
-  [ast.annotation] = pass_through,
+  [ast.specialized.stat.Reduce]     = pass_through,
+  [ast.specialized.stat.Expr]       = pass_through,
+  [ast.specialized.stat.RawDelete]  = pass_through,
+  [ast.specialized.stat.Fence]      = pass_through,
+  [ast.specialized.Block]           = pass_through,
 }
 
 local alpha_convert_node = ast.make_single_dispatch(
