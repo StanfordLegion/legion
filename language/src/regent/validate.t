@@ -213,11 +213,15 @@ local node_vars_are_valid = {
     cx:pop_local_scope()
   end,
 
-  [ast.typed.stat.Elseif]            = validate_loop(nil, "cond"),
-  [ast.typed.stat.While]             = validate_loop(nil, "cond"),
-  [ast.typed.stat.ForNum]            = validate_loop("symbol", "values"),
-  [ast.typed.stat.ForNumVectorized]  = validate_loop("symbol", "values"),
-  [ast.typed.stat.ForList]           = validate_loop("symbol", "value"),
+  [ast.typed.stat.Elseif] = validate_loop(nil, "cond"),
+  [ast.typed.stat.While] = validate_loop(nil, "cond"),
+
+  [ast.typed.stat.ForNum] = validate_loop("symbol", "values"),
+
+  [ast.typed.stat.ForNumVectorized] = validate_loop("symbol", "values"),
+
+  [ast.typed.stat.ForList] = validate_loop("symbol", "value"),
+
   [ast.typed.stat.ForListVectorized] = validate_loop("symbol", "value"),
 
   [ast.typed.stat.Repeat] = function(cx, node, continuation)

@@ -197,7 +197,7 @@ local node_allow_annotations = {
   [ast.typed.stat.MapRegions]        = unreachable,
   [ast.typed.stat.UnmapRegions]      = unreachable,
 
-  -- Top:
+  -- Tasks:
   [ast.typed.top.TaskParam] = deny_all,
 
   [ast.typed.top.Task] = allow({
@@ -213,10 +213,10 @@ local node_allow_annotations = {
   [ast.typed.top.Fspace] = deny_all,
 
   -- Specialized ASTs:
-  [ast.specialized.region]        = pass,
-  [ast.specialized.expr]          = pass,
-  [ast.specialized.stat]          = pass,
-  [ast.specialized.Block]         = pass,
+  [ast.specialized.region] = pass,
+  [ast.specialized.expr] = pass,
+  [ast.specialized.stat] = pass,
+  [ast.specialized.Block] = pass,
   [ast.specialized.top.QuoteExpr] = deny_all,
   [ast.specialized.top.QuoteStat] = deny_all,
 
