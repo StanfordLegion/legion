@@ -360,87 +360,36 @@ local function check_dispatch_completeness(table, node_type)
   assert(false, "dispatch table is missing node type " .. tostring(node_type))
 end
 
-function ast.make_single_dispatch(table, required_cases, default_handler)
+function ast.make_single_dispatch(table, required_cases)
   assert(table and required_cases)
 
   for _, parent_type in ipairs(required_cases) do
     check_dispatch_completeness(table, parent_type)
   end
 
-  -- Copy table so that we can modify it.
-  do
-    local copy = {}
-    for k, v in pairs(table) do
-      copy[k] = v
-    end
-    table = copy
-  end
-
-  -- Recursively expand dispatch table now to avoid doing it at lookup time.
-  do
-    local done = {}
-    repeat
-      local changed = false
-      local add = {}
-      for node_type, handler in pairs(table) do
-        if not done[node_type] and #node_type.children > 0 then
-          for _, child_type in ipairs(node_type.children) do
-            add[child_type] = handler
-          end
-          done[node_type] = true
-          changed = true
-        end
-      end
-      for k, v in pairs(add) do
-        table[k] = v
-      end
-    until not changed
-  end
-
-  -- Remove cases that match the default handler. No point in
-  -- explicitly representing them.
-  do
-    local remove = {}
-    for node_type, handler in pairs(table) do
-      if handler == default_handler then
-        remove[node_type] = true
-      end
-    end
-    for k, _ in pairs(remove) do
-      table[k] = nil
-    end
-  end
-
-  -- Default handler throws an error if not defined.
-  if not default_handler then
-    if cx then
-      default_handler = function(cx, node)
-        assert(false, "unexpected node type " .. tostring(node.node_type))
-      end
-    else
-      default_handler = function(node)
-        assert(false, "unexpected node type " .. tostring(node.node_type))
-      end
-    end
-  end
-
   return function(cx)
     if cx then
       return function(node, ...)
-        local handler = table[node.node_type]
-        if handler then
-          return handler(cx, node, ...)
+        local node_type = node.node_type
+        while node_type and not table[node_type] do
+          node_type = node_type.parent
+        end
+        if table[node_type] then
+          return table[node_type](cx, node, ...)
         else
-          return default_handler(cx, node, ...)
+          assert(false, "unexpected node type " .. tostring(node.node_type))
         end
       end
     else
       return function(node, ...)
-        local handler = table[node.node_type]
-        if handler then
-          return handler(node, ...)
+        local node_type = node.node_type
+        while node_type and not table[node_type] do
+          node_type = node_type.parent
+        end
+        if table[node_type] then
+          return table[node_type](node, ...)
         else
-          return default_handler(node, ...)
+          assert(false, "unexpected node type " .. tostring(node.node_type))
         end
       end
     end
