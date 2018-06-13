@@ -33,6 +33,7 @@
 #endif
 
 #include <stdio.h>
+#include <string.h>
 
 namespace Realm {
   namespace Cuda {
@@ -2129,6 +2130,22 @@ namespace Realm {
 
     void GPUProcessor::gpu_memset(void *dst, int value, size_t count)
     {
+      // Check to see if the destination is in the zero-copy memory
+      // if so we can do the memset ourselves without having to pass
+      // this over to the GPU just to send it back across the PCI-E bus
+      CudaModule *module = gpu->module;
+      if (module->cfg_zc_mem_size_in_mb > 0) {
+        const uintptr_t zc_start = (uintptr_t)module->zcmem_cpu_base;
+        const uintptr_t zc_stop = zc_start + (module->cfg_zc_mem_size_in_mb << 20);
+        const uintptr_t ptr = (uintptr_t)dst;
+        if ((zc_start <= ptr) && (ptr < zc_stop)) {
+          // Make sure the range is contained
+          assert((ptr + count) <= zc_stop);
+          memset(dst, value, count);
+          return;
+        }
+      }
+      // If we fall down to here then the set should be done on the GPU
       CUstream current = gpu->get_current_task_stream()->get_stream();
       CHECK_CU( cuMemsetD32Async((CUdeviceptr)dst, unsigned(value), 
                                   count, current) );
