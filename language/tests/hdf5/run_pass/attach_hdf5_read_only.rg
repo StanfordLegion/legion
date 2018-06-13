@@ -16,7 +16,7 @@ import "regent"
 
 local c = terralib.includec("assert.h")
 
-local hdf5 = terralib.includec("hdf5.h")
+local hdf5 = terralib.includec(os.getenv("HDF_HEADER") or "hdf5.h")
 -- there's some funny business in hdf5.h that prevents terra from being able to
 --  see some of the #define's, so we fix it here, and hope the HDF5 folks don't
 --  change the internals very often...
