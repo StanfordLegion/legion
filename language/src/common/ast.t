@@ -411,28 +411,27 @@ function ast.make_single_dispatch(table, required_cases, default_handler)
     end
   end
 
-  return function(cx)
-    -- Default handler throws an error if not defined.
-    local default = default_handler
-    if not default then
-      if cx then
-        default = function(cx, node)
-          assert(false, "unexpected node type " .. tostring(node.node_type))
-        end
-      else
-        default = function(node)
-          assert(false, "unexpected node type " .. tostring(node.node_type))
-        end
+  -- Default handler throws an error if not defined.
+  if not default_handler then
+    if cx then
+      default_handler = function(cx, node)
+        assert(false, "unexpected node type " .. tostring(node.node_type))
+      end
+    else
+      default_handler = function(node)
+        assert(false, "unexpected node type " .. tostring(node.node_type))
       end
     end
+  end
 
+  return function(cx)
     if cx then
       return function(node, ...)
         local handler = table[node.node_type]
         if handler then
           return handler(cx, node, ...)
         else
-          return default(cx, node, ...)
+          return default_handler(cx, node, ...)
         end
       end
     else
@@ -441,7 +440,7 @@ function ast.make_single_dispatch(table, required_cases, default_handler)
         if handler then
           return handler(node, ...)
         else
-          return default(node, ...)
+          return default_handler(node, ...)
         end
       end
     end
