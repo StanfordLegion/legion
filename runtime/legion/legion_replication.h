@@ -368,7 +368,10 @@ namespace Legion {
     /**
      * \class FieldDescriptorGather
      * A class for doing a gather of field descriptors to a specific
-     * node for doing dependent partitioning operations
+     * node for doing dependent partitioning operations. This collective
+     * also will construct an event broadcast tree to inform all the 
+     * constituent shards about when the operation is done with the 
+     * instances which are being gathered.
      */
     class FieldDescriptorGather : public GatherCollective {
     public:
@@ -386,9 +389,15 @@ namespace Legion {
                       const std::vector<FieldDataDescriptor> &descriptors);
       const std::vector<FieldDataDescriptor>& 
            get_full_descriptors(ApEvent &ready);
+      // Owner shard only
+      void notify_remote_complete(ApEvent precondition);
+      // Non-owner shard only
+      ApEvent get_complete_event(void) const;
     protected:
       std::set<ApEvent> ready_events;
       std::vector<FieldDataDescriptor> descriptors;
+      std::set<ApUserEvent> remote_complete_events;
+      ApUserEvent complete_event;
       bool used;
     };
 

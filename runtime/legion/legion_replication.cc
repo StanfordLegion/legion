@@ -2287,11 +2287,13 @@ namespace Legion {
           const std::vector<FieldDataDescriptor> &full_descriptors =
             gather_collective.get_full_descriptors(all_ready);
           // Perform the operation
-          return forest->create_partition_by_image(op, pid, projection, 
-                                          full_descriptors, all_ready);
+          ApEvent done = forest->create_partition_by_image(op, pid, projection, 
+                                                  full_descriptors, all_ready);
+          gather_collective.notify_remote_complete(done);
+          return done;
         }
         else // nothing else for us to do
-          return ApEvent::NO_AP_EVENT;
+          return gather_collective.get_complete_event();
       }
       else // singular so just do the normal thing
         return forest->create_partition_by_image(op, pid, projection, 
@@ -2324,11 +2326,13 @@ namespace Legion {
           const std::vector<FieldDataDescriptor> &full_descriptors =
             gather_collective.get_full_descriptors(all_ready);
           // Perform the operation
-          return forest->create_partition_by_image_range(op, pid, projection,
-                                                full_descriptors, all_ready);
+          ApEvent done = forest->create_partition_by_image_range(op, pid, 
+                                projection, full_descriptors, all_ready);
+          gather_collective.notify_remote_complete(done);
+          return done;
         }
         else // nothing else for us to do
-          return ApEvent::NO_AP_EVENT;
+          return gather_collective.get_complete_event();
       }
       else // singular so just do the normal thing
         return forest->create_partition_by_image_range(op, pid, projection, 
@@ -2361,11 +2365,13 @@ namespace Legion {
           const std::vector<FieldDataDescriptor> &full_descriptors =
             gather_collective.get_full_descriptors(all_ready);
           // Perform the operation
-          return forest->create_partition_by_preimage(op, pid, projection,
-                                              full_descriptors, all_ready);
+          ApEvent done = forest->create_partition_by_preimage(op, pid, 
+                              projection, full_descriptors, all_ready);
+          gather_collective.notify_remote_complete(done);
+          return done;
         }
         else // nothing else for us to do
-          return ApEvent::NO_AP_EVENT;
+          return gather_collective.get_complete_event();
       }
       else // singular so just do the normal thing
         return forest->create_partition_by_preimage(op, pid, projection, 
@@ -2398,11 +2404,13 @@ namespace Legion {
           const std::vector<FieldDataDescriptor> &full_descriptors =
             gather_collective.get_full_descriptors(all_ready);
           // Perform the operation
-          return forest->create_partition_by_preimage_range(op, pid, projection,
-                                                   full_descriptors, all_ready);
+          ApEvent done = forest->create_partition_by_preimage_range(op, pid, 
+                                    projection, full_descriptors, all_ready);
+          gather_collective.notify_remote_complete(done);
+          return done;
         }
         else // nothing else for us to do
-          return ApEvent::NO_AP_EVENT;
+          return gather_collective.get_complete_event();
       }
       else // singular so just do the normal thing
         return forest->create_partition_by_preimage_range(op, pid, projection, 
@@ -5678,6 +5686,9 @@ namespace Legion {
       // Make sure that we wait in case we still have messages to pass on
       if (used)
         perform_collective_wait();
+#ifdef DEBUG_LEGION
+      assert(!complete_event.exists() || complete_event.has_triggered());
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -5694,6 +5705,18 @@ namespace Legion {
     void FieldDescriptorGather::pack_collective(Serializer &rez) const
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(complete_event.exists());
+#endif
+      // Trigger any remote complete events we have dependent on our event
+      if (!remote_complete_events.empty())
+      {
+        for (std::set<ApUserEvent>::const_iterator it = 
+              remote_complete_events.begin(); it != 
+              remote_complete_events.end(); it++)
+          Runtime::trigger_event(*it, complete_event); 
+      }
+      rez.serialize(complete_event);
       rez.serialize<size_t>(ready_events.size());
       for (std::set<ApEvent>::const_iterator it = ready_events.begin();
             it != ready_events.end(); it++)
@@ -5708,6 +5731,9 @@ namespace Legion {
     void FieldDescriptorGather::unpack_collective(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
+      ApUserEvent remote_complete;
+      derez.deserialize(remote_complete);
+      remote_complete_events.insert(remote_complete);
       size_t num_events;
       derez.deserialize(num_events);
       for (unsigned idx = 0; idx < num_events; idx++)
@@ -5734,6 +5760,12 @@ namespace Legion {
         AutoLock c_lock(collective_lock);
         ready_events.insert(ready_event);
         descriptors.insert(descriptors.end(), descs.begin(), descs.end());
+        // If we're not the owner make our complete event
+#ifdef DEBUG_LEGION
+        assert(!complete_event.exists());
+#endif
+        if (!is_target())
+          complete_event = Runtime::create_ap_user_event();
       }
       perform_collective_async();
     }
@@ -5746,6 +5778,33 @@ namespace Legion {
       perform_collective_wait();
       ready = Runtime::merge_events(ready_events);
       return descriptors;
+    }
+
+    //--------------------------------------------------------------------------
+    void FieldDescriptorGather::notify_remote_complete(ApEvent precondition)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(is_target());
+#endif
+      if (!remote_complete_events.empty())
+      {
+        for (std::set<ApUserEvent>::const_iterator it = 
+              remote_complete_events.begin(); it != 
+              remote_complete_events.end(); it++)
+          Runtime::trigger_event(*it, precondition);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    ApEvent FieldDescriptorGather::get_complete_event(void) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!is_target());
+      assert(complete_event.exists());
+#endif
+      return complete_event;
     }
 
     /////////////////////////////////////////////////////////////
