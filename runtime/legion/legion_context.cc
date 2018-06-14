@@ -1369,7 +1369,7 @@ namespace Legion {
           continue;
         // Next check the privileges
         if (check_privilege && 
-            ((req.privilege & our_req.privilege) != req.privilege))
+            ((PRIV_ONLY(req) & our_req.privilege) != PRIV_ONLY(req)))
           continue;
         // Finally check that all the fields are contained
         bool dominated = true;
@@ -1401,7 +1401,7 @@ namespace Legion {
           continue;
         // Next check the privileges
         if (check_privilege && 
-            ((req.privilege & our_req.privilege) != req.privilege))
+            ((PRIV_ONLY(req) & our_req.privilege) != PRIV_ONLY(req)))
           continue;
         // If this is a returnable privilege requiremnt that means
         // that we made this region so we always have privileges
@@ -1690,20 +1690,13 @@ namespace Legion {
               our_req.privilege_fields.end())
           {
             // Only need to do this check if there were overlapping fields
-            if (!skip_privilege && (req.privilege & (~(our_req.privilege))))
+            if (!skip_privilege && (PRIV_ONLY(req) & (~(our_req.privilege))))
             {
-              // Handle the special case where the parent has WRITE_DISCARD
-              // privilege and the sub-task wants any other kind of privilege.  
-              // This case is ok because the parent could write something
-              // and then hand it off to the child.
-              if (our_req.privilege != WRITE_DISCARD)
-              {
-                if ((req.handle_type == SINGULAR) || 
-                    (req.handle_type == REG_PROJECTION))
-                  return ERROR_BAD_REGION_PRIVILEGES;
-                else
-                  return ERROR_BAD_PARTITION_PRIVILEGES;
-              }
+              if ((req.handle_type == SINGULAR) || 
+                  (req.handle_type == REG_PROJECTION))
+                return ERROR_BAD_REGION_PRIVILEGES;
+              else
+                return ERROR_BAD_PARTITION_PRIVILEGES;
             }
             privilege_fields.erase(fit++);
           }
@@ -2478,7 +2471,7 @@ namespace Legion {
       ApEvent term_event = part_op->get_completion_event();
       // Tell the region tree forest about this partition
       RtEvent safe = forest->create_pending_partition(pid, parent, color_space,
-                              partition_color, DISJOINT_KIND, did, term_event);
+                      partition_color, DISJOINT_COMPLETE_KIND, did, term_event);
       // Now we can add the operation to the queue
       runtime->add_to_dependence_queue(this, executing_processor, part_op);
       // Wait for any notifications to occur before returning
@@ -2524,7 +2517,8 @@ namespace Legion {
       part_op->initialize_union_partition(this, pid, handle1, handle2);
       ApEvent term_event = part_op->get_completion_event();
       // If either partition is aliased the result is aliased
-      if (kind == COMPUTE_KIND)
+      if ((kind == COMPUTE_KIND) || (kind == COMPUTE_COMPLETE_KIND) ||
+          (kind == COMPUTE_INCOMPLETE_KIND))
       {
         // If one of these partitions is aliased then the result is aliased
         IndexPartNode *p1 = forest->get_node(handle1);
@@ -2532,10 +2526,24 @@ namespace Legion {
         {
           IndexPartNode *p2 = forest->get_node(handle2);
           if (!p2->is_disjoint(true/*from app*/))
-            kind = ALIASED_KIND;
+          {
+            if (kind == COMPUTE_KIND)
+              kind = ALIASED_KIND;
+            else if (kind == COMPUTE_COMPLETE_KIND)
+              kind = ALIASED_COMPLETE_KIND;
+            else
+              kind = ALIASED_INCOMPLETE_KIND;
+          }
         }
         else
-          kind = ALIASED_KIND;
+        {
+          if (kind == COMPUTE_KIND)
+            kind = ALIASED_KIND;
+          else if (kind == COMPUTE_COMPLETE_KIND)
+            kind = ALIASED_COMPLETE_KIND;
+          else
+            kind = ALIASED_INCOMPLETE_KIND;
+        }
       }
       // Tell the region tree forest about this partition
       RtEvent safe = forest->create_pending_partition(pid, parent, color_space, 
@@ -2585,17 +2593,32 @@ namespace Legion {
       part_op->initialize_intersection_partition(this, pid, handle1, handle2);
       ApEvent term_event = part_op->get_completion_event();
       // If either partition is disjoint then the result is disjoint
-      if (kind == COMPUTE_KIND)
+      if ((kind == COMPUTE_KIND) || (kind == COMPUTE_COMPLETE_KIND) ||
+          (kind == COMPUTE_INCOMPLETE_KIND))
       {
         IndexPartNode *p1 = forest->get_node(handle1);
         if (!p1->is_disjoint(true/*from app*/))
         {
           IndexPartNode *p2 = forest->get_node(handle2);
           if (p2->is_disjoint(true/*from app*/))
-            kind = DISJOINT_KIND;
+          {
+            if (kind == COMPUTE_KIND)
+              kind = DISJOINT_KIND;
+            else if (kind == COMPUTE_COMPLETE_KIND)
+              kind = DISJOINT_COMPLETE_KIND;
+            else
+              kind = DISJOINT_INCOMPLETE_KIND;
+          }
         }
         else
-          kind = DISJOINT_KIND;
+        {
+          if (kind == COMPUTE_KIND)
+            kind = DISJOINT_KIND;
+          else if (kind == COMPUTE_COMPLETE_KIND)
+            kind = DISJOINT_COMPLETE_KIND;
+          else
+            kind = DISJOINT_INCOMPLETE_KIND;
+        }
       }
       // Tell the region tree forest about this partition
       RtEvent safe = forest->create_pending_partition(pid, parent, color_space,
@@ -2648,11 +2671,19 @@ namespace Legion {
       part_op->initialize_difference_partition(this, pid, handle1, handle2);
       ApEvent term_event = part_op->get_completion_event();
       // If the left-hand-side is disjoint the result is disjoint
-      if (kind == COMPUTE_KIND)
+      if ((kind == COMPUTE_KIND) || (kind == COMPUTE_COMPLETE_KIND) ||
+          (kind == COMPUTE_INCOMPLETE_KIND))
       {
         IndexPartNode *p1 = forest->get_node(handle1);
         if (p1->is_disjoint(true/*from app*/))
-          kind = DISJOINT_KIND;
+        {
+          if (kind == COMPUTE_KIND)
+            kind = DISJOINT_KIND;
+          else if (kind == COMPUTE_COMPLETE_KIND)
+            kind = DISJOINT_COMPLETE_KIND;
+          else
+            kind = DISJOINT_INCOMPLETE_KIND;
+        }
       }
       // Tell the region tree forest about this partition
       RtEvent safe = forest->create_pending_partition(pid, parent, color_space, 
@@ -2997,11 +3028,19 @@ namespace Legion {
       ApEvent term_event = part_op->get_completion_event();
       // If the source of the preimage is disjoint then the result is disjoint
       // Note this only applies here and not to range
-      if (part_kind == COMPUTE_KIND)
+      if ((part_kind == COMPUTE_KIND) || (part_kind == COMPUTE_COMPLETE_KIND) ||
+          (part_kind == COMPUTE_INCOMPLETE_KIND))
       {
         IndexPartNode *p = forest->get_node(projection);
         if (p->is_disjoint(true/*from app*/))
-          part_kind = DISJOINT_KIND;
+        {
+          if (part_kind == COMPUTE_KIND)
+            part_kind = DISJOINT_KIND;
+          else if (part_kind == COMPUTE_COMPLETE_KIND)
+            part_kind = DISJOINT_COMPLETE_KIND;
+          else
+            part_kind = DISJOINT_INCOMPLETE_KIND;
+        }
       }
       // Tell the region tree forest about this partition
       RtEvent safe = forest->create_pending_partition(pid, 
@@ -4750,20 +4789,39 @@ namespace Legion {
       }
       if (!to_perform.empty())
       {
-        for (std::vector<PostTaskArgs>::const_iterator it = 
-              to_perform.begin(); it != to_perform.end(); it++)
+        if (launch_next_op == NULL)
         {
-          if (it->instance.exists())
+          // We're not launching the next operation, so we can just kick
+          // these things off as they are without preconditions
+          for (std::vector<PostTaskArgs>::iterator it =
+                to_perform.begin(); it != to_perform.end(); it++)
           {
-            it->context->post_end_task(it->result, it->size, false/*owned*/);
-            // Once we've copied the data then we can destroy the instance
-            it->instance.destroy();
+            DeferredPostTaskArgs args(*it, RtUserEvent::NO_RT_USER_EVENT);
+            runtime->issue_runtime_meta_task(args, 
+                  LG_THROUGHPUT_DEFERRED_PRIORITY);
           }
-          else
-            it->context->post_end_task(it->result, it->size, true/*owned*/);
+        }
+        else
+        {
+          // We're going to launch the next iteration also, but don't do
+          // it until all of our currently kicked off tasks have started 
+          std::set<RtEvent> next_op_preconditions;
+          for (std::vector<PostTaskArgs>::iterator it =
+                to_perform.begin(); it != to_perform.end(); it++)
+          {
+            RtUserEvent start_event = Runtime::create_rt_user_event();
+            DeferredPostTaskArgs args(*it, start_event);
+            runtime->issue_runtime_meta_task(args, 
+                  LG_THROUGHPUT_DEFERRED_PRIORITY);
+            next_op_preconditions.insert(start_event);
+          }
+          // Now we can kick off the next iteration with the right preconditions
+          PostEndArgs args(launch_next_op, this);
+          runtime->issue_runtime_meta_task(args, LG_THROUGHPUT_WORK_PRIORITY,
+                                Runtime::merge_events(next_op_preconditions));
         }
       }
-      if (launch_next_op != NULL)
+      else if (launch_next_op != NULL)
       {
         PostEndArgs args(launch_next_op, this);
         runtime->issue_runtime_meta_task(args, LG_THROUGHPUT_WORK_PRIORITY);
@@ -6587,6 +6645,27 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    /*static*/ void InnerContext::handle_deferred_post_end_task(
+                                                               const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const DeferredPostTaskArgs *pargs = ((const DeferredPostTaskArgs*)args);
+      // If we have a start event, trigger that now
+      if (pargs->started.exists())
+        Runtime::trigger_event(pargs->started);
+      if (pargs->instance.exists())
+      {
+        pargs->context->post_end_task(
+                                    pargs->result, pargs->size, false/*owned*/);
+        // Once we've copied the data then we can destroy the instance
+        pargs->instance.destroy();
+      }
+      else
+        pargs->context->post_end_task(
+                                     pargs->result, pargs->size, true/*owned*/);
+    }
+
+    //--------------------------------------------------------------------------
     void InnerContext::inline_child_task(TaskOp *child)
     //--------------------------------------------------------------------------
     {
@@ -6689,9 +6768,6 @@ namespace Legion {
     IndexSpace InnerContext::find_index_launch_space(const Domain &domain)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(domain.dense());
-#endif
       std::map<Domain,IndexSpace>::const_iterator finder = 
         index_launch_spaces.find(domain);
       if (finder != index_launch_spaces.end())

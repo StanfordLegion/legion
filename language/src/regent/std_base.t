@@ -21,6 +21,18 @@ local base = {}
 
 base.config, base.args = config.args()
 
+
+-- Hack: Terra symbols don't support the hash() method so monkey patch
+-- it in here. This allows deterministic hashing of Terra symbols,
+-- which is currently required by OpenMP codegen.
+do
+  local terralib_symbol = getmetatable(terralib.newsymbol(int))
+  function terralib_symbol:hash()
+    local hash_value = "__terralib_symbol_#" .. tostring(self.id)
+    return hash_value
+  end
+end
+
 -- #####################################
 -- ## Legion Bindings
 -- #################
@@ -30,9 +42,11 @@ local c = terralib.includecstring([[
 #include "legion.h"
 #include "legion_terra.h"
 #include "legion_terra_partitions.h"
+#include "murmur_hash3.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -97,6 +111,98 @@ terra base.domain_from_bounds_3d(start : c.legion_point_3d_t,
     },
   }
   return c.legion_domain_from_rect_3d(rect)
+end
+
+-- #####################################
+-- ## Codegen Helpers
+-- #################
+
+function base.type_meet(a, b)
+  local function test()
+    local terra query(x : a, y : b)
+      if true then return x end
+      if true then return y end
+    end
+    return query:gettype().returntype
+  end
+  local valid, result_type = pcall(test)
+
+  if valid then
+    return result_type
+  end
+end
+
+local gen_optimal = terralib.memoize(
+  function(op, lhs_type, rhs_type)
+    return terra(lhs : lhs_type, rhs : rhs_type)
+      if [base.quote_binary_op(op, lhs, rhs)] then
+        return lhs
+      else
+        return rhs
+      end
+    end
+  end)
+
+base.fmax = macro(
+  function(lhs, rhs)
+    local lhs_type, rhs_type = lhs:gettype(), rhs:gettype()
+    local result_type = base.type_meet(lhs_type, rhs_type)
+    assert(result_type)
+    return `([gen_optimal(">", lhs_type, rhs_type)]([lhs], [rhs]))
+  end)
+
+base.fmin = macro(
+  function(lhs, rhs)
+    local lhs_type, rhs_type = lhs:gettype(), rhs:gettype()
+    local result_type = base.type_meet(lhs_type, rhs_type)
+    assert(result_type)
+    return `([gen_optimal("<", lhs_type, rhs_type)]([lhs], [rhs]))
+  end)
+
+function base.quote_unary_op(op, rhs)
+  if op == "-" then
+    return `(-[rhs])
+  elseif op == "not" then
+    return `(not [rhs])
+  else
+    assert(false, "unknown operator " .. tostring(op))
+  end
+end
+
+function base.quote_binary_op(op, lhs, rhs)
+  if op == "*" then
+    return `([lhs] * [rhs])
+  elseif op == "/" then
+    return `([lhs] / [rhs])
+  elseif op == "%" then
+    return `([lhs] % [rhs])
+  elseif op == "+" then
+    return `([lhs] + [rhs])
+  elseif op == "-" then
+    return `([lhs] - [rhs])
+  elseif op == "<" then
+    return `([lhs] < [rhs])
+  elseif op == ">" then
+    return `([lhs] > [rhs])
+  elseif op == "<=" then
+    return `([lhs] <= [rhs])
+  elseif op == ">=" then
+    return `([lhs] >= [rhs])
+  elseif op == "==" then
+    return `([lhs] == [rhs])
+  elseif op == "~=" then
+    return `([lhs] ~= [rhs])
+  elseif op == "and" then
+    return `([lhs] and [rhs])
+  elseif op == "or" then
+    return `([lhs] or [rhs])
+  elseif op == "max" then
+    return `([base.fmax]([lhs], [rhs]))
+  elseif op == "min" then
+    return `([base.fmin]([lhs], [rhs]))
+  else
+    assert(false, "unknown operator " .. tostring(op))
+  end
 end
 
 -- #####################################
@@ -479,6 +585,10 @@ function base.types.is_unpack_result(t)
   return terralib.types.istype(t) and rawget(t, "is_unpack_result") or false
 end
 
+function base.types.is_string(t)
+  return terralib.types.istype(t) and rawget(t, "is_string") or false
+end
+
 function base.types.type_supports_privileges(t)
   return base.types.is_region(t) or base.types.is_list_of_regions(t)
 end
@@ -619,7 +729,8 @@ function symbol:getlabel()
 end
 
 function symbol:hash()
-  return self
+  local hash_value = "__symbol_#" .. tostring(self.symbol_id)
+  return hash_value
 end
 
 function symbol:__tostring()
@@ -734,6 +845,20 @@ function base.variant:get_ast()
   return self.ast
 end
 
+function base.variant:set_untyped_ast(ast)
+  assert(not self.untyped_ast)
+  self.untyped_ast = ast
+end
+
+function base.variant:has_untyped_ast()
+  return self.untyped_ast
+end
+
+function base.variant:get_untyped_ast()
+  assert(self.untyped_ast)
+  return self.untyped_ast
+end
+
 function base.variant:compile()
   self.task:complete()
   return self:get_definition():compile()
@@ -814,6 +939,7 @@ do
       task = task,
       name = name,
       ast = false,
+      untyped_ast = false,
       definition = false,
       cuda = false,
       external = false,

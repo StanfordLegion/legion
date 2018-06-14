@@ -52,9 +52,10 @@ override CC_FLAGS := $(filter-out -DBOUNDS_CHECKS, \
                      $(filter-out -DLEGION_SPY, \
                        $(CC_FLAGS))))
 
-TESTS := serializing test_profiling ctxswitch barrier_reduce taskreg memspeed idcheck inst_reuse
+TESTS := serializing test_profiling ctxswitch barrier_reduce taskreg memspeed idcheck inst_reuse transpose
 TESTS_SINGLENODE := proc_group
 TESTS += deppart
+TESTS += scatter
 
 ifeq ($(strip $(USE_GASNET)),1)
   ifdef NODECOUNT

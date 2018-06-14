@@ -23,6 +23,8 @@ local passes_hooks = require("regent/passes_hooks")
 local pretty = require("regent/pretty")
 local specialize = require("regent/specialize")
 local normalize = require("regent/normalize")
+local inline_tasks = require("regent/inline_tasks")
+local eliminate_dead_code = require("regent/eliminate_dead_code")
 local std = require("regent/std")
 local type_check = require("regent/type_check")
 local validate = require("regent/validate")
@@ -37,22 +39,28 @@ end
 function passes.codegen(node, allow_pretty)
   if allow_pretty == nil then allow_pretty = true end
 
-  if allow_pretty and std.config["pretty"] then print(pretty.entry(node)) end
-  if std.config["validate"] then validate.entry(node) end
-  return codegen.entry(node)
+  if allow_pretty and std.config["pretty"] then print(profile("pretty", node, pretty.entry)(node)) end
+  if std.config["validate"] then profile("validate", node, validate.entry)(node) end
+  return profile("codegen", node, codegen.entry)(node)
 end
 
 function passes.compile(node, allow_pretty)
   local function ctor(environment_function)
     local env = environment_function()
     local node = profile("specialize", node, specialize.entry)(env, node)
-    node = profile("normalize after specialize", node, normalize.entry)(node)
-    alpha_convert.entry(node) -- Run this here to avoid bitrot (discard result).
-    node = profile("type check", node, type_check.entry)(node)
-    node = profile("normalize after type check", node, normalize.entry)(node)
-    node = profile("check annotations", node, check_annotations.entry)(node)
+    node = profile("normalize_after_specialize", node, normalize.entry)(node)
+    if std.config["inline"] then
+      node = profile("inline_tasks", node, inline_tasks.entry)(node)
+    end
+    profile("alpha_convert", node, alpha_convert.entry)(node) -- Run this here to avoid bitrot (discard result).
+    node = profile("type_check", node, type_check.entry)(node)
+    if std.config["inline"] then
+      node = profile("eliminate_dead_code", node, eliminate_dead_code.entry)(node)
+    end
+    node = profile("normalize_after_type_check", node, normalize.entry)(node)
+    node = profile("check_annotations", node, check_annotations.entry)(node)
     node = passes.optimize(node)
-    return profile("codegen", node, passes.codegen)(node, allow_pretty)
+    return passes.codegen(node, allow_pretty)
   end
   return ctor
 end

@@ -1,15 +1,28 @@
 This file lists the major changes as they appear in the stable branch.  No
 attempt is made to keep this list accurate for the master branch.
 
-Version 18.xx.0
+Version 18.05.0 (May 31, 2018)
   * Legion
     - Migrated all node-local Legion reservations to use Realm
       fast reservations and removed no longer necessary continuations
     - Added support for mapper attached data to all Mappable types
-
+    - Added support for assigning a block of IDs to a library in a consistent
+        way across nodes via generate_library_task_ids and friends
   * Realm
     - Added support for "fast" reservations that have better
       performance characteristics for reservations local to a node
+  * C API
+    - Updated projection functor API to match Legion C++ API
+  * Regent
+    - Regent now generates disjointness constraints for affine
+        expressions in partition accesses. E.g. p[i] and p[i+1] are
+        now known to be disjoint at compile time as long as p is a
+        disjoint partition
+    - Support for non-trivial projection functors in index space launches
+        such as f(p[i+1])
+    - Improvements to compile time spent in various optimization passes
+    - Support for parallel compilation with the flag -fjobs N
+    - Miscellaneous fixes
 
 Version 18.02.0 (February 2, 2018)
   * Legion

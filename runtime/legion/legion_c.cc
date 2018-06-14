@@ -3531,6 +3531,21 @@ legion_runtime_end_trace(legion_runtime_t runtime_,
 }
 
 // -----------------------------------------------------------------------
+// Frame Operations
+// -----------------------------------------------------------------------
+
+void
+legion_runtime_complete_frame(legion_runtime_t runtime_,
+                              legion_context_t ctx_)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+
+  runtime->complete_frame(ctx);
+}
+
+
+// -----------------------------------------------------------------------
 // Fence Operations
 // -----------------------------------------------------------------------
 
@@ -3671,6 +3686,47 @@ legion_physical_region_get_field_accessor_array_1d(
   return CObjectWrapper::wrap(accessor);
 }
 
+legion_accessor_array_1d_t
+legion_physical_region_get_field_accessor_array_1d_with_transform(
+  legion_physical_region_t handle_,
+  legion_field_id_t fid,
+  legion_domain_affine_transform_t transform_)
+{
+  PhysicalRegion *handle = CObjectWrapper::unwrap(handle_);
+  DomainAffineTransform domtrans = CObjectWrapper::unwrap(transform_);
+  UnsafeFieldAccessor<char,1,coord_t,Realm::AffineAccessor<char,1,coord_t> >
+    *accessor = NULL;
+  assert(domtrans.transform.n == 1);
+  switch (domtrans.transform.m)
+  {
+    case 1:
+      {
+        const AffineTransform<1,1,coord_t> transform = domtrans; 
+        accessor = new UnsafeFieldAccessor<char,1,coord_t,
+                 Realm::AffineAccessor<char,1,coord_t> >(*handle, fid, transform);
+        break;
+      }
+    case 2:
+      {
+        const AffineTransform<2,1,coord_t> transform = domtrans; 
+        accessor = new UnsafeFieldAccessor<char,1,coord_t,
+                 Realm::AffineAccessor<char,1,coord_t> >(*handle, fid, transform);
+        break;
+      }
+    case 3:
+      {
+        const AffineTransform<3,1,coord_t> transform = domtrans; 
+        accessor = new UnsafeFieldAccessor<char,1,coord_t,
+                 Realm::AffineAccessor<char,1,coord_t> >(*handle, fid, transform);
+        break;
+      }
+    default:
+      assert(false);
+  }
+
+  return CObjectWrapper::wrap(accessor);
+}
+
 void
 legion_accessor_array_1d_destroy(legion_accessor_array_1d_t handle_)
 {
@@ -3693,6 +3749,47 @@ legion_physical_region_get_field_accessor_array_2d(
   return CObjectWrapper::wrap(accessor);
 }
 
+legion_accessor_array_2d_t
+legion_physical_region_get_field_accessor_array_2d_with_transform(
+  legion_physical_region_t handle_,
+  legion_field_id_t fid,
+  legion_domain_affine_transform_t transform_)
+{
+  PhysicalRegion *handle = CObjectWrapper::unwrap(handle_);
+  DomainAffineTransform domtrans = CObjectWrapper::unwrap(transform_);
+  UnsafeFieldAccessor<char,2,coord_t,Realm::AffineAccessor<char,2,coord_t> >
+    *accessor = NULL;
+  assert(domtrans.transform.n == 2);
+  switch (domtrans.transform.m)
+  {
+    case 1:
+      {
+        const AffineTransform<1,2,coord_t> transform = domtrans; 
+        accessor = new UnsafeFieldAccessor<char,2,coord_t,
+                 Realm::AffineAccessor<char,2,coord_t> >(*handle, fid, transform);
+        break;
+      }
+    case 2:
+      {
+        const AffineTransform<2,2,coord_t> transform = domtrans; 
+        accessor = new UnsafeFieldAccessor<char,2,coord_t,
+                 Realm::AffineAccessor<char,2,coord_t> >(*handle, fid, transform);
+        break;
+      }
+    case 3:
+      {
+        const AffineTransform<3,2,coord_t> transform = domtrans; 
+        accessor = new UnsafeFieldAccessor<char,2,coord_t,
+                 Realm::AffineAccessor<char,2,coord_t> >(*handle, fid, transform);
+        break;
+      }
+    default:
+      assert(false);
+  }
+
+  return CObjectWrapper::wrap(accessor);
+}
+
 void
 legion_accessor_array_2d_destroy(legion_accessor_array_2d_t handle_)
 {
@@ -3711,6 +3808,47 @@ legion_physical_region_get_field_accessor_array_3d(
   UnsafeFieldAccessor<char,3,coord_t,Realm::AffineAccessor<char,3,coord_t> >
     *accessor = new UnsafeFieldAccessor<char,3,coord_t,
                       Realm::AffineAccessor<char,3,coord_t> >(*handle, fid);
+
+  return CObjectWrapper::wrap(accessor);
+}
+
+legion_accessor_array_3d_t
+legion_physical_region_get_field_accessor_array_3d_with_transform(
+  legion_physical_region_t handle_,
+  legion_field_id_t fid,
+  legion_domain_affine_transform_t transform_)
+{
+  PhysicalRegion *handle = CObjectWrapper::unwrap(handle_);
+  DomainAffineTransform domtrans = CObjectWrapper::unwrap(transform_);
+  UnsafeFieldAccessor<char,3,coord_t,Realm::AffineAccessor<char,3,coord_t> >
+    *accessor = NULL;
+  assert(domtrans.transform.n == 3);
+  switch (domtrans.transform.m)
+  {
+    case 1:
+      {
+        const AffineTransform<1,3,coord_t> transform = domtrans; 
+        accessor = new UnsafeFieldAccessor<char,3,coord_t,
+                 Realm::AffineAccessor<char,3,coord_t> >(*handle, fid, transform);
+        break;
+      }
+    case 2:
+      {
+        const AffineTransform<2,3,coord_t> transform = domtrans; 
+        accessor = new UnsafeFieldAccessor<char,3,coord_t,
+                 Realm::AffineAccessor<char,3,coord_t> >(*handle, fid, transform);
+        break;
+      }
+    case 3:
+      {
+        const AffineTransform<3,3,coord_t> transform = domtrans; 
+        accessor = new UnsafeFieldAccessor<char,3,coord_t,
+                 Realm::AffineAccessor<char,3,coord_t> >(*handle, fid, transform);
+        break;
+      }
+    default:
+      assert(false);
+  }
 
   return CObjectWrapper::wrap(accessor);
 }
@@ -4922,6 +5060,42 @@ unsigned long long
 legion_get_current_time_in_nanos(void)
 {
   return Realm::Clock::current_time_in_nanoseconds();
+}
+
+legion_future_t
+legion_issue_timing_op_seconds(legion_runtime_t runtime_,
+                               legion_context_t ctx_)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+
+  TimingLauncher launcher(MEASURE_SECONDS);
+  Future f = runtime->issue_timing_measurement(ctx, launcher);  
+  return CObjectWrapper::wrap(new Future(f));
+}
+
+legion_future_t
+legion_issue_timing_op_microseconds(legion_runtime_t runtime_,
+                                    legion_context_t ctx_)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+
+  TimingLauncher launcher(MEASURE_MICRO_SECONDS);
+  Future f = runtime->issue_timing_measurement(ctx, launcher);  
+  return CObjectWrapper::wrap(new Future(f));
+}
+
+legion_future_t
+legion_issue_timing_op_nanoseconds(legion_runtime_t runtime_,
+                                   legion_context_t ctx_)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+
+  TimingLauncher launcher(MEASURE_NANO_SECONDS);
+  Future f = runtime->issue_timing_measurement(ctx, launcher);  
+  return CObjectWrapper::wrap(new Future(f));
 }
 
 // -----------------------------------------------------------------------

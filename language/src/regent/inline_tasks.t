@@ -19,141 +19,9 @@ local data = require("common/data")
 local std = require("regent/std")
 local report = require("common/report")
 local symbol_table = require("regent/symbol_table")
+local pretty = require("regent/pretty")
 
 local inline_tasks = {}
-
-local context = {}
-
-function context:__index (field)
-  local value = context [field]
-  if value ~= nil then
-    return value
-  end
-  error ("context has no field '" .. field .. "' (in lookup)", 2)
-end
-
-function context:__newindex (field, value)
-  error ("context has no field '" .. field .. "' (in assignment)", 2)
-end
-
-function context:new_local_scope()
-  local cx = {
-    env = self.env:new_local_scope(),
-  }
-  setmetatable(cx, context)
-  return cx
-end
-
-function context:new_global_scope(env)
-  local cx = {
-    env = symbol_table.new_global_scope(env),
-  }
-  setmetatable(cx, context)
-  return cx
-end
-
-local global_env = context:new_global_scope({})
-
-local function expr_id(sym, node)
-  return ast.typed.expr.ID {
-    value = sym,
-    expr_type = std.rawref(&sym:gettype()),
-    annotations = node.annotations,
-    span = node.span,
-  }
-end
-
-local function make_block(stats, annotations, span)
-  return ast.typed.stat.Block {
-    block = ast.typed.Block {
-      stats = stats,
-      span = span,
-    },
-    annotations = annotations,
-    span = span,
-  }
-end
-
-local function stat_var(lhs, rhs, node)
-  local value = false
-  if rhs then value = rhs end
-  return ast.typed.stat.Var {
-    symbol = lhs,
-    type = lhs:gettype(),
-    value = value,
-    annotations = node.annotations,
-    span = node.span,
-  }
-end
-
-local function stat_asgn(lhs, rhs, node)
-  return ast.typed.stat.Assignment {
-    lhs = lhs,
-    rhs = rhs,
-    annotations = node.annotations,
-    span = node.span,
-  }
-end
-
-local function count_returns(node)
-  local num_returns = 0
-
-  if node:is(ast.typed.stat.Return) then num_returns = 1 end
-
-  for _, field in pairs(node) do
-    if ast.is_node(field) and field:is(ast.typed.stat) then
-      num_returns = num_returns + count_returns(field)
-
-    elseif ast.is_node(field) and field:is(ast.typed.Block) then
-      field.stats:map(function(node)
-        num_returns = num_returns + count_returns(node)
-      end)
-
-    elseif terralib.islist(field) then
-      field:map(function(field)
-        if ast.is_node(field) and field:is(ast.typed.stat) then
-          num_returns = num_returns + count_returns(field)
-        end
-      end)
-    end
-  end
-
-  return num_returns
-end
-
-local function find_self_recursion(prototype, node)
-  if node:is(ast.typed.expr.Call) and node.fn.value == prototype then
-    return true
-  end
-
-  for _, field in pairs(node) do
-    if ast.is_node(field) and
-      (field:is(ast.typed.stat) or field:is(ast.typed.expr))
-    then
-      if find_self_recursion(prototype, field) then return true end
-
-    elseif ast.is_node(field) and field:is(ast.typed.Block) then
-      local recursion_found = false
-      field.stats:map(function(field)
-        recursion_found = recursion_found or find_self_recursion(prototype, field)
-      end)
-      if recursion_found then return true end
-
-    elseif terralib.islist(field) then
-      local recursion_found = false
-      field:map(function(field)
-        if ast.is_node(field) and
-          (field:is(ast.typed.stat) or field:is(ast.typed.expr))
-        then
-          recursion_found = recursion_found or find_self_recursion(prototype, field)
-        end
-      end)
-      if recursion_found then return true end
-    end
-  end
-
-  return false
-end
 
 local function check_valid_inline_task(node, task)
   if not task then
@@ -163,353 +31,450 @@ local function check_valid_inline_task(node, task)
   local body = task.body
   assert(body)
 
-  local num_returns = count_returns(body)
+  local function count_return(node)
+    return (node:is(ast.specialized.stat.Return) and 1) or 0
+  end
+  local function add(x, y) return x + y end
+  local num_returns = ast.mapreduce_node_postorder(count_return, add, body, 0)
   if num_returns > 1 then
     report.error(task, "inline tasks cannot have multiple return statements")
   end
-  if num_returns == 1 and not body.stats[#body.stats]:is(ast.typed.stat.Return) then
+  if num_returns == 1 and not body.stats[#body.stats]:is(ast.specialized.stat.Return) then
     report.error(task, "the return statement in an inline task should be the last statement")
   end
 
-  if find_self_recursion(task.prototype, body) then
+  local function is_recursive_call(node)
+    return node:is(ast.specialized.expr.Call) and node.fn.value == task.prototype
+  end
+  local function lor(x, y) return x or y end
+  local has_self_recursion = ast.mapreduce_node_postorder(is_recursive_call, lor, body, false)
+  if has_self_recursion then
     report.error(task, "inline tasks cannot be recursive")
   end
 end
 
-local function check_rf_type(ty)
-  if std.is_ispace(ty) or std.is_region(ty) or
-     std.is_partition(ty) or std.is_cross_product(ty) then
-     return true
-  elseif std.is_fspace_instance(ty) then
-    for _, field in ipairs(ty:getentries()) do
-      if not check_rf_type(field.type) then
-        return false
-      end
-      return true
-    end
-  else
-    return false
-  end
-end
-
-local function check_rf(node)
-  if node:is(ast.typed.expr.ID) then
-    return check_rf_type(std.as_read(node.expr_type))
-  elseif node:is(ast.typed.expr.FieldAccess) then
-    return check_rf(node.value)
-  elseif node:is(ast.typed.expr.IndexAccess) then
-    return check_rf(node.value) and check_rf(node.index)
-  else
-    return false
-  end
-end
-
-local function get_root_subregion(node)
-  if node:is(ast.typed.expr.ID) then
-    local ty = std.as_read(node.expr_type)
-    if std.is_region(ty) then return node.value
-    elseif std.is_partition(ty) then return ty.parent_region_symbol
-    else return nil end
-  elseif node:is(ast.typed.expr.IndexAccess) then
-    return get_root_subregion(node.value)
-  end
-  return nil
-end
-
-function inline_tasks.expr(cx, node)
-  if node:is(ast.typed.expr.Call) then
-    local stats = terralib.newlist()
-    if type(node.fn.value) ~= "table" or not std.is_task(node.fn.value) then
-      return stats, node
-    end
-
-    local task = node.fn.value
-    local task_ast = task:has_primary_variant() and task:get_primary_variant():has_ast()
-    if node.annotations.inline:is(ast.annotation.Demand) then
-      check_valid_inline_task(node, task_ast)
-    elseif not task_ast or
-      not task_ast.annotations.inline:is(ast.annotation.Demand) or
-      node.annotations.inline:is(ast.annotation.Forbid)
-    then
-      return stats, node
-    end
-
-    local args = node.args:map(function(arg)
-      local new_stats, new_node = inline_tasks.expr(cx, arg)
-      stats:insertall(new_stats)
-      return new_node
-    end)
-    local params = task_ast.params:map(function(param) return param.symbol end)
-    local param_types = params:map(function(param) return param:gettype() end)
-    local task_body = task_ast.body
-    local return_var
-    local return_var_expr
-
-    local new_block
-    do
-      local stats = terralib.newlist()
-      local expr_mapping = {}
-      local type_mapping = {}
-      local new_local_params = terralib.newlist()
-      local new_local_param_types = terralib.newlist()
-      local new_args = terralib.newlist()
-      data.zip(params, param_types, args):map(function(tuple)
-        local param, param_type, arg = unpack(tuple)
-        if check_rf(arg) then
-          expr_mapping[param] = arg
-          if std.is_region(param_type) then
-            type_mapping[param_type] = std.as_read(arg.expr_type)
-            type_mapping[param] = get_root_subregion(arg)
-            type_mapping[param_type.ispace_symbol] =
-              type_mapping[param_type].ispace_symbol
-            type_mapping[param_type:ispace()] =
-              type_mapping[param_type]:ispace()
-          end
-        else
-          local new_var = std.newsymbol(std.as_read(arg.expr_type))
-          expr_mapping[param] = new_var
-          new_local_params:insert(new_var)
-          new_local_param_types:insert(new_var:gettype())
-          new_args:insert(arg)
-          if std.is_region(param_type) then
-            type_mapping[param] = new_var
-            type_mapping[param_type] = new_var:gettype()
-            type_mapping[param_type.ispace_symbol] =
-              type_mapping[param_type].ispace_symbol
-            type_mapping[param_type:ispace()] =
-              type_mapping[param_type]:ispace()
-          end
-        end
-      end)
-
-      if #new_local_params > 0 then
-        for i = 1, #new_local_params do
-          stats:insert(ast.typed.stat.Var {
-            symbol = new_local_params[i],
-            type = new_local_param_types[i],
-            value = new_args[i],
-            annotations = node.annotations,
-            span = node.span
-          })
-        end
-      end
-      local function subst_pre(node)
-        if node:is(ast.typed.stat.ForList) then
-          local old_type = node.symbol:gettype()
-          local new_type = std.type_sub(old_type, type_mapping)
-
-          if old_type ~= new_type then
-            local new_symbol = std.newsymbol(new_type, node.symbol:hasname())
-            expr_mapping[node.symbol] = new_symbol
-            return node { symbol = new_symbol }
-          else
-            return node
-          end
-        else
-          return node
-        end
-      end
-
-      local function subst_post(node)
-        if rawget(node, "expr_type") then
-          if node:is(ast.typed.expr.ID) and expr_mapping[node.value] then
-            local tgt = expr_mapping[node.value]
-            if rawget(tgt, "expr_type") then node = tgt
-            else node = node { value = tgt } end
-          elseif node:is(ast.typed.expr.Ispace) then
-            local ispace = std.as_read(node.expr_type)
-            local new_ispace = std.ispace(ispace.index_type)
-            type_mapping[ispace] = new_ispace
-          elseif node:is(ast.typed.expr.Region) then
-            local region = std.as_read(node.expr_type)
-            local ispace =
-              std.type_sub(std.as_read(region:ispace()), type_mapping)
-            local fspace =
-              std.type_sub(std.as_read(region:fspace()), type_mapping)
-            local new_region = std.region(ispace, fspace)
-            type_mapping[region] = new_region
-          end
-          return node { expr_type = std.type_sub(node.expr_type, type_mapping) }
-        elseif node:is(ast.typed.stat.Var) then
-          local new_symbol = nil
-          local new_type = std.type_sub(node.type, type_mapping)
-          if new_type ~= node.type then
-            local new_sym = std.newsymbol(new_type)
-            new_symbol = std.newsymbol(new_type)
-            expr_mapping[node.symbol] = new_symbol
-            if std.is_region(new_type) then
-              type_mapping[node.symbol] = new_symbol
-            end
-          else
-            new_symbol = node.symbol
-            new_type = node.type
-          end
-          return node {
-            symbol = new_symbol,
-            type = new_type,
-          }
-        else
-          return node
-        end
-      end
-      return_var = std.newsymbol(std.type_sub(task_ast.return_type, type_mapping))
-      return_var_expr = expr_id(return_var, node)
-      stats:insertall(task_body.stats)
-      if stats[#stats]:is(ast.typed.stat.Return) then
-        local num_stats = #stats
-        local return_stat = stats[num_stats]
-        stats[num_stats] = stat_asgn(return_var_expr, return_stat.value, return_stat)
-      end
-      stats = ast.map_node_prepostorder(subst_pre, subst_post, stats)
-      new_block = make_block(stats, node.annotations, node.span)
-    end
-    stats:insert(stat_var(return_var, nil, node))
-    stats:insert(new_block)
-    --- TODO: We add a dummy variable declaration that behaves like a fence.
-    ---       This hack is to prevent RDIR from reordering inlined blocks arbitrarily.
-    ---       Once we fix the issue in RDIR, we will remove this hack.
-    stats:insert(stat_var(
-        regentlib.newsymbol(int, "dummy"),
-        ast.typed.expr.Constant {
-          value = 0,
-          expr_type = int,
-          annotations = node.annotations,
-          span = node.span,
-        },
-        node))
-
-    return stats, return_var_expr
-
-  else
-    local stats = terralib.newlist()
-    local fields = {}
-
-    for k, field in pairs(node) do
-      if k ~= "node_type" then
-        if ast.is_node(field) and field:is(ast.typed.expr) then
-          local new_stats, new_node = inline_tasks.expr(cx, field)
-          stats:insertall(new_stats)
-          fields[k] = new_node
-
-        elseif terralib.islist(field) then
-          fields[k] = field:map(function(field)
-            if ast.is_node(field) and field:is(ast.typed.expr) then
-              local new_stats, new_node = inline_tasks.expr(cx, field)
-              stats:insertall(new_stats)
-              return new_node
-            else
-              return field
-            end
-          end)
-        else
-          fields[k] = field
-        end
-      end
-    end
-
-    return stats, node(fields)
-  end
-end
-
-function inline_tasks.block(cx, node)
-  local stats = terralib.newlist()
-  node.stats:map(function(node)
-    local new_stats, new_node = inline_tasks.stat(cx, node)
-    stats:insertall(new_stats)
-    stats:insert(new_node)
-  end)
-  return node { stats = stats }
-end
-
-function inline_tasks.stat(cx, node)
-  local stats = terralib.newlist()
-  local fields = {}
-
-  for k, field in pairs(node) do
-    if k ~= "node_type" then
-      if ast.is_node(field) and field:is(ast.typed.stat) then
-        local new_stats, new_node = inline_tasks.stat(cx, field)
-        stats:insertall(new_stats)
-        fields[k] = field
-
-      elseif ast.is_node(field) and field:is(ast.typed.expr) then
-        local new_stats, new_node = inline_tasks.expr(cx, field)
-        stats:insertall(new_stats)
-        fields[k] = new_node
-
-      elseif ast.is_node(field) and field:is(ast.typed.Block) then
-        local new_node = inline_tasks.block(cx, field)
-        fields[k] = new_node
-
-      elseif ast.is_node(field) and field:is(ast.location.Span) then
-        fields[k] = field
-
-      elseif terralib.islist(field) then
-        fields[k] = field:map(function(field)
-          if type(field) ~= "table" then
-            return field
-          else
-            if ast.is_node(field) and field:is(ast.typed.stat) then
-              local new_stats, new_node = inline_tasks.stat(cx, field)
-              stats:insertall(new_stats)
-              return new_node
-
-            elseif ast.is_node(field) and field:is(ast.typed.expr) then
-              local new_stats, new_node = inline_tasks.expr(cx, field)
-              stats:insertall(new_stats)
-              return new_node
-
-            else
-              return field
-            end
-          end
-        end)
-
-      else
-        fields[k] = field
-      end
-    end
-  end
-
-  node = node(fields)
-  return stats, node
-end
-
-function inline_tasks.top_task(cx, node)
-  return node {
-    body = node.body and inline_tasks.block(cx, node.body)
+-- To be able to correctly type check the task call after inlining,
+-- we preserve the original expression in an if statement that never executes.
+local function preserve_task_call(node)
+  return ast.specialized.stat.If {
+    cond = ast.specialized.expr.Constant {
+      value = false,
+      expr_type = bool,
+      annotations = ast.default_annotations(),
+      span = node.span,
+    },
+    then_block = ast.specialized.Block {
+      stats = terralib.newlist { node },
+      span = node.span,
+    },
+    elseif_blocks = terralib.newlist(),
+    else_block = ast.specialized.Block {
+      stats = terralib.newlist(),
+      span = node.span,
+    },
+    annotations = ast.default_annotations(),
+    span = node.span,
   }
 end
 
-function inline_tasks.top(cx, node)
-  if node:is(ast.typed.top.Task) then
+function inline_tasks.expr_call(call)
+  -- Task T is inlined at call site C only if T demands inlining and
+  -- C does not forbid inlining.
+  local function demands_inlining(node)
+    return node.annotations.inline:is(ast.annotation.Demand)
+  end
+  local function forbids_inlining(node)
+    return node.annotations.inline:is(ast.annotation.Forbid)
+  end
+
+  if not call:is(ast.specialized.expr.Call) or forbids_inlining(call) then
+    return call, false
+  end
+
+  local task = call.fn.value
+  if not std.is_task(task) then return call, false end
+
+  local task_ast = task:has_primary_variant() and
+                   task:get_primary_variant():has_untyped_ast()
+  if not task_ast then
+    if demands_inlining(call) then
+      report.error(call, "cannot inline a task that does not demand inlining")
+    end
+    return call, false
+  end
+  assert(demands_inlining(task_ast))
+
+  -- If the task does not demand inlining, check its validity before inlining it.
+  if not demands_inlining(task_ast) then check_valid_inline_task(call, task_ast) end
+
+  -- Once we reach this point, the task and the task call are valid for inlining.
+  local actions = terralib.newlist()
+
+  -- First, inline any task calls in the argument list.
+  local args = call.args:map(function(arg)
+    local new_arg, inlined, arg_actions = inline_tasks.expr(arg)
+    assert(new_arg ~= nil)
+    if not inlined then return arg
+    else
+      actions:insertall(arg_actions)
+      return new_arg
+    end
+  end)
+
+  local function is_singleton_type(type)
+    return std.is_ispace(type) or std.is_region(type) or
+           std.is_list_of_regions(type) or
+           std.is_partition(type) or std.is_cross_product(type)
+  end
+  -- Second, make assignments to temporary variables.
+  local params = task_ast.params:map(function(param) return param.symbol end)
+  local param_types = params:map(function(param) return param:gettype() end)
+  local symbol_mapping = {}
+  local expr_mapping = {}
+  data.zip(params, param_types, args):map(function(tuple)
+    local param, param_type, arg = unpack(tuple)
+    if is_singleton_type(param_type) and arg:is(ast.specialized.expr.ID) then
+      expr_mapping[param] = arg
+      symbol_mapping[param] = arg.value
+    else
+      local symbol_type = nil
+      if param_type:isprimitive() or param_type:ispointer() then
+        symbol_type = param_type
+      end
+      local new_symbol = std.newsymbol(symbol_type, param:hasname())
+      symbol_mapping[param] = new_symbol
+      actions:insert(ast.specialized.stat.Var {
+        symbols = terralib.newlist { new_symbol },
+        values = terralib.newlist { arg },
+        annotations = ast.default_annotations(),
+        span = call.span,
+      })
+    end
+  end)
+
+  -- Do alpha conversion to avoid type collision.
+  local stats = ast.map_node_postorder(function(node)
+    if node:is(ast.specialized.stat.Var) or
+       node:is(ast.specialized.stat.VarUnpack)
+    then
+      local symbols = node.symbols:map(function(symbol)
+        -- We should ignore the type of the existing symbol as we want to type check it again.
+        local symbol_type = symbol:hastype()
+        if is_singleton_type(symbol_type) then
+          symbol_type = nil
+        else
+          symbol_type = std.type_sub(symbol_type, symbol_mapping)
+        end
+        local new_symbol = std.newsymbol(symbol_type, symbol:hasname())
+        symbol_mapping[symbol] = new_symbol
+        return new_symbol
+      end)
+      return node { symbols = symbols }
+    elseif node:is(ast.specialized.stat.ForList) then
+      local symbol = node.symbol
+      local new_symbol = std.newsymbol(nil, symbol:hasname())
+      symbol_mapping[symbol] = new_symbol
+      return node { symbol = new_symbol }
+    else
+      return node
+    end
+  end, task_ast.body.stats)
+
+  -- Third, replace all occurrences of parameters in the task body with the new temporary variables.
+  stats = ast.map_node_postorder(function(node)
+    if node:is(ast.specialized.expr.ID) then
+      local new_node = expr_mapping[node.value] or
+                       (symbol_mapping[node.value] ~= nil and
+                        node { value = symbol_mapping[node.value] }) or
+                       node
+      return new_node
+    elseif node:is(ast.specialized.expr.DynamicCast) or
+           node:is(ast.specialized.expr.StaticCast) or
+           node:is(ast.specialized.expr.UnsafeCast)
+    then
+      return node { expr_type = std.type_sub(node.expr_type, symbol_mapping) }
+    elseif node:is(ast.specialized.expr.Cast) then
+      return node { fn = node.fn { value = std.type_sub(node.fn.value, symbol_mapping) } }
+    elseif node:is(ast.specialized.expr.Null) then
+      return node { pointer_type = std.type_sub(node.pointer_type, symbol_mapping) }
+    elseif node:is(ast.specialized.expr.Region) then
+      return node { fspace_type = std.type_sub(node.fspace_type, symbol_mapping) }
+    else
+      return node
+    end
+  end, stats)
+
+  -- Finally, convert any return statement to an assignment to a temporary variable
+  local return_var_expr = nil
+  if #stats > 0 and stats[#stats]:is(ast.specialized.stat.Return) then
+    local task_name = task_ast.name:mkstring("", "_", "")
+    local return_var = std.newsymbol(nil, "__" .. task_name .."_ret")
+    return_var_expr = ast.specialized.expr.ID {
+      value = return_var,
+      annotations = ast.default_annotations(),
+      span = call.span,
+    }
+    local return_stat = stats[#stats]
+    stats[#stats] = ast.specialized.stat.Var {
+      symbols = terralib.newlist { return_var },
+      values = terralib.newlist { return_stat.value },
+      annotations = ast.default_annotations(),
+      span = return_stat.span,
+    }
+  end
+
+  actions:insertall(stats)
+  return return_var_expr, true, actions
+end
+
+function inline_tasks.expr(node, no_return)
+  local inlined_any = false
+  local actions = terralib.newlist()
+  local new_node = ast.map_node_postorder(function(node)
+    local new_node, inlined, node_actions = inline_tasks.expr_call(node)
+    if not inlined then return node
+    else
+      inlined_any = true
+      actions:insertall(node_actions)
+      return new_node
+    end
+  end, node)
+  if not inlined_any then
+    return node, false
+  else
+    if no_return and new_node ~= nil then
+      actions:insert(ast.specialized.stat.Expr {
+        expr = new_node,
+        annotations = ast.default_annotations(),
+        span = node.span,
+      })
+      return nil, true, actions
+    else
+      return new_node, true, actions
+    end
+  end
+end
+
+function inline_tasks.stat_if(node)
+  local inlined_any = false
+  local actions = terralib.newlist()
+  local new_cond, inlined, cond_actions = inline_tasks.expr(node.cond)
+  if inlined then
+    assert(new_cond ~= nil)
+    inlined_any = true
+    actions:insertall(cond_actions)
+  end
+  local new_elseif_blocks = node.elseif_blocks:map(function(elseif_block)
+    local new_cond, inlined, cond_actions =
+      inline_tasks.expr(elseif_block.cond)
+    if inlined then
+      inlined_any = true
+      actions:insertall(cond_actions)
+      return elseif_block { cond = new_cond }
+    else
+      return elseif_block
+    end
+  end)
+  if inlined_any then
+    local stats = terralib.newlist { preserve_task_call(node) }
+    stats:insertall(actions)
+    stats:insert(node {
+      cond = new_cond,
+      elseif_blocks = new_elseif_blocks,
+    })
+    return stats
+  else
+    return node
+  end
+end
+
+function inline_tasks.stat_while(node)
+  local value, inlined, actions = inline_tasks.expr(node.cond)
+  if inlined then
+    assert(value ~= nil)
+    local stats = terralib.newlist { preserve_task_call(node) }
+    stats:insertall(actions)
+    stats:insert(node { cond = value })
+    return stats
+  else
+    return node
+  end
+end
+
+function inline_tasks.stat_fornum(node)
+  local inlined_any = false
+  local actions = terralib.newlist()
+  local values = node.values:map(function(value)
+    local new_value, inlined, value_actions = inline_tasks.expr(value)
+    if inlined then
+      assert(new_value ~= nil)
+      inlined_any = true
+      actions:insertall(value_actions)
+      return new_value
+    else
+      return value
+    end
+  end)
+  if inlined_any then
+    local stats = terralib.newlist { preserve_task_call(node) }
+    stats:insertall(actions)
+    stats:insert(node { values = values })
+    return stats
+  else
+    return node
+  end
+end
+
+function inline_tasks.stat_repeat(node)
+  local new_cond, inlined, actions = inline_tasks.expr(node.until_cond)
+  if inlined then
+    assert(new_cond ~= nil)
+    local stats = terralib.newlist { preserve_task_call(node) }
+    stats:insertall(actions)
+    stats:insert(node { until_cond = new_cond })
+    return stats
+  else
+    return node
+  end
+end
+
+function inline_tasks.stat_var(node)
+  if #node.values == 0 then return node end
+  assert(#node.symbols == 1 and #node.values == 1)
+  local value, inlined, actions = inline_tasks.expr(node.values[1])
+  assert(not inlined or value ~= nil)
+  if inlined then
+    local stats = terralib.newlist { preserve_task_call(node {
+        symbols = terralib.newlist {
+          std.newsymbol(nil, node.symbols[1]:hasname())
+        },
+      })
+    }
+    stats:insertall(actions)
+    stats:insert(node { values = terralib.newlist { value } })
+    return stats
+  else
+    return node
+  end
+end
+
+function inline_tasks.stat_forlist_or_varunpack(node)
+  local value, inlined, actions = inline_tasks.expr(node.value)
+  assert(not inlined or value ~= nil)
+  if inlined then
+    local stats = terralib.newlist { preserve_task_call(node) }
+    stats:insertall(actions)
+    stats:insert(node { value = value })
+    return stats
+  else
+    return node
+  end
+end
+
+function inline_tasks.stat_return(node)
+  if not node.value then return node end
+  local value, inlined, actions = inline_tasks.expr(node.value)
+  assert(not inlined or value ~= nil)
+  if inlined then
+    local stats = terralib.newlist { preserve_task_call(ast.specialized.stat.Expr {
+        expr = node.value,
+        annotations = ast.default_annotations(),
+        span = node.span,
+      })
+    }
+    stats:insertall(actions)
+    stats:insert(node { value = value })
+    return stats
+  else
+    return node
+  end
+end
+
+function inline_tasks.stat_assignment_or_reduce(node)
+  local inlined_any = false
+  local actions = terralib.newlist()
+  local new_rhs = node.rhs:map(function(rh)
+    local new_rh, inlined, rh_actions = inline_tasks.expr(rh)
+    if inlined then
+      assert(new_rh ~= nil)
+      inlined_any = true
+      actions:insertall(rh_actions)
+      return new_rh
+    else
+      return rh
+    end
+  end)
+  if inlined_any then
+    local stats = terralib.newlist { preserve_task_call(node) }
+    stats:insertall(actions)
+    stats:insert(node { rhs = new_rhs })
+    return stats
+  else
+    return node
+  end
+end
+
+function inline_tasks.stat_expr(node)
+  local value, inlined, actions = inline_tasks.expr(node.expr, true)
+  if inlined then
+    assert(value == nil)
+    local stats = terralib.newlist { preserve_task_call(node) }
+    stats:insertall(actions)
+    return stats
+  else
+    return node
+  end
+end
+
+local dispatch_table = {
+  [ast.specialized.stat.If] = inline_tasks.stat_if,
+  [ast.specialized.stat.While] = inline_tasks.stat_while,
+  [ast.specialized.stat.ForNum] = inline_tasks.stat_fornum,
+  [ast.specialized.stat.Repeat] = inline_tasks.stat_repeat,
+  [ast.specialized.stat.Var] = inline_tasks.stat_var,
+  [ast.specialized.stat.ForList] = inline_tasks.stat_forlist_or_varunpack,
+  [ast.specialized.stat.VarUnpack] = inline_tasks.stat_forlist_or_varunpack,
+  [ast.specialized.stat.Return] = inline_tasks.stat_return,
+  [ast.specialized.stat.Assignment] = inline_tasks.stat_assignment_or_reduce,
+  [ast.specialized.stat.Reduce] = inline_tasks.stat_assignment_or_reduce,
+  [ast.specialized.stat.Expr] = inline_tasks.stat_expr,
+}
+
+function inline_tasks.stat(node)
+  if dispatch_table[node.node_type] ~= nil then
+    return dispatch_table[node.node_type](node)
+  else
+    return node
+  end
+end
+
+function inline_tasks.top_task(node)
+  return ast.flatmap_node_postorder(inline_tasks.stat, node)
+end
+
+function inline_tasks.top(node)
+  if node:is(ast.specialized.top.Task) then
     if node.annotations.inline:is(ast.annotation.Demand) then
       check_valid_inline_task(node, node)
     end
-    local new_node = inline_tasks.top_task(cx, node)
-    if new_node.prototype:has_primary_variant() then
-      new_node.prototype:get_primary_variant():set_ast(new_node)
+    local new_node = inline_tasks.top_task(node)
+    if new_node.prototype:has_primary_variant() and
+       node.annotations.inline:is(ast.annotation.Demand)
+    then
+      new_node.prototype:get_primary_variant():set_untyped_ast(new_node)
     end
     return new_node
-
-  elseif node:is(ast.typed.top.Fspace) then
+  elseif node:is(ast.specialized.top.Fspace) or
+         node:is(ast.specialized.top.QuoteExpr) or
+         node:is(ast.specialized.top.QuoteStat) then
     return node
-
-  elseif node:is(ast.specialized.top.QuoteExpr) then
-    return node
-
-  elseif node:is(ast.specialized.top.QuoteStat) then
-    return node
-
   else
     assert(false, "unexpected node type " .. tostring(node:type()))
   end
-
 end
 
 function inline_tasks.entry(node)
-  local cx = context:new_global_scope({})
-  return inline_tasks.top(cx, node)
+  return inline_tasks.top(node)
 end
 
 inline_tasks.pass_name = "inline_tasks"

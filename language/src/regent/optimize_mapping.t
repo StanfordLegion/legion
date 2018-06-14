@@ -52,18 +52,6 @@ end
 local inline = "inline"
 local remote = "remote"
 
-local region_usage = {}
-region_usage.__index = region_usage
-
-function region_usage:__tostring()
-  local result = "region_usage(\n"
-  for region_type, polarity in pairs(self) do
-    result = result .. "  " .. tostring(region_type) .. " = " .. tostring(polarity) .. ",\n"
-  end
-  result = result .. ")"
-  return result
-end
-
 local function uses(cx, region_type, polarity)
   -- In order for this to be sound, we need to unmap *all* regions
   -- that could potentially alias with this one, not just just the
@@ -72,7 +60,9 @@ local function uses(cx, region_type, polarity)
   -- ignoring anything that isn't a root in the region forest.
 
   assert(std.type_supports_privileges(region_type))
-  local usage = { [region_type] = polarity }
+  local usage = data.newmap()
+  usage[region_type] = polarity
+
   for other_region_type, _ in cx.region_universe:items() do
     if std.is_region(other_region_type) then -- Skip lists of regions
       local constraint = std.constraint(
@@ -86,7 +76,7 @@ local function uses(cx, region_type, polarity)
       end
     end
   end
-  return setmetatable(usage, region_usage)
+  return usage
 end
 
 local function usage_meet_polarity(a, b)
@@ -107,15 +97,15 @@ local function usage_meet_polarity(a, b)
 end
 
 local function usage_meet(...)
-  local usage = {}
+  local usage = data.newmap()
   for _, a in pairs({...}) do
     if a then
-      for region_type, polarity in pairs(a) do
+      for region_type, polarity in a:items() do
         usage[region_type] = usage_meet_polarity(usage[region_type], polarity)
       end
     end
   end
-  return setmetatable(usage, region_usage)
+  return usage
 end
 
 local function usage_diff_polarity(a, b)
@@ -130,15 +120,15 @@ local function usage_diff(a, b)
   if not a or not b then
     return nil
   end
-  local usage = {}
-  for region_type, a_polarity in pairs(a) do
+  local usage = data.newmap()
+  for region_type, a_polarity in a:items() do
     local b_polarity = b[region_type]
     local diff = usage_diff_polarity(a_polarity, b_polarity)
     if diff then
       usage[region_type] = diff
     end
   end
-  return setmetatable(usage, region_usage)
+  return usage
 end
 
 local function usage_apply_polarity(a, b)
@@ -152,20 +142,35 @@ local function usage_apply_polarity(a, b)
 end
 
 local function usage_apply(...)
-  local usage = {}
+  local usage = data.newmap()
   for _, a in pairs({...}) do
     if a then
-      for region_type, polarity in pairs(a) do
+      for region_type, polarity in a:items() do
         usage[region_type] = usage_apply_polarity(usage[region_type], polarity)
       end
     end
   end
-  return setmetatable(usage, region_usage)
+  return usage
 end
 
-local function analyze_usage_node(cx)
-  return function(node)
-    if node:is(ast.typed.expr.Call) and std.is_task(node.fn.value) then
+local uses_expr_input = terralib.memoize(function(field_name, polarity)
+  return function(cx, node)
+    local region_type = std.as_read(node[field_name].expr_type)
+    return uses(cx, region_type, polarity)
+  end
+end)
+
+local uses_expr_result = terralib.memoize(function(polarity)
+  return function(cx, node)
+    return uses(cx, node.expr_type, polarity)
+  end
+end)
+
+local function uses_nothing(cx, node) end
+
+local node_usage = {
+  [ast.typed.expr.Call] = function(cx, node)
+    if std.is_task(node.fn.value) then
       local usage
       for _, arg in ipairs(node.args) do
         local arg_type = std.as_read(arg.expr_type)
@@ -174,56 +179,63 @@ local function analyze_usage_node(cx)
         end
       end
       return usage
-    elseif node:is(ast.typed.expr.RawPhysical) then
-      local region_type = std.as_read(node.region.expr_type)
-      return uses(cx, region_type, inline)
-    elseif node:is(ast.typed.expr.Copy) then
-      local src_type = std.as_read(node.src.expr_type)
-      local dst_type = std.as_read(node.dst.expr_type)
-      return usage_meet(
-        uses(cx, src_type, remote),
-        uses(cx, dst_type, remote))
-    elseif node:is(ast.typed.expr.Fill) then
-      local dst_type = std.as_read(node.dst.expr_type)
-      return uses(cx, dst_type, remote)
-    elseif node:is(ast.typed.expr.Acquire) then
-      local region_type = std.as_read(node.region.expr_type)
-      return uses(cx, region_type, remote)
-    elseif node:is(ast.typed.expr.Release) then
-      local region_type = std.as_read(node.region.expr_type)
-      return uses(cx, region_type, remote)
-    elseif node:is(ast.typed.expr.AttachHDF5) then
-      local region_type = std.as_read(node.region.expr_type)
-      return uses(cx, region_type, remote)
-    elseif node:is(ast.typed.expr.DetachHDF5) then
-      local region_type = std.as_read(node.region.expr_type)
-      return uses(cx, region_type, remote)
-    elseif node:is(ast.typed.expr.Region) then
-      return uses(cx, node.expr_type, inline)
-    elseif node:is(ast.typed.expr.PartitionByField) then
-      return uses(cx, node.region.expr_type, remote)
-    elseif node:is(ast.typed.expr.Image) then
-      return uses(cx, node.region.expr_type, remote)
-    elseif node:is(ast.typed.expr.Preimage) then
-      return uses(cx, node.region.expr_type, remote)
-    elseif node:is(ast.typed.expr.IndexAccess) then
-      local base_type = std.as_read(node.value.expr_type)
-      if std.is_region(base_type) then
-        return uses(cx, base_type, inline)
-      end
-    elseif node:is(ast.typed.expr.FieldAccess) or
-      node:is(ast.typed.expr.Deref)
-    then
-      local ptr_type = std.as_read(node.value.expr_type)
-      if std.is_bounded_type(ptr_type) and ptr_type:is_ptr() then
-        return data.reduce(
-          usage_meet,
-          ptr_type:bounds():map(
-            function(region) return uses(cx, region, inline) end))
-      end
     end
-  end
-end
+  end,
+
+  [ast.typed.expr.RawPhysical] = uses_expr_input("region", inline),
+
+  [ast.typed.expr.Copy] = function(cx, node)
+    local src_type = std.as_read(node.src.expr_type)
+    local dst_type = std.as_read(node.dst.expr_type)
+    return usage_meet(
+      uses(cx, src_type, remote),
+      uses(cx, dst_type, remote))
+  end,
+
+  [ast.typed.expr.Fill]             = uses_expr_input("dst", remote),
+  [ast.typed.expr.Acquire]          = uses_expr_input("region", remote),
+  [ast.typed.expr.Release]          = uses_expr_input("region", remote),
+  [ast.typed.expr.AttachHDF5]       = uses_expr_input("region", remote),
+  [ast.typed.expr.DetachHDF5]       = uses_expr_input("region", remote),
+  [ast.typed.expr.Region]           = uses_expr_result(inline),
+  [ast.typed.expr.PartitionByField] = uses_expr_input("region", remote),
+  [ast.typed.expr.Image]            = uses_expr_input("region", remote),
+  [ast.typed.expr.Preimage]         = uses_expr_input("region", remote),
+
+  [ast.typed.expr.IndexAccess] = function(cx, node)
+    local base_type = std.as_read(node.value.expr_type)
+    if std.is_region(base_type) then
+      return uses(cx, base_type, inline)
+    end
+  end,
+
+  [ast.typed.expr.Deref] = function(cx, node)
+    local ptr_type = std.as_read(node.value.expr_type)
+    if std.is_bounded_type(ptr_type) and ptr_type:is_ptr() then
+      return data.reduce(
+        usage_meet,
+        ptr_type:bounds():map(
+          function(region) return uses(cx, region, inline) end))
+    end
+  end,
+
+  [ast.typed.expr] = uses_nothing,
+  [ast.typed.stat] = uses_nothing,
+
+  [ast.typed.Block]             = uses_nothing,
+  [ast.IndexLaunchArgsProvably] = uses_nothing,
+  [ast.location]                = uses_nothing,
+  [ast.annotation]              = uses_nothing,
+  [ast.condition_kind]          = uses_nothing,
+  [ast.disjointness_kind]       = uses_nothing,
+  [ast.fence_kind]              = uses_nothing,
+}
+
+-- FIXME: Should fill out at least the expr cases, otherwise can't
+-- tell if the pass has been updated for all AST nodes or not.
+local analyze_usage_node = ast.make_single_dispatch(
+  node_usage,
+  {}) -- ast.typed.expr
 
 local function analyze_usage(cx, node)
   assert(node)
@@ -251,7 +263,7 @@ local function map_regions(diff)
   local result = terralib.newlist()
   if diff then
     local region_types_by_polarity = {}
-    for region_type, polarity in pairs(diff) do
+    for region_type, polarity in diff:items() do
       if not region_types_by_polarity[polarity] then
         region_types_by_polarity[polarity] = terralib.newlist()
       end

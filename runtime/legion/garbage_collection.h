@@ -77,7 +77,9 @@ namespace Legion {
       PHYSICAL_MANAGER_REF = 20,
       LOGICAL_VIEW_REF = 21,
       REGION_TREE_REF = 22,
-      LAST_SOURCE_REF = 23,
+      LAYOUT_DESC_REF = 23,
+      RUNTIME_REF = 24,
+      LAST_SOURCE_REF = 25,
     };
 
     enum ReferenceKind {
@@ -111,6 +113,8 @@ namespace Legion {
       "Physical Manager Reference",                 \
       "Logical View Reference",                     \
       "Region Tree Reference",                      \
+      "Layout Description Reference",               \
+      "Runtime Reference",                          \
     }
 
     extern Realm::Logger log_garbage;

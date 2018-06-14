@@ -443,8 +443,9 @@ function context:get_cleanup_items()
   return quote [items] end
 end
 
-local function physical_region_get_base_pointer(cx, index_type, field_type, field_id, privilege, physical_region)
-  assert(index_type and field_type and field_id and privilege and physical_region)
+local function physical_region_get_base_pointer_setup(index_type, field_type,
+                                                      runtime, physical_region, field_id)
+  assert(index_type and field_type and runtime and physical_region and field_id)
   local accessor_args = terralib.newlist({physical_region, field_id})
 
   local base_pointer = terralib.newsymbol(&field_type, "base_pointer")
@@ -470,7 +471,7 @@ local function physical_region_get_base_pointer(cx, index_type, field_type, fiel
       var accessor = [get_accessor]([accessor_args])
 
       var region = c.legion_physical_region_get_logical_region([physical_region])
-      var domain = c.legion_index_space_get_domain([cx.runtime], region.index_space)
+      var domain = c.legion_index_space_get_domain([runtime], region.index_space)
       var rect = [domain_get_bounds](domain)
 
       var subrect : rect_t
@@ -518,6 +519,65 @@ local function physical_region_get_base_pointer(cx, index_type, field_type, fiel
       [destroy_accessor](accessor)
     end
     return actions, base_pointer, strides
+  end
+end
+
+local physical_region_get_base_pointer_thunk = terralib.memoize(
+  function(index_type, field_type)
+    assert(index_type and field_type)
+
+    local runtime = terralib.newsymbol(c.legion_runtime_t, "runtime")
+    local physical_region = terralib.newsymbol(c.legion_physical_region_t, "physical_region")
+    local field_id = terralib.newsymbol(c.legion_field_id_t, "field_id")
+
+    local actions, base_pointer, strides = physical_region_get_base_pointer_setup(
+      index_type, field_type, runtime, physical_region, field_id)
+
+    local terra get_base_pointer([runtime], [physical_region], [field_id])
+      [actions]
+      return [base_pointer], [strides]
+    end
+    get_base_pointer:setinlined(false)
+    return terralib.newlist({get_base_pointer, strides})
+  end)
+
+local function physical_region_get_base_pointer(cx, index_type, field_type,
+                                                physical_region, field_id)
+  -- FIXME: The opt-compile-time code path improves compile time and
+  -- has the same runtime performance, but has potential issues on
+  -- non-x86 due to its use of an aggregate return value, so we can't
+  -- make it the default just yet.
+  if std.config["opt-compile-time"] then
+    local thunk, expected_strides = unpack(physical_region_get_base_pointer_thunk(
+      index_type, field_type))
+
+    local base_pointer = terralib.newsymbol(&field_type, "base_pointer")
+    local computed_strides = data.mapi(
+      function(i, _)
+        return terralib.newsymbol(c.size_t, "stride" .. tostring(i))
+      end,
+      expected_strides)
+    -- In order to ensure constant folding, forward any expected
+    -- strides with constant values.
+    local result_strides = data.mapi(
+      function(i, stride)
+        if type(stride) == "number" and terralib.isintegral(stride) then
+          return stride
+        else
+          return computed_strides[i]
+        end
+      end,
+      expected_strides)
+
+    local actions = quote
+      var [base_pointer], [computed_strides] = [thunk](
+        [cx.runtime], [physical_region], [field_id])
+    end
+
+    return actions, base_pointer, result_strides
+  else
+    return physical_region_get_base_pointer_setup(
+      index_type, field_type, cx.runtime, physical_region, field_id)
   end
 end
 
@@ -3499,8 +3559,11 @@ function codegen.expr_region(cx, node)
       function(field)
         local field_type, field_id, field_privilege = unpack(field)
         return terralib.newlist({
-            physical_region_get_base_pointer(cx, index_type, field_type, field_id, field_privilege, pr)})
+          physical_region_get_base_pointer(cx, index_type, field_type, pr, field_id)})
   end))))
+  pr_actions = pr_actions or terralib.newlist()
+  base_pointers = base_pointers or terralib.newlist()
+  strides = strides or terralib.newlist()
 
   cx:add_region_root(region_type, r,
                      field_paths,
@@ -6912,10 +6975,10 @@ end
 local function collect_symbols(cx, node)
   local result = terralib.newlist()
 
-  local undefined = {}
+  local undefined =  data.newmap()
   local reduction_variables = {}
-  local defined = { [node.symbol] = true }
-  local accesses = {}
+  local defined =  data.map_from_table({ [node.symbol] = true })
+  local accesses = data.newmap()
   local function collect_symbol_pre(node)
     if rawget(node, "node_type") then
       if node:is(ast.typed.stat.Var) then
@@ -6957,7 +7020,7 @@ local function collect_symbols(cx, node)
               node.expr_type:bounds() ~= node.value.expr_type:bounds()) then
         accesses[node] = true
       elseif node:is(ast.typed.stat.Reduce) then
-        if node.lhs:is(ast.typed.expr.ID) then
+        if node.lhs:is(ast.typed.expr.ID) and undefined[node.lhs.value] then
           reduction_variables[node.lhs.value:getsymbol()] = node.op
         end
       end
@@ -6968,9 +7031,9 @@ local function collect_symbols(cx, node)
                                  node.block)
 
   -- Base pointers need a special treatment to find them
-  local base_pointers = {}
-  local strides = {}
-  for node, _ in pairs(accesses) do
+  local base_pointers = data.newmap()
+  local strides = data.newmap()
+  for node, _ in accesses:items() do
     local value_type = std.as_read(node.expr_type)
     node.expr_type:bounds():map(function(region)
       local prefix = node.expr_type.field_path
@@ -6985,12 +7048,12 @@ local function collect_symbols(cx, node)
     end)
   end
 
-  for base_pointer, _ in pairs(base_pointers) do
+  for base_pointer, _ in base_pointers:items() do
     result:insert(base_pointer)
   end
-  for stride, _ in pairs(strides) do
+  for stride, _ in strides:items() do
     result:insert(stride) end
-  for symbol, _ in pairs(undefined) do
+  for symbol, _ in undefined:items() do
     if std.is_symbol(symbol) then symbol = symbol:getsymbol() end
     result:insert(symbol)
   end
@@ -7286,6 +7349,18 @@ function codegen.stat_for_list(cx, node)
       end
     end
   else
+    -- Reject the loop if the body has external function calls
+    ast.traverse_node_postorder(function(node)
+      if node:is(ast.typed.expr.Call) then
+        local fn = node.fn.value
+        if std.is_task(fn) then
+          report.error(node, "CUDA task cannot launch other tasks in a for loop")
+        elseif cudahelper.replace_with_builtin(fn) == fn and fn ~= array then
+          report.error(node, "CUDA task cannot call external functions in a for loop")
+        end
+      end
+    end, node.block)
+
     -- Now wrap the body as a terra function
     local indices = terralib.newlist()
     local lower_bounds = terralib.newlist()
@@ -7329,21 +7404,6 @@ function codegen.stat_for_list(cx, node)
       end
     end
 
-    local tid_x   = cudalib.nvvm_read_ptx_sreg_tid_x
-    local n_tid_x = cudalib.nvvm_read_ptx_sreg_ntid_x
-    local bid_x   = cudalib.nvvm_read_ptx_sreg_ctaid_x
-    local n_bid_x = cudalib.nvvm_read_ptx_sreg_nctaid_x
-
-    local tid_y   = cudalib.nvvm_read_ptx_sreg_tid_y
-    local n_tid_y = cudalib.nvvm_read_ptx_sreg_ntid_y
-    local bid_y   = cudalib.nvvm_read_ptx_sreg_ctaid_y
-    local n_bid_y = cudalib.nvvm_read_ptx_sreg_nctaid_y
-
-    local tid_z   = cudalib.nvvm_read_ptx_sreg_tid_z
-    local n_tid_z = cudalib.nvvm_read_ptx_sreg_ntid_z
-    local bid_z   = cudalib.nvvm_read_ptx_sreg_ctaid_z
-    local n_bid_z = cudalib.nvvm_read_ptx_sreg_nctaid_z
-
     local index_inits = terralib.newlist()
     local tid = terralib.newsymbol(c.size_t, "tid")
     local offsets = terralib.newlist()
@@ -7359,10 +7419,10 @@ function codegen.stat_for_list(cx, node)
 
     -- Compute a global tid
     index_inits:insert(quote
-      var bid = bid_x() + n_bid_x() * bid_y() + n_bid_x() * n_bid_y() * bid_z()
-      var num_threads = n_tid_x() * n_tid_y() * n_tid_z()
-      var [tid] = bid * num_threads + tid_x() + n_tid_x() * tid_y() + n_tid_x() * n_tid_y() * tid_z()
-      if [tid] >= [count] then return end
+      var [tid] = [cudahelper.global_thread_id()]
+      if [tid] >= [count] then
+        return
+      end
     end)
 
     -- Convert the global tid into a point in an index space
@@ -7385,29 +7445,47 @@ function codegen.stat_for_list(cx, node)
       [body]
     end
 
-    local args = collect_symbols(cx, node)
+    local args, reductions = collect_symbols(cx, node)
+    -- Remove reduction variables from kernel argument list as
+    -- we will define them in the kernel
+    args = data.filter(function(arg) return reductions[arg] == nil end, args)
+    local shared_mem_size = cudahelper.compute_reduction_buffer_size(node, reductions)
+    local device_ptrs, device_ptrs_map, host_preamble =
+      cudahelper.generate_reduction_preamble(reductions)
+    local kernel_preamble, kernel_postamble =
+      cudahelper.generate_reduction_kernel(reductions, device_ptrs_map)
+    local host_postamble =
+      cudahelper.generate_reduction_postamble(reductions, device_ptrs_map)
     args:insertall(lower_bounds)
     args:insertall(counts)
+    args:insertall(device_ptrs)
     args:sort(function(s1, s2) return sizeof(s1.type) > sizeof(s2.type) end)
 
-    local terra kernel([args]) [body] end
+    local terra kernel([args])
+      [kernel_preamble]
+      [body]
+      [kernel_postamble]
+    end
 
     -- Register the kernel function to JIT
     local kernel_id = cx.task_meta:get_cuda_variant():add_cuda_kernel(kernel)
 
     ---- kernel launch
     local count = terralib.newsymbol(c.size_t, "count")
-    local kernel_call = cudahelper.codegen_kernel_call(kernel_id, count, args)
+    local kernel_call =
+      cudahelper.codegen_kernel_call(kernel_id, count, args, shared_mem_size)
 
     if ispace_type:is_opaque() then
       return quote
         [actions]
+        [host_preamble]
         while iterator_has_next([it]) do
           var [ counts[1] ] = 0
           var [ lower_bounds[1] ] = iterator_next_span([it], &[ counts[1] ], -1).value
           var [count] = [ counts[1] ]
           [kernel_call]
         end
+        [host_postamble]
         [cleanup_actions]
       end
     else
@@ -7428,9 +7506,11 @@ function codegen.stat_for_list(cx, node)
       end
       return quote
         [actions]
+        [host_preamble]
         var [rect] = [domain_get_rect]([domain])
         [bounds_setup]
         [kernel_call]
+        [host_postamble]
         [cleanup_actions]
       end
     end
@@ -8295,14 +8375,14 @@ function codegen.stat_end_trace(cx, node)
 end
 
 local function find_region_roots(cx, region_types)
-  local roots_by_type = {}
+  local roots_by_type = data.newmap()
   for _, region_type in ipairs(region_types) do
     assert(cx:has_region(region_type))
     local root_region_type = cx:region(region_type).root_region_type
     roots_by_type[root_region_type] = true
   end
   local roots = terralib.newlist()
-  for region_type, _ in pairs(roots_by_type) do
+  for region_type, _ in roots_by_type:items() do
     roots:insert(region_type)
   end
   return roots
@@ -8368,11 +8448,21 @@ function codegen.stat_raw_delete(cx, node)
     ispace_getter = function(x) return `([x.value].impl.index_partition) end
   end
 
-  return quote
+  local actions = quote
     [value.actions]
     [region_delete_fn]([cx.runtime], [cx.context], [value.value].impl)
     [ispace_delete_fn]([cx.runtime], [cx.context], [ispace_getter(value)])
   end
+
+  if std.is_region(value_type) then
+    actions = quote
+      [actions]
+      c.legion_field_space_destroy(
+          [cx.runtime], [cx.context], [value.value].impl.field_space)
+    end
+  end
+
+  return actions
 end
 
 local make_dummy_task = terralib.memoize(
@@ -8882,7 +8972,7 @@ function codegen.top_task(cx, node)
               local field_path, field_type = unpack(field)
               local field_id = field_ids_by_field_path[field_path:hash()]
               return terralib.newlist({
-                  physical_region_get_base_pointer(cx, index_type, field_type, field_id, privilege, physical_region)})
+                physical_region_get_base_pointer(cx, index_type, field_type, physical_region, field_id)})
         end))))
 
         physical_region_actions:insertall(pr_actions or {})
@@ -9141,6 +9231,7 @@ function codegen.top(cx, node)
           " since the CUDA compiler is unavailable")
       end
       local cpu_variant = task:get_primary_variant()
+      cpu_variant:set_ast(node)
       task:add_complete_thunk(
         function()
           local cx = context.new_global_scope(cpu_variant)
@@ -9150,6 +9241,7 @@ function codegen.top(cx, node)
       return task
     else
       local cpu_variant = task:get_primary_variant()
+      cpu_variant:set_ast(node)
       task:add_complete_thunk(
         function()
           local cx = context.new_global_scope(cpu_variant)

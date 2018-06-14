@@ -883,7 +883,8 @@ namespace Legion {
       virtual bool dominates(IndexSpaceNode *rhs) = 0;
       virtual bool dominates(IndexPartNode *rhs) = 0;
     public:
-      virtual void pack_index_space(Serializer &rez) const = 0;
+      virtual void pack_index_space(Serializer &rez, 
+                                    bool include_size) const = 0;
       virtual void unpack_index_space(Deserializer &derez,
                                       AddressSpaceID source) = 0;
     public:
@@ -1081,7 +1082,7 @@ namespace Legion {
       virtual bool dominates(IndexSpaceNode *rhs);
       virtual bool dominates(IndexPartNode *rhs);
     public:
-      virtual void pack_index_space(Serializer &rez) const;
+      virtual void pack_index_space(Serializer &rez, bool include_size) const;
       virtual void unpack_index_space(Deserializer &derez,
                                       AddressSpaceID source);
     public:

@@ -253,7 +253,8 @@ namespace Legion {
         parent_notified = notified_event;
       }
       RtUserEvent disjointness_event;
-      if (part_kind == COMPUTE_KIND)
+      if ((part_kind == COMPUTE_KIND) || (part_kind == COMPUTE_COMPLETE_KIND) ||
+          (part_kind == COMPUTE_INCOMPLETE_KIND))
       {
         disjointness_event = Runtime::create_rt_user_event();
         create_node(pid, parent_node, color_node, partition_color,
@@ -261,7 +262,9 @@ namespace Legion {
       }
       else
       {
-        const bool disjoint = (part_kind == DISJOINT_KIND);
+        const bool disjoint = (part_kind == DISJOINT_KIND) || 
+                              (part_kind == DISJOINT_COMPLETE_KIND) || 
+                              (part_kind == DISJOINT_INCOMPLETE_KIND);
         create_node(pid, parent_node, color_node, partition_color,
                     disjoint, did, partition_ready, partial_pending);
         if (runtime->legion_spy_enabled)
@@ -270,7 +273,8 @@ namespace Legion {
       }
       // If we need to compute the disjointness, only do that
       // after the partition is actually ready
-      if (part_kind == COMPUTE_KIND)
+      if ((part_kind == COMPUTE_KIND) || (part_kind == COMPUTE_COMPLETE_KIND) ||
+          (part_kind == COMPUTE_INCOMPLETE_KIND))
       {
 #ifdef DEBUG_LEGION
         assert(disjointness_event.exists());
@@ -299,8 +303,17 @@ namespace Legion {
       // If we're supposed to compute this, but we already know that
       // the source is disjoint then we can also conlclude the the 
       // resulting partitions will also be disjoint under intersection
-      if ((kind == COMPUTE_KIND) && source->is_disjoint(true/*from app*/))
-        kind = DISJOINT_KIND;
+      if (((kind == COMPUTE_KIND) || (kind == COMPUTE_COMPLETE_KIND) ||
+           (kind == COMPUTE_INCOMPLETE_KIND)) && 
+          source->is_disjoint(true/*from app*/))
+      {
+        if (kind == COMPUTE_KIND)
+          kind = DISJOINT_KIND;
+        else if (kind == COMPUTE_COMPLETE_KIND)
+          kind = DISJOINT_COMPLETE_KIND;
+        else
+          kind = DISJOINT_INCOMPLETE_KIND;
+      }
       // If we haven't been given a color yet, we need to find
       // one that will be valid for all the child partitions
       if (part_color == INVALID_COLOR)
@@ -1882,8 +1895,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, REGION_TREE_PREMAP_ONLY_CALL);
-      // If we are a NO_ACCESS, then we are already done 
-      if (IS_NO_ACCESS(req))
+      // If we are a NO_ACCESS or there are no fields then we are already done 
+      if (IS_NO_ACCESS(req) || req.privilege_fields.empty())
         return;
       TaskContext *context = op->find_physical_context(index);
       RegionTreeContext ctx = context->get_context();
@@ -1917,6 +1930,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, REGION_TREE_PHYSICAL_REGISTER_ONLY_CALL);
+      // If we are a NO_ACCESS or there are no fields then we are already done 
+      if (IS_NO_ACCESS(req) || req.privilege_fields.empty())
+        return;
       InnerContext *context = op->find_physical_context(index);
       RegionTreeContext ctx = context->get_context();
 #ifdef DEBUG_LEGION
@@ -5472,7 +5488,10 @@ namespace Legion {
               rez.serialize(IndexPartition::NO_PART);
             rez.serialize(color);
             rez.serialize(index_space_ready);
-            pack_index_space(rez);
+            if (realm_index_space_set.has_triggered())
+              pack_index_space(rez, true/*include size*/);
+            else
+              rez.serialize<size_t>(0);
             rez.serialize<size_t>(semantic_info.size());
             for (LegionMap<SemanticTag,SemanticInfo>::aligned::iterator it = 
                   semantic_info.begin(); it != semantic_info.end(); it++)
@@ -8552,7 +8571,8 @@ namespace Legion {
       if (layout == NULL)
       {
         LayoutConstraints *layout_constraints = 
-          context->runtime->register_layout(handle, constraints);
+          context->runtime->register_layout(handle, 
+                                            constraints, true/*internal*/);
         layout = create_layout_description(file_mask, total_dims,
                                            layout_constraints,
                                            mask_index_map, field_set,
@@ -9942,7 +9962,7 @@ namespace Legion {
       // In the future we might consider breaking this out so that we
       // generate two close operations: a read-only one for the predicate
       // true case, and normal close operation for the predicate false case
-      const bool overwriting = IS_WRITE_ONLY(closer.user.usage) && 
+      const bool overwriting = HAS_WRITE_DISCARD(closer.user.usage) && 
         (next_child == INVALID_COLOR) && !closer.user.op->is_predicated_op();
       // Now we can look at all the children
       for (LegionList<FieldState>::aligned::iterator it = 
@@ -14594,7 +14614,7 @@ namespace Legion {
         }
         std::vector<InstanceView*> new_views(targets.size());
         convert_target_views(targets, context, new_views);
-        if (!IS_WRITE_ONLY(info.req))
+        if (!HAS_WRITE_DISCARD(info.req))
         {
           // Any case but write-only
           // All close operations have already been done, so all

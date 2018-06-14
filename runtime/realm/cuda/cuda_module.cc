@@ -33,6 +33,7 @@
 #endif
 
 #include <stdio.h>
+#include <string.h>
 
 namespace Realm {
   namespace Cuda {
@@ -1873,6 +1874,25 @@ namespace Realm {
       return ThreadLocal::current_gpu_proc;
     }
 
+    void GPUProcessor::push_call_configuration(dim3 grid_dim, dim3 block_dim,
+                                               size_t shared_size, void *stream)
+    {
+      call_configs.push_back(CallConfig(grid_dim, block_dim,
+                                        shared_size, (cudaStream_t)stream));
+    }
+
+    void GPUProcessor::pop_call_configuration(dim3 *grid_dim, dim3 *block_dim,
+                                              size_t *shared_size, void *stream)
+    {
+      assert(!call_configs.empty());
+      const CallConfig &config = call_configs.back();
+      *grid_dim = config.grid;
+      *block_dim = config.block;
+      *shared_size = config.shared;
+      *((cudaStream_t*)stream) = config.stream;
+      call_configs.pop_back();
+    }
+
     void GPUProcessor::stream_synchronize(cudaStream_t stream)
     {
       // same as device_synchronize for now
@@ -1962,6 +1982,11 @@ namespace Realm {
       
     GPUProcessor::LaunchConfig::LaunchConfig(dim3 _grid, dim3 _block, size_t _shared)
       : grid(_grid), block(_block), shared(_shared)
+    {}
+
+    GPUProcessor::CallConfig::CallConfig(dim3 _grid, dim3 _block, 
+                                         size_t _shared, cudaStream_t _stream)
+      : LaunchConfig(_grid, _block, _shared), stream(_stream)
     {}
 
     void GPUProcessor::configure_call(dim3 grid_dim,
@@ -2106,7 +2131,7 @@ namespace Realm {
     void GPUProcessor::gpu_memset(void *dst, int value, size_t count)
     {
       CUstream current = gpu->get_current_task_stream()->get_stream();
-      CHECK_CU( cuMemsetD32Async((CUdeviceptr)dst, unsigned(value), 
+      CHECK_CU( cuMemsetD8Async((CUdeviceptr)dst, (unsigned char)value, 
                                   count, current) );
     }
 
@@ -2114,7 +2139,7 @@ namespace Realm {
                                         size_t count, cudaStream_t stream)
     {
       CUstream current = gpu->get_current_task_stream()->get_stream();
-      CHECK_CU( cuMemsetD32Async((CUdeviceptr)dst, unsigned(value),
+      CHECK_CU( cuMemsetD8Async((CUdeviceptr)dst, (unsigned char)value,
                                   count, current) );
     }
 
@@ -2466,11 +2491,11 @@ namespace Realm {
 	  info->index = i;
 	  CHECK_CU( cuDeviceGet(&info->device, i) );
 	  CHECK_CU( cuDeviceGetName(info->name, GPUInfo::MAX_NAME_LEN, info->device) );
-	  CHECK_CU( cuDeviceComputeCapability(&info->compute_major,
-					      &info->compute_minor,
-					      info->device) );
+          CHECK_CU( cuDeviceGetAttribute(&info->compute_major,
+                         CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MAJOR, info->device) );
+          CHECK_CU( cuDeviceGetAttribute(&info->compute_minor,
+                         CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MINOR, info->device) );
 	  CHECK_CU( cuDeviceTotalMem(&info->total_mem, info->device) );
-	  CHECK_CU( cuDeviceGetProperties(&info->props, info->device) );
 
 	  log_gpu.info() << "GPU #" << i << ": " << info->name << " ("
 			 << info->compute_major << '.' << info->compute_minor

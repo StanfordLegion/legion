@@ -70,6 +70,8 @@ variables:
   USE_HDF: "1"
 .llvm: &llvm
   USE_LLVM: "1"
+.cuda: &cuda
+  USE_CUDA: "1"
 .gasnet: &gasnet
   USE_GASNET: "1"
 .cmake: &cmake
@@ -85,7 +87,10 @@ variables:
   TEST_LEGION_CXX: "0"
   TEST_REALM: "0"
   TEST_FUZZER: "0"
+.parallel: &parallel
   REGENT_JOBS: "2"
+.incremental: &incremental
+  REGENT_INCREMENTAL: "1"
 
 ###
 ### Setup
@@ -109,7 +114,7 @@ before_script:
   #     brew install pypy homebrew/versions/llvm35
   #   fi
   - |
-    if [[ "$USE_GASNET" -eq 1 ]]; then
+    if [[ "$USE_GASNET" -eq 1 && "$(hostname)" != n0003 ]]; then
       export CONDUIT=mpi
       export GASNET_ROOT="$PWD/gasnet/release"
       # OpenMPI:
@@ -118,9 +123,19 @@ before_script:
       export LAUNCHER="mpirun -n 2"
       unset WARN_AS_ERROR
       git clone https://github.com/StanfordLegion/gasnet.git gasnet
-      pushd gasnet
-      make -j$THREADS
-      popd
+      make -C gasnet -j$THREADS
+    fi
+  - |
+    if [[ "$(hostname)" = n0003 ]]; then
+      source /usr/local/modules-3.2.10/init/bash
+      module load cmake/3.8.2
+      module load mpi/openmpi/1.10.4
+      module load cuda/8.0
+
+      if [[ "$USE_GASNET" -eq 1 ]]; then
+        module load gasnet/1.30.0-openmpi
+        export LAUNCHER="mpirun -n 2 -x TERRA_PATH -x INCLUDE_PATH -x LD_LIBRARY_PATH -x LG_RT_DIR -x USE_RDIR"
+      fi
     fi
 
 ###
@@ -145,6 +160,11 @@ before_script:
   tags:
     - linux
     - n0004
+
+# For CUDA tests, always use a specific machine:
+.n0003: &n0003
+  tags:
+    - n0003
 
 ###
 ### Docker Image
@@ -216,7 +236,7 @@ gcc49_cxx98_release_legion:
 gcc49_cxx98_release_cmake_regent:
   <<: [*linux_compute, *image, *tests]
   variables:
-    <<: [*gcc49, *terra38, *release, *cxx98_normal, *cmake, *regent]
+    <<: [*gcc49, *terra38, *release, *cxx98_normal, *cmake, *regent, *incremental]
 #   * Debug (Privilege and Bounds Checks)
 gcc49_cxx98_debug_checks_legion:
   <<: [*linux, *image, *tests]
@@ -230,7 +250,7 @@ gcc49_cxx98_debug_spy_legion:
 gcc49_cxx98_debug_spy_regent:
   <<: [*linux_compute, *image, *tests]
   variables:
-    <<: [*gcc49, *terra38, *debug, *cxx98_spy, *regent]
+    <<: [*gcc49, *terra38, *debug, *cxx98_spy, *regent, *parallel]
 #   * C++11
 gcc49_cxx11_release_legion:
   <<: [*linux, *image, *tests]
@@ -281,7 +301,7 @@ gcc49_cxx98_debug_gasnet_cmake_legion:
 gcc49_cxx98_debug_gasnet_regent:
   <<: [*linux_compute, *image, *tests]
   variables:
-    <<: [*gcc49, *terra38, *debug, *cxx98_normal, *gasnet, *regent]
+    <<: [*gcc49, *terra38, *debug, *cxx98_normal, *gasnet, *regent, *incremental]
 # * Integration: LLVM + GASNet
 gcc49_cxx98_debug_llvm_gasnet_legion:
   <<: [*linux_compute, *image, *tests]
@@ -290,7 +310,7 @@ gcc49_cxx98_debug_llvm_gasnet_legion:
 gcc49_cxx98_debug_llvm_gasnet_regent:
   <<: [*linux_compute, *image, *tests]
   variables:
-    <<: [*gcc49, *terra38, *debug, *cxx98_normal, *llvm, *gasnet, *regent]
+    <<: [*gcc49, *terra38, *debug, *cxx98_normal, *llvm, *gasnet, *regent, *incremental]
 # * Integration: HDF5 + GASNet
 gcc49_cxx98_debug_hdf5_gasnet_legion:
   <<: [*linux_compute, *image, *tests]
@@ -314,7 +334,7 @@ gcc49_cxx98_32bit_debug_legion:
 gcc49_cxx98_debug_external:
   <<: [*linux_compute, *image, *external_tests]
   variables:
-    <<: [*gcc49, *terra38, *debug, *cxx98_normal]
+    <<: [*gcc49, *terra38, *debug, *cxx98_normal, *hdf5]
 
 # Linux with Clang 3.8
 # * Basic configurations
@@ -326,7 +346,7 @@ clang38_cxx98_release_legion:
 clang38_cxx98_release_cmake_regent:
   <<: [*linux_compute, *image_clang, *tests]
   variables:
-    <<: [*clang38, *terra38, *release, *cxx98_normal, *cmake, *regent]
+    <<: [*clang38, *terra38, *release, *cxx98_normal, *cmake, *regent, *incremental]
 #   * Debug (Privilege and Bounds Checks)
 clang38_cxx98_debug_checks_legion:
   <<: [*linux, *image_clang, *tests]
@@ -340,7 +360,7 @@ clang38_cxx98_debug_spy_legion:
 clang38_cxx98_debug_spy_regent:
   <<: [*linux_compute, *image_clang, *tests]
   variables:
-    <<: [*clang38, *terra38, *debug, *cxx98_spy, *regent]
+    <<: [*clang38, *terra38, *debug, *cxx98_spy, *regent, *parallel]
 #   * C++11
 clang38_cxx11_release_legion:
   <<: [*linux, *image_clang, *tests]
@@ -391,7 +411,7 @@ clang38_cxx98_debug_gasnet_cmake_legion:
 clang38_cxx98_debug_gasnet_regent:
   <<: [*linux_compute, *image_clang, *tests]
   variables:
-    <<: [*clang38, *terra38, *debug, *cxx98_normal, *gasnet, *regent]
+    <<: [*clang38, *terra38, *debug, *cxx98_normal, *gasnet, *regent, *incremental]
 # * Integration: LLVM + GASNet
 clang38_cxx98_debug_llvm_gasnet_legion:
   <<: [*linux_compute, *image_clang, *tests]
@@ -400,7 +420,7 @@ clang38_cxx98_debug_llvm_gasnet_legion:
 clang38_cxx98_debug_llvm_gasnet_regent:
   <<: [*linux_compute, *image_clang, *tests]
   variables:
-    <<: [*clang38, *terra38, *debug, *cxx98_normal, *llvm, *gasnet, *regent]
+    <<: [*clang38, *terra38, *debug, *cxx98_normal, *llvm, *gasnet, *regent, *incremental]
 # * Integration: HDF5 + GASNet
 clang38_cxx98_debug_hdf5_gasnet_legion:
   <<: [*linux_compute, *image_clang, *tests]
@@ -409,7 +429,7 @@ clang38_cxx98_debug_hdf5_gasnet_legion:
 clang38_cxx98_debug_hdf5_gasnet_regent:
   <<: [*linux_compute, *image_clang, *tests]
   variables:
-    <<: [*clang38, *terra38, *debug, *cxx98_normal, *hdf5, *gasnet, *regent]
+    <<: [*clang38, *terra38, *debug, *cxx98_normal, *hdf5, *gasnet, *regent, *incremental]
 # * Integration: HDF5 + GASNet
 # clang38_cxx98_debug_spy_gasnet_regent:
 #   <<: [*linux_compute, *image_clang, *tests]
@@ -424,7 +444,7 @@ clang38_cxx98_32bit_debug_legion:
 clang38_cxx98_debug_external:
   <<: [*linux_compute, *image_clang, *external_tests]
   variables:
-    <<: [*clang38, *terra38, *debug, *cxx98_normal]
+    <<: [*clang38, *terra38, *debug, *cxx98_normal, *hdf5]
 
 # # macOS with Clang 3.5
 # macos_clang38_cxx98_debug:
@@ -492,3 +512,19 @@ clang35_cxx98_debug_legion:
 #   <<: [*linux_n0004, *image, *perf_tests]
 #   variables:
 #     <<: [*gcc49, *terra38, *release, *cxx98_normal]
+
+# Performance tests:
+# n0004_gcc49_cxx98_release_perf:
+#   <<: [*linux_n0004, *image, *perf_tests]
+#   variables:
+#     <<: [*gcc49, *terra38, *release, *cxx98_normal]
+
+# CUDA tests:
+n0003_gcc48_cxx98_release_legion_cuda:
+  <<: [*n0003, *image, *tests]
+  variables:
+    <<: [*gcc48, *terra38, *release, *cxx98_normal, *cuda, *legion]
+# n0003_gcc48_cxx98_release_regent_cuda:
+#   <<: [*n0003, *image, *tests]
+#   variables:
+#     <<: [*gcc48, *terra38, *release, *cxx98_normal, *cuda, *regent]

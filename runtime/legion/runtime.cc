@@ -1648,6 +1648,7 @@ namespace Legion {
                             fid, context->get_task_name())
             break;
           }
+        case WRITE_ONLY:
         case WRITE_DISCARD:
           {
             if (!(WRITE_DISCARD & req.privilege))
@@ -1806,6 +1807,7 @@ namespace Legion {
                           context->get_task_name())
             break;
           }
+        case WRITE_ONLY:
         case WRITE_DISCARD:
           {
             REPORT_LEGION_ERROR(ERROR_ACCESSOR_BOUNDS_CHECK, 
@@ -2129,7 +2131,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     MPIRankTable::MPIRankTable(Runtime *rt)
       : runtime(rt), participating(int(runtime->address_space) <
-          runtime->legion_collective_participating_spaces)
+         runtime->legion_collective_participating_spaces), done_triggered(false)
     //--------------------------------------------------------------------------
     {
       if (runtime->total_address_spaces > 1)
@@ -2145,17 +2147,7 @@ namespace Legion {
           stage_notifications.resize(runtime->legion_collective_stages, 1);
           // Stage 0 always starts with 0 notifications since we'll 
           // explictcly arrive on it
-          // Special case: if we expect a stage -1 message from a 
-          // non-participating space, we'll count that as part of 
-          // stage 0, it will make it a negative count, but the 
-          // type is 'int' so we're good
-          if ((runtime->legion_collective_stages > 0) &&
-              (runtime->address_space <
-               (runtime->total_address_spaces -
-                runtime->legion_collective_participating_spaces)))
-            stage_notifications[0] = -1;
-          else
-            stage_notifications[0] = 0;
+          stage_notifications[0] = 0;
         }
         done_event = Runtime::create_rt_user_event();
       }
@@ -2208,7 +2200,7 @@ namespace Legion {
               (runtime->address_space >= (runtime->total_address_spaces -
                 runtime->legion_collective_participating_spaces)))
           {
-            const bool all_stages_done =  send_explicit_stage(0);
+            const bool all_stages_done = initiate_exchange();
             if (all_stages_done)
               complete_exchange();
           }
@@ -2217,7 +2209,7 @@ namespace Legion {
         {
           // We are not a participating node
           // so we just have to send notification to one node
-          send_explicit_stage(-1);
+          send_remainder_stage();
         }
         // Wait for our done event to be ready
         done_event.wait();
@@ -2232,28 +2224,38 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool MPIRankTable::send_explicit_stage(int stage)
+    bool MPIRankTable::initiate_exchange(void)
     //--------------------------------------------------------------------------
     {
-      bool all_stages_done = false;
+#ifdef DEBUG_LEGION
+      assert(participating); // should only get this for participating shards
+#endif
+      {
+        AutoLock r_lock(reservation);
+#ifdef DEBUG_LEGION
+        assert(!sent_stages.empty());
+        assert(!sent_stages[0]); // stage 0 shouldn't be sent yet
+        assert(!stage_notifications.empty());
+        if (runtime->legion_collective_stages == 1)
+          assert(stage_notifications[0] < 
+                  runtime->legion_collective_last_radix); 
+        else
+          assert(stage_notifications[0] < runtime->legion_collective_radix);
+#endif
+        stage_notifications[0]++;
+      }
+      return send_ready_stages(0/*start stage*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void MPIRankTable::send_remainder_stage(void)
+    //--------------------------------------------------------------------------
+    {
       Serializer rez;
       {
         RezCheck z(rez);
-        rez.serialize(stage);
-        AutoLock r_lock(reservation);
-#ifdef DEBUG_LEGION
-        {
-          size_t expected_size = 1;
-          for (int idx = 0; idx < stage; idx++)
-            expected_size *= runtime->legion_collective_radix;
-          assert(expected_size <= forward_mapping.size());
-        }
-        if (stage >= 0)
-        {
-          assert(stage < int(sent_stages.size()));
-          assert(!sent_stages[stage]);
-        }
-#endif
+        rez.serialize(-1);
+        AutoLock r_lock(reservation, 1, false/*exclusive*/);
         rez.serialize<size_t>(forward_mapping.size());
         for (std::map<int,AddressSpace>::const_iterator it = 
               forward_mapping.begin(); it != forward_mapping.end(); it++)
@@ -2261,94 +2263,28 @@ namespace Legion {
           rez.serialize(it->first);
           rez.serialize(it->second);
         }
-        // Mark that we're sending this stage
-        if (stage >= 0)
-        {
-#ifdef DEBUG_LEGION
-          assert(stage < int(stage_notifications.size()));
-          if (stage == (runtime->legion_collective_stages-1))
-            assert(stage_notifications[stage] < 
-                  runtime->legion_collective_last_radix); 
-          else
-            assert(stage_notifications[stage] <
-                  runtime->legion_collective_radix);
-#endif
-          stage_notifications[stage]++;
-          sent_stages[stage] = true;
-          // Check to see if all the stages are done
-          all_stages_done = (stage_notifications.back() == 
-                      runtime->legion_collective_last_radix); 
-          if (all_stages_done)
-          {
-            for (int stage = 1; 
-                  stage < runtime->legion_collective_stages; stage++)
-            {
-              if (stage_notifications[stage-1] == 
-                    runtime->legion_collective_radix)
-                continue;
-              all_stages_done = false;
-              break;
-            }
-          }
-        }
       }
-      if (stage == -1)
+      if (participating)
       {
-        if (participating)
-        {
-          // Send back to the nodes that are not participating
-          AddressSpaceID target = runtime->address_space +
-            runtime->legion_collective_participating_spaces;
+        // Send back to the nodes that are not participating
+        AddressSpaceID target = runtime->address_space +
+          runtime->legion_collective_participating_spaces;
 #ifdef DEBUG_LEGION
-          assert(target < runtime->total_address_spaces);
+        assert(target < runtime->total_address_spaces);
 #endif
-          runtime->send_mpi_rank_exchange(target, rez);
-        }
-        else
-        {
-          // Sent to a node that is participating
-          AddressSpaceID target = runtime->address_space % 
-            runtime->legion_collective_participating_spaces;
-          runtime->send_mpi_rank_exchange(target, rez);
-        }
+        runtime->send_mpi_rank_exchange(target, rez);
       }
       else
       {
-#ifdef DEBUG_LEGION
-        assert(stage >= 0);
-#endif
-        if (stage == (runtime->legion_collective_stages-1))
-        {
-          for (int r = 1; r < runtime->legion_collective_last_radix; r++)
-          {
-            AddressSpaceID target = runtime->address_space ^
-              (r << (stage * runtime->legion_collective_log_radix));
-#ifdef DEBUG_LEGION
-            assert(int(target) < 
-                    runtime->legion_collective_participating_spaces);
-#endif
-            runtime->send_mpi_rank_exchange(target, rez);
-          }
-        }
-        else
-        {
-          for (int r = 1; r < runtime->legion_collective_radix; r++)
-          {
-            AddressSpaceID target = runtime->address_space ^
-              (r << (stage * runtime->legion_collective_log_radix));
-#ifdef DEBUG_LEGION
-            assert(int(target) < 
-                    runtime->legion_collective_participating_spaces);
-#endif
-            runtime->send_mpi_rank_exchange(target, rez);
-          }
-        }
+        // Sent to a node that is participating
+        AddressSpaceID target = runtime->address_space % 
+          runtime->legion_collective_participating_spaces;
+        runtime->send_mpi_rank_exchange(target, rez);
       }
-      return all_stages_done;
     }
 
     //--------------------------------------------------------------------------
-    bool MPIRankTable::send_ready_stages(void) 
+    bool MPIRankTable::send_ready_stages(const int start_stage) 
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -2356,7 +2292,8 @@ namespace Legion {
 #endif
       // Iterate through the stages and send any that are ready
       // Remember that stages have to be done in order
-      for (int stage = 1; stage < runtime->legion_collective_stages; stage++)
+      for (int stage = start_stage; 
+            stage < runtime->legion_collective_stages; stage++)
       {
         Serializer rez;
         {
@@ -2369,7 +2306,8 @@ namespace Legion {
           // Check to see if we're sending this stage
           // We need all the notifications from the previous stage before
           // we can send this stage
-          if (stage_notifications[stage-1] < runtime->legion_collective_radix)
+          if ((stage > 0) && 
+              (stage_notifications[stage-1] < runtime->legion_collective_radix))
             return false;
           // If we get here then we can send the stage
           sent_stages[stage] = true;
@@ -2419,9 +2357,15 @@ namespace Legion {
       }
       // If we make it here, then we sent the last stage, check to see
       // if we've seen all the notifications for it
-      AutoLock r_lock(reservation,1,false/*exclusive*/);
-      return (stage_notifications.back() == 
-                runtime->legion_collective_last_radix);
+      AutoLock r_lock(reservation);
+      if ((stage_notifications.back() == runtime->legion_collective_last_radix)
+          && !done_triggered)
+      {
+        done_triggered = true;
+        return true;
+      }
+      else
+        return false;
     }
 
     //--------------------------------------------------------------------------
@@ -2439,14 +2383,9 @@ namespace Legion {
       if (stage == -1)
       {
         if (!participating)
-        {
-#ifdef DEBUG_LEGION
-          assert(forward_mapping.size() == runtime->total_address_spaces);
-#endif
-          Runtime::trigger_event(done_event);
-        }
+          all_stages_done = true;
         else // we can now send our stage 0
-          all_stages_done = send_explicit_stage(0); 
+          all_stages_done = initiate_exchange();
       }
       else
         all_stages_done = send_ready_stages();
@@ -2475,11 +2414,6 @@ namespace Legion {
 #endif
 	forward_mapping[rank] = space;
       }
-      // A stage -1 message is counted as part of stage 0 (if it exists
-      //  and we are participating)
-      if ((stage == -1) && participating &&
-	  (runtime->legion_collective_stages > 0))
-	stage = 0;
       if (stage >= 0)
       {
 #ifdef DEBUG_LEGION
@@ -2502,15 +2436,15 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(forward_mapping.size() == runtime->total_address_spaces);
 #endif
-      // We are done
-      Runtime::trigger_event(done_event);
       // See if we have to send a message back to a
       // non-participating node
       if ((int(runtime->total_address_spaces) > 
            runtime->legion_collective_participating_spaces) &&
           (int(runtime->address_space) < int(runtime->total_address_spaces -
             runtime->legion_collective_participating_spaces)))
-        send_explicit_stage(-1);
+        send_remainder_stage();
+      // We are done
+      Runtime::trigger_event(done_event);
     }
 
     /////////////////////////////////////////////////////////////
@@ -6673,11 +6607,6 @@ namespace Legion {
               runtime->handle_constraint_release(derez);
               break;
             }
-          case SEND_CONSTRAINT_REMOVAL:
-            {
-              runtime->handle_constraint_removal(derez);
-              break;
-            }
           case SEND_TOP_LEVEL_TASK_REQUEST:
             {
               runtime->handle_top_level_task_request(derez);
@@ -7976,10 +7905,24 @@ namespace Legion {
       {
         // This is a debug case for when we have one runtime instance
         // for each processor
-        Processor proc = Processor::get_executing_processor();
-        Realm::ProfilingRequestSet profiling_requests;
-        ready_event = ApEvent(proc.register_task(descriptor_id,
-            *realm_descriptor, profiling_requests, user_data, user_data_size));
+        std::set<Processor::Kind> handled_kinds;
+        Machine::ProcessorQuery local_procs(runtime->machine);
+        local_procs.local_address_space();
+        std::set<ApEvent> ready_events;
+        for (Machine::ProcessorQuery::iterator it = 
+              local_procs.begin(); it != local_procs.end(); it++)
+        {
+          const Processor::Kind kind = it->kind();
+          if (handled_kinds.find(kind) != handled_kinds.end())
+            continue;
+          Realm::ProfilingRequestSet profiling_requests;
+          ready_events.insert(ApEvent(Processor::register_task_by_kind(kind,
+                          false/*global*/, descriptor_id, *realm_descriptor, 
+                          profiling_requests, user_data, user_data_size)));
+          handled_kinds.insert(kind);
+        }
+        if (!ready_events.empty())
+          ready_event = Runtime::merge_events(ready_events);
       }
       // If we have a variant name, then record it
       if (registrar.task_variant_name == NULL)
@@ -8316,22 +8259,27 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     LayoutConstraints::LayoutConstraints(LayoutConstraintID lay_id,FieldSpace h,
-                                         Runtime *rt, AddressSpaceID owner, 
-                                         AddressSpaceID local)
-      : LayoutConstraintSet(), Collectable(), layout_id(lay_id), handle(h), 
-        owner_space(owner), local_space(local), runtime(rt), 
-        constraints_name(NULL) 
+                                     Runtime *rt, bool inter, DistributedID did)
+      : LayoutConstraintSet(), DistributedCollectable(rt, (did > 0) ? did : 
+          rt->get_available_distributed_id(), get_owner_space(lay_id, rt), 
+          (did == 0)), layout_id(lay_id), handle(h), internal(inter), 
+        constraints_name(NULL), layout_lock(gc_lock)
     //--------------------------------------------------------------------------
     {
+#ifdef LEGION_GC
+      log_garbage.info("GC Constraints %lld %d", 
+          LEGION_DISTRIBUTED_ID_FILTER(did), local_space);
+#endif
     }
 
     //--------------------------------------------------------------------------
     LayoutConstraints::LayoutConstraints(LayoutConstraintID lay_id, Runtime *rt,
-                                     const LayoutConstraintRegistrar &registrar)
-      : LayoutConstraintSet(registrar.layout_constraints), Collectable(),
-        layout_id(lay_id), handle(registrar.handle), 
-        owner_space(rt->address_space), local_space(rt->address_space),
-        runtime(rt)
+      const LayoutConstraintRegistrar &registrar, bool inter, DistributedID did)
+      : LayoutConstraintSet(registrar.layout_constraints), 
+        DistributedCollectable(rt, (did > 0) ? did : 
+            rt->get_available_distributed_id(), get_owner_space(lay_id, rt)), 
+        layout_id(lay_id), handle(registrar.handle), internal(inter), 
+        layout_lock(gc_lock)
     //--------------------------------------------------------------------------
     {
       if (registrar.layout_name == NULL)
@@ -8341,36 +8289,38 @@ namespace Legion {
       }
       else
         constraints_name = strdup(registrar.layout_name);
+#ifdef LEGION_GC
+      log_garbage.info("GC Constraints %lld %d", 
+          LEGION_DISTRIBUTED_ID_FILTER(did), local_space);
+#endif
     }
 
     //--------------------------------------------------------------------------
     LayoutConstraints::LayoutConstraints(LayoutConstraintID lay_id, Runtime *rt,
                                          const LayoutConstraintSet &cons,
-                                         FieldSpace h)
-      : LayoutConstraintSet(cons), Collectable(), layout_id(lay_id), handle(h),
-        owner_space(rt->address_space), local_space(rt->address_space), 
-        runtime(rt)
+                                         FieldSpace h, bool inter)
+      : LayoutConstraintSet(cons), DistributedCollectable(rt,
+          rt->get_available_distributed_id(), get_owner_space(lay_id, rt)), 
+        layout_id(lay_id), handle(h), internal(inter), layout_lock(gc_lock)
     //--------------------------------------------------------------------------
     {
       constraints_name = (char*)malloc(64*sizeof(char));
       snprintf(constraints_name,64,"layout constraints %ld", layout_id);
+#ifdef LEGION_GC
+      log_garbage.info("GC Constraints %lld %d", 
+          LEGION_DISTRIBUTED_ID_FILTER(did), local_space);
+#endif
     }
 
     //--------------------------------------------------------------------------
     LayoutConstraints::LayoutConstraints(const LayoutConstraints &rhs)
-      : LayoutConstraintSet(rhs), Collectable(), layout_id(rhs.layout_id), 
-        handle(rhs.handle), owner_space(0), local_space(0), runtime(NULL)
+      : LayoutConstraintSet(rhs), DistributedCollectable(NULL, 0, 0), 
+        layout_id(rhs.layout_id), handle(rhs.handle), internal(false),
+        layout_lock(gc_lock)
     //--------------------------------------------------------------------------
     {
       // should never be called
       assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    void LayoutConstraints::RemoveFunctor::apply(AddressSpaceID target)
-    //--------------------------------------------------------------------------
-    {
-      runtime->send_constraint_removal(target, rez);
     }
 
     //--------------------------------------------------------------------------
@@ -8391,6 +8341,41 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void LayoutConstraints::notify_active(ReferenceMutator *mutator)
+    //--------------------------------------------------------------------------
+    {
+      // If we're not the owner add a remote reference
+      if (!is_owner())
+        send_remote_gc_update(owner_space, mutator, 1/*count*/, true/*add*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void LayoutConstraints::notify_inactive(ReferenceMutator *mutator)
+    //--------------------------------------------------------------------------
+    {
+      if (is_owner())
+        runtime->unregister_layout(layout_id);
+      else
+        send_remote_gc_update(owner_space, mutator, 1/*count*/, false/*add*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void LayoutConstraints::notify_valid(ReferenceMutator *mutator)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void LayoutConstraints::notify_invalid(ReferenceMutator *mutator)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
     void LayoutConstraints::send_constraint_response(AddressSpaceID target,
                                                      RtUserEvent done_event)
     //--------------------------------------------------------------------------
@@ -8399,7 +8384,9 @@ namespace Legion {
       {
         RezCheck z(rez);
         rez.serialize(layout_id);
+        rez.serialize(did);
         rez.serialize(handle);
+        rez.serialize<bool>(internal);
         size_t name_len = strlen(constraints_name)+1;
         rez.serialize(name_len);
         rez.serialize(constraints_name, name_len);
@@ -8427,22 +8414,6 @@ namespace Legion {
       derez.deserialize(constraints_name, name_len);
       // unpack the constraints
       deserialize(derez); 
-    }
-
-    //--------------------------------------------------------------------------
-    void LayoutConstraints::release_remote_instances(void)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(is_owner());
-#endif
-      Serializer rez;
-      {
-        RezCheck z(rez);
-        rez.serialize(layout_id);
-      }
-      RemoveFunctor functor(rez, runtime);
-      remote_instances.map(functor);
     }
 
     //--------------------------------------------------------------------------
@@ -8641,20 +8612,32 @@ namespace Legion {
       DerezCheck z(derez);
       LayoutConstraintID lay_id;
       derez.deserialize(lay_id);
+      DistributedID did;
+      derez.deserialize(did);
       FieldSpace handle;
       derez.deserialize(handle);
+      bool internal;
+      derez.deserialize(internal);
       // Make it an unpack it, then try to register it 
       LayoutConstraints *new_constraints = 
-        new LayoutConstraints(lay_id, handle, runtime,
-                              source, runtime->address_space);
+        new LayoutConstraints(lay_id, handle, runtime, internal, did);
       new_constraints->update_constraints(derez);
-      if (!runtime->register_layout(new_constraints))
-        delete (new_constraints);
+      std::set<RtEvent> preconditions;
       // Now try to register this with the runtime
+      if (!runtime->register_layout(new_constraints))
+        delete new_constraints;
+      else
+      {
+        WrapperReferenceMutator mutator(preconditions);
+        new_constraints->register_with_runtime(&mutator);
+      }
       // Trigger our done event and then return it
       RtUserEvent done_event;
       derez.deserialize(done_event);
-      Runtime::trigger_event(done_event);
+      if (!preconditions.empty())
+        Runtime::trigger_event(done_event,Runtime::merge_events(preconditions));
+      else
+        Runtime::trigger_event(done_event);
       return lay_id;
     }
 
@@ -9152,8 +9135,6 @@ namespace Legion {
         legion_collective_log_radix(config.legion_collective_log_radix),
         legion_collective_stages(config.legion_collective_stages),
         legion_collective_last_radix(config.legion_collective_last_radix),
-        legion_collective_last_log_radix(
-                                 config.legion_collective_last_log_radix),
         legion_collective_participating_spaces(
                            config.legion_collective_participating_spaces),
         mpi_rank_table((mpi_rank >= 0) ? new MPIRankTable(this) : NULL),
@@ -9335,12 +9316,10 @@ namespace Legion {
         legion_collective_log_radix(rhs.legion_collective_log_radix),
         legion_collective_stages(rhs.legion_collective_stages),
         legion_collective_last_radix(rhs.legion_collective_last_radix),
-        legion_collective_last_log_radix(
-                                 rhs.legion_collective_last_log_radix),
         legion_collective_participating_spaces(
                            rhs.legion_collective_participating_spaces),
-        mpi_rank_table(NULL),
-        local_procs(rhs.local_procs), proc_spaces(rhs.proc_spaces)
+        mpi_rank_table(NULL), local_procs(rhs.local_procs), 
+        local_utils(rhs.local_utils), proc_spaces(rhs.proc_spaces)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -9627,7 +9606,7 @@ namespace Legion {
             layout_constraints_table.begin();
           LayoutConstraints *next = next_it->second;
           layout_constraints_table.erase(next_it);
-          if (next->remove_reference())
+          if (next->remove_base_resource_ref(RUNTIME_REF))
             delete (next);
         }
       }
@@ -9688,11 +9667,47 @@ namespace Legion {
                 pending_constraints.end())
           unique_constraint_id += runtime_stride;
         // Now do the registrations
+        std::map<AddressSpaceID,unsigned> address_counts;
         for (std::map<LayoutConstraintID,LayoutConstraintRegistrar>::
               const_iterator it = pending_constraints.begin(); 
               it != pending_constraints.end(); it++)
         {
-          register_layout(it->second, it->first);
+          // Figure out the distributed ID that we expect and then
+          // check against what we expect on the owner node. This
+          // is slightly brittle, but we'll always catch it when
+          // we break the invariant.
+          const AddressSpaceID owner_space = 
+            LayoutConstraints::get_owner_space(it->first, this);
+          // Compute the expected DID
+          DistributedID expected_did;
+          std::map<AddressSpaceID,unsigned>::iterator finder = 
+            address_counts.find(owner_space);
+          if (finder != address_counts.end())
+          {
+            if (owner_space == 0)
+              expected_did = (finder->second+1) * runtime_stride;
+            else
+              expected_did = owner_space + (finder->second * runtime_stride);
+            finder->second++;
+          }
+          else
+          {
+            if (owner_space == 0)
+              expected_did = runtime_stride;
+            else
+              expected_did = owner_space;
+            address_counts[owner_space] = 1;
+          }
+          // Now if we're the owner we have to actually bump the distributed ID
+          // number to reflect that we allocated, we'll also confirm that it
+          // is what we expected
+          if (owner_space == address_space)
+          {
+            const DistributedID did = get_available_distributed_id();
+            if (did != expected_did)
+              assert(false);
+          }
+          register_layout(it->second, it->first, expected_did);
         }
         // avoid races if we are doing separate runtime creation
         if (!separate_runtime_instances)
@@ -10037,7 +10052,7 @@ namespace Legion {
       constraint_set.add_constraint(
           SpecializedConstraint(VIRTUAL_SPECIALIZE));
       LayoutConstraints *constraints = 
-        register_layout(FieldSpace::NO_SPACE, constraint_set);
+        register_layout(FieldSpace::NO_SPACE, constraint_set, true/*internal*/);
       FieldMask all_ones(LEGION_FIELD_MASK_FIELD_ALL_ONES);
       std::vector<unsigned> mask_index_map;
       std::vector<CustomSerdezID> serdez;
@@ -10321,8 +10336,9 @@ namespace Legion {
       IndexPartition result = 
         ctx->create_partition_by_union(forest, parent, handle1, handle2,
                                        color_space, kind, color);
-      if (verify_disjointness && (kind == DISJOINT_KIND) && 
-          !forest->is_disjoint(result))
+      if (verify_disjointness && ((kind == DISJOINT_KIND) || 
+            (kind == DISJOINT_COMPLETE_KIND) || 
+            (kind == DISJOINT_INCOMPLETE_KIND)) && !forest->is_disjoint(result))
         REPORT_LEGION_ERROR(ERROR_DISJOINTNESS_TEST_FAILURE,
                             "Disjointness test failure for create partition "
                             "by union in task %s (UID %lld)",
@@ -10347,8 +10363,9 @@ namespace Legion {
         ctx->create_partition_by_intersection(forest, parent, handle1,
                                               handle2, color_space,
                                               kind, color);
-      if (verify_disjointness && (kind == DISJOINT_KIND) && 
-          !forest->is_disjoint(result))
+      if (verify_disjointness && ((kind == DISJOINT_KIND) ||
+            (kind == DISJOINT_COMPLETE_KIND) ||
+            (kind == DISJOINT_INCOMPLETE_KIND)) && !forest->is_disjoint(result))
         REPORT_LEGION_ERROR(ERROR_DISJOINTNESS_TEST_FAILURE,
                             "Disjointness test failure for create partition "
                             "by intersection in task %s (UID %lld)",
@@ -10373,8 +10390,9 @@ namespace Legion {
         ctx->create_partition_by_difference(forest, parent, handle1, 
                                             handle2, color_space,
                                             kind, color);
-      if (verify_disjointness && (kind == DISJOINT_KIND) && 
-          !forest->is_disjoint(result))
+      if (verify_disjointness && ((kind == DISJOINT_KIND) ||
+            (kind == DISJOINT_COMPLETE_KIND) ||
+            (kind == DISJOINT_INCOMPLETE_KIND)) && !forest->is_disjoint(result))
         REPORT_LEGION_ERROR(ERROR_DISJOINTNESS_TEST_FAILURE,
                             "Disjointness test failure for create partition "
                             "by difference in task %s (UID %lld)",
@@ -10396,7 +10414,9 @@ namespace Legion {
       Color result = 
         ctx->create_cross_product_partitions(forest, handle1, handle2, 
                                              handles, kind, color);
-      if (verify_disjointness && (kind == DISJOINT_KIND))
+      if (verify_disjointness && 
+          ((kind == DISJOINT_KIND) || (kind == DISJOINT_COMPLETE_KIND) ||
+           (kind == DISJOINT_INCOMPLETE_KIND)))
       {
         Domain color_space = get_index_partition_color_space(handle1);
         // This code will only work if the color space has type coord_t
@@ -10494,7 +10514,9 @@ namespace Legion {
                                          transform, transform_size,
                                          extent, extent_size,
                                          part_kind, color);
-      if (verify_disjointness && (part_kind == DISJOINT_KIND) && 
+      if (verify_disjointness && ((part_kind == DISJOINT_KIND) ||
+           (part_kind == DISJOINT_COMPLETE_KIND) ||
+           (part_kind == DISJOINT_INCOMPLETE_KIND)) && 
           !forest->is_disjoint(result))
         REPORT_LEGION_ERROR(ERROR_DISJOINTNESS_TEST_FAILURE,
                             "Disjointness test failure for create restricted "
@@ -10539,7 +10561,9 @@ namespace Legion {
         ctx->create_partition_by_image(forest, handle, projection, parent,
                                        fid, color_space, part_kind, 
                                        color, id, tag);
-      if (verify_disjointness && (part_kind == DISJOINT_KIND) && 
+      if (verify_disjointness && ((part_kind == DISJOINT_KIND) ||
+           (part_kind == DISJOINT_COMPLETE_KIND) ||
+           (part_kind == DISJOINT_INCOMPLETE_KIND)) && 
           !forest->is_disjoint(result))
         REPORT_LEGION_ERROR(ERROR_DISJOINTNESS_TEST_FAILURE,
                             "Disjointness test failure for create partition "
@@ -10568,7 +10592,9 @@ namespace Legion {
         ctx->create_partition_by_image_range(forest, handle, projection, 
                                   parent, fid, color_space, part_kind, 
                                   color, id, tag);
-      if (verify_disjointness && (part_kind == DISJOINT_KIND) && 
+      if (verify_disjointness && ((part_kind == DISJOINT_KIND) ||
+           (part_kind == DISJOINT_COMPLETE_KIND) ||
+           (part_kind == DISJOINT_INCOMPLETE_KIND)) && 
           !forest->is_disjoint(result))
         REPORT_LEGION_ERROR(ERROR_DISJOINTNESS_TEST_FAILURE,
                             "Disjointness test failure for create partition "
@@ -10597,7 +10623,9 @@ namespace Legion {
         ctx->create_partition_by_preimage(forest, projection, handle,
                               parent, fid, color_space, part_kind, 
                               color, id, tag);
-      if (verify_disjointness && (part_kind == DISJOINT_KIND) && 
+      if (verify_disjointness && ((part_kind == DISJOINT_KIND) ||
+           (part_kind == DISJOINT_COMPLETE_KIND) ||
+           (part_kind == DISJOINT_INCOMPLETE_KIND)) && 
           !forest->is_disjoint(result))
         REPORT_LEGION_ERROR(ERROR_DISJOINTNESS_TEST_FAILURE,
                             "Disjointness test failure for create partition "
@@ -10625,7 +10653,9 @@ namespace Legion {
         ctx->create_partition_by_preimage_range(forest, projection, handle,
                                     parent, fid, color_space, part_kind, 
                                     color, id, tag);
-      if (verify_disjointness && (part_kind == DISJOINT_KIND) && 
+      if (verify_disjointness && ((part_kind == DISJOINT_KIND) || 
+           (part_kind == DISJOINT_COMPLETE_KIND) ||
+           (part_kind == DISJOINT_INCOMPLETE_KIND)) && 
           !forest->is_disjoint(result))
         REPORT_LEGION_ERROR(ERROR_DISJOINTNESS_TEST_FAILURE,
                             "Disjointness test failure for create partition "
@@ -14643,15 +14673,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_constraint_removal(AddressSpaceID target,
-                                          Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message(rez, SEND_CONSTRAINT_REMOVAL,
-                                        DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
     void Runtime::send_mpi_rank_exchange(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -15793,16 +15814,6 @@ namespace Legion {
       LayoutConstraintID layout_id;
       derez.deserialize(layout_id);
       release_layout(layout_id);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_constraint_removal(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      Deserializer z(derez);
-      LayoutConstraintID layout_id;
-      derez.deserialize(layout_id);
-      unregister_layout(layout_id);
     }
 
     //--------------------------------------------------------------------------
@@ -18576,26 +18587,26 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     LayoutConstraintID Runtime::register_layout(
-                                     const LayoutConstraintRegistrar &registrar,
-                                     LayoutConstraintID layout_id)
+                                const LayoutConstraintRegistrar &registrar,
+                                LayoutConstraintID layout_id, DistributedID did)
     //--------------------------------------------------------------------------
     {
       if (layout_id == AUTO_GENERATE_ID)
         layout_id = get_unique_constraint_id();
       // Now make our entry and then return the result
       LayoutConstraints *constraints = 
-        new LayoutConstraints(layout_id, this, registrar);
+        new LayoutConstraints(layout_id, this, registrar,false/*internal*/,did);
       register_layout(constraints);
       return layout_id;
     }
 
     //--------------------------------------------------------------------------
     LayoutConstraints* Runtime::register_layout(FieldSpace handle,
-                                                const LayoutConstraintSet &cons)
+                                 const LayoutConstraintSet &cons, bool internal)
     //--------------------------------------------------------------------------
     {
       LayoutConstraints *constraints = new LayoutConstraints(
-          get_unique_constraint_id(), this, cons, handle);
+          get_unique_constraint_id(), this, cons, handle, internal);
       register_layout(constraints);
       return constraints;
     }
@@ -18604,7 +18615,11 @@ namespace Legion {
     bool Runtime::register_layout(LayoutConstraints *new_constraints)
     //--------------------------------------------------------------------------
     {
-      new_constraints->add_reference();
+      new_constraints->add_base_resource_ref(RUNTIME_REF);
+      // If we're not internal and we're the owner then we also
+      // add an application reference to prevent early collection
+      if (!new_constraints->internal && new_constraints->is_owner())
+        new_constraints->add_base_gc_ref(APPLICATION_REF);
       AutoLock l_lock(layout_constraints_lock);
       std::map<LayoutConstraintID,LayoutConstraints*>::const_iterator finder =
         layout_constraints_table.find(new_constraints->layout_id);
@@ -18619,11 +18634,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       LayoutConstraints *constraints = find_layout_constraints(layout_id);
+#ifdef DEBUG_LEGION
+      assert(!constraints->internal);
+#endif
       // Check to see if this is the owner
       if (constraints->is_owner())
       {
-        // Send the remove message to all the remove nodes
-        constraints->release_remote_instances();
+        if (constraints->remove_base_gc_ref(APPLICATION_REF))
+          delete constraints;
       }
       else
       {
@@ -18635,7 +18653,6 @@ namespace Legion {
         }
         send_constraint_release(constraints->owner_space, rez);
       }
-      unregister_layout(layout_id);
     }
 
     //--------------------------------------------------------------------------
@@ -18653,7 +18670,8 @@ namespace Legion {
           layout_constraints_table.erase(finder);
         }
       }
-      if ((constraints != NULL) && constraints->remove_reference())
+      if ((constraints != NULL) && 
+          constraints->remove_base_resource_ref(RUNTIME_REF))
         delete (constraints);
     }
 
@@ -19840,6 +19858,11 @@ namespace Legion {
             InnerContext::handle_post_end_task(args); 
             break;
           }
+        case LG_DEFERRED_POST_END_ID:
+          {
+            InnerContext::handle_deferred_post_end_task(args);
+            break;
+          }
         case LG_DEFERRED_READY_TRIGGER_ID:
           {
             const Operation::DeferredReadyArgs *deferred_ready_args = 
@@ -20466,16 +20489,14 @@ namespace Legion {
       {
         // We have an incomplete last stage
         legion_collective_last_radix = 1 << log_remainder;
-        legion_collective_last_log_radix = log_remainder;
         // Now we can compute the number of participating stages
         legion_collective_participating_spaces = 
           1 << ((legion_collective_stages - 1) * legion_collective_log_radix +
-                 legion_collective_last_log_radix);
+                 log_remainder);
       }
       else
       {
         legion_collective_last_radix = legion_collective_radix;
-        legion_collective_last_log_radix = legion_collective_log_radix;
         legion_collective_participating_spaces = 
           1 << (legion_collective_stages * legion_collective_log_radix);
       }

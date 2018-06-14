@@ -2939,6 +2939,14 @@ extern "C" {
                            legion_trace_id_t tid);
 
   // -----------------------------------------------------------------------
+  // Frame Operations
+  // -----------------------------------------------------------------------
+
+  void
+  legion_runtime_complete_frame(legion_runtime_t runtime,
+                                legion_context_t ctx);
+
+  // -----------------------------------------------------------------------
   // Tunable Variables
   // -----------------------------------------------------------------------
 
@@ -3024,6 +3032,12 @@ extern "C" {
   legion_physical_region_get_field_accessor_array_1d(
     legion_physical_region_t handle,
     legion_field_id_t fid);
+
+  legion_accessor_array_1d_t
+  legion_physical_region_get_field_accessor_array_1d_with_transform(
+      legion_physical_region_t handle,
+      legion_field_id_t fid,
+      legion_domain_affine_transform_t transform);
   
   /**
    * @return Caller takes ownership of return value.
@@ -3035,6 +3049,12 @@ extern "C" {
     legion_physical_region_t handle,
     legion_field_id_t fid);
 
+  legion_accessor_array_2d_t
+  legion_physical_region_get_field_accessor_array_2d_with_transform(
+    legion_physical_region_t handle,
+    legion_field_id_t fid,
+    legion_domain_affine_transform_t transform);
+
   /**
    * @return Caller takes ownership of return value.
    *
@@ -3044,6 +3064,12 @@ extern "C" {
   legion_physical_region_get_field_accessor_array_3d(
     legion_physical_region_t handle,
     legion_field_id_t fid);
+
+  legion_accessor_array_3d_t
+  legion_physical_region_get_field_accessor_array_3d_with_transform(
+    legion_physical_region_t handle,
+    legion_field_id_t fid,
+    legion_domain_affine_transform_t transform);
 
   void *
   legion_accessor_array_1d_raw_rect_ptr(legion_accessor_array_1d_t handle,
@@ -3799,6 +3825,27 @@ extern "C" {
    */
   unsigned long long
   legion_get_current_time_in_nanos(void);
+
+  /**
+   * @see Legion::Runtime::get_current_time()
+   */
+  legion_future_t
+  legion_issue_timing_op_seconds(legion_runtime_t runtime,
+                                 legion_context_t ctx);
+
+  /**
+   * @see Legion::Runtime::get_current_time_in_microseconds()
+   */
+  legion_future_t
+  legion_issue_timing_op_microseconds(legion_runtime_t runtime,
+                                      legion_context_t ctx);
+
+  /**
+   * @see Legion::Runtime::get_current_time_in_nanoseconds()
+   */
+  legion_future_t
+  legion_issue_timing_op_nanoseconds(legion_runtime_t runtime,
+                                     legion_context_t ctx);
 
   // -----------------------------------------------------------------------
   // Machine Operations

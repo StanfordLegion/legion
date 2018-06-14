@@ -14,12 +14,18 @@
 
 -- Profiling compiler passes
 
+local data = require("common/data")
 local log = require("common/log")
+
 local log_profile = log.make_logger("profile")
 
 local profile = {}
 
 function profile:__index(field)
+  local value = rawget(profile, field)
+  if value then
+    return value
+  end
   error("profiler has no field '" .. field .. "' (in lookup)", 2)
 end
 
@@ -27,11 +33,19 @@ function profile:__newindex(field, value)
   error("profiler has no field '" .. field .. "' (in assignment)", 2)
 end
 
+local first_import_time
+local total_time_by_pass = data.new_default_map(function() return 0 end)
+
 if log.get_log_level("profile") >= 3 then
   function profile:__call(pass_name, node, fn)
     return fn
   end
 
+  function profile.set_import_time()
+  end
+
+  function profile.print_summary()
+  end
 else
   local ast = require("regent/ast")
   local base = require("regent/std_base")
@@ -44,6 +58,7 @@ else
       local start = tonumber(c.legion_get_current_time_in_micros())
       local result = {fn(...)}
       local stop = tonumber(c.legion_get_current_time_in_micros())
+      local elapsed = (stop - start) * 1e-6
       local tag
       if not target then
         tag = ""
@@ -56,10 +71,39 @@ else
       end
       if tag then
         log_profile:info(tag .. pass_name .. " took " ..
-                         tostring((stop - start) * 1e-6) .. "s")
+	                 tostring(elapsed) .. " s")
+
       end
+      total_time_by_pass[pass_name] = total_time_by_pass[pass_name] + elapsed
       return unpack(result)
     end
+  end
+
+  function profile.set_import_time()
+    assert(first_import_time == nil)
+    first_import_time = tonumber(c.legion_get_current_time_in_micros())
+  end
+
+  function profile.print_summary()
+    local final_time = tonumber(c.legion_get_current_time_in_micros())
+    local total_elapsed = (final_time - first_import_time) * 1e-6
+
+    local pass_times = terralib.newlist()
+    for k, v in total_time_by_pass:items() do
+      pass_times:insert({k, v})
+    end
+    table.sort(pass_times, function(a, b) return a[2] < b[2] end)
+    log_profile:info("########################################")
+    log_profile:info("##  summary of total execution time   ##")
+    log_profile:info("########################################")
+    local total_pass_time = 0
+    for _, kv in ipairs(pass_times) do
+      local k, v = unpack(kv)
+      log_profile:info(k .. " " .. tostring(v) .. " s")
+      total_pass_time = total_pass_time + v
+    end
+    log_profile:info("total " .. tostring(total_elapsed) .. " s")
+    log_profile:info("unaccounted " .. tostring(total_elapsed - total_pass_time) .. " s")
   end
 end
 
