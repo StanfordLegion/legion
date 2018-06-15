@@ -33,7 +33,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     TaskContext::TaskContext(Runtime *rt, TaskOp *owner,
                              const std::vector<RegionRequirement> &reqs)
-      : runtime(rt), owner_task(owner), regions(reqs),
+      : runtime(rt), owner_task(owner), regions(reqs), created_req_spaces(NULL),
         executing_processor(Processor::NO_PROC), total_tunable_count(0), 
         overhead_tracker(NULL), task_executed(false),
         has_inline_accessor(false), mutable_priority(false),
@@ -66,6 +66,15 @@ namespace Legion {
           if (it->second.second != NULL)
             (*it->second.second)(it->second.first);
         }
+      }
+      if (created_req_spaces != NULL)
+      {
+        for (std::set<FieldSpaceNode*>::const_iterator it = 
+              created_req_spaces->begin(); it != 
+              created_req_spaces->end(); it++)
+          if ((*it)->remove_base_resource_ref(CONTEXT_REF))
+            delete (*it);
+        delete created_req_spaces;
       }
     }
 
@@ -200,6 +209,19 @@ namespace Legion {
       created_requirements.push_back(new_req);
       // Created regions always return privileges that they make
       returnable_privileges.push_back(!task_local);
+      // Save a reference to our field space if necessary
+      if (runtime->legion_spy_enabled)
+      {
+        if (created_req_spaces == NULL)
+          created_req_spaces = new std::set<FieldSpaceNode*>();
+        FieldSpaceNode *node = 
+          runtime->forest->get_node(handle.get_field_space());
+        if (created_req_spaces->find(node) == created_req_spaces->end())
+        {
+          node->add_base_resource_ref(CONTEXT_REF);
+          created_req_spaces->insert(node);
+        }
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -1488,6 +1510,18 @@ namespace Legion {
           req.privilege_fields.begin(), req.privilege_fields.end());
       // This is not a returnable privilege requirement
       returnable_privileges.push_back(false);
+      // Save a reference to our field space if necessary
+      if (runtime->legion_spy_enabled)
+      {
+        if (created_req_spaces == NULL)
+          created_req_spaces = new std::set<FieldSpaceNode*>();
+        FieldSpaceNode *node = top->column_source; 
+        if (created_req_spaces->find(node) == created_req_spaces->end())
+        {
+          node->add_base_resource_ref(CONTEXT_REF);
+          created_req_spaces->insert(node);
+        }
+      }
       return int(regions.size() + created_requirements.size() - 1);
     }
 

@@ -574,6 +574,13 @@ namespace Legion {
       // Track whether the created region requirements have
       // privileges to be returned or not
       std::vector<bool>                         returnable_privileges;
+      // If we're doing legion spy logging we also need to track
+      // created field space nodes for collected requirements
+      // to prevent them from being collected before we can do 
+      // our logging of created requirements, this mainly only
+      // shows up in control replicated contexts but can happen
+      // in any context.
+      std::set<FieldSpaceNode*>                 *created_req_spaces;
     protected:
       // These next two data structure don't need a lock becaue
       // they are only mutated by the application task 
