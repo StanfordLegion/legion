@@ -5695,9 +5695,9 @@ namespace Legion {
         // See if we've sent all our messages in which case we can 
         // trigger all the remote user events for any previous stages
         if (((stage == (shard_collective_stages-1)) && 
-              (preconditions.size() == shard_collective_last_radix)) ||
+              (int(preconditions.size()) == shard_collective_last_radix)) ||
             ((stage < (shard_collective_stages-1)) &&
-              (preconditions.size() == shard_collective_radix)))
+              (int(preconditions.size()) == shard_collective_radix)))
         {
           const std::set<ApUserEvent> &to_trigger = 
            remote_to_trigger[(stage > 0) ? (stage-1) : shard_collective_stages];
@@ -5741,7 +5741,7 @@ namespace Legion {
       {
 #ifdef DEBUG_LEGION
         assert(participating);
-        assert(stage < remote_to_trigger.size());
+        assert(stage < int(remote_to_trigger.size()));
 #endif
         remote_to_trigger[stage].insert(remote_complete);
       }
