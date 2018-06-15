@@ -1183,8 +1183,7 @@ namespace Realm {
 								    unsigned max_latency /*= 0*/)
   {
     impl = ((ProcessorQueryImpl *)impl)->writeable_reference();
-    // we have a cached version of the map, record it 
-
+    // we have a cached version of the map, record it
     ((ProcessorQueryImpl *)impl)->add_predicate(new ProcessorHasAffinityPredicate(m, min_bandwidth, max_latency));
     // query type can use one of the cached maps
     if (!min_bandwidth && !max_latency)
@@ -1214,34 +1213,14 @@ namespace Realm {
     return ((ProcessorQueryImpl *)impl)->first_match();
   }
 
-  Processor Machine::ProcessorQuery::next(Processor after) 
+  Processor Machine::ProcessorQuery::next(Processor after)
   {
-    //return ((ProcessorQueryImpl *)impl)->next_match(after);
     return ((ProcessorQueryImpl *)impl)->cache_next(after);
-
   }
 
   Processor Machine::ProcessorQuery::random(void) const
   {
     return ((ProcessorQueryImpl *)impl)->random_match();
-  }
-
-
-  // SEEMAH may want to add specific iterators
-  std::vector<Processor>::iterator Machine::ProcessorQuery::begin(Processor::Kind k) {
-    return ((ProcessorQueryImpl *)impl)->begin(k);
-  }
-
-  std::vector<Processor>::iterator Machine::ProcessorQuery::end(Processor::Kind k) {
-    return ((ProcessorQueryImpl *)impl)->end(k);
-  }
-
-  std::vector<Memory>::iterator Machine::MemoryQuery::begin(Memory::Kind k) {
-    return ((MemoryQueryImpl *)impl)->begin(k);
-  }
-
-  std::vector<Memory>::iterator Machine::MemoryQuery::end(Memory::Kind k) {
-    return ((MemoryQueryImpl *)impl)->end(k);
   }
 
 
@@ -1352,8 +1331,7 @@ namespace Realm {
 
   Memory Machine::MemoryQuery::next(Memory after) const
   {
-    //     return ((MemoryQueryImpl *)impl)->next_match(after);
-        return ((MemoryQueryImpl *)impl)->cache_next(after);
+    return ((MemoryQueryImpl *)impl)->cache_next(after);
   }
 
   Memory Machine::MemoryQuery::random(void) const
@@ -1452,19 +1430,19 @@ namespace Realm {
   // class ProcessorQueryImpl
   //
   int ProcessorQueryImpl::init=0;
-  std::vector<Processor>* ProcessorQueryImpl::_toc_procs_list=NULL; 
-  std::vector<Processor>* ProcessorQueryImpl::_loc_procs_list=NULL; 
-  std::vector<Processor>* ProcessorQueryImpl::_omp_procs_list=NULL; 
-  std::vector<Processor>* ProcessorQueryImpl::_io_procs_list=NULL;  
-  std::map<Memory, std::vector<Processor> >* ProcessorQueryImpl::_sysmem_local_procs=NULL; // predicate==memory.sysmem && restricted_kind == loc_procs
-  std::map<Memory, std::vector<Processor> >* ProcessorQueryImpl::_sysmem_local_io_procs=NULL; // predicate==memory.sysmem && restricted_kind == io_procs
-  std::map<Memory, std::vector<Processor> >* ProcessorQueryImpl::_fbmem_local_procs=NULL;  // predicate==memory.fbmem && restricted_kind == toc_procs
+  std::vector<Processor>* ProcessorQueryImpl::_toc_procs_list=NULL;
+  std::vector<Processor>* ProcessorQueryImpl::_loc_procs_list=NULL;
+  std::vector<Processor>* ProcessorQueryImpl::_omp_procs_list=NULL;
+  std::vector<Processor>* ProcessorQueryImpl::_io_procs_list=NULL;
+  std::map<Memory, std::vector<Processor> >* ProcessorQueryImpl::_sysmem_local_procs=NULL;
+  std::map<Memory, std::vector<Processor> >* ProcessorQueryImpl::_sysmem_local_io_procs=NULL;
+  std::map<Memory, std::vector<Processor> >* ProcessorQueryImpl::_fbmem_local_procs=NULL;
 
   ProcessorQueryImpl::ProcessorQueryImpl(const Machine& _machine)
     : references(1)
     , machine((MachineImpl *)_machine.impl)
     , is_restricted_node(false)
-    , is_restricted_kind(false) 
+    , is_restricted_kind(false)
     , cached_mem(Memory::NO_MEMORY)
     , is_cached_mem(false)
     , shared_cached_list(false)
@@ -1485,8 +1463,8 @@ namespace Realm {
       this->_toc_procs_list = new std::vector<Processor>();
       this->_loc_procs_list = new std::vector<Processor>();
       this->_omp_procs_list = new std::vector<Processor>();
-      this->_io_procs_list = new std::vector<Processor>(); 
-      this->_sysmem_local_procs =  new std::map<Memory, std::vector<Processor> >(); 
+      this->_io_procs_list = new std::vector<Processor>();
+      this->_sysmem_local_procs =  new std::map<Memory, std::vector<Processor> >();
       this->_sysmem_local_io_procs = new std::map<Memory, std::vector<Processor> >();
       this->_fbmem_local_procs =  new std::map<Memory, std::vector<Processor> >();
 
@@ -1494,34 +1472,33 @@ namespace Realm {
       machine->get_proc_mem_affinity(proc_mem_affinities);
 
       for (unsigned idx = 0; idx < proc_mem_affinities.size(); ++idx) {
-	Machine::ProcessorMemoryAffinity& affinity = proc_mem_affinities[idx];
+       Machine::ProcessorMemoryAffinity& affinity = proc_mem_affinities[idx];
 
-	if (affinity.m.kind() == Memory::SYSTEM_MEM) {
-	  switch(affinity.p.kind()) {
-	    
-	  case Processor::LOC_PROC:
-	    this->_loc_procs_list->push_back(affinity.p);
-	    (*(this->_sysmem_local_procs))[affinity.m].push_back(affinity.p);
-	    break;
-	    
-	  case Processor::IO_PROC:
-	    this->_io_procs_list->push_back(affinity.p);
-	    (*(this->_sysmem_local_io_procs))[affinity.m].push_back(affinity.p);
-	    break;
-	    
-	  case Processor::OMP_PROC:
-	    this->_omp_procs_list->push_back(affinity.p);
-	    break;
+       if (affinity.m.kind() == Memory::SYSTEM_MEM) {
+         switch(affinity.p.kind()) {
+         case Processor::LOC_PROC:
+           this->_loc_procs_list->push_back(affinity.p);
+           (*(this->_sysmem_local_procs))[affinity.m].push_back(affinity.p);
+           break;
 
-	  default:
-	    break;
+         case Processor::IO_PROC:
+           this->_io_procs_list->push_back(affinity.p);
+           (*(this->_sysmem_local_io_procs))[affinity.m].push_back(affinity.p);
+           break;
 
-	  }
-	}
-	else if ((affinity.p.kind() == Processor::TOC_PROC) && (affinity.m.kind() == Memory::GPU_FB_MEM)) {
-	  this->_toc_procs_list->push_back(affinity.p);
-	  (*(this->_fbmem_local_procs))[affinity.m].push_back(affinity.p);
-	}
+         case Processor::OMP_PROC:
+           this->_omp_procs_list->push_back(affinity.p);
+           break;
+
+         default:
+           break;
+
+         }
+       }
+       else if ((affinity.p.kind() == Processor::TOC_PROC) && (affinity.m.kind() == Memory::GPU_FB_MEM)) {
+         this->_toc_procs_list->push_back(affinity.p);
+         (*(this->_fbmem_local_procs))[affinity.m].push_back(affinity.p);
+       }
       }
       // initialization is complete, increment init
       __sync_fetch_and_add(&init, 1);
@@ -1529,7 +1506,7 @@ namespace Realm {
     // return after initialization is complete
     while (true) {
       if (init == 2)
-	return;
+        return;
     }
   }
 
@@ -1608,7 +1585,6 @@ namespace Realm {
     }
     // any constraint to processor query will invalidate cached list
     valid_cache = false;
-
   }
 
   void ProcessorQueryImpl::restrict_to_kind(Processor::Kind new_kind)
@@ -1634,19 +1610,18 @@ namespace Realm {
 
   }
 
-  // complete iterators
   bool ProcessorQueryImpl::cached_list_next(Processor after, Processor& nextp)
   {
     std::vector<Processor>* clist = cached_list();
     if (clist) {
       if ((*clist)[0] == after)
-	cur_index = 1;
+        cur_index = 1;
       else
-	++cur_index;
+        ++cur_index;
       if (cur_index < clist->size())
-	nextp =  (*clist)[cur_index];
+        nextp =  (*clist)[cur_index];
       else
-	nextp = Processor::NO_PROC;
+        nextp = Processor::NO_PROC;
       return true;
     }
     return false;
@@ -1662,12 +1637,12 @@ namespace Realm {
     }
     if (!cur_cached_list) return nextp;
     if (!cur_cached_list->size()) return nextp;
-    if ((*cur_cached_list)[0] == after) 
-      	cur_index = 1;
+    if ((*cur_cached_list)[0] == after)
+      cur_index = 1;
     else {
       if (((*cur_cached_list)[cur_index] != after) && (cur_index < cur_cached_list->size())) {
-	log_query.fatal() << "cur_cached_list: inconsistent state";
-	assert(0);
+        log_query.fatal() << "cur_cached_list: inconsistent state";
+        assert(0);
       }
       ++cur_index;
     }
@@ -1676,53 +1651,50 @@ namespace Realm {
     return nextp;
   }
 
-
-  // return a cached list of processors 
+  // return a cached list of processors
   std::vector<Processor>* ProcessorQueryImpl::cached_list() const
   {
     if (is_restricted_kind && (!is_restricted_node)) {
       if (!predicates.size()) {
-	switch (restricted_kind) {
-	case Processor::LOC_PROC:
-	  if (loc_procs_list()->size())
-	    return loc_procs_list();
-	  break;
-	
-	case Processor::IO_PROC:
-	  if (io_procs_list()->size())
-	    return io_procs_list();
-	  break;
-	case Processor::OMP_PROC:
-	  if (omp_procs_list()->size())
-	    return omp_procs_list();
-	  break;
-	case Processor::TOC_PROC:
-	  if (toc_procs_list()->size())
-	    return toc_procs_list();
-	default:
-	  break;
-	}
+        switch (restricted_kind) {
+        case Processor::LOC_PROC:
+          if (loc_procs_list()->size())
+            return loc_procs_list();
+          break;
+        case Processor::IO_PROC:
+          if (io_procs_list()->size())
+            return io_procs_list();
+          break;
+        case Processor::OMP_PROC:
+          if (omp_procs_list()->size())
+            return omp_procs_list();
+          break;
+        case Processor::TOC_PROC:
+          if (toc_procs_list()->size())
+            return toc_procs_list();
+        default:
+          break;
+        }
       }
 
       else if (is_cached_mem) {
-	switch (restricted_kind) {
-	case Processor::LOC_PROC:
-	  return &(*_sysmem_local_procs)[cached_mem];
-	  break;
-	case Processor::IO_PROC:
-	  return &(*_sysmem_local_io_procs)[cached_mem];
-	break;
-	case Processor::TOC_PROC:
-	  return &(*_fbmem_local_procs)[cached_mem];
-	  break;
-	default:
-	  break;
-	}
+        switch (restricted_kind) {
+        case Processor::LOC_PROC:
+          return &(*_sysmem_local_procs)[cached_mem];
+          break;
+        case Processor::IO_PROC:
+          return &(*_sysmem_local_io_procs)[cached_mem];
+          break;
+        case Processor::TOC_PROC:
+          return &(*_fbmem_local_procs)[cached_mem];
+          break;
+        default:
+          break;
+        }
       }
     }
     return NULL;
   }
-
 
   Processor ProcessorQueryImpl::first_match(void) const
   {
@@ -1766,6 +1738,7 @@ namespace Realm {
     while(it != machine->nodeinfos.end()) {
       if(is_restricted_node && (it->first != restricted_node_id))
 	break;
+
       const std::map<Processor, MachineProcInfo *> *plist;
       if(is_restricted_kind) {
 	std::map<Processor::Kind, std::map<Processor, MachineProcInfo *> >::const_iterator it2 = it->second->proc_by_kind.find(restricted_kind);
@@ -1775,10 +1748,10 @@ namespace Realm {
 	  plist = 0;
       } else
 	plist = &(it->second->procs);
-      
+
       if(plist) {
-	// if restricted node id is set or is_restricted_kind && predicates.size() == 0
-	if ((restricted_node_id || is_restricted_kind)  && !predicates.size())
+	  // if restricted node id is set or is_restricted_kind && predicates.size() == 0
+	  if ((restricted_node_id || is_restricted_kind)  && !predicates.size())
 	  return plist->begin()->first;
 
 	std::map<Processor, MachineProcInfo *>::const_iterator it2 = plist->begin();
@@ -1795,6 +1768,7 @@ namespace Realm {
 	  ++it2;
 	}
       }
+
       // try the next node (if it exists)
       ++it;
     }
@@ -1831,8 +1805,6 @@ namespace Realm {
     }
     return lowest;
 #else
-    // optimize if restricted kind without predicates and restricted_node attached to the query
-
     std::map<int, MachineNodeInfo *>::const_iterator it;
     // start where we left off
     it = machine->nodeinfos.find(ID(after).proc.owner_node);
@@ -1863,12 +1835,14 @@ namespace Realm {
 	      ok && (it3 != predicates.end());
 	      it3++)
 	    ok = (*it3)->matches_predicate(machine, it2->first, it2->second);
-	  if (ok) 
-	     return it2->first;
+	  if(ok)
+	    return it2->first;
+
 	  // try next processor (if it exists)
 	  ++it2;
 	}
       }
+
       // try the next node (if it exists)
       ++it;
     }
@@ -1881,8 +1855,6 @@ namespace Realm {
   {
     bool first_time = true;
     Processor pval = Processor::NO_PROC;
-    
-
     log_query.debug("cache_next: processor input id =  %llu\n", after.id);
     // if valid cache
     if (valid_cache) {
@@ -1894,19 +1866,19 @@ namespace Realm {
     else {
       valid_cache=true;
       shared_cached_list = false;
-	// if this is not pointing to a persistent list
+      // if this is not pointing to a persistent list
       if (cur_cached_list && !shared_cached_list) {
-	delete cur_cached_list;
-	cur_cached_list=NULL;
+        delete cur_cached_list;
+        cur_cached_list=NULL;
       }
 
       // optimize if restricted kind without predicates and restricted_node attached to the query
       // shared_cached_list = true  i.e. cur_cached_list points to a precomputed list
       if ((cur_cached_list = cached_list()) != NULL) {
-	shared_cached_list = true;
-	pval = next(after);
-	log_query.debug("cache_next: processor output id: [cached list] = %llu\n", pval.id);
-	return pval;
+        shared_cached_list = true;
+        pval = next(after);
+        log_query.debug("cache_next: processor output id: [cached list] = %llu\n", pval.id);
+        return pval;
       }
 
       // general mutated query
@@ -1919,45 +1891,45 @@ namespace Realm {
       // start where we left off
       it = machine->nodeinfos.find(ID(after).proc.owner_node);
       while(it != machine->nodeinfos.end()) {
-	if(is_restricted_node && (it->first != restricted_node_id))
-	  break;
+        if(is_restricted_node && (it->first != restricted_node_id))
+          break;
 
-	const std::map<Processor, MachineProcInfo *> *plist;
-	if(is_restricted_kind) {
-	  std::map<Processor::Kind, std::map<Processor, MachineProcInfo *> >::const_iterator it2 = it->second->proc_by_kind.find(restricted_kind);
-	  if(it2 != it->second->proc_by_kind.end())
-	    plist = &(it2->second);
-	  else
-	    plist = 0;
-	} else
-	  plist = &(it->second->procs);
+        const std::map<Processor, MachineProcInfo *> *plist;
+        if(is_restricted_kind) {
+          std::map<Processor::Kind, std::map<Processor, MachineProcInfo *> >::const_iterator it2 = it->second->proc_by_kind.find(restricted_kind);
+          if(it2 != it->second->proc_by_kind.end())
+            plist = &(it2->second);
+          else
+            plist = 0;
+        } else
+          plist = &(it->second->procs);
 
-	if(plist) {
-	  std::map<Processor, MachineProcInfo *>::const_iterator it2;
-	  // same node?  if so, skip past ones we've done
-	  if(it->first == ID(after).proc.owner_node)
-	    it2 = plist->upper_bound(after);
-	  else
-	    it2 = plist->begin();
-	  while(it2 != plist->end()) {
-	    bool ok = true;
-	    for(std::vector<ProcQueryPredicate *>::const_iterator it3 = predicates.begin();
-		ok && (it3 != predicates.end());
-		it3++)
-	      ok = (*it3)->matches_predicate(machine, it2->first, it2->second);
-	    if(ok) {
-	      if (first_time) {
-		pval = it2->first;
-		first_time = false;
-	      }
-	      cur_cached_list->push_back(it2->first);
-	    }
-	    // try next processor (if it exists)
-	    ++it2;
-	  }
-	}
-	// try the next node (if it exists)
-	++it;
+        if(plist) {
+          std::map<Processor, MachineProcInfo *>::const_iterator it2;
+          // same node?  if so, skip past ones we've done
+          if(it->first == ID(after).proc.owner_node)
+            it2 = plist->upper_bound(after);
+          else
+            it2 = plist->begin();
+          while(it2 != plist->end()) {
+            bool ok = true;
+            for(std::vector<ProcQueryPredicate *>::const_iterator it3 = predicates.begin();
+                ok && (it3 != predicates.end());
+                it3++)
+              ok = (*it3)->matches_predicate(machine, it2->first, it2->second);
+            if(ok) {
+              if (first_time) {
+                pval = it2->first;
+                first_time = false;
+              }
+              cur_cached_list->push_back(it2->first);
+            }
+            // try next processor (if it exists)
+            ++it2;
+          }
+        }
+        // try the next node (if it exists)
+        ++it;
       }
     }
     log_query.debug("cache_next: processor output id =  %llu\n", pval.id);
@@ -2008,7 +1980,6 @@ namespace Realm {
 	break;
 
       const std::map<Processor, MachineProcInfo *> *plist;
-
       if(is_restricted_kind) {
 	std::map<Processor::Kind, std::map<Processor, MachineProcInfo *> >::const_iterator it2 = it->second->proc_by_kind.find(restricted_kind);
 	if(it2 != it->second->proc_by_kind.end()) {
@@ -2060,6 +2031,7 @@ namespace Realm {
 	  it != machine->proc_mem_affinities.end();
 	  it++) {
 	Processor p =(*it).p;
+	if(p.id <= after.id) continue;
 	if(is_restricted_node && (ID(p).proc.owner_node != (unsigned)restricted_node_id))
 	  continue;
 	if(is_restricted_kind && (p.kind() != restricted_kind))
@@ -2095,7 +2067,7 @@ namespace Realm {
       const std::map<Processor, MachineProcInfo *> *plist;
       if(is_restricted_kind) {
 	std::map<Processor::Kind, std::map<Processor, MachineProcInfo *> >::const_iterator it2 = it->second->proc_by_kind.find(restricted_kind);
-	if(it2 != it->second->proc_by_kind.end()) 
+	if(it2 != it->second->proc_by_kind.end())
 	  plist = &(it2->second);
 	else
 	  plist = 0;
@@ -2128,218 +2100,29 @@ namespace Realm {
     return chosen;
   }
 
-
+  inline
   std::vector<Processor>*   ProcessorQueryImpl::toc_procs_list(void) const
   {
     return ProcessorQueryImpl::_toc_procs_list;
   }
-  
+
+  inline
   std::vector<Processor>*  ProcessorQueryImpl::loc_procs_list(void) const
   {
     return ProcessorQueryImpl::_loc_procs_list;
   }
 
+  inline
   std::vector<Processor>*  ProcessorQueryImpl::io_procs_list(void) const
   {
     return ProcessorQueryImpl::_io_procs_list;
   }
 
+  inline
   std::vector<Processor>*  ProcessorQueryImpl::omp_procs_list(void) const
   {
     return ProcessorQueryImpl::_omp_procs_list;
   }
-
-  // specialized iterators to be used if we decide to enhance the ProcessorQuery API
-  std::vector<Processor>::const_iterator   ProcessorQueryImpl::begin(Processor::Kind k) const 
-  {
-    switch (k) {
-    case Processor::TOC_PROC:
-      return toc_procs_list()->begin();
-      break;
-	  
-    case Processor::LOC_PROC:
-      return loc_procs_list()->begin();
-      break;
-
-    case Processor::IO_PROC:
-      return io_procs_list()->begin();
-      break;
-	  
-    case Processor::OMP_PROC:
-      return omp_procs_list()->begin();
-      break;
-
-    default:
-      // unimplemented
-      assert(0);
-      break;
-    }
-  }
-
-  std::vector<Processor>::const_iterator  ProcessorQueryImpl::end(Processor::Kind k) const 
-  {
-    switch(k) {
-    case Processor::TOC_PROC:
-      return toc_procs_list()->end();
-      break;
-
-    case Processor::LOC_PROC:
-      return loc_procs_list()->end();
-      break;
-	
-    case Processor::IO_PROC:
-      return io_procs_list()->end();
-      break;
-	  
-    case Processor::OMP_PROC:
-      return omp_procs_list()->end();
-      break;
-
-    default:
-      // unimplemented
-      assert(0);
-      break;
-    }
-  }
-
-  std::vector<Processor>::iterator ProcessorQueryImpl::begin(Processor::Kind k) 
-  { 
-    switch (k) {
-    case Processor::TOC_PROC:
-      return toc_procs_list()->begin();
-      break;
-	  
-    case Processor::LOC_PROC:
-      return loc_procs_list()->begin();
-      break;
-	  
-    case Processor::IO_PROC:
-      return io_procs_list()->begin();
-      break;
-	  
-    case Processor::OMP_PROC:
-      return omp_procs_list()->begin();
-      break;
-
-    default:
-      // unimplemented
-      assert(0);
-      break;
-    }
-  }
-      
-  std::vector<Processor>::iterator ProcessorQueryImpl::end(Processor::Kind k) 
-  {
-    switch (k) {
-    case Processor::TOC_PROC:
-      return toc_procs_list()->end();
-      break;
-	  
-    case Processor::LOC_PROC:
-      return loc_procs_list()->end();
-      break;
-
-    case Processor::IO_PROC:
-      return io_procs_list()->end();
-      break;
-	  
-    case Processor::OMP_PROC:
-      return omp_procs_list()->end();
-      break;
-      
-    default:
-      // unimplemented
-      assert(0);
-      break;
-    }
-  }
-
-
-  std::vector<Memory>*  MemoryQueryImpl::sysmems_list(void) const
-  {
-    return  MemoryQueryImpl::_sysmems_list;
-  }
-
-  std::vector<Memory>* MemoryQueryImpl::fbmems_list(void) const
-  {
-    return MemoryQueryImpl::_fbmems_list;
-  }
-
-
-  std::vector<Memory>::iterator MemoryQueryImpl::begin(Memory::Kind k) {
-    switch (k) {
-    
-    case Memory::SYSTEM_MEM:
-      return sysmems_list()->begin();
-      break;
-
-    case Memory::GPU_FB_MEM:
-      return fbmems_list()->begin();
-      break;
-
-    default:
-      // unimplemented
-      assert(0);
-      break;
-    }
-  }
-
-  std::vector<Memory>::iterator MemoryQueryImpl::end(Memory::Kind k) {
-    switch (k) {
-
-    case Memory::SYSTEM_MEM:
-      return sysmems_list()->end();
-      break;
-
-    case Memory::GPU_FB_MEM:
-      return fbmems_list()->end();
-      break;
-
-    default:
-      // unimplemented
-      assert(0);
-      break;
-    }
-  }
-
-
-
-  std::vector<Memory>::const_iterator MemoryQueryImpl::begin(Memory::Kind k) const {
-    switch (k) {
-    
-    case Memory::SYSTEM_MEM:
-      return sysmems_list()->begin();
-      break;
-
-    case Memory::GPU_FB_MEM:
-      return fbmems_list()->begin();
-      break;
-
-    default:
-      // unimplemented
-      assert(0);
-      break;
-    }
-  }
-
-  std::vector<Memory>::const_iterator MemoryQueryImpl::end(Memory::Kind k) const {
-    switch (k) {
-
-    case Memory::SYSTEM_MEM:
-      return sysmems_list()->end();
-      break;
-
-    case Memory::GPU_FB_MEM:
-      return fbmems_list()->end();
-      break;
-
-    default:
-      // unimplemented
-      assert(0);
-      break;
-    }
-  }
-
 
 
   ////////////////////////////////////////////////////////////////////////
@@ -2560,7 +2343,7 @@ namespace Realm {
 	}
 
 	// GPU FRAME BUFFER MEM
-      	it2 = it->second->mem_by_kind.find(Memory::GPU_FB_MEM);
+        it2 = it->second->mem_by_kind.find(Memory::GPU_FB_MEM);
 	// if the list is not empty
 	if(it2 != it->second->mem_by_kind.end())
 	  plist = &(it2->second);
@@ -2578,7 +2361,7 @@ namespace Realm {
     }
     // wait until initialization is complete
     while (true) {
-      if (init == 2) 
+      if (init == 2)
 	return;
     }
   }
@@ -2616,7 +2399,7 @@ namespace Realm {
 	it != predicates.end();
 	it++)
       delete *it;
-    
+
     if (!shared_cached_list && cur_cached_list)
       delete cur_cached_list;
   }
@@ -2750,8 +2533,7 @@ namespace Realm {
 	plist = &(it->second->mems);
 
       if(plist) {
-	
-	if ((is_restricted_node) && (!predicates.size()))
+        if ((is_restricted_node) && (!predicates.size()))
 	  return plist->begin()->first;
 
 	std::map<Memory, MachineMemInfo *>::const_iterator it2 = plist->begin();
@@ -2849,15 +2631,14 @@ namespace Realm {
     return Memory::NO_MEMORY;
 #endif
   }
-  
-  
+
   Memory MemoryQueryImpl::next(Memory after) {
     Memory nextp = Memory::NO_MEMORY;
     if (!cur_cached_list) return nextp;
     if (!cur_cached_list->size()) return nextp;
     if ((*cur_cached_list)[0] == after)
       cur_index = 1;
-    else 
+    else
       ++cur_index;
     if (cur_index < cur_cached_list->size())
       nextp =  (*cur_cached_list)[cur_index];
@@ -2865,8 +2646,8 @@ namespace Realm {
   }
 
 
-  // cache valid set of memories 
-  Memory MemoryQueryImpl::cache_next(Memory after) 
+  // cache valid set of memories
+  Memory MemoryQueryImpl::cache_next(Memory after)
   {
     bool first_time = true;
     Memory mval = Memory::NO_MEMORY;
@@ -2876,7 +2657,7 @@ namespace Realm {
       return next(after);
     }
     // else build the cache.
-    // Use existing caches for common queries or build 
+    // Use existing caches for common queries or build
     // a new one for more complex mutated queries
     else {
       valid_cache=true;
@@ -2887,7 +2668,7 @@ namespace Realm {
 	cur_cached_list=NULL;
       }
 
-      // optimize if restricted kind without predicates and 
+      // optimize if restricted kind without predicates and
       // restricted_node attached to the query
       // shared_cached_list = true  i.e. cur_cached_list points to a precomputed list
       if ((cur_cached_list = cached_list()) != NULL) {
@@ -2905,7 +2686,6 @@ namespace Realm {
       while(it != machine->nodeinfos.end()) {
 	if(is_restricted_node && (it->first != restricted_node_id))
 	  break;
-      
 	const std::map<Memory, MachineMemInfo *> *plist;
 	if(is_restricted_kind) {
 	  std::map<Memory::Kind, std::map<Memory, MachineMemInfo *> >::const_iterator it2 = it->second->mem_by_kind.find(restricted_kind);
@@ -2915,8 +2695,8 @@ namespace Realm {
 	    plist = 0;
 	} else
 	  plist = &(it->second->mems);
-	
-	if(plist) {
+
+        if(plist) {
 	  std::map<Memory, MachineMemInfo *>::const_iterator it2;
 	  // same node?  if so, skip past ones we've done
 	  if(it->first == ID(after).memory.owner_node)
@@ -2990,23 +2770,22 @@ namespace Realm {
 	break;
 
       const std::map<Memory, MachineMemInfo *> *plist;
-      if (is_restricted_kind) {
+      if(is_restricted_kind) {
 	std::map<Memory::Kind, std::map<Memory, MachineMemInfo *> >::const_iterator it2 = it->second->mem_by_kind.find(restricted_kind);
 	if(it2 != it->second->mem_by_kind.end())
-	plist = &(it2->second);
+	  plist = &(it2->second);
 	else
 	  plist = 0;
-      } 
-      else
+      } else
 	plist = &(it->second->mems);
 
-    if(plist) {
-      // if predicates is empty then increment count by size of plist
-      if (!predicates.size()) {
-	count =  count + plist->size();
-      }
-      // else iterate over all relevant memories on this node and match the predicates
-      else  {
+      if(plist) {
+        // if predicates is empty then increment count by size of plist
+        if (!predicates.size()) {
+          count =  count + plist->size();
+        }
+        // else iterate over all relevant memories on this node and match the predicates
+        else  {
 	std::map<Memory, MachineMemInfo *>::const_iterator it2 = plist->begin();
 	while(it2 != plist->end()) {
 	  bool ok = true;
@@ -3016,13 +2795,15 @@ namespace Realm {
 	    ok = (*it3)->matches_predicate(machine, it2->first, it2->second);
 	  if(ok)
 	    count += 1;
+
 	  // continue to next memory (if it exists)
 	  ++it2;
 	}
-      }
-    }
-    // continue to the next node (if it exists)
-    ++it;
+	  }
+	  }
+
+      // continue to the next node (if it exists)
+      ++it;
     }
     return count;
 #endif
@@ -3074,15 +2855,13 @@ namespace Realm {
 	break;
 
       const std::map<Memory, MachineMemInfo *> *plist;
-      
       if(is_restricted_kind) {
 	std::map<Memory::Kind, std::map<Memory, MachineMemInfo *> >::const_iterator it2 = it->second->mem_by_kind.find(restricted_kind);
 	if(it2 != it->second->mem_by_kind.end())
 	  plist = &(it2->second);
 	else
 	  plist = 0;
-      }
-      else
+      } else
 	plist = &(it->second->mems);
 
       if(plist) {
@@ -3111,6 +2890,17 @@ namespace Realm {
     return chosen;
   }
 
+  inline
+  std::vector<Memory>* MemoryQueryImpl::sysmems_list(void) const
+  {
+    return MemoryQueryImpl::_sysmems_list;
+  }
+
+  inline
+  std::vector<Memory>* MemoryQueryImpl::fbmems_list(void) const
+  {
+    return MemoryQueryImpl::_fbmems_list;
+  }
 
   ////////////////////////////////////////////////////////////////////////
   //

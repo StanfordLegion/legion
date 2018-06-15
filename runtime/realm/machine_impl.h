@@ -78,8 +78,6 @@ namespace Realm {
 
     std::map<Memory, MachineMemInfo *> mems;
     std::map<Memory::Kind, std::map<Memory, MachineMemInfo *> > mem_by_kind;
-
-
   };
 
     class MachineImpl {
@@ -227,17 +225,10 @@ namespace Realm {
       size_t count_matches(void) const;
       Processor random_match(void) const;
 
-      void set_cached_mem(Memory m) { cached_mem = m; 
+      void set_cached_mem(Memory m) { cached_mem = m;
 	if (predicates.size() == 1) is_cached_mem = true; else is_cached_mem=false;};
       void reset_cached_mem() { cached_mem = Memory::NO_MEMORY; is_cached_mem = false;};
       Processor cache_next(Processor after);
-
-
-      // specialized iterators
-      std::vector<Processor>::const_iterator begin(Processor::Kind k) const;
-      std::vector<Processor>::const_iterator end(Processor::Kind k) const;
-      std::vector<Processor>::iterator begin(Processor::Kind k);
-      std::vector<Processor>::iterator end(Processor::Kind k);
 
     protected:
       int references;
@@ -255,7 +246,7 @@ namespace Realm {
       // cached list of processors
       std::vector<Processor>* cached_list() const;
       // cached iterator
-      bool cached_list_next(Processor after, Processor& nextp); 
+      bool cached_list_next(Processor after, Processor& nextp);
       Processor next(Processor after);
     };            
 
@@ -348,12 +339,6 @@ namespace Realm {
       size_t count_matches(void) const;
       Memory random_match(void) const;
       Memory cache_next(Memory after);
-
-      std::vector<Memory>::iterator begin(Memory::Kind k);
-      std::vector<Memory>::iterator end(Memory::Kind k);
-
-      std::vector<Memory>::const_iterator begin(Memory::Kind k) const;
-      std::vector<Memory>::const_iterator end(Memory::Kind k) const;
 
     protected:
       int references;
