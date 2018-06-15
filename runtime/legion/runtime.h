@@ -1435,6 +1435,40 @@ namespace Legion {
         std::set<ProjectionSummary> projections;
         bool result;
       };
+#ifndef DISABLE_CVOPT
+      struct InterferenceKey {
+      public:
+        InterferenceKey(void)
+          : node(NULL), target(NULL), space(IndexSpace::NO_SPACE) { }
+        InterferenceKey(RegionTreeNode* n,IndexSpaceExpression *t,IndexSpace sp)
+          : node(n), target(t), space(sp) { }
+      public:
+        inline bool operator==(const InterferenceKey &rhs) const
+        {
+          if (node != rhs.node)
+            return false;
+          if (target != rhs.target)
+            return false;
+          return space == rhs.space;
+        }
+        inline bool operator<(const InterferenceKey &rhs) const
+        {
+          if (node < rhs.node)
+            return true;
+          if (node > rhs.node)
+            return false;
+          if (target < rhs.target)
+            return true;
+          if (target > rhs.target)
+            return false;
+          return space < rhs.space;
+        }
+      public:
+        RegionTreeNode *node;
+        IndexSpaceExpression *target;
+        IndexSpace space; 
+      };
+#endif
     public:
       ProjectionFunction(ProjectionID pid, ProjectionFunctor *functor);
       ProjectionFunction(const ProjectionFunction &rhs);
@@ -1514,7 +1548,7 @@ namespace Legion {
     protected:
       mutable LocalLock projection_reservation;
 #ifndef DISABLE_CVOPT
-      std::map<std::pair<IndexSpaceExpression*,IndexSpace>,
+      std::map<InterferenceKey,
                std::map<DomainPoint,IndexSpaceExpression*> > interfering_points;
 #else
       std::map<std::pair<RegionTreeNode*,IndexSpace>,

@@ -9427,12 +9427,11 @@ namespace Legion {
       assert(is_functional);
       assert(results.empty());
 #endif
-      const std::pair<IndexSpaceExpression*,IndexSpace> 
-        key(target, launch_space);
+      const InterferenceKey key(upper_bound, target, launch_space);
       {
         // Check to see if we already have the interfering points
         AutoLock p_lock(projection_reservation, 1, false/*exclusive*/);
-        std::map<std::pair<IndexSpaceExpression*,IndexSpace>,
+        std::map<InterferenceKey,
                   std::map<DomainPoint,IndexSpaceExpression*> >::const_iterator
             finder = interfering_points.find(key);
         if (finder != interfering_points.end())
