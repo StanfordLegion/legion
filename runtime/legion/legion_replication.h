@@ -344,7 +344,10 @@ namespace Legion {
     /**
      * \class FieldDescriptorExchange
      * A class for doing an all-gather of field descriptors for 
-     * doing dependent partitioning operations
+     * doing dependent partitioning operations. This will also build
+     * a butterfly tree of user events that will be used to know when
+     * all of the constituent shards are done with the operation they
+     * are collectively performing together.
      */
     class FieldDescriptorExchange : public AllGatherCollective {
     public:
@@ -357,12 +360,25 @@ namespace Legion {
     public:
       ApEvent exchange_descriptors(ApEvent ready_event,
                                  const std::vector<FieldDataDescriptor> &desc);
+      // Have to call this with the completion event
+      ApEvent exchange_completion(ApEvent complete_event);
     public:
       virtual void pack_collective_stage(Serializer &rez, int stage) const;
       virtual void unpack_collective_stage(Deserializer &derez, int stage);
     public:
       std::set<ApEvent> ready_events;
       std::vector<FieldDataDescriptor> descriptors;
+    public:
+      // Use these for building the butterfly network of user events for
+      // knowing when everything is done on all the nodes. 
+      // This vector is of the number of stages and tracks the incoming
+      // set of remote complete events for a stage, in the case of a 
+      // remainder stage it is of size 1
+      std::vector<std::set<ApUserEvent> > remote_to_trigger; // stages
+      // This vector is the number of stages+1 to capture the ready
+      // event for each of the different stages as well as the event
+      // for when the entire collective is done
+      mutable std::vector<std::set<ApEvent> > local_preconditions; 
     };
 
     /**

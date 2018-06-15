@@ -2253,8 +2253,9 @@ namespace Legion {
         // Do the all-to-all gather of the field data descriptors
         ApEvent all_ready = collective.exchange_descriptors(instances_ready,
                                                             instances);
-        return forest->create_partition_by_field(op, pid, 
+        ApEvent done = forest->create_partition_by_field(op, pid, 
                 collective.descriptors, all_ready, shard_id, total_shards);
+        return collective.exchange_completion(done);
       }
       else // singular so just do the normal thing
         return forest->create_partition_by_field(op, pid, 
@@ -5616,9 +5617,53 @@ namespace Legion {
         AutoLock c_lock(collective_lock);
         ready_events.insert(ready_event);
         descriptors.insert(descriptors.end(), descs.begin(), descs.end());
+        if (participating)
+        {
+          remote_to_trigger.resize(shard_collective_stages + 1);
+          local_preconditions.resize(shard_collective_stages + 1);
+        }
+        else
+        {
+          remote_to_trigger.resize(1);
+          local_preconditions.resize(1);
+        }
       }
       perform_collective_sync();
       return Runtime::merge_events(ready_events);
+    }
+
+    //--------------------------------------------------------------------------
+    ApEvent FieldDescriptorExchange::exchange_completion(ApEvent complete)
+    //--------------------------------------------------------------------------
+    {
+      if (participating)
+      {
+        // Might have a precondition from a remainder shard 
+        if (!local_preconditions[0].empty())
+        {
+#ifdef DEBUG_LEGION
+          assert(local_preconditions[0].size() == 1);
+#endif
+          complete = Runtime::merge_events(complete,
+              *(local_preconditions[0].begin()));
+        }
+        const std::set<ApUserEvent> &to_trigger = remote_to_trigger[0];
+        for (std::set<ApUserEvent>::const_iterator it = 
+              to_trigger.begin(); it != to_trigger.end(); it++)
+          Runtime::trigger_event(*it, complete);
+        return Runtime::merge_events(local_preconditions.back());
+      }
+      else
+      {
+        // Not participating so we should have exactly one thing to 
+        // trigger and one precondition for being done
+#ifdef DEBUG_LEGION
+        assert(remote_to_trigger[0].size() == 1);
+        assert(local_preconditions[0].size() == 1);
+#endif
+        Runtime::trigger_event(*(remote_to_trigger[0].begin()), complete);
+        return *(local_preconditions[0].begin());
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -5626,6 +5671,47 @@ namespace Legion {
                                                         int stage) const
     //--------------------------------------------------------------------------
     {
+      // Always make a stage precondition and send it back
+      ApUserEvent stage_complete = Runtime::create_ap_user_event();
+      rez.serialize(stage_complete);
+      if (stage == -1)
+      {
+#ifdef DEBUG_LEGION
+        assert(!local_preconditions.empty());
+        assert(local_preconditions[0].empty());
+#endif
+        // Always save this as a precondition for later
+        local_preconditions[0].insert(stage_complete);
+      }
+      else 
+      {
+#ifdef DEBUG_LEGION
+        assert(participating);
+        assert(stage < shard_collective_stages);
+#endif
+        std::set<ApEvent> &preconditions = 
+          local_preconditions[shard_collective_stages - stage];
+        preconditions.insert(stage_complete);
+        // See if we've sent all our messages in which case we can 
+        // trigger all the remote user events for any previous stages
+        if (((stage == (shard_collective_stages-1)) && 
+              (preconditions.size() == shard_collective_last_radix)) ||
+            ((stage < (shard_collective_stages-1)) &&
+              (preconditions.size() == shard_collective_radix)))
+        {
+          const std::set<ApUserEvent> &to_trigger = 
+           remote_to_trigger[(stage > 0) ? (stage-1) : shard_collective_stages];
+          // Check for empty which can happen with stage 0 if there
+          // are no remainders
+          if (!to_trigger.empty())
+          {
+            const ApEvent stage_pre = Runtime::merge_events(preconditions);
+            for (std::set<ApUserEvent>::const_iterator it = 
+                  to_trigger.begin(); it != to_trigger.end(); it++)
+              Runtime::trigger_event(*it, stage_pre);
+          }
+        }
+      }
       rez.serialize<size_t>(ready_events.size());
       for (std::set<ApEvent>::const_iterator it = ready_events.begin();
             it != ready_events.end(); it++)
@@ -5641,6 +5727,24 @@ namespace Legion {
                                                           int stage)
     //--------------------------------------------------------------------------
     {
+      ApUserEvent remote_complete;
+      derez.deserialize(remote_complete);
+      if (stage == -1)
+      {
+#ifdef DEBUG_LEGION
+        assert(!remote_to_trigger.empty());
+        assert(remote_to_trigger[shard_collective_stages].empty());
+#endif
+        remote_to_trigger[shard_collective_stages].insert(remote_complete);
+      }
+      else
+      {
+#ifdef DEBUG_LEGION
+        assert(participating);
+        assert(stage < remote_to_trigger.size());
+#endif
+        remote_to_trigger[stage].insert(remote_complete);
+      }
       size_t num_events;
       derez.deserialize(num_events);
       for (unsigned idx = 0; idx < num_events; idx++)
