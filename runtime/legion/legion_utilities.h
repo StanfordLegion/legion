@@ -10855,20 +10855,10 @@ namespace Legion {
     public:
       FieldMaskSet(void)
         : single(true) { entries.single_entry = NULL; }
-      FieldMaskSet(const FieldMaskSet &rhs)
-        : single(true)
-      {
-        // must be empty
-#ifdef DEBUG_LEGION
-        assert(rhs.single);
-        assert(rhs.entries.single_entry == NULL);
-#endif
-        entries.single_entry = NULL;
-      }
+      inline FieldMaskSet(const FieldMaskSet &rhs);
       ~FieldMaskSet(void) { clear(); }
     public:
-      FieldMaskSet& operator=(const FieldMaskSet &rhs)
-        { assert(false); return *this; }
+      inline FieldMaskSet& operator=(const FieldMaskSet &rhs);
     public:
       inline bool empty(void) const 
         { return single && (entries.single_entry == NULL); }
@@ -10913,6 +10903,61 @@ namespace Legion {
       FieldMask valid_fields;
       bool single;
     };
+
+    //--------------------------------------------------------------------------
+    template<typename T>
+    inline FieldMaskSet<T>::FieldMaskSet(const FieldMaskSet<T> &rhs)
+      : single(rhs.single), valid_fields(rhs.valid_fields)
+    //--------------------------------------------------------------------------
+    {
+      if (single)
+        entries.single_entry = rhs.entries.single_entry;
+      else
+        entries.multi_entries = new typename LegionMap<T*,FieldMask>::aligned(
+            rhs.entries.multi_entries->begin(),
+            rhs.entries.multi_entries->end());
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T>
+    inline FieldMaskSet<T>& FieldMaskSet<T>::operator=(
+                                                     const FieldMaskSet<T> &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // Check our current state
+      if (single != rhs.single)
+      {
+        // Different data structures
+        if (single)
+        {
+          entries.multi_entries = new typename LegionMap<T*,FieldMask>::aligned(
+              rhs.entries.multi_entries->begin(),
+              rhs.entries.multi_entries->end());
+        }
+        else
+        {
+          // Free our map
+          delete entries.multi_entries;
+          entries.single_entry = rhs.entries.single_entry;
+        }
+        single = rhs.single;
+      }
+      else
+      {
+        // Same data structures so we can just copy things over
+        if (single)
+          entries.single_entry = rhs.entries.single_entry;
+        else
+        {
+          entries.multi_entries->clear();
+          entries.multi_entries->insert(
+              rhs.entries.multi_entries->begin(),
+              rhs.entries.multi_entries->end());
+        }
+      }
+      valid_fields = rhs.valid_fields;
+      return *this;
+    }
 
     //--------------------------------------------------------------------------
     template<typename T>
