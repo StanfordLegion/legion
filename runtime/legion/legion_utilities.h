@@ -10838,7 +10838,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<typename T>
     inline FieldMaskSet<T>::FieldMaskSet(const FieldMaskSet<T> &rhs)
-      : single(rhs.single), valid_fields(rhs.valid_fields)
+      : valid_fields(rhs.valid_fields), single(rhs.single)
     //--------------------------------------------------------------------------
     {
       if (single)
