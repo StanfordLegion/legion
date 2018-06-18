@@ -2031,7 +2031,6 @@ namespace Realm {
 	  it != machine->proc_mem_affinities.end();
 	  it++) {
 	Processor p =(*it).p;
-	if(p.id <= after.id) continue;
 	if(is_restricted_node && (ID(p).proc.owner_node != (unsigned)restricted_node_id))
 	  continue;
 	if(is_restricted_kind && (p.kind() != restricted_kind))
