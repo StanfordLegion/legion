@@ -2200,10 +2200,11 @@ namespace Legion {
         {
           // We aren't participating directly, but we still have to 
           // participate in the collective operations
-          thunk->perform(this, runtime->forest, ApEvent::NO_AP_EVENT,instances);
+          const ApEvent done = 
+            thunk->perform(this,runtime->forest,ApEvent::NO_AP_EVENT,instances);
           // We have no local points, so we can just trigger
           complete_mapping();
-          complete_execution();
+          complete_execution(Runtime::protect_event(done));
         }
         else // If we have valid points then we do the base call
         {
@@ -5651,7 +5652,17 @@ namespace Legion {
         for (std::set<ApUserEvent>::const_iterator it = 
               to_trigger.begin(); it != to_trigger.end(); it++)
           Runtime::trigger_event(*it, complete);
-        return Runtime::merge_events(local_preconditions.back());
+        const ApEvent done = Runtime::merge_events(local_preconditions.back());
+        // If we have a remainder shard then we need to signal them too
+        if (!remote_to_trigger[shard_collective_stages].empty())
+        {
+#ifdef DEBUG_LEGION
+          assert(remote_to_trigger[shard_collective_stages].size() == 1);
+#endif
+          Runtime::trigger_event(
+              *(remote_to_trigger[shard_collective_stages].begin()), done);     
+        }
+        return done;
       }
       else
       {
@@ -5733,9 +5744,21 @@ namespace Legion {
       {
 #ifdef DEBUG_LEGION
         assert(!remote_to_trigger.empty());
-        assert(remote_to_trigger[shard_collective_stages].empty());
 #endif
-        remote_to_trigger[shard_collective_stages].insert(remote_complete);
+        if (participating)
+        {
+#ifdef DEBUG_LEGION
+          assert(remote_to_trigger[shard_collective_stages].empty());
+#endif
+          remote_to_trigger[shard_collective_stages].insert(remote_complete);
+        }
+        else
+        {
+#ifdef DEBUG_LEGION
+          assert(remote_to_trigger[0].empty());
+#endif
+          remote_to_trigger[0].insert(remote_complete);
+        }
       }
       else
       {
