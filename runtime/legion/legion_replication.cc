@@ -2200,11 +2200,13 @@ namespace Legion {
         {
           // We aren't participating directly, but we still have to 
           // participate in the collective operations
-          const ApEvent done = 
+          const ApEvent done_event = 
             thunk->perform(this,runtime->forest,ApEvent::NO_AP_EVENT,instances);
+          // We can try to early-complete this operation too
+          request_early_complete(done_event);
           // We have no local points, so we can just trigger
           complete_mapping();
-          complete_execution(Runtime::protect_event(done));
+          complete_execution(Runtime::protect_event(done_event));
         }
         else // If we have valid points then we do the base call
         {
