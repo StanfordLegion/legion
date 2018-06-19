@@ -4854,11 +4854,22 @@ namespace Legion {
                            parent_ctx->get_task_name(), 
                            parent_ctx->get_unique_id());
         }
+        if (!HAS_WRITE(launcher.dst_requirements[idx]))
+          REPORT_LEGION_ERROR(ERROR_DESTINATION_REGION_REQUIREMENT,
+                          "Destination region requirement %d of "
+                          "copy (ID %lld) in task %s (ID %lld) does "
+                          "not have a write or a reduce privilege.",
+                          idx, get_unique_op_id(),
+                          parent_ctx->get_task_name(),
+                          parent_ctx->get_unique_id())
         dst_requirements[idx] = launcher.dst_requirements[idx];
         dst_requirements[idx].flags |= NO_ACCESS_FLAG;
         // If our privilege is not reduce, then shift it to write discard
-        // since we are going to write all over the region
-        if (dst_requirements[idx].privilege != REDUCE)
+        // since we are going to write all over the region, although we
+        // can only do this safely now if there is no scatter region
+        // requirement, otherwise we're doing it onto
+        if ((dst_requirements[idx].privilege != REDUCE) && 
+            (idx >= gather_requirements.size()))
           dst_requirements[idx].privilege = WRITE_ONLY;
       }
       if (!launcher.gather_requirements.empty())

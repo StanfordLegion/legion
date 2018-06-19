@@ -798,10 +798,14 @@ namespace Legion {
       struct MapCopyInput {
         std::vector<std::vector<PhysicalInstance> >       src_instances;
         std::vector<std::vector<PhysicalInstance> >       dst_instances;
+        std::vector<std::vector<PhysicalInstance> >       gather_instances;
+        std::vector<std::vector<PhysicalInstance> >       scatter_instances;
       };
       struct MapCopyOutput {
         std::vector<std::vector<PhysicalInstance> >       src_instances;
         std::vector<std::vector<PhysicalInstance> >       dst_instances;
+        std::vector<std::vector<PhysicalInstance> >       gather_instances;
+        std::vector<std::vector<PhysicalInstance> >       scatter_instances;
         ProfilingRequest                                  profiling_requests;
         TaskPriority                                      profiling_priority;
       };
