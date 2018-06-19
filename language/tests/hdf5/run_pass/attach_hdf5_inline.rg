@@ -14,7 +14,7 @@
 
 import "regent"
 local c = regentlib.c
-local hdf5 = terralib.includec("hdf5.h")
+local hdf5 = terralib.includec(os.getenv("HDF_HEADER") or "hdf5.h")
 
 local NX = 180
 local HALO_WIDTH = 2

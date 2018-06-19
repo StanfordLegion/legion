@@ -2637,6 +2637,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       log_mapper.spew("Default map_copy in %s", get_mapper_name());
+      // Default mapper doesn't support gather/scatter copies yet
+      assert(copy.gather_requirements.empty());
+      assert(copy.scatter_requirements.empty());
       // For the sources always use an existing instances and virtual
       // instances for the rest, for the destinations, hope they are
       // restricted, otherwise we really don't know what to do
