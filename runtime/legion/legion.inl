@@ -6824,8 +6824,8 @@ namespace Legion {
                                                FieldID gather_field, bool inst)
     //--------------------------------------------------------------------------
     {
-      gather_requirements.push_back(req);
-      gather_requirements.back().add_field(gather_field, inst);
+      src_indirect_requirements.push_back(req);
+      src_indirect_requirements.back().add_field(gather_field, inst);
     }
 
     //--------------------------------------------------------------------------
@@ -6833,8 +6833,8 @@ namespace Legion {
                                                 FieldID scatter_field,bool inst)
     //--------------------------------------------------------------------------
     {
-      scatter_requirements.push_back(req);
-      scatter_requirements.back().add_field(scatter_field, inst);
+      dst_indirect_requirements.push_back(req);
+      dst_indirect_requirements.back().add_field(scatter_field, inst);
     }
 
     //--------------------------------------------------------------------------
@@ -6916,8 +6916,8 @@ namespace Legion {
                                                FieldID gather_field, bool inst)
     //--------------------------------------------------------------------------
     {
-      gather_requirements.push_back(r);
-      gather_requirements.back().add_field(gather_field, inst);
+      src_indirect_requirements.push_back(r);
+      src_indirect_requirements.back().add_field(gather_field, inst);
     }
 
     //--------------------------------------------------------------------------
@@ -6925,8 +6925,8 @@ namespace Legion {
                                                 FieldID scatter_field,bool inst)
     //--------------------------------------------------------------------------
     {
-      scatter_requirements.push_back(r);
-      scatter_requirements.back().add_field(scatter_field, inst);
+      dst_indirect_requirements.push_back(r);
+      dst_indirect_requirements.back().add_field(scatter_field, inst);
     }
 
     //--------------------------------------------------------------------------
