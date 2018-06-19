@@ -186,6 +186,10 @@ namespace Realm {
       int latency_weight;
     };
 
+  namespace Config {
+    extern bool use_machine_query_cache;
+  };
+
     class ProcessorQueryImpl {
     public:
       ProcessorQueryImpl(const Machine& _machine);

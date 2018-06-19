@@ -354,6 +354,10 @@ namespace Realm {
     }
 
 
+  namespace Config {
+    bool use_machine_query_cache = true;
+  };
+
   ////////////////////////////////////////////////////////////////////////
   //
   // class MachineImpl
@@ -1215,7 +1219,9 @@ namespace Realm {
 
   Processor Machine::ProcessorQuery::next(Processor after)
   {
-    return ((ProcessorQueryImpl *)impl)->cache_next(after);
+    if (Config::use_machine_query_cache)
+      return ((ProcessorQueryImpl *)impl)->cache_next(after);
+    return ((ProcessorQueryImpl *)impl)->next_match(after);
   }
 
   Processor Machine::ProcessorQuery::random(void) const
@@ -1331,7 +1337,9 @@ namespace Realm {
 
   Memory Machine::MemoryQuery::next(Memory after) const
   {
-    return ((MemoryQueryImpl *)impl)->cache_next(after);
+    if (Config::use_machine_query_cache)
+     return ((MemoryQueryImpl *)impl)->cache_next(after);
+    return ((MemoryQueryImpl *)impl)->next_match(after);
   }
 
   Memory Machine::MemoryQuery::random(void) const
@@ -1451,8 +1459,8 @@ namespace Realm {
 
   {
     // to be done only once
-    if (__sync_bool_compare_and_swap(&init,0,1)) {
-
+    if (Config::use_machine_query_cache) {
+      if (__sync_bool_compare_and_swap(&init,0,1)) {
       // _omp_procs_list -> openmp processors
       // _io_procs_list -> io processors
       // _sysmem_local_procs -> system memory-> local processor list map
@@ -1508,6 +1516,7 @@ namespace Realm {
       if (init == 2)
         return;
     }
+   }
   }
 
   ProcessorQueryImpl::ProcessorQueryImpl(const ProcessorQueryImpl& copy_from)
@@ -1654,6 +1663,9 @@ namespace Realm {
   // return a cached list of processors
   std::vector<Processor>* ProcessorQueryImpl::cached_list() const
   {
+    if (!Config::use_machine_query_cache)
+      return NULL;
+
     if (is_restricted_kind && (!is_restricted_node)) {
       if (!predicates.size()) {
         switch (restricted_kind) {
@@ -2316,7 +2328,8 @@ namespace Realm {
     //  cache memory information only once
     // _sysmems_list -> system memories
     // _fbmems_list -> frame buffer memories
-    if (__sync_bool_compare_and_swap(&init,0,1)) {
+    if (Config::use_machine_query_cache) {
+      if (__sync_bool_compare_and_swap(&init,0,1)) {
 
       this->_sysmems_list = new std::vector<Memory>();
       this->_fbmems_list = new std::vector<Memory>();
@@ -2363,6 +2376,7 @@ namespace Realm {
       if (init == 2)
 	return;
     }
+   }
   }
 
 
@@ -2463,6 +2477,9 @@ namespace Realm {
 
   std::vector<Memory>* MemoryQueryImpl::cached_list() const
   {
+    if (!Config::use_machine_query_cache)
+      return NULL;
+
     if (is_restricted_kind && (!is_restricted_node) && (!predicates.size())) {
       switch (restricted_kind) {
       case Memory::SYSTEM_MEM:
