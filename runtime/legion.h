@@ -1612,8 +1612,8 @@ namespace Legion {
     public:
       std::vector<RegionRequirement>  src_requirements;
       std::vector<RegionRequirement>  dst_requirements;
-      std::vector<RegionRequirement>  gather_requirements;
-      std::vector<RegionRequirement>  scatter_requirements;
+      std::vector<RegionRequirement>  src_indirect_requirements;
+      std::vector<RegionRequirement>  dst_indirect_requirements;
       std::vector<Grant>              grants;
       std::vector<PhaseBarrier>       wait_barriers;
       std::vector<PhaseBarrier>       arrive_barriers;
@@ -1666,8 +1666,8 @@ namespace Legion {
     public:
       std::vector<RegionRequirement>  src_requirements;
       std::vector<RegionRequirement>  dst_requirements;
-      std::vector<RegionRequirement>  gather_requirements;
-      std::vector<RegionRequirement>  scatter_requirements;
+      std::vector<RegionRequirement>  src_indirect_requirements;
+      std::vector<RegionRequirement>  dst_indirect_requirements;
       std::vector<Grant>              grants;
       std::vector<PhaseBarrier>       wait_barriers;
       std::vector<PhaseBarrier>       arrive_barriers;
@@ -2642,8 +2642,8 @@ namespace Legion {
       // Copy Launcher arguments
       std::vector<RegionRequirement>    src_requirements;
       std::vector<RegionRequirement>    dst_requirements;
-      std::vector<RegionRequirement>    gather_requirements;
-      std::vector<RegionRequirement>    scatter_requirements;
+      std::vector<RegionRequirement>    src_indirect_requirements;
+      std::vector<RegionRequirement>    dst_indirect_requirements;
       std::vector<Grant>                grants;
       std::vector<PhaseBarrier>         wait_barriers;
       std::vector<PhaseBarrier>         arrive_barriers;
