@@ -6014,8 +6014,7 @@ namespace Legion {
             }
           case SEND_REMOTE_EXPRESSION_INVALIDATION:
             {
-              runtime->handle_remote_expression_invalidation(derez,
-                                              remote_address_space);
+              runtime->handle_remote_expression_invalidation(derez);
               break;
             }
           case SEND_INDEX_PARTITION_NOTIFICATION:
@@ -9160,6 +9159,7 @@ namespace Legion {
         unique_code_descriptor_id(LG_TASK_ID_AVAILABLE +
                         ((unique == 0) ? runtime_stride : unique)),
         unique_constraint_id((unique == 0) ? runtime_stride : unique),
+        unique_is_expr_id((unique == 0) ? runtime_stride : unique),
         unique_task_id(get_current_static_task_id()+unique),
         unique_mapper_id(get_current_static_mapper_id()+unique),
         unique_projection_id(get_current_static_projection_id()+unique),
@@ -14876,12 +14876,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_remote_expression_invalidation(Deserializer &derez,
-                                                        AddressSpaceID source)
+    void Runtime::handle_remote_expression_invalidation(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      IntermediateExpression::handle_expression_invalidation(derez, 
-                                                             forest, source);
+      IntermediateExpression::handle_expression_invalidation(derez, forest);
     }
 
     //--------------------------------------------------------------------------
@@ -18042,6 +18040,19 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       // check for overflow
       assert(result <= unique_constraint_id);
+#endif
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpaceExprID Runtime::get_unique_index_space_expr_id(void)
+    //--------------------------------------------------------------------------
+    {
+      IndexSpaceExprID result = __sync_fetch_and_add(&unique_is_expr_id,
+                                                     runtime_stride);
+#ifdef DEBUG_LEGION
+      // check for overflow
+      assert(result <= unique_is_expr_id);
 #endif
       return result;
     }
