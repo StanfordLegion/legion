@@ -730,6 +730,7 @@ namespace Legion {
     public:
       IndexSpaceExpression(void);
       IndexSpaceExpression(TypeTag tag, Runtime *runtime); 
+      IndexSpaceExpression(TypeTag tag, IndexSpaceExprID id);
       virtual ~IndexSpaceExpression(void);
     public:
       virtual ApEvent get_expr_index_space(void *result, TypeTag tag, 
@@ -786,6 +787,8 @@ namespace Legion {
       };
     public:
       IntermediateExpression(TypeTag tag, RegionTreeForest *ctx);
+      IntermediateExpression(TypeTag tag, RegionTreeForest *ctx, 
+                             IndexSpaceExprID expr_id);
       virtual ~IntermediateExpression(void);
     public:
       virtual ApEvent get_expr_index_space(void *result, TypeTag tag, 
@@ -998,8 +1001,6 @@ namespace Legion {
       virtual void tighten_index_space(void);
       virtual bool check_empty(void);
       virtual void pack_expression(Serializer &rez, AddressSpaceID target);
-    public:
-      const IndexSpaceExprID remote_expr_id;
     public:
       Realm::IndexSpace<DIM,T> realm_index_space;
       ApEvent realm_index_space_ready;

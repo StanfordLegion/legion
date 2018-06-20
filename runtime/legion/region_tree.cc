@@ -5127,6 +5127,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    IndexSpaceExpression::IndexSpaceExpression(TypeTag tag, IndexSpaceExprID id)
+      : type_tag(tag), expr_id(id), has_empty(false)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
     IndexSpaceExpression::~IndexSpaceExpression(void)
     //--------------------------------------------------------------------------
     {
@@ -5200,6 +5207,14 @@ namespace Legion {
     IntermediateExpression::IntermediateExpression(TypeTag tag,
                                                    RegionTreeForest *ctx)
       : IndexSpaceExpression(tag, ctx->runtime), context(ctx)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    IntermediateExpression::IntermediateExpression(TypeTag tag,
+                                     RegionTreeForest *ctx, IndexSpaceExprID id)
+      : IndexSpaceExpression(tag, id), context(ctx)
     //--------------------------------------------------------------------------
     {
     }
