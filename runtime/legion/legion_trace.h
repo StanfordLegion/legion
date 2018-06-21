@@ -550,6 +550,7 @@ namespace Legion {
                                   unsigned inst_idx,
                                   ApEvent &ready_event,
                                   const RegionRequirement &req,
+                                  RegionNode *region_node,
                                   InstanceView *view,
                                   const FieldMask &fields,
                                   ContextID logical_ctx,

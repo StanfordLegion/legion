@@ -2100,7 +2100,7 @@ namespace Legion {
 #endif
             ContextID physical_ctx = context->get_context().get_id();
             trace_info.tpl->record_set_ready_event(op, idx1, idx2, ready, req,
-                                                   target_views[idx2],
+                                                   region_node, target_views[idx2],
                                                    ref.get_valid_fields(),
                                                    logical_ctx, physical_ctx);
           }
@@ -14691,8 +14691,8 @@ namespace Legion {
               assert(info.logical_ctx != -1U);
 #endif
               trace_info.tpl->record_set_ready_event(info.op, info.index, idx,
-                                                     ready, info.req, new_view,
-                                                     user_mask,
+                                                     ready, info.req, this,
+                                                     new_view, user_mask,
                                                      info.logical_ctx,
                                                      info.ctx);
             }
@@ -14713,8 +14713,8 @@ namespace Legion {
               assert(info.logical_ctx != -1U);
 #endif
               trace_info.tpl->record_set_ready_event(info.op, info.index, idx,
-                                                     ready, info.req, new_view,
-                                                     user_mask,
+                                                     ready, info.req, this,
+                                                     new_view, user_mask,
                                                      info.logical_ctx,
                                                      info.ctx);
             }
@@ -14915,7 +14915,8 @@ namespace Legion {
 #endif
               trace_info.tpl->record_set_ready_event(info.op,
                                                      info.index, 0, ready,
-                                                     info.req, new_views[0],
+                                                     info.req, this,
+                                                     new_views[0],
                                                      ref.get_valid_fields(),
                                                      info.logical_ctx,
                                                      info.ctx);
@@ -14951,6 +14952,7 @@ namespace Legion {
 #endif
                 trace_info.tpl->record_set_ready_event(info.op, info.index, idx,
                                                        ready, info.req,
+                                                       this,
                                                        new_views[idx],
                                                        ref.get_valid_fields(),
                                                        info.logical_ctx,

@@ -2973,6 +2973,7 @@ namespace Legion {
                                                   unsigned inst_idx,
                                                   ApEvent &ready_event,
                                                   const RegionRequirement &req,
+                                                  RegionNode *region_node,
                                                   InstanceView *view,
                                                   const FieldMask &fields,
                                                   ContextID logical_ctx,
@@ -2990,7 +2991,6 @@ namespace Legion {
       assert(operations.find(op_key) != operations.end());
 #endif
 
-      RegionNode *region_node = view->logical_node->as_region_node();
       if (view->is_reduction_view())
       {
         ReductionView *reduction_view = view->as_reduction_view();
