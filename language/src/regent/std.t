@@ -1531,7 +1531,10 @@ end
 function std.generate_arithmetic_metamethods(ty)
   local methods = {}
   for method, _ in pairs(arithmetic_combinators) do
-    methods[method] = std.generate_arithmetic_metamethod(ty, method)
+    local f =  std.generate_arithmetic_metamethod(ty, method)
+    f:setname(method .. "_" .. tostring(ty))
+    methods[method] = f
+
   end
   return methods
 end
@@ -1539,20 +1542,31 @@ end
 function std.generate_arithmetic_metamethods_for_bounded_type(ty)
   local methods = {}
   for method, _ in pairs(arithmetic_combinators) do
-    methods[method] = terralib.overloadedfunction(
-      method,
-      {
-        terra(a : ty, b : ty) : ty.index_type
-          return [generate_arithmetic_metamethod_body(ty.index_type, method, `(a.__ptr), `(b.__ptr))]
-        end,
-        terra(a : ty, b : ty.index_type) : ty.index_type
-          return [generate_arithmetic_metamethod_body(ty.index_type, method, `(a.__ptr), b)]
-        end,
-        terra(a : ty.index_type, b : ty) : ty.index_type
-          return [generate_arithmetic_metamethod_body(ty.index_type, method, a, `(b.__ptr))]
-        end
-      }
-    )
+    local prefix = method .. "_" .. tostring(ty)
+    local overload1 =
+      terra(a : ty, b : ty) : ty.index_type
+        return [generate_arithmetic_metamethod_body(ty.index_type, method, `(a.__ptr), `(b.__ptr))]
+      end
+    local overload2 =
+      terra(a : ty, b : ty.index_type) : ty.index_type
+        return [generate_arithmetic_metamethod_body(ty.index_type, method, `(a.__ptr), b)]
+      end
+    local overload3 =
+      terra(a : ty.index_type, b : ty) : ty.index_type
+        return [generate_arithmetic_metamethod_body(ty.index_type, method, a, `(b.__ptr))]
+      end
+    overload1:setname(prefix .. "_1")
+    overload2:setname(prefix .. "_2")
+    overload3:setname(prefix .. "_3")
+    local tbl = { overload1, overload2, overload3 }
+    if method == "__mod" and not ty.index_type:is_opaque() then
+      local mod_with_rect = terra(a : ty, b : std.rect_type(ty.index_type)) : ty
+        return [ty] { __ptr = a.__ptr % b }
+      end
+      mod_with_rect:setname("__mod_with_rect" .. "_" .. tostring(ty))
+      tbl[#tbl + 1] = mod_with_rect
+    end
+    methods[method] = terralib.overloadedfunction(method, tbl)
   end
   return methods
 end
@@ -1786,15 +1800,6 @@ local bounded_type = terralib.memoize(function(index_type, ...)
     assert(false)
   end
 
-  -- Important: This has to downgrade the type, because arithmetic
-  -- isn't guarranteed to stay within bounds.
-  for method_name, method in pairs(std.generate_arithmetic_metamethods_for_bounded_type(st)) do
-    st.metamethods[method_name] = method
-  end
-  for method_name, method in pairs(std.generate_conditional_metamethods_for_bounded_type(st)) do
-    st.metamethods[method_name] = method
-  end
-
   terra st:to_point()
     return ([index_type](@self)):to_point()
   end
@@ -1833,6 +1838,15 @@ local bounded_type = terralib.memoize(function(index_type, ...)
         return tostring(self.index_type) .. "(" .. tostring(bounds:mkstring(", ")) .. ")"
       end
     end
+  end
+
+  -- Important: This has to downgrade the type, because arithmetic
+  -- isn't guarranteed to stay within bounds.
+  for method_name, method in pairs(std.generate_arithmetic_metamethods_for_bounded_type(st)) do
+    st.metamethods[method_name] = method
+  end
+  for method_name, method in pairs(std.generate_conditional_metamethods_for_bounded_type(st)) do
+    st.metamethods[method_name] = method
   end
 
   return st
@@ -2100,14 +2114,13 @@ function std.index_type(base_type, displayname)
     st.metamethods[method_name] = method
   end
   if not st:is_opaque() then
-    st.metamethods.__mod = terralib.overloadedfunction(
-      "__mod", {
-        st.metamethods.__mod,
-        terra(a : st, b : std.rect_type(st)) : st
-          var sz = b:size()
-          return (a + sz) % sz
-        end
-      })
+    local mod_with_rect = terra(a : st, b : std.rect_type(st)) : st
+      var sz = b:size()
+      return (a + sz) % sz
+    end
+    mod_with_rect:setname("__mod_with_rect" .. "_" .. tostring(st))
+    st.metamethods.__mod =
+      terralib.overloadedfunction("__mod", { st.metamethods.__mod, mod_with_rect })
   end
 
   -- Makes a Terra function that performs an operation element-wise on two
