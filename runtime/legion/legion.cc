@@ -7043,7 +7043,11 @@ namespace Legion {
     /*static*/ const InputArgs& Runtime::get_input_args(void)
     //--------------------------------------------------------------------------
     {
-      return Internal::implicit_runtime->input_args;
+      // If we have an implicit runtime we use that
+      if (Internal::implicit_runtime != NULL)
+        return Internal::implicit_runtime->input_args;
+      // Otherwise this is not from a Legion task, so fallback to the_runtime
+      return Internal::Runtime::the_runtime->input_args;
     }
 
     //--------------------------------------------------------------------------

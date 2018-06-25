@@ -1063,7 +1063,7 @@ namespace Legion {
 #ifndef DISABLE_CVOPT
       void buffer_reduction_shards(PredEvent pred_guard, 
               ReplicationID repl_id, RtEvent shard_invalid_barrier,
-              const std::map<ShardID,WriteMasks> &reduction_shards);
+              const LegionMap<ShardID,WriteMasks>::aligned &reduction_shards);
 #endif
       void begin_guard_protection(void);
       void end_guard_protection(void);
@@ -1717,10 +1717,10 @@ namespace Legion {
                                               IndexSpaceExpression *write_mask); 
 #ifndef DISABLE_CVOPT
       void find_needed_shards(const FieldMask &mask, ShardID origin_shard,
-                          IndexSpaceExpression *target, 
-                          const WriteMasks &write_masks,
-                          std::map<ShardID,WriteMasks> &needed_shards,
-                          std::map<ShardID,WriteMasks> &reduction_shards) const;
+            IndexSpaceExpression *target, 
+            const WriteMasks &write_masks,
+            LegionMap<ShardID,WriteMasks>::aligned &needed_shards,
+            LegionMap<ShardID,WriteMasks>::aligned &reduction_shards) const;
       void find_needed_shards_single(const unsigned field_index, 
           const ShardID origin_shard, IndexSpaceExpression *target_expr,
           std::map<ShardID,IndexSpaceExpression*> &needed_shards,
@@ -1730,7 +1730,7 @@ namespace Legion {
           const ShardID origin_shard, IndexSpaceExpression *target_expr,
           const WriteMasks &write_masks,
           const FieldMaskSet<ShardingSummary> &projections,
-          std::map<ShardID,WriteMasks> &needed_shards) const;
+          LegionMap<ShardID,WriteMasks>::aligned &needed_shards) const;
       void find_interfering_shards_single(const unsigned field_index, 
           const ShardID origin_shard, IndexSpaceExpression *target_expr,
           const FieldMaskSet<ShardingSummary> &projections,

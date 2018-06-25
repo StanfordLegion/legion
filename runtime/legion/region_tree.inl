@@ -405,9 +405,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     RemoteExpression<DIM,T>::RemoteExpression(Deserializer &derez, 
-        RegionTreeForest *ctx, AddressSpaceID src, IndexSpaceExprID id)
-      : IntermediateExpression(NT_TemplateHelper::encode_tag<DIM,T>(), ctx),
-        source(src), remote_expr_id(id)
+        RegionTreeForest *ctx, IndexSpaceExprID id)
+      : IntermediateExpression(NT_TemplateHelper::encode_tag<DIM,T>(), ctx, id)
     //--------------------------------------------------------------------------
     {
       derez.deserialize(realm_index_space);
@@ -420,8 +419,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     RemoteExpression<DIM,T>::RemoteExpression(const RemoteExpression &rhs)
-      : IndexSpaceExpression(NT_TemplateHelper::encode_tag<DIM,T>(), NULL),
-        source(0), remote_expr_id(0)
+      : IndexSpaceExpression(NT_TemplateHelper::encode_tag<DIM,T>(), NULL, 0)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -434,7 +432,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Tell the forest that we no longer exist
-      context->unregister_remote_expression(source, remote_expr_id);
+      context->unregister_remote_expression(expr_id);
     }
 
     //--------------------------------------------------------------------------

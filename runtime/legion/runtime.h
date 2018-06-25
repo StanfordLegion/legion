@@ -2564,8 +2564,7 @@ namespace Legion {
       void handle_index_space_colors_request(Deserializer &derez,
                                              AddressSpaceID source);
       void handle_index_space_colors_response(Deserializer &derez);
-      void handle_remote_expression_invalidation(Deserializer &derez,
-                                                 AddressSpaceID source);
+      void handle_remote_expression_invalidation(Deserializer &derez);
       void handle_index_partition_notification(Deserializer &derez);
       void handle_index_partition_node(Deserializer &derez,
                                        AddressSpaceID source);
@@ -3061,6 +3060,7 @@ namespace Legion {
       FieldID            get_unique_field_id(void);
       CodeDescriptorID   get_unique_code_descriptor_id(void);
       LayoutConstraintID get_unique_constraint_id(void);
+      IndexSpaceExprID   get_unique_index_space_expr_id(void);
       ReplicationID      get_unique_replication_id(void);
     public:
       // Verify that a region requirement is valid
@@ -3177,6 +3177,7 @@ namespace Legion {
       unsigned unique_field_id; 
       unsigned unique_code_descriptor_id;
       unsigned unique_constraint_id;
+      unsigned unique_is_expr_id;
       unsigned unique_control_replication_id;
       unsigned unique_task_id;
       unsigned unique_mapper_id;

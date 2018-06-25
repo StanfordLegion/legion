@@ -6820,21 +6820,21 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    inline void CopyLauncher::add_gather_field(const RegionRequirement &req,
-                                               FieldID gather_field, bool inst)
+    inline void CopyLauncher::add_src_indirect_field(
+                 const RegionRequirement &req, FieldID src_idx_field, bool inst)
     //--------------------------------------------------------------------------
     {
-      gather_requirements.push_back(req);
-      gather_requirements.back().add_field(gather_field, inst);
+      src_indirect_requirements.push_back(req);
+      src_indirect_requirements.back().add_field(src_idx_field, inst);
     }
 
     //--------------------------------------------------------------------------
-    inline void CopyLauncher::add_scatter_field(const RegionRequirement &req,
-                                                FieldID scatter_field,bool inst)
+    inline void CopyLauncher::add_dst_indirect_field(
+                 const RegionRequirement &req, FieldID dst_idx_field, bool inst)
     //--------------------------------------------------------------------------
     {
-      scatter_requirements.push_back(req);
-      scatter_requirements.back().add_field(scatter_field, inst);
+      dst_indirect_requirements.push_back(req);
+      dst_indirect_requirements.back().add_field(dst_idx_field, inst);
     }
 
     //--------------------------------------------------------------------------
@@ -6912,21 +6912,21 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    inline void IndexCopyLauncher::add_gather_field(const RegionRequirement &r,
-                                               FieldID gather_field, bool inst)
+    inline void IndexCopyLauncher::add_src_indirect_field(
+                   const RegionRequirement &r, FieldID src_idx_field, bool inst)
     //--------------------------------------------------------------------------
     {
-      gather_requirements.push_back(r);
-      gather_requirements.back().add_field(gather_field, inst);
+      src_indirect_requirements.push_back(r);
+      src_indirect_requirements.back().add_field(src_idx_field, inst);
     }
 
     //--------------------------------------------------------------------------
-    inline void IndexCopyLauncher::add_scatter_field(const RegionRequirement &r,
-                                                FieldID scatter_field,bool inst)
+    inline void IndexCopyLauncher::add_dst_indirect_field(
+                    const RegionRequirement &r, FieldID dst_idx_field,bool inst)
     //--------------------------------------------------------------------------
     {
-      scatter_requirements.push_back(r);
-      scatter_requirements.back().add_field(scatter_field, inst);
+      dst_indirect_requirements.push_back(r);
+      dst_indirect_requirements.back().add_field(dst_idx_field, inst);
     }
 
     //--------------------------------------------------------------------------

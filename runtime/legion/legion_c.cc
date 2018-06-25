@@ -1822,7 +1822,7 @@ legion_region_requirement_get_privilege_field(
     unsigned idx)
 {
   RegionRequirement *req = CObjectWrapper::unwrap(req_);
-  assert(idx >= 0 && idx < req->instance_fields.size());
+  assert(idx < req->instance_fields.size());
 
   std::set<FieldID>::iterator itr = req->privilege_fields.begin();
   for (unsigned i = 0; i < idx; ++i, ++itr);
@@ -1858,7 +1858,7 @@ legion_region_requirement_get_instance_field(
 {
   RegionRequirement *req = CObjectWrapper::unwrap(req_);
 
-  assert(idx >= 0 && idx < req->instance_fields.size());
+  assert(idx < req->instance_fields.size());
   return req->instance_fields[idx];
 }
 
@@ -3680,7 +3680,7 @@ legion_physical_region_get_field_id(legion_physical_region_t handle_, size_t ind
   PhysicalRegion *handle = CObjectWrapper::unwrap(handle_);
   std::vector<FieldID> fields;
   handle->get_fields(fields);
-  assert((index >= 0) && (index < fields.size()));
+  assert((index < fields.size()));
   return fields[index];
 }
 

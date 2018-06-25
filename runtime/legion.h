@@ -1605,11 +1605,11 @@ namespace Legion {
       inline void add_src_field(unsigned idx, FieldID fid, bool inst = true);
       inline void add_dst_field(unsigned idx, FieldID fid, bool inst = true);
     public:
-      // Specify gather/scatter region requirements (must have exactly 1 field)
-      inline void add_gather_field(const RegionRequirement &gather_req,
-                                   FieldID gather_fid, bool inst = true);
-      inline void add_scatter_field(const RegionRequirement &scatter_req,
-                                    FieldID scatter_fid, bool inst = true);
+      // Specify src/dst indirect requirements (must have exactly 1 field)
+      inline void add_src_indirect_field(const RegionRequirement &src_idx_req,
+                                         FieldID src_idx_fid, bool inst = true);
+      inline void add_dst_indirect_field(const RegionRequirement &dst_idx_req,
+                                         FieldID dst_idx_fid, bool inst = true);
     public:
       inline void add_grant(Grant g);
       inline void add_wait_barrier(PhaseBarrier bar);
@@ -1619,8 +1619,8 @@ namespace Legion {
     public:
       std::vector<RegionRequirement>  src_requirements;
       std::vector<RegionRequirement>  dst_requirements;
-      std::vector<RegionRequirement>  gather_requirements;
-      std::vector<RegionRequirement>  scatter_requirements;
+      std::vector<RegionRequirement>  src_indirect_requirements;
+      std::vector<RegionRequirement>  dst_indirect_requirements;
       std::vector<Grant>              grants;
       std::vector<PhaseBarrier>       wait_barriers;
       std::vector<PhaseBarrier>       arrive_barriers;
@@ -1659,11 +1659,11 @@ namespace Legion {
       inline void add_src_field(unsigned idx, FieldID fid, bool inst = true);
       inline void add_dst_field(unsigned idx, FieldID fid, bool inst = true);
     public:
-      // Specify gather/scatter region requirements (must have exactly 1 field)
-      inline void add_gather_field(const RegionRequirement &gather_req,
-                                   FieldID gather_fid, bool inst = true);
-      inline void add_scatter_field(const RegionRequirement &scatter_req,
-                                    FieldID scatter_fid, bool inst = true);
+      // Specify src/dst indirect requirements (must have exactly 1 field)
+      inline void add_src_indirect_field(const RegionRequirement &src_idx_req,
+                                         FieldID src_idx_fid, bool inst = true);
+      inline void add_dst_indirect_field(const RegionRequirement &dst_idx_req,
+                                         FieldID dst_idx_fid, bool inst = true);
     public:
       inline void add_grant(Grant g);
       inline void add_wait_barrier(PhaseBarrier bar);
@@ -1673,8 +1673,8 @@ namespace Legion {
     public:
       std::vector<RegionRequirement>  src_requirements;
       std::vector<RegionRequirement>  dst_requirements;
-      std::vector<RegionRequirement>  gather_requirements;
-      std::vector<RegionRequirement>  scatter_requirements;
+      std::vector<RegionRequirement>  src_indirect_requirements;
+      std::vector<RegionRequirement>  dst_indirect_requirements;
       std::vector<Grant>              grants;
       std::vector<PhaseBarrier>       wait_barriers;
       std::vector<PhaseBarrier>       arrive_barriers;
@@ -2656,8 +2656,8 @@ namespace Legion {
       // Copy Launcher arguments
       std::vector<RegionRequirement>    src_requirements;
       std::vector<RegionRequirement>    dst_requirements;
-      std::vector<RegionRequirement>    gather_requirements;
-      std::vector<RegionRequirement>    scatter_requirements;
+      std::vector<RegionRequirement>    src_indirect_requirements;
+      std::vector<RegionRequirement>    dst_indirect_requirements;
       std::vector<Grant>                grants;
       std::vector<PhaseBarrier>         wait_barriers;
       std::vector<PhaseBarrier>         arrive_barriers;

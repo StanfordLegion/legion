@@ -5290,18 +5290,16 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexSpaceExpression* RegionTreeForest::find_or_create_remote_expression(
-    AddressSpaceID source, IndexSpaceExprID remote_expr_id, Deserializer &derez)
+                           IndexSpaceExprID remote_expr_id, Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       size_t unpack_size;
       derez.deserialize(unpack_size);
-      std::pair<AddressSpaceID,IndexSpaceExprID> key(source, remote_expr_id);
       // See if we can find it with the read-only lock first
       {
         AutoLock l_lock(lookup_is_op_lock, 1, false/*exclusive*/);
-        std::map<std::pair<AddressSpaceID,IndexSpaceExprID>,
-          IndexSpaceExpression*>::const_iterator finder = 
-            remote_expressions.find(key);
+        std::map<IndexSpaceExprID,IndexSpaceExpression*>::const_iterator 
+          finder = remote_expressions.find(remote_expr_id);
         if (finder != remote_expressions.end())
         {
           // Didn't unpack anything else so just skip the bytes
@@ -5311,9 +5309,8 @@ namespace Legion {
       }
       // Retake the lock in exclusive mode and see if we lost the race
       AutoLock l_lock(lookup_is_op_lock);
-      std::map<std::pair<AddressSpaceID,IndexSpaceExprID>,
-          IndexSpaceExpression*>::const_iterator finder = 
-            remote_expressions.find(key);
+      std::map<IndexSpaceExprID,IndexSpaceExpression*>::const_iterator 
+        finder = remote_expressions.find(remote_expr_id);
       if (finder != remote_expressions.end())
       {
         // Didn't unpack anything else so just skip the bytes
@@ -5323,22 +5320,20 @@ namespace Legion {
       // We get to make the object
       TypeTag type_tag;
       derez.deserialize(type_tag);
-      RemoteExpressionCreator creator(derez, this, source, remote_expr_id);
+      RemoteExpressionCreator creator(derez, this, remote_expr_id);
       NT_TemplateHelper::demux<RemoteExpressionCreator>(type_tag, &creator);
-      remote_expressions[key] = creator.result;
+      remote_expressions[remote_expr_id] = creator.result;
       return creator.result;
     }
 
     //--------------------------------------------------------------------------
     IndexSpaceExpression* RegionTreeForest::find_remote_expression(
-                         AddressSpaceID source, IndexSpaceExprID remote_expr_id)
+                                                IndexSpaceExprID remote_expr_id)
     //--------------------------------------------------------------------------
     {
-      std::pair<AddressSpaceID,IndexSpaceExprID> key(source, remote_expr_id);
       AutoLock l_lock(lookup_is_op_lock, 1, false/*exclusive*/);
-      std::map<std::pair<AddressSpaceID,IndexSpaceExprID>,
-        IndexSpaceExpression*>::const_iterator finder = 
-          remote_expressions.find(key);
+      std::map<IndexSpaceExprID,IndexSpaceExpression*>::const_iterator 
+        finder = remote_expressions.find(remote_expr_id);
 #ifdef DEBUG_LEGION
       assert(finder != remote_expressions.end());
 #endif
@@ -5346,14 +5341,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeForest::unregister_remote_expression(AddressSpaceID source, 
+    void RegionTreeForest::unregister_remote_expression(
                                                 IndexSpaceExprID remote_expr_id)
     //--------------------------------------------------------------------------
     {
-      std::pair<AddressSpaceID,IndexSpaceExprID> key(source, remote_expr_id);
       AutoLock l_lock(lookup_is_op_lock);
-      std::map<std::pair<AddressSpaceID,IndexSpaceExprID>,
-        IndexSpaceExpression*>::iterator finder = remote_expressions.find(key);
+      std::map<IndexSpaceExprID,IndexSpaceExpression*>::iterator 
+        finder = remote_expressions.find(remote_expr_id);
 #ifdef DEBUG_LEGION
       assert(finder != remote_expressions.end());
 #endif
@@ -5383,8 +5377,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexSpaceExpression::IndexSpaceExpression(TypeTag tag)
-      : type_tag(tag), expr_id(next_expr_id()), has_empty(false)
+    IndexSpaceExpression::IndexSpaceExpression(TypeTag tag, Runtime *rt)
+      : type_tag(tag), expr_id(rt->get_unique_index_space_expr_id()), 
+        has_empty(false)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpaceExpression::IndexSpaceExpression(TypeTag tag, IndexSpaceExprID id)
+      : type_tag(tag), expr_id(id), has_empty(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -5407,19 +5409,6 @@ namespace Legion {
       targs->proxy_this->tighten_index_space();
       if (targs->proxy_this->remove_expression_reference())
         delete targs->proxy_this;
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ IndexSpaceExprID IndexSpaceExpression::next_expr_id(void)
-    //--------------------------------------------------------------------------
-    {
-      // Monotonically increasing counter of expression IDs for uniqueness
-      static IndexSpaceExprID next_id = 1;
-      IndexSpaceExprID result = __sync_fetch_and_add(&next_id, 1);
-#ifdef DEBUG_LEGION
-      assert(result <= next_id); // check for overflow
-#endif
-      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -5465,8 +5454,7 @@ namespace Legion {
       }
       IndexSpaceExprID remote_expr_id;
       derez.deserialize(remote_expr_id);
-      return forest->find_or_create_remote_expression(source, 
-                                        remote_expr_id, derez);
+      return forest->find_or_create_remote_expression(remote_expr_id, derez);
     }
 
     /////////////////////////////////////////////////////////////
@@ -5476,7 +5464,15 @@ namespace Legion {
     //--------------------------------------------------------------------------
     IntermediateExpression::IntermediateExpression(TypeTag tag,
                                                    RegionTreeForest *ctx)
-      : IndexSpaceExpression(tag), context(ctx)
+      : IndexSpaceExpression(tag, ctx->runtime), context(ctx)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    IntermediateExpression::IntermediateExpression(TypeTag tag,
+                                     RegionTreeForest *ctx, IndexSpaceExprID id)
+      : IndexSpaceExpression(tag, id), context(ctx)
     //--------------------------------------------------------------------------
     {
     }
@@ -5528,13 +5524,13 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ void IntermediateExpression::handle_expression_invalidation(
-           Deserializer &derez, RegionTreeForest *forest, AddressSpaceID source)
+                                  Deserializer &derez, RegionTreeForest *forest)
     //--------------------------------------------------------------------------
     {
       IndexSpaceExprID remote_expr_id;
       derez.deserialize(remote_expr_id);
       IndexSpaceExpression *remote_expr = 
-        forest->find_remote_expression(source, remote_expr_id);
+        forest->find_remote_expression(remote_expr_id);
       if (remote_expr->remove_expression_reference())
         delete remote_expr;
     }
@@ -6144,7 +6140,7 @@ namespace Legion {
                                    DistributedID did, ApEvent ready)
       : IndexTreeNode(ctx, (par == NULL) ? 0 : par->depth + 1, c,
                       did, get_owner_space(h, ctx->runtime)),
-        IndexSpaceExpression(h.type_tag),
+        IndexSpaceExpression(h.type_tag, ctx->runtime),
         handle(h), parent(par), index_space_ready(ready), 
         realm_index_space_set(Runtime::create_rt_user_event()), 
         tight_index_space_set(Runtime::create_rt_user_event()),

@@ -4625,7 +4625,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void DeferredCopier::buffer_reduction_shards(PredEvent pred_guard,
         ReplicationID repl_id, RtEvent shard_invalid_barrier,
-        const std::map<ShardID,WriteMasks> &shard_reductions)
+        const LegionMap<ShardID,WriteMasks>::aligned &shard_reductions)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -4640,7 +4640,7 @@ namespace Legion {
       PendingReductionShards &pending_shards = 
         reduction_shards[current_reduction_epoch];
       FieldMask &epoch_mask = reduction_epoch_masks[current_reduction_epoch];
-      for (std::map<ShardID,WriteMasks>::const_iterator sit = 
+      for (LegionMap<ShardID,WriteMasks>::aligned::const_iterator sit = 
             shard_reductions.begin(); sit != shard_reductions.end(); sit++)
       {
         const ShardInfo key(sit->first, repl_id, shard_invalid_barrier);
@@ -7679,7 +7679,7 @@ namespace Legion {
 #endif
 #ifndef DISABLE_CVOPT
       RegionTreeForest *context = logical_node->context;
-      std::map<ShardID,WriteMasks> needed_shards, reduction_shards; 
+      LegionMap<ShardID,WriteMasks>::aligned needed_shards, reduction_shards; 
       IndexSpaceExpression *dst_expr = context->intersect_index_spaces(
           logical_node->get_index_space_expression(),
           copier.dst->logical_node->get_index_space_expression());
@@ -7940,9 +7940,9 @@ namespace Legion {
 #ifndef DISABLE_CVOPT
     //--------------------------------------------------------------------------
     void CompositeView::find_needed_shards(const FieldMask &mask,ShardID origin,
-                  IndexSpaceExpression *target, const WriteMasks &write_masks,
-                  std::map<ShardID,WriteMasks> &needed_shards,
-                  std::map<ShardID,WriteMasks> &reduction_shards) const
+                IndexSpaceExpression *target, const WriteMasks &write_masks,
+                LegionMap<ShardID,WriteMasks>::aligned &needed_shards,
+                LegionMap<ShardID,WriteMasks>::aligned &reduction_shards) const
     //--------------------------------------------------------------------------
     {
       // See if we have any write projections to test against first
@@ -7989,7 +7989,7 @@ namespace Legion {
             const ShardID origin_shard, IndexSpaceExpression *target_expr,
             const WriteMasks &write_masks,
             const FieldMaskSet<ShardingSummary> &projections,
-                  std::map<ShardID,WriteMasks> &needed_shards) const
+                  LegionMap<ShardID,WriteMasks>::aligned &needed_shards) const
     //--------------------------------------------------------------------------
     {
       // Iterate over the write masks and find ones that we care about

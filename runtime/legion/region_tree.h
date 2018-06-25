@@ -700,12 +700,10 @@ namespace Legion {
     public:
       // Remote expression methods
       IndexSpaceExpression* find_or_create_remote_expression(
-              AddressSpaceID source, IndexSpaceExprID remote_expr_id, 
-              Deserializer &derez);
+              IndexSpaceExprID remote_expr_id, Deserializer &derez);
       IndexSpaceExpression* find_remote_expression(
-              AddressSpaceID source, IndexSpaceExprID remote_expr_id);
-      void unregister_remote_expression(AddressSpaceID source,
-                                        IndexSpaceExprID remote_expr_id);
+              IndexSpaceExprID remote_expr_id);
+      void unregister_remote_expression(IndexSpaceExprID remote_expr_id);
       void record_remote_expression(IndexSpaceExpression *expr,
                                     AddressSpaceID target);
     public:
@@ -734,8 +732,7 @@ namespace Legion {
       std::map<IndexSpaceExprID/*first*/,ExpressionTrieNode*> intersection_ops;
       std::map<IndexSpaceExprID/*lhs*/,ExpressionTrieNode*> difference_ops;
       // Remote expressions
-      std::map<std::pair<AddressSpaceID,IndexSpaceExprID>,
-               IndexSpaceExpression*> remote_expressions;
+      std::map<IndexSpaceExprID,IndexSpaceExpression*> remote_expressions;
     };
 
     /**
@@ -760,7 +757,8 @@ namespace Legion {
       };
     public:
       IndexSpaceExpression(void);
-      IndexSpaceExpression(TypeTag tag); 
+      IndexSpaceExpression(TypeTag tag, Runtime *runtime); 
+      IndexSpaceExpression(TypeTag tag, IndexSpaceExprID id);
       virtual ~IndexSpaceExpression(void);
     public:
       virtual ApEvent get_expr_index_space(void *result, TypeTag tag, 
@@ -775,7 +773,6 @@ namespace Legion {
       virtual bool remove_expression_reference(void) = 0;
     public:
       static void handle_tighten_index_space(const void *args);
-      static IndexSpaceExprID next_expr_id(void);
     public:
       void add_parent_operation(IndexSpaceOperation *op);
       void remove_parent_operation(IndexSpaceOperation *op);
@@ -818,6 +815,8 @@ namespace Legion {
       };
     public:
       IntermediateExpression(TypeTag tag, RegionTreeForest *ctx);
+      IntermediateExpression(TypeTag tag, RegionTreeForest *ctx, 
+                             IndexSpaceExprID expr_id);
       virtual ~IntermediateExpression(void);
     public:
       virtual ApEvent get_expr_index_space(void *result, TypeTag tag, 
@@ -830,7 +829,7 @@ namespace Legion {
       virtual bool remove_expression_reference(void);
     public:
       static void handle_expression_invalidation(Deserializer &derez,
-                    RegionTreeForest *forest, AddressSpaceID source);
+                                                 RegionTreeForest *forest);
     public:
       RegionTreeForest *const context;
     private:
@@ -1019,7 +1018,7 @@ namespace Legion {
     class RemoteExpression : public IntermediateExpression {
     public:
       RemoteExpression(Deserializer &derez, RegionTreeForest *ctx,
-                       AddressSpaceID src, IndexSpaceExprID id);
+                       IndexSpaceExprID id);
       RemoteExpression(const RemoteExpression &rhs);
       virtual ~RemoteExpression(void);
     public:
@@ -1031,9 +1030,6 @@ namespace Legion {
       virtual bool check_empty(void);
       virtual void pack_expression(Serializer &rez, AddressSpaceID target);
     public:
-      const AddressSpaceID source;
-      const IndexSpaceExprID remote_expr_id;
-    public:
       Realm::IndexSpace<DIM,T> realm_index_space;
       ApEvent realm_index_space_ready;
     };
@@ -1041,19 +1037,18 @@ namespace Legion {
     struct RemoteExpressionCreator {
     public:
       RemoteExpressionCreator(Deserializer &d, RegionTreeForest *ctx,
-                              AddressSpaceID src, IndexSpaceExprID id)
-        : derez(d), context(ctx), source(src), remote_expr_id(id) { }
+                              IndexSpaceExprID id)
+        : derez(d), context(ctx), remote_expr_id(id) { }
     public:
       template<typename N, typename T>
       static inline void demux(RemoteExpressionCreator *creator)
       {
         creator->result = new RemoteExpression<N::N,T>(creator->derez,
-            creator->context, creator->source, creator->remote_expr_id);
+            creator->context, creator->remote_expr_id);
       }
     public:
       Deserializer &derez;
       RegionTreeForest *const context;
-      const AddressSpaceID source;
       const IndexSpaceExprID remote_expr_id;
       IndexSpaceExpression *result;
     };
