@@ -171,7 +171,7 @@ function affine.analyze_index_noninterference(index, other_index)
   -- Attempt a simple affine analysis.
   local x1, b1 = get_affine_coefficients(index)
   local x2, b2 = get_affine_coefficients(other_index)
-  if x1 == x1 and not data.vector.eq(b1, b2) then
+  if x1 == x2 and not data.vector.eq(b1, b2) then
     return true
   end
 
