@@ -317,7 +317,8 @@ namespace Legion {
                                      const std::set<RegionTreeID> *managed) = 0;
       virtual void end_static_trace(void) = 0;
       virtual void record_previous_trace(LegionTrace *trace) = 0;
-      virtual void invalidate_trace_cache(LegionTrace *trace) = 0;
+      virtual void invalidate_trace_cache(LegionTrace *trace,
+                                          Operation *invalidator) = 0;
       virtual void invalidate_current_template(void) = 0;
     public:
       virtual void issue_frame(FrameOp *frame, ApEvent frame_termination) = 0;
@@ -943,7 +944,8 @@ namespace Legion {
       virtual void begin_static_trace(const std::set<RegionTreeID> *managed);
       virtual void end_static_trace(void);
       virtual void record_previous_trace(LegionTrace *trace);
-      virtual void invalidate_trace_cache(LegionTrace *trace);
+      virtual void invalidate_trace_cache(LegionTrace *trace,
+                                          Operation *invalidator);
       virtual void invalidate_current_template(void);
     public:
       virtual void issue_frame(FrameOp *frame, ApEvent frame_termination);
@@ -1552,7 +1554,8 @@ namespace Legion {
       virtual void begin_static_trace(const std::set<RegionTreeID> *managed);
       virtual void end_static_trace(void);
       virtual void record_previous_trace(LegionTrace *trace);
-      virtual void invalidate_trace_cache(LegionTrace *trace);
+      virtual void invalidate_trace_cache(LegionTrace *trace,
+                                          Operation *invalidator);
       virtual void invalidate_current_template(void);
     public:
       virtual void issue_frame(FrameOp *frame, ApEvent frame_termination);
@@ -1867,7 +1870,8 @@ namespace Legion {
       virtual void begin_static_trace(const std::set<RegionTreeID> *managed);
       virtual void end_static_trace(void);
       virtual void record_previous_trace(LegionTrace *trace);
-      virtual void invalidate_trace_cache(LegionTrace *trace);
+      virtual void invalidate_trace_cache(LegionTrace *trace,
+                                          Operation *invalidator);
       virtual void invalidate_current_template(void);
     public:
       virtual void issue_frame(FrameOp *frame, ApEvent frame_termination);

@@ -1382,6 +1382,7 @@ namespace Legion {
     class TraceCompleteOp;
     class TraceReplayOp;
     class TraceBeginOp;
+    class TraceSummaryOp;
     class PhysicalTrace;
     struct PhysicalTemplate;
     struct Instruction;
@@ -1525,6 +1526,7 @@ namespace Legion {
     friend class Internal::AttachOp;                        \
     friend class Internal::DetachOp;                        \
     friend class Internal::TimingOp;                        \
+    friend class Internal::TraceSummaryOp;                  \
     friend class Internal::ExternalTask;                    \
     friend class Internal::TaskOp;                          \
     friend class Internal::SingleTask;                      \

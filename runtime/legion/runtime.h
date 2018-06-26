@@ -2665,6 +2665,7 @@ namespace Legion {
       TraceCompleteOp*      get_available_trace_op(void);
       TraceReplayOp*        get_available_replay_op(void);
       TraceBeginOp*         get_available_begin_op(void);
+      TraceSummaryOp*       get_available_summary_op(void);
       MustEpochOp*          get_available_epoch_op(void);
       PendingPartitionOp*   get_available_pending_partition_op(void);
       DependentPartitionOp* get_available_dependent_partition_op(void);
@@ -2704,6 +2705,7 @@ namespace Legion {
       void free_trace_op(TraceCompleteOp *op);
       void free_replay_op(TraceReplayOp *op);
       void free_begin_op(TraceBeginOp *op);
+      void free_summary_op(TraceSummaryOp *op);
       void free_epoch_op(MustEpochOp *op);
       void free_pending_partition_op(PendingPartitionOp *op);
       void free_dependent_partition_op(DependentPartitionOp* op);
@@ -2981,6 +2983,7 @@ namespace Legion {
       mutable LocalLock trace_op_lock;
       mutable LocalLock replay_op_lock;
       mutable LocalLock begin_op_lock;
+      mutable LocalLock summary_op_lock;
       mutable LocalLock epoch_op_lock;
       mutable LocalLock pending_partition_op_lock;
       mutable LocalLock dependent_partition_op_lock;
@@ -3017,6 +3020,7 @@ namespace Legion {
       std::deque<TraceCompleteOp*>      available_trace_ops;
       std::deque<TraceReplayOp*>        available_replay_ops;
       std::deque<TraceBeginOp*>         available_begin_ops;
+      std::deque<TraceSummaryOp*>       available_summary_ops;
       std::deque<MustEpochOp*>          available_epoch_ops;
       std::deque<PendingPartitionOp*>   available_pending_partition_ops;
       std::deque<DependentPartitionOp*> available_dependent_partition_ops;

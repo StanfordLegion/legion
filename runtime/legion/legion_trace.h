@@ -116,7 +116,7 @@ namespace Legion {
       bool is_recording(void) const { return state == PHYSICAL_RECORD; }
       bool is_replaying(void) const { return state == PHYSICAL_REPLAY; }
     public:
-      void invalidate_trace_cache(void);
+      void invalidate_trace_cache(Operation *invalidator);
       void invalidate_current_template(void);
 #ifdef LEGION_SPY
     public:
@@ -398,6 +398,46 @@ namespace Legion {
       virtual OpKind get_operation_kind(void) const;
     };
 
+    class TraceSummaryOp : public Operation {
+    public:
+      static const AllocationType alloc_type = TRACE_SUMMARY_OP_ALLOC;
+    public:
+      TraceSummaryOp(Runtime *rt);
+      TraceSummaryOp(const TraceSummaryOp &rhs);
+      virtual ~TraceSummaryOp(void);
+    public:
+      TraceSummaryOp& operator=(const TraceSummaryOp &rhs);
+    public:
+      void initialize_summary(TaskContext *ctx,
+                              UniqueID creator_id,
+                              const std::vector<RegionRequirement> &reqs,
+                              const std::vector<InstanceSet> &insts,
+                              const std::vector<unsigned> &indices);
+      void perform_logging(void);
+    public:
+      virtual void activate(void);
+      virtual void deactivate(void);
+      virtual const char* get_logging_name(void) const;
+      virtual OpKind get_operation_kind(void) const;
+    public:
+      virtual void trigger_dependence_analysis(void);
+      virtual void trigger_ready(void);
+      virtual void trigger_mapping(void);
+      virtual void trigger_commit(void);
+    public:
+      virtual unsigned find_parent_index(unsigned idx);
+    protected:
+      UniqueID creator_id;
+      std::vector<RegionRequirement> requirements;
+      std::vector<InstanceSet> instances;
+      std::vector<unsigned> parent_indices;
+      std::vector<RegionTreePath> privilege_paths;
+      std::vector<VersionInfo> version_infos;
+      std::vector<RestrictInfo> restrict_infos;
+      std::set<RtEvent> map_applied_conditions;
+      std::set<ApEvent> mapped_preconditions;
+    };
+
     /**
      * \class PhysicalTrace
      * This class is used for memoizing the dynamic physical dependence
@@ -486,12 +526,16 @@ namespace Legion {
       void register_operation(Operation *op);
       void execute_all(void);
       void execute_slice(unsigned slice_idx);
+      void issue_summary_operations(TaskContext* context,
+                                    Operation *invalidator);
+    public:
       void finalize(void);
       void optimize(void);
       void elide_fences(std::vector<unsigned> &gen);
       void propagate_merges(std::vector<unsigned> &gen);
       void prepare_parallel_replay(const std::vector<unsigned> &gen);
       void push_complete_replays();
+      void generate_summary_operations(void);
       void dump_template(void);
       void dump_instructions(const std::vector<Instruction*> &instructions);
     public:
@@ -545,6 +589,9 @@ namespace Legion {
                              MaterializedView *dst,
                              const FieldMask &dst_mask,
                              ContextID logical_ctx);
+      void record_summary_info(const RegionRequirement &region,
+                               const InstanceSet &instance_set,
+                               unsigned parent_idx);
       void record_set_ready_event(Operation *op,
                                   unsigned region_idx,
                                   unsigned inst_idx,
@@ -621,6 +668,14 @@ namespace Legion {
         bool read;
       };
       std::map<TraceLocalID, std::vector<InstanceReq> > op_reqs;
+      std::vector<std::pair<RegionRequirement, InstanceSet> > summary_info;
+      std::vector<unsigned> parent_indices;
+      struct SummaryOpInfo {
+        std::vector<RegionRequirement> requirements;
+        std::vector<InstanceSet> instances;
+        std::vector<unsigned> parent_indices;
+      };
+      std::vector<SummaryOpInfo> dedup_summary_ops;
       std::map<unsigned, unsigned> frontiers;
     public:
       ApEvent fence_completion;

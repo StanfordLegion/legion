@@ -17253,6 +17253,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    TraceSummaryOp* Runtime::get_available_summary_op(void)
+    //--------------------------------------------------------------------------
+    {
+      return get_available(summary_op_lock, available_summary_ops);
+    }
+
+    //--------------------------------------------------------------------------
     MustEpochOp* Runtime::get_available_epoch_op(void)
     //--------------------------------------------------------------------------
     {
@@ -17573,6 +17580,15 @@ namespace Legion {
       AutoLock t_lock(begin_op_lock);
       release_operation<false>(available_begin_ops, op);
     }
+
+    //--------------------------------------------------------------------------
+    void Runtime::free_summary_op(TraceSummaryOp *op)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock t_lock(summary_op_lock);
+      release_operation<false>(available_summary_ops, op);
+    }
+
     //--------------------------------------------------------------------------
     void Runtime::free_epoch_op(MustEpochOp *op)
     //--------------------------------------------------------------------------

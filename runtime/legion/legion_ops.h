@@ -71,6 +71,7 @@ namespace Legion {
         TRACE_COMPLETE_OP_KIND,
         TRACE_REPLAY_OP_KIND,
         TRACE_BEGIN_OP_KIND,
+        TRACE_SUMMARY_OP_KIND,
         TASK_OP_KIND,
         LAST_OP_KIND,
       };
@@ -106,6 +107,7 @@ namespace Legion {
         "Trace Complete",           \
         "Trace Replay",             \
         "Trace Begin",              \
+        "Trace Summary",            \
         "Task",                     \
       }
     public:

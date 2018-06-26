@@ -356,6 +356,19 @@ namespace Legion {
         log_spy.print("Must Epoch Operation %llu %llu", context, must_op);
       }
 
+      static inline void log_summary_operation(UniqueID context,
+                                               UniqueID unique_id)
+      {
+        log_spy.print("Summary Operation %llu %llu", context, unique_id);
+      }
+
+      static inline void log_summary_op_creator(UniqueID internal_op_id,
+                                                UniqueID creator_op_id)
+      {
+        log_spy.print("Summary Operation Creator %llu %llu",
+		      internal_op_id, creator_op_id);
+      }
+
       static inline void log_dependent_partition_operation(UniqueID context,
                                                            UniqueID unique_id,
                                                            IDType pid,

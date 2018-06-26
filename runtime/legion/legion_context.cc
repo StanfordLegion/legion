@@ -5435,11 +5435,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InnerContext::invalidate_trace_cache(LegionTrace *trace)
+    void InnerContext::invalidate_trace_cache(
+                                     LegionTrace *trace, Operation *invalidator)
     //--------------------------------------------------------------------------
     {
       if (previous_trace != NULL && previous_trace != trace)
-        previous_trace->invalidate_trace_cache();
+        previous_trace->invalidate_trace_cache(invalidator);
     }
 
     //--------------------------------------------------------------------------
@@ -8730,7 +8731,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LeafContext::invalidate_trace_cache(LegionTrace *trace)
+    void LeafContext::invalidate_trace_cache(
+                                     LegionTrace *trace, Operation *invalidator)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -9908,10 +9910,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InlineContext::invalidate_trace_cache(LegionTrace *trace)
+    void InlineContext::invalidate_trace_cache(
+                                     LegionTrace *trace, Operation *invalidator)
     //--------------------------------------------------------------------------
     {
-      enclosing->invalidate_trace_cache(trace);
+      enclosing->invalidate_trace_cache(trace, invalidator);
     }
 
     //--------------------------------------------------------------------------

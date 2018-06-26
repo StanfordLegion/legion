@@ -921,7 +921,7 @@ namespace Legion {
       // This will also add any necessary dependences
       if (trace != NULL)
         trace->register_operation(this, gen);
-      parent_ctx->invalidate_trace_cache(trace);
+      parent_ctx->invalidate_trace_cache(trace, this);
 
       // See if we have any fence dependences
       execution_fence_event = parent_ctx->register_fence_dependence(this);

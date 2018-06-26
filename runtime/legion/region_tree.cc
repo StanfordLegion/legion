@@ -2082,6 +2082,11 @@ namespace Legion {
         {
           TaskContext *context = op->find_logical_context(idx1);
           logical_ctx = context->get_context().get_id();
+#ifdef DEBUG_LEGION
+          assert(trace_info.tpl != NULL && trace_info.tpl->is_recording());
+#endif
+          trace_info.tpl->record_summary_info(req, targets,
+              op->find_parent_index(idx1));
         }
         for (unsigned idx2 = 0; idx2 < targets.size(); idx2++)
         {
@@ -14628,6 +14633,14 @@ namespace Legion {
                               info.req.privilege_fields.size());
       }
 #endif
+      if (trace_info.recording)
+      {
+#ifdef DEBUG_LEGION
+        assert(trace_info.tpl != NULL && trace_info.tpl->is_recording());
+#endif
+        trace_info.tpl->record_summary_info(info.req, targets,
+            info.op->find_parent_index(info.index));
+      }
       if (IS_REDUCE(info.req))
       {
         // Reduction only case
