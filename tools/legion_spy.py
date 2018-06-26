@@ -87,6 +87,7 @@ TRACE_OP_KIND = 20
 TIMING_OP_KIND = 21
 PREDICATE_OP_KIND = 22
 MUST_EPOCH_OP_KIND = 23
+SUMMARY_OP_KIND = 24
 
 OPEN_NONE = 0
 OPEN_READ_ONLY = 1
@@ -4858,7 +4859,7 @@ class Operation(object):
                  'temporaries', 'incoming', 'outgoing', 'logical_incoming', 
                  'logical_outgoing', 'physical_incoming', 'physical_outgoing', 
                  'start_event', 'finish_event', 'inter_close_ops', 'open_ops', 
-                 'advance_ops', 'task', 'task_id', 'predicate', 'predicate_result',
+                 'advance_ops', 'summary_ops', 'task', 'task_id', 'predicate', 'predicate_result',
                  'futures', 'index_owner', 'points', 'launch_rect', 'creator', 
                  'realm_copies', 'realm_fills', 'realm_depparts', 'version_numbers', 
                  'internal_idx', 'disjoint_close_fields', 'partition_kind', 
@@ -4886,6 +4887,7 @@ class Operation(object):
         self.inter_close_ops = None
         self.open_ops = None
         self.advance_ops = None
+        self.summary_ops = None
         self.realm_copies = None
         self.realm_depparts = None
         self.realm_fills = None
@@ -4956,6 +4958,10 @@ class Operation(object):
         if self.points is not None:
             for point in self.points.itervalues():
                 point.op.set_context(context, False)
+        # Finaly recurse for any summary operations
+        if self.summary_ops:
+            for summary in self.summary_ops:
+                summary.set_context(context, False)
         if add:
             self.context.add_operation(self)
 
@@ -4989,7 +4995,8 @@ class Operation(object):
         assert self.kind == INTER_CLOSE_OP_KIND or \
             self.kind == READ_ONLY_CLOSE_OP_KIND or \
             self.kind == POST_CLOSE_OP_KIND or \
-            self.kind == OPEN_OP_KIND or self.kind == ADVANCE_OP_KIND
+            self.kind == OPEN_OP_KIND or \
+            self.kind == ADVANCE_OP_KIND or self.kind == SUMMARY_OP_KIND
         self.creator = creator
         self.internal_idx = idx
         # If our parent context created us we don't need to be recorded 
@@ -4999,6 +5006,8 @@ class Operation(object):
                 creator.add_open_operation(self)
             elif self.kind == ADVANCE_OP_KIND:
                 creator.add_advance_operation(self)
+            elif self.kind == SUMMARY_OP_KIND:
+                creator.add_summary_operation(self)
             else:
                 creator.add_close_operation(self)
         else:
@@ -5038,6 +5047,11 @@ class Operation(object):
         if self.inter_close_ops is None:
             self.inter_close_ops = list()
         self.inter_close_ops.append(close)
+
+    def add_summary_operation(self, summary):
+        if self.summary_ops is None:
+            self.summary_ops = list()
+        self.summary_ops.append(summary)
 
     def get_depth(self):
         assert self.context is not None
@@ -5736,6 +5750,9 @@ class Operation(object):
     def perform_logical_analysis(self, perform_checks):
         if self.replayed:
             return True
+        if self.summary_ops is not None:
+            for summary in self.summary_ops:
+                summary.perform_logical_analysis(perform_checks)
         # We need a context to do this
         assert self.context is not None
         # If this operation was predicated false, then there is nothing to do
@@ -6281,6 +6298,7 @@ class Operation(object):
             TIMING_OP_KIND : "turquoise",
             PREDICATE_OP_KIND : "olivedrab1",
             MUST_EPOCH_OP_KIND : "tomato",
+            SUMMARY_OP_KIND : "darkslategray4",
             }[self.kind]
 
     def print_base_node(self, printer, dataflow):
@@ -6734,6 +6752,15 @@ class Task(object):
             self.variant = other.variant
         else:
             assert not other.variant
+
+    def flatten_summary_operations(self):
+        flattened = list()
+        for op in self.operations:
+            if op.summary_ops is not None:
+                for summary in op.summary_ops:
+                    flattened.append(summary)
+            flattened.append(op)
+        self.operations = flattened
 
     def perform_logical_dependence_analysis(self, perform_checks):
         # If we don't have any operations we are done
@@ -8826,6 +8853,10 @@ predicate_op_pat         = re.compile(
     prefix+"Predicate Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
 must_epoch_op_pat        = re.compile(
     prefix+"Must Epoch Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
+summary_op_pat        = re.compile(
+    prefix+"Summary Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
+summary_op_creator_pat        = re.compile(
+    prefix+"Summary Operation Creator (?P<uid>[0-9]+) (?P<cuid>[0-9]+)")
 dep_partition_op_pat     = re.compile(
     prefix+"Dependent Partition Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+) "+
            "(?P<pid>[0-9a-f]+) (?P<kind>[0-9]+)")
@@ -9552,6 +9583,20 @@ def parse_legion_spy_line(line, state):
         op.set_op_kind(MUST_EPOCH_OP_KIND)
         # Don't add it to the context for now
         return True
+    m = summary_op_pat.match(line)
+    if m is not None:
+        op = state.get_operation(int(m.group('uid')))
+        op.set_op_kind(SUMMARY_OP_KIND)
+        op.set_name("Trace Summary Op "+m.group('uid'))
+        context = state.get_task(int(m.group('ctx')))
+        op.set_context(context, False)
+        return True
+    m = summary_op_creator_pat.match(line)
+    if m is not None:
+        op = state.get_operation(int(m.group('uid')))
+        creator = state.get_operation(int(m.group('cuid')))
+        op.set_creator(creator, None)
+        return True
     m = dep_partition_op_pat.match(line)
     if m is not None:
         op = state.get_operation(int(m.group('uid')))
@@ -9946,6 +9991,9 @@ class State(object):
                 slice_ = self.slice_slice[slice_]
             assert slice_ in self.slice_index
             self.slice_index[slice_].add_point_task(point)
+        # Flatten summary operations in each context
+        for task in self.tasks.itervalues():
+            task.flatten_summary_operations()
         # Add implicit dependencies between point and index operations
         if self.detailed_logging:
             index_owners = set()
