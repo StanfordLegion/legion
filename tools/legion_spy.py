@@ -6429,6 +6429,8 @@ class Operation(object):
     def is_physical_operation(self):
         if self.is_internal():
             return False
+        if self.kind is SUMMARY_OP_KIND:
+            return False
         if self.kind is COPY_OP_KIND:
             return False
         if self.kind is FILL_OP_KIND:
