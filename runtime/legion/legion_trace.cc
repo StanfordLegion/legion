@@ -1687,10 +1687,10 @@ namespace Legion {
       else
         complete_mapping();
 #ifdef LEGION_SPY
-      LegionSpy::log_operation_events(unique_op_id, ApEvent::NO_AP_EVENT,
+      LegionSpy::log_operation_events(unique_op_id, execution_fence_event,
                                       completion_event);
 #endif
-      complete_execution();
+      complete_execution(Runtime::protect_event(execution_fence_event));
     }
 
     //--------------------------------------------------------------------------
