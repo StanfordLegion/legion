@@ -5750,9 +5750,6 @@ class Operation(object):
     def perform_logical_analysis(self, perform_checks):
         if self.replayed:
             return True
-        if self.summary_ops is not None:
-            for summary in self.summary_ops:
-                summary.perform_logical_analysis(perform_checks)
         # We need a context to do this
         assert self.context is not None
         # If this operation was predicated false, then there is nothing to do
