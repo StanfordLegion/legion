@@ -3013,6 +3013,7 @@ namespace Legion {
     public:
       // Static methods for start-up and callback phases
       static int start(int argc, char **argv, bool background);
+      static RealmRuntime initialize(int *argc, char ***argv);
       static LegionConfiguration parse_arguments(int argc, char **argv);
       static void perform_slow_config_checks(const LegionConfiguration &config);
       static void configure_mpi_interoperability(bool separate_runtimes);
@@ -3069,6 +3070,7 @@ namespace Legion {
       // Static member variables
       static Processor::TaskFuncID legion_main_id;
       static std::vector<RegistrationCallbackFnptr> registration_callbacks;
+      static bool runtime_initialized;
       static bool runtime_started;
       static bool runtime_backgrounded;
       static Runtime *the_runtime;

@@ -18813,6 +18813,7 @@ namespace Legion {
     /*static*/ Processor::TaskFuncID Runtime::legion_main_id = 0;
     /*static*/ std::vector<RegistrationCallbackFnptr> 
                                              Runtime::registration_callbacks;
+    /*static*/ bool Runtime::runtime_initialized = false;
     /*static*/ bool Runtime::runtime_started = false;
     /*static*/ bool Runtime::runtime_backgrounded = false;
     /*static*/ Runtime* Runtime::the_runtime = NULL;
@@ -18853,20 +18854,8 @@ namespace Legion {
       // their values as they might be changed by GASNet or MPI or whatever.
       // Note that the logger isn't initialized until after this call returns 
       // which means any logging that occurs before this has undefined behavior.
-      RealmRuntime realm;
-#ifndef NDEBUG
-      bool ok = 
-#endif
-        realm.network_init(&argc, &argv);
-      assert(ok);
-
-      // Next we configure the realm runtime after which we can access the
-      // machine model and make events and reservations and do reigstrations
-#ifndef NDEBUG
-      ok = 
-#endif
-        realm.configure_from_command_line(argc, argv);
-      assert(ok);
+      RealmRuntime realm = runtime_initialized ? 
+        RealmRuntime::get_runtime() : initialize(&argc, &argv);
 
       // Parse the command line arguments
       const LegionConfiguration config = parse_arguments(argc, argv);
@@ -18934,6 +18923,31 @@ namespace Legion {
       if (!background)
         realm.wait_for_shutdown();
       return 0;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ RealmRuntime Runtime::initialize(int *argc, char ***argv)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!runtime_initialized);
+#endif
+      RealmRuntime realm;
+#ifndef NDEBUG
+      bool ok = 
+#endif
+        realm.network_init(argc, argv);
+      assert(ok);
+
+      // Next we configure the realm runtime after which we can access the
+      // machine model and make events and reservations and do reigstrations
+#ifndef NDEBUG
+      ok = 
+#endif
+        realm.configure_from_command_line(*argc, *argv);
+      assert(ok);
+      runtime_initialized = true;
+      return realm;
     }
 
     //--------------------------------------------------------------------------

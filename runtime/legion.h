@@ -6415,6 +6415,20 @@ namespace Legion {
       static int start(int argc, char **argv, bool background = false);
 
       /**
+       * This 'initialize' method is an optional method that provides
+       * users a way to look at the command line arguments before they
+       * actually start the Legion runtime. Users will still need to 
+       * call 'start' in order to actually start the Legion runtime but
+       * this way they can do some static initialization and use their
+       * own command line parameters to initialize the runtime prior
+       * to actually starting it. The resulting 'argc' and 'argv' should
+       * be passed into the 'start' method or undefined behavior will occur.
+       * @param argc pointer to an integer in which to store the argument count 
+       * @param argv pointer to array of strings for storing command line args
+       */
+      static void initialize(int *argc, char ***argv);
+
+      /**
        * Blocking call to wait for the runtime to shutdown when
        * running in background mode.  Otherwise it is illegal to 
        * invoke this method.
