@@ -1686,11 +1686,18 @@ namespace Legion {
         complete_mapping(Runtime::merge_events(map_applied_conditions));
       else
         complete_mapping();
+
+      std::set<ApEvent> wait_events;
+      if (execution_fence_event.exists())
+        wait_events.insert(execution_fence_event);
+      for (unsigned idx = 0; idx < instances.size(); ++idx)
+        instances[idx].update_wait_on_events(wait_events);
+      ApEvent wait_event = Runtime::merge_events(wait_events);
 #ifdef LEGION_SPY
-      LegionSpy::log_operation_events(unique_op_id, execution_fence_event,
+      LegionSpy::log_operation_events(unique_op_id, wait_event,
                                       completion_event);
 #endif
-      complete_execution(Runtime::protect_event(execution_fence_event));
+      complete_execution(Runtime::protect_event(wait_event));
     }
 
     //--------------------------------------------------------------------------
