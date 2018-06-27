@@ -415,6 +415,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void StaticTrace::perform_logging(void)
+    //--------------------------------------------------------------------------
+    {
+      // TODO: Implement this if someone wants to memoize static traces
+    }
+
+    //--------------------------------------------------------------------------
     const LegionVector<LegionTrace::DependenceRecord>::aligned& 
         StaticTrace::translate_dependence_records(Operation *op, unsigned index)
     //--------------------------------------------------------------------------
@@ -904,6 +911,37 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
+    void DynamicTrace::perform_logging(void)
+    //--------------------------------------------------------------------------
+    {
+      for (unsigned idx = 0; idx < operations.size(); ++idx)
+      {
+        Operation *op = operations[idx].first;
+        const LegionVector<DependenceRecord>::aligned &deps = dependences[idx];
+        for (LegionVector<DependenceRecord>::aligned::const_iterator it = 
+              deps.begin(); it != deps.end(); it++)
+        {
+          if ((it->prev_idx == -1) || (it->next_idx == -1))
+          {
+            LegionSpy::log_mapping_dependence(
+                op->get_context()->get_unique_id(),
+                operations[it->operation_idx].first->get_unique_op_id(),
+                (it->prev_idx == -1) ? 0 : it->prev_idx,
+                op->get_unique_op_id(),
+                (it->next_idx == -1) ? 0 : it->next_idx, TRUE_DEPENDENCE);
+          }
+          else
+          {
+            LegionSpy::log_mapping_dependence(
+                op->get_context()->get_unique_id(),
+                operations[it->operation_idx].first->get_unique_op_id(),
+                it->prev_idx, op->get_unique_op_id(), it->next_idx, it->dtype);
+          }
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void DynamicTrace::insert_dependence(const DependenceRecord &record)
     //--------------------------------------------------------------------------
     {
@@ -1203,6 +1241,13 @@ namespace Legion {
 #endif
         PhysicalTemplate *current_template =
           local_trace->get_physical_trace()->get_current_template();
+#ifdef DEBUG_LEGION
+        assert(current_template != NULL);
+#endif
+#ifdef LEGION_SPY
+        local_trace->perform_logging();
+        current_template->perform_logging(unique_op_id);
+#endif
         current_template->execute_all();
         template_completion = current_template->get_completion();
         Runtime::trigger_event(completion_event, template_completion);
@@ -1401,6 +1446,9 @@ namespace Legion {
             parent_ctx->get_current_execution_fence_event();
         physical_trace->initialize_template(get_completion_event(), recurrent);
         local_trace->set_state_replay();
+#ifdef LEGION_SPY
+        physical_trace->get_current_template()->set_fence_uid(unique_op_id);
+#endif
       }
       else if (!fence_registered)
       {
@@ -2837,6 +2885,22 @@ namespace Legion {
       for (std::vector<Instruction*>::const_iterator it = instructions.begin();
            it != instructions.end(); ++it)
         std::cerr << "  " << (*it)->to_string() << std::endl;
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTemplate::perform_logging(UniqueID fence_uid)
+    //--------------------------------------------------------------------------
+    {
+      UniqueID context_id = trace->logical_trace->ctx->get_unique_id();
+      for (std::map<TraceLocalID, Operation*>::iterator it = operations.begin();
+           it != operations.end(); ++it)
+      {
+        UniqueID op_uid = it->second->get_unique_op_id();
+        LegionSpy::log_mapping_dependence(
+            context_id, prev_fence_uid, 0, op_uid, 0, TRUE_DEPENDENCE);
+        LegionSpy::log_mapping_dependence(
+            context_id, op_uid, 0, fence_uid, 0, TRUE_DEPENDENCE);
+      }
     }
 
     //--------------------------------------------------------------------------
