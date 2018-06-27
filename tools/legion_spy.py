@@ -6302,6 +6302,8 @@ class Operation(object):
         title = str(self)+' (UID: '+str(self.uid)+')'
         if self.task is not None and self.task.point.dim > 0:
             title += ' Point: ' + self.task.point.to_string()
+        if self.replayed:
+            title += '  (replayed)'
         label = printer.generate_html_op_label(title, self.reqs, self.mappings,
                                        self.get_color(), self.state.detailed_graphs)
         printer.println(self.node_name+' [label=<'+label+'>,fontsize=14,'+\
@@ -7119,6 +7121,8 @@ class Task(object):
             title = str(self)+' (UID: '+str(self.op.uid)+')'
             if self.point.dim > 0:
                 title += ' Point: ' + self.point.to_string()
+            if self.op.replayed:
+                title += '  (replayed)'
             label = printer.generate_html_op_label(title, self.op.reqs,
                                                    self.op.mappings,
                                                    self.op.get_color(), 
