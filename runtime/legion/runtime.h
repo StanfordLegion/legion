@@ -800,16 +800,6 @@ namespace Legion {
                                     const std::vector<LogicalRegion> &regions,
                                     MappingInstance &result, bool acquire, 
                                     bool tight_region_bounds, bool remote);
-      bool find_satisfying_instance(const LayoutConstraintSet &constraints,
-                                    const std::vector<LogicalRegion> &regions,
-                                    MappingInstance &result, 
-                                    std::set<PhysicalManager*> &candidates,
-                                    bool acquire,bool tight_bounds,bool remote);
-      bool find_satisfying_instance(LayoutConstraints *constraints,
-                                    const std::vector<LogicalRegion> &regions,
-                                    MappingInstance &result, 
-                                    std::set<PhysicalManager*> &candidates,
-                                    bool acquire,bool tight_bounds,bool remote);
       bool find_valid_instance(     const LayoutConstraintSet &constraints,
                                     const std::vector<LogicalRegion> &regions,
                                     MappingInstance &result, bool acquire, 
@@ -818,29 +808,17 @@ namespace Legion {
                                     const std::vector<LogicalRegion> &regions,
                                     MappingInstance &result, bool acquire, 
                                     bool tight_region_bounds, bool remote);
-      void release_candidate_references(const std::set<PhysicalManager*> 
-                                                        &candidates) const;
       void release_candidate_references(const std::deque<PhysicalManager*>
                                                         &candidates) const;
     protected:
+      // We serialize all allocation attempts in a memory in order to 
+      // ensure find_and_create calls will remain atomic
+      RtEvent acquire_allocation_privilege(void);
+      void release_allocation_privilege(void);
       PhysicalManager* allocate_physical_instance(
                                     const LayoutConstraintSet &constraints,
                                     const std::vector<LogicalRegion> &regions,
                                     UniqueID creator_id);
-      PhysicalManager* find_and_record(PhysicalManager *manager, 
-                                    const LayoutConstraintSet &constraints,
-                                    const std::vector<LogicalRegion> &regions,
-                                    std::set<PhysicalManager*> &candidates,
-                                    bool acquire, MapperID mapper_id, 
-                                    Processor proc, GCPriority priority,
-                                    bool tight_region_bounds, bool remote);
-      PhysicalManager* find_and_record(PhysicalManager *manager, 
-                                    LayoutConstraints *constraints,
-                                    const std::vector<LogicalRegion> &regions,
-                                    std::set<PhysicalManager*> &candidates,
-                                    bool acquire, MapperID mapper_id, 
-                                    Processor proc, GCPriority priority,
-                                    bool tight_region_bounds, bool remote);
     public:
       bool delete_by_size_and_state(const size_t needed_size, 
                                     InstanceState state, bool larger_only); 
@@ -868,6 +846,9 @@ namespace Legion {
       // It is only valid on the owner node
       LegionMap<PhysicalManager*,InstanceInfo,
                 MEMORY_INSTANCES_ALLOC>::tracked current_instances;
+      // Keep track of outstanding requuests for allocations which 
+      // will be tried in the order that they arrive
+      std::deque<RtUserEvent> pending_allocation_attempts;
     };
 
     /**
