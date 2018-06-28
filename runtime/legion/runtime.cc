@@ -3802,6 +3802,10 @@ namespace Legion {
       }
       else
       {
+        // Acquire allocation privilege before doing anything
+        const RtEvent wait_on = acquire_allocation_privilege();
+        if (wait_on.exists())
+          wait_on.wait();
         // Try to make the result
         PhysicalManager *manager = allocate_physical_instance(constraints, 
                                                      regions, creator_id);
@@ -3814,6 +3818,8 @@ namespace Legion {
           result = MappingInstance(manager);
           success = true;
         }
+        // Release our allocation privilege after doing the record
+        release_allocation_privilege();
       }
       return success;
     }
@@ -3856,6 +3862,10 @@ namespace Legion {
       }
       else
       {
+        // Acquire allocation privilege before doing anything
+        const RtEvent wait_on = acquire_allocation_privilege();
+        if (wait_on.exists())
+          wait_on.wait();
         // Try to make the instance
         PhysicalManager *manager = allocate_physical_instance(*constraints,
                                                      regions, creator_id);
@@ -3868,6 +3878,8 @@ namespace Legion {
           result = MappingInstance(manager);
           success = true;
         }
+        // Release our allocation privilege after doing the record
+        release_allocation_privilege();
       }
       return success;
     }
@@ -3921,10 +3933,16 @@ namespace Legion {
       }
       else
       {
-        // Try to find an instance first and then make one
-        std::set<PhysicalManager*> candidates;
+        // First get our allocation privileges so we're the only
+        // one trying to do any allocations
+        const RtEvent wait_on = acquire_allocation_privilege();
+        if (wait_on.exists())
+          wait_on.wait();
+        // Since this is find or acquire, first see if we can find
+        // an instance that has already been makde that satisfies 
+        // our layout constraints
         success = find_satisfying_instance(constraints, regions, 
-                   result, candidates, acquire, tight_region_bounds, remote);
+                   result, acquire, tight_region_bounds, remote);
         if (!success)
         {
           // If we couldn't find it, we have to make it
@@ -3932,25 +3950,18 @@ namespace Legion {
                                                        regions, creator_id);
           if (manager != NULL)
           {
+            success = true;
             if (runtime->legion_spy_enabled)
               manager->log_instance_creation(creator_id, processor, regions);
-            // We're definitely going to succeed one way or another
-            success = true;
-            // To maintain the illusion that this is atomic we have to
-            // check again to see if anything else has been registered
-            // which might also satisfy the constraints
-            PhysicalManager *actual_manager = 
-              find_and_record(manager, constraints, regions, candidates,
-                              acquire, mapper_id, processor, priority, 
-                              tight_region_bounds, remote);
-            // If they are still the same then we succeeded
-            if (actual_manager == manager)
-              created = true;
-            // Save the final result
-            result = MappingInstance(actual_manager);
+            record_created_instance(manager, acquire, mapper_id, processor,
+                                    priority, remote);
+            result = MappingInstance(manager);
+            // We made this instance so mark that it was created
+            created = true;
           }
         }
-        release_candidate_references(candidates);
+        // Release our allocation privilege after doing the record
+        release_allocation_privilege();
       }
       return success;
     }
@@ -4004,10 +4015,17 @@ namespace Legion {
       }
       else
       {
+        // First get our allocation privileges so we're the only
+        // one trying to do any allocations
+        const RtEvent wait_on = acquire_allocation_privilege();
+        if (wait_on.exists())
+          wait_on.wait();
+        // Since this is find or acquire, first see if we can find
+        // an instance that has already been makde that satisfies 
+        // our layout constraints
         // Try to find an instance first and then make one
-        std::set<PhysicalManager*> candidates;
         success = find_satisfying_instance(constraints, regions, 
-                   result, candidates, acquire, tight_region_bounds, remote);
+                   result, acquire, tight_region_bounds, remote);
         if (!success)
         {
           // If we couldn't find it, we have to make it
@@ -4015,24 +4033,18 @@ namespace Legion {
                                                        regions, creator_id);
           if (manager != NULL)
           {
+            success = true;
             if (runtime->legion_spy_enabled)
               manager->log_instance_creation(creator_id, processor, regions);
-            // If we make it here we're definitely going to succeed
-            success = true;
-            // To maintain the illusion that this is atomic we have to
-            // check again to see if anything else has been registered
-            // which might also satisfy the constraints
-            PhysicalManager *actual_manager = 
-              find_and_record(manager, constraints, regions, candidates,
-                              acquire, mapper_id, processor, priority, 
-                              tight_region_bounds, remote);
-            // If they are still the same then we succeeded
-            if (actual_manager == manager)
-              created = true;
-            result = MappingInstance(actual_manager);
+            record_created_instance(manager, acquire, mapper_id, processor,
+                                    priority, remote);
+            result = MappingInstance(manager);
+            // We made this instance so mark that it was created
+            created = true;
           }
         }
-        release_candidate_references(candidates);
+        // Release our allocation privilege after doing the record
+        release_allocation_privilege();
       }
       return success;
     }
@@ -5151,107 +5163,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool MemoryManager::find_satisfying_instance(
-                                const LayoutConstraintSet &constraints,
-                                const std::vector<LogicalRegion> &regions,
-                                MappingInstance &result, 
-                                std::set<PhysicalManager*> &candidates,
-                                bool acquire, bool tight_bounds, bool remote)
-    //--------------------------------------------------------------------------
-    {
-      // Hold the lock while iterating here
-      {
-        AutoLock m_lock(manager_lock, 1, false/*exclusive*/);
-        for (std::map<PhysicalManager*,InstanceInfo>::const_iterator it = 
-              current_instances.begin(); it != current_instances.end(); it++)
-        {
-          // Skip it if has already been collected
-          if (it->second.current_state == PENDING_COLLECTED_STATE)
-            continue;
-          // Skip any unattached external instances too
-          if (it->second.unattached_external)
-            continue;
-          if (!it->first->meets_region_tree(regions))
-            continue;
-          it->first->add_base_resource_ref(MEMORY_MANAGER_REF);
-          candidates.insert(it->first);
-        }
-      }
-      // If we have any candidates check their constraints
-      if (!candidates.empty())
-      {
-        for (std::set<PhysicalManager*>::const_iterator it = 
-              candidates.begin(); it != candidates.end(); it++)
-        {
-          if (!(*it)->meets_regions(regions, tight_bounds))
-            continue;
-          if ((*it)->entails(constraints))
-          {
-            // Check to see if we need to acquire
-            // If we fail to acquire then keep going
-            if (acquire && !(*it)->acquire_instance(
-                    remote ? REMOTE_DID_REF : MAPPING_ACQUIRE_REF, NULL))
-              continue;
-            // If we make it here, we succeeded
-            result = MappingInstance(*it);
-            return true;
-          }
-        }
-      }
-      return false;
-    }
-
-    //--------------------------------------------------------------------------
-    bool MemoryManager::find_satisfying_instance(LayoutConstraints *constraints,
-                                  const std::vector<LogicalRegion> &regions,
-                                  MappingInstance &result, 
-                                  std::set<PhysicalManager*> &candidates,
-                                  bool acquire, bool tight_bounds, bool remote)
-    //--------------------------------------------------------------------------
-    {
-      // Hold the lock while iterating here
-      {
-        AutoLock m_lock(manager_lock, 1, false/*exclusive*/);
-        for (std::map<PhysicalManager*,InstanceInfo>::const_iterator it = 
-              current_instances.begin(); it != current_instances.end(); it++)
-        {
-          // Skip it if has already been collected
-          if (it->second.current_state == PENDING_COLLECTED_STATE)
-            continue;
-          // Skip any unattached external instances too
-          if (it->second.unattached_external)
-            continue;
-          if (!it->first->meets_region_tree(regions))
-            continue;
-          candidates.insert(it->first);
-        }
-      }
-      // If we have any candidates check their constraints
-      if (!candidates.empty())
-      {
-        for (std::set<PhysicalManager*>::const_iterator it = 
-              candidates.begin(); it != candidates.end(); it++)
-        {
-          if (!(*it)->meets_regions(regions, tight_bounds))
-            continue;
-          if ((*it)->entails(constraints))
-          {
-            // Check to see if we need to acquire
-            // If we fail to acquire then keep going
-            if (acquire && !(*it)->acquire_instance(
-                    remote ? REMOTE_DID_REF : MAPPING_ACQUIRE_REF, NULL))
-              continue;
-            // If we make it here, we succeeded
-            result = MappingInstance(*it);
-            return true;
-          }
-        }
-      }
-      return false;
-    }
-
-
-    //--------------------------------------------------------------------------
     bool MemoryManager::find_valid_instance(
                                      const LayoutConstraintSet &constraints,
                                      const std::vector<LogicalRegion> &regions,
@@ -5357,19 +5268,6 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void MemoryManager::release_candidate_references(
-                             const std::set<PhysicalManager*> &candidates) const
-    //--------------------------------------------------------------------------
-    {
-      for (std::set<PhysicalManager*>::const_iterator it = 
-            candidates.begin(); it != candidates.end(); it++)
-      {
-        if ((*it)->remove_base_resource_ref(MEMORY_MANAGER_REF))
-          delete (*it);
-      } 
-    }
-
-    //--------------------------------------------------------------------------
-    void MemoryManager::release_candidate_references(
                            const std::deque<PhysicalManager*> &candidates) const
     //--------------------------------------------------------------------------
     {
@@ -5379,6 +5277,41 @@ namespace Legion {
         if ((*it)->remove_base_resource_ref(MEMORY_MANAGER_REF))
           delete (*it);
       }
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent MemoryManager::acquire_allocation_privilege(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(is_owner); // should only happen on the owner
+#endif
+      const RtUserEvent our_event = Runtime::create_rt_user_event();
+      AutoLock m_lock(manager_lock);
+      // Wait for the previous allocation if there is one
+      const RtEvent wait_on = pending_allocation_attempts.empty() ? 
+        RtEvent::NO_RT_EVENT : pending_allocation_attempts.back();
+      pending_allocation_attempts.push_back(our_event);
+      return wait_on;
+    }
+
+    //--------------------------------------------------------------------------
+    void MemoryManager::release_allocation_privilege(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(is_owner); // should only happen on the owner
+#endif
+      RtUserEvent to_trigger;
+      {
+        AutoLock m_lock(manager_lock);
+#ifdef DEBUG_LEGION
+        assert(!pending_allocation_attempts.empty());
+#endif
+        to_trigger = pending_allocation_attempts.front();
+        pending_allocation_attempts.pop_front();
+      }
+      Runtime::trigger_event(to_trigger);
     }
 
     //--------------------------------------------------------------------------
@@ -5447,227 +5380,6 @@ namespace Legion {
       }
       // If we made it here well then we failed 
       return NULL;
-    }
-
-    //--------------------------------------------------------------------------
-    PhysicalManager* MemoryManager::find_and_record(PhysicalManager *manager,
-                              const LayoutConstraintSet &constraints,
-                              const std::vector<LogicalRegion> &regions,
-                              std::set<PhysicalManager*> &candidates,
-                              bool acquire, MapperID mapper_id,
-                              Processor proc, GCPriority priority, 
-                              bool tight_region_bounds, bool remote)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(is_owner);
-#endif
-      // First do the insertion
-      // If we're going to add a valid reference, mark this valid early
-      // to avoid races with deletions
-      bool early_valid = acquire || (priority == GC_NEVER_PRIORITY);
-      size_t instance_size = manager->get_instance_size();
-      // Since we're going to put this in the table add a reference
-      if (is_owner)
-        manager->add_base_resource_ref(MEMORY_MANAGER_REF);
-      PhysicalManager *alternate = NULL;
-      do
-      {
-        // Check to see if we have an alternate candidate
-        if (alternate != NULL)
-        {
-          if (!alternate->meets_regions(regions, tight_region_bounds))
-          {
-            alternate = NULL;
-            continue; // Go back around the loop
-          }
-          if (!alternate->entails(constraints))
-          {
-            alternate = NULL;
-            continue; // Go back around the loop
-          }
-          if (acquire && !alternate->acquire_instance(
-                    remote ? REMOTE_DID_REF : MAPPING_ACQUIRE_REF, NULL))
-          {
-            alternate = NULL;
-            continue; // Go back around the loop
-          }
-          // If we make it here then we found a better candidate
-          // so we need to delete the instance that we initially made
-          manager->perform_deletion(RtEvent::NO_RT_EVENT);
-          if (manager->remove_base_resource_ref(MEMORY_MANAGER_REF))
-            delete manager;
-          return alternate;
-        }
-#ifdef DEBUG_LEGION
-        assert(alternate == NULL);
-#endif
-        AutoLock m_lock(manager_lock);
-        // Find our candidates
-        for (std::map<PhysicalManager*,InstanceInfo>::const_iterator it = 
-              current_instances.begin(); it != current_instances.end(); it++)
-        {
-          // Skip it if has already been collected
-          if (it->second.current_state == PENDING_COLLECTED_STATE)
-            continue;
-          // Skip any unattached external instances too
-          if (it->second.unattached_external)
-            continue;
-          // If we already considered it we don't have to do it again
-          if (candidates.find(it->first) != candidates.end())
-            continue;
-          // Check if the region trees are the same
-          if (!it->first->meets_region_tree(regions))
-            continue;
-          // We found an alternate candidate so break out so we can test it
-          it->first->add_base_resource_ref(MEMORY_MANAGER_REF);
-          candidates.insert(it->first);
-          alternate = it->first;
-          // We found an alternate so we can break out
-          break;
-        }
-        // If we have an alternate we might have to acquire it
-        // while not holding the lock so go back around the loop
-        if (alternate != NULL)
-          continue;
-        // If we make it here then we are good to add our instance
-#ifdef DEBUG_LEGION
-        assert(current_instances.find(manager) == current_instances.end());
-#endif
-        InstanceInfo &info = current_instances[manager];
-        if (early_valid)
-          info.current_state = VALID_STATE;
-        info.min_priority = priority;
-        info.instance_size = instance_size;
-        info.mapper_priorities[
-          std::pair<MapperID,Processor>(mapper_id,proc)] = priority;
-        // Break out because we are done
-        break;
-      } while (true);
-      // If we make it here we've successfully added ourselves
-      // and found no satisfying instances added in between
-      // Now we can add any references that we need to
-      if (acquire)
-      {
-        if (remote)
-          manager->add_base_valid_ref(REMOTE_DID_REF);
-        else
-          manager->add_base_valid_ref(MAPPING_ACQUIRE_REF);
-      } 
-      // If we have a GC_NEVER_PRIORITY then we have to add the valid reference
-      if (priority == GC_NEVER_PRIORITY)
-        manager->add_base_valid_ref(NEVER_GC_REF);
-      return manager;
-    }
-
-    //--------------------------------------------------------------------------
-    PhysicalManager* MemoryManager::find_and_record(PhysicalManager *manager,
-                              LayoutConstraints *constraints,
-                              const std::vector<LogicalRegion> &regions,
-                              std::set<PhysicalManager*> &candidates,
-                              bool acquire, MapperID mapper_id,
-                              Processor proc, GCPriority priority, 
-                              bool tight_region_bounds, bool remote)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(is_owner);
-#endif
-      // First do the insertion
-      // If we're going to add a valid reference, mark this valid early
-      // to avoid races with deletions
-      bool early_valid = acquire || (priority == GC_NEVER_PRIORITY);
-      size_t instance_size = manager->get_instance_size();
-      // Since we're going to put this in the table add a reference
-      if (is_owner)
-        manager->add_base_resource_ref(MEMORY_MANAGER_REF);
-      PhysicalManager *alternate = NULL;
-      do
-      {
-        // Check to see if we have an alternate candidate
-        if (alternate != NULL)
-        {
-          if (!alternate->meets_regions(regions, tight_region_bounds))
-          {
-            alternate = NULL;
-            continue; // Go back around the loop
-          }
-          if (!alternate->entails(constraints))
-          {
-            alternate = NULL;
-            continue; // Go back around the loop
-          }
-          if (acquire && !alternate->acquire_instance(
-                    remote ? REMOTE_DID_REF : MAPPING_ACQUIRE_REF, NULL))
-          {
-            alternate = NULL;
-            continue; // Go back around the loop
-          }
-          // If we make it here then we found a better candidate
-          // so we need to delete the instance that we initially made
-          manager->perform_deletion(RtEvent::NO_RT_EVENT);
-          if (manager->remove_base_resource_ref(MEMORY_MANAGER_REF))
-            delete manager;
-          return alternate;
-        }
-#ifdef DEBUG_LEGION
-        assert(alternate == NULL);
-#endif
-        AutoLock m_lock(manager_lock);
-        // Find our candidates
-        for (std::map<PhysicalManager*,InstanceInfo>::const_iterator it = 
-              current_instances.begin(); it != current_instances.end(); it++)
-        {
-          // Skip it if has already been collected
-          if (it->second.current_state == PENDING_COLLECTED_STATE)
-            continue;
-          // Skip any unattached external instances too
-          if (it->second.unattached_external)
-            continue;
-          // If we already considered it we don't have to do it again
-          if (candidates.find(it->first) != candidates.end())
-            continue;
-          // Check if the region trees are the same
-          if (!it->first->meets_region_tree(regions))
-            continue;
-          // We found an alternate candidate so break out so we can test it
-          it->first->add_base_resource_ref(MEMORY_MANAGER_REF);
-          candidates.insert(it->first);
-          alternate = it->first;
-          // We found an alternate so we can break out
-          break;
-        }
-        // If we have an alternate we might have to acquire it
-        // while not holding the lock so go back around the loop
-        if (alternate != NULL)
-          continue;
-        // If we make it here then we are good to add our instance
-#ifdef DEBUG_LEGION
-        assert(current_instances.find(manager) == current_instances.end());
-#endif
-        InstanceInfo &info = current_instances[manager];
-        if (early_valid)
-          info.current_state = VALID_STATE;
-        info.min_priority = priority;
-        info.instance_size = instance_size;
-        info.mapper_priorities[
-          std::pair<MapperID,Processor>(mapper_id,proc)] = priority;
-        // Break out because we are done
-        break;
-      } while (true);
-      // If we make it here we've successfully added ourselves
-      // and found no satisfying instances added in between
-      // Now we can add any references that we need to
-      if (acquire)
-      {
-        if (remote)
-          manager->add_base_valid_ref(REMOTE_DID_REF);
-        else
-          manager->add_base_valid_ref(MAPPING_ACQUIRE_REF);
-      }
-      if (priority == GC_NEVER_PRIORITY)
-        manager->add_base_valid_ref(NEVER_GC_REF);
-      return manager;
     }
 
     //--------------------------------------------------------------------------
@@ -21025,6 +20737,7 @@ namespace Legion {
     /*static*/ Processor::TaskFuncID Runtime::legion_main_id = 0;
     /*static*/ std::vector<RegistrationCallbackFnptr> 
                                              Runtime::registration_callbacks;
+    /*static*/ bool Runtime::runtime_initialized = false;
     /*static*/ bool Runtime::runtime_started = false;
     /*static*/ bool Runtime::runtime_backgrounded = false;
     /*static*/ Runtime* Runtime::the_runtime = NULL;
@@ -21065,20 +20778,8 @@ namespace Legion {
       // their values as they might be changed by GASNet or MPI or whatever.
       // Note that the logger isn't initialized until after this call returns 
       // which means any logging that occurs before this has undefined behavior.
-      RealmRuntime realm;
-#ifndef NDEBUG
-      bool ok = 
-#endif
-        realm.network_init(&argc, &argv);
-      assert(ok);
-
-      // Next we configure the realm runtime after which we can access the
-      // machine model and make events and reservations and do reigstrations
-#ifndef NDEBUG
-      ok = 
-#endif
-        realm.configure_from_command_line(argc, argv);
-      assert(ok);
+      RealmRuntime realm = runtime_initialized ? 
+        RealmRuntime::get_runtime() : initialize(&argc, &argv);
 
       // Parse the command line arguments
       const LegionConfiguration config = parse_arguments(argc, argv);
@@ -21146,6 +20847,31 @@ namespace Legion {
       if (!background)
         realm.wait_for_shutdown();
       return 0;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ RealmRuntime Runtime::initialize(int *argc, char ***argv)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!runtime_initialized);
+#endif
+      RealmRuntime realm;
+#ifndef NDEBUG
+      bool ok = 
+#endif
+        realm.network_init(argc, argv);
+      assert(ok);
+
+      // Next we configure the realm runtime after which we can access the
+      // machine model and make events and reservations and do reigstrations
+#ifndef NDEBUG
+      ok = 
+#endif
+        realm.configure_from_command_line(*argc, *argv);
+      assert(ok);
+      runtime_initialized = true;
+      return realm;
     }
 
     //--------------------------------------------------------------------------
