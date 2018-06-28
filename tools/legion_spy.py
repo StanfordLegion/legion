@@ -5749,6 +5749,9 @@ class Operation(object):
 
     def perform_logical_analysis(self, perform_checks):
         if self.replayed:
+            if self.reqs is not None:
+                for idx in range(0,len(self.reqs)):
+                    self.context.check_restricted_coherence(self, self.reqs[idx])
             return True
         # We need a context to do this
         assert self.context is not None
