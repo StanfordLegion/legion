@@ -3802,13 +3802,16 @@ namespace Legion {
       }
       else
       {
+        // Create the builder and initialize it before getting
+        // the allocation privilege to avoid deadlock scenario
+        InstanceBuilder builder(regions, constraints, runtime, this,creator_id);
+        builder.initialize(runtime->forest);
         // Acquire allocation privilege before doing anything
         const RtEvent wait_on = acquire_allocation_privilege();
         if (wait_on.exists())
           wait_on.wait();
         // Try to make the result
-        PhysicalManager *manager = allocate_physical_instance(constraints, 
-                                                     regions, creator_id);
+        PhysicalManager *manager = allocate_physical_instance(builder);
         if (manager != NULL)
         {
           if (runtime->legion_spy_enabled)
@@ -3862,13 +3865,16 @@ namespace Legion {
       }
       else
       {
+        // Create the builder and initialize it before getting
+        // the allocation privilege to avoid deadlock scenario
+        InstanceBuilder builder(regions,*constraints, runtime, this,creator_id);
+        builder.initialize(runtime->forest);
         // Acquire allocation privilege before doing anything
         const RtEvent wait_on = acquire_allocation_privilege();
         if (wait_on.exists())
           wait_on.wait();
         // Try to make the instance
-        PhysicalManager *manager = allocate_physical_instance(*constraints,
-                                                     regions, creator_id);
+        PhysicalManager *manager = allocate_physical_instance(builder);
         if (manager != NULL)
         {
           if (runtime->legion_spy_enabled)
@@ -3933,6 +3939,10 @@ namespace Legion {
       }
       else
       {
+        // Create the builder and initialize it before getting
+        // the allocation privilege to avoid deadlock scenario
+        InstanceBuilder builder(regions, constraints, runtime, this,creator_id);
+        builder.initialize(runtime->forest);
         // First get our allocation privileges so we're the only
         // one trying to do any allocations
         const RtEvent wait_on = acquire_allocation_privilege();
@@ -3946,8 +3956,7 @@ namespace Legion {
         if (!success)
         {
           // If we couldn't find it, we have to make it
-          PhysicalManager *manager = allocate_physical_instance(constraints, 
-                                                       regions, creator_id);
+          PhysicalManager *manager = allocate_physical_instance(builder);
           if (manager != NULL)
           {
             success = true;
@@ -4015,6 +4024,10 @@ namespace Legion {
       }
       else
       {
+        // Create the builder and initialize it before getting
+        // the allocation privilege to avoid deadlock scenario
+        InstanceBuilder builder(regions,*constraints, runtime, this,creator_id);
+        builder.initialize(runtime->forest);
         // First get our allocation privileges so we're the only
         // one trying to do any allocations
         const RtEvent wait_on = acquire_allocation_privilege();
@@ -4029,8 +4042,7 @@ namespace Legion {
         if (!success)
         {
           // If we couldn't find it, we have to make it
-          PhysicalManager *manager = allocate_physical_instance(*constraints,
-                                                       regions, creator_id);
+          PhysicalManager *manager = allocate_physical_instance(builder);
           if (manager != NULL)
           {
             success = true;
@@ -5316,16 +5328,13 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PhysicalManager* MemoryManager::allocate_physical_instance(
-                                      const LayoutConstraintSet &constraints,
-                                      const std::vector<LogicalRegion> &regions,
-                                      UniqueID creator_id)
+                                                      InstanceBuilder &builder)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(is_owner);
 #endif
       // First, just try to make the instance as is, if it works we are done 
-      InstanceBuilder builder(regions, constraints, runtime, this, creator_id);
       PhysicalManager *manager = 
                               builder.create_physical_instance(runtime->forest);
       if (manager != NULL)
