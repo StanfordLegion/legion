@@ -498,13 +498,13 @@ namespace Legion {
           reduction_op(NULL), valid(false) { }
       virtual ~InstanceBuilder(void);
     public:
+      void initialize(RegionTreeForest *forest);
       size_t compute_needed_size(RegionTreeForest *forest);
       PhysicalManager* create_physical_instance(RegionTreeForest *forest);
     public:
       virtual void handle_profiling_response(
                     const Realm::ProfilingResponse &response);
     protected:
-      void initialize(RegionTreeForest *forest);
       void compute_ancestor_and_domain(RegionTreeForest *forest);
       RegionNode* find_common_ancestor(RegionNode *one, RegionNode *two) const;
     protected:
