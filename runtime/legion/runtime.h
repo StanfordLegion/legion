@@ -815,10 +815,7 @@ namespace Legion {
       // ensure find_and_create calls will remain atomic
       RtEvent acquire_allocation_privilege(void);
       void release_allocation_privilege(void);
-      PhysicalManager* allocate_physical_instance(
-                                    const LayoutConstraintSet &constraints,
-                                    const std::vector<LogicalRegion> &regions,
-                                    UniqueID creator_id);
+      PhysicalManager* allocate_physical_instance(InstanceBuilder &builder);
     public:
       bool delete_by_size_and_state(const size_t needed_size, 
                                     InstanceState state, bool larger_only); 
