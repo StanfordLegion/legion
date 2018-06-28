@@ -1440,10 +1440,8 @@ namespace Legion {
 
       if (physical_trace->get_current_template() != NULL)
       {
-        if (recurrent && (implicit_runtime->no_fence_elision ||
-                          implicit_runtime->no_trace_optimization))
-          execution_precondition =
-            parent_ctx->get_current_execution_fence_event();
+        execution_precondition =
+          parent_ctx->get_current_execution_fence_event();
         physical_trace->initialize_template(get_completion_event(), recurrent);
         local_trace->set_state_replay();
 #ifdef LEGION_SPY
