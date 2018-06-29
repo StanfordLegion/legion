@@ -8691,6 +8691,7 @@ namespace Legion {
         {
           Serializer rez;
           {
+            RezCheck z(rez);
             rez.serialize(handle);
             rez.serialize(tag);
             rez.serialize(can_fail);
