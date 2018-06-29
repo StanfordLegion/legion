@@ -7758,6 +7758,11 @@ namespace Legion {
 #ifdef LEGION_SPY
       LegionSpy::log_replay_operation(unique_op_id);
 #endif
+      if (runtime->legion_spy_enabled)
+      {
+        for (unsigned idx = 0; idx < regions.size(); idx++)
+          TaskOp::log_requirement(unique_op_id, idx, regions[idx]);
+      }
       SliceTask *new_slice = this->clone_as_slice_task(internal_space,
                                                        current_proc,
                                                        false,

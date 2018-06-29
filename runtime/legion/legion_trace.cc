@@ -415,7 +415,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void StaticTrace::perform_logging(void)
+    void StaticTrace::perform_logging(
+                               UniqueID prev_fence_uid, UniqueID curr_fence_uid)
     //--------------------------------------------------------------------------
     {
       // TODO: Implement this if someone wants to memoize static traces
@@ -911,33 +912,40 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
-    void DynamicTrace::perform_logging(void)
+    void DynamicTrace::perform_logging(
+                               UniqueID prev_fence_uid, UniqueID curr_fence_uid)
     //--------------------------------------------------------------------------
     {
       for (unsigned idx = 0; idx < operations.size(); ++idx)
       {
         Operation *op = operations[idx].first;
+        UniqueID context_uid = op->get_context()->get_unique_id();
+        UniqueID uid = op->get_unique_op_id();
         const LegionVector<DependenceRecord>::aligned &deps = dependences[idx];
-        for (LegionVector<DependenceRecord>::aligned::const_iterator it = 
-              deps.begin(); it != deps.end(); it++)
+        for (LegionVector<DependenceRecord>::aligned::const_iterator it =
+             deps.begin(); it != deps.end(); it++)
         {
           if ((it->prev_idx == -1) || (it->next_idx == -1))
           {
             LegionSpy::log_mapping_dependence(
-                op->get_context()->get_unique_id(),
+                context_uid,
                 operations[it->operation_idx].first->get_unique_op_id(),
                 (it->prev_idx == -1) ? 0 : it->prev_idx,
-                op->get_unique_op_id(),
+                uid,
                 (it->next_idx == -1) ? 0 : it->next_idx, TRUE_DEPENDENCE);
           }
           else
           {
             LegionSpy::log_mapping_dependence(
-                op->get_context()->get_unique_id(),
+                context_uid,
                 operations[it->operation_idx].first->get_unique_op_id(),
-                it->prev_idx, op->get_unique_op_id(), it->next_idx, it->dtype);
+                it->prev_idx, uid, it->next_idx, it->dtype);
           }
         }
+        LegionSpy::log_mapping_dependence(
+            context_uid, prev_fence_uid, 0, uid, 0, TRUE_DEPENDENCE);
+        LegionSpy::log_mapping_dependence(
+            context_uid, uid, 0, curr_fence_uid, 0, TRUE_DEPENDENCE);
       }
     }
 
@@ -1245,8 +1253,8 @@ namespace Legion {
         assert(current_template != NULL);
 #endif
 #ifdef LEGION_SPY
-        local_trace->perform_logging();
-        current_template->perform_logging(unique_op_id);
+        local_trace->perform_logging(
+            current_template->get_fence_uid(), unique_op_id);
 #endif
         current_template->execute_all();
         template_completion = current_template->get_completion();
@@ -2884,22 +2892,6 @@ namespace Legion {
       for (std::vector<Instruction*>::const_iterator it = instructions.begin();
            it != instructions.end(); ++it)
         std::cerr << "  " << (*it)->to_string() << std::endl;
-    }
-
-    //--------------------------------------------------------------------------
-    void PhysicalTemplate::perform_logging(UniqueID fence_uid)
-    //--------------------------------------------------------------------------
-    {
-      UniqueID context_id = trace->logical_trace->ctx->get_unique_id();
-      for (std::map<TraceLocalID, Operation*>::iterator it = operations.begin();
-           it != operations.end(); ++it)
-      {
-        UniqueID op_uid = it->second->get_unique_op_id();
-        LegionSpy::log_mapping_dependence(
-            context_id, prev_fence_uid, 0, op_uid, 0, TRUE_DEPENDENCE);
-        LegionSpy::log_mapping_dependence(
-            context_id, op_uid, 0, fence_uid, 0, TRUE_DEPENDENCE);
-      }
     }
 
     //--------------------------------------------------------------------------

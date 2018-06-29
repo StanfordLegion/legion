@@ -119,7 +119,8 @@ namespace Legion {
       void invalidate_trace_cache(Operation *invalidator);
       void invalidate_current_template(void);
     public:
-      virtual void perform_logging(void) = 0;
+      virtual void perform_logging(
+                          UniqueID prev_fence_uid, UniqueID curr_fence_uid) = 0;
 #ifdef LEGION_SPY
     public:
       UniqueID get_current_uid_by_index(unsigned op_idx) const;
@@ -183,7 +184,8 @@ namespace Legion {
       virtual void record_aliased_children(unsigned req_index, unsigned depth,
                                            const FieldMask &aliased_mask);
     public:
-      virtual void perform_logging(void);
+      virtual void perform_logging(
+                          UniqueID prev_fence_uid, UniqueID curr_fence_uid);
     protected:
       const LegionVector<DependenceRecord>::aligned&
                   translate_dependence_records(Operation *op, unsigned index);
@@ -248,7 +250,8 @@ namespace Legion {
       virtual void record_aliased_children(unsigned req_index, unsigned depth,
                                            const FieldMask &aliased_mask);
     public:
-      virtual void perform_logging(void);
+      virtual void perform_logging(
+                          UniqueID prev_fence_uid, UniqueID curr_fence_uid);
     protected:
       // Insert a normal dependence for the current operation
       void insert_dependence(const DependenceRecord &record);
@@ -547,8 +550,8 @@ namespace Legion {
     public:
 #ifdef LEGION_SPY
       void set_fence_uid(UniqueID fence_uid) { prev_fence_uid = fence_uid; }
+      UniqueID get_fence_uid(void) const { return prev_fence_uid; }
 #endif
-      void perform_logging(UniqueID fence_uid);
     public:
       inline bool is_recording(void) const { return recording; }
       inline bool is_replaying(void) const { return !recording; }

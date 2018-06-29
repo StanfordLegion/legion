@@ -9534,7 +9534,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef LEGION_SPY
-      tpl->register_operation(this);
       LegionSpy::log_replay_operation(unique_op_id);
 #endif
       trigger_mapping();
@@ -9598,13 +9597,6 @@ namespace Legion {
     void DynamicCollectiveOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
-#ifdef LEGION_SPY
-      if (is_recording())
-      {
-        assert(tpl != NULL && tpl->is_recording());
-        tpl->record_get_op_term_event(completion_event, this);
-      }
-#endif
       ApEvent barrier = Runtime::get_previous_phase(collective.phase_barrier);
       if (!barrier.has_triggered())
       {
@@ -13222,10 +13214,6 @@ namespace Legion {
       PhysicalTraceInfo trace_info;
       if (is_recording())
       {
-#ifdef LEGION_SPY
-        assert(tpl != NULL && tpl->is_recording());
-        tpl->record_get_op_term_event(completion_event, this);
-#endif
         trace_info.recording = true;
         trace_info.op = this;
         trace_info.tpl = tpl;
@@ -13628,7 +13616,6 @@ namespace Legion {
       if (runtime->legion_spy_enabled)
         log_fill_requirement();
 #ifdef LEGION_SPY
-      tpl->register_operation(this);
       LegionSpy::log_replay_operation(unique_op_id);
 #endif
       complete_mapping();
