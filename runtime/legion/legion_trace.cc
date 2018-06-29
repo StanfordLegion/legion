@@ -414,6 +414,7 @@ namespace Legion {
       assert(false);
     }
 
+#ifdef LEGION_SPY
     //--------------------------------------------------------------------------
     void StaticTrace::perform_logging(
                                UniqueID prev_fence_uid, UniqueID curr_fence_uid)
@@ -421,6 +422,7 @@ namespace Legion {
     {
       // TODO: Implement this if someone wants to memoize static traces
     }
+#endif
 
     //--------------------------------------------------------------------------
     const LegionVector<LegionTrace::DependenceRecord>::aligned& 
@@ -911,6 +913,7 @@ namespace Legion {
       aliased_children[index].push_back(AliasChildren(req_index, depth, mask));
     } 
 
+#ifdef LEGION_SPY
     //--------------------------------------------------------------------------
     void DynamicTrace::perform_logging(
                                UniqueID prev_fence_uid, UniqueID curr_fence_uid)
@@ -948,6 +951,7 @@ namespace Legion {
             context_uid, uid, 0, curr_fence_uid, 0, TRUE_DEPENDENCE);
       }
     }
+#endif
 
     //--------------------------------------------------------------------------
     void DynamicTrace::insert_dependence(const DependenceRecord &record)

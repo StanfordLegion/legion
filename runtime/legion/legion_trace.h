@@ -118,10 +118,10 @@ namespace Legion {
     public:
       void invalidate_trace_cache(Operation *invalidator);
       void invalidate_current_template(void);
+#ifdef LEGION_SPY
     public:
       virtual void perform_logging(
                           UniqueID prev_fence_uid, UniqueID curr_fence_uid) = 0;
-#ifdef LEGION_SPY
     public:
       UniqueID get_current_uid_by_index(unsigned op_idx) const;
 #endif
@@ -183,9 +183,11 @@ namespace Legion {
                                     const FieldMask &dependent_mask);
       virtual void record_aliased_children(unsigned req_index, unsigned depth,
                                            const FieldMask &aliased_mask);
+#ifdef LEGION_SPY
     public:
       virtual void perform_logging(
                           UniqueID prev_fence_uid, UniqueID curr_fence_uid);
+#endif
     protected:
       const LegionVector<DependenceRecord>::aligned&
                   translate_dependence_records(Operation *op, unsigned index);
@@ -249,9 +251,11 @@ namespace Legion {
                                     const FieldMask &dependent_mask);
       virtual void record_aliased_children(unsigned req_index, unsigned depth,
                                            const FieldMask &aliased_mask);
+#ifdef LEGION_SPY
     public:
       virtual void perform_logging(
                           UniqueID prev_fence_uid, UniqueID curr_fence_uid);
+#endif
     protected:
       // Insert a normal dependence for the current operation
       void insert_dependence(const DependenceRecord &record);
