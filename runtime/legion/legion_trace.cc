@@ -2708,7 +2708,8 @@ namespace Legion {
     {
       RegionTreeForest *forest = trace->runtime->forest;
 
-      LegionMap<RegionTreeNode*, FieldMask>::aligned covered_fields;
+      typedef std::pair<RegionTreeNode*, PhysicalManager*> DedupKey;
+      LegionMap<DedupKey, FieldMask>::aligned covered_fields;
       std::vector<SummaryOpInfo> summary_ops;
 
       for (int idx = summary_info.size() - 1; idx >= 0; --idx)
@@ -2716,6 +2717,7 @@ namespace Legion {
         const std::pair<RegionRequirement, InstanceSet> &pair =
           summary_info[idx];
         const RegionRequirement &req = pair.first;
+        const InstanceSet &insts = pair.second;
 
         // We do not need to bump the version number for read-only regions.
         // We can also ignore reductions because we reject traces that end with
@@ -2726,54 +2728,67 @@ namespace Legion {
         FieldSpaceNode *field_node = region_node->get_column_source();
         FieldMask fields = field_node->get_field_mask(req.privilege_fields);
 
-        // We only need to consider fields that are not yet analyzed.
-        // If all the fields are covered by the summary operations generated
-        // so far, we simply ignore the region requirement.
-        // We also rememeber whether any of the fields are deduplicated so that
-        // we know later whether we should match the set of fields in the
-        // requirement with those actually summarized.
-        LegionMap<RegionTreeNode*, FieldMask>::aligned::iterator cf_finder =
-          covered_fields.find(region_node);
-        FieldMask uncovered = fields;
-        bool fields_narrowed = false;
-        if (cf_finder == covered_fields.end())
-          covered_fields[region_node] = fields;
-        else
-        {
-          uncovered -= cf_finder->second;
-          if (!uncovered) continue;
-          cf_finder->second |= uncovered;
-          fields_narrowed = !!(fields - uncovered);
-        }
-
         summary_ops.push_back(SummaryOpInfo());
         SummaryOpInfo &summary_op = summary_ops.back();
-        summary_op.requirements.push_back(req);
-        summary_op.parent_indices.push_back(parent_indices[idx]);
-        RegionRequirement &req_copy = summary_op.requirements.back();
-        req_copy.privilege = WRITE_DISCARD;
-        if (fields_narrowed)
+        bool dedup = true;
+        FieldMask all_uncovered;
+        InstanceSet new_insts;
+        for (unsigned iidx = 0; iidx < insts.size(); ++iidx)
         {
-          req_copy.privilege_fields.clear();
-          req_copy.instance_fields.clear();
-          field_node->get_field_set(uncovered, req_copy.privilege_fields);
-          field_node->get_field_set(uncovered, req_copy.instance_fields);
-
-          InstanceSet inst_set;
-          for (unsigned iidx = 0; iidx < pair.second.size(); ++iidx)
+          const InstanceRef &ref = insts[iidx];
+#ifdef DEBUG_LEGION
+          assert(!(ref.get_valid_fields() - fields));
+#endif
+          FieldMask uncovered = fields & ref.get_valid_fields();
+          // We only need to consider fields that are not yet analyzed.
+          // If all the fields are covered by the summary operations generated
+          // so far, we simply ignore the region requirement.
+          // We also rememeber whether any of the fields are deduplicated so that
+          // we know later whether we should match the set of fields in the
+          // requirement with those actually summarized.
+          DedupKey key(region_node, ref.get_manager());
+          LegionMap<DedupKey, FieldMask>::aligned::iterator cf_finder =
+            covered_fields.find(key);
+          bool fields_narrowed = false;
+          if (cf_finder == covered_fields.end())
+            covered_fields[key] = uncovered;
+          else
           {
-            const InstanceRef &ref = pair.second[iidx];
-            FieldMask new_fields = ref.get_valid_fields() & uncovered;
-            if (!new_fields) continue;
-            inst_set.add_instance(InstanceRef(ref.get_manager(), new_fields));
+            FieldMask fields = uncovered;
+            uncovered -= cf_finder->second;
+            if (!uncovered) continue;
+            cf_finder->second |= uncovered;
+            fields_narrowed = !!(fields - uncovered);
+          }
+          all_uncovered |= uncovered;
+
+          dedup = false;
+          if (fields_narrowed)
+            new_insts.add_instance(InstanceRef(ref.get_manager(), uncovered));
+          else
+            new_insts.add_instance(ref);
+        }
+
+        if (!dedup)
+        {
+          summary_op.requirements.push_back(req);
+          summary_op.parent_indices.push_back(parent_indices[idx]);
+          RegionRequirement &req_copy = summary_op.requirements.back();
+          req_copy.privilege = WRITE_DISCARD;
+          if (!!(fields - all_uncovered))
+          {
+            req_copy.privilege_fields.clear();
+            req_copy.instance_fields.clear();
+            field_node->get_field_set(all_uncovered, req_copy.privilege_fields);
+            field_node->get_field_set(all_uncovered, req_copy.instance_fields);
           }
 #ifdef DEBUG_LEGION
-          assert(inst_set.size() > 0);
+          assert(new_insts.size() > 0);
 #endif
-          summary_op.instances.push_back(inst_set);
+          summary_op.instances.push_back(new_insts);
         }
         else
-          summary_op.instances.push_back(pair.second);
+          summary_ops.pop_back();
       }
       std::reverse(summary_ops.begin(), summary_ops.end());
       dedup_summary_ops.swap(summary_ops);
