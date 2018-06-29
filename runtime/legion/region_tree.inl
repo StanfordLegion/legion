@@ -128,7 +128,7 @@ namespace Legion {
       rez.serialize(temp);
       rez.serialize(ready);
       // Record that we are sending this expression remotely
-      context->record_remote_expression(this, target);
+      record_remote_instance(target);
     }
 
     //--------------------------------------------------------------------------
@@ -498,7 +498,7 @@ namespace Legion {
       rez.serialize(realm_index_space);
       rez.serialize(realm_index_space_ready);
       // Record that we are sending this expression remotely
-      context->record_remote_expression(this, target);
+      record_remote_instance(target);
     }
 
     /////////////////////////////////////////////////////////////
@@ -1130,8 +1130,32 @@ namespace Legion {
         REPORT_LEGION_ERROR(ERROR_ILLEGAL_INDEX_SPACE_DELETION,
             "Duplicate deletion of Index Space %d", handle.get_id())
       destroyed = true;
-      if (!parent_operations.empty())
-        context->invalidate_index_space_expression(parent_operations);
+      // Traverse upwards for any parent operations
+      std::vector<IndexSpaceOperation*> parents;
+      {
+        AutoLock n_lock(node_lock,1,false/*exclusive*/);
+        if (!parent_operations.empty())
+        {
+          parents.resize(parent_operations.size());
+          unsigned idx = 0;
+          for (std::set<IndexSpaceOperation*>::const_iterator it = 
+                parent_operations.begin(); it != 
+                parent_operations.end(); it++, idx++)
+          {
+            (*it)->add_reference();
+            parents[idx] = (*it);
+          }
+        }
+      }
+      if (!parents.empty())
+      {
+        context->invalidate_index_space_expression(parents);
+        // Remove any references that we have on the parents
+        for (std::vector<IndexSpaceOperation*>::const_iterator it = 
+              parents.begin(); it != parents.end(); it++)
+          if ((*it)->remove_reference())
+            delete (*it);
+      }
       // If we're not the owner, send a message that we're removing
       // the application reference
       if (!is_owner())

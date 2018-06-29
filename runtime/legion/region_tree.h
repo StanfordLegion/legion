@@ -690,7 +690,7 @@ namespace Legion {
     public:
       // Methods for removing index space expression when they are done
       void invalidate_index_space_expression(
-                            const std::set<IndexSpaceOperation*> &parents);
+                            const std::vector<IndexSpaceOperation*> &parents);
       void remove_union_operation(IndexSpaceOperation *expr, 
                             const std::vector<IndexSpaceExpression*> &exprs);
       void remove_intersection_operation(IndexSpaceOperation *expr, 
@@ -704,8 +704,6 @@ namespace Legion {
       IndexSpaceExpression* find_remote_expression(
               IndexSpaceExprID remote_expr_id);
       void unregister_remote_expression(IndexSpaceExprID remote_expr_id);
-      void record_remote_expression(IndexSpaceExpression *expr,
-                                    AddressSpaceID target);
     public:
       Runtime *const runtime;
     protected:
@@ -756,9 +754,9 @@ namespace Legion {
         IndexSpaceExpression *const proxy_this;
       };
     public:
-      IndexSpaceExpression(void);
-      IndexSpaceExpression(TypeTag tag, Runtime *runtime); 
-      IndexSpaceExpression(TypeTag tag, IndexSpaceExprID id);
+      IndexSpaceExpression(LocalLock &lock);
+      IndexSpaceExpression(TypeTag tag, Runtime *runtime, LocalLock &lock); 
+      IndexSpaceExpression(TypeTag tag, IndexSpaceExprID id, LocalLock &lock);
       virtual ~IndexSpaceExpression(void);
     public:
       virtual ApEvent get_expr_index_space(void *result, TypeTag tag, 
@@ -793,6 +791,8 @@ namespace Legion {
     public:
       const TypeTag type_tag;
       const IndexSpaceExprID expr_id;
+    private:
+      LocalLock &expr_lock;
     protected:
       std::set<IndexSpaceOperation*> parent_operations;
       bool empty, has_empty;
@@ -832,6 +832,8 @@ namespace Legion {
                                                  RegionTreeForest *forest);
     public:
       RegionTreeForest *const context;
+    protected:
+      mutable LocalLock inter_lock;
     private:
       NodeSet remote_instances;
     };
