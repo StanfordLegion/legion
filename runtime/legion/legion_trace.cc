@@ -1440,8 +1440,9 @@ namespace Legion {
 
       if (physical_trace->get_current_template() != NULL)
       {
-        execution_precondition =
-          parent_ctx->get_current_execution_fence_event();
+        if (!fence_registered)
+          execution_precondition =
+            parent_ctx->get_current_execution_fence_event();
         physical_trace->initialize_template(get_completion_event(), recurrent);
         local_trace->set_state_replay();
 #ifdef LEGION_SPY
