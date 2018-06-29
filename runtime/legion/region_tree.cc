@@ -4926,7 +4926,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RegionTreeForest::invalidate_index_space_expression(
-                                  const std::set<IndexSpaceOperation*> &parents)
+                               const std::vector<IndexSpaceOperation*> &parents)
     //--------------------------------------------------------------------------
     {
       // Two phases here: in read-only made figure out the set of operations
@@ -4934,7 +4934,7 @@ namespace Legion {
       std::deque<IndexSpaceOperation*> to_remove;
       {
         AutoLock l_lock(lookup_is_op_lock,1,false/*exclusive*/);
-        for (std::set<IndexSpaceOperation*>::const_iterator it = 
+        for (std::vector<IndexSpaceOperation*>::const_iterator it = 
               parents.begin(); it != parents.end(); it++)
           (*it)->invalidate_operation(to_remove);
       }
@@ -5096,39 +5096,30 @@ namespace Legion {
       remote_expressions.erase(finder);
     }
 
-    //--------------------------------------------------------------------------
-    void RegionTreeForest::record_remote_expression(
-                              IndexSpaceExpression *expr, AddressSpaceID target)
-    //--------------------------------------------------------------------------
-    {
-      // We are just bouncing this off here to use the lock to serialize
-      // access to the node set data structures for the index space expressions
-      AutoLock l_lock(lookup_is_op_lock);
-      expr->record_remote_instance(target);
-    }
-
     /////////////////////////////////////////////////////////////
     // Index Space Expression 
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    IndexSpaceExpression::IndexSpaceExpression(void)
-      : type_tag(0), expr_id(0), has_empty(false)
+    IndexSpaceExpression::IndexSpaceExpression(LocalLock &lock)
+      : type_tag(0), expr_id(0), expr_lock(lock), has_empty(false)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
-    IndexSpaceExpression::IndexSpaceExpression(TypeTag tag, Runtime *rt)
+    IndexSpaceExpression::IndexSpaceExpression(TypeTag tag, Runtime *rt,
+                                               LocalLock &lock)
       : type_tag(tag), expr_id(rt->get_unique_index_space_expr_id()), 
-        has_empty(false)
+        expr_lock(lock), has_empty(false)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
-    IndexSpaceExpression::IndexSpaceExpression(TypeTag tag, IndexSpaceExprID id)
-      : type_tag(tag), expr_id(id), has_empty(false)
+    IndexSpaceExpression::IndexSpaceExpression(TypeTag tag, IndexSpaceExprID id,
+                                               LocalLock &lock)
+      : type_tag(tag), expr_id(id), expr_lock(lock), has_empty(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -5157,6 +5148,7 @@ namespace Legion {
     void IndexSpaceExpression::add_parent_operation(IndexSpaceOperation *op)
     //--------------------------------------------------------------------------
     {
+      AutoLock e_lock(expr_lock);
 #ifdef DEBUG_LEGION
       assert(parent_operations.find(op) == parent_operations.end());
 #endif
@@ -5167,6 +5159,7 @@ namespace Legion {
     void IndexSpaceExpression::remove_parent_operation(IndexSpaceOperation *op)
     //--------------------------------------------------------------------------
     {
+      AutoLock e_lock(expr_lock);
 #ifdef DEBUG_LEGION
       assert(parent_operations.find(op) != parent_operations.end());
 #endif
@@ -5206,7 +5199,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     IntermediateExpression::IntermediateExpression(TypeTag tag,
                                                    RegionTreeForest *ctx)
-      : IndexSpaceExpression(tag, ctx->runtime), context(ctx)
+      : IndexSpaceExpression(tag, ctx->runtime, inter_lock), context(ctx)
     //--------------------------------------------------------------------------
     {
     }
@@ -5214,7 +5207,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     IntermediateExpression::IntermediateExpression(TypeTag tag,
                                      RegionTreeForest *ctx, IndexSpaceExprID id)
-      : IndexSpaceExpression(tag, id), context(ctx)
+      : IndexSpaceExpression(tag, id, inter_lock), context(ctx)
     //--------------------------------------------------------------------------
     {
     }
@@ -5260,7 +5253,7 @@ namespace Legion {
     void IntermediateExpression::record_remote_instance(AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
-      // Lock for synchronization held by caller
+      AutoLock i_lock(inter_lock);
       remote_instances.add(target);
     }
 
@@ -5287,6 +5280,8 @@ namespace Legion {
       : IntermediateExpression(tag, ctx), op_kind(kind), invalidated(0)
     //--------------------------------------------------------------------------
     {
+      // We always keep a reference on ourself until we get invalidated
+      add_expression_reference();
     }
 
     //--------------------------------------------------------------------------
@@ -5302,10 +5297,7 @@ namespace Legion {
     bool IndexSpaceOperation::remove_expression_reference(void)
     //--------------------------------------------------------------------------
     {
-      // Only delete this if we have no references and we've been invalidated
-      if (remove_reference())
-        return (__sync_fetch_and_add(&invalidated, 0) > 0);
-      return false;
+      return remove_reference();
     }
     
     //--------------------------------------------------------------------------
@@ -5319,12 +5311,37 @@ namespace Legion {
         return;
       // Add ourselves to the list if we're here first
       to_remove.push_back(this);
-      // Add an expression reference to prevent us being collected early
-      add_expression_reference();
-      // Then continue up the expression tree
-      for (std::set<IndexSpaceOperation*>::const_iterator it = 
-            parent_operations.begin(); it != parent_operations.end(); it++)
+      // The expression that we added in the constructor flows back in
+      // the 'to_remove' data structure
+      std::vector<IndexSpaceOperation*> parents;
+      {
+        // Have to get a read-only copy of these while holding the lock
+        AutoLock i_lock(inter_lock,1,false/*exclusive*/);
+        // If we don't have any parent operations then we're done
+        if (parent_operations.empty())
+          return;
+        parents.resize(parent_operations.size());
+        unsigned idx = 0;
+        for (std::set<IndexSpaceOperation*>::const_iterator it = 
+              parent_operations.begin(); it != 
+              parent_operations.end(); it++, idx++)
+        {
+          // Add a reference to prevent the parents from being collected
+          // as we're traversing up the tree
+          (*it)->add_reference();
+          parents[idx] = (*it);
+        }
+      }
+      // Now continue up the tree with the parents which we are temporarily
+      // holding a reference to in order to prevent a collection race
+      for (std::vector<IndexSpaceOperation*>::const_iterator it = 
+            parents.begin(); it != parents.end(); it++)
+      {
         (*it)->invalidate_operation(to_remove);
+        // Remove the reference when we're done with the parents
+        if ((*it)->remove_reference())
+          delete (*it);
+      }
     }
 
     /////////////////////////////////////////////////////////////
@@ -5869,7 +5886,7 @@ namespace Legion {
                                    DistributedID did, ApEvent ready)
       : IndexTreeNode(ctx, (par == NULL) ? 0 : par->depth + 1, c,
                       did, get_owner_space(h, ctx->runtime)),
-        IndexSpaceExpression(h.type_tag, ctx->runtime),
+        IndexSpaceExpression(h.type_tag, ctx->runtime, node_lock),
         handle(h), parent(par), index_space_ready(ready), 
         realm_index_space_set(Runtime::create_rt_user_event()), 
         tight_index_space_set(Runtime::create_rt_user_event()),
@@ -5890,7 +5907,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexSpaceNode::IndexSpaceNode(const IndexSpaceNode &rhs)
-      : IndexTreeNode(NULL, 0, 0, 0, 0), handle(IndexSpace::NO_SPACE), 
+      : IndexTreeNode(NULL, 0, 0, 0, 0), 
+        IndexSpaceExpression(node_lock), handle(IndexSpace::NO_SPACE), 
         parent(NULL), index_space_ready(ApEvent::NO_AP_EVENT)
     //--------------------------------------------------------------------------
     {
