@@ -20,6 +20,10 @@
 -- ]
 
 import "regent"
+import "bishop"
+
+mapper
+end
 
 fspace fs
 {
@@ -82,4 +86,4 @@ task main()
     for color in cs do check(q[color], 0) end
   end
 end
-regentlib.start(main)
+regentlib.start(main, bishoplib.make_entry())
