@@ -16,14 +16,18 @@
 -- [
 --   ["pennant.tests/sedovsmall/sedovsmall.pnt",
 --    "-npieces", "1", "-seq_init", "1", "-par_init", "1", "-interior", "0",
+--    "-fflow-spmd", "1", "-fvectorize-unsafe", "1", "-ftrace", "0"],
+--   ["pennant.tests/sedov/sedov.pnt",
+--    "-npieces", "3", "-ll:cpu", "3", "-seq_init", "1", "-par_init", "1", "-interior", "0",
+--    "-absolute", "2e-6", "-relative", "1e-8", "-relative_absolute", "1e-10",
+--    "-fflow-spmd", "1", "-fvectorize-unsafe", "1", "-ftrace", "0"],
+--   ["pennant.tests/leblanc/leblanc.pnt",
+--    "-npieces", "2", "-ll:cpu", "2", "-seq_init", "1", "-par_init", "1", "-interior", "0",
 --    "-fflow-spmd", "1", "-fvectorize-unsafe", "1"],
 --   ["pennant.tests/sedov/sedov.pnt",
 --    "-npieces", "3", "-ll:cpu", "3", "-seq_init", "1", "-par_init", "1", "-interior", "0",
 --    "-absolute", "2e-6", "-relative", "1e-8", "-relative_absolute", "1e-10",
---    "-fflow-spmd", "1", "-fvectorize-unsafe", "1"],
---   ["pennant.tests/leblanc/leblanc.pnt",
---    "-npieces", "2", "-ll:cpu", "2", "-seq_init", "1", "-par_init", "1", "-interior", "0",
---    "-fflow-spmd", "1", "-fvectorize-unsafe", "1"]
+--    "-fflow-spmd", "1", "-fvectorize-unsafe", "1", "-dm:memoize"]
 -- ]
 
 -- Inspired by https://github.com/losalamos/PENNANT
@@ -1799,6 +1803,7 @@ task test()
   __demand(__spmd)
   do
     -- Main Simulation Loop
+    __demand(__trace)
     while continue_simulation(warmup, cycle, cstop, time, tstop) do
       -- if warmup and cycle > 0 then
       --   wait_for(dthydro)
