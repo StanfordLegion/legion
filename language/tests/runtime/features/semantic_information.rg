@@ -26,8 +26,7 @@ local c = regentlib.c
 task attach_info(r : region(ispace(int1d), fs))
 where reads writes(r)
 do
-  var pr = __physical(r)[0]
-  var lr = c.legion_physical_region_get_logical_region(pr)
+  var lr = __raw(r)
   var is = lr.index_space
   var fs = lr.field_space
   var fields = __fields(r)
@@ -50,8 +49,7 @@ end
 task retrieve_info(r : region(ispace(int1d), fs))
 where reads writes(r)
 do
-  var pr = __physical(r)[0]
-  var lr = c.legion_physical_region_get_logical_region(pr)
+  var lr = __raw(r)
   var is = lr.index_space
   var fs = lr.field_space
   var fields = __fields(r)

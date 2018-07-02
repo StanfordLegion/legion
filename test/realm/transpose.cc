@@ -81,9 +81,9 @@ void copy_profiling_task(const void *args, size_t arglen,
 
 static size_t log2_buffer_size = 20; // should be bigger than any cache in system
 
-template <int N>
+template <int N, typename FT>
 void do_single_dim(Memory src_mem, Memory dst_mem, int log2_size,
-		   Processor prof_proc)
+		   Processor prof_proc, int pad = 0)
 {
   std::vector<LayoutPermutation<N> > perms;
   LayoutPermutation<N> scratch;
@@ -97,10 +97,17 @@ void do_single_dim(Memory src_mem, Memory dst_mem, int log2_size,
   }
   IndexSpace<N> is(bounds);
 
+  Rect<N> bounds_pad;
+  for(int i = 0; i < N; i++) {
+    bounds_pad.lo[i] = 0;
+    bounds_pad.hi[i] = (1 << (log2_size / N)) - 1 + 32;
+  }
+  IndexSpace<N> is_pad(bounds_pad);
+
   std::vector<RegionInstance> src_insts, dst_insts;
 
   std::map<FieldID, size_t> field_sizes;
-  field_sizes[0] = sizeof(int);
+  field_sizes[0] = sizeof(FT);
   InstanceLayoutConstraints ilc(field_sizes, 1);
 
   for(typename std::vector<LayoutPermutation<N> >::const_iterator it = perms.begin();
@@ -108,7 +115,7 @@ void do_single_dim(Memory src_mem, Memory dst_mem, int log2_size,
       ++it) {
     // src mem
     {
-      InstanceLayoutGeneric *ilg = InstanceLayoutGeneric::choose_instance_layout(is, ilc, it->dim_order);
+      InstanceLayoutGeneric *ilg = InstanceLayoutGeneric::choose_instance_layout(is_pad, ilc, it->dim_order);
       RegionInstance s_inst;
       Event e = RegionInstance::create_instance(s_inst, src_mem, ilg,
 						ProfilingRequestSet());
@@ -116,7 +123,7 @@ void do_single_dim(Memory src_mem, Memory dst_mem, int log2_size,
       tgt[0].inst = s_inst;
       tgt[0].field_id = 0;
       tgt[0].size = field_sizes[0];
-      int fill_value = 77;
+      FT fill_value = 77;
       e = is.fill(tgt, ProfilingRequestSet(), &fill_value, sizeof(fill_value), e);
       e.wait();
       src_insts.push_back(s_inst);
@@ -132,7 +139,7 @@ void do_single_dim(Memory src_mem, Memory dst_mem, int log2_size,
       tgt[0].inst = d_inst;
       tgt[0].field_id = 0;
       tgt[0].size = field_sizes[0];
-      int fill_value = 88;
+      FT fill_value = 88;
       e = is.fill(tgt, ProfilingRequestSet(), &fill_value, sizeof(fill_value), e);
       e.wait();
       dst_insts.push_back(d_inst);
@@ -209,9 +216,10 @@ void top_level_task(const void *args, size_t arglen,
   Memory m = Machine::MemoryQuery(machine).only_kind(Memory::SYSTEM_MEM).first();
   assert(m.exists());
 
-  do_single_dim<1>(m, m, log2_buffer_size, p);
-  do_single_dim<2>(m, m, log2_buffer_size, p);
-  do_single_dim<3>(m, m, log2_buffer_size, p);
+  typedef int FT;
+  do_single_dim<1, FT>(m, m, log2_buffer_size, p);
+  do_single_dim<2, FT>(m, m, log2_buffer_size, p);
+  do_single_dim<3, FT>(m, m, log2_buffer_size, p);
 }
 
 int main(int argc, char **argv)

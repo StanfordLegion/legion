@@ -1,0 +1,10 @@
+--- a/include/llvm/ADT/IntrusiveRefCntPtr.h    2018-06-26 18:04:09.036217914 -0700
++++ b/include/llvm/ADT/IntrusiveRefCntPtr.h    2018-06-25 15:36:38.688578563 -0700
+@@ -135,6 +135,7 @@
+   template <typename T>
+   class IntrusiveRefCntPtr {
+     T* Obj;
++    template<typename U> friend class IntrusiveRefCntPtr;
+
+   public:
+     typedef T element_type;
