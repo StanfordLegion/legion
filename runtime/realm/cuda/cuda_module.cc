@@ -476,9 +476,9 @@ namespace Realm {
       , notification(_notification)
     {
       if(fill_data_size <= MAX_DIRECT_SIZE) {
-	memcpy(&fill_data.direct, _fill_data, fill_data_size);
+	memcpy(fill_data.direct, _fill_data, fill_data_size);
       } else {
-	fill_data.indirect = malloc(fill_data_size);
+	fill_data.indirect = new char[fill_data_size];
 	assert(fill_data.indirect != 0);
 	memcpy(fill_data.indirect, _fill_data, fill_data_size);
       }
@@ -487,7 +487,7 @@ namespace Realm {
     GPUMemset1D::~GPUMemset1D(void)
     {
       if(fill_data_size > MAX_DIRECT_SIZE)
-	free(fill_data.indirect);
+	delete[] fill_data.indirect;
     }
 
     void GPUMemset1D::execute(GPUStream *stream)
@@ -502,7 +502,7 @@ namespace Realm {
       case 1:
 	{
 	  CHECK_CU( cuMemsetD8Async(CUdeviceptr(dst), 
-				    *reinterpret_cast<const unsigned char *>(&fill_data.direct),
+				    *reinterpret_cast<const unsigned char *>(fill_data.direct),
 				    bytes,
 				    raw_stream) );
 	  break;
@@ -510,7 +510,7 @@ namespace Realm {
       case 2:
 	{
 	  CHECK_CU( cuMemsetD16Async(CUdeviceptr(dst), 
-				     *reinterpret_cast<const unsigned short *>(&fill_data.direct),
+				     *reinterpret_cast<const unsigned short *>(fill_data.direct),
 				     bytes >> 1,
 				     raw_stream) );
 	  break;
@@ -518,16 +518,47 @@ namespace Realm {
       case 4:
 	{
 	  CHECK_CU( cuMemsetD32Async(CUdeviceptr(dst), 
-				     *reinterpret_cast<const unsigned int *>(&fill_data.direct),
+				     *reinterpret_cast<const unsigned int *>(fill_data.direct),
 				     bytes >> 2,
 				     raw_stream) );
 	  break;
 	}
       default:
 	{
-	  log_gpudma.fatal() << "fill data size of " << fill_data_size
-			     << " not yet supported!";
-	  assert(0);
+	  // use strided 2D memsets to deal with larger patterns
+	  size_t elements = bytes / fill_data_size;
+	  const char *srcdata = ((fill_data_size <= MAX_DIRECT_SIZE) ?
+				   fill_data.direct :
+				   fill_data.indirect);
+	  // 16- and 32-bit fills must be aligned on every piece
+	  if((fill_data_size & 3) == 0) {
+	    for(size_t offset = 0; offset < fill_data_size; offset += 4) {
+	      unsigned int val = *reinterpret_cast<const unsigned int *>(srcdata + offset);
+	      CHECK_CU( cuMemsetD2D32Async(CUdeviceptr(dst) + offset,
+					   fill_data_size /*pitch*/,
+					   val,
+					   1 /*width*/, elements /*height*/,
+					   raw_stream) );
+	    }
+	  } else if((fill_data_size & 1) == 0) {
+	    for(size_t offset = 0; offset < fill_data_size; offset += 2) {
+	      unsigned short val = *reinterpret_cast<const unsigned short *>(srcdata + offset);
+	      CHECK_CU( cuMemsetD2D16Async(CUdeviceptr(dst) + offset,
+					   fill_data_size /*pitch*/,
+					   val,
+					   1 /*width*/, elements /*height*/,
+					   raw_stream) );
+	    }
+	  } else {
+	    for(size_t offset = 0; offset < fill_data_size; offset += 1) {
+	      unsigned int val = *(srcdata + offset);
+	      CHECK_CU( cuMemsetD2D8Async(CUdeviceptr(dst) + offset,
+					  fill_data_size /*pitch*/,
+					  val,
+					  1 /*width*/, elements /*height*/,
+					  raw_stream) );
+	    }
+	  }
 	}
       }
       
@@ -554,9 +585,9 @@ namespace Realm {
       , notification(_notification)
     {
       if(fill_data_size <= MAX_DIRECT_SIZE) {
-	memcpy(&fill_data.direct, _fill_data, fill_data_size);
+	memcpy(fill_data.direct, _fill_data, fill_data_size);
       } else {
-	fill_data.indirect = malloc(fill_data_size);
+	fill_data.indirect = new char[fill_data_size];
 	assert(fill_data.indirect != 0);
 	memcpy(fill_data.indirect, _fill_data, fill_data_size);
       }
@@ -565,13 +596,13 @@ namespace Realm {
     GPUMemset2D::~GPUMemset2D(void)
     {
       if(fill_data_size > MAX_DIRECT_SIZE)
-	free(fill_data.indirect);
+	delete[] fill_data.indirect;
     }
 
     void GPUMemset2D::execute(GPUStream *stream)
     {
       DetailedTimer::ScopedPush sp(TIME_COPY);
-      log_gpudma.info("gpu memset 2d: dst=%p dst_odd=%ld bytes=%zd lines=%zd fill_data_size=%zd",
+      log_gpudma.info("gpu memset 2d: dst=%p dst_off=%ld bytes=%zd lines=%zd fill_data_size=%zd",
 		      dst, dst_stride, bytes, lines, fill_data_size);
 
       CUstream raw_stream = stream->get_stream();
@@ -580,7 +611,7 @@ namespace Realm {
       case 1:
 	{
 	  CHECK_CU( cuMemsetD2D8Async(CUdeviceptr(dst), dst_stride,
-				      *reinterpret_cast<const unsigned char *>(&fill_data.direct),
+				      *reinterpret_cast<const unsigned char *>(fill_data.direct),
 				      bytes, lines,
 				      raw_stream) );
 	  break;
@@ -588,7 +619,7 @@ namespace Realm {
       case 2:
 	{
 	  CHECK_CU( cuMemsetD2D16Async(CUdeviceptr(dst), dst_stride,
-				       *reinterpret_cast<const unsigned short *>(&fill_data.direct),
+				       *reinterpret_cast<const unsigned short *>(fill_data.direct),
 				       bytes >> 1, lines,
 				       raw_stream) );
 	  break;
@@ -596,23 +627,57 @@ namespace Realm {
       case 4:
 	{
 	  CHECK_CU( cuMemsetD2D32Async(CUdeviceptr(dst), dst_stride,
-				       *reinterpret_cast<const unsigned int *>(&fill_data.direct),
+				       *reinterpret_cast<const unsigned int *>(fill_data.direct),
 				       bytes >> 2, lines,
 				       raw_stream) );
 	  break;
 	}
       default:
 	{
-	  log_gpudma.fatal() << "fill data size of " << fill_data_size
-			     << " not yet supported!";
-	  assert(0);
+	  // use strided 2D memsets to deal with larger patterns
+	  size_t elements = bytes / fill_data_size;
+	  const char *srcdata = ((fill_data_size <= MAX_DIRECT_SIZE) ?
+				   fill_data.direct :
+				   fill_data.indirect);
+	  // 16- and 32-bit fills must be aligned on every piece
+	  if((fill_data_size & 3) == 0) {
+	    for(size_t offset = 0; offset < fill_data_size; offset += 4) {
+	      unsigned int val = *reinterpret_cast<const unsigned int *>(srcdata + offset);
+	      for(size_t l = 0; l < lines; l++)
+		CHECK_CU( cuMemsetD2D32Async(CUdeviceptr(dst) + offset + (l * dst_stride),
+					     fill_data_size /*pitch*/,
+					     val,
+					     1 /*width*/, elements /*height*/,
+					     raw_stream) );
+	    }
+	  } else if((fill_data_size & 1) == 0) {
+	    for(size_t offset = 0; offset < fill_data_size; offset += 2) {
+	      unsigned short val = *reinterpret_cast<const unsigned short *>(srcdata + offset);
+	      for(size_t l = 0; l < lines; l++)
+		CHECK_CU( cuMemsetD2D16Async(CUdeviceptr(dst) + offset + (l * dst_stride),
+					     fill_data_size /*pitch*/,
+					     val,
+					     1 /*width*/, elements /*height*/,
+					     raw_stream) );
+	    }
+	  } else {
+	    for(size_t offset = 0; offset < fill_data_size; offset += 1) {
+	      unsigned int val = *(srcdata + offset);
+	      for(size_t l = 0; l < lines; l++)
+		CHECK_CU( cuMemsetD2D8Async(CUdeviceptr(dst) + offset + (l * dst_stride),
+					    fill_data_size /*pitch*/,
+					    val,
+					    1 /*width*/, elements /*height*/,
+					    raw_stream) );
+	    }
+	  }
 	}
       }
       
       if(notification)
 	stream->add_notification(notification);
 
-      log_gpudma.info("gpu memset 2d complete: dst=%p dst_odd=%ld bytes=%zd lines=%zd fill_data_size=%zd",
+      log_gpudma.info("gpu memset 2d complete: dst=%p dst_off=%ld bytes=%zd lines=%zd fill_data_size=%zd",
 		      dst, dst_stride, bytes, lines, fill_data_size);
     }
 
