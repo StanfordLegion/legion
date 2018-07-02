@@ -3992,6 +3992,8 @@ namespace Legion {
       if ((__sync_add_and_fetch(&outstanding_profiling_requests, -1) == 0) &&
           profiling_reported.exists())
         Runtime::trigger_event(profiling_reported);
+      if (is_recording())
+        tpl->record_complete_replay(this, copy_complete_event);
       // Mark that we completed mapping
       if (!map_applied_conditions.empty())
         complete_mapping(Runtime::merge_events(map_applied_conditions));
@@ -3999,8 +4001,6 @@ namespace Legion {
         complete_mapping();
       if (!acquired_instances.empty())
         release_acquired_instances(acquired_instances);
-      if (is_recording())
-        tpl->record_complete_replay(this, copy_complete_event);
       // Handle the case for marking when the copy completes
       request_early_complete(copy_complete_event);
       complete_execution(Runtime::protect_event(copy_complete_event));
@@ -8347,6 +8347,8 @@ namespace Legion {
       if ((__sync_add_and_fetch(&outstanding_profiling_requests, -1) == 0) &&
           profiling_reported.exists())
         Runtime::trigger_event(profiling_reported);
+      if (is_recording())
+        tpl->record_complete_replay(this, acquire_complete);
       // Mark that we completed mapping
       if (!map_applied_conditions.empty())
         complete_mapping(Runtime::merge_events(map_applied_conditions));
@@ -8354,8 +8356,6 @@ namespace Legion {
         complete_mapping();
       if (!acquired_instances.empty())
         release_acquired_instances(acquired_instances);
-      if (is_recording())
-        tpl->record_complete_replay(this, acquire_complete);
       request_early_complete(acquire_complete);
       complete_execution(Runtime::protect_event(acquire_complete));
     }
@@ -9050,6 +9050,8 @@ namespace Legion {
       if ((__sync_add_and_fetch(&outstanding_profiling_requests, -1) == 0) &&
           profiling_reported.exists())
         Runtime::trigger_event(profiling_reported);
+      if (is_recording())
+        tpl->record_complete_replay(this, release_complete);
       // Mark that we completed mapping
       if (!map_applied_conditions.empty())
         complete_mapping(Runtime::merge_events(map_applied_conditions));
@@ -9057,8 +9059,6 @@ namespace Legion {
         complete_mapping();
       if (!acquired_instances.empty())
         release_acquired_instances(acquired_instances);
-      if (is_recording())
-        tpl->record_complete_replay(this, release_complete);
       request_early_complete(release_complete);
       complete_execution(Runtime::protect_event(release_complete));
     }

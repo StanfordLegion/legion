@@ -133,7 +133,7 @@ namespace Legion {
       // aliased but non-interfering region requirements. This should
       // be pretty sparse so we'll make it a map
       std::map<unsigned,LegionVector<AliasChildren>::aligned> aliased_children;
-      TracingState state;
+      volatile TracingState state;
       // Pointer to a physical trace
       PhysicalTrace *physical_trace;
       unsigned last_memoized;
@@ -660,7 +660,7 @@ namespace Legion {
                            std::set<unsigned> &users);
     private:
       PhysicalTrace *trace;
-      bool recording;
+      volatile bool recording;
       bool replayable;
       bool has_block;
       mutable LocalLock template_lock;

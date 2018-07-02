@@ -1435,9 +1435,16 @@ namespace Legion {
           if (mapped_event.exists())
             mapped_event.wait();
         }
+#ifdef DEBUG_LEGION
+        assert(!(local_trace->is_recording() || local_trace->is_replaying()));
+#endif
 
         if (physical_trace->get_current_template() == NULL)
           physical_trace->check_template_preconditions();
+#ifdef DEBUG_LEGION
+        assert(physical_trace->get_current_template() == NULL ||
+               !physical_trace->get_current_template()->is_recording());
+#endif
 
         // Register this fence with all previous users in the parent's context
 #ifdef LEGION_SPY
@@ -2266,6 +2273,11 @@ namespace Legion {
     void PhysicalTemplate::finalize(void)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      for (std::map<TraceLocalID, Operation*>::iterator it = operations.begin();
+           it != operations.end(); ++it)
+        assert(it->second->get_mapped_event().has_triggered());
+#endif
       recording = false;
       replayable = check_replayable();
       if (outstanding_gc_events.size() > 0)

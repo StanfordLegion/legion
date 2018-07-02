@@ -3653,6 +3653,22 @@ namespace Legion {
       }
       if (perform_postmap)
         perform_post_mapping();
+
+      if (is_recording())
+      {
+#ifdef DEBUG_LEGION
+        assert(tpl != NULL && tpl->is_recording());
+#endif
+        std::set<ApEvent> ready_events;
+        for (unsigned idx = 0; idx < regions.size(); idx++)
+        {
+          if (!virtual_mapped[idx] && !no_access_regions[idx])
+            physical_instances[idx].update_wait_on_events(ready_events);
+        }
+        ApEvent ready_event = Runtime::merge_events(ready_events);
+        tpl->record_merge_events(ready_event, ready_events, this);
+        tpl->record_complete_replay(this, ready_event);
+      }
     }  
 
     //--------------------------------------------------------------------------
@@ -3865,16 +3881,7 @@ namespace Legion {
           if (!virtual_mapped[idx] && !no_access_regions[idx])
             physical_instances[idx].update_wait_on_events(ready_events);
         }
-        ApEvent ready_event = Runtime::merge_events(ready_events);
-        if (is_recording())
-        {
-#ifdef DEBUG_LEGION
-          assert(tpl != NULL && tpl->is_recording());
-#endif
-          tpl->record_merge_events(ready_event, ready_events, this);
-          tpl->record_complete_replay(this, ready_event);
-        }
-        wait_on_events.insert(ready_event);
+        wait_on_events.insert(Runtime::merge_events(ready_events));
       }
       // Now add get all the other preconditions for the launch
       for (unsigned idx = 0; idx < futures.size(); idx++)
