@@ -421,8 +421,12 @@ function data.map:get(k)
 end
 
 function data.map:put(k, v)
-  self.__keys_by_hash[data.hash(k)] = k
-  self.__values_by_hash[data.hash(k)] = v
+  local kh = data.hash(k)
+  if v == nil then
+    k = nil
+  end
+  self.__keys_by_hash[kh] = k
+  self.__values_by_hash[kh] = v
 end
 
 function data.map:next_item(k)

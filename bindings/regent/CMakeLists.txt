@@ -42,6 +42,11 @@ list(APPEND REGENT_SRC
   bishop_c.h      bishop_c.cc
 )
 
+# Murmur3 hash
+list(APPEND REGENT_SRC
+  murmur_hash3.h  murmur_hash3.cc
+)
+
 add_library(Regent ${REGENT_SRC})
 target_link_libraries(Regent PUBLIC Legion::Legion)
 set_target_properties(Regent PROPERTIES POSITION_INDEPENDENT_CODE ON)

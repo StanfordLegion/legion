@@ -38,6 +38,15 @@ task test_1d()
   for e in r do
     regentlib.assert(e <= r.bounds, "test failed")
   end
+
+  var z, w = unsafe_cast(int1d(int, r), x), unsafe_cast(int1d(int, r), y)
+  a, b, c, d, e, f = z + w, z - y, x * w, z / w, x % w, z % is_bounds
+  regentlib.assert([int](a) == 1, "test failed")
+  regentlib.assert([int](b) == -3, "test failed")
+  regentlib.assert([int](c) == -2, "test failed")
+  regentlib.assert([int](d) == 0, "test failed")
+  regentlib.assert([int](e) == -1, "test failed")
+  regentlib.assert([int](f) == 1, "test failed")
 end
 
 task test_2d()
@@ -60,6 +69,15 @@ task test_2d()
   for e in r do
     regentlib.assert(e <= r.bounds, "test failed")
   end
+
+  var z, w = unsafe_cast(int2d(int, r), x), unsafe_cast(int2d(int, r), y)
+  a, b, c, d, e, f = z + w, z - y, x * w, z / w, x % w, z % is_bounds
+  regentlib.assert(a.x == 1, "test failed")   regentlib.assert(a.y == 1, "test failed")
+  regentlib.assert(b.x == -3, "test failed")  regentlib.assert(b.y == -5, "test failed")
+  regentlib.assert(c.x == -2, "test failed")  regentlib.assert(c.y == -6, "test failed")
+  regentlib.assert(d.x == 0, "test failed")   regentlib.assert(d.y == 0, "test failed")
+  regentlib.assert(e.x == -1, "test failed")  regentlib.assert(e.y == -2, "test failed")
+  regentlib.assert(f.x == 1, "test failed")   regentlib.assert(f.y == 2, "test failed")
 end
 
 task test_3d()
@@ -82,6 +100,15 @@ task test_3d()
   for e in r do
     regentlib.assert(e <= r.bounds, "test failed")
   end
+
+  var z, w = unsafe_cast(int3d(int, r), x), unsafe_cast(int3d(int, r), y)
+  a, b, c, d, e, f = z + w, z - y, x * w, z / w, x % w, z % is_bounds
+  regentlib.assert(a.x == 1, "test failed")   regentlib.assert(a.y == 1, "test failed")  regentlib.assert(a.z == 16, "test failed")
+  regentlib.assert(b.x == -3, "test failed")  regentlib.assert(b.y == -5, "test failed") regentlib.assert(b.z == 8, "test failed")
+  regentlib.assert(c.x == -2, "test failed")  regentlib.assert(c.y == -6, "test failed") regentlib.assert(c.z == 48, "test failed")
+  regentlib.assert(d.x == 0, "test failed")   regentlib.assert(d.y == 0, "test failed")  regentlib.assert(d.z == 3, "test failed")
+  regentlib.assert(e.x == -1, "test failed")  regentlib.assert(e.y == -2, "test failed") regentlib.assert(e.z == 0, "test failed")
+  regentlib.assert(f.x == 1, "test failed")   regentlib.assert(f.y == 2, "test failed")  regentlib.assert(f.z == 5, "test failed")
 end
 
 task main()

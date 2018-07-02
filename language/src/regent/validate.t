@@ -84,206 +84,216 @@ function context:check_variable(node, symbol, expected_type)
   end
 end
 
-local function validate_vars_node(cx)
-  return function(node, continuation)
-    if node:is(ast.typed.expr.ID) then
-      cx:check_variable(node, node.value, node.expr_type)
-
-    elseif node:is(ast.typed.expr.FieldAccess) then
-      -- Field accesses used to autoref pointers. The type checker now
-      -- desugars into a deref and a separate field access.
-      local value_type = std.as_read(node.value.expr_type)
-      if std.is_bounded_type(value_type) and
-        value_type:is_ptr() and
-        not std.get_field(value_type.index_type.base_type, node.field_name)
-      then
-        report.error(node, "expected desugared autoref field access, got " .. tostring(value_type))
-      end
-      continuation(node, true)
-
-    elseif node:is(ast.typed.expr.Constant) or
-      node:is(ast.typed.expr.Function) or
-      node:is(ast.typed.expr.IndexAccess) or
-      node:is(ast.typed.expr.MethodCall) or
-      node:is(ast.typed.expr.Call) or
-      node:is(ast.typed.expr.Cast) or
-      node:is(ast.typed.expr.Ctor) or
-      node:is(ast.typed.expr.CtorListField) or
-      node:is(ast.typed.expr.CtorRecField) or
-      node:is(ast.typed.expr.RawContext) or
-      node:is(ast.typed.expr.RawFields) or
-      node:is(ast.typed.expr.RawPhysical) or
-      node:is(ast.typed.expr.RawRuntime) or
-      node:is(ast.typed.expr.RawValue) or
-      node:is(ast.typed.expr.Isnull) or
-      node:is(ast.typed.expr.Null) or
-      node:is(ast.typed.expr.DynamicCast) or
-      node:is(ast.typed.expr.StaticCast) or
-      node:is(ast.typed.expr.UnsafeCast) or
-      node:is(ast.typed.expr.Ispace) or
-      node:is(ast.typed.expr.Region) or
-      node:is(ast.typed.expr.Partition) or
-      node:is(ast.typed.expr.PartitionEqual) or
-      node:is(ast.typed.expr.PartitionByField) or
-      node:is(ast.typed.expr.Image) or
-      node:is(ast.typed.expr.Preimage) or
-      node:is(ast.typed.expr.CrossProduct) or
-      node:is(ast.typed.expr.CrossProductArray) or
-      node:is(ast.typed.expr.ListSlicePartition) or
-      node:is(ast.typed.expr.ListDuplicatePartition) or
-      node:is(ast.typed.expr.ListSliceCrossProduct) or
-      node:is(ast.typed.expr.ListCrossProduct) or
-      node:is(ast.typed.expr.ListCrossProductComplete) or
-      node:is(ast.typed.expr.ListPhaseBarriers) or
-      node:is(ast.typed.expr.ListInvert) or
-      node:is(ast.typed.expr.ListRange) or
-      node:is(ast.typed.expr.ListIspace) or
-      node:is(ast.typed.expr.ListFromElement) or
-      node:is(ast.typed.expr.PhaseBarrier) or
-      node:is(ast.typed.expr.DynamicCollective) or
-      node:is(ast.typed.expr.DynamicCollectiveGetResult) or
-      node:is(ast.typed.expr.Advance) or
-      node:is(ast.typed.expr.Adjust) or
-      node:is(ast.typed.expr.Arrive) or
-      node:is(ast.typed.expr.Await) or
-      node:is(ast.typed.expr.Copy) or
-      node:is(ast.typed.expr.Fill) or
-      node:is(ast.typed.expr.Acquire) or
-      node:is(ast.typed.expr.Release) or
-      node:is(ast.typed.expr.AttachHDF5) or
-      node:is(ast.typed.expr.DetachHDF5) or
-      node:is(ast.typed.expr.AllocateScratchFields) or
-      node:is(ast.typed.expr.WithScratchFields) or
-      node:is(ast.typed.expr.RegionRoot) or
-      node:is(ast.typed.expr.Condition) or
-      node:is(ast.typed.expr.Unary) or
-      node:is(ast.typed.expr.Binary) or
-      node:is(ast.typed.expr.Deref) or
-      node:is(ast.typed.expr.Future) or
-      node:is(ast.typed.expr.FutureGetResult)
-    then
-      continuation(node, true)
-
-    elseif node:is(ast.typed.stat.If) then
-      continuation(node.cond)
-
-      cx:push_local_scope()
-      continuation(node.then_block)
-      cx:pop_local_scope()
-
-      continuation(node.elseif_blocks)
-
-      cx:push_local_scope()
-      continuation(node.else_block)
-      cx:pop_local_scope()
-
-    elseif node:is(ast.typed.stat.Elseif) or
-      node:is(ast.typed.stat.While)
-    then
-      continuation(node.cond)
-
-      cx:push_local_scope()
-      continuation(node.block)
-      cx:pop_local_scope()
-
-    elseif node:is(ast.typed.stat.ForNum) then
-      continuation(node.values)
-
-      cx:push_local_scope()
-      cx:intern_variable(node, node.symbol)
-      continuation(node.block)
-      cx:pop_local_scope()
-
-    elseif node:is(ast.typed.stat.ForNumVectorized) then
-      continuation(node.values)
-
-      cx:push_local_scope()
-      cx:intern_variable(node, node.symbol)
-      continuation(node.block)
-      cx:pop_local_scope()
-    elseif node:is(ast.typed.stat.ForList) then
-      continuation(node.value)
-
-      cx:push_local_scope()
-      cx:intern_variable(node, node.symbol)
-      continuation(node.block)
-      cx:pop_local_scope()
-
-    elseif node:is(ast.typed.stat.ForListVectorized) then
-      continuation(node.value)
-
-      cx:push_local_scope()
-      cx:intern_variable(node, node.symbol)
-      continuation(node.block)
-      cx:pop_local_scope()
-
-    elseif node:is(ast.typed.stat.Repeat) then
-      cx:push_local_scope()
-      continuation(node.block)
-      continuation(node.until_cond)
-      cx:pop_local_scope()
-
-    elseif node:is(ast.typed.stat.MustEpoch) or
-      node:is(ast.typed.stat.Block)
-    then
-      cx:push_local_scope()
-      continuation(node.block)
-      cx:pop_local_scope()
-
-    elseif node:is(ast.typed.stat.IndexLaunchNum) then
-      continuation(node.values)
-
-      cx:push_local_scope()
-      cx:intern_variable(node, node.symbol)
-      continuation(node.preamble)
-      continuation(node.reduce_lhs)
-      continuation(node.call)
-      cx:pop_local_scope()
-
-    elseif node:is(ast.typed.stat.IndexLaunchList) then
-      continuation(node.value)
-
-      cx:push_local_scope()
-      cx:intern_variable(node, node.symbol)
-      continuation(node.preamble)
-      continuation(node.reduce_lhs)
-      continuation(node.call)
-      cx:pop_local_scope()
-
-    elseif node:is(ast.typed.stat.Var) then
-      continuation(node.value)
-      cx:intern_variable(node, node.symbol)
-      cx:check_variable(node, node.symbol, node.type)
-
-    elseif node:is(ast.typed.stat.VarUnpack) then
-      continuation(node.value)
-      cx:intern_variables(node, node.symbols)
-
-    elseif node:is(ast.typed.stat.Return) or
-      node:is(ast.typed.stat.Break) or
-      node:is(ast.typed.stat.Assignment) or
-      node:is(ast.typed.stat.Reduce) or
-      node:is(ast.typed.stat.Expr) or
-      node:is(ast.typed.stat.RawDelete) or
-      node:is(ast.typed.stat.Fence) or
-      node:is(ast.typed.stat.BeginTrace) or
-      node:is(ast.typed.stat.EndTrace) or
-      node:is(ast.typed.stat.MapRegions) or
-      node:is(ast.typed.stat.UnmapRegions) or
-      node:is(ast.typed.Block) or
-      node:is(ast.location) or
-      node:is(ast.annotation) or
-      node:is(ast.condition_kind) or
-      node:is(ast.disjointness_kind) or
-      node:is(ast.fence_kind)
-    then
-      continuation(node, true)
-
-    else
-      assert(false, "unexpected node type " .. tostring(node:type()))
-    end
-  end
+local function unreachable(node)
+  assert(false, "unreachable")
 end
+
+local continue = function(cx, node, continuation)
+  continuation(node, true)
+end
+
+local function validate_block(cx, node, continuation)
+  cx:push_local_scope()
+  continuation(node.block)
+  cx:pop_local_scope()
+end
+
+local validate_loop = terralib.memoize(
+  function(symbol_field, value_field)
+    return function (cx, node, continuation)
+      if value_field then
+        continuation(node[value_field])
+      end
+
+      cx:push_local_scope()
+      if symbol_field then
+        cx:intern_variable(node, node[symbol_field])
+      end
+      continuation(node.block)
+      cx:pop_local_scope()
+    end
+  end)
+
+local node_vars_are_valid = {
+  -- Expressions:
+  [ast.typed.expr.ID] = function(cx, node, continuation)
+    cx:check_variable(node, node.value, node.expr_type)
+  end,
+
+  [ast.typed.expr.FieldAccess] = function(cx, node, continuation)
+    -- Field accesses used to autoref pointers. The type checker now
+    -- desugars into a deref and a separate field access.
+    local value_type = std.as_read(node.value.expr_type)
+    if std.is_bounded_type(value_type) and
+      value_type:is_ptr() and
+      not std.get_field(value_type.index_type.base_type, node.field_name)
+    then
+      report.error(node, "expected desugared autoref field access, got " .. tostring(value_type))
+    end
+    continuation(node, true)
+  end,
+
+  [ast.typed.expr.Constant]                   = continue,
+  [ast.typed.expr.Function]                   = continue,
+  [ast.typed.expr.IndexAccess]                = continue,
+  [ast.typed.expr.MethodCall]                 = continue,
+  [ast.typed.expr.Call]                       = continue,
+  [ast.typed.expr.Cast]                       = continue,
+  [ast.typed.expr.Ctor]                       = continue,
+  [ast.typed.expr.CtorListField]              = continue,
+  [ast.typed.expr.CtorRecField]               = continue,
+  [ast.typed.expr.RawContext]                 = continue,
+  [ast.typed.expr.RawFields]                  = continue,
+  [ast.typed.expr.RawPhysical]                = continue,
+  [ast.typed.expr.RawRuntime]                 = continue,
+  [ast.typed.expr.RawValue]                   = continue,
+  [ast.typed.expr.Isnull]                     = continue,
+  [ast.typed.expr.Null]                       = continue,
+  [ast.typed.expr.DynamicCast]                = continue,
+  [ast.typed.expr.StaticCast]                 = continue,
+  [ast.typed.expr.UnsafeCast]                 = continue,
+  [ast.typed.expr.Ispace]                     = continue,
+  [ast.typed.expr.Region]                     = continue,
+  [ast.typed.expr.Partition]                  = continue,
+  [ast.typed.expr.PartitionEqual]             = continue,
+  [ast.typed.expr.PartitionByField]           = continue,
+  [ast.typed.expr.Image]                      = continue,
+  [ast.typed.expr.ImageByTask]                = continue,
+  [ast.typed.expr.Preimage]                   = continue,
+  [ast.typed.expr.CrossProduct]               = continue,
+  [ast.typed.expr.CrossProductArray]          = continue,
+  [ast.typed.expr.ListSlicePartition]         = continue,
+  [ast.typed.expr.ListDuplicatePartition]     = continue,
+  [ast.typed.expr.ListSliceCrossProduct]      = continue,
+  [ast.typed.expr.ListCrossProduct]           = continue,
+  [ast.typed.expr.ListCrossProductComplete]   = continue,
+  [ast.typed.expr.ListPhaseBarriers]          = continue,
+  [ast.typed.expr.ListInvert]                 = continue,
+  [ast.typed.expr.ListRange]                  = continue,
+  [ast.typed.expr.ListIspace]                 = continue,
+  [ast.typed.expr.ListFromElement]            = continue,
+  [ast.typed.expr.PhaseBarrier]               = continue,
+  [ast.typed.expr.DynamicCollective]          = continue,
+  [ast.typed.expr.DynamicCollectiveGetResult] = continue,
+  [ast.typed.expr.Advance]                    = continue,
+  [ast.typed.expr.Adjust]                     = continue,
+  [ast.typed.expr.Arrive]                     = continue,
+  [ast.typed.expr.Await]                      = continue,
+  [ast.typed.expr.Copy]                       = continue,
+  [ast.typed.expr.Fill]                       = continue,
+  [ast.typed.expr.Acquire]                    = continue,
+  [ast.typed.expr.Release]                    = continue,
+  [ast.typed.expr.AttachHDF5]                 = continue,
+  [ast.typed.expr.DetachHDF5]                 = continue,
+  [ast.typed.expr.AllocateScratchFields]      = continue,
+  [ast.typed.expr.WithScratchFields]          = continue,
+  [ast.typed.expr.RegionRoot]                 = continue,
+  [ast.typed.expr.Condition]                  = continue,
+  [ast.typed.expr.Unary]                      = continue,
+  [ast.typed.expr.Binary]                     = continue,
+  [ast.typed.expr.Deref]                      = continue,
+  [ast.typed.expr.Future]                     = continue,
+  [ast.typed.expr.FutureGetResult]            = continue,
+  [ast.typed.expr.ParallelizerConstraint]     = continue,
+
+  [ast.typed.expr.Internal]                   = unreachable,
+
+  -- Statements:
+  [ast.typed.stat.If] = function(cx, node, continuation)
+    continuation(node.cond)
+
+    cx:push_local_scope()
+    continuation(node.then_block)
+    cx:pop_local_scope()
+
+    continuation(node.elseif_blocks)
+
+    cx:push_local_scope()
+    continuation(node.else_block)
+    cx:pop_local_scope()
+  end,
+
+  [ast.typed.stat.Elseif] = validate_loop(nil, "cond"),
+  [ast.typed.stat.While] = validate_loop(nil, "cond"),
+
+  [ast.typed.stat.ForNum] = validate_loop("symbol", "values"),
+
+  [ast.typed.stat.ForNumVectorized] = validate_loop("symbol", "values"),
+
+  [ast.typed.stat.ForList] = validate_loop("symbol", "value"),
+
+  [ast.typed.stat.ForListVectorized] = validate_loop("symbol", "value"),
+
+  [ast.typed.stat.Repeat] = function(cx, node, continuation)
+    cx:push_local_scope()
+    continuation(node.block)
+    continuation(node.until_cond)
+    cx:pop_local_scope()
+  end,
+
+  [ast.typed.stat.MustEpoch] = validate_block,
+  [ast.typed.stat.Block] = validate_block,
+
+  [ast.typed.stat.IndexLaunchNum] = function(cx, node, continuation)
+    continuation(node.values)
+
+    cx:push_local_scope()
+    cx:intern_variable(node, node.symbol)
+    continuation(node.preamble)
+    continuation(node.reduce_lhs)
+    continuation(node.call)
+    cx:pop_local_scope()
+  end,
+
+  [ast.typed.stat.IndexLaunchList] = function(cx, node, continuation)
+    continuation(node.value)
+
+    cx:push_local_scope()
+    cx:intern_variable(node, node.symbol)
+    continuation(node.preamble)
+    continuation(node.reduce_lhs)
+    continuation(node.call)
+    cx:pop_local_scope()
+  end,
+
+  [ast.typed.stat.Var] = function(cx, node, continuation)
+    continuation(node.value)
+    cx:intern_variable(node, node.symbol)
+    cx:check_variable(node, node.symbol, node.type)
+  end,
+
+  [ast.typed.stat.VarUnpack] = function(cx, node, continuation)
+    continuation(node.value)
+    cx:intern_variables(node, node.symbols)
+  end,
+
+  [ast.typed.stat.Return]          = continue,
+  [ast.typed.stat.Break]           = continue,
+  [ast.typed.stat.Assignment]      = continue,
+  [ast.typed.stat.Reduce]          = continue,
+  [ast.typed.stat.Expr]            = continue,
+  [ast.typed.stat.RawDelete]       = continue,
+  [ast.typed.stat.Fence]           = continue,
+  [ast.typed.stat.ParallelizeWith] = continue,
+  [ast.typed.stat.BeginTrace]      = continue,
+  [ast.typed.stat.EndTrace]        = continue,
+  [ast.typed.stat.MapRegions]      = continue,
+  [ast.typed.stat.UnmapRegions]    = continue,
+
+  [ast.typed.stat.Internal]        = unreachable,
+
+  -- Miscellaneous:
+  [ast.typed.Block]       = continue,
+  [ast.location]          = continue,
+  [ast.annotation]        = continue,
+  [ast.condition_kind]    = continue,
+  [ast.disjointness_kind] = continue,
+  [ast.fence_kind]        = continue,
+}
+
+local validate_vars_node = ast.make_single_dispatch(
+  node_vars_are_valid,
+  {ast.typed.expr, ast.typed.stat})
 
 local function validate_variables(cx, node)
   ast.traverse_node_continuation(validate_vars_node(cx), node)

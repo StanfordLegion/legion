@@ -52,7 +52,10 @@ function ast_node:__newindex(field, value)
   error(node_type .. " has no field '" .. field .. "' (in assignment)", 2)
 end
 
-ast_node.hash = false -- Don't blow up inside a data.newmap()
+function ast_node:hash()
+  local hash_value = "__ast_node_#" .. tostring(self.node_id)
+  return hash_value
+end
 
 function ast.is_node(node)
   return type(node) == "table" and getmetatable(node) == ast_node
@@ -83,7 +86,7 @@ local function ast_node_tostring(node, indent, hide)
     end
     local str = tostring(node.node_type) .. "(" .. newline
     for k, v in pairs(node) do
-      if k ~= "node_type" then
+      if k ~= "node_type" and (not hide or k ~= "node_id") then
         local vstr = ast_node_tostring(v, indent + 1, hide)
         if vstr then
           str = str .. spaces1 .. k .. " = " .. vstr .. "," .. newline
@@ -138,7 +141,7 @@ end
 function ast_node:get_fields()
   local result = {}
   for k, v in pairs(self) do
-    if k ~= "node_type" then
+    if k ~= "node_type" and k ~= "node_id" then
       result[k] = v
     end
   end
@@ -188,6 +191,8 @@ function ast_ctor:set_print_custom(thunk)
   return self
 end
 
+do
+local next_ast_node_id = 0
 function ast_ctor:__call(node)
   assert(type(node) == "table", tostring(self) .. " expected table")
 
@@ -202,6 +207,7 @@ function ast_ctor:__call(node)
       copy[k] = v
     end
     copy["node_type"] = nil
+    copy["node_id"] = nil
     result = copy
   end
 
@@ -219,6 +225,11 @@ function ast_ctor:__call(node)
 
   -- Prepare the result to be returned.
   rawset(result, "node_type", self)
+
+  local id = next_ast_node_id
+  next_ast_node_id = next_ast_node_id + 1
+  rawset(result, "node_id", id)
+
   setmetatable(result, ast_node)
 
   if self.memoize_cache then
@@ -241,6 +252,7 @@ function ast_ctor:__call(node)
   end
 
   return result
+end
 end
 
 function ast_ctor:__tostring()
@@ -419,7 +431,7 @@ function ast.map_node_continuation(fn, node)
       elseif continuing then
         local tmp = {}
         for k, child in pairs(node) do
-          if k ~= "node_type" then
+          if k ~= "node_type" and k ~= "node_id" then
             tmp[k] = continuation(child)
           end
         end
@@ -454,7 +466,7 @@ function ast.traverse_node_prepostorder(pre_fn, post_fn, node)
   if ast.is_node(node) then
     pre_fn(node)
     for k, child in pairs(node) do
-      if k ~= "node_type" then
+      if k ~= "node_type" and k ~= "node_id" then
         ast.traverse_node_prepostorder(pre_fn, post_fn, child)
       end
     end
@@ -470,7 +482,7 @@ function ast.map_node_postorder(fn, node)
   if ast.is_node(node) then
     local tmp = {}
     for k, child in pairs(node) do
-      if k ~= "node_type" then
+      if k ~= "node_type" and k ~= "node_id" then
         tmp[k] = ast.map_node_postorder(fn, child)
       end
     end
@@ -490,7 +502,7 @@ function ast.map_node_prepostorder(pre_fn, post_fn, node)
     local new_node = pre_fn(node)
     local tmp = {}
     for k, child in pairs(new_node) do
-      if k ~= "node_type" then
+      if k ~= "node_type" and k ~= "node_id" then
         tmp[k] = ast.map_node_prepostorder(pre_fn, post_fn, child)
       end
     end

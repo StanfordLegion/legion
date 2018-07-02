@@ -176,14 +176,20 @@ def precompile_regent(tests, flags, launcher, root_dir, env, thread_count):
 
 def run_test_legion_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
     flags = ['-logfile', 'out_%.log']
+    if env['USE_CUDA'] == '1':
+        flags.extend(['-ll:gpu', '1'])
     run_cxx(legion_cxx_tests, flags, launcher, root_dir, bin_dir, env, thread_count)
 
 def run_test_legion_gasnet_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
     flags = ['-logfile', 'out_%.log']
+    if env['USE_CUDA'] == '1':
+        flags.extend(['-ll:gpu', '1'])
     run_cxx(legion_gasnet_cxx_tests, flags, launcher, root_dir, bin_dir, env, thread_count)
 
 def run_test_legion_openmp_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
     flags = ['-logfile', 'out_%.log']
+    if env['USE_CUDA'] == '1':
+        flags.extend(['-ll:gpu', '1'])
     run_cxx(legion_openmp_cxx_tests, flags, launcher, root_dir, bin_dir, env, thread_count)
 
 def run_test_legion_python_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
@@ -198,6 +204,8 @@ def run_test_legion_python_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread
 
 def run_test_legion_hdf_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
     flags = ['-logfile', 'out_%.log']
+    if env['USE_CUDA'] == '1':
+        flags.extend(['-ll:gpu', '1'])
     run_cxx(legion_hdf_cxx_tests, flags, launcher, root_dir, bin_dir, env, thread_count)
 
 def run_test_fuzzer(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
@@ -269,6 +277,15 @@ def run_test_external(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
     ])
     cmd(['make', '-C', os.path.join(soleil_dir, 'src')], env=soleil_env)
     # FIXME: Actually run it
+
+    # TaskAMR
+    # Contact: Jonathan Graham <jgraham@lanl.gov>
+    task_amr_dir = os.path.join(tmp_dir, 'task_amr')
+    cmd(['git', 'clone', 'https://github.com/lanl/TaskAMR.git', task_amr_dir])
+    task_amr_env = dict(list(env.items()) + [
+        ('LEGION_ROOT', root_dir),
+    ])
+    cmd(['make', '-C', os.path.join(task_amr_dir)], env=task_amr_env)
 
 def run_test_private(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
     flags = ['-logfile', 'out_%.log']
@@ -692,6 +709,7 @@ def run_tests(test_modules=None,
         ('USE_GASNET', '1' if use_gasnet else '0'),
         ('TEST_GASNET', '1' if use_gasnet else '0'),
         ('USE_CUDA', '1' if use_cuda else '0'),
+        ('TEST_CUDA', '1' if use_cuda else '0'),
         ('USE_OPENMP', '1' if use_openmp else '0'),
         ('TEST_OPENMP', '1' if use_openmp else '0'),
         ('USE_PYTHON', '1' if use_python else '0'),

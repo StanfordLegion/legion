@@ -959,10 +959,9 @@ namespace Legion {
       virtual UniqueID get_unique_id(void) const;
       virtual unsigned get_context_index(void) const;
       virtual int get_depth(void) const;
-      virtual const ProjectionInfo* get_projection_info(unsigned idx, bool src);
+      virtual const ProjectionInfo* get_projection_info(unsigned idx);
     protected:
-      void check_copy_privilege(const RegionRequirement &req, 
-                                unsigned idx, bool src,
+      void check_copy_privilege(const RegionRequirement &req, unsigned idx,
                                 bool permit_projection = false);
       void compute_parent_indexes(void);
     public:
@@ -977,8 +976,8 @@ namespace Legion {
       int perform_conversion(unsigned idx, const RegionRequirement &req,
                              std::vector<MappingInstance> &output,
                              InstanceSet &targets, bool is_reduce = false);
-      inline void set_mapping_state(unsigned idx, bool is_src) 
-        { current_index = idx; current_src = is_src; }
+      inline void set_mapping_state(unsigned idx) 
+        { current_index = idx; }
       virtual void add_copy_profiling_request(
                                       Realm::ProfilingRequestSet &reqeusts);
       virtual void handle_profiling_response(
@@ -992,10 +991,18 @@ namespace Legion {
       std::vector<VersionInfo>    dst_versions;
       std::vector<RestrictInfo>   src_restrict_infos;
       std::vector<RestrictInfo>   dst_restrict_infos;
+    public: // These are only used for indirect copies
+      std::vector<RegionTreePath> gather_privilege_paths;
+      std::vector<RegionTreePath> scatter_privilege_paths;
+      std::vector<unsigned>       gather_parent_indexes;
+      std::vector<unsigned>       scatter_parent_indexes;
+      std::vector<VersionInfo>    gather_versions;
+      std::vector<VersionInfo>    scatter_versions;
+      std::vector<RestrictInfo>   gather_restrict_infos;
+      std::vector<RestrictInfo>   scatter_restrict_infos;
     protected: // for support with mapping
       MapperManager*              mapper;
       unsigned                    current_index;
-      bool                        current_src;
     protected:
       std::map<PhysicalManager*,std::pair<unsigned,bool> > acquired_instances;
       std::vector<std::map<Reservation,bool> > atomic_locks;
@@ -1044,12 +1051,14 @@ namespace Legion {
       void check_point_requirements(void);
 #endif
     public:
-      virtual const ProjectionInfo* get_projection_info(unsigned idx, bool src);
+      virtual const ProjectionInfo* get_projection_info(unsigned idx);
     public:
       IndexSpace                    launch_space;
     public:
       std::vector<ProjectionInfo>   src_projection_infos;
       std::vector<ProjectionInfo>   dst_projection_infos;
+      std::vector<ProjectionInfo>   gather_projection_infos;
+      std::vector<ProjectionInfo>   scatter_projection_infos;
     protected:
       std::vector<PointCopyOp*>     points;
       unsigned                      points_committed;
@@ -1094,7 +1103,7 @@ namespace Legion {
       virtual const DomainPoint& get_domain_point(void) const;
       virtual void set_projection_result(unsigned idx,LogicalRegion result);
     public:
-      virtual const ProjectionInfo* get_projection_info(unsigned idx, bool src);
+      virtual const ProjectionInfo* get_projection_info(unsigned idx);
     protected:
       IndexCopyOp*              owner;
     };

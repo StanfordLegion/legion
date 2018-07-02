@@ -7340,6 +7340,7 @@ namespace Legion {
         {
           Serializer rez;
           {
+            RezCheck z(rez);
             rez.serialize(handle);
             rez.serialize(tag);
             rez.serialize(can_fail);
@@ -8657,7 +8658,8 @@ namespace Legion {
       if (layout == NULL)
       {
         LayoutConstraints *layout_constraints = 
-          context->runtime->register_layout(handle, constraints);
+          context->runtime->register_layout(handle, 
+                                            constraints, true/*internal*/);
         layout = create_layout_description(file_mask, total_dims,
                                            layout_constraints,
                                            mask_index_map, field_set,

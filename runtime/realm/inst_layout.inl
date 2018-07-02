@@ -515,6 +515,15 @@ namespace Realm {
     return *this;
   }
 
+  template <typename FT>
+  inline AccessorRefHelper<FT>& AccessorRefHelper<FT>::operator=(
+                                  const AccessorRefHelper<FT>& rhs)
+  {
+    const FT newval = rhs; 
+    inst.write_untyped(offset, &newval, sizeof(FT));
+    return *this;
+  }
+
 
   ////////////////////////////////////////////////////////////////////////
   //

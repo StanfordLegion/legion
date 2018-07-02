@@ -1443,7 +1443,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       pause_mapper_call(ctx);
-      LayoutConstraints *cons = runtime->register_layout(handle, constraints);
+      LayoutConstraints *cons = 
+        runtime->register_layout(handle, constraints, false/*internal*/);
       resume_mapper_call(ctx);
       return cons->layout_id;
     }

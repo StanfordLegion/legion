@@ -1531,7 +1531,10 @@ end
 function std.generate_arithmetic_metamethods(ty)
   local methods = {}
   for method, _ in pairs(arithmetic_combinators) do
-    methods[method] = std.generate_arithmetic_metamethod(ty, method)
+    local f =  std.generate_arithmetic_metamethod(ty, method)
+    f:setname(method .. "_" .. tostring(ty))
+    methods[method] = f
+
   end
   return methods
 end
@@ -1539,20 +1542,31 @@ end
 function std.generate_arithmetic_metamethods_for_bounded_type(ty)
   local methods = {}
   for method, _ in pairs(arithmetic_combinators) do
-    methods[method] = terralib.overloadedfunction(
-      method,
-      {
-        terra(a : ty, b : ty) : ty.index_type
-          return [generate_arithmetic_metamethod_body(ty.index_type, method, `(a.__ptr), `(b.__ptr))]
-        end,
-        terra(a : ty, b : ty.index_type) : ty.index_type
-          return [generate_arithmetic_metamethod_body(ty.index_type, method, `(a.__ptr), b)]
-        end,
-        terra(a : ty.index_type, b : ty) : ty.index_type
-          return [generate_arithmetic_metamethod_body(ty.index_type, method, a, `(b.__ptr))]
-        end
-      }
-    )
+    local prefix = method .. "_" .. tostring(ty)
+    local overload1 =
+      terra(a : ty, b : ty) : ty.index_type
+        return [generate_arithmetic_metamethod_body(ty.index_type, method, `(a.__ptr), `(b.__ptr))]
+      end
+    local overload2 =
+      terra(a : ty, b : ty.index_type) : ty.index_type
+        return [generate_arithmetic_metamethod_body(ty.index_type, method, `(a.__ptr), b)]
+      end
+    local overload3 =
+      terra(a : ty.index_type, b : ty) : ty.index_type
+        return [generate_arithmetic_metamethod_body(ty.index_type, method, a, `(b.__ptr))]
+      end
+    overload1:setname(prefix .. "_1")
+    overload2:setname(prefix .. "_2")
+    overload3:setname(prefix .. "_3")
+    local tbl = { overload1, overload2, overload3 }
+    if method == "__mod" and not ty.index_type:is_opaque() then
+      local mod_with_rect = terra(a : ty, b : std.rect_type(ty.index_type)) : ty
+        return [ty] { __ptr = a.__ptr % b }
+      end
+      mod_with_rect:setname("__mod_with_rect" .. "_" .. tostring(ty))
+      tbl[#tbl + 1] = mod_with_rect
+    end
+    methods[method] = terralib.overloadedfunction(method, tbl)
   end
   return methods
 end
@@ -1691,7 +1705,7 @@ local bounded_type = terralib.memoize(function(index_type, ...)
   if #bounds > 1 then
     -- Find the smallest bitmask that will fit.
     -- TODO: Would be nice to compress smaller than one byte.
-   local bitmask_type
+    local bitmask_type
     if terralib.llvmversion >= 38 then
       if #bounds <= bit.lshift(1, 8) then
         bitmask_type = uint8
@@ -1786,15 +1800,6 @@ local bounded_type = terralib.memoize(function(index_type, ...)
     assert(false)
   end
 
-  -- Important: This has to downgrade the type, because arithmetic
-  -- isn't guarranteed to stay within bounds.
-  for method_name, method in pairs(std.generate_arithmetic_metamethods_for_bounded_type(st)) do
-    st.metamethods[method_name] = method
-  end
-  for method_name, method in pairs(std.generate_conditional_metamethods_for_bounded_type(st)) do
-    st.metamethods[method_name] = method
-  end
-
   terra st:to_point()
     return ([index_type](@self)):to_point()
   end
@@ -1833,6 +1838,15 @@ local bounded_type = terralib.memoize(function(index_type, ...)
         return tostring(self.index_type) .. "(" .. tostring(bounds:mkstring(", ")) .. ")"
       end
     end
+  end
+
+  -- Important: This has to downgrade the type, because arithmetic
+  -- isn't guarranteed to stay within bounds.
+  for method_name, method in pairs(std.generate_arithmetic_metamethods_for_bounded_type(st)) do
+    st.metamethods[method_name] = method
+  end
+  for method_name, method in pairs(std.generate_conditional_metamethods_for_bounded_type(st)) do
+    st.metamethods[method_name] = method
   end
 
   return st
@@ -2100,14 +2114,13 @@ function std.index_type(base_type, displayname)
     st.metamethods[method_name] = method
   end
   if not st:is_opaque() then
-    st.metamethods.__mod = terralib.overloadedfunction(
-      "__mod", {
-        st.metamethods.__mod,
-        terra(a : st, b : std.rect_type(st)) : st
-          var sz = b:size()
-          return (a + sz) % sz
-        end
-      })
+    local mod_with_rect = terra(a : st, b : std.rect_type(st)) : st
+      var sz = b:size()
+      return (a + sz) % sz
+    end
+    mod_with_rect:setname("__mod_with_rect" .. "_" .. tostring(st))
+    st.metamethods.__mod =
+      terralib.overloadedfunction("__mod", { st.metamethods.__mod, mod_with_rect })
   end
 
   -- Makes a Terra function that performs an operation element-wise on two
@@ -2584,14 +2597,21 @@ std.vptr = terralib.memoize(function(width, points_to_type, ...)
   if #bounds > 1 then
     -- Find the smallest bitmask that will fit.
     -- TODO: Would be nice to compress smaller than one byte.
-    if #bounds < bit.lshift(1, 8) - 1 and terralib.llvmversion >= 38 then
-      bitmask_type = vector(uint8, width)
-    elseif #bounds < bit.lshift(1, 16) - 1 then
-      bitmask_type = vector(uint16, width)
-    elseif #bounds < bit.lshift(1, 32) - 1 then
-      bitmask_type = vector(uint32, width)
+    if terralib.llvmversion >= 38 then
+      if #bounds <= bit.lshift(1, 8) then
+        bitmask_type = vector(uint8, width)
+      elseif #bounds <= bit.lshift(1, 16) then
+        bitmask_type = vector(uint16, width)
+      -- XXX: What we really want here is bit.lshift(1ULL, 32),
+      --      which is supported only in LuaJIT 2.1 or higher
+      elseif #bounds <= bit.lshift(1, 30) then
+        bitmask_type = vector(uint32, width)
+      else
+        assert(false) -- really?
+      end
     else
-      assert(false) -- really?
+      assert(#bounds <= bit.lshift(1, 30))
+      bitmask_type = vector(uint32, width)
     end
     st.entries:insert({ "__index", bitmask_type })
   end
@@ -3655,15 +3675,102 @@ terra Pipe:read_string() : &int8
   return str
 end
 
+
+local terra checksum_murmur3(llvm_bitcode: &int8) : &int8
+  var len = c.strlen(llvm_bitcode)
+  var output: uint64[2]
+  c.murmur_hash3_128(llvm_bitcode, len, 0, &(output[0]))
+  -- convert to string of hex values
+  var hex = [&int8](c.malloc(33))
+  c.sprintf(&(hex[0]), "%016lx%016lx", output[0], output[1])
+  return hex
+end
+
+local function incremental_compile_tasks()
+  local pclog = log.make_logger('incr_compile')
+  local objfiles = terralib.newlist()
+  local task_wrappers = {}
+
+  local cache_regent_dir
+  do
+    local home_dir = os.getenv('HOME')
+    local cache_dir = home_dir .. "/.cache"
+    cache_regent_dir = cache_dir .. "/regent"
+
+    -- Attempt to create the cache directory. If this fails, ignore
+    -- it. We'll catch the failure in the next step. It would be pointless
+    -- to try to check if the directory exists first because there would be
+    -- a race condition on its use regardless.
+    c.mkdir(cache_dir, 0x1c0) -- 0700 in octal, but Lua doesn't support octal
+    c.mkdir(cache_regent_dir, 0x1c0)
+  end
+
+  for _, variant in ipairs(variants) do
+    local exports = { [variant:wrapper_name()] = variant:make_wrapper() }
+    local checksum_m
+    do
+      local llvm_bitcode = terralib.saveobj(nil, "llvmir", exports, nil, nil, false)
+      local raw_checksum_m = checksum_murmur3(llvm_bitcode)
+      checksum_m = ffi.string(raw_checksum_m)
+      c.free(raw_checksum_m)
+    end
+
+    local cache_filename = cache_regent_dir .. "/" .. checksum_m .. ".o"
+
+    if c.access(cache_filename, c.F_OK) == -1 then
+      -- If object file doesn't exist then create it.
+      pclog:info('cached file does NOT exist '  .. cache_filename .. ': task = ' .. variant.definition:getname())
+
+      -- Save to a temporary file first. This is important to avoid race
+      -- conditions in case multiple compilations are proceeding concurrently.
+      local objtmp = os.tmpname()
+      terralib.saveobj(objtmp, "object", exports)
+
+      -- Now attempt to move the object file into place. Note: This is atomic,
+      -- so we don't need to worry about races.
+      local ok, err = os.rename(objtmp, cache_filename)
+      if ok == nil then
+        assert(false, err)
+      end
+    else
+      -- Otherwise do nothing (will automatically reuse the cached object file).
+      pclog:info('cached file does exist '  .. cache_filename .. ' : task = ' .. variant.definition:getname())
+    end
+
+    objfiles:insert(cache_filename)
+  end
+
+  -- Declare all task wrappers using a (fake) header file, so the compiler will
+  -- expect them to be linked-in later.
+  local header = [[
+#include "legion.h"
+#include "legion_terra.h"
+#include "legion_terra_partitions.h"
+]] ..
+  table.concat(
+    variants:map(function(variant) return variant:wrapper_sig() .. '\n' end)
+  )
+  task_wrappers = terralib.includecstring(header)
+  return objfiles,task_wrappers
+end
+
 local function compile_tasks_in_parallel()
   -- Force codegen; the main process will need to codegen later anyway, so we
   -- might as well do it now and not duplicate the work on the children.
-  for _,variant in ipairs(variants) do
-    variant.task:complete()
-  end
+
+  profile('task:complete', nil, function()
+    for _, variant in ipairs(variants) do
+      variant.task:complete()
+    end
+  end)()
 
   -- Don't spawn extra processes if jobs == 1.
   local num_slaves = math.max(tonumber(std.config["jobs"]) or 1, 1)
+
+  if std.config["incr-comp"] then
+    return profile('incremental_compile', nil, incremental_compile_tasks)()
+  end
+
   if num_slaves == 1 then
     return terralib.newlist(), make_task_wrappers()
   end
@@ -3704,6 +3811,7 @@ local function compile_tasks_in_parallel()
                    tostring(variant) .. ' to file ' .. filename)
         local exports = {}
         exports[variant:wrapper_name()] = variant:make_wrapper()
+
         profile('compile', variant, function()
           terralib.saveobj(filename, 'object', exports)
         end)()
@@ -3763,7 +3871,10 @@ local function compile_tasks_in_parallel()
 end
 
 function std.start(main_task, extra_setup_thunk)
-  if std.config["pretty"] then os.exit() end
+  if std.config["pretty"] then
+    profile.print_summary()
+    os.exit()
+  end
 
   assert(std.is_task(main_task))
   local objfiles,task_wrappers = compile_tasks_in_parallel()
@@ -3811,12 +3922,38 @@ function std.start(main_task, extra_setup_thunk)
   wrapper()
 end
 
+local function infer_filetype(filename)
+  if filename:match("%.o$") then
+    return "object"
+  elseif filename:match("%.bc$") then
+    return "bitcode"
+  elseif filename:match("%.ll$") then
+    return "llvmir"
+  elseif filename:match("%.so$") or filename:match("%.dylib$") or filename:match("%.dll$") then
+    return "sharedlibrary"
+  elseif filename:match("%.s") then
+    return "asm"
+  else
+    return "executable"
+  end
+end
+
 function std.saveobj(main_task, filename, filetype, extra_setup_thunk, link_flags)
   assert(std.is_task(main_task))
-  local flags = terralib.newlist()
+  filetype = filetype or infer_filetype(filename)
+  assert(not link_flags or filetype == 'sharedlibrary' or filetype == 'executable',
+         'Link flags are ignored unless saving to shared library or executable')
+
   local objfiles,task_wrappers = compile_tasks_in_parallel()
-  flags:insertall(objfiles)
+  if #objfiles > 0 then
+    assert(filetype == "object" or filetype == "executable",
+           'Parallel compilation only supported for object or executable output')
+  end
+
   local main, names = std.setup(main_task, extra_setup_thunk, task_wrappers)
+
+  local flags = terralib.newlist()
+  flags:insertall(objfiles)
   local use_cmake = os.getenv("USE_CMAKE") == "1"
   local lib_dir = os.getenv("LG_RT_DIR") .. "/../bindings/regent"
   if use_cmake then
@@ -3840,11 +3977,25 @@ function std.saveobj(main_task, filename, filetype, extra_setup_thunk, link_flag
   if use_cmake then
     flags:insertall({"-llegion", "-lrealm"})
   end
+
   profile('compile', nil, function()
-    if filetype ~= nil then
-      terralib.saveobj(filename, filetype, names, flags)
+    if #objfiles > 0 and filetype == 'object' then
+      -- Terra will not read the link flags in this case, to collect the code
+      -- that was compiled on different processes, so we have to combine all
+      -- the object files manually.
+      local mainobj = os.tmpname()
+      terralib.saveobj(mainobj, 'object', names)
+      local cmd = os.getenv('CXX') or 'c++'
+      cmd = cmd .. ' -Wl,-r'
+      cmd = cmd .. ' ' .. mainobj
+      for _,f in ipairs(objfiles) do
+        cmd = cmd .. ' ' .. f
+      end
+      cmd = cmd .. ' -o ' .. filename
+      cmd = cmd .. ' -nostdlib'
+      assert(os.execute(cmd) == 0)
     else
-      terralib.saveobj(filename, names, flags)
+      terralib.saveobj(filename, filetype, names, flags)
     end
   end)()
   profile.print_summary()

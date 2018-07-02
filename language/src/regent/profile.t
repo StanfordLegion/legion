@@ -71,7 +71,8 @@ else
       end
       if tag then
         log_profile:info(tag .. pass_name .. " took " ..
-                         tostring(elapsed) .. "s")
+	                 tostring(elapsed) .. " s")
+
       end
       total_time_by_pass[pass_name] = total_time_by_pass[pass_name] + elapsed
       return unpack(result)
@@ -98,11 +99,11 @@ else
     local total_pass_time = 0
     for _, kv in ipairs(pass_times) do
       local k, v = unpack(kv)
-      log_profile:info(k .. " " .. tostring(v) .. "s")
+      log_profile:info(k .. " " .. tostring(v) .. " s")
       total_pass_time = total_pass_time + v
     end
-    log_profile:info("total " .. tostring(total_elapsed) .. "s")
-    log_profile:info("unaccounted " .. tostring(total_elapsed - total_pass_time) .. "s")
+    log_profile:info("total " .. tostring(total_elapsed) .. " s")
+    log_profile:info("unaccounted " .. tostring(total_elapsed - total_pass_time) .. " s")
   end
 end
 

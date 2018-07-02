@@ -1598,11 +1598,11 @@ namespace Legion {
       inline void add_src_field(unsigned idx, FieldID fid, bool inst = true);
       inline void add_dst_field(unsigned idx, FieldID fid, bool inst = true);
     public:
-      // Specify gather/scatter region requirements (must have exactly 1 field)
-      inline void add_gather_field(const RegionRequirement &gather_req,
-                                   FieldID gather_fid, bool inst = true);
-      inline void add_scatter_field(const RegionRequirement &scatter_req,
-                                    FieldID scatter_fid, bool inst = true);
+      // Specify src/dst indirect requirements (must have exactly 1 field)
+      inline void add_src_indirect_field(const RegionRequirement &src_idx_req,
+                                         FieldID src_idx_fid, bool inst = true);
+      inline void add_dst_indirect_field(const RegionRequirement &dst_idx_req,
+                                         FieldID dst_idx_fid, bool inst = true);
     public:
       inline void add_grant(Grant g);
       inline void add_wait_barrier(PhaseBarrier bar);
@@ -1612,8 +1612,8 @@ namespace Legion {
     public:
       std::vector<RegionRequirement>  src_requirements;
       std::vector<RegionRequirement>  dst_requirements;
-      std::vector<RegionRequirement>  gather_requirements;
-      std::vector<RegionRequirement>  scatter_requirements;
+      std::vector<RegionRequirement>  src_indirect_requirements;
+      std::vector<RegionRequirement>  dst_indirect_requirements;
       std::vector<Grant>              grants;
       std::vector<PhaseBarrier>       wait_barriers;
       std::vector<PhaseBarrier>       arrive_barriers;
@@ -1652,11 +1652,11 @@ namespace Legion {
       inline void add_src_field(unsigned idx, FieldID fid, bool inst = true);
       inline void add_dst_field(unsigned idx, FieldID fid, bool inst = true);
     public:
-      // Specify gather/scatter region requirements (must have exactly 1 field)
-      inline void add_gather_field(const RegionRequirement &gather_req,
-                                   FieldID gather_fid, bool inst = true);
-      inline void add_scatter_field(const RegionRequirement &scatter_req,
-                                    FieldID scatter_fid, bool inst = true);
+      // Specify src/dst indirect requirements (must have exactly 1 field)
+      inline void add_src_indirect_field(const RegionRequirement &src_idx_req,
+                                         FieldID src_idx_fid, bool inst = true);
+      inline void add_dst_indirect_field(const RegionRequirement &dst_idx_req,
+                                         FieldID dst_idx_fid, bool inst = true);
     public:
       inline void add_grant(Grant g);
       inline void add_wait_barrier(PhaseBarrier bar);
@@ -1666,8 +1666,8 @@ namespace Legion {
     public:
       std::vector<RegionRequirement>  src_requirements;
       std::vector<RegionRequirement>  dst_requirements;
-      std::vector<RegionRequirement>  gather_requirements;
-      std::vector<RegionRequirement>  scatter_requirements;
+      std::vector<RegionRequirement>  src_indirect_requirements;
+      std::vector<RegionRequirement>  dst_indirect_requirements;
       std::vector<Grant>              grants;
       std::vector<PhaseBarrier>       wait_barriers;
       std::vector<PhaseBarrier>       arrive_barriers;
@@ -2648,6 +2648,8 @@ namespace Legion {
       // Copy Launcher arguments
       std::vector<RegionRequirement>    src_requirements;
       std::vector<RegionRequirement>    dst_requirements;
+      std::vector<RegionRequirement>    src_indirect_requirements;
+      std::vector<RegionRequirement>    dst_indirect_requirements;
       std::vector<Grant>                grants;
       std::vector<PhaseBarrier>         wait_barriers;
       std::vector<PhaseBarrier>         arrive_barriers;
@@ -6429,6 +6431,20 @@ namespace Legion {
        * @return only if running in background, otherwise never
        */
       static int start(int argc, char **argv, bool background = false);
+
+      /**
+       * This 'initialize' method is an optional method that provides
+       * users a way to look at the command line arguments before they
+       * actually start the Legion runtime. Users will still need to 
+       * call 'start' in order to actually start the Legion runtime but
+       * this way they can do some static initialization and use their
+       * own command line parameters to initialize the runtime prior
+       * to actually starting it. The resulting 'argc' and 'argv' should
+       * be passed into the 'start' method or undefined behavior will occur.
+       * @param argc pointer to an integer in which to store the argument count 
+       * @param argv pointer to array of strings for storing command line args
+       */
+      static void initialize(int *argc, char ***argv);
 
       /**
        * Blocking call to wait for the runtime to shutdown when

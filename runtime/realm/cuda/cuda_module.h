@@ -133,7 +133,6 @@ namespace Realm {
 
       int compute_major, compute_minor;
       size_t total_mem;
-      CUdevprop props;
       std::set<CUdevice> peers;  // other GPUs we can do p2p copies with
     };
 
@@ -291,7 +290,7 @@ namespace Realm {
       static const size_t MAX_DIRECT_SIZE = 8;
       union {
 	char direct[8];
-	void *indirect;
+	char *indirect;
       } fill_data;
       size_t fill_data_size;
       GPUCompletionNotification *notification;
@@ -317,7 +316,7 @@ namespace Realm {
       static const size_t MAX_DIRECT_SIZE = 8;
       union {
 	char direct[8];
-	void *indirect;
+	char *indirect;
       } fill_data;
       size_t fill_data_size;
       GPUCompletionNotification *notification;
@@ -594,6 +593,11 @@ namespace Realm {
       static GPUProcessor *get_current_gpu_proc(void);
 
       // calls that come from the CUDA runtime API
+      void push_call_configuration(dim3 grid_dim, dim3 block_dim,
+                                   size_t shared_size, void *stream);
+      void pop_call_configuration(dim3 *grid_dim, dim3 *block_dim,
+                                  size_t *shared_size, void *stream);
+
       void stream_synchronize(cudaStream_t stream);
       void device_synchronize(void);
 
@@ -636,9 +640,13 @@ namespace Realm {
         size_t shared;
 	LaunchConfig(dim3 _grid, dim3 _block, size_t _shared);
       };
+      struct CallConfig : public LaunchConfig {
+        cudaStream_t stream; 
+        CallConfig(dim3 _grid, dim3 _block, size_t _shared, cudaStream_t _stream);
+      };
       std::vector<LaunchConfig> launch_configs;
       std::vector<char> kernel_args;
-
+      std::vector<CallConfig> call_configs;
     protected:
       Realm::CoreReservation *core_rsrv;
     };

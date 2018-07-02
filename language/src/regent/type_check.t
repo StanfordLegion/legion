@@ -2975,186 +2975,93 @@ function type_check.expr_parallelizer_constraint(cx, node)
   }
 end
 
-function type_check.expr(cx, node)
-  if node:is(ast.specialized.expr.ID) then
-    return type_check.expr_id(cx, node)
+local function unreachable(node)
+  assert(false, "unreachable")
+end
 
-  elseif node:is(ast.specialized.expr.Constant) then
-    return type_check.expr_constant(cx, node)
+local type_check_expr_node = {
+  [ast.specialized.expr.ID]                         = type_check.expr_id,
+  [ast.specialized.expr.Constant]                   = type_check.expr_constant,
+  [ast.specialized.expr.Function]                   = type_check.expr_function,
+  [ast.specialized.expr.FieldAccess]                = type_check.expr_field_access,
+  [ast.specialized.expr.IndexAccess]                = type_check.expr_index_access,
+  [ast.specialized.expr.MethodCall]                 = type_check.expr_method_call,
+  [ast.specialized.expr.Call]                       = type_check.expr_call,
+  [ast.specialized.expr.Cast]                       = type_check.expr_cast,
+  [ast.specialized.expr.Ctor]                       = type_check.expr_ctor,
+  [ast.specialized.expr.RawContext]                 = type_check.expr_raw_context,
+  [ast.specialized.expr.RawFields]                  = type_check.expr_raw_fields,
+  [ast.specialized.expr.RawPhysical]                = type_check.expr_raw_physical,
+  [ast.specialized.expr.RawRuntime]                 = type_check.expr_raw_runtime,
+  [ast.specialized.expr.RawValue]                   = type_check.expr_raw_value,
+  [ast.specialized.expr.Isnull]                     = type_check.expr_isnull,
+  [ast.specialized.expr.New]                        = type_check.expr_new,
+  [ast.specialized.expr.Null]                       = type_check.expr_null,
+  [ast.specialized.expr.DynamicCast]                = type_check.expr_dynamic_cast,
+  [ast.specialized.expr.StaticCast]                 = type_check.expr_static_cast,
+  [ast.specialized.expr.UnsafeCast]                 = type_check.expr_unsafe_cast,
+  [ast.specialized.expr.Ispace]                     = type_check.expr_ispace,
+  [ast.specialized.expr.Region]                     = type_check.expr_region,
+  [ast.specialized.expr.Partition]                  = type_check.expr_partition,
+  [ast.specialized.expr.PartitionEqual]             = type_check.expr_partition_equal,
+  [ast.specialized.expr.PartitionByField]           = type_check.expr_partition_by_field,
 
-  elseif node:is(ast.specialized.expr.Function) then
-    return type_check.expr_function(cx, node)
-
-  elseif node:is(ast.specialized.expr.FieldAccess) then
-    return type_check.expr_field_access(cx, node)
-
-  elseif node:is(ast.specialized.expr.IndexAccess) then
-    return type_check.expr_index_access(cx, node)
-
-  elseif node:is(ast.specialized.expr.MethodCall) then
-    return type_check.expr_method_call(cx, node)
-
-  elseif node:is(ast.specialized.expr.Call) then
-    return type_check.expr_call(cx, node)
-
-  elseif node:is(ast.specialized.expr.Cast) then
-    return type_check.expr_cast(cx, node)
-
-  elseif node:is(ast.specialized.expr.Ctor) then
-    return type_check.expr_ctor(cx, node)
-
-  elseif node:is(ast.specialized.expr.RawContext) then
-    return type_check.expr_raw_context(cx, node)
-
-  elseif node:is(ast.specialized.expr.RawFields) then
-    return type_check.expr_raw_fields(cx, node)
-
-  elseif node:is(ast.specialized.expr.RawPhysical) then
-    return type_check.expr_raw_physical(cx, node)
-
-  elseif node:is(ast.specialized.expr.RawRuntime) then
-    return type_check.expr_raw_runtime(cx, node)
-
-  elseif node:is(ast.specialized.expr.RawValue) then
-    return type_check.expr_raw_value(cx, node)
-
-  elseif node:is(ast.specialized.expr.Isnull) then
-    return type_check.expr_isnull(cx, node)
-
-  elseif node:is(ast.specialized.expr.New) then
-    return type_check.expr_new(cx, node)
-
-  elseif node:is(ast.specialized.expr.Null) then
-    return type_check.expr_null(cx, node)
-
-  elseif node:is(ast.specialized.expr.DynamicCast) then
-    return type_check.expr_dynamic_cast(cx, node)
-
-  elseif node:is(ast.specialized.expr.StaticCast) then
-    return type_check.expr_static_cast(cx, node)
-
-  elseif node:is(ast.specialized.expr.UnsafeCast) then
-    return type_check.expr_unsafe_cast(cx, node)
-
-  elseif node:is(ast.specialized.expr.Ispace) then
-    return type_check.expr_ispace(cx, node)
-
-  elseif node:is(ast.specialized.expr.Region) then
-    return type_check.expr_region(cx, node)
-
-  elseif node:is(ast.specialized.expr.Partition) then
-    return type_check.expr_partition(cx, node)
-
-  elseif node:is(ast.specialized.expr.PartitionEqual) then
-    return type_check.expr_partition_equal(cx, node)
-
-  elseif node:is(ast.specialized.expr.PartitionByField) then
-    return type_check.expr_partition_by_field(cx, node)
-
-  elseif node:is(ast.specialized.expr.Image) then
+  [ast.specialized.expr.Image] = function(cx, node)
     if not node.region.fields and
        node.region.region:is(ast.specialized.expr.Function) then
       return type_check.expr_image_by_task(cx, node)
     else
       return type_check.expr_image(cx, node)
     end
+  end,
 
-  elseif node:is(ast.specialized.expr.Preimage) then
-    return type_check.expr_preimage(cx, node)
+  [ast.specialized.expr.Preimage]                   = type_check.expr_preimage,
+  [ast.specialized.expr.CrossProduct]               = type_check.expr_cross_product,
+  [ast.specialized.expr.CrossProductArray]          = type_check.expr_cross_product_array,
+  [ast.specialized.expr.ListSlicePartition]         = type_check.expr_list_slice_partition,
+  [ast.specialized.expr.ListDuplicatePartition]     = type_check.expr_list_duplicate_partition,
+  [ast.specialized.expr.ListCrossProduct]           = type_check.expr_list_cross_product,
+  [ast.specialized.expr.ListCrossProductComplete]   = type_check.expr_list_cross_product_complete,
+  [ast.specialized.expr.ListPhaseBarriers]          = type_check.expr_list_phase_barriers,
+  [ast.specialized.expr.ListInvert]                 = type_check.expr_list_invert,
+  [ast.specialized.expr.ListRange]                  = type_check.expr_list_range,
+  [ast.specialized.expr.ListIspace]                 = type_check.expr_list_ispace,
+  [ast.specialized.expr.ListFromElement]            = type_check.expr_list_from_element,
+  [ast.specialized.expr.PhaseBarrier]               = type_check.expr_phase_barrier,
+  [ast.specialized.expr.DynamicCollective]          = type_check.expr_dynamic_collective,
+  [ast.specialized.expr.DynamicCollectiveGetResult] = type_check.expr_dynamic_collective_get_result,
+  [ast.specialized.expr.Advance]                    = type_check.expr_advance,
+  [ast.specialized.expr.Adjust]                     = type_check.expr_adjust,
+  [ast.specialized.expr.Arrive]                     = type_check.expr_arrive,
+  [ast.specialized.expr.Await]                      = type_check.expr_await,
+  [ast.specialized.expr.Copy]                       = type_check.expr_copy,
+  [ast.specialized.expr.Fill]                       = type_check.expr_fill,
+  [ast.specialized.expr.Acquire]                    = type_check.expr_acquire,
+  [ast.specialized.expr.Release]                    = type_check.expr_release,
+  [ast.specialized.expr.AttachHDF5]                 = type_check.expr_attach_hdf5,
+  [ast.specialized.expr.DetachHDF5]                 = type_check.expr_detach_hdf5,
+  [ast.specialized.expr.AllocateScratchFields]      = type_check.expr_allocate_scratch_fields,
+  [ast.specialized.expr.WithScratchFields]          = type_check.expr_with_scratch_fields,
+  [ast.specialized.expr.Unary]                      = type_check.expr_unary,
+  [ast.specialized.expr.Binary]                     = type_check.expr_binary,
+  [ast.specialized.expr.Deref]                      = type_check.expr_deref,
 
-  elseif node:is(ast.specialized.expr.CrossProduct) then
-    return type_check.expr_cross_product(cx, node)
-
-  elseif node:is(ast.specialized.expr.CrossProductArray) then
-    return type_check.expr_cross_product_array(cx, node)
-
-  elseif node:is(ast.specialized.expr.ListSlicePartition) then
-    return type_check.expr_list_slice_partition(cx, node)
-
-  elseif node:is(ast.specialized.expr.ListDuplicatePartition) then
-    return type_check.expr_list_duplicate_partition(cx, node)
-
-  elseif node:is(ast.specialized.expr.ListCrossProduct) then
-    return type_check.expr_list_cross_product(cx, node)
-
-  elseif node:is(ast.specialized.expr.ListCrossProductComplete) then
-    return type_check.expr_list_cross_product_complete(cx, node)
-
-  elseif node:is(ast.specialized.expr.ListPhaseBarriers) then
-    return type_check.expr_list_phase_barriers(cx, node)
-
-  elseif node:is(ast.specialized.expr.ListInvert) then
-    return type_check.expr_list_invert(cx, node)
-
-  elseif node:is(ast.specialized.expr.ListRange) then
-    return type_check.expr_list_range(cx, node)
-
-  elseif node:is(ast.specialized.expr.ListIspace) then
-    return type_check.expr_list_ispace(cx, node)
-
-  elseif node:is(ast.specialized.expr.ListFromElement) then
-    return type_check.expr_list_from_element(cx, node)
-
-  elseif node:is(ast.specialized.expr.PhaseBarrier) then
-    return type_check.expr_phase_barrier(cx, node)
-
-  elseif node:is(ast.specialized.expr.DynamicCollective) then
-    return type_check.expr_dynamic_collective(cx, node)
-
-  elseif node:is(ast.specialized.expr.DynamicCollectiveGetResult) then
-    return type_check.expr_dynamic_collective_get_result(cx, node)
-
-  elseif node:is(ast.specialized.expr.Advance) then
-    return type_check.expr_advance(cx, node)
-
-  elseif node:is(ast.specialized.expr.Adjust) then
-    return type_check.expr_adjust(cx, node)
-
-  elseif node:is(ast.specialized.expr.Arrive) then
-    return type_check.expr_arrive(cx, node)
-
-  elseif node:is(ast.specialized.expr.Await) then
-    return type_check.expr_await(cx, node)
-
-  elseif node:is(ast.specialized.expr.Copy) then
-    return type_check.expr_copy(cx, node)
-
-  elseif node:is(ast.specialized.expr.Fill) then
-    return type_check.expr_fill(cx, node)
-
-  elseif node:is(ast.specialized.expr.Acquire) then
-    return type_check.expr_acquire(cx, node)
-
-  elseif node:is(ast.specialized.expr.Release) then
-    return type_check.expr_release(cx, node)
-
-  elseif node:is(ast.specialized.expr.AttachHDF5) then
-    return type_check.expr_attach_hdf5(cx, node)
-
-  elseif node:is(ast.specialized.expr.DetachHDF5) then
-    return type_check.expr_detach_hdf5(cx, node)
-
-  elseif node:is(ast.specialized.expr.AllocateScratchFields) then
-    return type_check.expr_allocate_scratch_fields(cx, node)
-
-  elseif node:is(ast.specialized.expr.WithScratchFields) then
-    return type_check.expr_with_scratch_fields(cx, node)
-
-  elseif node:is(ast.specialized.expr.Unary) then
-    return type_check.expr_unary(cx, node)
-
-  elseif node:is(ast.specialized.expr.Binary) then
-    return type_check.expr_binary(cx, node)
-
-  elseif node:is(ast.specialized.expr.Deref) then
-    return type_check.expr_deref(cx, node)
-
-  elseif node:is(ast.specialized.expr.LuaTable) then
+  [ast.specialized.expr.LuaTable] = function(cx, node)
     report.error(node, "unable to specialize value of type table")
+  end,
 
-  else
-    assert(false, "unexpected node type " .. tostring(node.node_type))
-  end
+  [ast.specialized.expr.CtorListField] = unreachable,
+  [ast.specialized.expr.CtorRecField]  = unreachable,
+  [ast.specialized.expr.RegionRoot]    = unreachable,
+  [ast.specialized.expr.Condition]     = unreachable,
+}
+
+local type_check_expr = ast.make_single_dispatch(
+  type_check_expr_node,
+  {ast.specialized.expr})
+
+function type_check.expr(cx, node)
+  return type_check_expr(cx)(node)
 end
 
 function type_check.block(cx, node)
@@ -3633,61 +3540,34 @@ function type_check.stat_parallelize_with(cx, node)
   }
 end
 
+local type_check_stat_node = {
+  [ast.specialized.stat.If]              = type_check.stat_if,
+  [ast.specialized.stat.While]           = type_check.stat_while,
+  [ast.specialized.stat.ForNum]          = type_check.stat_for_num,
+  [ast.specialized.stat.ForList]         = type_check.stat_for_list,
+  [ast.specialized.stat.Repeat]          = type_check.stat_repeat,
+  [ast.specialized.stat.MustEpoch]       = type_check.stat_must_epoch,
+  [ast.specialized.stat.Block]           = type_check.stat_block,
+  [ast.specialized.stat.Var]             = type_check.stat_var,
+  [ast.specialized.stat.VarUnpack]       = type_check.stat_var_unpack,
+  [ast.specialized.stat.Return]          = type_check.stat_return,
+  [ast.specialized.stat.Break]           = type_check.stat_break,
+  [ast.specialized.stat.Assignment]      = type_check.stat_assignment,
+  [ast.specialized.stat.Reduce]          = type_check.stat_reduce,
+  [ast.specialized.stat.Expr]            = type_check.stat_expr,
+  [ast.specialized.stat.RawDelete]       = type_check.stat_raw_delete,
+  [ast.specialized.stat.Fence]           = type_check.stat_fence,
+  [ast.specialized.stat.ParallelizeWith] = type_check.stat_parallelize_with,
+
+  [ast.specialized.stat.Elseif] = unreachable,
+}
+
+local type_check_stat = ast.make_single_dispatch(
+  type_check_stat_node,
+  {ast.specialized.stat})
+
 function type_check.stat(cx, node)
-  if node:is(ast.specialized.stat.If) then
-    return type_check.stat_if(cx, node)
-
-  elseif node:is(ast.specialized.stat.While) then
-    return type_check.stat_while(cx, node)
-
-  elseif node:is(ast.specialized.stat.ForNum) then
-    return type_check.stat_for_num(cx, node)
-
-  elseif node:is(ast.specialized.stat.ForList) then
-    return type_check.stat_for_list(cx, node)
-
-  elseif node:is(ast.specialized.stat.Repeat) then
-    return type_check.stat_repeat(cx, node)
-
-  elseif node:is(ast.specialized.stat.MustEpoch) then
-    return type_check.stat_must_epoch(cx, node)
-
-  elseif node:is(ast.specialized.stat.Block) then
-    return type_check.stat_block(cx, node)
-
-  elseif node:is(ast.specialized.stat.Var) then
-    return type_check.stat_var(cx, node)
-
-  elseif node:is(ast.specialized.stat.VarUnpack) then
-    return type_check.stat_var_unpack(cx, node)
-
-  elseif node:is(ast.specialized.stat.Return) then
-    return type_check.stat_return(cx, node)
-
-  elseif node:is(ast.specialized.stat.Break) then
-    return type_check.stat_break(cx, node)
-
-  elseif node:is(ast.specialized.stat.Assignment) then
-    return type_check.stat_assignment(cx, node)
-
-  elseif node:is(ast.specialized.stat.Reduce) then
-    return type_check.stat_reduce(cx, node)
-
-  elseif node:is(ast.specialized.stat.Expr) then
-    return type_check.stat_expr(cx, node)
-
-  elseif node:is(ast.specialized.stat.RawDelete) then
-    return type_check.stat_raw_delete(cx, node)
-
-  elseif node:is(ast.specialized.stat.Fence) then
-    return type_check.stat_fence(cx, node)
-
-  elseif node:is(ast.specialized.stat.ParallelizeWith) then
-    return type_check.stat_parallelize_with(cx, node)
-
-  else
-    assert(false, "unexpected node type " .. tostring(node:type()))
-  end
+  return type_check_stat(cx)(node)
 end
 
 function type_check.top_task_param(cx, node, mapping, is_defined)
@@ -3833,11 +3713,7 @@ end
 
 function type_check.top(cx, node)
   if node:is(ast.specialized.top.Task) then
-    local new_node = type_check.top_task(cx, node)
-    if new_node.prototype:has_primary_variant() then
-      new_node.prototype:get_primary_variant():set_ast(new_node)
-    end
-    return new_node
+    return type_check.top_task(cx, node)
 
   elseif node:is(ast.specialized.top.Fspace) then
     return type_check.top_fspace(cx, node)

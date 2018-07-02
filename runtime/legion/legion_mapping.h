@@ -797,14 +797,18 @@ namespace Legion {
        * layouts of the physical instances to be used in the 
        */
       struct MapCopyInput {
-        std::vector<std::vector<PhysicalInstance> >       src_instances;
-        std::vector<std::vector<PhysicalInstance> >       dst_instances;
+        std::vector<std::vector<PhysicalInstance> >     src_instances;
+        std::vector<std::vector<PhysicalInstance> >     dst_instances;
+        std::vector<std::vector<PhysicalInstance> >     src_indirect_instances;
+        std::vector<std::vector<PhysicalInstance> >     dst_indirect_instances;
       };
       struct MapCopyOutput {
-        std::vector<std::vector<PhysicalInstance> >       src_instances;
-        std::vector<std::vector<PhysicalInstance> >       dst_instances;
-        ProfilingRequest                                  profiling_requests;
-        TaskPriority                                      profiling_priority;
+        std::vector<std::vector<PhysicalInstance> >     src_instances;
+        std::vector<std::vector<PhysicalInstance> >     dst_instances;
+        std::vector<PhysicalInstance>                   src_indirect_instances;
+        std::vector<PhysicalInstance>                   dst_indirect_instances;
+        ProfilingRequest                                profiling_requests;
+        TaskPriority                                    profiling_priority;
       };
       //------------------------------------------------------------------------
       virtual void map_copy(const MapperContext      ctx,

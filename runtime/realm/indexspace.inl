@@ -608,6 +608,16 @@ namespace Realm {
   {}
 
   template <int N, typename T> __CUDA_HD__
+  inline void PointInRectIterator<N,T>::reset(const Rect<N,T>& _r,
+					      bool _fortran_order /*= true*/)
+  {
+    p = _r.lo;
+    valid = !_r.empty();
+    rect = _r;
+    fortran_order = _fortran_order;
+  }
+
+  template <int N, typename T> __CUDA_HD__
   inline bool PointInRectIterator<N,T>::step(void)
   {
     assert(valid);  // can't step an iterator that's already done
@@ -641,6 +651,85 @@ namespace Realm {
     // if we fall through, we're out of points
     valid = false;
     return false;
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // struct CopySrcDstField
+
+  inline CopySrcDstField::CopySrcDstField(void)
+    : inst(RegionInstance::NO_INST)
+    , field_id(FieldID(-1))
+    , size(0)
+    , redop_id(0)
+    , red_fold(false)
+    , serdez_id(0)
+    , subfield_offset(0)
+    , indirect_index(-1)
+  {
+    fill_data.indirect = 0;
+  }
+
+  inline CopySrcDstField::~CopySrcDstField(void)
+  {
+    if((size > MAX_DIRECT_SIZE) && fill_data.indirect)
+      free(fill_data.indirect);
+  }
+
+  inline CopySrcDstField &CopySrcDstField::set_field(RegionInstance _inst,
+						     FieldID _field_id,
+						     size_t _size,
+						     size_t _subfield_offset /*= 0*/)
+  {
+    inst = _inst;
+    field_id = _field_id;
+    size = _size;
+    subfield_offset = _subfield_offset;
+    return *this;
+  }
+
+  inline CopySrcDstField &CopySrcDstField::set_indirect(int _indirect_index,
+							FieldID _field_id,
+							size_t _size,
+							size_t _subfield_offset /*= 0*/)
+  {
+    indirect_index = _indirect_index;
+    field_id = _field_id;
+    size = _size;
+    subfield_offset = _subfield_offset;
+    return *this;
+  }
+
+  inline CopySrcDstField &CopySrcDstField::set_redop(ReductionOpID _redop_id, bool _is_fold)
+  {
+    redop_id = _redop_id;
+    red_fold = _is_fold;
+    return *this;
+  }
+
+  inline CopySrcDstField &CopySrcDstField::set_serdez(CustomSerdezID _serdez_id)
+  {
+    serdez_id = _serdez_id;
+    return *this;
+  }
+  
+  inline CopySrcDstField &CopySrcDstField::set_fill(const void *_data, size_t _size)
+  {
+    size = _size;
+    if(size <= MAX_DIRECT_SIZE) {
+      memcpy(&fill_data.direct, _data, size);
+    } else {
+      fill_data.indirect = malloc(size);
+      memcpy(fill_data.indirect, _data, size);
+    }
+    return *this;
+  }
+
+  template <typename T>
+  inline CopySrcDstField &CopySrcDstField::set_fill(T value)
+  {
+    return set_fill(&value, sizeof(T));
   }
 
 
@@ -1127,17 +1216,63 @@ namespace Realm {
   // copy and fill operations
 
   template <int N, typename T>
-  inline Event IndexSpace<N,T>::copy(const std::vector<CopySrcDstField> &srcs,
-				      const std::vector<CopySrcDstField> &dsts,
-				      const IndexSpace<N,T> &mask,
-				      const ProfilingRequestSet &requests,
-				      Event wait_on /*= Event::NO_EVENT*/,
-				      ReductionOpID redop_id /*= 0*/,
-				      bool red_fold /*= false*/) const
+  inline Event IndexSpace<N,T>::fill(const std::vector<CopySrcDstField> &dsts,
+				     const Realm::ProfilingRequestSet &requests,
+				     const void *fill_value, size_t fill_value_size,
+				     Event wait_on /*= Event::NO_EVENT*/) const
   {
-    assert(0);
-    return wait_on;
+    std::vector<CopySrcDstField> srcs;
+    srcs.resize(dsts.size());
+    size_t offset = 0;
+    for(size_t i = 0; i < dsts.size(); i++) {
+      assert((offset + dsts[i].size) <= fill_value_size);
+      srcs[i].set_fill(reinterpret_cast<const char *>(fill_value) + offset,
+		       dsts[i].size);
+      // special case: if a field uses all of the fill value, the next
+      //  field (if any) is allowed to use the same value
+      if((offset > 0) || (dsts[i].size != fill_value_size))
+	offset += dsts[i].size;
+    }
+    return copy(srcs, dsts,
+		std::vector<const typename CopyIndirection<N,T>::Base *>(),
+		requests, wait_on);
   }
+
+  template <int N, typename T>
+  inline Event IndexSpace<N,T>::copy(const std::vector<CopySrcDstField> &srcs,
+				     const std::vector<CopySrcDstField> &dsts,
+				     const ProfilingRequestSet &requests,
+				     Event wait_on,
+				     ReductionOpID redop_id,
+				     bool red_fold /*= false*/) const
+  {
+    if(redop_id == 0) {
+      // passthrough
+      return copy(srcs, dsts,
+		  std::vector<const typename CopyIndirection<N,T>::Base *>(),
+		  requests, wait_on);
+    } else {
+      // copy reduction op into dst fields
+      std::vector<CopySrcDstField> dsts2(dsts);
+      for(size_t i = 0; i < dsts2.size(); i++)
+	dsts2[i].set_redop(redop_id, red_fold);
+      return copy(srcs, dsts2,
+		  std::vector<const typename CopyIndirection<N,T>::Base *>(),
+		  requests, wait_on);
+    }
+  }
+
+  template <int N, typename T>
+  inline Event IndexSpace<N,T>::copy(const std::vector<CopySrcDstField> &srcs,
+				     const std::vector<CopySrcDstField> &dsts,
+				     const ProfilingRequestSet &requests,
+				     Event wait_on /*= Event::NO_EVENT*/) const
+  {
+    return copy(srcs, dsts,
+		std::vector<const typename CopyIndirection<N,T>::Base *>(),
+		requests, wait_on);
+  }
+
 
   // simple wrapper for the multiple subspace version
   template <int N, typename T>

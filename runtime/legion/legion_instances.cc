@@ -114,7 +114,7 @@ namespace Legion {
       : allocated_fields(mask), constraints(con), owner(own), total_dims(dims)
     //--------------------------------------------------------------------------
     {
-      constraints->add_reference();
+      constraints->add_base_gc_ref(LAYOUT_DESC_REF);
       field_infos.resize(field_sizes.size());
       // Switch data structures from layout by field order to order
       // of field locations in the bit mask
@@ -141,7 +141,7 @@ namespace Legion {
       : allocated_fields(mask), constraints(con), owner(NULL), total_dims(0)
     //--------------------------------------------------------------------------
     {
-      constraints->add_reference();
+      constraints->add_base_gc_ref(LAYOUT_DESC_REF);
     }
 
     //--------------------------------------------------------------------------
@@ -159,7 +159,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       comp_cache.clear();
-      if (constraints->remove_reference())
+      if (constraints->remove_base_gc_ref(LAYOUT_DESC_REF))
         delete (constraints);
     }
 
@@ -2056,7 +2056,8 @@ namespace Legion {
       {
         // First make a new layout constraint
         LayoutConstraints *layout_constraints = 
-         forest->runtime->register_layout(field_node->handle,constraints);
+          forest->runtime->register_layout(field_node->handle,
+                                           constraints, true/*internal*/);
         // Then make our description
         layout = field_node->create_layout_description(instance_mask, num_dims,
                                   layout_constraints, mask_index_map,

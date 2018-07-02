@@ -237,13 +237,15 @@ def get_test_specs(use_run, use_spy, use_hdf5, use_openmp, short, extra_flags):
     ]
     run = [
         ('run_pass', (test_run_pass, ([] + extra_flags, {'REALM_BACKTRACE': '1'})),
-         (os.path.join('tests', 'regent', 'run_pass'),
+         (os.path.join('tests', 'regent', 'unit_test'),
+          os.path.join('tests', 'regent', 'run_pass'),
           os.path.join('tests', 'regent', 'perf'),
           os.path.join('tests', 'regent', 'bugs'),
           os.path.join('tests', 'bishop', 'run_pass'),
           os.path.join('examples'),
           os.path.join('..', 'tutorial'),
           os.path.join('tests', 'runtime', 'bugs'),
+          os.path.join('tests', 'runtime', 'features'),
          )),
     ]
     spy = [

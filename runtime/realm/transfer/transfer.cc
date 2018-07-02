@@ -982,6 +982,7 @@ namespace Realm {
   public:
     TransferIteratorIndexSpace(const IndexSpace<N,T> &_is,
 				RegionInstance inst,
+			        const int _dim_order[N],
 				const std::vector<FieldID>& _fields,
 				size_t _extra_elems);
 
@@ -1021,15 +1022,19 @@ namespace Realm {
     size_t field_idx;
     size_t extra_elems;
     bool tentative_valid;
+    int dim_order[N];
   };
 
   template <int N, typename T>
   TransferIteratorIndexSpace<N,T>::TransferIteratorIndexSpace(const IndexSpace<N,T>& _is,
 								RegionInstance inst,
+							        const int _dim_order[N],
 								const std::vector<FieldID>& _fields,
 								size_t _extra_elems)
     : is(_is), field_idx(0), extra_elems(_extra_elems), tentative_valid(false)
   {
+    for(int i = 0; i < N; i++) dim_order[i] = _dim_order[i];
+
     if(is.is_valid()) {
       iter.reset(is);
       iter_init_deferred = false;
@@ -1064,6 +1069,7 @@ namespace Realm {
     RegionInstance inst;
     std::vector<FieldID> fields;
     size_t extra_elems;
+    int dim_order[N];
 
     if(!((deserializer >> is) &&
 	 (deserializer >> inst) &&
@@ -1071,8 +1077,13 @@ namespace Realm {
 	 (deserializer >> extra_elems)))
       return 0;
 
+    for(int i = 0; i < N; i++)
+      if(!(deserializer >> dim_order[i]))
+	return 0;
+
     TransferIteratorIndexSpace<N,T> *tiis = new TransferIteratorIndexSpace<N,T>(is,
 										inst,
+										dim_order,
 										fields,
 										extra_elems);
 
@@ -1175,7 +1186,10 @@ namespace Realm {
 	act_counts[d] = 1;
 	act_strides[d] = 0;
       }
-      for(int d = 0; d < N; d++) {
+      // follow the agreed-upon dimension ordering
+      for(int di = 0; di < N; di++) {
+	int d = dim_order[di];
+
 	// the stride for a degenerate dimensions does not matter - don't cause
 	//   a "break" if it mismatches
 	if((cur_dim < max_dims) &&
@@ -1227,7 +1241,9 @@ namespace Realm {
     //  the iterator rectangle so that iterators using different layouts still
     //  agree
     carry = true;
-    for(int d = 0; d < N; d++) {
+    for(int di = 0; di < N; di++) {
+      int d = dim_order[di];
+
       if(carry) {
 	if(target_subrect.hi[d] == iter.rect.hi[d]) {
 	  next_point[d] = iter.rect.lo[d];
@@ -1316,7 +1332,10 @@ namespace Realm {
 
       bool grow = true;
       cur_bytes = field_size;
-      for(int d = 0; d < N; d++) {
+      // follow the agreed-upon dimension ordering
+      for(int di = 0; di < N; di++) {
+	int d = dim_order[di];
+
 	if(grow) {
 	  size_t len = iter.rect.hi[d] - cur_point[d] + 1;
 	  size_t piece_limit = hlp->bounds.hi[d] - cur_point[d] + 1;
@@ -1331,6 +1350,10 @@ namespace Realm {
 	  }
 	  target_subrect.hi[d] = cur_point[d] + len - 1;
 	  cur_bytes *= len;
+	  // if we didn't start this dimension at the lo point, we can't
+	  //  grow any further
+	  if(cur_point[d] > iter.rect.lo[d])
+	    grow = false;
 	} else
 	  target_subrect.hi[d] = cur_point[d];
       }
@@ -1340,7 +1363,9 @@ namespace Realm {
       info.dset_bounds.resize(N);
       info.offset.resize(N);
       info.extent.resize(N);
-      for(unsigned d = 0; d < N; d++) {
+      for(int di = 0; di < N; di++) {
+	int d = dim_order[di];
+
 	info.offset[N - 1 - d] = (target_subrect.lo[d] - hlp->bounds.lo[d] + hlp->offset[d]);
 	info.extent[N - 1 - d] = (target_subrect.hi[d] - target_subrect.lo[d] + 1);
 	info.dset_bounds[N - 1 - d] = (hlp->offset[d] +
@@ -1355,7 +1380,9 @@ namespace Realm {
     //  the iterator rectangle so that iterators using different layouts still
     //  agree
     carry = true;
-    for(int d = 0; d < N; d++) {
+    for(int di = 0; di < N; di++) {
+      int d = dim_order[di];
+
       if(carry) {
 	if(target_subrect.hi[d] == iter.rect.hi[d]) {
 	  next_point[d] = iter.rect.lo[d];
@@ -1419,11 +1446,18 @@ namespace Realm {
   template <typename S>
   bool TransferIteratorIndexSpace<N,T>::serialize(S& serializer) const
   {
-    return ((serializer << iter.space) &&
-	    (serializer << (inst_impl ? inst_impl->me :
-                                        RegionInstance::NO_INST)) &&
-	    (serializer << fields) &&
-	    (serializer << extra_elems));
+    if(!((serializer << iter.space) &&
+	 (serializer << (inst_impl ? inst_impl->me :
+			 RegionInstance::NO_INST)) &&
+	 (serializer << fields) &&
+	 (serializer << extra_elems)))
+      return false;
+
+    for(int i = 0; i < N; i++)
+      if(!(serializer << dim_order[i]))
+	return false;
+
+    return true;
   }
 
 
@@ -1743,7 +1777,64 @@ namespace Realm {
 #endif
 
     size_t extra_elems = 0;
-    return new TransferIteratorIndexSpace<N,T>(is, inst, fields, extra_elems);
+    int dim_order[N];
+    bool have_ordering = false;
+    bool force_fortran_order = false;
+    std::vector<RegionInstance> insts(1, inst);
+    if(peer.exists()) insts.push_back(peer);
+    for(std::vector<RegionInstance>::iterator ii = insts.begin();
+	ii != insts.end();
+	++ii) {
+      RegionInstanceImpl *impl = get_runtime()->get_instance_impl(*ii);
+      // can't wait for it here - make sure it's valid before calling
+      assert(impl->metadata.is_valid());
+      const InstanceLayout<N,T> *layout = dynamic_cast<const InstanceLayout<N,T> *>(impl->metadata.layout);
+      for(typename std::vector<InstancePieceList<N,T> >::const_iterator it = layout->piece_lists.begin();
+	  it != layout->piece_lists.end();
+	  ++it) {
+	for(typename std::vector<InstanceLayoutPiece<N,T> *>::const_iterator it2 = it->pieces.begin();
+	    it2 != it->pieces.end();
+	    ++it2) {
+	  const AffineLayoutPiece<N,T> *affine = dynamic_cast<const AffineLayoutPiece<N,T> *>(*it2);
+	  if(!affine) {
+	    force_fortran_order = true;
+	    break;
+	  }
+	  int piece_preferred_order[N];
+	  size_t prev_stride = 0;
+	  for(int i = 0; i < N; i++) {
+	    size_t best_stride = size_t(-1);
+	    for(int j = 0; j < N; j++) {
+	      if(affine->strides[j] < prev_stride) continue;
+	      if(affine->strides[j] >= best_stride) continue;
+	      // make sure each dimension with the same stride appears once
+	      if((i > 0) && (affine->strides[j] == prev_stride) &&
+		 (j <= piece_preferred_order[i-1])) continue;
+	      piece_preferred_order[i] = j;
+	      best_stride = affine->strides[j];
+	    }
+	    assert(best_stride < size_t(-1));
+	    prev_stride = best_stride;
+	  }
+	  // log_dma.print() << "order: " << *affine << " -> "
+	  // 		  << piece_preferred_order[0] << ", "
+	  // 		  << ((N > 1) ? piece_preferred_order[1] : -1) << ", "
+	  // 		  << ((N > 2) ? piece_preferred_order[2] : -1);
+	  if(have_ordering) {
+	    if(memcmp(dim_order, piece_preferred_order, N * sizeof(int)) != 0) {
+	      force_fortran_order = true;
+	      break;
+	    }
+	  } else {
+	    memcpy(dim_order, piece_preferred_order, N * sizeof(int));
+	    have_ordering = true;
+	  }
+	}
+      }
+    }
+    if(!have_ordering || force_fortran_order)
+      for(int i = 0; i < N; i++) dim_order[i] = i;
+    return new TransferIteratorIndexSpace<N,T>(is, inst, dim_order, fields, extra_elems);
   }
   
   template <int N, typename T>
@@ -1897,7 +1988,7 @@ namespace Realm {
 
   class TransferPlanReduce : public TransferPlan {
   public:
-    TransferPlanReduce(const std::vector<CopySrcDstField>& _srcs,
+    TransferPlanReduce(const CopySrcDstField& _src,
 		       const CopySrcDstField& _dst,
 		       ReductionOpID _redop_id, bool _red_fold);
 
@@ -1906,16 +1997,16 @@ namespace Realm {
 			       Event wait_on, int priority);
 
   protected:
-    std::vector<CopySrcDstField> srcs;
+    CopySrcDstField src;
     CopySrcDstField dst;
     ReductionOpID redop_id;
     bool red_fold;
   };
 
-  TransferPlanReduce::TransferPlanReduce(const std::vector<CopySrcDstField>& _srcs,
+  TransferPlanReduce::TransferPlanReduce(const CopySrcDstField& _src,
 					 const CopySrcDstField& _dst,
 					 ReductionOpID _redop_id, bool _red_fold)
-    : srcs(_srcs)
+    : src(_src)
     , dst(_dst)
     , redop_id(_redop_id)
     , red_fold(_red_fold)
@@ -1931,13 +2022,14 @@ namespace Realm {
     bool inst_lock_needed = false;
 
     ReduceRequest *r = new ReduceRequest(td,
-					 srcs, dst,
+					 std::vector<CopySrcDstField>(1, src),
+					 dst,
 					 inst_lock_needed,
 					 redop_id, red_fold,
 					 wait_on, ev,
 					 0 /*priority*/, requests);
 
-    NodeID src_node = ID(srcs[0].inst).instance.owner_node;
+    NodeID src_node = ID(src.inst).instance.owner_node;
     if(src_node == my_node_id) {
       log_dma.debug("performing reduction on local node");
 
@@ -2037,190 +2129,58 @@ namespace Realm {
     return ev;
   }
 
-  /*static*/ bool TransferPlan::plan_copy(std::vector<TransferPlan *>& plans,
-					  const std::vector<CopySrcDstField> &srcs,
-					  const std::vector<CopySrcDstField> &dsts,
-					  ReductionOpID redop_id /*= 0*/,
-					  bool red_fold /*= false*/)
-  {
-    if(redop_id == 0) {
-      // not a reduction, so sort fields by src/dst mem pairs
-      //log_new_dma.info("Performing copy op");
-
-      OASByMem oas_by_mem;
-
-      std::vector<CopySrcDstField>::const_iterator src_it = srcs.begin();
-      std::vector<CopySrcDstField>::const_iterator dst_it = dsts.begin();
-      unsigned src_subfield_offset = (src_it != srcs.end()) ? src_it->subfield_offset : 0;
-      unsigned dst_subfield_offset = (dst_it != dsts.end()) ? dst_it->subfield_offset : 0;
-
-      while((src_it != srcs.end()) && (dst_it != dsts.end())) {
-	InstPair ip(src_it->inst, dst_it->inst);
-	MemPair mp(get_runtime()->get_instance_impl(src_it->inst)->memory,
-		   get_runtime()->get_instance_impl(dst_it->inst)->memory);
-
-	// printf("I:(%x/%x) M:(%x/%x) sub:(%d/%d) src=(%d/%d) dst=(%d/%d)\n",
-	//        ip.first.id, ip.second.id, mp.first.id, mp.second.id,
-	//        src_suboffset, dst_suboffset,
-	//        src_it->offset, src_it->size, 
-	//        dst_it->offset, dst_it->size);
-
-	OffsetsAndSize oas;
-	oas.src_field_id = src_it->field_id;
-	assert(src_it->field_id != (FieldID)-1);
-	oas.dst_field_id = dst_it->field_id;
-	assert(dst_it->field_id != (FieldID)-1);
-	oas.src_subfield_offset = src_subfield_offset;
-	oas.dst_subfield_offset = dst_subfield_offset;
-	oas.size = std::min(src_it->size - src_subfield_offset,
-			    dst_it->size - dst_subfield_offset);
-	oas.serdez_id = src_it->serdez_id;
-
-	// This is a little bit of hack: if serdez_id != 0 we directly create a
-	// separate copy plan instead of inserting it into ''oasvec''
-	if (oas.serdez_id != 0) {
-	  OASByInst* oas_by_inst = new OASByInst;
-	  (*oas_by_inst)[ip].push_back(oas);
-	  TransferPlanCopy *p = new TransferPlanCopy(oas_by_inst);
-	  plans.push_back(p);
-	} else {
-	  // </SERDEZ_DMA>
-	  OASByInst *oas_by_inst;
-	  OASByMem::iterator it = oas_by_mem.find(mp);
-	  if(it != oas_by_mem.end()) {
-	    oas_by_inst = it->second;
-	  } else {
-	    oas_by_inst = new OASByInst;
-	    oas_by_mem[mp] = oas_by_inst;
-	  }
-	  (*oas_by_inst)[ip].push_back(oas);
-	}
-	src_subfield_offset += oas.size;
-	assert(src_subfield_offset <= src_it->size);
-	if(src_subfield_offset == src_it->size) {
-	  src_it++;
-	  if(src_it != srcs.end())
-	    src_subfield_offset = src_it->subfield_offset;
-	}
-	dst_subfield_offset += oas.size;
-	assert(dst_subfield_offset <= dst_it->size);
-	if(dst_subfield_offset == dst_it->size) {
-	  dst_it++;
-	  if(dst_it != dsts.end())
-	    dst_subfield_offset = dst_it->subfield_offset;
-	}
-      }
-      // make sure we used up both
-      assert(src_it == srcs.end());
-      assert(dst_it == dsts.end());
-
-      log_dma.debug() << "copy: " << oas_by_mem.size() << " distinct src/dst mem pairs";
-
-      for(OASByMem::const_iterator it = oas_by_mem.begin(); it != oas_by_mem.end(); it++) {
-	OASByInst *oas_by_inst = it->second;
-	// TODO: teach new DMA code to handle multiple instances in the same memory
-	for(OASByInst::const_iterator it2 = oas_by_inst->begin();
-	    it2 != oas_by_inst->end();
-	    ++it2) {
-	  OASByInst *new_oas_by_inst = new OASByInst;
-	  (*new_oas_by_inst)[it2->first] = it2->second;
-	  TransferPlanCopy *p = new TransferPlanCopy(new_oas_by_inst);
-	  plans.push_back(p);
-	}
-	// done with original oas_by_inst
-	delete oas_by_inst;
-      }
-    } else {
-      // reduction op case
-
-      // sanity checks:
-      // 1) all sources in same node
-      for(size_t i = 1; i < srcs.size(); i++)
-	assert(ID(srcs[i].inst).instance.owner_node == ID(srcs[0].inst).instance.owner_node);
-      // 2) single destination field
-      assert(dsts.size() == 1);
-
-      TransferPlanReduce *p = new TransferPlanReduce(srcs, dsts[0],
-						     redop_id, red_fold);
-      plans.push_back(p);
-    }
-
-    return true;
-  }
-
-  /*static*/ bool TransferPlan::plan_fill(std::vector<TransferPlan *>& plans,
-					  const std::vector<CopySrcDstField> &dsts,
-					  const void *fill_value,
-					  size_t fill_value_size)
-  {
-    // when 'dsts' contains multiple fields, the 'fill_value' should look
-    // like a packed struct with a fill value for each field in order -
-    // track the offset and complain if we run out of data
-    size_t fill_ofs = 0;
-    for(std::vector<CopySrcDstField>::const_iterator it = dsts.begin();
-	it != dsts.end();
-	++it) {
-      if((fill_ofs + it->size) > fill_value_size) {
-	log_dma.fatal() << "insufficient data for fill - need at least "
-			<< (fill_ofs + it->size) << " bytes, but have only " << fill_value_size;
-	assert(0);
-      }
-      assert(it->subfield_offset == 0);
-      TransferPlan *p = new TransferPlanFill(((const char *)fill_value) + fill_ofs,
-					     it->size,
-					     it->inst,
-					     it->field_id);
-      plans.push_back(p);
-
-      // special case: if a field uses all of the fill value, the next
-      //  field (if any) is allowed to use the same value
-      if((fill_ofs > 0) || (it->size != fill_value_size))
-	fill_ofs += it->size;
-    }
-
-    return true;
-  }
-
-
   template <int N, typename T>
   Event IndexSpace<N,T>::copy(const std::vector<CopySrcDstField>& srcs,
-			       const std::vector<CopySrcDstField>& dsts,
-			       const Realm::ProfilingRequestSet &requests,
-			       Event wait_on,
-			       ReductionOpID redop_id, bool red_fold) const
+			      const std::vector<CopySrcDstField>& dsts,
+			      const std::vector<const typename CopyIndirection<N,T>::Base *> &indirects,
+			      const Realm::ProfilingRequestSet &requests,
+			      Event wait_on) const
   {
     TransferDomain *td = TransferDomain::construct(*this);
     std::vector<TransferPlan *> plans;
-    bool ok = TransferPlan::plan_copy(plans, srcs, dsts, redop_id, red_fold);
-    assert(ok);
-    // hack to eliminate duplicate profiling responses
-    //assert(requests.empty() || (plans.size() == 1));
-    ProfilingRequestSet empty_prs;
-    const ProfilingRequestSet *prsptr = &requests;
-    std::set<Event> finish_events;
-    for(std::vector<TransferPlan *>::iterator it = plans.begin();
-	it != plans.end();
-	++it) {
-      //Event e = (*it)->execute_plan(td, requests, wait_on, 0 /*priority*/);
-      Event e = (*it)->execute_plan(td, *prsptr, wait_on, 0 /*priority*/);
-      prsptr = &empty_prs;
-      finish_events.insert(e);
-      delete *it;
-    }
-    delete td;
-    return Event::merge_events(finish_events);
-  }
+    assert(srcs.size() == dsts.size());
+    for(size_t i = 0; i < srcs.size(); i++) {
+      assert(srcs[i].size == dsts[i].size);
+      assert(srcs[i].indirect_index == -1);
+      assert(dsts[i].indirect_index == -1);
 
-  template <int N, typename T>
-  Event IndexSpace<N,T>::fill(const std::vector<CopySrcDstField> &dsts,
-			       const Realm::ProfilingRequestSet &requests,
-			       const void *fill_value, size_t fill_value_size,
-			       Event wait_on /*= Event::NO_EVENT*/) const
-  {
-    TransferDomain *td = TransferDomain::construct(*this);
-    std::vector<TransferPlan *> plans;
-    bool ok = TransferPlan::plan_fill(plans, dsts, fill_value, fill_value_size);
-    assert(ok);
+      // if the source field id is -1 and dst has no redop, we can use old fill
+      if(srcs[i].field_id == FieldID(-1)) {
+	// no support for reduction fill yet
+	assert(dsts[i].redop_id == 0);
+	TransferPlan *p = new TransferPlanFill(((srcs[i].size <= srcs[i].MAX_DIRECT_SIZE) ?
+						  &(srcs[i].fill_data.direct) :
+						  srcs[i].fill_data.indirect),
+					       srcs[i].size,
+					       dsts[i].inst,
+					       dsts[i].field_id);
+	plans.push_back(p);
+	continue;
+      }
+
+      // if the dst has a reduction op, do a reduce
+      if(dsts[i].redop_id != 0) {
+	TransferPlan *p = new TransferPlanReduce(srcs[i], dsts[i],
+						 dsts[i].redop_id,
+						 dsts[i].red_fold);
+	plans.push_back(p);
+	continue;
+      }
+
+      // per-field copy otherwise - TODO: re-merge fields in the same
+      //  instance (as long as they don't have serdez active)
+      OffsetsAndSize oas;
+      oas.src_field_id = srcs[i].field_id;
+      oas.dst_field_id = dsts[i].field_id;
+      oas.src_subfield_offset = srcs[i].subfield_offset;
+      oas.dst_subfield_offset = dsts[i].subfield_offset;
+      oas.size = srcs[i].size;
+      oas.serdez_id = srcs[i].serdez_id;
+      OASByInst *oas_by_inst = new OASByInst;
+      (*oas_by_inst)[InstPair(srcs[i].inst, dsts[i].inst)].push_back(oas);
+      TransferPlanCopy *p = new TransferPlanCopy(oas_by_inst);
+      plans.push_back(p);
+    }
     // hack to eliminate duplicate profiling responses
     //assert(requests.empty() || (plans.size() == 1));
     ProfilingRequestSet empty_prs;
@@ -2241,14 +2201,10 @@ namespace Realm {
 
 #define DOIT(N,T) \
   template Event IndexSpace<N,T>::copy(const std::vector<CopySrcDstField>&, \
-					const std::vector<CopySrcDstField>&, \
-					const ProfilingRequestSet&, \
-					Event, \
-					ReductionOpID, bool) const; \
-  template Event IndexSpace<N,T>::fill(const std::vector<CopySrcDstField>&, \
-					const ProfilingRequestSet&, \
-					const void *, size_t, \
-					Event wait_on) const; \
+				       const std::vector<CopySrcDstField>&, \
+				       const std::vector<const CopyIndirection<N,T>::Base *>&, \
+				       const ProfilingRequestSet&,	\
+				       Event) const;			\
   template class TransferIteratorIndexSpace<N,T>; \
   template class TransferDomainIndexSpace<N,T>;
   FOREACH_NT(DOIT)

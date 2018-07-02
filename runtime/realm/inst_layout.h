@@ -212,6 +212,7 @@ namespace Realm {
 
     // "write"
     AccessorRefHelper<FT>& operator=(const FT& newval);
+    AccessorRefHelper<FT>& operator=(const AccessorRefHelper<FT>& rhs);
 
   protected:
     RegionInstance inst;
