@@ -724,14 +724,12 @@ namespace Legion {
     ApEvent RegionTreeForest::create_partition_by_field(Operation *op,
                                                         IndexPartition pending,
                              const std::vector<FieldDataDescriptor> &instances,
-                                                        ApEvent instances_ready,
-                                                        ShardID shard,
-                                                        size_t total_shards)
+                                                        ApEvent instances_ready)
     //--------------------------------------------------------------------------
     {
       IndexPartNode *partition = get_node(pending);
-      return partition->parent->create_by_field(op, partition, instances, 
-                                    instances_ready, shard, total_shards);
+      return partition->parent->create_by_field(op, partition, 
+                                                instances, instances_ready);
     }
 
     //--------------------------------------------------------------------------
@@ -739,13 +737,15 @@ namespace Legion {
                                                         IndexPartition pending,
                                                         IndexPartition proj,
                               const std::vector<FieldDataDescriptor> &instances,
-                                                      ApEvent instances_ready)
+                                                      ApEvent instances_ready,
+                                                        ShardID shard,
+                                                        size_t total_shards)
     //--------------------------------------------------------------------------
     {
       IndexPartNode *partition = get_node(pending);
       IndexPartNode *projection = get_node(proj);
       return partition->parent->create_by_image(op, partition, projection,
-                                        instances, instances_ready);
+                          instances, instances_ready, shard, total_shards);
     }
 
     //--------------------------------------------------------------------------
@@ -753,13 +753,15 @@ namespace Legion {
                                                       IndexPartition pending,
                                                       IndexPartition proj,
                               const std::vector<FieldDataDescriptor> &instances,
-                                                      ApEvent instances_ready)
+                                                      ApEvent instances_ready,
+                                                      ShardID shard,
+                                                      size_t total_shards)
     //--------------------------------------------------------------------------
     {
       IndexPartNode *partition = get_node(pending);
       IndexPartNode *projection = get_node(proj);
       return partition->parent->create_by_image_range(op, partition, projection,
-                                              instances, instances_ready);
+                               instances, instances_ready, shard, total_shards);
     }
 
     //--------------------------------------------------------------------------

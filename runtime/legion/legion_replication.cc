@@ -1915,15 +1915,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ReplDependentPartitionOp::initialize_by_field(ReplicateContext *ctx, 
+                                                       ShardID target,
                                                        ApEvent ready_event,
                                                        IndexPartition pid,
                                                        LogicalRegion handle, 
                                                        LogicalRegion parent,
                                                        FieldID fid,
                                                        MapperID id, 
-                                                       MappingTagID t,
-                                                       ShardID shard,
-                                                       size_t total_shards)
+                                                       MappingTagID t)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -1949,7 +1948,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(thunk == NULL);
 #endif
-      thunk = new ReplByFieldThunk(ctx, pid, shard, total_shards);
+      thunk = new ReplByFieldThunk(ctx, target, pid);
       partition_ready = ready_event;
       if (runtime->legion_spy_enabled)
         perform_logging();
@@ -1957,12 +1956,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ReplDependentPartitionOp::initialize_by_image(ReplicateContext *ctx, 
-                                                       ShardID target_shard,
                                                        ApEvent ready_event,
                                                        IndexPartition pid,
                                                    LogicalPartition projection,
                                              LogicalRegion parent, FieldID fid,
-                                                   MapperID id, MappingTagID t) 
+                                                   MapperID id, MappingTagID t,
+                                                   ShardID shard, size_t total) 
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -1989,8 +1988,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(thunk == NULL);
 #endif
-      thunk = new ReplByImageThunk(ctx, target_shard, 
-                                   pid, projection.get_index_partition());
+      thunk = new ReplByImageThunk(ctx, shard, total, pid, 
+                                   projection.get_index_partition());
       partition_ready = ready_event;
       if (runtime->legion_spy_enabled)
         perform_logging();
@@ -1999,13 +1998,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void ReplDependentPartitionOp::initialize_by_image_range(
                                                          ReplicateContext *ctx, 
-                                                         ShardID target_shard,
                                                          ApEvent ready_event,
                                                          IndexPartition pid,
                                                 LogicalPartition projection,
                                                 LogicalRegion parent,
                                                 FieldID fid, MapperID id,
-                                                MappingTagID t) 
+                                                MappingTagID t,
+                                                ShardID shard, size_t total) 
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -2032,8 +2031,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(thunk == NULL);
 #endif
-      thunk = new ReplByImageRangeThunk(ctx, target_shard, 
-                                        pid, projection.get_index_partition());
+      thunk = new ReplByImageRangeThunk(ctx, shard, total, pid, 
+                                        projection.get_index_partition());
       partition_ready = ready_event;
       if (runtime->legion_spy_enabled)
         perform_logging();
@@ -2236,10 +2235,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ReplDependentPartitionOp::ReplByFieldThunk::ReplByFieldThunk(
-        ReplicateContext *ctx, IndexPartition p, ShardID s, size_t t)
+        ReplicateContext *ctx, ShardID target, IndexPartition p)
       : ByFieldThunk(p), 
-        collective(FieldDescriptorExchange(ctx, COLLECTIVE_LOC_54)),
-        shard_id(s), total_shards(t)
+        gather_collective(FieldDescriptorGather(ctx, target, COLLECTIVE_LOC_54))
     //--------------------------------------------------------------------------
     {
     }
@@ -2253,12 +2251,20 @@ namespace Legion {
     {
       if (op->is_index_space)
       {
-        // Do the all-to-all gather of the field data descriptors
-        ApEvent all_ready = collective.exchange_descriptors(instances_ready,
-                                                            instances);
-        ApEvent done = forest->create_partition_by_field(op, pid, 
-                collective.descriptors, all_ready, shard_id, total_shards);
-        return collective.exchange_completion(done);
+        gather_collective.contribute(instances_ready, instances);
+        if (gather_collective.is_target())
+        {
+          ApEvent all_ready;
+          const std::vector<FieldDataDescriptor> &full_descriptors =
+            gather_collective.get_full_descriptors(all_ready);
+          // Perform the operation
+          ApEvent done = forest->create_partition_by_field(op, pid,
+                                      full_descriptors, all_ready);
+          gather_collective.notify_remote_complete(done);
+          return done;
+        }
+        else // nothing else for us to do
+          return gather_collective.get_complete_event();
       }
       else // singular so just do the normal thing
         return forest->create_partition_by_field(op, pid, 
@@ -2267,10 +2273,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ReplDependentPartitionOp::ReplByImageThunk::ReplByImageThunk(
-                                          ReplicateContext *ctx, ShardID target,
+                                          ReplicateContext *ctx, 
+                                          ShardID s, size_t total,
                                           IndexPartition p, IndexPartition proj)
       : ByImageThunk(p, proj), 
-        gather_collective(FieldDescriptorGather(ctx, target, COLLECTIVE_LOC_55))
+        collective(FieldDescriptorExchange(ctx, COLLECTIVE_LOC_55)),
+        shard_id(s), total_shards(total)
     //--------------------------------------------------------------------------
     {
     }
@@ -2284,20 +2292,12 @@ namespace Legion {
     {
       if (op->is_index_space)
       {
-        gather_collective.contribute(instances_ready, instances);
-        if (gather_collective.is_target())
-        {
-          ApEvent all_ready;
-          const std::vector<FieldDataDescriptor> &full_descriptors =
-            gather_collective.get_full_descriptors(all_ready);
-          // Perform the operation
-          ApEvent done = forest->create_partition_by_image(op, pid, projection, 
-                                                  full_descriptors, all_ready);
-          gather_collective.notify_remote_complete(done);
-          return done;
-        }
-        else // nothing else for us to do
-          return gather_collective.get_complete_event();
+        // Do the all-to-all gather of the field data descriptors
+        ApEvent all_ready = collective.exchange_descriptors(instances_ready,
+                                                            instances);
+        ApEvent done = forest->create_partition_by_image(op, pid, projection,
+                  collective.descriptors, all_ready, shard_id, total_shards);
+        return collective.exchange_completion(done);
       }
       else // singular so just do the normal thing
         return forest->create_partition_by_image(op, pid, projection, 
@@ -2306,10 +2306,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ReplDependentPartitionOp::ReplByImageRangeThunk::ReplByImageRangeThunk(
-                                          ReplicateContext *ctx, ShardID target,
+                                          ReplicateContext *ctx, 
+                                          ShardID s, size_t total,
                                           IndexPartition p, IndexPartition proj)
       : ByImageRangeThunk(p, proj), 
-        gather_collective(FieldDescriptorGather(ctx, target, COLLECTIVE_LOC_60))
+        collective(FieldDescriptorExchange(ctx, COLLECTIVE_LOC_60)),
+        shard_id(s), total_shards(total)
     //--------------------------------------------------------------------------
     {
     }
@@ -2323,20 +2325,12 @@ namespace Legion {
     {
       if (op->is_index_space)
       {
-        gather_collective.contribute(instances_ready, instances);
-        if (gather_collective.is_target())
-        {
-          ApEvent all_ready;
-          const std::vector<FieldDataDescriptor> &full_descriptors =
-            gather_collective.get_full_descriptors(all_ready);
-          // Perform the operation
-          ApEvent done = forest->create_partition_by_image_range(op, pid, 
-                                projection, full_descriptors, all_ready);
-          gather_collective.notify_remote_complete(done);
-          return done;
-        }
-        else // nothing else for us to do
-          return gather_collective.get_complete_event();
+        // Do the all-to-all gather of the field data descriptors
+        ApEvent all_ready = collective.exchange_descriptors(instances_ready,
+                                                            instances);
+        ApEvent done = forest->create_partition_by_image_range(op, pid, 
+            projection,collective.descriptors,all_ready,shard_id,total_shards);
+        return collective.exchange_completion(done);   
       }
       else // singular so just do the normal thing
         return forest->create_partition_by_image_range(op, pid, projection, 

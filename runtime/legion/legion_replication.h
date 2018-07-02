@@ -963,43 +963,44 @@ namespace Legion {
     public:
       class ReplByFieldThunk : public ByFieldThunk {
       public:
-        ReplByFieldThunk(ReplicateContext *ctx, IndexPartition p,
-                         ShardID shard_id, size_t total_shards);
+        ReplByFieldThunk(ReplicateContext *ctx,
+                         ShardID target, IndexPartition p);
+      public:
+        virtual ApEvent perform(DependentPartitionOp *op,
+            RegionTreeForest *forest, ApEvent instances_ready,
+            const std::vector<FieldDataDescriptor> &instances);
+        virtual void elide_collectives(void) 
+          { gather_collective.elide_collective(); }
+      protected:
+        FieldDescriptorGather gather_collective;
+      };
+      class ReplByImageThunk : public ByImageThunk {
+      public:
+        ReplByImageThunk(ReplicateContext *ctx, ShardID shard_id, size_t total,
+                         IndexPartition p, IndexPartition proj);
       public:
         virtual ApEvent perform(DependentPartitionOp *op,
             RegionTreeForest *forest, ApEvent instances_ready,
             const std::vector<FieldDataDescriptor> &instances);
         virtual void elide_collectives(void) { collective.elide_collective(); }
       protected:
-        FieldDescriptorExchange collective; 
+        FieldDescriptorExchange collective;
         const ShardID shard_id;
         const size_t total_shards;
       };
-      class ReplByImageThunk : public ByImageThunk {
-      public:
-        ReplByImageThunk(ReplicateContext *ctx, ShardID target,
-                         IndexPartition p, IndexPartition proj);
-      public:
-        virtual ApEvent perform(DependentPartitionOp *op,
-            RegionTreeForest *forest, ApEvent instances_ready,
-            const std::vector<FieldDataDescriptor> &instances);
-        virtual void elide_collectives(void) 
-          { gather_collective.elide_collective(); }
-      protected:
-        FieldDescriptorGather gather_collective;
-      };
       class ReplByImageRangeThunk : public ByImageRangeThunk {
       public:
-        ReplByImageRangeThunk(ReplicateContext *ctx, ShardID target,
-                              IndexPartition p, IndexPartition proj);
+        ReplByImageRangeThunk(ReplicateContext *ctx, ShardID shard_id, 
+                  size_t total, IndexPartition p, IndexPartition proj);
       public:
         virtual ApEvent perform(DependentPartitionOp *op,
             RegionTreeForest *forest, ApEvent instances_ready,
             const std::vector<FieldDataDescriptor> &instances);
-        virtual void elide_collectives(void) 
-          { gather_collective.elide_collective(); }
+        virtual void elide_collectives(void) { collective.elide_collective(); }
       protected:
-        FieldDescriptorGather gather_collective;
+        FieldDescriptorExchange collective;
+        const ShardID shard_id;
+        const size_t total_shards;
       };
       class ReplByPreimageThunk : public ByPreimageThunk {
       public:
@@ -1035,21 +1036,22 @@ namespace Legion {
     public:
       ReplDependentPartitionOp& operator=(const ReplDependentPartitionOp &rhs);
     public:
-      void initialize_by_field(ReplicateContext *ctx, ApEvent ready_event,
-                               IndexPartition pid,
+      void initialize_by_field(ReplicateContext *ctx, ShardID target,
+                               ApEvent ready_event, IndexPartition pid,
                                LogicalRegion handle, LogicalRegion parent,
-                               FieldID fid, MapperID id, MappingTagID tag,
-                               ShardID shard, size_t total_shards); 
-      void initialize_by_image(ReplicateContext *ctx, ShardID target,
+                               FieldID fid, MapperID id, MappingTagID tag);
+      void initialize_by_image(ReplicateContext *ctx,
                                ApEvent ready_event, IndexPartition pid,
                                LogicalPartition projection,
                                LogicalRegion parent, FieldID fid,
-                               MapperID id, MappingTagID tag);
-      void initialize_by_image_range(ReplicateContext *ctx, ShardID target,
+                               MapperID id, MappingTagID tag,
+                               ShardID shard, size_t total_shards);
+      void initialize_by_image_range(ReplicateContext *ctx,
                                ApEvent ready_event, IndexPartition pid,
                                LogicalPartition projection,
                                LogicalRegion parent, FieldID fid,
-                               MapperID id, MappingTagID tag);
+                               MapperID id, MappingTagID tag,
+                               ShardID shard, size_t total_shards);
       void initialize_by_preimage(ReplicateContext *ctx, ShardID target,
                                ApEvent ready_event, IndexPartition pid,
                                IndexPartition projection, LogicalRegion handle,

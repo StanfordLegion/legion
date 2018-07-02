@@ -8644,9 +8644,9 @@ namespace Legion {
         creation_barrier.wait();
       }
       Runtime::advance_barrier(creation_barrier);
-      part_op->initialize_by_field(this, pending_partition_barrier,
-                                   pid, handle, parent_priv, fid, id, tag,
-                                   owner_shard->shard_id, total_shards);
+      part_op->initialize_by_field(this, index_partition_allocator_shard,
+                                   pending_partition_barrier,
+                                   pid, handle, parent_priv, fid, id, tag);
 #ifdef DEBUG_LEGION
       part_op->set_sharding_collective(new ShardingGatherCollective(this, 
                                     0/*owner shard*/, COLLECTIVE_LOC_38));
@@ -8781,9 +8781,9 @@ namespace Legion {
         creation_barrier.wait();
       }
       Runtime::advance_barrier(creation_barrier);
-      part_op->initialize_by_image(this, index_partition_allocator_shard,
-                                   pending_partition_barrier, 
-                                   pid, projection, parent, fid, id, tag);
+      part_op->initialize_by_image(this, pending_partition_barrier, 
+                                   pid, projection, parent, fid, id, tag,
+                                   owner_shard->shard_id, total_shards);
 #ifdef DEBUG_LEGION
       part_op->set_sharding_collective(new ShardingGatherCollective(this, 
                                     0/*owner shard*/, COLLECTIVE_LOC_39));
@@ -8918,9 +8918,9 @@ namespace Legion {
         creation_barrier.wait();
       }
       Runtime::advance_barrier(creation_barrier);
-      part_op->initialize_by_image_range(this, index_partition_allocator_shard,
-                                         pending_partition_barrier,
-                                         pid, projection, parent, fid, id, tag);
+      part_op->initialize_by_image_range(this, pending_partition_barrier,
+                                         pid, projection, parent, fid, id, tag,
+                                         owner_shard->shard_id, total_shards);
 #ifdef DEBUG_LEGION
       part_op->set_sharding_collective(new ShardingGatherCollective(this, 
                                     0/*owner shard*/, COLLECTIVE_LOC_40));
