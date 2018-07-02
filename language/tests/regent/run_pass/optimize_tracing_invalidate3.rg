@@ -121,3 +121,4 @@ task main()
   reuse()
 end
 
+regentlib.start(main)
