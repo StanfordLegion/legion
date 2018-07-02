@@ -2273,11 +2273,6 @@ namespace Legion {
     void PhysicalTemplate::finalize(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      for (std::map<TraceLocalID, Operation*>::iterator it = operations.begin();
-           it != operations.end(); ++it)
-        assert(it->second->get_mapped_event().has_triggered());
-#endif
       recording = false;
       replayable = check_replayable();
       if (outstanding_gc_events.size() > 0)
