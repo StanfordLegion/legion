@@ -3373,6 +3373,25 @@ namespace Legion {
       }
       else
       {
+        if (HAS_WRITE(req))
+        {
+          RegionTreeNode *node = view->logical_node;
+          std::vector<InstanceView*> to_delete;
+          for (LegionMap<InstanceView*, FieldMask>::aligned::iterator vit =
+              valid_views.begin(); vit != valid_views.end(); ++vit)
+          {
+            RegionTreeNode *other = vit->first->logical_node;
+            if (!!(fields & vit->second) &&
+                node->intersects_with(other, false))
+            {
+              vit->second = vit->second - fields;
+              if (!vit->second)
+                to_delete.push_back(vit->first);
+            }
+          }
+          for (unsigned idx = 0; idx < to_delete.size(); ++idx)
+            valid_views.erase(to_delete[idx]);
+        }
         LegionMap<InstanceView*, FieldMask>::aligned::iterator finder =
           valid_views.find(view);
         if (finder == valid_views.end())
