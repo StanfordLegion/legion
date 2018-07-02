@@ -3431,8 +3431,9 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(is_recording());
 #endif
-      summary_info.push_back(
-          std::make_pair<RegionRequirement, InstanceSet>(region, instance_set));
+      summary_info.resize(summary_info.size() + 1);
+      summary_info.back().first = region;
+      summary_info.back().second = instance_set;
       parent_indices.push_back(parent_idx);
     }
 
