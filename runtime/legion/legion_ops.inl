@@ -108,6 +108,7 @@ namespace Legion {
         {
 #ifdef DEBUG_LEGION
           assert(OP::trace->is_replaying());
+          assert(tpl->is_replaying());
 #endif
           memo_state = REPLAY;
           OP::trace->register_physical_only(this, OP::gen);
@@ -119,6 +120,7 @@ namespace Legion {
         {
 #ifdef DEBUG_LEGION
           assert(OP::trace->is_recording());
+          assert(tpl->is_recording());
 #endif
           memo_state = RECORD;
         }

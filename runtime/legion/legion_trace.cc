@@ -2937,6 +2937,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock t_lock(template_lock);
+#ifdef DEBUG_LEGION
+      assert(is_recording());
+#endif
 
       TraceLocalID op_key = task->get_trace_local_id();
 #ifdef DEBUG_LEGION
@@ -2966,6 +2969,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock t_lock(template_lock, 1, false/*exclusive*/);
+#ifdef DEBUG_LEGION
+      assert(is_replaying());
+#endif
 
       TraceLocalID op_key = task->get_trace_local_id();
       CachedMappings::const_iterator finder = cached_mappings.find(op_key);
@@ -2987,6 +2993,9 @@ namespace Legion {
       assert(task->is_memoizing());
 #endif
       AutoLock tpl_lock(template_lock);
+#ifdef DEBUG_LEGION
+      assert(is_recording());
+#endif
 
       unsigned lhs_ = events.size();
       events.push_back(lhs);
@@ -3018,6 +3027,9 @@ namespace Legion {
       assert(lhs.exists());
 #endif
       AutoLock tpl_lock(template_lock);
+#ifdef DEBUG_LEGION
+      assert(is_recording());
+#endif
 
       unsigned lhs_ = events.size();
       user_events.resize(events.size());
@@ -3048,6 +3060,9 @@ namespace Legion {
       assert(rhs.exists());
 #endif
       AutoLock tpl_lock(template_lock);
+#ifdef DEBUG_LEGION
+      assert(is_recording());
+#endif
 
       events.push_back(ApEvent());
       std::map<ApEvent, unsigned>::iterator lhs_finder = event_map.find(lhs);
@@ -3106,6 +3121,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock tpl_lock(template_lock);
+#ifdef DEBUG_LEGION
+      assert(is_recording());
+#endif
 
       std::set<unsigned> rhs_;
       for (std::set<ApEvent>::const_iterator it = rhs.begin(); it != rhs.end();
@@ -3160,6 +3178,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock t_lock(template_lock);
+#ifdef DEBUG_LEGION
+      assert(is_recording());
+#endif
 
       if (src->is_reduction_view())
       {
@@ -3245,6 +3266,9 @@ namespace Legion {
         lhs = ApEvent(rename);
       }
       AutoLock tpl_lock(template_lock);
+#ifdef DEBUG_LEGION
+      assert(is_recording());
+#endif
 
       unsigned lhs_ = events.size();
       events.push_back(lhs);
@@ -3297,6 +3321,10 @@ namespace Legion {
                                              ContextID logical_ctx)
     //--------------------------------------------------------------------------
     {
+      AutoLock tpl_lock(template_lock);
+#ifdef DEBUG_LEGION
+      assert(is_recording());
+#endif
       // FIXME: Nested composite views potentially make the check expensive.
       //        Here we simply handle the case we know can be done efficiently.
       if (!src->has_nested_views())
@@ -3374,6 +3402,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock tpl_lock(template_lock);
+#ifdef DEBUG_LEGION
+      assert(is_recording());
+#endif
       summary_info.push_back(
           std::make_pair<RegionRequirement, InstanceSet>(region, instance_set));
       parent_indices.push_back(parent_idx);
@@ -3393,6 +3424,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock tpl_lock(template_lock);
+#ifdef DEBUG_LEGION
+      assert(is_recording());
+#endif
 
       Memoizable *memoizable = op->get_memoizable();
 #ifdef DEBUG_LEGION
@@ -3480,6 +3514,9 @@ namespace Legion {
       assert(op->is_memoizing());
 #endif
       AutoLock tpl_lock(template_lock);
+#ifdef DEBUG_LEGION
+      assert(is_recording());
+#endif
 
       unsigned lhs_ = events.size();
       events.push_back(lhs);
@@ -3519,6 +3556,9 @@ namespace Legion {
       assert(op->is_memoizing());
 #endif
       AutoLock tpl_lock(template_lock);
+#ifdef DEBUG_LEGION
+      assert(is_recording());
+#endif
 
       unsigned lhs_ = events.size();
       events.push_back(lhs);
@@ -3549,6 +3589,9 @@ namespace Legion {
       assert(op->is_memoizing());
 #endif
       AutoLock tpl_lock(template_lock);
+#ifdef DEBUG_LEGION
+      assert(is_recording());
+#endif
 
       events.push_back(ApEvent());
 #ifdef DEBUG_LEGION
@@ -3595,6 +3638,9 @@ namespace Legion {
       assert(op->is_memoizing());
 #endif
       AutoLock tpl_lock(template_lock);
+#ifdef DEBUG_LEGION
+      assert(is_recording());
+#endif
 
       unsigned lhs_ = events.size();
       events.push_back(lhs);
@@ -3640,6 +3686,7 @@ namespace Legion {
       AutoLock tpl_lock(template_lock);
 #ifdef DEBUG_LEGION
       assert(fill_views.find(fill_view) == fill_views.end());
+      assert(is_recording());
 #endif
       fill_views[fill_view] = fill_mask;
     }
@@ -3654,6 +3701,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock tpl_lock(template_lock);
+#ifdef DEBUG_LEGION
+      assert(is_recording());
+#endif
       LegionMap<FillView*, FieldMask>::aligned::iterator finder =
         fill_views.find(fill_view);
       if (finder == fill_views.end())
@@ -3696,6 +3746,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock tpl_lock(template_lock);
+#ifdef DEBUG_LEGION
+      assert(is_recording());
+#endif
       LegionMap<InstanceView*, FieldMask>::aligned::iterator finder =
         valid_views.find(dst_view);
       if (finder == valid_views.end())
@@ -3718,6 +3771,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock tpl_lock(template_lock);
+#ifdef DEBUG_LEGION
+      assert(is_recording());
+#endif
       has_block = true;
     }
 
@@ -3727,6 +3783,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock tpl_lock(template_lock);
+#ifdef DEBUG_LEGION
+      assert(is_recording());
+#endif
       outstanding_gc_events[view].insert(term_event);
     }
 
