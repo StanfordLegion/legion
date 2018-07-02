@@ -675,15 +675,19 @@ namespace Legion {
       std::map<TraceLocalID, unsigned> task_entries;
       typedef std::pair<PhysicalInstance, unsigned> InstanceAccess;
       struct UserInfo {
-        std::set<unsigned> users;
-        std::set<RegionNode*> nodes;
+        UserInfo(bool r, unsigned u, RegionNode *n)
+          : read(r), node(n)
+          { users.insert(u); }
         bool read;
+        std::set<unsigned> users;
+        RegionNode *node;
       };
-      std::map<InstanceAccess, UserInfo> last_users;
+      typedef std::list<UserInfo> UserInfos;
+      std::map<InstanceAccess, UserInfos> last_users;
       struct InstanceReq {
+        bool read;
         PhysicalInstance instance;
         std::vector<FieldID> fields;
-        bool read;
       };
       std::map<TraceLocalID, std::vector<InstanceReq> > op_reqs;
       std::vector<std::pair<RegionRequirement, InstanceSet> > summary_info;

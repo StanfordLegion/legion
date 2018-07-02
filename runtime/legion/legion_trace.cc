@@ -2011,11 +2011,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       std::set<ApEvent> to_merge;
-      for (std::map<InstanceAccess, UserInfo>::const_iterator it =
+      for (std::map<InstanceAccess, UserInfos>::const_iterator it =
            last_users.begin(); it != last_users.end(); ++it)
-        for (std::set<unsigned>::const_iterator uit = it->second.users.begin();
-             uit != it->second.users.end(); ++uit)
-          to_merge.insert(events[*uit]);
+        for (UserInfos::const_iterator iit = it->second.begin();
+             iit != it->second.end(); ++iit)
+          for (std::set<unsigned>::const_iterator uit = iit->users.begin();
+               uit != iit->users.end(); ++uit)
+            to_merge.insert(events[*uit]);
       return Runtime::merge_events(to_merge);
     }
 
@@ -2367,19 +2369,21 @@ namespace Legion {
       // - frontiers[idx] == (event idx from the previous trace)
       // - after each replay, we do assignment events[frontiers[idx]] = idx
       // Note that 'frontiers' is used in 'find_last_users()'
-      for (std::map<InstanceAccess, UserInfo>::iterator it = last_users.begin();
+      for (std::map<InstanceAccess,UserInfos>::iterator it = last_users.begin();
            it != last_users.end(); ++it)
-        for (std::set<unsigned>::iterator uit = it->second.users.begin(); uit !=
-             it->second.users.end(); ++uit)
-        {
-          unsigned frontier = *uit;
-          if (frontiers.find(frontier) == frontiers.end())
+        for (UserInfos::iterator iit = it->second.begin(); iit !=
+             it->second.end(); ++iit)
+          for (std::set<unsigned>::iterator uit = iit->users.begin(); uit !=
+               iit->users.end(); ++uit)
           {
-            unsigned next_event_id = events.size();
-            frontiers[frontier] = next_event_id;
-            events.resize(next_event_id + 1);
+            unsigned frontier = *uit;
+            if (frontiers.find(frontier) == frontiers.end())
+            {
+              unsigned next_event_id = events.size();
+              frontiers[frontier] = next_event_id;
+              events.resize(next_event_id + 1);
+            }
           }
-        }
 
       // We are now going to break the invariant that
       // the generator of events[idx] is instructions[idx].
@@ -3742,53 +3746,36 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       InstanceAccess key(inst, field);
-      std::map<InstanceAccess, UserInfo>::iterator finder =
+      std::map<InstanceAccess, UserInfos>::iterator finder =
         last_users.find(key);
       if (finder == last_users.end())
       {
-        UserInfo &info = last_users[key];
-        info.users.insert(user);
-        info.nodes.insert(node);
-        info.read = read;
+        UserInfos &infos = last_users[key];
+        infos.push_back(UserInfo(read, user, node));
       }
       else
       {
-        if (finder->second.read == read)
+        bool joined = false;
+        for (UserInfos::iterator it = finder->second.begin();
+             it != finder->second.end();)
         {
-          if (read)
+          if ((read && it->read) || !it->node->intersects_with(node, false))
           {
-            finder->second.users.insert(user);
-            finder->second.nodes.insert(node);
-          }
-          else if (!finder->second.read && !read)
-          {
-            std::set<RegionNode*> &nodes = finder->second.nodes;
-
-            bool interfere_with_any = false;
-            for (std::set<RegionNode*>::iterator it = nodes.begin();
-                 it != nodes.end(); ++it)
-              if ((*it)->intersects_with(node, false))
-              {
-                interfere_with_any = true;
-                break;
-              }
-            if (interfere_with_any)
+            if (it->node == node)
             {
-              finder->second.users.clear();
-              finder->second.nodes.clear();
+#ifdef DEBUG_LEGION
+              assert(!joined);
+#endif
+              it->users.insert(user);
+              joined = true;
             }
-            finder->second.users.insert(user);
-            finder->second.nodes.insert(node);
+            ++it;
           }
+          else
+            it = finder->second.erase(it);
         }
-        else
-        {
-          finder->second.users.clear();
-          finder->second.users.insert(user);
-          finder->second.nodes.clear();
-          finder->second.nodes.insert(node);
-          finder->second.read = read;
-        }
+        if (!joined)
+          finder->second.push_back(UserInfo(read, user, node));
       }
     }
 
@@ -3799,19 +3786,21 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       InstanceAccess key(inst, field);
-      std::map<InstanceAccess, UserInfo>::iterator finder =
+      std::map<InstanceAccess, UserInfos>::iterator finder =
         last_users.find(key);
 #ifdef DEBUG_LEGION
       assert(finder != last_users.end());
 #endif
-      for (std::set<unsigned>::iterator it = finder->second.users.begin(); it !=
-           finder->second.users.end(); ++it)
-      {
+      for (UserInfos::iterator uit = finder->second.begin();
+           uit != finder->second.end(); ++uit)
+        for (std::set<unsigned>::iterator it = uit->users.begin(); it !=
+             uit->users.end(); ++it)
+        {
 #ifdef DEBUG_LEGION
-        assert(frontiers.find(*it) != frontiers.end());
+          assert(frontiers.find(*it) != frontiers.end());
 #endif
-        users.insert(frontiers[*it]);
-      }
+          users.insert(frontiers[*it]);
+        }
     }
 
     /////////////////////////////////////////////////////////////
