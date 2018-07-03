@@ -9147,7 +9147,8 @@ namespace Legion {
       assert(is_functional);
       assert(results.empty());
 #endif
-      const InterferenceKey key(upper_bound, target, launch_space);
+      const InterferenceKey key(upper_bound->get_row_source(), 
+                                target, launch_space);
       {
         // Check to see if we already have the interfering points
         AutoLock p_lock(projection_reservation, 1, false/*exclusive*/);

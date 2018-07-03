@@ -1418,7 +1418,7 @@ namespace Legion {
       public:
         InterferenceKey(void)
           : node(NULL), target(NULL), space(IndexSpace::NO_SPACE) { }
-        InterferenceKey(RegionTreeNode* n,IndexSpaceExpression *t,IndexSpace sp)
+        InterferenceKey(IndexTreeNode* n,IndexSpaceExpression *t, IndexSpace sp)
           : node(n), target(t), space(sp) { }
       public:
         inline bool operator==(const InterferenceKey &rhs) const
@@ -1442,7 +1442,7 @@ namespace Legion {
           return space < rhs.space;
         }
       public:
-        RegionTreeNode *node;
+        IndexTreeNode *node;
         IndexSpaceExpression *target;
         IndexSpace space; 
       };
