@@ -2265,7 +2265,6 @@ namespace Legion {
         op->initialize_summary(context, invalidator->get_unique_op_id(),
             it->requirements, it->instances, it->parent_indices);
         op->execute_dependence_analysis();
-        op->add_mapping_reference(op->get_generation());
       }
     }
 
