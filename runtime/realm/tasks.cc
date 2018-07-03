@@ -1096,6 +1096,7 @@ namespace Realm {
     Thread *t = Thread::create_user_thread<ThreadedTaskScheduler,
 					   &ThreadedTaskScheduler::scheduler_loop>(this,
 										   tlp,
+										   &core_rsrv,
 										   this);
     all_workers.insert(t);
     //if(make_active)
