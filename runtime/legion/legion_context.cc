@@ -8782,13 +8782,12 @@ namespace Legion {
       }
       Runtime::advance_barrier(creation_barrier);
       part_op->initialize_by_image(this, 
-#ifdef SHARD_BY_IMAGE
-                                   owner_shard->shard_id, total_shards,
-#else
+#ifndef SHARD_BY_IMAGE
                                    index_partition_allocator_shard,
 #endif
                                    pending_partition_barrier, 
-                                   pid, projection, parent, fid, id, tag);
+                                   pid, projection, parent, fid, id, tag,
+                                   owner_shard->shard_id, total_shards);
 #ifdef DEBUG_LEGION
       part_op->set_sharding_collective(new ShardingGatherCollective(this, 
                                     0/*owner shard*/, COLLECTIVE_LOC_39));
@@ -8924,13 +8923,12 @@ namespace Legion {
       }
       Runtime::advance_barrier(creation_barrier);
       part_op->initialize_by_image_range(this, 
-#ifdef SHARD_BY_IMAGE
-                                         owner_shard->shard_id, total_shards,
-#else
+#ifndef SHARD_BY_IMAGE
                                          index_partition_allocator_shard,
 #endif
                                          pending_partition_barrier,
-                                         pid, projection, parent, fid, id, tag);
+                                         pid, projection, parent, fid, id, tag,
+                                         owner_shard->shard_id, total_shards);
 #ifdef DEBUG_LEGION
       part_op->set_sharding_collective(new ShardingGatherCollective(this, 
                                     0/*owner shard*/, COLLECTIVE_LOC_40));

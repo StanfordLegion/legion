@@ -1956,16 +1956,15 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ReplDependentPartitionOp::initialize_by_image(ReplicateContext *ctx, 
-#ifdef SHARD_BY_IMAGE
-                                                   ShardID shard, size_t total,
-#else
+#ifndef SHARD_BY_IMAGE
                                                        ShardID target,
 #endif
                                                        ApEvent ready_event,
                                                        IndexPartition pid,
                                                    LogicalPartition projection,
                                              LogicalRegion parent, FieldID fid,
-                                                   MapperID id, MappingTagID t)
+                                                   MapperID id, MappingTagID t,
+                                                   ShardID shard, size_t total)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -1993,11 +1992,12 @@ namespace Legion {
       assert(thunk == NULL);
 #endif
 #ifdef SHARD_BY_IMAGE
-      thunk = new ReplByImageThunk(ctx, shard, total, pid, 
-                                   projection.get_index_partition());
+      thunk = new ReplByImageThunk(ctx, pid, projection.get_index_partition(),
+                                   shard, total);
 #else
       thunk = new ReplByImageThunk(ctx, target, pid,
-                                   projection.get_index_partition());
+                                   projection.get_index_partition(),
+                                   shard, total);
 #endif
       partition_ready = ready_event;
       if (runtime->legion_spy_enabled)
@@ -2007,10 +2007,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void ReplDependentPartitionOp::initialize_by_image_range(
                                                          ReplicateContext *ctx, 
-#ifdef SHARD_BY_IMAGE
-
-                                                   ShardID shard, size_t total, 
-#else
+#ifndef SHARD_BY_IMAGE
                                                          ShardID target,
 #endif
                                                          ApEvent ready_event,
@@ -2018,7 +2015,8 @@ namespace Legion {
                                                 LogicalPartition projection,
                                                 LogicalRegion parent,
                                                 FieldID fid, MapperID id,
-                                                MappingTagID t)
+                                                MappingTagID t, ShardID shard, 
+                                                size_t total_shards) 
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -2046,11 +2044,13 @@ namespace Legion {
       assert(thunk == NULL);
 #endif
 #ifdef SHARD_BY_IMAGE
-      thunk = new ReplByImageRangeThunk(ctx, shard, total, pid, 
-                                        projection.get_index_partition());
+      thunk = new ReplByImageRangeThunk(ctx, pid, 
+                                        projection.get_index_partition(),
+                                        shard, total_shards);
 #else
       thunk = new ReplByImageRangeThunk(ctx, target, pid, 
-                                        projection.get_index_partition());
+                                        projection.get_index_partition(),
+                                        shard, total_shards);
 #endif
       partition_ready = ready_event;
       if (runtime->legion_spy_enabled)
@@ -2294,18 +2294,19 @@ namespace Legion {
 #ifdef SHARD_BY_IMAGE
     ReplDependentPartitionOp::ReplByImageThunk::ReplByImageThunk(
                                           ReplicateContext *ctx, 
-                                          ShardID s, size_t total,
-                                          IndexPartition p, IndexPartition proj)
+                                          IndexPartition p, IndexPartition proj,
+                                          ShardID s, size_t total)
       : ByImageThunk(p, proj), 
         collective(FieldDescriptorExchange(ctx, COLLECTIVE_LOC_55)),
-        shard_id(s), total_shards(total)
 #else
     ReplDependentPartitionOp::ReplByImageThunk::ReplByImageThunk(
                                           ReplicateContext *ctx, ShardID target,
-                                          IndexPartition p, IndexPartition proj)
+                                          IndexPartition p, IndexPartition proj,
+                                          ShardID s, size_t total)
       : ByImageThunk(p, proj), 
-        collective(FieldDescriptorGather(ctx, target, COLLECTIVE_LOC_55))
+        collective(FieldDescriptorGather(ctx, target, COLLECTIVE_LOC_55)),
 #endif
+        shard_id(s), total_shards(total)
     //--------------------------------------------------------------------------
     {
     }
@@ -2319,6 +2320,13 @@ namespace Legion {
     {
       if (op->is_index_space)
       {
+        // There is a special case here if we're projecting the same 
+        // partition that we used to make the instances, if it is then
+        // we can avoid needing to do the exchange at all
+        if ((op->requirement.handle_type == PART_PROJECTION) &&
+            (op->requirement.partition.get_index_partition() == projection))
+          return forest->create_partition_by_image_range(op, pid, projection,
+              instances, instances_ready, shard_id, total_shards);
 #ifdef SHARD_BY_IMAGE
         // Do the all-to-all gather of the field data descriptors
         ApEvent all_ready = collective.exchange_descriptors(instances_ready,
@@ -2352,18 +2360,19 @@ namespace Legion {
 #ifdef SHARD_BY_IMAGE
     ReplDependentPartitionOp::ReplByImageRangeThunk::ReplByImageRangeThunk(
                                           ReplicateContext *ctx, 
-                                          ShardID s, size_t total,
-                                          IndexPartition p, IndexPartition proj)
+                                          IndexPartition p, IndexPartition proj,
+                                          ShardID s, size_t total)
       : ByImageRangeThunk(p, proj), 
         collective(FieldDescriptorExchange(ctx, COLLECTIVE_LOC_60)),
-        shard_id(s), total_shards(total)
 #else
     ReplDependentPartitionOp::ReplByImageRangeThunk::ReplByImageRangeThunk(
                                           ReplicateContext *ctx, ShardID target,
-                                          IndexPartition p, IndexPartition proj)
+                                          IndexPartition p, IndexPartition proj,
+                                          ShardID s, size_t total)
       : ByImageRangeThunk(p, proj), 
-        collective(FieldDescriptorGather(ctx, target, COLLECTIVE_LOC_60))
+        collective(FieldDescriptorGather(ctx, target, COLLECTIVE_LOC_60)),
 #endif
+        shard_id(s), total_shards(total)
     //--------------------------------------------------------------------------
     {
     }
@@ -2377,6 +2386,13 @@ namespace Legion {
     {
       if (op->is_index_space)
       {
+        // There is a special case here if we're projecting the same 
+        // partition that we used to make the instances, if it is then
+        // we can avoid needing to do the exchange at all
+        if ((op->requirement.handle_type == PART_PROJECTION) &&
+            (op->requirement.partition.get_index_partition() == projection))
+          return forest->create_partition_by_image_range(op, pid, projection,
+              instances, instances_ready, shard_id, total_shards);
 #ifdef SHARD_BY_IMAGE
         // Do the all-to-all gather of the field data descriptors
         ApEvent all_ready = collective.exchange_descriptors(instances_ready,
