@@ -37,7 +37,8 @@ namespace Realm {
   class LocalNumaProcessor : public LocalTaskProcessor {
   public:
     LocalNumaProcessor(Processor _me, int _numa_node,
-		       CoreReservationSet& crs, size_t _stack_size);
+		       CoreReservationSet& crs, size_t _stack_size,
+		       bool _force_kthreads);
     virtual ~LocalNumaProcessor(void);
   protected:
     int numa_node;
@@ -46,7 +47,8 @@ namespace Realm {
 
   LocalNumaProcessor::LocalNumaProcessor(Processor _me, int _numa_node,
 					 CoreReservationSet& crs,
-					 size_t _stack_size)
+					 size_t _stack_size,
+					 bool _force_kthreads)
     : LocalTaskProcessor(_me, Processor::LOC_PROC)
     , numa_node(_numa_node)
   {
@@ -63,13 +65,17 @@ namespace Realm {
     core_rsrv = new CoreReservation(name, crs, params);
 
 #ifdef REALM_USE_USER_THREADS
-    UserThreadTaskScheduler *sched = new UserThreadTaskScheduler(me, *core_rsrv);
-    // no config settings we want to tweak yet
-#else
-    KernelThreadTaskScheduler *sched = new KernelThreadTaskScheduler(me, *core_rsrv);
-    sched->cfg_max_idle_workers = 3; // keep a few idle threads around
+    if(!_force_kthreads) {
+      UserThreadTaskScheduler *sched = new UserThreadTaskScheduler(me, *core_rsrv);
+      // no config settings we want to tweak yet
+      set_scheduler(sched);
+    } else
 #endif
-    set_scheduler(sched);
+    {
+      KernelThreadTaskScheduler *sched = new KernelThreadTaskScheduler(me, *core_rsrv);
+      sched->cfg_max_idle_workers = 3; // keep a few idle threads around
+      set_scheduler(sched);
+    }
   }
 
   LocalNumaProcessor::~LocalNumaProcessor(void)
@@ -251,7 +257,8 @@ namespace Realm {
 	  Processor p = runtime->next_local_processor_id();
 	  ProcessorImpl *pi = new LocalNumaProcessor(p, it->first,
 						     runtime->core_reservation_set(),
-						     cfg_stack_size_in_mb << 20);
+						     cfg_stack_size_in_mb << 20,
+						     Config::force_kernel_threads);
 	  runtime->add_processor(pi);
 
 	  // create affinities between this processor and system/reg memories
