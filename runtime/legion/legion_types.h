@@ -336,6 +336,7 @@ namespace Legion {
       LG_REMOTE_PHYSICAL_REQUEST_TASK_ID,
       LG_REMOTE_PHYSICAL_RESPONSE_TASK_ID,
       LG_REPLAY_SLICE_ID,
+      LG_DELETE_TEMPLATE_ID,
       LG_MESSAGE_ID, // These two must be the last two
       LG_RETRY_SHUTDOWN_TASK_ID,
       LG_LAST_TASK_ID, // This one should always be last

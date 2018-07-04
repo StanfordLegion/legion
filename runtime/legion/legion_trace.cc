@@ -1152,7 +1152,11 @@ namespace Legion {
         assert(current_template != NULL);
         assert(local_trace->get_physical_trace() != NULL);
 #endif
-        local_trace->get_physical_trace()->fix_trace(current_template);
+        RtEvent pending_deletion =
+          local_trace->get_physical_trace()->fix_trace(current_template);
+        if (pending_deletion.exists())
+          execution_precondition = Runtime::merge_events(
+              execution_precondition, ApEvent(pending_deletion));
         local_trace->initialize_tracing_state();
       }
       FenceOp::trigger_mapping();
@@ -1315,7 +1319,11 @@ namespace Legion {
         assert(current_template != NULL);
         assert(local_trace->get_physical_trace() != NULL);
 #endif
-        local_trace->get_physical_trace()->fix_trace(current_template);
+        RtEvent pending_deletion =
+          local_trace->get_physical_trace()->fix_trace(current_template);
+        if (pending_deletion.exists())
+          execution_precondition = Runtime::merge_events(
+              execution_precondition, ApEvent(pending_deletion));
         local_trace->initialize_tracing_state();
       }
       else if (replayed)
@@ -1835,16 +1843,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTrace::fix_trace(PhysicalTemplate *tpl)
+    RtEvent PhysicalTrace::fix_trace(PhysicalTemplate *tpl)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(tpl->is_recording());
 #endif
       tpl->finalize();
+      RtEvent pending_deletion = RtEvent::NO_RT_EVENT;
       if (!tpl->is_replayable())
       {
-        delete tpl;
+        pending_deletion = tpl->defer_template_deletion();
         current_template = NULL;
         if (++nonreplayable_count > LEGION_NON_REPLAYABLE_WARNING)
         {
@@ -1860,6 +1869,7 @@ namespace Legion {
       }
       else
         templates.push_back(tpl);
+      return pending_deletion;
     }
 
     //--------------------------------------------------------------------------
@@ -2026,6 +2036,17 @@ namespace Legion {
                uit != iit->users.end(); ++uit)
             to_merge.insert(events[*uit]);
       return Runtime::merge_events(to_merge);
+    }
+
+    //--------------------------------------------------------------------------
+    ApEvent PhysicalTemplate::get_completion_for_deletion(void) const
+    //--------------------------------------------------------------------------
+    {
+      std::set<ApEvent> all_events;
+      for (std::map<ApEvent, unsigned>::const_iterator it = event_map.begin();
+           it != event_map.end(); ++it)
+        all_events.insert(it->first);
+      return Runtime::merge_events(all_events);
     }
 
     //--------------------------------------------------------------------------
@@ -3816,11 +3837,29 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    RtEvent PhysicalTemplate::defer_template_deletion(void)
+    //--------------------------------------------------------------------------
+    {
+      ApEvent wait_on = get_completion_for_deletion();
+      DeleteTemplateArgs args(this);
+      return implicit_runtime->issue_runtime_meta_task(args, LG_LOW_PRIORITY,
+          Runtime::protect_event(wait_on));
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ void PhysicalTemplate::handle_replay_slice(const void *args)
     //--------------------------------------------------------------------------
     {
       const ReplaySliceArgs *pargs = (const ReplaySliceArgs*)args;
       pargs->tpl->execute_slice(pargs->slice_index);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void PhysicalTemplate::handle_delete_template(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const DeleteTemplateArgs *pargs = (const DeleteTemplateArgs*)args;
+      delete pargs->tpl;
     }
 
     //--------------------------------------------------------------------------

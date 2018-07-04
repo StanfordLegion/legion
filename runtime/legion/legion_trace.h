@@ -472,7 +472,7 @@ namespace Legion {
       bool has_any_templates(void) const { return templates.size() > 0; }
     public:
       PhysicalTemplate* start_new_template(ApEvent fence_event);
-      void fix_trace(PhysicalTemplate *tpl);
+      RtEvent fix_trace(PhysicalTemplate *tpl);
     public:
       void initialize_template(ApEvent fence_completion, bool recurrent);
     public:
@@ -518,6 +518,15 @@ namespace Legion {
         PhysicalTemplate *tpl;
         unsigned slice_index;
       };
+      struct DeleteTemplateArgs : public LgTaskArgs<DeleteTemplateArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_DELETE_TEMPLATE_ID;
+      public:
+        DeleteTemplateArgs(PhysicalTemplate *t)
+          : LgTaskArgs<DeleteTemplateArgs>(0), tpl(t) { }
+      public:
+        PhysicalTemplate *tpl;
+      };
     public:
       PhysicalTemplate(PhysicalTrace *trace, ApEvent fence_event);
       PhysicalTemplate(PhysicalTrace *trace, const PhysicalTemplate &rhs);
@@ -528,6 +537,7 @@ namespace Legion {
       void initialize(Runtime *runtime, ApEvent fence_completion,
                       bool recurrent);
       ApEvent get_completion(void) const;
+      ApEvent get_completion_for_deletion(void) const;
     private:
       static bool check_logical_open(RegionTreeNode *node, ContextID ctx,
                                      FieldMask fields);
@@ -647,7 +657,10 @@ namespace Legion {
       void record_blocking_call(void);
       void record_outstanding_gc_event(InstanceView *view, ApEvent term_event);
     public:
+      RtEvent defer_template_deletion(void);
+    public:
       static void handle_replay_slice(const void *args);
+      static void handle_delete_template(const void *args);
     private:
       void record_ready_view(const RegionRequirement &req,
                              InstanceView *view,

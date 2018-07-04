@@ -20204,6 +20204,11 @@ namespace Legion {
             PhysicalTemplate::handle_replay_slice(args);
             break;
           }
+        case LG_DELETE_TEMPLATE_ID:
+          {
+            PhysicalTemplate::handle_delete_template(args);
+            break;
+          }
         case LG_RETRY_SHUTDOWN_TASK_ID:
           {
             const ShutdownManager::RetryShutdownArgs *shutdown_args = 
