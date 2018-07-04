@@ -3393,6 +3393,16 @@ namespace Legion {
       }
       else
       {
+        if (valid_views.find(view) == valid_views.end() && HAS_READ(req))
+        {
+          LegionMap<InstanceView*, FieldMask>::aligned::iterator pfinder =
+            previous_valid_views.find(view);
+          if (pfinder == previous_valid_views.end())
+            previous_valid_views[view] = fields;
+          else
+            pfinder->second |= fields;
+        }
+
         if (HAS_WRITE(req))
         {
           RegionTreeNode *node = view->logical_node;
@@ -3400,7 +3410,9 @@ namespace Legion {
           for (LegionMap<InstanceView*, FieldMask>::aligned::iterator vit =
               valid_views.begin(); vit != valid_views.end(); ++vit)
           {
+            if (vit->first->get_manager() == view->get_manager()) continue;
             RegionTreeNode *other = vit->first->logical_node;
+            if (node->get_tree_id() != other->get_tree_id()) continue;
             if (!!(fields & vit->second) &&
                 node->intersects_with(other, false))
             {
@@ -3412,23 +3424,8 @@ namespace Legion {
           for (unsigned idx = 0; idx < to_delete.size(); ++idx)
             valid_views.erase(to_delete[idx]);
         }
-        LegionMap<InstanceView*, FieldMask>::aligned::iterator finder =
-          valid_views.find(view);
-        if (finder == valid_views.end())
-        {
-          if (HAS_READ(req))
-          {
-            LegionMap<InstanceView*, FieldMask>::aligned::iterator pfinder =
-              previous_valid_views.find(view);
-            if (pfinder == previous_valid_views.end())
-              previous_valid_views[view] = fields;
-            else
-              pfinder->second |= fields;
-          }
-          valid_views[view] = fields;
-        }
-        else
-          finder->second |= fields;
+
+        valid_views[view] |= fields;
       }
 #ifdef DEBUG_LEGION
       assert(logical_contexts.find(view) == logical_contexts.end() ||
