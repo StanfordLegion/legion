@@ -1868,7 +1868,11 @@ namespace Legion {
         }
       }
       else
+      {
+        // Reset the nonreplayable count when we find a replayable template
+        nonreplayable_count = 0;
         templates.push_back(tpl);
+      }
       return pending_deletion;
     }
 
