@@ -4064,7 +4064,6 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(events[lhs].exists());
       assert(user_events[lhs].exists());
-      assert(events[rhs].exists());
       assert(events[lhs].id == user_events[lhs].id);
 #endif
       Runtime::trigger_event(user_events[lhs], events[rhs]);
