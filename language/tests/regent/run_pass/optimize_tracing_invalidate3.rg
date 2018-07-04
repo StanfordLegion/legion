@@ -126,4 +126,4 @@ task main()
   reuse()
 end
 
-regentlib.start(main)
+regentlib.start(main, bishoplib.make_entry())
