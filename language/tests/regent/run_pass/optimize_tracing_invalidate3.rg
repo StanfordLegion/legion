@@ -24,6 +24,11 @@ import "bishop"
 
 mapper
 
+task
+{
+  target : processors[0];
+}
+
 task#no_reuse task#dummy region
 {
   create: demand;
