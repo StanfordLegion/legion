@@ -2325,8 +2325,12 @@ namespace Legion {
         // we can avoid needing to do the exchange at all
         if ((op->requirement.handle_type == PART_PROJECTION) &&
             (op->requirement.partition.get_index_partition() == projection))
+        {
+          // Make sure we elide our collective to avoid leaking anything
+          collective.elide_collective();
           return forest->create_partition_by_image_range(op, pid, projection,
               instances, instances_ready, shard_id, total_shards);
+        }
 #ifdef SHARD_BY_IMAGE
         // Do the all-to-all gather of the field data descriptors
         ApEvent all_ready = collective.exchange_descriptors(instances_ready,
@@ -2391,8 +2395,12 @@ namespace Legion {
         // we can avoid needing to do the exchange at all
         if ((op->requirement.handle_type == PART_PROJECTION) &&
             (op->requirement.partition.get_index_partition() == projection))
+        {
+          // Make sure we elide our collective to avoid leaking anything
+          collective.elide_collective();
           return forest->create_partition_by_image_range(op, pid, projection,
               instances, instances_ready, shard_id, total_shards);
+        }
 #ifdef SHARD_BY_IMAGE
         // Do the all-to-all gather of the field data descriptors
         ApEvent all_ready = collective.exchange_descriptors(instances_ready,
