@@ -5316,6 +5316,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(dynamic_trace != NULL);
 #endif
+      dynamic_trace->clear_blocking_call();
+
       // Issue a begin op
       TraceBeginOp *begin = runtime->get_available_begin_op();
       begin->initialize_begin(this, dynamic_trace);
@@ -5355,18 +5357,19 @@ namespace Legion {
           "Illegal end trace call on a static trace in "
                        "task %s (UID %lld)", get_task_name(), get_unique_id());
       }
+      bool has_blocking_call = current_trace->has_blocking_call();
       if (current_trace->is_fixed())
       {
         // Already fixed, dump a complete trace op into the stream
         TraceCompleteOp *complete_op = runtime->get_available_trace_op();
-        complete_op->initialize_complete(this);
+        complete_op->initialize_complete(this, has_blocking_call);
         runtime->add_to_dependence_queue(this, executing_processor, complete_op);
       }
       else
       {
         // Not fixed yet, dump a capture trace op into the stream
         TraceCaptureOp *capture_op = runtime->get_available_capture_op(); 
-        capture_op->initialize_capture(this);
+        capture_op->initialize_capture(this, has_blocking_call);
         runtime->add_to_dependence_queue(this, executing_processor, capture_op);
         // Mark that the current trace is now fixed
         current_trace->as_dynamic_trace()->fix_trace();
@@ -5421,7 +5424,7 @@ namespace Legion {
       // We're done with this trace, need a trace complete op to clean up
       // This operation takes ownership of the static trace reference
       TraceCompleteOp *complete_op = runtime->get_available_trace_op();
-      complete_op->initialize_complete(this);
+      complete_op->initialize_complete(this,current_trace->has_blocking_call());
       runtime->add_to_dependence_queue(this, executing_processor, complete_op);
       // We no longer have a trace that we're executing 
       current_trace = NULL;
@@ -5444,11 +5447,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InnerContext::invalidate_current_template(void)
+    void InnerContext::record_blocking_call(void)
     //--------------------------------------------------------------------------
     {
       if (current_trace != NULL)
-        current_trace->invalidate_current_template();
+        current_trace->record_blocking_call();
     }
 
     //--------------------------------------------------------------------------
@@ -8742,7 +8745,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LeafContext::invalidate_current_template(void)
+    void LeafContext::record_blocking_call(void)
     //--------------------------------------------------------------------------
     {
     }
@@ -9918,10 +9921,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InlineContext::invalidate_current_template(void)
+    void InlineContext::record_blocking_call(void)
     //--------------------------------------------------------------------------
     {
-      enclosing->invalidate_current_template();
+      enclosing->record_blocking_call();
     }
 
     //--------------------------------------------------------------------------

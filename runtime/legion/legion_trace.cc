@@ -52,7 +52,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     LegionTrace::LegionTrace(TaskContext *c, bool logical_only)
-      : ctx(c), state(LOGICAL_ONLY), last_memoized(0)
+      : ctx(c), state(LOGICAL_ONLY), last_memoized(0),
+        blocking_call_observed(false)
     //--------------------------------------------------------------------------
     {
       physical_trace = logical_only ? NULL
@@ -159,14 +160,6 @@ namespace Legion {
       }
       if (invalidated_template != NULL)
         invalidated_template->issue_summary_operations(ctx, invalidator);
-    }
-
-    //--------------------------------------------------------------------------
-    void LegionTrace::invalidate_current_template(void)
-    //--------------------------------------------------------------------------
-    {
-      if (physical_trace != NULL)
-        physical_trace->invalidate_current_template();
     }
 
     /////////////////////////////////////////////////////////////
@@ -1072,7 +1065,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TraceCaptureOp::initialize_capture(TaskContext *ctx)
+    void TraceCaptureOp::initialize_capture(TaskContext *ctx, bool has_block)
     //--------------------------------------------------------------------------
     {
       initialize(ctx, MIXED_FENCE);
@@ -1086,6 +1079,7 @@ namespace Legion {
       trace = NULL;
       tracing = false;
       current_template = NULL;
+      has_blocking_call = has_block;
     }
 
     //--------------------------------------------------------------------------
@@ -1153,7 +1147,8 @@ namespace Legion {
         assert(local_trace->get_physical_trace() != NULL);
 #endif
         RtEvent pending_deletion =
-          local_trace->get_physical_trace()->fix_trace(current_template);
+          local_trace->get_physical_trace()->fix_trace(
+              current_template, has_blocking_call);
         if (pending_deletion.exists())
           execution_precondition = Runtime::merge_events(
               execution_precondition, ApEvent(pending_deletion));
@@ -1198,7 +1193,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TraceCompleteOp::initialize_complete(TaskContext *ctx)
+    void TraceCompleteOp::initialize_complete(TaskContext *ctx, bool has_block)
     //--------------------------------------------------------------------------
     {
       initialize(ctx, MIXED_FENCE);
@@ -1211,6 +1206,7 @@ namespace Legion {
       current_template = NULL;
       template_completion = ApEvent::NO_AP_EVENT;
       replayed = false;
+      has_blocking_call = has_block;
     }
 
     //--------------------------------------------------------------------------
@@ -1320,7 +1316,8 @@ namespace Legion {
         assert(local_trace->get_physical_trace() != NULL);
 #endif
         RtEvent pending_deletion =
-          local_trace->get_physical_trace()->fix_trace(current_template);
+          local_trace->get_physical_trace()->fix_trace(
+              current_template, has_blocking_call);
         if (pending_deletion.exists())
           execution_precondition = Runtime::merge_events(
               execution_precondition, ApEvent(pending_deletion));
@@ -1843,13 +1840,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtEvent PhysicalTrace::fix_trace(PhysicalTemplate *tpl)
+    RtEvent PhysicalTrace::fix_trace(
+                                  PhysicalTemplate *tpl, bool has_blocking_call)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(tpl->is_recording());
 #endif
-      tpl->finalize();
+      tpl->finalize(has_blocking_call);
       RtEvent pending_deletion = RtEvent::NO_RT_EVENT;
       if (!tpl->is_replayable())
       {
@@ -1874,14 +1872,6 @@ namespace Legion {
         templates.push_back(tpl);
       }
       return pending_deletion;
-    }
-
-    //--------------------------------------------------------------------------
-    void PhysicalTrace::invalidate_current_template(void)
-    //--------------------------------------------------------------------------
-    {
-      if (current_template != NULL && current_template->is_recording())
-        current_template->record_blocking_call();
     }
 
     //--------------------------------------------------------------------------
@@ -1929,8 +1919,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PhysicalTemplate::PhysicalTemplate(PhysicalTrace *t, ApEvent fence_event)
-      : trace(t), recording(true), replayable(true), has_block(false),
-        fence_completion_id(0),
+      : trace(t), recording(true), replayable(true), fence_completion_id(0),
         replay_parallelism(implicit_runtime->max_replay_parallelism)
     //--------------------------------------------------------------------------
     {
@@ -1938,6 +1927,16 @@ namespace Legion {
       event_map[fence_event] = fence_completion_id;
       instructions.push_back(
          new AssignFenceCompletion(*this, fence_completion_id, TraceLocalID()));
+    }
+
+    //--------------------------------------------------------------------------
+    PhysicalTemplate::PhysicalTemplate(const PhysicalTemplate &rhs)
+      : trace(NULL), recording(true), replayable(true), fence_completion_id(0),
+        replay_parallelism(1)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
     }
 
     //--------------------------------------------------------------------------
@@ -1963,16 +1962,6 @@ namespace Legion {
         }
         cached_mappings.clear();
       }
-    }
-
-    //--------------------------------------------------------------------------
-    PhysicalTemplate::PhysicalTemplate(PhysicalTrace *t, const PhysicalTemplate &rhs)
-      : trace(t), recording(true), replayable(true), has_block(false),
-        fence_completion_id(0), replay_parallelism(1)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
     }
 
     //--------------------------------------------------------------------------
@@ -2222,10 +2211,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool PhysicalTemplate::check_replayable(void)
+    bool PhysicalTemplate::check_replayable(void) const
     //--------------------------------------------------------------------------
     {
-      if (untracked_fill_views.size() > 0 || has_block)
+      if (untracked_fill_views.size() > 0)
         return false;
       for (LegionMap<InstanceView*, FieldMask>::aligned::const_iterator it =
            previous_valid_views.begin(); it !=
@@ -2294,11 +2283,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::finalize(void)
+    void PhysicalTemplate::finalize(bool has_blocking_call)
     //--------------------------------------------------------------------------
     {
       recording = false;
-      replayable = check_replayable();
+      replayable = !has_blocking_call && check_replayable();
       if (outstanding_gc_events.size() > 0)
         for (std::map<InstanceView*, std::set<ApEvent> >::iterator it =
              outstanding_gc_events.begin(); it !=
@@ -3812,17 +3801,6 @@ namespace Legion {
 #endif
       logical_contexts[dst_view] = logical_ctx;
       physical_contexts[dst_view] = physical_ctx;
-    }
-
-    //--------------------------------------------------------------------------
-    void PhysicalTemplate::record_blocking_call(void)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock tpl_lock(template_lock);
-#ifdef DEBUG_LEGION
-      assert(is_recording());
-#endif
-      has_block = true;
     }
 
     //--------------------------------------------------------------------------

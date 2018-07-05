@@ -116,8 +116,10 @@ namespace Legion {
       bool is_recording(void) const { return state == PHYSICAL_RECORD; }
       bool is_replaying(void) const { return state == PHYSICAL_REPLAY; }
     public:
+      void clear_blocking_call(void) { blocking_call_observed = false; }
+      void record_blocking_call(void) { blocking_call_observed = true; }
+      bool has_blocking_call(void) const { return blocking_call_observed; }
       void invalidate_trace_cache(Operation *invalidator);
-      void invalidate_current_template(void);
 #ifdef LEGION_SPY
     public:
       virtual void perform_logging(
@@ -137,6 +139,7 @@ namespace Legion {
       // Pointer to a physical trace
       PhysicalTrace *physical_trace;
       unsigned last_memoized;
+      bool blocking_call_observed;
       std::set<std::pair<Operation*,GenerationID> > frontiers;
 #ifdef LEGION_SPY
     protected:
@@ -317,7 +320,7 @@ namespace Legion {
     public:
       TraceCaptureOp& operator=(const TraceCaptureOp &rhs);
     public:
-      void initialize_capture(TaskContext *ctx);
+      void initialize_capture(TaskContext *ctx, bool has_blocking_call);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -328,6 +331,7 @@ namespace Legion {
     protected:
       DynamicTrace *dynamic_trace;
       PhysicalTemplate *current_template;
+      bool has_blocking_call;
     };
 
     /**
@@ -348,7 +352,7 @@ namespace Legion {
     public:
       TraceCompleteOp& operator=(const TraceCompleteOp &rhs);
     public:
-      void initialize_complete(TaskContext *ctx);
+      void initialize_complete(TaskContext *ctx, bool has_blocking_call);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -360,6 +364,7 @@ namespace Legion {
       PhysicalTemplate *current_template;
       ApEvent template_completion;
       bool replayed;
+      bool has_blocking_call;
     };
 
     /**
@@ -465,14 +470,13 @@ namespace Legion {
       PhysicalTrace& operator=(const PhysicalTrace &rhs);
     public:
       void clear_cached_template(void) { current_template = NULL; }
-      void invalidate_current_template(void);
       void check_template_preconditions(void);
     public:
       PhysicalTemplate* get_current_template(void) { return current_template; }
       bool has_any_templates(void) const { return templates.size() > 0; }
     public:
       PhysicalTemplate* start_new_template(ApEvent fence_event);
-      RtEvent fix_trace(PhysicalTemplate *tpl);
+      RtEvent fix_trace(PhysicalTemplate *tpl, bool has_blocking_call);
     public:
       void initialize_template(ApEvent fence_completion, bool recurrent);
     public:
@@ -529,7 +533,7 @@ namespace Legion {
       };
     public:
       PhysicalTemplate(PhysicalTrace *trace, ApEvent fence_event);
-      PhysicalTemplate(PhysicalTrace *trace, const PhysicalTemplate &rhs);
+      PhysicalTemplate(const PhysicalTemplate &rhs);
     private:
       friend class PhysicalTrace;
       ~PhysicalTemplate(void);
@@ -545,14 +549,14 @@ namespace Legion {
                           LegionMap<IndexSpaceNode*, FieldMask>::aligned projs);
     public:
       bool check_preconditions(void);
-      bool check_replayable(void);
+      bool check_replayable(void) const;
       void register_operation(Operation *op);
       void execute_all(void);
       void execute_slice(unsigned slice_idx);
       void issue_summary_operations(TaskContext* context,
                                     Operation *invalidator);
     public:
-      void finalize(void);
+      void finalize(bool has_blocking_call);
       void optimize(void);
       void elide_fences(std::vector<unsigned> &gen);
       void propagate_merges(std::vector<unsigned> &gen);
@@ -654,7 +658,6 @@ namespace Legion {
                                             const FieldMask &copy_mask,
                                             ContextID logical_ctx,
                                             ContextID physical_ctx);
-      void record_blocking_call(void);
       void record_outstanding_gc_event(InstanceView *view, ApEvent term_event);
     public:
       RtEvent defer_template_deletion(void);
@@ -675,7 +678,6 @@ namespace Legion {
       PhysicalTrace *trace;
       volatile bool recording;
       bool replayable;
-      bool has_block;
       mutable LocalLock template_lock;
       const unsigned fence_completion_id;
       const unsigned replay_parallelism;

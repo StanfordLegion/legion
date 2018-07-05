@@ -335,7 +335,7 @@ namespace Legion {
         }
       }
       if (producer_op != NULL && Internal::implicit_context != NULL)
-        Internal::implicit_context->invalidate_current_template();
+        Internal::implicit_context->record_blocking_call();
       if (!ready_event.has_triggered())
       {
         TaskContext *context =
@@ -367,7 +367,7 @@ namespace Legion {
              context->get_task_name(), context->get_unique_id())
       }
       if (producer_op != NULL && Internal::implicit_context != NULL)
-        Internal::implicit_context->invalidate_current_template();
+        Internal::implicit_context->record_blocking_call();
       if (!ready_event.has_triggered())
       {
         TaskContext *context =
@@ -416,7 +416,7 @@ namespace Legion {
               context->get_unique_id())
       }
       if (block && producer_op != NULL && Internal::implicit_context != NULL)
-        Internal::implicit_context->invalidate_current_template();
+        Internal::implicit_context->record_blocking_call();
       if (block && !ready_event.has_triggered())
       {
         TaskContext *context =
@@ -964,7 +964,7 @@ namespace Legion {
             "performance degredation.", context->get_task_name(),
             context->get_unique_id())
       if (op != NULL && Internal::implicit_context != NULL)
-        Internal::implicit_context->invalidate_current_template();
+        Internal::implicit_context->record_blocking_call();
       // Wait on the event that indicates the entire task has finished
       if (valid && !ready_event.has_triggered())
       {
@@ -1025,7 +1025,7 @@ namespace Legion {
       assert(valid);
 #endif
       if (op != NULL && Internal::implicit_context != NULL)
-        Internal::implicit_context->invalidate_current_template();
+        Internal::implicit_context->record_blocking_call();
       if (!ready_event.has_triggered())
       {
         if (context != NULL)
@@ -1211,7 +1211,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (context != NULL)
-        context->invalidate_current_template();
+        context->record_blocking_call();
       if (runtime->runtime_warnings && !silence_warnings &&
           (context != NULL) && !context->is_leaf_context())
       {

@@ -319,7 +319,7 @@ namespace Legion {
       virtual void record_previous_trace(LegionTrace *trace) = 0;
       virtual void invalidate_trace_cache(LegionTrace *trace,
                                           Operation *invalidator) = 0;
-      virtual void invalidate_current_template(void) = 0;
+      virtual void record_blocking_call(void) = 0;
     public:
       virtual void issue_frame(FrameOp *frame, ApEvent frame_termination) = 0;
       virtual void perform_frame_issue(FrameOp *frame, 
@@ -946,7 +946,7 @@ namespace Legion {
       virtual void record_previous_trace(LegionTrace *trace);
       virtual void invalidate_trace_cache(LegionTrace *trace,
                                           Operation *invalidator);
-      virtual void invalidate_current_template(void);
+      virtual void record_blocking_call(void);
     public:
       virtual void issue_frame(FrameOp *frame, ApEvent frame_termination);
       virtual void perform_frame_issue(FrameOp *frame, 
@@ -1556,7 +1556,7 @@ namespace Legion {
       virtual void record_previous_trace(LegionTrace *trace);
       virtual void invalidate_trace_cache(LegionTrace *trace,
                                           Operation *invalidator);
-      virtual void invalidate_current_template(void);
+      virtual void record_blocking_call(void);
     public:
       virtual void issue_frame(FrameOp *frame, ApEvent frame_termination);
       virtual void perform_frame_issue(FrameOp *frame, 
@@ -1872,7 +1872,7 @@ namespace Legion {
       virtual void record_previous_trace(LegionTrace *trace);
       virtual void invalidate_trace_cache(LegionTrace *trace,
                                           Operation *invalidator);
-      virtual void invalidate_current_template(void);
+      virtual void record_blocking_call(void);
     public:
       virtual void issue_frame(FrameOp *frame, ApEvent frame_termination);
       virtual void perform_frame_issue(FrameOp *frame, 
