@@ -2328,8 +2328,11 @@ namespace Legion {
         {
           // Make sure we elide our collective to avoid leaking anything
           collective.elide_collective();
-          return forest->create_partition_by_image_range(op, pid, projection,
-              instances, instances_ready, shard_id, total_shards);
+          if (!instances.empty())
+            return forest->create_partition_by_image_range(op, pid, projection,
+                instances, instances_ready, shard_id, total_shards);
+          else
+            return ApEvent::NO_AP_EVENT;
         }
 #ifdef SHARD_BY_IMAGE
         // Do the all-to-all gather of the field data descriptors
@@ -2398,8 +2401,11 @@ namespace Legion {
         {
           // Make sure we elide our collective to avoid leaking anything
           collective.elide_collective();
-          return forest->create_partition_by_image_range(op, pid, projection,
-              instances, instances_ready, shard_id, total_shards);
+          if (!instances.empty())
+            return forest->create_partition_by_image_range(op, pid, projection,
+                instances, instances_ready, shard_id, total_shards);
+          else
+            return ApEvent::NO_AP_EVENT;
         }
 #ifdef SHARD_BY_IMAGE
         // Do the all-to-all gather of the field data descriptors
