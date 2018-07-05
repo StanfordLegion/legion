@@ -1894,6 +1894,9 @@ namespace Legion {
 #ifdef DEBUG_LEGION
           assert((*it)->is_replayable());
 #endif
+          // Reset the nonreplayable count when a replayable template satisfies
+          // the precondition
+          nonreplayable_count = 0;
           current_template = *it;
           return;
         }
