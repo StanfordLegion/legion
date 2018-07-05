@@ -577,7 +577,6 @@ namespace Legion {
     protected:
       static std::string view_to_string(const InstanceView *view);
       static std::string view_to_string(const FillView *view);
-      void sanity_check(void);
     public:
       void record_mapper_output(SingleTask *task,
                                 const Mapper::MapTaskOutput &output,
@@ -665,7 +664,9 @@ namespace Legion {
       static void handle_replay_slice(const void *args);
       static void handle_delete_template(const void *args);
     private:
-      void record_ready_view(const RegionRequirement &req,
+      void update_valid_view(bool is_reduction,
+                             bool has_read,
+                             bool has_write,
                              InstanceView *view,
                              const FieldMask &fields,
                              ContextID logical_ctx,
@@ -734,7 +735,6 @@ namespace Legion {
       LegionMap<InstanceView*, FieldMask>::aligned    reduction_views;
       LegionMap<FillView*,     FieldMask>::aligned    fill_views;
       LegionMap<FillView*,     FieldMask>::aligned    untracked_fill_views;
-      LegionMap<InstanceView*, bool>::aligned         initialized;
       LegionMap<InstanceView*, ContextID>::aligned    logical_contexts;
       LegionMap<InstanceView*, ContextID>::aligned    physical_contexts;
       std::map<InstanceView*, std::set<ApEvent> >     outstanding_gc_events;

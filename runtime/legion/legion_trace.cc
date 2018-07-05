@@ -2217,6 +2217,13 @@ namespace Legion {
       if (untracked_fill_views.size() > 0)
         return false;
       for (LegionMap<InstanceView*, FieldMask>::aligned::const_iterator it =
+           reduction_views.begin(); it !=
+           reduction_views.end(); ++it)
+      {
+        if (it->first->get_manager()->instance_domain->get_volume() > 0)
+          return false;
+      }
+      for (LegionMap<InstanceView*, FieldMask>::aligned::const_iterator it =
            previous_valid_views.begin(); it !=
            previous_valid_views.end(); ++it)
       {
@@ -2312,9 +2319,6 @@ namespace Legion {
       events.clear();
       events.resize(num_events);
       event_map.clear();
-#ifdef DEBUG_LEGION
-      sanity_check();
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -2746,7 +2750,7 @@ namespace Legion {
         // We do not need to bump the version number for read-only regions.
         // We can also ignore reductions because we reject traces that end with
         // reduction tasks.
-        if (IS_READ_ONLY(req) || IS_REDUCE(req)) continue;
+        if (!HAS_WRITE(req) || IS_REDUCE(req)) continue;
 
         RegionTreeNode *region_node = forest->get_node(req.region);
         FieldSpaceNode *field_node = region_node->get_column_source();
@@ -2828,7 +2832,10 @@ namespace Legion {
       LogicalRegion handle = view->logical_node->as_region_node()->handle;
       ss << "pointer: " << std::hex << view
          << ", instance: " << std::hex << view->get_manager()->get_instance().id
-         << ", kind: "<< (view->is_materialized_view() ? "   normal" : "reduction")
+         << ", kind: "
+         << (view->is_materialized_view() ? "   normal" : "reduction")
+         << ", domain: "
+         << view->get_manager()->instance_domain->handle.get_id()
          << ", region: " << "(" << handle.get_index_space().get_id()
          << "," << handle.get_field_space().get_id()
          << "," << handle.get_tree_id()
@@ -2875,10 +2882,8 @@ namespace Legion {
         char *mask = it->second.to_string();
         std::cerr << "  " << view_to_string(it->first) << " " << mask
                   << " logical ctx: " << logical_contexts[it->first]
-                  << " physical ctx: " << physical_contexts[it->first];
-        if (it->first->is_reduction_view())
-          std::cerr << " initialized: " << initialized[it->first];
-        std::cerr << std::endl;
+                  << " physical ctx: " << physical_contexts[it->first]
+                  << std::endl;
         free(mask);
       }
 
@@ -2904,7 +2909,7 @@ namespace Legion {
         free(mask);
       }
 
-      std::cerr << "[Reduction Views]" << std::endl;
+      std::cerr << "[Pending Reductions]" << std::endl;
       for (LegionMap<InstanceView*, FieldMask>::aligned::iterator it =
            reduction_views.begin(); it != reduction_views.end(); ++it)
       {
@@ -2912,7 +2917,7 @@ namespace Legion {
         std::cerr << "  " << view_to_string(it->first) << " " << mask
                   << " logical ctx: " << logical_contexts[it->first]
                   << " physical ctx: " << physical_contexts[it->first]
-                  << " initialized: " << initialized[it->first] << std::endl;
+                  << std::endl;
         free(mask);
       }
 
@@ -2935,19 +2940,6 @@ namespace Legion {
       for (std::vector<Instruction*>::const_iterator it = instructions.begin();
            it != instructions.end(); ++it)
         std::cerr << "  " << (*it)->to_string() << std::endl;
-    }
-
-    //--------------------------------------------------------------------------
-    void PhysicalTemplate::sanity_check(void)
-    //--------------------------------------------------------------------------
-    {
-      // Reduction instances should not have been recycled in the trace
-      for (LegionMap<InstanceView*, FieldMask>::aligned::iterator it =
-           previous_valid_views.begin(); it !=
-           previous_valid_views.end(); ++it)
-        if (it->first->is_reduction_view())
-          assert(initialized.find(it->first) != initialized.end() &&
-                 initialized[it->first]);
     }
 
     //--------------------------------------------------------------------------
@@ -3201,70 +3193,10 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(is_recording());
 #endif
-
-      if (src->is_reduction_view())
-      {
-        LegionMap<InstanceView*, FieldMask>::aligned::iterator finder =
-          reduction_views.find(src);
-        if (finder == reduction_views.end())
-        {
-          LegionMap<InstanceView*, FieldMask>::aligned::iterator pfinder =
-            previous_valid_views.find(src);
-          if (pfinder == previous_valid_views.end())
-            previous_valid_views[src] = src_mask;
-          else
-            pfinder->second |= src_mask;
-          initialized[src] = true;
-        }
-#ifdef DEBUG_LEGION
-        else
-        {
-          assert(finder->second == src_mask);
-          assert(initialized.find(src) != initialized.end());
-        }
-#endif
-      }
-      else
-      {
-        LegionMap<InstanceView*, FieldMask>::aligned::iterator finder =
-          valid_views.find(src);
-        if (finder == valid_views.end())
-        {
-          LegionMap<InstanceView*, FieldMask>::aligned::iterator pfinder =
-            previous_valid_views.find(src);
-          if (pfinder == previous_valid_views.end())
-            previous_valid_views[src] = src_mask;
-          else
-            pfinder->second |= src_mask;
-        }
-        else
-          finder->second |= src_mask;
-      }
-
-#ifdef DEBUG_LEGION
-      assert(!dst->is_reduction_view());
-#endif
-      LegionMap<InstanceView*, FieldMask>::aligned::iterator finder =
-        valid_views.find(dst);
-      if (finder == valid_views.end())
-        valid_views[dst] = dst_mask;
-      else
-        finder->second |= dst_mask;
-
-#ifdef DEBUG_LEGION
-      assert(logical_contexts.find(src) == logical_contexts.end() ||
-             logical_contexts[src] == src_logical_ctx);
-      assert(logical_contexts.find(dst) == logical_contexts.end() ||
-             logical_contexts[dst] == dst_logical_ctx);
-      assert(physical_contexts.find(src) == physical_contexts.end() ||
-             physical_contexts[src] == src_physical_ctx);
-      assert(physical_contexts.find(dst) == physical_contexts.end() ||
-             physical_contexts[dst] == dst_physical_ctx);
-#endif
-      logical_contexts[src] = src_logical_ctx;
-      logical_contexts[dst] = dst_logical_ctx;
-      physical_contexts[src] = src_physical_ctx;
-      physical_contexts[dst] = dst_physical_ctx;
+      update_valid_view(
+          false, true, false, src, src_mask, src_logical_ctx, src_physical_ctx);
+      update_valid_view(
+          false, false, false, dst, dst_mask, dst_logical_ctx, dst_physical_ctx);
     }
 
     //--------------------------------------------------------------------------
@@ -3367,41 +3299,78 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    inline void PhysicalTemplate::record_ready_view(const RegionRequirement &req,
+    inline void PhysicalTemplate::update_valid_view(bool is_reduction,
+                                                    bool has_read,
+                                                    bool has_write,
                                                     InstanceView *view,
                                                     const FieldMask &fields,
                                                     ContextID logical_ctx,
                                                     ContextID physical_ctx)
     //--------------------------------------------------------------------------
     {
-      if (view->is_reduction_view())
+      if (is_reduction)
       {
 #ifdef DEBUG_LEGION
-        assert(IS_REDUCE(req));
+        assert(view->is_reduction_view());
         assert(reduction_views.find(view) == reduction_views.end());
-        assert(initialized.find(view) == initialized.end());
+        assert(valid_views.find(view) == valid_views.end());
 #endif
         reduction_views[view] = fields;
-        initialized[view] = false;
+        valid_views[view] = fields;
       }
       else
       {
-        if (valid_views.find(view) == valid_views.end() && HAS_READ(req))
+#ifdef DEBUG_LEGION
+        assert(view->is_materialized_view() || view->is_reduction_view());
+#endif
+        if (has_read)
         {
-          LegionMap<InstanceView*, FieldMask>::aligned::iterator pfinder =
-            previous_valid_views.find(view);
-          if (pfinder == previous_valid_views.end())
-            previous_valid_views[view] = fields;
-          else
-            pfinder->second |= fields;
+          FieldMask invalid_fields = fields;
+
+          LegionMap<InstanceView*, FieldMask>::aligned::iterator finder =
+            valid_views.find(view);
+          if (finder != valid_views.end())
+            invalid_fields -= finder->second;
+
+          if (!!invalid_fields && view->is_materialized_view())
+            for (LegionMap<InstanceView*, FieldMask>::aligned::iterator vit =
+                valid_views.begin(); vit != valid_views.end(); ++vit)
+            {
+              if (vit->first->get_manager() != view->get_manager()) continue;
+              LogicalView *target = vit->first;
+              LogicalView *parent = view->get_parent();
+              while (parent != NULL)
+              {
+                if (parent == target)
+                  invalid_fields -= vit->second;
+                if (!invalid_fields)
+                  break;
+                parent = parent->get_parent();
+              }
+              if (!invalid_fields)
+                break;
+            }
+
+          if (!!invalid_fields)
+            previous_valid_views[view] |= invalid_fields;
+
+          if (view->is_reduction_view())
+          {
+            LegionMap<InstanceView*, FieldMask>::aligned::iterator finder =
+              reduction_views.find(view);
+            if (finder != reduction_views.end())
+              finder->second -= fields;
+            if (!finder->second)
+              reduction_views.erase(finder);
+          }
         }
 
-        if (HAS_WRITE(req))
+        if (has_write)
         {
           RegionTreeNode *node = view->logical_node;
           std::vector<InstanceView*> to_delete;
           for (LegionMap<InstanceView*, FieldMask>::aligned::iterator vit =
-              valid_views.begin(); vit != valid_views.end(); ++vit)
+               valid_views.begin(); vit != valid_views.end(); ++vit)
           {
             if (vit->first->get_manager() == view->get_manager()) continue;
             RegionTreeNode *other = vit->first->logical_node;
@@ -3525,7 +3494,8 @@ namespace Legion {
         free(fill_buffer);
       }
 
-      record_ready_view(req, view, fields, logical_ctx, physical_ctx);
+      update_valid_view(IS_REDUCE(req), HAS_READ(req), HAS_WRITE(req),
+                        view, fields, logical_ctx, physical_ctx);
 
       std::map<TraceLocalID, unsigned>::iterator finder =
         task_entries.find(op_key);
