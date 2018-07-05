@@ -149,10 +149,11 @@ namespace Realm {
   template <typename T, void (T::*START_MTHD)(void)>
   /*static*/ Thread *Thread::create_user_thread(T *target,
 						const ThreadLaunchParameters& params,
+						const CoreReservation *rsrv,
 						ThreadScheduler *_scheduler)
   {
     return create_user_thread_untyped(target, thread_entry_wrapper<T, START_MTHD>,
-				      params, _scheduler);
+				      params, rsrv, _scheduler);
   }
 #endif
 

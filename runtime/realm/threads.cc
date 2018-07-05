@@ -741,24 +741,23 @@ namespace Realm {
 				        (PTHREAD_STACK_MIN * 2) :
 				        (256 << 10));
 
+    ptrdiff_t stack_size = 0;  // 0 == "pthread default"
+
     if(params.stack_size != params.STACK_SIZE_DEFAULT) {
       // make sure it's not too large
       assert((rsrv.params.max_stack_size == rsrv.params.STACK_SIZE_DEFAULT) ||
 	     (params.stack_size <= rsrv.params.max_stack_size));
 
-      if(params.stack_size < MIN_STACK_SIZE)
-	CHECK_PTHREAD( pthread_attr_setstacksize(&attr, MIN_STACK_SIZE) );
-      else
-	CHECK_PTHREAD( pthread_attr_setstacksize(&attr, params.stack_size) );
+      stack_size = std::max<ptrdiff_t>(params.stack_size, MIN_STACK_SIZE);
     } else {
       // does the entire core reservation have a non-standard stack size?
       if(rsrv.params.max_stack_size != rsrv.params.STACK_SIZE_DEFAULT) {
-	if(rsrv.params.max_stack_size < MIN_STACK_SIZE)
-	  CHECK_PTHREAD( pthread_attr_setstacksize(&attr, MIN_STACK_SIZE) );
-	else
-	  CHECK_PTHREAD( pthread_attr_setstacksize(&attr, rsrv.params.max_stack_size) );
+	stack_size = std::max<ptrdiff_t>(rsrv.params.max_stack_size,
+					 MIN_STACK_SIZE);
       }
     }
+    if(stack_size > 0)
+      CHECK_PTHREAD( pthread_attr_setstacksize(&attr, stack_size) );
 
     // TODO: actually use heap size
 
@@ -769,7 +768,8 @@ namespace Realm {
 
     CHECK_PTHREAD( pthread_attr_destroy(&attr) );
 
-    log_thread.info() << "thread created:" << this << " (" << rsrv.name << ") - pthread " << thread;
+    log_thread.info() << "thread created:" << this << " (" << rsrv.name << ") - pthread " << std::hex << thread << std::dec;
+    log_thread.debug() << "thread stack: " << this << " size=" << stack_size;
   }
 
   void KernelThread::join(void)
@@ -906,7 +906,8 @@ namespace Realm {
 
     virtual ~UserThread(void);
 
-    void start_thread(const ThreadLaunchParameters& params);
+    void start_thread(const ThreadLaunchParameters& params,
+		      const CoreReservation *rsrv);
 
     virtual void join(void);
     virtual void detach(void);
@@ -994,17 +995,27 @@ namespace Realm {
     }
   }
 
-  void UserThread::start_thread(const ThreadLaunchParameters& params)
+  void UserThread::start_thread(const ThreadLaunchParameters& params,
+				const CoreReservation *rsrv)
   {
-    // figure out how big the stack should be
+    // it turns out MacOS behaves REALLY strangely with a stack < 32KB, and there
+    //  make be some lower limit in Linux-land too, so clamp to 64KB to be safe
+    const ptrdiff_t MIN_STACK_SIZE = 64 << 10;
+
     if(params.stack_size != params.STACK_SIZE_DEFAULT) {
-      stack_size = params.stack_size;
-      // it turns out MacOS behaves REALLY strangely with a stack < 32KB, and there
-      //  make be some lower limit in Linux-land too, so clamp to 64KB to be safe
-      if(stack_size < (64 << 10))
-	stack_size = 64 << 10;
+      // make sure it's not too large
+      if(rsrv)
+	assert((rsrv->params.max_stack_size == rsrv->params.STACK_SIZE_DEFAULT) ||
+	       (params.stack_size <= rsrv->params.max_stack_size));
+
+      stack_size = std::max<ptrdiff_t>(params.stack_size, MIN_STACK_SIZE);
     } else {
-      stack_size = 2 << 20; // pick something - 2MB ?
+      // does the entire core reservation have a non-standard stack size?
+      if(rsrv &&
+	 (rsrv->params.max_stack_size != rsrv->params.STACK_SIZE_DEFAULT)) {
+	stack_size = std::max<ptrdiff_t>(rsrv->params.max_stack_size,
+					 MIN_STACK_SIZE);
+      }
     }
 
     stack_base = malloc(stack_size);
@@ -1022,6 +1033,9 @@ namespace Realm {
     makecontext(&ctx, uthread_entry, 0);
 
     update_state(STATE_STARTUP);    
+
+    log_thread.info() << "thread created:" << this << " (" << (rsrv ? rsrv->name : "??") << ") - user thread";
+    log_thread.debug() << "thread stack: " << this << " size=" << stack_size << " base=" << stack_base;
   }
 
   void UserThread::join(void)
@@ -1155,12 +1169,13 @@ namespace Realm {
 #ifdef REALM_USE_USER_THREADS
   /*static*/ Thread *Thread::create_user_thread_untyped(void *target, void (*entry_wrapper)(void *),
 							const ThreadLaunchParameters& params,
+							const CoreReservation *rsrv,
 							ThreadScheduler *_scheduler)
   {
     UserThread *t = new UserThread(target, entry_wrapper, _scheduler);
 
     // no need to wait on an allocation - the host thread will take care of that
-    t->start_thread(params);
+    t->start_thread(params, rsrv);
 
     return t;
   }
