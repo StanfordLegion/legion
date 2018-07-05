@@ -2320,6 +2320,7 @@ namespace Legion {
     {
       if (op->is_index_space)
       {
+#ifdef SHARD_BY_IMAGE
         // There is a special case here if we're projecting the same 
         // partition that we used to make the instances, if it is then
         // we can avoid needing to do the exchange at all
@@ -2334,7 +2335,6 @@ namespace Legion {
           else
             return ApEvent::NO_AP_EVENT;
         }
-#ifdef SHARD_BY_IMAGE
         // Do the all-to-all gather of the field data descriptors
         ApEvent all_ready = collective.exchange_descriptors(instances_ready,
                                                             instances);
@@ -2393,6 +2393,7 @@ namespace Legion {
     {
       if (op->is_index_space)
       {
+#ifdef SHARD_BY_IMAGE
         // There is a special case here if we're projecting the same 
         // partition that we used to make the instances, if it is then
         // we can avoid needing to do the exchange at all
@@ -2407,7 +2408,6 @@ namespace Legion {
           else
             return ApEvent::NO_AP_EVENT;
         }
-#ifdef SHARD_BY_IMAGE
         // Do the all-to-all gather of the field data descriptors
         ApEvent all_ready = collective.exchange_descriptors(instances_ready,
                                                             instances);
