@@ -3368,9 +3368,11 @@ namespace Legion {
             LegionMap<InstanceView*, FieldMask>::aligned::iterator finder =
               reduction_views.find(view);
             if (finder != reduction_views.end())
+            {
               finder->second -= fields;
-            if (!finder->second)
-              reduction_views.erase(finder);
+              if (!finder->second)
+                reduction_views.erase(finder);
+            }
           }
         }
 
