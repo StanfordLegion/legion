@@ -1671,6 +1671,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       activate_operation();
+      requirements.clear();
+      instances.clear();
+      parent_indices.clear();
+      privilege_paths.clear();
+      version_infos.clear();
+      restrict_infos.clear();
+      map_applied_conditions.clear();
+      mapped_preconditions.clear();
     }
 
     //--------------------------------------------------------------------------
