@@ -10850,10 +10850,12 @@ namespace Legion {
         preconditions.insert(it->first);
       }
       ApEvent reduce_pre = Runtime::merge_events(preconditions);
-      ApEvent reduce_post = target->logical_node->issue_copy(op, 
-                             src_fields, dst_fields, reduce_pre, 
-                             pred_guard, intersect, mask,
-                             manager->redop, fold);
+      ApEvent reduce_post = manager->issue_reduction(op,
+                                                     src_fields, dst_fields,
+                                                     target->logical_node,
+                                                     reduce_pre, pred_guard,
+                                                     fold, true/*precise*/,
+                                                     intersect, mask);
       // No need to add the user to the destination as that will
       // be handled by the caller using the reduce post event we return
       add_copy_user(manager->redop, reduce_post, versions, reduce_expr,
