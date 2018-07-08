@@ -50,6 +50,11 @@ else
   end
 end
 
+-- Force SSE when the LLVM version is less than 3.8
+if terralib.llvmversion < 38 then
+  SIMD_REG_SIZE = 16
+end
+
 local V = {}
 V.__index = V
 function V:__tostring() return "vector" end
