@@ -335,6 +335,7 @@ extern "C" {
     bool inline_task;
     bool stealable;
     bool map_locally;
+    bool memoize;
     legion_task_priority_t parent_priority;
   } legion_task_options_t;
 
@@ -902,6 +903,30 @@ extern "C" {
                              legion_index_space_t handle);
 
   /**
+   * @see Legion::Runtime::attach_semantic_information()
+   */
+  void
+  legion_index_space_attach_semantic_information(legion_runtime_t runtime,
+                                                 legion_index_space_t handle,
+                                                 legion_semantic_tag_t tag,
+                                                 const void *buffer,
+                                                 size_t size,
+                                                 bool is_mutable /* = false */);
+
+  /**
+   * @see Legion::Runtime::retrieve_semantic_information()
+   */
+  void
+  legion_index_space_retrieve_semantic_information(
+                                           legion_runtime_t runtime,
+                                           legion_index_space_t handle,
+                                           legion_semantic_tag_t tag,
+                                           const void **result,
+                                           size_t *size,
+                                           bool can_fail /* = false */,
+                                           bool wait_until_ready /* = false */);
+
+  /**
    * @see Legion::Runtime::attach_name()
    */
   void
@@ -1280,6 +1305,31 @@ extern "C" {
                                  legion_index_partition_t handle);
 
   /**
+   * @see Legion::Runtime::attach_semantic_information()
+   */
+  void
+  legion_index_partition_attach_semantic_information(
+                                                legion_runtime_t runtime,
+                                                legion_index_partition_t handle,
+                                                legion_semantic_tag_t tag,
+                                                const void *buffer,
+                                                size_t size,
+                                                bool is_mutable /* = false */);
+
+  /**
+   * @see Legion::Runtime::retrieve_semantic_information()
+   */
+  void
+  legion_index_partition_retrieve_semantic_information(
+                                           legion_runtime_t runtime,
+                                           legion_index_partition_t handle,
+                                           legion_semantic_tag_t tag,
+                                           const void **result,
+                                           size_t *size,
+                                           bool can_fail /* = false */,
+                                           bool wait_until_ready /* = false */);
+
+  /**
    * @see Legion::Runtime::attach_name()
    */
   void
@@ -1318,6 +1368,57 @@ extern "C" {
   legion_field_space_destroy(legion_runtime_t runtime,
                              legion_context_t ctx,
                              legion_field_space_t handle);
+
+  /**
+   * @see Legion::Runtime::attach_semantic_information()
+   */
+  void
+  legion_field_space_attach_semantic_information(
+                                                legion_runtime_t runtime,
+                                                legion_field_space_t handle,
+                                                legion_semantic_tag_t tag,
+                                                const void *buffer,
+                                                size_t size,
+                                                bool is_mutable /* = false */);
+
+  /**
+   * @see Legion::Runtime::retrieve_semantic_information()
+   */
+  void
+  legion_field_space_retrieve_semantic_information(
+                                           legion_runtime_t runtime,
+                                           legion_field_space_t handle,
+                                           legion_semantic_tag_t tag,
+                                           const void **result,
+                                           size_t *size,
+                                           bool can_fail /* = false */,
+                                           bool wait_until_ready /* = false */);
+
+  /**
+   * @see Legion::Runtime::attach_semantic_information()
+   */
+  void
+  legion_field_id_attach_semantic_information(legion_runtime_t runtime,
+                                              legion_field_space_t handle,
+                                              legion_field_id_t id,
+                                              legion_semantic_tag_t tag,
+                                              const void *buffer,
+                                              size_t size,
+                                              bool is_mutable /* = false */);
+
+  /**
+   * @see Legion::Runtime::retrieve_semantic_information()
+   */
+  void
+  legion_field_id_retrieve_semantic_information(
+                                           legion_runtime_t runtime,
+                                           legion_field_space_t handle,
+                                           legion_field_id_t id,
+                                           legion_semantic_tag_t tag,
+                                           const void **result,
+                                           size_t *size,
+                                           bool can_fail /* = false */,
+                                           bool wait_until_ready /* = false */);
 
   /**
    * @see Legion::Runtime::attach_name()
@@ -1410,6 +1511,31 @@ extern "C" {
   legion_logical_region_get_parent_logical_partition(
     legion_runtime_t runtime,
     legion_logical_region_t handle);
+
+  /**
+   * @see Legion::Runtime::attach_semantic_information()
+   */
+  void
+  legion_logical_region_attach_semantic_information(
+                                                legion_runtime_t runtime,
+                                                legion_logical_region_t handle,
+                                                legion_semantic_tag_t tag,
+                                                const void *buffer,
+                                                size_t size,
+                                                bool is_mutable /* = false */);
+
+  /**
+   * @see Legion::Runtime::retrieve_semantic_information()
+   */
+  void
+  legion_logical_region_retrieve_semantic_information(
+                                           legion_runtime_t runtime,
+                                           legion_logical_region_t handle,
+                                           legion_semantic_tag_t tag,
+                                           const void **result,
+                                           size_t *size,
+                                           bool can_fail /* = false */,
+                                           bool wait_until_ready /* = false */);
 
   /**
    * @see Legion::Runtime::attach_name()
@@ -1526,6 +1652,31 @@ extern "C" {
   legion_logical_partition_get_parent_logical_region(
     legion_runtime_t runtime,
     legion_logical_partition_t handle);
+
+  /**
+   * @see Legion::Runtime::attach_semantic_information()
+   */
+  void
+  legion_logical_partition_attach_semantic_information(
+                                                legion_runtime_t runtime,
+                                                legion_logical_partition_t handle,
+                                                legion_semantic_tag_t tag,
+                                                const void *buffer,
+                                                size_t size,
+                                                bool is_mutable /* = false */);
+
+  /**
+   * @see Legion::Runtime::retrieve_semantic_information()
+   */
+  void
+  legion_logical_partition_retrieve_semantic_information(
+                                           legion_runtime_t runtime,
+                                           legion_logical_partition_t handle,
+                                           legion_semantic_tag_t tag,
+                                           const void **result,
+                                           size_t *size,
+                                           bool can_fail /* = false */,
+                                           bool wait_until_ready /* = false */);
 
   /**
    * @see Legion::Runtime::attach_name()
@@ -2928,7 +3079,8 @@ extern "C" {
   void
   legion_runtime_begin_trace(legion_runtime_t runtime,
                              legion_context_t ctx,
-                             legion_trace_id_t tid);
+                             legion_trace_id_t tid,
+                             bool memoize);
 
   /**
    * @see Legion::Runtime::end_trace()
@@ -3231,6 +3383,30 @@ extern "C" {
    */
   legion_mapping_tag_id_t
   legion_task_get_tag(legion_task_t task);
+
+  /**
+   * @see Legion::Runtime::attach_semantic_information()
+   */
+  void
+  legion_task_id_attach_semantic_information(legion_runtime_t runtime,
+                                             legion_task_id_t task_id,
+                                             legion_semantic_tag_t tag,
+                                             const void *buffer,
+                                             size_t size,
+                                             bool is_mutable /* = false */);
+
+  /**
+   * @see Legion::Runtime::retrieve_semantic_information()
+   */
+  void
+  legion_task_id_retrieve_semantic_information(
+                                           legion_runtime_t runtime,
+                                           legion_task_id_t task_id,
+                                           legion_semantic_tag_t tag,
+                                           const void **result,
+                                           size_t *size,
+                                           bool can_fail /* = false */,
+                                           bool wait_until_ready /* = false */);
 
   /**
    * @see Legion::Runtime::attach_name()

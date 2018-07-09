@@ -446,7 +446,7 @@ endif
 
 
 ifeq ($(strip $(DEBUG)),1)
-CC_FLAGS	+= -DDEBUG_REALM -DDEBUG_LEGION -ggdb #-ggdb -Wall
+CC_FLAGS	+= -DDEBUG_REALM -DDEBUG_LEGION -O0 -ggdb #-ggdb -Wall
 else
 CC_FLAGS	+= -O2 -fno-strict-aliasing #-ggdb
 endif

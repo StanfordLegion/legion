@@ -82,6 +82,9 @@ def extract(dest_dir, archive_path, format):
     else:
         raise Exception('Unknown format %s' % format)
 
+def apply_patch(dest_dir, diff_path, strip_levels=1):
+    subprocess.check_call(['patch', '-p%d' % strip_levels, '-i', diff_path], cwd=dest_dir)
+
 def git_clone(repo_dir, url, branch=None):
     if branch is not None:
         subprocess.check_call(['git', 'clone', '-b', branch, url, repo_dir])
@@ -221,6 +224,8 @@ def install_llvm(llvm_dir, llvm_install_dir, llvm_version, llvm_use_cmake, cmake
     if not cache:
         extract(llvm_dir, llvm_tarball, 'xz')
         extract(llvm_dir, clang_tarball, 'xz')
+        if llvm_version == '35':
+            apply_patch(llvm_source_dir, os.path.join(os.path.dirname(os.path.realpath(__file__)), 'llvm-3.5-gcc.patch'))
         os.rename(clang_source_dir, os.path.join(llvm_source_dir, 'tools', 'clang'))
 
         llvm_build_dir = os.path.join(llvm_dir, 'build')

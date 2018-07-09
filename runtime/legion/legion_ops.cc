@@ -90,6 +90,7 @@ namespace Legion {
       execution_fence_event = ApEvent::NO_AP_EVENT;
       trace = NULL;
       tracing = false;
+      trace_local_id = (unsigned)-1;
       must_epoch = NULL;
 #ifdef DEBUG_LEGION
       assert(mapped_event.exists());
@@ -122,8 +123,6 @@ namespace Legion {
         delete commit_tracker;
         commit_tracker = NULL;
       }
-      if ((trace != NULL) && (trace->remove_reference()))
-        delete trace;
       if (!mapped_event.has_triggered())
         Runtime::trigger_event(mapped_event);
       if (!resolved_event.has_triggered())
@@ -218,9 +217,15 @@ namespace Legion {
       assert(t != NULL);
 #endif
       trace = t; 
-      trace->add_reference();
       tracing = is_tracing;
       trace->record_static_dependences(this, dependences);
+    }
+
+    //--------------------------------------------------------------------------
+    void Operation::set_trace_local_id(unsigned id)
+    //--------------------------------------------------------------------------
+    {
+      trace_local_id = id;
     }
 
     //--------------------------------------------------------------------------
@@ -916,6 +921,8 @@ namespace Legion {
       // This will also add any necessary dependences
       if (trace != NULL)
         trace->register_operation(this, gen);
+      parent_ctx->invalidate_trace_cache(trace, this);
+
       // See if we have any fence dependences
       execution_fence_event = parent_ctx->register_fence_dependence(this);
     }
@@ -1464,6 +1471,33 @@ namespace Legion {
                                     one_below, logical_context_uid, 
                                     &proj_epochs, true/*skip parent check*/);
     }
+
+#ifdef DEBUG_LEGION
+    //--------------------------------------------------------------------------
+    void Operation::dump_physical_state(RegionRequirement *req, unsigned idx,
+                                        bool before, bool closing)
+    //--------------------------------------------------------------------------
+    {
+      if ((req->handle_type == PART_PROJECTION &&
+           req->partition == LogicalPartition::NO_PART) ||
+          (req->handle_type != PART_PROJECTION &&
+           req->region == LogicalRegion::NO_REGION))
+        return;
+      InnerContext *context = find_physical_context(idx);
+      RegionTreeContext ctx = context->get_context();
+      RegionTreeNode *child_node = req->handle_type == PART_PROJECTION ? 
+        static_cast<RegionTreeNode*>(runtime->forest->get_node(req->partition)) :
+        static_cast<RegionTreeNode*>(runtime->forest->get_node(req->region));
+      FieldMask user_mask =
+        child_node->column_source->get_field_mask(req->privilege_fields);
+      TreeStateLogger::capture_state(runtime, req, idx,
+                                     get_logging_name(), unique_op_id,
+                                     child_node, ctx.get_id(),
+                                     before/*before*/, false/*premap*/,
+                                     closing/*closing*/, false/*logical*/,
+                   FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES), user_mask);
+    }
+#endif
 
     //--------------------------------------------------------------------------
     void Operation::MappingDependenceTracker::issue_stage_triggers(
@@ -2420,6 +2454,7 @@ namespace Legion {
       if (remap_region)
       {
         region.impl->get_references(mapped_instances);
+        PhysicalTraceInfo trace_info;
         runtime->forest->physical_register_only(requirement,
                                                 version_info, restrict_info,
                                                 this, 0/*idx*/, 
@@ -2428,7 +2463,8 @@ namespace Legion {
                                                 true/*read only locks*/,
                                                 map_applied_conditions,
                                                 mapped_instances, 
-                                                NULL/*advance projections*/
+                                                NULL/*advance projections*/,
+                                                trace_info
 #ifdef DEBUG_LEGION
                                                , get_logging_name()
                                                , unique_op_id
@@ -2437,6 +2473,7 @@ namespace Legion {
       }
       else
       {
+        PhysicalTraceInfo trace_info;
         // We're going to need to invoke the mapper, find the set of valid
         // instances as part of our traversal
         InstanceSet valid_instances;
@@ -2453,7 +2490,8 @@ namespace Legion {
                                                 true/*read only locks*/,
                                                 map_applied_conditions,
                                                 mapped_instances,
-                                                NULL/*advance projections*/
+                                                NULL/*advance projections*/,
+                                                trace_info
 #ifdef DEBUG_LEGION
                                                 , get_logging_name()
                                                 , unique_op_id
@@ -2467,6 +2505,9 @@ namespace Legion {
 #endif 
         // We're done so apply our mapping changes
         version_info.apply_mapping(map_applied_conditions);
+#ifdef DEBUG_LEGION
+        dump_physical_state(&requirement, 0);
+#endif
       }
       // If we have any wait preconditions from phase barriers or 
       // grants then we can add them to the mapping preconditions
@@ -3173,7 +3214,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     CopyOp::CopyOp(Runtime *rt)
-      : Copy(), SpeculativeOp(rt)
+      : Copy(), MemoizableOp<SpeculativeOp>(rt)
     //--------------------------------------------------------------------------
     {
       this->is_index_space = false;
@@ -3181,7 +3222,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     CopyOp::CopyOp(const CopyOp &rhs)
-      : Copy(), SpeculativeOp(NULL)
+      : Copy(), MemoizableOp<SpeculativeOp>(NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -3214,6 +3255,7 @@ namespace Legion {
                                launcher.dst_requirements.size(), 
                              launcher.static_dependences,
                              launcher.predicate);
+      initialize_memoizable();
       src_requirements.resize(launcher.src_requirements.size());
       dst_requirements.resize(launcher.dst_requirements.size());
       src_versions.resize(launcher.src_requirements.size());
@@ -3254,28 +3296,30 @@ namespace Legion {
         if (dst_requirements[idx].privilege != REDUCE)
           dst_requirements[idx].privilege = WRITE_ONLY;
       }
-      if (!launcher.gather_requirements.empty())
+      if (!launcher.src_indirect_requirements.empty())
       {
-        const size_t gather_size = launcher.gather_requirements.size();
-        gather_requirements.resize(gather_size);
+        const size_t gather_size = launcher.src_indirect_requirements.size();
+        src_indirect_requirements.resize(gather_size);
         gather_versions.resize(gather_size);
         gather_restrict_infos.resize(gather_size);
         for (unsigned idx = 0; idx < gather_size; idx++)
         {
-          gather_requirements[idx] = launcher.gather_requirements[idx];
-          gather_requirements[idx].flags |= NO_ACCESS_FLAG;
+          src_indirect_requirements[idx] = 
+            launcher.src_indirect_requirements[idx];
+          src_indirect_requirements[idx].flags |= NO_ACCESS_FLAG;
         }
       }
-      if (!launcher.scatter_requirements.empty())
+      if (!launcher.dst_indirect_requirements.empty())
       {
-        const size_t scatter_size = launcher.scatter_requirements.size();
-        scatter_requirements.resize(scatter_size);
+        const size_t scatter_size = launcher.dst_indirect_requirements.size();
+        dst_indirect_requirements.resize(scatter_size);
         scatter_versions.resize(scatter_size);
         scatter_restrict_infos.resize(scatter_size);
         for (unsigned idx = 0; idx < scatter_size; idx++)
         {
-          scatter_requirements[idx] = launcher.scatter_requirements[idx];
-          scatter_requirements[idx].flags |= NO_ACCESS_FLAG;
+          dst_indirect_requirements[idx] = 
+            launcher.dst_indirect_requirements[idx];
+          dst_indirect_requirements[idx].flags |= NO_ACCESS_FLAG;
         }
       }
       grants = launcher.grants;
@@ -3309,24 +3353,24 @@ namespace Legion {
                         src_requirements.size(), dst_requirements.size(),
                         get_unique_id(), parent_ctx->get_task_name(),
                         parent_ctx->get_unique_id())
-        if (!gather_requirements.empty() && 
-            (gather_requirements.size() != src_requirements.size()))
-          REPORT_LEGION_ERROR(ERROR_NUMBER_GATHER_REQUIREMENTS,
+        if (!src_indirect_requirements.empty() && 
+            (src_indirect_requirements.size() != src_requirements.size()))
+          REPORT_LEGION_ERROR(ERROR_NUMBER_SRC_INDIRECT_REQUIREMENTS,
                         "Number of gather requirements (%zd) does not "
                         "match number of source requirements (%zd) "
                         "for copy operation (ID %lld) with parent "
-                        "task %s (ID %lld)",
-                        gather_requirements.size(), src_requirements.size(),
+                        "task %s (ID %lld)", src_indirect_requirements.size(),
+                        src_requirements.size(),
                         get_unique_id(), parent_ctx->get_task_name(),
                         parent_ctx->get_unique_id())
-        if (!scatter_requirements.empty() &&
-            (scatter_requirements.size() != src_requirements.size()))
-          REPORT_LEGION_ERROR(ERROR_NUMBER_SCATTER_REQUIREMENTS,
+        if (!dst_indirect_requirements.empty() &&
+            (dst_indirect_requirements.size() != src_requirements.size()))
+          REPORT_LEGION_ERROR(ERROR_NUMBER_DST_INDIRECT_REQUIREMENTS,
                         "Number of scatter requirements (%zd) does not "
                         "match number of source requriements (%zd) "
                         "for copy operation ID (%lld) with parent "
-                        "task %s (ID %lld)",
-                        scatter_requirements.size(), src_requirements.size(),
+                        "task %s (ID %lld)", dst_indirect_requirements.size(),
+                        src_requirements.size(),
                         get_unique_id(), parent_ctx->get_task_name(),
                         parent_ctx->get_unique_id())
         for (unsigned idx = 0; idx < src_requirements.size(); idx++)
@@ -3382,58 +3426,58 @@ namespace Legion {
           check_copy_privilege(dst_requirements[idx], 
                                 src_requirements.size() + idx);
         }
-        if (!gather_requirements.empty())
+        if (!src_indirect_requirements.empty())
         {
           const size_t offset = 
             src_requirements.size() + dst_requirements.size();
-          for (unsigned idx = 0; idx < gather_requirements.size(); idx++)
+          for (unsigned idx = 0; idx < src_indirect_requirements.size(); idx++)
           {
-            if (gather_requirements[idx].privilege_fields.size() != 1)
+            if (src_indirect_requirements[idx].privilege_fields.size() != 1)
               REPORT_LEGION_ERROR(ERROR_COPY_GATHER_REQUIREMENT,
-                          "Copy gather requirement %d for copy "
-                          "operation (ID %lld) in parent task %s "
-                          "(ID %lld) has %zd privilege fields but "
-                          "gather requirements are only permitted "
-                          "to have one privilege field.", idx,
-                          get_unique_id(), parent_task->get_task_name(),
-                          parent_task->get_unique_id(),
-                          gather_requirements[idx].privilege_fields.size())
-            if (!IS_READ_ONLY(gather_requirements[idx]))
+                        "Copy gather requirement %d for copy "
+                        "operation (ID %lld) in parent task %s "
+                        "(ID %lld) has %zd privilege fields but "
+                        "gather requirements are only permitted "
+                        "to have one privilege field.", idx,
+                        get_unique_id(), parent_task->get_task_name(),
+                        parent_task->get_unique_id(),
+                        src_indirect_requirements[idx].privilege_fields.size())
+            if (!IS_READ_ONLY(src_indirect_requirements[idx]))
               REPORT_LEGION_ERROR(ERROR_COPY_GATHER_REQUIREMENT,
-                          "Copy gather requirement %d for copy "
-                          "operation (ID %lld) in parent task %s "
-                          "(ID %lld) must be requested with a "
-                          "read-only privilege.", idx,
-                          get_unique_id(), parent_ctx->get_task_name(),
-                          parent_ctx->get_unique_id())
-            check_copy_privilege(gather_requirements[idx], offset + idx);
+                        "Copy gather requirement %d for copy "
+                        "operation (ID %lld) in parent task %s "
+                        "(ID %lld) must be requested with a "
+                        "read-only privilege.", idx,
+                        get_unique_id(), parent_ctx->get_task_name(),
+                        parent_ctx->get_unique_id())
+            check_copy_privilege(src_indirect_requirements[idx], offset + idx);
           }
         }
-        if (!scatter_requirements.empty())
+        if (!dst_indirect_requirements.empty())
         {
           const size_t offset = src_requirements.size() + 
-            dst_requirements.size() + gather_requirements.size();
-          for (unsigned idx = 0; idx < scatter_requirements.size(); idx++)
+            dst_requirements.size() + src_indirect_requirements.size();
+          for (unsigned idx = 0; idx < dst_indirect_requirements.size(); idx++)
           {
-            if (scatter_requirements[idx].privilege_fields.size() != 1)
+            if (dst_indirect_requirements[idx].privilege_fields.size() != 1)
               REPORT_LEGION_ERROR(ERROR_COPY_SCATTER_REQUIREMENT,
-                          "Copy scatter requirement %d for copy "
-                          "operation (ID %lld) in parent task %s "
-                          "(ID %lld) has %zd privilege fields but "
-                          "scatter requirements are only permitted "
-                          "to have one privilege field.", idx,
-                          get_unique_id(), parent_task->get_task_name(),
-                          parent_task->get_unique_id(),
-                          scatter_requirements[idx].privilege_fields.size())
-            if (!IS_READ_ONLY(scatter_requirements[idx]))
+                        "Copy scatter requirement %d for copy "
+                        "operation (ID %lld) in parent task %s "
+                        "(ID %lld) has %zd privilege fields but "
+                        "scatter requirements are only permitted "
+                        "to have one privilege field.", idx,
+                        get_unique_id(), parent_task->get_task_name(),
+                        parent_task->get_unique_id(),
+                        dst_indirect_requirements[idx].privilege_fields.size())
+            if (!IS_READ_ONLY(dst_indirect_requirements[idx]))
               REPORT_LEGION_ERROR(ERROR_COPY_SCATTER_REQUIREMENT,
-                          "Copy scatter requirement %d for copy "
-                          "operation (ID %lld) in parent task %s "
-                          "(ID %lld) must be requested with a "
-                          "read-only privilege.", idx,
-                          get_unique_id(), parent_ctx->get_task_name(),
-                          parent_ctx->get_unique_id())
-            check_copy_privilege(scatter_requirements[idx], offset + idx);
+                        "Copy scatter requirement %d for copy "
+                        "operation (ID %lld) in parent task %s "
+                        "(ID %lld) must be requested with a "
+                        "read-only privilege.", idx,
+                        get_unique_id(), parent_ctx->get_task_name(),
+                        parent_ctx->get_unique_id())
+            check_copy_privilege(dst_indirect_requirements[idx], offset + idx);
           }
         }
         for (unsigned idx = 0; idx < src_requirements.size(); idx++)
@@ -3475,6 +3519,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       activate_speculative();
+      activate_memoizable();
       mapper = NULL;
       outstanding_profiling_requests = 1; // start at 1 to guard
       profiling_reported = RtUserEvent::NO_RT_USER_EVENT;
@@ -3490,8 +3535,8 @@ namespace Legion {
       // Clear out our region tree state
       src_requirements.clear();
       dst_requirements.clear();
-      gather_requirements.clear();
-      scatter_requirements.clear();
+      src_indirect_requirements.clear();
+      dst_indirect_requirements.clear();
       grants.clear();
       wait_barriers.clear();
       arrive_barriers.clear();
@@ -3604,12 +3649,12 @@ namespace Legion {
                                           src_requirements.size()+idx, 
                                           req.instance_fields);
       }
-      if (!gather_requirements.empty())
+      if (!src_indirect_requirements.empty())
       {
         const size_t offset = src_requirements.size() + dst_requirements.size();
-        for (unsigned idx = 0; idx < gather_requirements.size(); idx++)
+        for (unsigned idx = 0; idx < src_indirect_requirements.size(); idx++)
         {
-          const RegionRequirement &req = gather_requirements[idx];
+          const RegionRequirement &req = src_indirect_requirements[idx];
           LegionSpy::log_logical_requirement(unique_op_id, idx, true/*region*/,
                                              req.region.index_space.id,
                                              req.region.field_space.id,
@@ -3621,13 +3666,13 @@ namespace Legion {
                                             req.instance_fields);
         }
       }
-      if (!scatter_requirements.empty())
+      if (!dst_indirect_requirements.empty())
       {
         const size_t offset = src_requirements.size() + 
-          dst_requirements.size() + gather_requirements.size();
-        for (unsigned idx = 0; idx < scatter_requirements.size(); idx++)
+          dst_requirements.size() + src_indirect_requirements.size();
+        for (unsigned idx = 0; idx < dst_indirect_requirements.size(); idx++)
         {
-          const RegionRequirement &req = gather_requirements[idx];
+          const RegionRequirement &req = dst_indirect_requirements[idx];
           LegionSpy::log_logical_requirement(unique_op_id, idx, true/*region*/,
                                              req.region.index_space.id,
                                              req.region.field_space.id,
@@ -3661,22 +3706,22 @@ namespace Legion {
         initialize_privilege_path(dst_privilege_paths[idx],
                                   dst_requirements[idx]);
       }
-      if (!gather_requirements.empty())
+      if (!src_indirect_requirements.empty())
       {
-        gather_privilege_paths.resize(gather_requirements.size());
-        for (unsigned idx = 0; idx < gather_requirements.size(); idx++)
+        gather_privilege_paths.resize(src_indirect_requirements.size());
+        for (unsigned idx = 0; idx < src_indirect_requirements.size(); idx++)
         {
           initialize_privilege_path(gather_privilege_paths[idx],
-                                    gather_requirements[idx]);
+                                    src_indirect_requirements[idx]);
         }
       }
-      if (!scatter_requirements.empty())
+      if (!dst_indirect_requirements.empty())
       {
-        scatter_privilege_paths.resize(scatter_requirements.size());
-        for (unsigned idx = 0; idx < scatter_requirements.size(); idx++)
+        scatter_privilege_paths.resize(dst_indirect_requirements.size());
+        for (unsigned idx = 0; idx < dst_indirect_requirements.size(); idx++)
         {
           initialize_privilege_path(scatter_privilege_paths[idx],
-                                    scatter_requirements[idx]);
+                                    dst_indirect_requirements[idx]);
         }
       }
       if (runtime->legion_spy_enabled)
@@ -3717,25 +3762,25 @@ namespace Legion {
         if (is_reduce_req)
           dst_requirements[idx].privilege = REDUCE;
       }
-      if (!gather_requirements.empty())
+      if (!src_indirect_requirements.empty())
       {
-        gather_versions.resize(gather_requirements.size());
+        gather_versions.resize(src_indirect_requirements.size());
         const size_t offset = src_requirements.size() + dst_requirements.size();
         for (unsigned idx = 0; idx < src_requirements.size(); idx++)
           runtime->forest->perform_dependence_analysis(this, offset + idx, 
-                                                 gather_requirements[idx],
+                                                 src_indirect_requirements[idx],
                                                  gather_restrict_infos[idx],
                                                  gather_versions[idx],
                                                  projection_info,
                                                  gather_privilege_paths[idx]);
       }
-      if (!scatter_requirements.empty())
+      if (!dst_indirect_requirements.empty())
       {
-        scatter_versions.resize(scatter_requirements.size());
+        scatter_versions.resize(dst_indirect_requirements.size());
         const size_t offset = src_requirements.size() + dst_requirements.size();
         for (unsigned idx = 0; idx < src_requirements.size(); idx++)
           runtime->forest->perform_dependence_analysis(this, offset + idx, 
-                                                 scatter_requirements[idx],
+                                                 dst_indirect_requirements[idx],
                                                  scatter_restrict_infos[idx],
                                                  scatter_versions[idx],
                                                  projection_info,
@@ -3809,6 +3854,12 @@ namespace Legion {
     void CopyOp::trigger_ready(void)
     //--------------------------------------------------------------------------
     {
+      if (is_replaying())
+      {
+        enqueue_ready_operation();
+        return;
+      }
+
       // Do our versioning analysis and then add it to the ready queue
       std::set<RtEvent> preconditions;
       for (unsigned idx = 0; idx < src_requirements.size(); idx++)
@@ -3834,22 +3885,22 @@ namespace Legion {
         if (is_reduce_req)
           dst_requirements[idx].privilege = REDUCE;
       }
-      if (!gather_requirements.empty())
+      if (!src_indirect_requirements.empty())
       {
         offset += dst_requirements.size();
-        for (unsigned idx = 0; idx < gather_requirements.size(); idx++)
+        for (unsigned idx = 0; idx < src_indirect_requirements.size(); idx++)
           runtime->forest->perform_versioning_analysis(this, offset + idx,
-                                                 gather_requirements[idx],
+                                                 src_indirect_requirements[idx],
                                                  gather_privilege_paths[idx],
                                                  gather_versions[idx],
                                                  preconditions);
       }
-      if (!scatter_requirements.empty())
+      if (!dst_indirect_requirements.empty())
       {
-        offset += gather_requirements.size();
-        for (unsigned idx = 0; idx < scatter_requirements.size(); idx++)
+        offset += src_indirect_requirements.size();
+        for (unsigned idx = 0; idx < dst_indirect_requirements.size(); idx++)
           runtime->forest->perform_versioning_analysis(this, offset + idx,
-                                                 scatter_requirements[idx],
+                                                 dst_indirect_requirements[idx],
                                                  scatter_privilege_paths[idx],
                                                  scatter_versions[idx],
                                                  preconditions);
@@ -3864,6 +3915,18 @@ namespace Legion {
     void CopyOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
+      PhysicalTraceInfo trace_info;
+      if (is_recording())
+      {
+#ifdef DEBUG_LEGION
+        assert(tpl != NULL && tpl->is_recording());
+#endif
+        tpl->record_get_op_term_event(completion_event, this);
+        trace_info.recording = true;
+        trace_info.op = this;
+        trace_info.tpl = tpl;
+      }
+
       std::vector<InstanceSet> valid_src_instances(src_requirements.size());
       std::vector<InstanceSet> valid_dst_instances(dst_requirements.size());
       Mapper::MapCopyInput input;
@@ -3922,28 +3985,16 @@ namespace Legion {
       }
       // Now we can carry out the mapping requested by the mapper
       // and issue the across copies, first set up the sync precondition
-      ApEvent sync_precondition;
-      if (!wait_barriers.empty() || !grants.empty())
+      ApEvent sync_precondition = compute_sync_precondition();
+
+      if (is_recording())
       {
-        std::set<ApEvent> preconditions;
-        for (std::vector<PhaseBarrier>::const_iterator it = 
-              wait_barriers.begin(); it != wait_barriers.end(); it++)
-        {
-          ApEvent e = Runtime::get_previous_phase(*it); 
-          preconditions.insert(e);
-          if (runtime->legion_spy_enabled)
-            LegionSpy::log_phase_barrier_wait(unique_op_id, e);
-        }
-        for (std::vector<Grant>::const_iterator it = grants.begin();
-              it != grants.end(); it++)
-        {
-          ApEvent e = it->impl->acquire_grant();
-          preconditions.insert(e);
-        }
-        if (sync_precondition.exists())
-          preconditions.insert(sync_precondition);
-        sync_precondition = Runtime::merge_events(preconditions);
+#ifdef DEBUG_LEGION
+        assert(tpl != NULL && tpl->is_recording());
+#endif
+        tpl->record_set_op_sync_event(sync_precondition, this);
       }
+
       // Register the source and destination regions
       std::set<ApEvent> copy_complete_events;
       for (unsigned idx = 0; idx < src_requirements.size(); idx++)
@@ -3955,6 +4006,14 @@ namespace Legion {
         // and add it to the set of copy complete events
         ApUserEvent local_completion = Runtime::create_ap_user_event();
         copy_complete_events.insert(local_completion);
+        if (is_recording())
+        {
+#ifdef DEBUG_LEGION
+          assert(tpl != NULL && tpl->is_recording());
+#endif
+          tpl->record_create_ap_user_event(local_completion, this);
+        }
+
         // Do the conversion and check for errors
         src_composite = 
           perform_conversion<true/*src*/>(idx, src_requirements[idx],
@@ -3985,7 +4044,8 @@ namespace Legion {
                                                   true/*read only locks*/,
                                                   map_applied_conditions,
                                                   src_targets,
-                                                  get_projection_info(idx)
+                                                  get_projection_info(idx),
+                                                  trace_info
 #ifdef DEBUG_LEGION
                                                   , get_logging_name()
                                                   , unique_op_id
@@ -4014,7 +4074,8 @@ namespace Legion {
                                                 false/*not read only*/,
                                                 map_applied_conditions,
                                                 dst_targets,
-                                                get_projection_info(dst_idx)
+                                                get_projection_info(idx),
+                                                trace_info
 #ifdef DEBUG_LEGION
                                                 , get_logging_name()
                                                 , unique_op_id
@@ -4057,8 +4118,15 @@ namespace Legion {
                                   local_completion, this, idx,
                                   idx + src_requirements.size(),
                                   local_sync_precondition, predication_guard, 
-                                  map_applied_conditions);
+                                  map_applied_conditions, trace_info);
           Runtime::trigger_event(local_completion, across_done);
+          if (is_recording())
+          {
+#ifdef DEBUG_LEGION
+            assert(tpl != NULL && tpl->is_recording());
+#endif
+            tpl->record_trigger_event(local_completion, across_done);
+          }
         }
         else
         {
@@ -4070,8 +4138,16 @@ namespace Legion {
             runtime->forest->reduce_across(
                                   src_requirements[idx], dst_requirements[idx],
                                   src_targets, dst_targets, this, 
-                                  local_sync_precondition, predication_guard);
+                                  local_sync_precondition, predication_guard,
+                                  trace_info);
           Runtime::trigger_event(local_completion, across_done);
+          if (is_recording())
+          {
+#ifdef DEBUG_LEGION
+            assert(tpl != NULL && tpl->is_recording());
+#endif
+            tpl->record_trigger_event(local_completion, across_done);
+          }
         }
         // Apply our changes to the version states
         // Don't apply changes to the source if we have a composite instance
@@ -4079,12 +4155,28 @@ namespace Legion {
         if (src_composite == -1)
           src_versions[idx].apply_mapping(map_applied_conditions);
         dst_versions[idx].apply_mapping(map_applied_conditions); 
+#ifdef DEBUG_LEGION
+      dump_physical_state(&src_requirements[idx], idx);
+      dump_physical_state(&dst_requirements[idx], idx + src_requirements.size());
+#endif
       }
       ApEvent copy_complete_event = Runtime::merge_events(copy_complete_events);
+      if (is_recording())
+      {
+#ifdef DEBUG_LEGION
+        assert(tpl != NULL && tpl->is_recording());
+#endif
+        tpl->record_merge_events(copy_complete_event, copy_complete_events,
+                                 this);
+      }
+
       if (!restrict_postconditions.empty())
       {
         restrict_postconditions.insert(copy_complete_event);
         copy_complete_event = Runtime::merge_events(restrict_postconditions);
+        if (is_recording())
+          tpl->record_merge_events(copy_complete_event,
+              restrict_postconditions, this);
       }
 #ifdef LEGION_SPY
       if (runtime->legion_spy_enabled)
@@ -4109,6 +4201,8 @@ namespace Legion {
       if ((__sync_add_and_fetch(&outstanding_profiling_requests, -1) == 0) &&
           profiling_reported.exists())
         Runtime::trigger_event(profiling_reported);
+      if (is_recording())
+        tpl->record_complete_replay(this, copy_complete_event);
       // Mark that we completed mapping
       if (!map_applied_conditions.empty())
         complete_mapping(Runtime::merge_events(map_applied_conditions));
@@ -4340,7 +4434,7 @@ namespace Legion {
         (idx < (src_requirements.size() + 
                 dst_requirements.size())) ? "destination" : 
         (idx < (src_requirements.size() + dst_requirements.size() + 
-                gather_requirements.size())) ? "gather" : "scatter";
+                src_indirect_requirements.size())) ? "gather" : "scatter";
       switch (et)
       {
         case NO_ERROR:
@@ -4531,13 +4625,13 @@ namespace Legion {
         else
           dst_parent_indexes[idx] = unsigned(parent_index);
       }
-      if (!gather_requirements.empty())
+      if (!src_indirect_requirements.empty())
       {
-        gather_parent_indexes.resize(gather_requirements.size());
-        for (unsigned idx = 0; idx < gather_requirements.size(); idx++)
+        gather_parent_indexes.resize(src_indirect_requirements.size());
+        for (unsigned idx = 0; idx < src_indirect_requirements.size(); idx++)
         {
           int parent_index = 
-            parent_ctx->find_parent_region_req(gather_requirements[idx]);
+            parent_ctx->find_parent_region_req(src_indirect_requirements[idx]);
           if (parent_index < 0)
             REPORT_LEGION_ERROR(ERROR_PARENT_TASK_COPY,
                            "Parent task %s (ID %lld) of copy operation "
@@ -4548,20 +4642,20 @@ namespace Legion {
                            parent_ctx->get_task_name(), 
                            parent_ctx->get_unique_id(),
                            unique_op_id, 
-                           gather_requirements[idx].region.index_space.id,
-                           gather_requirements[idx].region.field_space.id, 
-                           gather_requirements[idx].region.tree_id, idx)
+                           src_indirect_requirements[idx].region.index_space.id,
+                           src_indirect_requirements[idx].region.field_space.id, 
+                           src_indirect_requirements[idx].region.tree_id, idx)
           else
             gather_parent_indexes[idx] = unsigned(parent_index);
         }
       }
-      if (!scatter_requirements.empty())
+      if (!dst_indirect_requirements.empty())
       {
-        scatter_parent_indexes.resize(scatter_requirements.size());
-        for (unsigned idx = 0; idx < scatter_requirements.size(); idx++)
+        scatter_parent_indexes.resize(dst_indirect_requirements.size());
+        for (unsigned idx = 0; idx < dst_indirect_requirements.size(); idx++)
         {
           int parent_index = 
-            parent_ctx->find_parent_region_req(scatter_requirements[idx]);
+            parent_ctx->find_parent_region_req(dst_indirect_requirements[idx]);
           if (parent_index < 0)
             REPORT_LEGION_ERROR(ERROR_PARENT_TASK_COPY,
                            "Parent task %s (ID %lld) of copy operation "
@@ -4572,13 +4666,81 @@ namespace Legion {
                            parent_ctx->get_task_name(), 
                            parent_ctx->get_unique_id(),
                            unique_op_id, 
-                           scatter_requirements[idx].region.index_space.id,
-                           scatter_requirements[idx].region.field_space.id, 
-                           scatter_requirements[idx].region.tree_id, idx)
+                           dst_indirect_requirements[idx].region.index_space.id,
+                           dst_indirect_requirements[idx].region.field_space.id, 
+                           dst_indirect_requirements[idx].region.tree_id, idx)
           else
             scatter_parent_indexes[idx] = unsigned(parent_index);
         }
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void CopyOp::replay_analysis(void)
+    //--------------------------------------------------------------------------
+    {
+      if (runtime->legion_spy_enabled)
+        log_copy_requirements();
+#ifdef LEGION_SPY
+      LegionSpy::log_replay_operation(unique_op_id);
+#endif
+      tpl->register_operation(this);
+      complete_mapping();
+    }
+
+    //--------------------------------------------------------------------------
+    ApEvent CopyOp::compute_sync_precondition(void) const
+    //--------------------------------------------------------------------------
+    {
+      if (wait_barriers.empty() && grants.empty())
+        return ApEvent::NO_AP_EVENT;
+      std::set<ApEvent> sync_preconditions;
+      if (!wait_barriers.empty())
+      {
+        for (std::vector<PhaseBarrier>::const_iterator it = 
+              wait_barriers.begin(); it != wait_barriers.end(); it++)
+        {
+          ApEvent e = Runtime::get_previous_phase(it->phase_barrier);
+          sync_preconditions.insert(e);
+          if (runtime->legion_spy_enabled)
+            LegionSpy::log_phase_barrier_wait(unique_op_id, e);
+        }
+      }
+      if (!grants.empty())
+      {
+        for (std::vector<Grant>::const_iterator it = grants.begin();
+              it != grants.end(); it++)
+        {
+          ApEvent e = it->impl->acquire_grant();
+          sync_preconditions.insert(e);
+        }
+      }
+      return Runtime::merge_events(sync_preconditions);
+    }
+
+    //--------------------------------------------------------------------------
+    void CopyOp::complete_replay(ApEvent copy_complete_event)
+    //--------------------------------------------------------------------------
+    {
+      // Chain all the unlock and barrier arrivals off of the
+      // copy complete event
+      if (!arrive_barriers.empty())
+      {
+        for (std::vector<PhaseBarrier>::iterator it = 
+              arrive_barriers.begin(); it != arrive_barriers.end(); it++)
+        {
+          if (runtime->legion_spy_enabled)
+            LegionSpy::log_phase_barrier_arrival(unique_op_id, 
+                                                 it->phase_barrier);
+          Runtime::phase_barrier_arrive(it->phase_barrier, 1/*count*/,
+                                        completion_event);    
+        }
+      }
+
+      // Handle the case for marking when the copy completes
+      Runtime::trigger_event(completion_event, copy_complete_event);
+      need_completion_trigger = false;
+      complete_execution();
     }
 
     //--------------------------------------------------------------------------
@@ -4869,33 +5031,35 @@ namespace Legion {
         // can only do this safely now if there is no scatter region
         // requirement, otherwise we're doing it onto
         if ((dst_requirements[idx].privilege != REDUCE) && 
-            (idx >= gather_requirements.size()))
+            (idx >= src_indirect_requirements.size()))
           dst_requirements[idx].privilege = WRITE_ONLY;
       }
-      if (!launcher.gather_requirements.empty())
+      if (!launcher.src_indirect_requirements.empty())
       {
-        const size_t gather_size = launcher.gather_requirements.size();
-        gather_requirements.resize(gather_size);
+        const size_t gather_size = launcher.src_indirect_requirements.size();
+        src_indirect_requirements.resize(gather_size);
         gather_versions.resize(gather_size);
         gather_restrict_infos.resize(gather_size);
         gather_projection_infos.resize(gather_size);
         for (unsigned idx = 0; idx < gather_size; idx++)
         {
-          gather_requirements[idx] = launcher.gather_requirements[idx];
-          gather_requirements[idx].flags |= NO_ACCESS_FLAG;
+          src_indirect_requirements[idx] = 
+            launcher.src_indirect_requirements[idx];
+          src_indirect_requirements[idx].flags |= NO_ACCESS_FLAG;
         }
       }
-      if (!launcher.scatter_requirements.empty())
+      if (!launcher.dst_indirect_requirements.empty())
       {
-        const size_t scatter_size = launcher.scatter_requirements.size();
-        scatter_requirements.resize(scatter_size);
+        const size_t scatter_size = launcher.dst_indirect_requirements.size();
+        dst_indirect_requirements.resize(scatter_size);
         scatter_versions.resize(scatter_size);
         scatter_restrict_infos.resize(scatter_size);
         scatter_projection_infos.resize(scatter_size);
         for (unsigned idx = 0; idx < scatter_size; idx++)
         {
-          scatter_requirements[idx] = launcher.scatter_requirements[idx];
-          scatter_requirements[idx].flags |= NO_ACCESS_FLAG;
+          dst_indirect_requirements[idx] = 
+            launcher.dst_indirect_requirements[idx];
+          dst_indirect_requirements[idx].flags |= NO_ACCESS_FLAG;
         }
       }
       grants = launcher.grants;
@@ -4928,24 +5092,23 @@ namespace Legion {
                         src_requirements.size(), dst_requirements.size(),
                         get_unique_id(), parent_ctx->get_task_name(),
                         parent_ctx->get_unique_id())
-        if (!gather_requirements.empty() && 
-            (gather_requirements.size() != src_requirements.size()))
-          REPORT_LEGION_ERROR(ERROR_NUMBER_GATHER_REQUIREMENTS,
+        if (!src_indirect_requirements.empty() && 
+            (src_indirect_requirements.size() != src_requirements.size()))
+          REPORT_LEGION_ERROR(ERROR_NUMBER_SRC_INDIRECT_REQUIREMENTS,
                         "Number of gather requirements (%zd) does not "
                         "match number of source requirements (%zd) "
                         "for copy operation (ID %lld) with parent "
-                        "task %s (ID %lld)",
-                        gather_requirements.size(), src_requirements.size(),
-                        get_unique_id(), parent_ctx->get_task_name(),
-                        parent_ctx->get_unique_id())
-        if (!scatter_requirements.empty() &&
-            (scatter_requirements.size() != src_requirements.size()))
-          REPORT_LEGION_ERROR(ERROR_NUMBER_SCATTER_REQUIREMENTS,
+                        "task %s (ID %lld)", src_indirect_requirements.size(),
+                        src_requirements.size(), get_unique_id(), 
+                        parent_ctx->get_task_name(),parent_ctx->get_unique_id())
+        if (!dst_indirect_requirements.empty() &&
+            (dst_indirect_requirements.size() != src_requirements.size()))
+          REPORT_LEGION_ERROR(ERROR_NUMBER_DST_INDIRECT_REQUIREMENTS,
                         "Number of scatter requirements (%zd) does not "
                         "match number of source requriements (%zd) "
                         "for copy operation ID (%lld) with parent "
-                        "task %s (ID %lld)",
-                        scatter_requirements.size(), src_requirements.size(),
+                        "task %s (ID %lld)", dst_indirect_requirements.size(),
+                        src_requirements.size(),
                         get_unique_id(), parent_ctx->get_task_name(),
                         parent_ctx->get_unique_id())
         for (unsigned idx = 0; idx < src_requirements.size(); idx++)
@@ -5002,59 +5165,59 @@ namespace Legion {
           check_copy_privilege(dst_requirements[idx], 
               src_requirements.size() + idx, true/*permit projection*/);
         }
-        if (!gather_requirements.empty())
+        if (!src_indirect_requirements.empty())
         {
           const size_t offset = 
             src_requirements.size() + dst_requirements.size();
-          for (unsigned idx = 0; idx < gather_requirements.size(); idx++)
+          for (unsigned idx = 0; idx < src_indirect_requirements.size(); idx++)
           {
-            if (gather_requirements[idx].privilege_fields.size() != 1)
+            if (src_indirect_requirements[idx].privilege_fields.size() != 1)
               REPORT_LEGION_ERROR(ERROR_COPY_GATHER_REQUIREMENT,
-                          "Copy gather requirement %d for copy "
-                          "operation (ID %lld) in parent task %s "
-                          "(ID %lld) has %zd privilege fields but "
-                          "gather requirements are only permitted "
-                          "to have one privilege field.", idx,
-                          get_unique_id(), parent_task->get_task_name(),
-                          parent_task->get_unique_id(),
-                          gather_requirements[idx].privilege_fields.size())
-            if (!IS_READ_ONLY(gather_requirements[idx]))
+                        "Copy gather requirement %d for copy "
+                        "operation (ID %lld) in parent task %s "
+                        "(ID %lld) has %zd privilege fields but "
+                        "gather requirements are only permitted "
+                        "to have one privilege field.", idx,
+                        get_unique_id(), parent_task->get_task_name(),
+                        parent_task->get_unique_id(),
+                        src_indirect_requirements[idx].privilege_fields.size())
+            if (!IS_READ_ONLY(src_indirect_requirements[idx]))
               REPORT_LEGION_ERROR(ERROR_COPY_GATHER_REQUIREMENT,
-                          "Copy gather requirement %d for copy "
-                          "operation (ID %lld) in parent task %s "
-                          "(ID %lld) must be requested with a "
-                          "read-only privilege.", idx,
-                          get_unique_id(), parent_ctx->get_task_name(),
-                          parent_ctx->get_unique_id())
-            check_copy_privilege(gather_requirements[idx], offset + idx,
+                        "Copy gather requirement %d for copy "
+                        "operation (ID %lld) in parent task %s "
+                        "(ID %lld) must be requested with a "
+                        "read-only privilege.", idx,
+                        get_unique_id(), parent_ctx->get_task_name(),
+                        parent_ctx->get_unique_id())
+            check_copy_privilege(src_indirect_requirements[idx], offset + idx,
                                  true/*permit projection*/);
           }
         }
-        if (!scatter_requirements.empty())
+        if (!dst_indirect_requirements.empty())
         {
           const size_t offset = src_requirements.size() + 
-            dst_requirements.size() + gather_requirements.size();
-          for (unsigned idx = 0; idx < scatter_requirements.size(); idx++)
+            dst_requirements.size() + src_indirect_requirements.size();
+          for (unsigned idx = 0; idx < dst_indirect_requirements.size(); idx++)
           {
-            if (scatter_requirements[idx].privilege_fields.size() != 1)
+            if (dst_indirect_requirements[idx].privilege_fields.size() != 1)
               REPORT_LEGION_ERROR(ERROR_COPY_SCATTER_REQUIREMENT,
-                          "Copy scatter requirement %d for copy "
-                          "operation (ID %lld) in parent task %s "
-                          "(ID %lld) has %zd privilege fields but "
-                          "scatter requirements are only permitted "
-                          "to have one privilege field.", idx,
-                          get_unique_id(), parent_task->get_task_name(),
-                          parent_task->get_unique_id(),
-                          scatter_requirements[idx].privilege_fields.size())
-            if (!IS_READ_ONLY(scatter_requirements[idx]))
+                        "Copy scatter requirement %d for copy "
+                        "operation (ID %lld) in parent task %s "
+                        "(ID %lld) has %zd privilege fields but "
+                        "scatter requirements are only permitted "
+                        "to have one privilege field.", idx,
+                        get_unique_id(), parent_task->get_task_name(),
+                        parent_task->get_unique_id(),
+                        dst_indirect_requirements[idx].privilege_fields.size())
+            if (!IS_READ_ONLY(dst_indirect_requirements[idx]))
               REPORT_LEGION_ERROR(ERROR_COPY_SCATTER_REQUIREMENT,
-                          "Copy scatter requirement %d for copy "
-                          "operation (ID %lld) in parent task %s "
-                          "(ID %lld) must be requested with a "
-                          "read-only privilege.", idx,
-                          get_unique_id(), parent_ctx->get_task_name(),
-                          parent_ctx->get_unique_id())
-            check_copy_privilege(scatter_requirements[idx], offset + idx,
+                        "Copy scatter requirement %d for copy "
+                        "operation (ID %lld) in parent task %s "
+                        "(ID %lld) must be requested with a "
+                        "read-only privilege.", idx,
+                        get_unique_id(), parent_ctx->get_task_name(),
+                        parent_ctx->get_unique_id())
+            check_copy_privilege(dst_indirect_requirements[idx], offset + idx,
                                  true/*permit projeciton*/);
           }
         }
@@ -5117,22 +5280,22 @@ namespace Legion {
         initialize_privilege_path(dst_privilege_paths[idx],
                                   dst_requirements[idx]);
       }
-      if (!gather_requirements.empty())
+      if (!src_indirect_requirements.empty())
       {
-        gather_privilege_paths.resize(gather_requirements.size());
-        for (unsigned idx = 0; idx < gather_requirements.size(); idx++)
+        gather_privilege_paths.resize(src_indirect_requirements.size());
+        for (unsigned idx = 0; idx < src_indirect_requirements.size(); idx++)
         {
           initialize_privilege_path(gather_privilege_paths[idx],
-                                    gather_requirements[idx]);
+                                    src_indirect_requirements[idx]);
         }
       }
-      if (!scatter_requirements.empty())
+      if (!dst_indirect_requirements.empty())
       {
-        scatter_privilege_paths.resize(scatter_requirements.size());
-        for (unsigned idx = 0; idx < scatter_requirements.size(); idx++)
+        scatter_privilege_paths.resize(dst_indirect_requirements.size());
+        for (unsigned idx = 0; idx < dst_indirect_requirements.size(); idx++)
         {
           initialize_privilege_path(scatter_privilege_paths[idx],
-                                    scatter_requirements[idx]);
+                                    dst_indirect_requirements[idx]);
         }
       }
       if (runtime->legion_spy_enabled)
@@ -5183,13 +5346,13 @@ namespace Legion {
             LegionSpy::log_requirement_projection(unique_op_id,
                 src_requirements.size() + idx, req.projection);
         }
-        if (!gather_requirements.empty())
+        if (!src_indirect_requirements.empty())
         {
           const size_t offset = 
             src_requirements.size() + dst_requirements.size();
-          for (unsigned idx = 0; idx < gather_requirements.size(); idx++)
+          for (unsigned idx = 0; idx < src_indirect_requirements.size(); idx++)
           {
-            const RegionRequirement &req = gather_requirements[idx];
+            const RegionRequirement &req = src_indirect_requirements[idx];
             const bool reg = (req.handle_type == SINGULAR) ||
                              (req.handle_type == REG_PROJECTION);
             const bool proj = (req.handle_type == REG_PROJECTION) ||
@@ -5210,13 +5373,13 @@ namespace Legion {
                                                     req.projection);
           }
         }
-        if (!scatter_requirements.empty())
+        if (!dst_indirect_requirements.empty())
         {
           const size_t offset = src_requirements.size() + 
-            dst_requirements.size() + gather_requirements.size();
-          for (unsigned idx = 0; idx < scatter_requirements.size(); idx++)
+            dst_requirements.size() + src_indirect_requirements.size();
+          for (unsigned idx = 0; idx < dst_indirect_requirements.size(); idx++)
           {
-            const RegionRequirement &req = scatter_requirements[idx];
+            const RegionRequirement &req = dst_indirect_requirements[idx];
             const bool reg = (req.handle_type == SINGULAR) ||
                              (req.handle_type == REG_PROJECTION);
             const bool proj = (req.handle_type == REG_PROJECTION) ||
@@ -5279,30 +5442,30 @@ namespace Legion {
         if (is_reduce_req)
           dst_requirements[idx].privilege = REDUCE;
       }
-      if (!gather_requirements.empty())
+      if (!src_indirect_requirements.empty())
       {
-        gather_versions.resize(gather_requirements.size());
-        for (unsigned idx = 0; idx < gather_requirements.size(); idx++)
+        gather_versions.resize(src_indirect_requirements.size());
+        for (unsigned idx = 0; idx < src_indirect_requirements.size(); idx++)
         {
           gather_projection_infos[idx] = 
-            ProjectionInfo(runtime, gather_requirements[idx], launch_space);
+            ProjectionInfo(runtime,src_indirect_requirements[idx],launch_space);
           runtime->forest->perform_dependence_analysis(this, idx, 
-                                                 gather_requirements[idx],
+                                                 src_indirect_requirements[idx],
                                                  gather_restrict_infos[idx],
                                                  gather_versions[idx],
                                                  gather_projection_infos[idx],
                                                  gather_privilege_paths[idx]);
         }
       }
-      if (!scatter_requirements.empty())
+      if (!dst_indirect_requirements.empty())
       {
-        scatter_versions.resize(scatter_requirements.size());
-        for (unsigned idx = 0; idx < scatter_requirements.size(); idx++)
+        scatter_versions.resize(dst_indirect_requirements.size());
+        for (unsigned idx = 0; idx < dst_indirect_requirements.size(); idx++)
         {
           scatter_projection_infos[idx] = 
-            ProjectionInfo(runtime, scatter_requirements[idx], launch_space);
+           ProjectionInfo(runtime, dst_indirect_requirements[idx],launch_space);
           runtime->forest->perform_dependence_analysis(this, idx, 
-                                                 scatter_requirements[idx],
+                                                 dst_indirect_requirements[idx],
                                                  scatter_restrict_infos[idx],
                                                  scatter_versions[idx],
                                                  scatter_projection_infos[idx],
@@ -5364,10 +5527,10 @@ namespace Legion {
         if (is_reduce_req)
           dst_requirements[idx].privilege = REDUCE;
       }
-      if (!gather_requirements.empty())
+      if (!src_indirect_requirements.empty())
       {
         offset += dst_requirements.size();
-        for (unsigned idx = 0; idx < gather_requirements.size(); idx++)
+        for (unsigned idx = 0; idx < src_indirect_requirements.size(); idx++)
         {
           VersionInfo &version_info = gather_versions[idx];
           // If we already have physical state for it then we've 
@@ -5380,17 +5543,17 @@ namespace Legion {
             ((proj_info.projection_type != SINGULAR) && 
              (proj_info.projection->depth > 0));
           runtime->forest->perform_versioning_analysis(this, offset + idx, 
-                                               gather_requirements[idx],
+                                               src_indirect_requirements[idx],
                                                gather_privilege_paths[idx],
                                                version_info,
                                                preconditions,
                                                partial_traversal);
         }
       }
-      if (!scatter_requirements.empty())
+      if (!dst_indirect_requirements.empty())
       {
-        offset += gather_requirements.size();
-        for (unsigned idx = 0; idx < scatter_requirements.size(); idx++)
+        offset += src_indirect_requirements.size();
+        for (unsigned idx = 0; idx < dst_indirect_requirements.size(); idx++)
         {
           VersionInfo &version_info = scatter_versions[idx];
           // If we already have physical state for it then we've 
@@ -5403,7 +5566,7 @@ namespace Legion {
             ((proj_info.projection_type != SINGULAR) && 
              (proj_info.projection->depth > 0));
           runtime->forest->perform_versioning_analysis(this, offset + idx,
-                                               scatter_requirements[idx],
+                                               dst_indirect_requirements[idx],
                                                scatter_privilege_paths[idx],
                                                version_info,
                                                preconditions,
@@ -5447,33 +5610,33 @@ namespace Legion {
                                  dst_requirements[idx], runtime, 
                                  projection_points);
       }
-      if (!gather_requirements.empty())
+      if (!src_indirect_requirements.empty())
       {
         offset += dst_requirements.size();
-        for (unsigned idx = 0; idx < gather_requirements.size(); idx++)
+        for (unsigned idx = 0; idx < src_indirect_requirements.size(); idx++)
         {
-          if (gather_requirements[idx].handle_type == SINGULAR)
+          if (src_indirect_requirements[idx].handle_type == SINGULAR)
             continue;
           ProjectionFunction *function = 
             runtime->find_projection_function(
-                gather_requirements[idx].projection);
+                src_indirect_requirements[idx].projection);
           function->project_points(this, offset + idx,
-                                   gather_requirements[idx], runtime,
+                                   src_indirect_requirements[idx], runtime,
                                    projection_points);
         }
       }
-      if (!scatter_requirements.empty())
+      if (!dst_indirect_requirements.empty())
       {
-        offset += gather_requirements.size();
-        for (unsigned idx = 0; idx < scatter_requirements.size(); idx++)
+        offset += src_indirect_requirements.size();
+        for (unsigned idx = 0; idx < dst_indirect_requirements.size(); idx++)
         {
-          if (scatter_requirements[idx].handle_type == SINGULAR)
+          if (dst_indirect_requirements[idx].handle_type == SINGULAR)
             continue;
           ProjectionFunction *function = 
             runtime->find_projection_function(
-                scatter_requirements[idx].projection);
+                dst_indirect_requirements[idx].projection);
           function->project_points(this, offset + idx,
-                                   scatter_requirements[idx], runtime,
+                                   dst_indirect_requirements[idx], runtime,
                                    projection_points);
         }
       }
@@ -5742,26 +5905,26 @@ namespace Legion {
       owner = own;
       execution_fence_event = own->get_execution_fence_event();
       // From Copy
-      src_requirements        = owner->src_requirements;
-      dst_requirements        = owner->dst_requirements;
-      gather_requirements     = owner->gather_requirements;
-      scatter_requirements    = owner->scatter_requirements;
-      grants                  = owner->grants;
-      wait_barriers           = owner->wait_barriers;
-      arrive_barriers         = owner->arrive_barriers;
-      parent_task             = owner->parent_task;
-      map_id                  = owner->map_id;
-      tag                     = owner->tag;
+      src_requirements          = owner->src_requirements;
+      dst_requirements          = owner->dst_requirements;
+      src_indirect_requirements = owner->src_indirect_requirements;
+      dst_indirect_requirements = owner->dst_indirect_requirements;
+      grants                    = owner->grants;
+      wait_barriers             = owner->wait_barriers;
+      arrive_barriers           = owner->arrive_barriers;
+      parent_task               = owner->parent_task;
+      map_id                    = owner->map_id;
+      tag                       = owner->tag;
       // From CopyOp
-      src_parent_indexes      = owner->src_parent_indexes;
-      dst_parent_indexes      = owner->dst_parent_indexes;
-      gather_parent_indexes   = owner->gather_parent_indexes;
-      scatter_parent_indexes  = owner->scatter_parent_indexes;
-      src_restrict_infos      = owner->src_restrict_infos;
-      dst_restrict_infos      = owner->dst_restrict_infos;
-      gather_restrict_infos   = owner->gather_restrict_infos;
-      scatter_restrict_infos  = owner->scatter_restrict_infos;
-      predication_guard       = owner->predication_guard;
+      src_parent_indexes        = owner->src_parent_indexes;
+      dst_parent_indexes        = owner->dst_parent_indexes;
+      gather_parent_indexes     = owner->gather_parent_indexes;
+      scatter_parent_indexes    = owner->scatter_parent_indexes;
+      src_restrict_infos        = owner->src_restrict_infos;
+      dst_restrict_infos        = owner->dst_restrict_infos;
+      gather_restrict_infos     = owner->gather_restrict_infos;
+      scatter_restrict_infos    = owner->scatter_restrict_infos;
+      predication_guard         = owner->predication_guard;
       if (runtime->legion_spy_enabled)
         LegionSpy::log_index_point(owner->get_unique_op_id(), unique_op_id, p);
     }
@@ -5871,25 +6034,26 @@ namespace Legion {
         if (is_reduce_req)
           dst_requirements[idx].privilege = REDUCE;
       }
-      if (!gather_requirements.empty())
+      if (!src_indirect_requirements.empty())
       {
         gather_versions = owner->gather_versions;
         const size_t offset = src_requirements.size() + dst_requirements.size();
-        for (unsigned idx = 0; idx < gather_requirements.size(); idx++)
+        for (unsigned idx = 0; idx < src_indirect_requirements.size(); idx++)
           perform_projection_version_analysis(
-            owner->gather_projection_infos[idx],owner->gather_requirements[idx], 
-            gather_requirements[idx], offset + idx, logical_context_uid, 
+            owner->gather_projection_infos[idx],
+            owner->src_indirect_requirements[idx],
+            src_indirect_requirements[idx], offset + idx, logical_context_uid,
             gather_versions[idx], preconditions);
       }
-      if (!scatter_requirements.empty())
+      if (!dst_indirect_requirements.empty())
       {
         scatter_versions = owner->scatter_versions;
         const size_t offset = src_requirements.size() + dst_requirements.size();
-        for (unsigned idx = 0; idx < scatter_requirements.size(); idx++)
+        for (unsigned idx = 0; idx < dst_indirect_requirements.size(); idx++)
           perform_projection_version_analysis(
             owner->scatter_projection_infos[idx],
-            owner->scatter_requirements[idx], 
-            scatter_requirements[idx], offset + idx, logical_context_uid, 
+            owner->dst_indirect_requirements[idx], 
+            dst_indirect_requirements[idx], offset + idx, logical_context_uid, 
             scatter_versions[idx], preconditions);
       }
       // Then put ourselves in the queue of operations ready to map
@@ -5959,25 +6123,25 @@ namespace Legion {
         dst_requirements[idx].handle_type = SINGULAR;
       }
       else if (idx < (src_requirements.size() + 
-            dst_requirements.size() + gather_requirements.size()))
+            dst_requirements.size() + src_indirect_requirements.size()))
       {
         idx -= (src_requirements.size() + dst_requirements.size());
 #ifdef DEBUG_LEGION
-        assert(gather_requirements[idx].handle_type != SINGULAR);
+        assert(src_indirect_requirements[idx].handle_type != SINGULAR);
 #endif
-        gather_requirements[idx].region = result;
-        gather_requirements[idx].handle_type = SINGULAR;
+        src_indirect_requirements[idx].region = result;
+        src_indirect_requirements[idx].handle_type = SINGULAR;
       }
       else
       {
         idx -= (src_requirements.size() + dst_requirements.size() + 
-                gather_requirements.size());
+                src_indirect_requirements.size());
 #ifdef DEBUG_LEGION
-        assert(idx < scatter_requirements.size());
-        assert(scatter_requirements[idx].handle_type != SINGULAR);
+        assert(idx < dst_indirect_requirements.size());
+        assert(dst_indirect_requirements[idx].handle_type != SINGULAR);
 #endif
-        scatter_requirements[idx].region = result;
-        scatter_requirements[idx].handle_type = SINGULAR;
+        dst_indirect_requirements[idx].region = result;
+        dst_indirect_requirements[idx].handle_type = SINGULAR;
       }
     }
 
@@ -6075,31 +6239,7 @@ namespace Legion {
       // Perform fence analysis for the given fence in the context
       // Depending on the kind of fence we will either do mapping
       // analysis or execution analysis or both
-      switch (fence_kind) 
-      {
-        case MAPPING_FENCE:
-          {
-            parent_ctx->perform_fence_analysis(this, true, false);
-            parent_ctx->update_current_fence(this, true, false);
-            break;
-          }
-        case EXECUTION_FENCE:
-          {
-            execution_precondition = 
-              parent_ctx->perform_fence_analysis(this, false, true);
-            parent_ctx->update_current_fence(this, false, true);
-            break;
-          }
-        case MIXED_FENCE:
-          {
-            execution_precondition =
-              parent_ctx->perform_fence_analysis(this, true, true);
-            parent_ctx->update_current_fence(this, true, true);
-            break;
-          }
-        default:
-          assert(false);
-      }
+      perform_fence_analysis(true/*register fence also*/);       
     }
 
     //--------------------------------------------------------------------------
@@ -6143,6 +6283,66 @@ namespace Legion {
           }
         default:
           assert(false); // should never get here
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void FenceOp::perform_fence_analysis(bool update_fence)
+    //--------------------------------------------------------------------------
+    {
+      switch (fence_kind) 
+      {
+        case MAPPING_FENCE:
+          {
+            parent_ctx->perform_fence_analysis(this, true, false);
+            if (update_fence)
+              parent_ctx->update_current_fence(this, true, false);
+            break;
+          }
+        case EXECUTION_FENCE:
+          {
+            execution_precondition = 
+              parent_ctx->perform_fence_analysis(this, false, true);
+            if (update_fence)
+              parent_ctx->update_current_fence(this, false, true);
+            break;
+          }
+        case MIXED_FENCE:
+          {
+            execution_precondition =
+              parent_ctx->perform_fence_analysis(this, true, true);
+            if (update_fence)
+              parent_ctx->update_current_fence(this, true, true);
+            break;
+          }
+        default:
+          assert(false);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void FenceOp::update_current_fence(void)
+    //--------------------------------------------------------------------------
+    {
+      switch (fence_kind) 
+      {
+        case MAPPING_FENCE:
+          {
+            parent_ctx->update_current_fence(this, true, false);
+            break;
+          }
+        case EXECUTION_FENCE:
+          {
+            parent_ctx->update_current_fence(this, false, true);
+            break;
+          }
+        case MIXED_FENCE:
+          {
+            parent_ctx->update_current_fence(this, true, true);
+            break;
+          }
+        default:
+          assert(false);
       }
     }
 
@@ -7487,6 +7687,9 @@ namespace Legion {
       assert(completion_event.exists());
       assert(chosen_instances.empty());
 #endif
+#ifdef DEBUG_LEGION
+      dump_physical_state(&requirement, 0, true, true);
+#endif
       // See if we are restricted or not and if not find our valid instances 
       if (!restrict_info.has_restrictions())
       {
@@ -7576,6 +7779,9 @@ namespace Legion {
                                               chosen_instances);
       }
       version_info.apply_mapping(map_applied_conditions);
+#ifdef DEBUG_LEGION
+      dump_physical_state(&requirement, 0, false, true);
+#endif
       // Remove profiling our guard and trigger the profiling event if necessary
       if ((__sync_add_and_fetch(&outstanding_profiling_requests, -1) == 0) &&
           profiling_reported.exists())
@@ -8396,14 +8602,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     AcquireOp::AcquireOp(Runtime *rt)
-      : Acquire(), SpeculativeOp(rt)
+      : Acquire(), MemoizableOp<SpeculativeOp>(rt)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     AcquireOp::AcquireOp(const AcquireOp &rhs)
-      : Acquire(), SpeculativeOp(NULL)
+      : Acquire(), MemoizableOp<SpeculativeOp>(NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -8436,6 +8642,7 @@ namespace Legion {
                              1/*num region requirements*/,
                              launcher.static_dependences,
                              launcher.predicate);
+      initialize_memoizable();
       // Note we give it READ WRITE EXCLUSIVE to make sure that nobody
       // can be re-ordered around this operation for mapping or
       // normal dependences.  We won't actually read or write anything.
@@ -8486,6 +8693,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       activate_speculative();
+      activate_memoizable();
       mapper = NULL;
       outstanding_profiling_requests = 1; // start at 1 to guard
       profiling_reported = RtUserEvent::NO_RT_USER_EVENT;
@@ -8638,6 +8846,12 @@ namespace Legion {
     void AcquireOp::trigger_ready(void)
     //--------------------------------------------------------------------------
     {
+      if (is_replaying())
+      {
+        enqueue_ready_operation();
+        return;
+      }
+
       std::set<RtEvent> preconditions;  
       runtime->forest->perform_versioning_analysis(this, 0/*idx*/,
                                                    requirement,
@@ -8654,6 +8868,18 @@ namespace Legion {
     void AcquireOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
+      PhysicalTraceInfo trace_info;
+      if (is_recording())
+      {
+#ifdef DEBUG_LEGION
+        assert(tpl != NULL && tpl->is_recording());
+#endif
+        tpl->record_get_op_term_event(completion_event, this);
+        trace_info.recording = true;
+        trace_info.op = this;
+        trace_info.tpl = tpl;
+      }
+
       // Map this is a restricted region. We already know the 
       // physical region that we want to map.
       InstanceSet mapped_instances = restrict_info.get_instances();
@@ -8667,39 +8893,39 @@ namespace Legion {
                                               false/*not read only*/,
                                               map_applied_conditions,
                                               mapped_instances,
-                                              NULL/*advance projections*/
+                                              NULL/*advance projections*/,
+                                              trace_info
 #ifdef DEBUG_LEGION
                                               , get_logging_name()
                                               , unique_op_id
 #endif
                                               );
       version_info.apply_mapping(map_applied_conditions);
+#ifdef DEBUG_LEGION
+      dump_physical_state(&requirement, 0);
+#endif
       // Get all the events that need to happen before we can consider
       // ourselves acquired: reference ready and all synchronization
       std::set<ApEvent> acquire_preconditions;
       for (unsigned idx = 0; idx < mapped_instances.size(); idx++)
         acquire_preconditions.insert(mapped_instances[idx].get_ready_event());
-      if (!wait_barriers.empty())
+      ApEvent sync_precondition = compute_sync_precondition();
+      if (is_recording())
       {
-        for (std::vector<PhaseBarrier>::const_iterator it = 
-              wait_barriers.begin(); it != wait_barriers.end(); it++)
-        {
-          ApEvent e = Runtime::get_previous_phase(*it);
-          acquire_preconditions.insert(e);
-          if (runtime->legion_spy_enabled)
-            LegionSpy::log_phase_barrier_wait(unique_op_id, e);
-        }
+#ifdef DEBUG_LEGION
+        assert(tpl != NULL && tpl->is_recording());
+#endif
+        tpl->record_set_op_sync_event(sync_precondition, this);
       }
-      if (!grants.empty())
-      {
-        for (std::vector<Grant>::const_iterator it = grants.begin();
-              it != grants.end(); it++)
-        {
-          ApEvent e = it->impl->acquire_grant();
-          acquire_preconditions.insert(e);
-        }
-      }
+      acquire_preconditions.insert(sync_precondition);
       ApEvent acquire_complete = Runtime::merge_events(acquire_preconditions);
+      if (is_recording())
+      {
+#ifdef DEBUG_LEGION
+        assert(tpl != NULL && tpl->is_recording());
+#endif
+        tpl->record_merge_events(acquire_complete, acquire_preconditions, this);
+      }
       if (runtime->legion_spy_enabled)
       {
         runtime->forest->log_mapping_decision(unique_op_id, 0/*idx*/,
@@ -8727,6 +8953,8 @@ namespace Legion {
       if ((__sync_add_and_fetch(&outstanding_profiling_requests, -1) == 0) &&
           profiling_reported.exists())
         Runtime::trigger_event(profiling_reported);
+      if (is_recording())
+        tpl->record_complete_replay(this, acquire_complete);
       // Mark that we completed mapping
       if (!map_applied_conditions.empty())
         complete_mapping(Runtime::merge_events(map_applied_conditions));
@@ -8805,6 +9033,72 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return requirement;
+    }
+
+    //--------------------------------------------------------------------------
+    void AcquireOp::replay_analysis(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef LEGION_SPY
+      LegionSpy::log_replay_operation(unique_op_id);
+#endif
+      tpl->register_operation(this);
+      complete_mapping();
+    }
+
+    //--------------------------------------------------------------------------
+    ApEvent AcquireOp::compute_sync_precondition(void) const
+    //--------------------------------------------------------------------------
+    {
+      if (wait_barriers.empty() && grants.empty())
+        return ApEvent::NO_AP_EVENT;
+      std::set<ApEvent> sync_preconditions;
+      if (!wait_barriers.empty())
+      {
+        for (std::vector<PhaseBarrier>::const_iterator it =
+              wait_barriers.begin(); it != wait_barriers.end(); it++)
+        {
+          ApEvent e = Runtime::get_previous_phase(it->phase_barrier);
+          sync_preconditions.insert(e);
+          if (runtime->legion_spy_enabled)
+            LegionSpy::log_phase_barrier_wait(unique_op_id, e);
+        }
+      }
+      if (!grants.empty())
+      {
+        for (std::vector<Grant>::const_iterator it = grants.begin();
+              it != grants.end(); it++)
+        {
+          ApEvent e = it->impl->acquire_grant();
+          sync_preconditions.insert(e);
+        }
+      }
+      return Runtime::merge_events(sync_preconditions);
+    }
+
+    //--------------------------------------------------------------------------
+    void AcquireOp::complete_replay(ApEvent acquire_complete_event)
+    //--------------------------------------------------------------------------
+    {
+      // Chain all the unlock and barrier arrivals off of the
+      // copy complete event
+      if (!arrive_barriers.empty())
+      {
+        for (std::vector<PhaseBarrier>::iterator it =
+              arrive_barriers.begin(); it != arrive_barriers.end(); it++)
+        {
+          if (runtime->legion_spy_enabled)
+            LegionSpy::log_phase_barrier_arrival(unique_op_id,
+                                                 it->phase_barrier);
+          Runtime::phase_barrier_arrive(it->phase_barrier, 1/*count*/,
+                                        completion_event);
+        }
+      }
+
+      // Handle the case for marking when the copy completes
+      Runtime::trigger_event(completion_event, acquire_complete_event);
+      need_completion_trigger = false;
+      complete_execution();
     }
 
     //--------------------------------------------------------------------------
@@ -9014,14 +9308,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ReleaseOp::ReleaseOp(Runtime *rt)
-      : Release(), SpeculativeOp(rt)
+      : Release(), MemoizableOp<SpeculativeOp>(rt)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     ReleaseOp::ReleaseOp(const ReleaseOp &rhs)
-      : Release(), SpeculativeOp(NULL)
+      : Release(), MemoizableOp<SpeculativeOp>(NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -9054,6 +9348,7 @@ namespace Legion {
                              1/*num region requirements*/,
                              launcher.static_dependences,
                              launcher.predicate);
+      initialize_memoizable();
       // Note we give it READ WRITE EXCLUSIVE to make sure that nobody
       // can be re-ordered around this operation for mapping or
       // normal dependences.  We won't actually read or write anything.
@@ -9103,6 +9398,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       activate_speculative(); 
+      activate_memoizable();
       mapper = NULL;
       outstanding_profiling_requests = 1; // start at 1 to guard
       profiling_reported = RtUserEvent::NO_RT_USER_EVENT;
@@ -9256,6 +9552,12 @@ namespace Legion {
     void ReleaseOp::trigger_ready(void)
     //--------------------------------------------------------------------------
     {
+      if (is_replaying())
+      {
+        enqueue_ready_operation();
+        return;
+      }
+
       std::set<RtEvent> preconditions;
       runtime->forest->perform_versioning_analysis(this, 0/*idx*/,
                                                    requirement,
@@ -9272,6 +9574,18 @@ namespace Legion {
     void ReleaseOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
+      PhysicalTraceInfo trace_info;
+      if (is_recording())
+      {
+#ifdef DEBUG_LEGION
+        assert(tpl != NULL && tpl->is_recording());
+#endif
+        tpl->record_get_op_term_event(completion_event, this);
+        trace_info.recording = true;
+        trace_info.op = this;
+        trace_info.tpl = tpl;
+      }
+
       // We already know what the answer has to be here 
       InstanceSet mapped_instances = restrict_info.get_instances();
       // Invoke the mapper before doing anything else 
@@ -9284,37 +9598,37 @@ namespace Legion {
                                               false/*not read only*/,
                                               map_applied_conditions,
                                               mapped_instances,
-                                              NULL/*advance projections*/
+                                              NULL/*advance projections*/,
+                                              trace_info
 #ifdef DEBUG_LEGION
                                               , get_logging_name()
                                               , unique_op_id
 #endif
                                               );
       version_info.apply_mapping(map_applied_conditions);
+#ifdef DEBUG_LEGION
+      dump_physical_state(&requirement, 0);
+#endif
       std::set<ApEvent> release_preconditions;
       for (unsigned idx = 0; idx < mapped_instances.size(); idx++)
         release_preconditions.insert(mapped_instances[idx].get_ready_event());
-      if (!wait_barriers.empty())
+      ApEvent sync_precondition = compute_sync_precondition();
+      if (is_recording())
       {
-        for (std::vector<PhaseBarrier>::const_iterator it = 
-              wait_barriers.begin(); it != wait_barriers.end(); it++)
-        {
-          ApEvent e = Runtime::get_previous_phase(*it);
-          release_preconditions.insert(e);
-          if (runtime->legion_spy_enabled)
-            LegionSpy::log_phase_barrier_wait(unique_op_id, e);
-        }
+#ifdef DEBUG_LEGION
+        assert(tpl != NULL && tpl->is_recording());
+#endif
+        tpl->record_set_op_sync_event(sync_precondition, this);
       }
-      if (!grants.empty())
-      {
-        for (std::vector<Grant>::const_iterator it = grants.begin();
-              it != grants.end(); it++)
-        {
-          ApEvent e = it->impl->acquire_grant();
-          release_preconditions.insert(e);
-        }
-      }
+      release_preconditions.insert(sync_precondition);
       ApEvent release_complete = Runtime::merge_events(release_preconditions);
+      if (is_recording())
+      {
+#ifdef DEBUG_LEGION
+        assert(tpl != NULL && tpl->is_recording());
+#endif
+        tpl->record_merge_events(release_complete, release_preconditions, this);
+      }
       if (runtime->legion_spy_enabled)
       {
         runtime->forest->log_mapping_decision(unique_op_id, 0/*idx*/,
@@ -9342,6 +9656,8 @@ namespace Legion {
       if ((__sync_add_and_fetch(&outstanding_profiling_requests, -1) == 0) &&
           profiling_reported.exists())
         Runtime::trigger_event(profiling_reported);
+      if (is_recording())
+        tpl->record_complete_replay(this, release_complete);
       // Mark that we completed mapping
       if (!map_applied_conditions.empty())
         complete_mapping(Runtime::merge_events(map_applied_conditions));
@@ -9476,6 +9792,72 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return requirement;
+    }
+
+    //--------------------------------------------------------------------------
+    void ReleaseOp::replay_analysis(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef LEGION_SPY
+      LegionSpy::log_replay_operation(unique_op_id);
+#endif
+      tpl->register_operation(this);
+      complete_mapping();
+    }
+
+    //--------------------------------------------------------------------------
+    ApEvent ReleaseOp::compute_sync_precondition(void) const
+    //--------------------------------------------------------------------------
+    {
+      if (wait_barriers.empty() && grants.empty())
+        return ApEvent::NO_AP_EVENT;
+      std::set<ApEvent> sync_preconditions;
+      if (!wait_barriers.empty())
+      {
+        for (std::vector<PhaseBarrier>::const_iterator it =
+              wait_barriers.begin(); it != wait_barriers.end(); it++)
+        {
+          ApEvent e = Runtime::get_previous_phase(it->phase_barrier);
+          sync_preconditions.insert(e);
+          if (runtime->legion_spy_enabled)
+            LegionSpy::log_phase_barrier_wait(unique_op_id, e);
+        }
+      }
+      if (!grants.empty())
+      {
+        for (std::vector<Grant>::const_iterator it = grants.begin();
+              it != grants.end(); it++)
+        {
+          ApEvent e = it->impl->acquire_grant();
+          sync_preconditions.insert(e);
+        }
+      }
+      return Runtime::merge_events(sync_preconditions);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReleaseOp::complete_replay(ApEvent release_complete_event)
+    //--------------------------------------------------------------------------
+    {
+      // Chain all the unlock and barrier arrivals off of the
+      // copy complete event
+      if (!arrive_barriers.empty())
+      {
+        for (std::vector<PhaseBarrier>::iterator it =
+              arrive_barriers.begin(); it != arrive_barriers.end(); it++)
+        {
+          if (runtime->legion_spy_enabled)
+            LegionSpy::log_phase_barrier_arrival(unique_op_id,
+                                                 it->phase_barrier);
+          Runtime::phase_barrier_arrive(it->phase_barrier, 1/*count*/,
+                                        completion_event);
+        }
+      }
+
+      // Handle the case for marking when the copy completes
+      Runtime::trigger_event(completion_event, release_complete_event);
+      need_completion_trigger = false;
+      complete_execution();
     }
 
     //--------------------------------------------------------------------------
@@ -9688,14 +10070,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     DynamicCollectiveOp::DynamicCollectiveOp(Runtime *rt)
-      : Operation(rt)
+      : Mappable(), MemoizableOp<Operation>(rt)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     DynamicCollectiveOp::DynamicCollectiveOp(const DynamicCollectiveOp &rhs)
-      : Operation(NULL)
+      : Mappable(), MemoizableOp<Operation>(NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -9724,6 +10106,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       initialize_operation(ctx, true/*track*/);
+      initialize_memoizable();
       future = Future(new FutureImpl(runtime, true/*register*/,
             runtime->get_available_distributed_id(), 
             runtime->address_space, this));
@@ -9736,6 +10119,30 @@ namespace Legion {
                                  future.impl->get_ready_event(), empty_point);
       }
       return future;
+    }
+
+    //--------------------------------------------------------------------------
+    unsigned DynamicCollectiveOp::get_context_index(void) const
+    //--------------------------------------------------------------------------
+    {
+      return context_index;
+    }
+
+    //--------------------------------------------------------------------------
+    int DynamicCollectiveOp::get_depth(void) const
+    //--------------------------------------------------------------------------
+    {
+      return (parent_ctx->get_depth() + 1);
+    }
+
+    //--------------------------------------------------------------------------
+    void DynamicCollectiveOp::replay_analysis(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef LEGION_SPY
+      LegionSpy::log_replay_operation(unique_op_id);
+#endif
+      trigger_mapping();
     }
 
     //--------------------------------------------------------------------------
@@ -12355,6 +12762,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(!mapped_instances.empty()); 
 #endif
+      PhysicalTraceInfo trace_info;
       // Then we can register our mapped_instances
       runtime->forest->physical_register_only(requirement, 
                                               version_info, restrict_info,
@@ -12364,7 +12772,8 @@ namespace Legion {
                                               true/*read only locks*/,
                                               map_applied_conditions,
                                               mapped_instances,
-                                              NULL/*no projection info*/
+                                              NULL/*no projection info*/,
+                                              trace_info
 #ifdef DEBUG_LEGION
                                               , get_logging_name()
                                               , unique_op_id
@@ -13118,7 +13527,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FillOp::FillOp(Runtime *rt)
-      : SpeculativeOp(rt), Fill()
+      : MemoizableOp<SpeculativeOp>(rt), Fill()
     //--------------------------------------------------------------------------
     {
       this->is_index_space = false;
@@ -13126,7 +13535,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FillOp::FillOp(const FillOp &rhs)
-      : SpeculativeOp(NULL), Fill()
+      : MemoizableOp<SpeculativeOp>(NULL), Fill()
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -13157,6 +13566,7 @@ namespace Legion {
       parent_task = ctx->get_task();
       initialize_speculation(ctx, true/*track*/, 1, 
                              launcher.static_dependences, launcher.predicate);
+      initialize_memoizable();
       requirement = RegionRequirement(launcher.handle, WRITE_DISCARD,
                                       EXCLUSIVE, launcher.parent);
       requirement.privilege_fields = launcher.fields;
@@ -13191,6 +13601,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       activate_speculative();
+      activate_memoizable();
       value = NULL;
       value_size = 0;
       true_guard = PredEvent::NO_PRED_EVENT;
@@ -13384,6 +13795,12 @@ namespace Legion {
     void FillOp::trigger_ready(void)
     //--------------------------------------------------------------------------
     {
+      if (is_replaying())
+      {
+        enqueue_ready_operation();
+        return;
+      }
+
       std::set<RtEvent> preconditions;
       runtime->forest->perform_versioning_analysis(this, 0/*idx*/,
                                                    requirement,
@@ -13400,6 +13817,14 @@ namespace Legion {
     void FillOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
+      PhysicalTraceInfo trace_info;
+      if (is_recording())
+      {
+        trace_info.recording = true;
+        trace_info.op = this;
+        trace_info.tpl = tpl;
+      }
+
       // Tell the region tree forest to fill in this field
       // Note that the forest takes ownership of the value buffer
       if (future.impl == NULL)
@@ -13419,7 +13844,8 @@ namespace Legion {
                                                   false/*not read only*/,
                                                   map_applied_conditions,
                                                   mapped_instances,
-                                                  get_projection_info()
+                                                  get_projection_info(),
+                                                  trace_info
 #ifdef DEBUG_LEGION
                                                   , get_logging_name()
                                                   , unique_op_id
@@ -13433,7 +13859,8 @@ namespace Legion {
                                        version_info, restrict_info, 
                                        mapped_instances, sync_precondition,
                                        map_applied_conditions, 
-                                       true_guard, false_guard);
+                                       true_guard, false_guard,
+                                       trace_info);
         if (runtime->legion_spy_enabled)
         {
           if (!mapped_instances.empty())
@@ -13446,6 +13873,9 @@ namespace Legion {
 #endif
         }
         version_info.apply_mapping(map_applied_conditions);
+#ifdef DEBUG_LEGION
+      dump_physical_state(&requirement, 0);
+#endif
         // Clear value and value size since the forest ended up 
         // taking ownership of them
         value = NULL;
@@ -13496,6 +13926,7 @@ namespace Legion {
       void *result = malloc(result_size);
       memcpy(result, future.impl->get_untyped_result(), result_size);
       InstanceSet mapped_instances;
+      PhysicalTraceInfo trace_info;
       if (restrict_info.has_restrictions())
       {
         mapped_instances = restrict_info.get_instances();
@@ -13507,7 +13938,8 @@ namespace Legion {
                                                 false/*not read only*/,
                                                 map_applied_conditions,
                                                 mapped_instances,
-                                                get_projection_info()
+                                                get_projection_info(),
+                                                trace_info
 #ifdef DEBUG_LEGION
                                                 , get_logging_name()
                                                 , unique_op_id
@@ -13521,7 +13953,8 @@ namespace Legion {
                                        version_info, restrict_info, 
                                        mapped_instances, sync_precondition,
                                        map_applied_conditions,
-                                       true_guard, false_guard);
+                                       true_guard, false_guard,
+                                       trace_info);
       if (!mapped_instances.empty())
         runtime->forest->log_mapping_decision(unique_op_id, 0/*idx*/,
                                               requirement,
@@ -13531,6 +13964,9 @@ namespace Legion {
                                       completion_event);
 #endif
       version_info.apply_mapping(map_applied_conditions);
+#ifdef DEBUG_LEGION
+      dump_physical_state(&requirement, 0);
+#endif
       if (!map_applied_conditions.empty())
         complete_mapping(Runtime::merge_events(map_applied_conditions));
       else
@@ -13777,6 +14213,19 @@ namespace Legion {
         }
       }
       return Runtime::merge_events(sync_preconditions);
+    }
+
+    //--------------------------------------------------------------------------
+    void FillOp::replay_analysis(void)
+    //--------------------------------------------------------------------------
+    {
+      if (runtime->legion_spy_enabled)
+        log_fill_requirement();
+#ifdef LEGION_SPY
+      LegionSpy::log_replay_operation(unique_op_id);
+#endif
+      complete_mapping();
+      complete_execution();
     }
 
     ///////////////////////////////////////////////////////////// 

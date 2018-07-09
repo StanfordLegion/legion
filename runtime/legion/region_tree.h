@@ -368,7 +368,8 @@ namespace Legion {
                                   bool need_read_only_reservations,
                                   std::set<RtEvent> &map_applied,
                                   InstanceSet &targets,
-                                  const ProjectionInfo *proj_info
+                                  const ProjectionInfo *proj_info,
+                                  PhysicalTraceInfo &trace_info
 #ifdef DEBUG_LEGION
                                  , const char *log_name
                                  , UniqueID uid
@@ -381,7 +382,8 @@ namespace Legion {
                    std::vector<VersionInfo> &version_infos,
                    std::vector<RestrictInfo> &restrict_infos,
                    std::deque<InstanceSet> &targets,
-                   std::set<RtEvent> &map_applied_events);
+                   std::set<RtEvent> &map_applied_events,
+                   PhysicalTraceInfo &trace_info);
       void physical_perform_close(const RegionRequirement &req,
                                   VersionInfo &version_info,
                                   Operation *op, unsigned index,
@@ -422,13 +424,15 @@ namespace Legion {
                           ApEvent term_event, Operation *op,
                           unsigned src_index, unsigned dst_index,
                           ApEvent precondition, PredEvent pred_guard,
-                          std::set<RtEvent> &map_applied);
+                          std::set<RtEvent> &map_applied,
+                          PhysicalTraceInfo &trace_info);
       ApEvent reduce_across(const RegionRequirement &src_req,
                             const RegionRequirement &dst_req,
                             const InstanceSet &src_targets,
                             const InstanceSet &dst_targets,
                             Operation *op, ApEvent precondition,
-                            PredEvent predication_guard);
+                            PredEvent predication_guard,
+                            PhysicalTraceInfo &trace_info);
     public:
       int physical_convert_mapping(Operation *op,
                                const RegionRequirement &req,
@@ -451,7 +455,7 @@ namespace Legion {
                                 const RegionRequirement &req,
                                 const InstanceSet &targets,
                                 bool postmapping = false);
-    protected: // helper method for the above two methods
+    public: // helper method for the above two methods
       void perform_missing_acquires(Operation *op,
                  std::map<PhysicalManager*,std::pair<unsigned,bool> > &acquired,
                                const std::vector<PhysicalManager*> &unacquired);
@@ -469,7 +473,8 @@ namespace Legion {
                           RestrictInfo &restrict_info,
                           InstanceSet &instances, ApEvent precondition,
                           std::set<RtEvent> &map_applied_events,
-                          PredEvent true_guard, PredEvent false_guard);
+                          PredEvent true_guard, PredEvent false_guard,
+                          PhysicalTraceInfo &trace_info);
       InstanceManager* create_external_instance(AttachOp *attach_op,
                                 const RegionRequirement &req,
                                 const std::vector<FieldID> &field_set);
@@ -951,6 +956,7 @@ namespace Legion {
                   const std::vector<CopySrcDstField> &dst_fields,
 #endif
                   ApEvent precondition, PredEvent predicate_guard,
+                  PhysicalTraceInfo &trace_info,
                   IndexTreeNode *intersect = NULL,
                   ReductionOpID redop = 0, bool reduction_fold = true) = 0;
       virtual ApEvent issue_fill(Operation *op,
@@ -961,6 +967,7 @@ namespace Legion {
 #endif
                   const void *fill_value, size_t fill_size,
                   ApEvent precondition, PredEvent predicate_guard,
+                  PhysicalTraceInfo &trace_info,
                   IndexTreeNode *intersect = NULL) = 0;
     public:
       virtual Realm::InstanceLayoutGeneric* create_layout(
@@ -1187,6 +1194,7 @@ namespace Legion {
                   const std::vector<CopySrcDstField> &dst_fields,
 #endif
                   ApEvent precondition, PredEvent predicate_guard,
+                  PhysicalTraceInfo &trace_info,
                   IndexTreeNode *intersect = NULL,
                   ReductionOpID redop = 0, bool reduction_fold = true);
       virtual ApEvent issue_fill(Operation *op,
@@ -1197,6 +1205,7 @@ namespace Legion {
 #endif
                   const void *fill_value, size_t fill_size,
                   ApEvent precondition, PredEvent predicate_guard,
+                  PhysicalTraceInfo &trace_info,
                   IndexTreeNode *intersect = NULL);
     public:
       virtual Realm::InstanceLayoutGeneric* create_layout(
@@ -2184,6 +2193,7 @@ namespace Legion {
                                FieldMask copy_mask,
             const LegionMap<LogicalView*,FieldMask>::aligned &valid_instances,
                                const RestrictInfo &restrict_info,
+                               PhysicalTraceInfo &trace_info,
                                bool restrict_out = false);
       void sort_copy_instances(const TraversalInfo &info,
                                MaterializedView *target,
@@ -2200,6 +2210,7 @@ namespace Legion {
            const LegionMap<MaterializedView*,FieldMask>::aligned &src_instances,
                                 VersionTracker *version_tracker,
                       LegionMap<ApEvent,FieldMask>::aligned &postconditions,
+                                PhysicalTraceInfo &trace_info,
                                 CopyAcrossHelper *across_helper = NULL,
                                 RegionTreeNode *intersect = NULL);
       static void compute_event_sets(FieldMask update_mask,
@@ -2211,6 +2222,7 @@ namespace Legion {
           const LegionMap<ReductionView*,FieldMask>::aligned &valid_reductions,
                                    Operation *op, unsigned index,
                                    std::set<RtEvent> &map_applied_events,
+                                   PhysicalTraceInfo &trace_info,
                                    bool restrict_out = false);
       void invalidate_instance_views(PhysicalState *state,
                                      const FieldMask &invalid_mask); 
@@ -2221,12 +2233,14 @@ namespace Legion {
          const RestrictInfo &restrict_info, 
          const InstanceSet &restricted_instances,
          const std::vector<MaterializedView*> &restricted_views,
-         const LegionMap<LogicalView*,FieldMask>::aligned &copy_out_views);
+         const LegionMap<LogicalView*,FieldMask>::aligned &copy_out_views,
+         PhysicalTraceInfo &trace_info);
       void issue_restricted_reductions(const TraversalInfo &info,
          const RestrictInfo &restrict_info,
          const InstanceSet &restricted_instances,
          const std::vector<InstanceView*> &restricted_views,
-         const LegionMap<ReductionView*,FieldMask>::aligned &reduce_out_views);
+         const LegionMap<ReductionView*,FieldMask>::aligned &reduce_out_views,
+         PhysicalTraceInfo &trace_info);
       // Look for a view to remove from the set of valid views
       void filter_valid_views(PhysicalState *state, LogicalView *to_filter);
       void update_valid_views(PhysicalState *state, const FieldMask &valid_mask,
@@ -2294,6 +2308,7 @@ namespace Legion {
                   const std::vector<CopySrcDstField> &src_fields,
                   const std::vector<CopySrcDstField> &dst_fields,
                   ApEvent precondition, PredEvent predicate_guard,
+                  PhysicalTraceInfo &trace_info,
                   RegionTreeNode *intersect = NULL,
                   ReductionOpID redop = 0, bool reduction_fold = true) = 0;
       virtual ApEvent issue_fill(Operation *op,
@@ -2303,6 +2318,7 @@ namespace Legion {
 #ifdef LEGION_SPY
                   UniqueID fill_uid,
 #endif
+                  PhysicalTraceInfo &trace_info,
                   RegionTreeNode *intersect = NULL) = 0;
     public:
       virtual bool are_children_disjoint(const LegionColor c1, 
@@ -2322,7 +2338,9 @@ namespace Legion {
                                          const FieldMask &mask) = 0;
       virtual void print_physical_context(ContextID ctx, 
                                           TreeStateLogger *logger,
-                                          const FieldMask &mask) = 0;
+                                          const FieldMask &mask,
+                                  std::deque<RegionTreeNode*> &to_traverse) = 0;
+      virtual void print_context_header(TreeStateLogger *logger) = 0;
 #ifdef DEBUG_LEGION
     public:
       // These methods are only ever called by a debugger
@@ -2436,6 +2454,7 @@ namespace Legion {
                   const std::vector<CopySrcDstField> &src_fields,
                   const std::vector<CopySrcDstField> &dst_fields,
                   ApEvent precondition, PredEvent predicate_guard,
+                  PhysicalTraceInfo &trace_info,
                   RegionTreeNode *intersect = NULL,
                   ReductionOpID redop = 0, bool reduction_fold = true);
       virtual ApEvent issue_fill(Operation *op,
@@ -2445,6 +2464,7 @@ namespace Legion {
 #ifdef LEGION_SPY
                   UniqueID fill_uid,
 #endif
+                  PhysicalTraceInfo &trace_info,
                   RegionTreeNode *intersect = NULL);
     public:
       virtual bool are_children_disjoint(const LegionColor c1, 
@@ -2489,7 +2509,9 @@ namespace Legion {
                                          const FieldMask &mask);
       virtual void print_physical_context(ContextID ctx, 
                                           TreeStateLogger *logger,
-                                          const FieldMask &mask);
+                                          const FieldMask &mask,
+                                      std::deque<RegionTreeNode*> &to_traverse);
+      virtual void print_context_header(TreeStateLogger *logger);
       void print_logical_state(LogicalState &state,
                                const FieldMask &capture_mask,
                          LegionMap<LegionColor,FieldMask>::aligned &to_traverse,
@@ -2518,7 +2540,8 @@ namespace Legion {
                            InnerContext *context, RestrictInfo &restrict_info, 
                            ApEvent term_event, const RegionUsage &usage, 
                            bool defer_add_users, InstanceSet &targets,
-                           const ProjectionInfo *proj_info);
+                           const ProjectionInfo *proj_info,
+                           PhysicalTraceInfo &trace_info);
       void seed_state(ContextID ctx, ApEvent term_event,
                              const RegionUsage &usage,
                              const FieldMask &user_mask,
@@ -2534,7 +2557,8 @@ namespace Legion {
                        UniqueID logical_ctx_uid, InnerContext *context, 
                        VersionInfo &version_info,
                        std::set<RtEvent> &map_applied_events,
-                       PredEvent true_guard, PredEvent false_guard
+                       PredEvent true_guard, PredEvent false_guard,
+                       PhysicalTraceInfo &trace_info
 #ifdef LEGION_SPY
                        , UniqueID fill_op_uid
 #endif
@@ -2546,7 +2570,8 @@ namespace Legion {
                               const void *value, size_t value_size,
                               VersionInfo &version_info, InstanceSet &instances,
                               ApEvent precondition, PredEvent true_guard,
-                              std::set<RtEvent> &map_applied_events);
+                              std::set<RtEvent> &map_applied_events,
+                              PhysicalTraceInfo &trace_info);
       InstanceRef attach_external(ContextID ctx, InnerContext *parent_ctx,
                                   const UniqueID logical_ctx_uid,
                                   const FieldMask &attach_mask,
@@ -2632,6 +2657,7 @@ namespace Legion {
                   const std::vector<CopySrcDstField> &src_fields,
                   const std::vector<CopySrcDstField> &dst_fields,
                   ApEvent precondition, PredEvent predicate_guard,
+                  PhysicalTraceInfo &trace_info,
                   RegionTreeNode *intersect = NULL,
                   ReductionOpID redop = 0, bool reduction_fold = true);
       virtual ApEvent issue_fill(Operation *op,
@@ -2641,6 +2667,7 @@ namespace Legion {
 #ifdef LEGION_SPY
                   UniqueID fill_uid,
 #endif
+                  PhysicalTraceInfo &trace_info,
                   RegionTreeNode *intersect = NULL);
     public:
       virtual bool are_children_disjoint(const LegionColor c1, 
@@ -2694,7 +2721,9 @@ namespace Legion {
                                          const FieldMask &mask);
       virtual void print_physical_context(ContextID ctx, 
                                           TreeStateLogger *logger,
-                                          const FieldMask &mask);
+                                          const FieldMask &mask,
+                                      std::deque<RegionTreeNode*> &to_traverse);
+      virtual void print_context_header(TreeStateLogger *logger);
       void print_logical_state(LogicalState &state,
                                const FieldMask &capture_mask,
                          LegionMap<LegionColor,FieldMask>::aligned &to_traverse,

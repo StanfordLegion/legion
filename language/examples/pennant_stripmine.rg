@@ -1267,7 +1267,7 @@ task test()
       --   last_time = start_time
       -- end
 
-      -- c.legion_runtime_begin_trace(__runtime(), __context(), 0)
+      -- c.legion_runtime_begin_trace(__runtime(), __context(), 0, false)
 
       dt = calc_global_dt(dt, dtfac, dtinit, dtmax, dthydro, time, tstop, cycle)
 

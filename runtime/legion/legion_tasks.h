@@ -132,7 +132,7 @@ namespace Legion {
      * This is the base task operation class for all
      * kinds of tasks in the system.  
      */
-    class TaskOp : public ExternalTask, public SpeculativeOp {
+    class TaskOp : public ExternalTask, public MemoizableOp<SpeculativeOp> {
     public:
       enum TaskKind {
         INDIVIDUAL_TASK_KIND,
@@ -380,6 +380,7 @@ namespace Legion {
       bool commit_received;
     protected:
       bool options_selected;
+      bool memoize_selected;
       bool map_origin;
     protected:
       // For managing predication
@@ -476,6 +477,7 @@ namespace Legion {
                                     Mapper::MapTaskOutput &output,
                                     MustEpochOp *must_epoch_owner,
                                     std::vector<InstanceSet> &valid_instances); 
+      void replay_map_task_output();
     protected: // mapper helper calls
       void validate_target_processors(const std::vector<Processor> &prcs) const;
       void validate_variant_selection(MapperManager *local_mapper,
@@ -532,6 +534,9 @@ namespace Legion {
                                  size_t res_size, bool owned) = 0; 
       virtual void handle_post_mapped(RtEvent pre = RtEvent::NO_RT_EVENT) = 0;
       virtual void handle_misspeculation(void) = 0;
+    public:
+      // From Memoizable
+      virtual void complete_replay(ApEvent completion_event);
     protected:
       // Boolean for each region saying if it is virtual mapped
       std::vector<bool> virtual_mapped;
@@ -687,7 +692,8 @@ namespace Legion {
       RtEvent perform_versioning_analysis(void);
       virtual RtEvent perform_must_epoch_version_analysis(MustEpochOp *own);
     public:
-      virtual bool has_prepipeline_stage(void) const { return true; }
+      virtual bool has_prepipeline_stage(void) const
+        { return need_prepipeline_stage; }
       virtual void trigger_prepipeline_stage(void);
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
@@ -741,6 +747,9 @@ namespace Legion {
       void unpack_remote_mapped(Deserializer &derez);
       void unpack_remote_complete(Deserializer &derez);
       void unpack_remote_commit(Deserializer &derez);
+    public:
+      // From MemoizableOp
+      virtual void replay_analysis(void);
     public:
       static void process_unpack_remote_mapped(Deserializer &derez);
       static void process_unpack_remote_complete(Deserializer &derez);
@@ -851,6 +860,12 @@ namespace Legion {
       void send_back_created_state(AddressSpaceID target);
     public:
       virtual void record_reference_mutation_effect(RtEvent event);
+    public:
+      // From MemoizableOp
+      virtual void replay_analysis(void);
+    public:
+      // From Memoizable
+      virtual TraceLocalID get_trace_local_id() const;
     protected:
       friend class SliceTask;
       SliceTask                   *slice_owner;
@@ -899,7 +914,8 @@ namespace Legion {
       virtual void activate(void);
       virtual void deactivate(void);
     public:
-      virtual bool has_prepipeline_stage(void) const { return true; }
+      virtual bool has_prepipeline_stage(void) const
+        { return need_prepipeline_stage; }
       virtual void trigger_prepipeline_stage(void);
       virtual void trigger_dependence_analysis(void);
       virtual void report_interfering_requirements(unsigned idx1,unsigned idx2);
@@ -952,6 +968,9 @@ namespace Legion {
       void unpack_slice_mapped(Deserializer &derez, AddressSpaceID source);
       void unpack_slice_complete(Deserializer &derez);
       void unpack_slice_commit(Deserializer &derez); 
+    public:
+      // From MemoizableOp
+      virtual void replay_analysis(void);
     public:
       static void process_slice_mapped(Deserializer &derez, 
                                        AddressSpaceID source);
@@ -1105,6 +1124,9 @@ namespace Legion {
                           const std::set<IndexPartition> &parts);
       virtual void register_index_partition_deletions(
                           const std::set<IndexPartition> &parts);
+    public:
+      // From MemoizableOp
+      virtual void replay_analysis(void);
     protected:
       friend class IndexTask;
       friend class PointTask;

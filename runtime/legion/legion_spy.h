@@ -291,13 +291,6 @@ namespace Legion {
 		      context, unique_id);
       }
 
-      static inline void log_trace_operation(UniqueID context,
-                                             UniqueID unique_id)
-      {
-        log_spy.print("Trace Operation %llu %llu",
-                      context, unique_id);
-      }
-
       static inline void log_copy_operation(UniqueID context,
                                             UniqueID unique_id)
       {
@@ -361,6 +354,19 @@ namespace Legion {
                                                   UniqueID must_op)
       {
         log_spy.print("Must Epoch Operation %llu %llu", context, must_op);
+      }
+
+      static inline void log_summary_operation(UniqueID context,
+                                               UniqueID unique_id)
+      {
+        log_spy.print("Summary Operation %llu %llu", context, unique_id);
+      }
+
+      static inline void log_summary_op_creator(UniqueID internal_op_id,
+                                                UniqueID creator_op_id)
+      {
+        log_spy.print("Summary Operation Creator %llu %llu",
+		      internal_op_id, creator_op_id);
       }
 
       static inline void log_dependent_partition_operation(UniqueID context,
@@ -851,6 +857,12 @@ namespace Legion {
         log_spy.print("Deppart Events %llu %d " IDFMT " " IDFMT,
                       op_unique_id, handle.get_id(), pre.id, post.id);
       }
+
+      static inline void log_replay_operation(UniqueID op_unique_id)
+      {
+        log_spy.print("Replay Operation %llu", op_unique_id);
+      }
+
 #endif
     }; // namespace LegionSpy
 

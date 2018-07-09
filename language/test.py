@@ -245,6 +245,7 @@ def get_test_specs(use_run, use_spy, use_hdf5, use_openmp, short, extra_flags):
           os.path.join('examples'),
           os.path.join('..', 'tutorial'),
           os.path.join('tests', 'runtime', 'bugs'),
+          os.path.join('tests', 'runtime', 'features'),
          )),
     ]
     spy = [

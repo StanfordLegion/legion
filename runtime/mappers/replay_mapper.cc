@@ -743,6 +743,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ReplayMapper::memoize_operation(const MapperContext  ctx,
+                                         const Mappable&      mappable,
+                                         const MemoizeInput&  input,
+                                               MemoizeOutput& output)
+    //--------------------------------------------------------------------------
+    {
+      // TODO: update this when we record memoization decision
+      output.memoize = false;
+    }
+
+    //--------------------------------------------------------------------------
     void ReplayMapper::select_tasks_to_map(const MapperContext          ctx,
                                            const SelectMappingInput&    input,
                                                  SelectMappingOutput&   output)

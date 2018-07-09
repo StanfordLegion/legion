@@ -148,9 +148,6 @@ local function get_affine_coefficients(node)
   then
     local rhs_value = convert_constant_expr(node.rhs)
     return node.lhs.value, rhs_value * (node.op == "-" and -1 or 1)
-
-  else
-    assert(false)
   end
 end
 
@@ -171,7 +168,7 @@ function affine.analyze_index_noninterference(index, other_index)
   -- Attempt a simple affine analysis.
   local x1, b1 = get_affine_coefficients(index)
   local x2, b2 = get_affine_coefficients(other_index)
-  if x1 == x1 and not data.vector.eq(b1, b2) then
+  if b1 and b2 and x1 == x2 and not data.vector.eq(b1, b2) then
     return true
   end
 

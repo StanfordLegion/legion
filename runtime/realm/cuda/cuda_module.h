@@ -290,7 +290,7 @@ namespace Realm {
       static const size_t MAX_DIRECT_SIZE = 8;
       union {
 	char direct[8];
-	void *indirect;
+	char *indirect;
       } fill_data;
       size_t fill_data_size;
       GPUCompletionNotification *notification;
@@ -316,7 +316,7 @@ namespace Realm {
       static const size_t MAX_DIRECT_SIZE = 8;
       union {
 	char direct[8];
-	void *indirect;
+	char *indirect;
       } fill_data;
       size_t fill_data_size;
       GPUCompletionNotification *notification;

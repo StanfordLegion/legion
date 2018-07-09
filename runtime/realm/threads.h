@@ -96,6 +96,7 @@ namespace Realm {
 #ifdef REALM_USE_USER_THREADS
     static Thread *create_user_thread_untyped(void *target, void (*entry_wrapper)(void *),
 					      const ThreadLaunchParameters& params,
+					      const CoreReservation *rsrv,
 					      ThreadScheduler *_scheduler);
 #endif
    
@@ -116,6 +117,7 @@ namespace Realm {
     template <typename T, void (T::*START_MTHD)(void)>
     static Thread *create_user_thread(T *target,
 				      const ThreadLaunchParameters& params,
+				      const CoreReservation *rsrv,
 				      ThreadScheduler *_scheduler);
 #endif
 

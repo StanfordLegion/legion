@@ -148,7 +148,7 @@ namespace Legion {
                                  const FieldMask &k, std::set<RtEvent> &e)
       : ctx(c), op(o), index(idx), req(r), version_info(info),
         traversal_mask(k), context_uid(o->get_context()->get_context_uid()),
-        map_applied_events(e)
+        map_applied_events(e), logical_ctx(-1U)
     //--------------------------------------------------------------------------
     {
     }
@@ -2834,7 +2834,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void FieldState::print_state(TreeStateLogger *logger,
-                                 const FieldMask &capture_mask) const
+                                 const FieldMask &capture_mask,
+                                 RegionNode *node) const
     //--------------------------------------------------------------------------
     {
       switch (open_state)
@@ -2872,19 +2873,31 @@ namespace Legion {
         case OPEN_READ_ONLY_PROJ:
           {
             logger->log("Field State: OPEN READ-ONLY PROJECTION %d",
-                        projection);
+                        projection->projection_id);
             break;
           }
         case OPEN_READ_WRITE_PROJ:
           {
             logger->log("Field State: OPEN READ WRITE PROJECTION %d",
-                        projection);
+                        projection->projection_id);
+            break;
+          }
+        case OPEN_READ_WRITE_PROJ_DISJOINT_SHALLOW:
+          {
+            logger->log("Field State: OPEN READ WRITE PROJECTION (Disjoint Shallow) %d",
+                        projection->projection_id);
             break;
           }
         case OPEN_REDUCE_PROJ:
           {
             logger->log("Field State: OPEN REDUCE PROJECTION %d Mode %d",
-                        projection, redop);
+                        projection->projection_id, redop);
+            break;
+          }
+        case OPEN_REDUCE_PROJ_DIRTY:
+          {
+            logger->log("Field State: OPEN REDUCE PROJECTION (Dirty) %d Mode %d",
+                        projection->projection_id, redop);
             break;
           }
         default:
@@ -2899,6 +2912,115 @@ namespace Legion {
           continue;
         char *mask_buffer = overlap.to_string();
         logger->log("Color %d   Mask %s", it->first, mask_buffer);
+        free(mask_buffer);
+      }
+      logger->up();
+    }
+
+    //--------------------------------------------------------------------------
+    void FieldState::print_state(TreeStateLogger *logger,
+                                 const FieldMask &capture_mask,
+                                 PartitionNode *node) const
+    //--------------------------------------------------------------------------
+    {
+      switch (open_state)
+      {
+        case NOT_OPEN:
+          {
+            logger->log("Field State: NOT OPEN (%ld)", 
+                        open_children.size());
+            break;
+          }
+        case OPEN_READ_WRITE:
+          {
+            logger->log("Field State: OPEN READ WRITE (%ld)", 
+                        open_children.size());
+            break;
+          }
+        case OPEN_READ_ONLY:
+          {
+            logger->log("Field State: OPEN READ-ONLY (%ld)", 
+                        open_children.size());
+            break;
+          }
+        case OPEN_SINGLE_REDUCE:
+          {
+            logger->log("Field State: OPEN SINGLE REDUCE Mode %d (%ld)", 
+                        redop, open_children.size());
+            break;
+          }
+        case OPEN_MULTI_REDUCE:
+          {
+            logger->log("Field State: OPEN MULTI REDUCE Mode %d (%ld)", 
+                        redop, open_children.size());
+            break;
+          }
+        case OPEN_READ_ONLY_PROJ:
+          {
+            logger->log("Field State: OPEN READ-ONLY PROJECTION %d",
+                        projection->projection_id);
+            break;
+          }
+        case OPEN_READ_WRITE_PROJ:
+          {
+            logger->log("Field State: OPEN READ WRITE PROJECTION %d",
+                        projection->projection_id);
+            break;
+          }
+        case OPEN_READ_WRITE_PROJ_DISJOINT_SHALLOW:
+          {
+            logger->log("Field State: OPEN READ WRITE PROJECTION (Disjoint Shallow) %d",
+                        projection->projection_id);
+            break;
+          }
+        case OPEN_REDUCE_PROJ:
+          {
+            logger->log("Field State: OPEN REDUCE PROJECTION %d Mode %d",
+                        projection->projection_id, redop);
+            break;
+          }
+        case OPEN_REDUCE_PROJ_DIRTY:
+          {
+            logger->log("Field State: OPEN REDUCE PROJECTION (Dirty) %d Mode %d",
+                        projection->projection_id, redop);
+            break;
+          }
+        default:
+          assert(false);
+      }
+      logger->down();
+      for (LegionMap<LegionColor,FieldMask>::aligned::const_iterator it = 
+            open_children.begin(); it != open_children.end(); it++)
+      {
+        DomainPoint color =
+          node->row_source->color_space->delinearize_color_to_point(it->first);
+        FieldMask overlap = it->second & capture_mask;
+        if (!overlap)
+          continue;
+        char *mask_buffer = overlap.to_string();
+        switch (color.get_dim())
+        {
+          case 1:
+            {
+              logger->log("Color %d   Mask %s", 
+                          color[0], mask_buffer);
+              break;
+            }
+          case 2:
+            {
+              logger->log("Color (%d,%d)   Mask %s", 
+                          color[0], color[1], mask_buffer);
+              break;
+            }
+          case 3:
+            {
+              logger->log("Color (%d,%d,%d)   Mask %s", 
+                          color[0], color[1], color[2], mask_buffer);
+              break;
+            }
+          default:
+            assert(false); // implemenent more dimensions
+        }
         free(mask_buffer);
       }
       logger->up();
@@ -3376,6 +3498,55 @@ namespace Legion {
       ClosedNode *result = new ClosedNode(node);
       result->perform_unpack(derez, runtime, is_region);
       return result;
+    }
+
+    void ClosedNode::record_closed_tree(const FieldMask &fields,
+                                        ContextID logical_ctx,
+                 LegionMap<std::pair<RegionTreeNode*,ContextID>,
+                           FieldMask>::aligned &nodes,
+                 std::map<std::pair<RegionTreeNode*,ContextID>,
+                          LegionMap<IndexSpaceNode*,FieldMask>::aligned> &projs)
+    //--------------------------------------------------------------------------
+    {
+      std::pair<RegionTreeNode*,ContextID> key(node, logical_ctx);
+      if (children.size() == 0 && projections.size() == 0)
+      {
+        LegionMap<std::pair<RegionTreeNode*,ContextID>,
+                  FieldMask>::aligned::iterator finder = nodes.find(key);
+        if (finder == nodes.end())
+            nodes[key] = fields;
+        else
+          finder->second |= fields;
+        return;
+      }
+      std::map<std::pair<RegionTreeNode*,ContextID>,
+               LegionMap<IndexSpaceNode*,FieldMask>::aligned>::iterator finder =
+                 projs.find(key);
+      for (std::map<ProjectionFunction*,
+           LegionMap<IndexSpaceNode*,FieldMask>::aligned>::const_iterator pit =
+           projections.begin(); pit != projections.end(); pit++)
+      {
+        for (LegionMap<IndexSpaceNode*,FieldMask>::aligned::const_iterator it =
+              pit->second.begin(); it != pit->second.end(); it++)
+        {
+          FieldMask overlap = it->second & fields;
+          if (!overlap) continue;
+          if (finder == projs.end())
+          {
+            projs[key] = LegionMap<IndexSpaceNode*,FieldMask>::aligned();
+            finder = projs.find(key);
+          }
+          LegionMap<IndexSpaceNode*,FieldMask>::aligned::iterator finder2 =
+            finder->second.find(it->first);
+          if (finder2 == finder->second.end())
+            finder->second[it->first] = overlap;
+          else
+            finder2->second |= overlap;
+        }
+      }
+      for (std::map<RegionTreeNode*,ClosedNode*>::const_iterator it =
+            children.begin(); it != children.end(); it++)
+        it->second->record_closed_tree(fields, logical_ctx, nodes, projs);
     }
 
     /////////////////////////////////////////////////////////////
@@ -4096,7 +4267,6 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void PhysicalState::print_physical_state(const FieldMask &capture_mask,
-                         LegionMap<LegionColor,FieldMask>::aligned &to_traverse,
                                              TreeStateLogger *logger)
     //--------------------------------------------------------------------------
     {
@@ -4106,6 +4276,13 @@ namespace Legion {
         char *dirty_buffer = overlap.to_string();
         logger->log("Dirty Mask: %s",dirty_buffer);
         free(dirty_buffer);
+      }
+      // Reduction Mask
+      {
+        FieldMask overlap = reduction_mask & capture_mask;
+        char *reduction_buffer = overlap.to_string();
+        logger->log("Reduction Mask: %s",reduction_buffer);
+        free(reduction_buffer);
       }
       // Valid Views
       {
@@ -4117,28 +4294,46 @@ namespace Legion {
             continue;
           num_valid++;
         }
-        logger->log("Valid Instances (%d)", num_valid);
-        logger->down();
-        for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it = 
-              valid_views.begin(); it != valid_views.end(); it++)
+        if (num_valid > 0)
         {
-          FieldMask overlap = it->second & capture_mask;
-          if (!overlap)
-            continue;
-          if (it->first->is_deferred_view())
-            continue;
+          logger->log("Valid Instances (%d)", num_valid);
+          logger->down();
+          for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it = 
+                valid_views.begin(); it != valid_views.end(); it++)
+          {
+            FieldMask overlap = it->second & capture_mask;
+            if (!overlap)
+              continue;
+            if (it->first->is_deferred_view())
+            {
+              if (it->first->is_composite_view())
+              {
+                CompositeView *composite_view = it->first->as_composite_view();
+                if (composite_view != NULL)
+                {
+                  logger->log("=== Composite Instance ===");
+                  logger->down();
+                  // We go only two levels down into the nested composite views
+                  composite_view->print_view_state(capture_mask, logger, 0, 2);
+                  logger->up();
+                  logger->log("==========================");
+                }
+              }
+              continue;
+            }
 #ifdef DEBUG_LEGION
-          assert(it->first->as_instance_view()->is_materialized_view());
+            assert(it->first->as_instance_view()->is_materialized_view());
 #endif
-          MaterializedView *current = 
-            it->first->as_instance_view()->as_materialized_view();
-          char *valid_mask = overlap.to_string();
-          logger->log("Instance " IDFMT "   Memory " IDFMT "   Mask %s",
-                      current->manager->get_instance().id, 
-                      current->manager->get_memory().id, valid_mask);
-          free(valid_mask);
+            MaterializedView *current = 
+              it->first->as_instance_view()->as_materialized_view();
+            char *valid_mask = overlap.to_string();
+            logger->log("Instance " IDFMT "   Memory " IDFMT "   Mask %s",
+                        current->manager->get_instance().id, 
+                        current->manager->get_memory().id, valid_mask);
+            free(valid_mask);
+          }
+          logger->up();
         }
-        logger->up();
       }
       // Valid Reduction Views
       {
@@ -4151,23 +4346,26 @@ namespace Legion {
             continue;
           num_valid++;
         }
-        logger->log("Valid Reduction Instances (%d)", num_valid);
-        logger->down();
-        for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it = 
-              reduction_views.begin(); it != 
-              reduction_views.end(); it++)
+        if (num_valid > 0)
         {
-          FieldMask overlap = it->second & capture_mask;
-          if (!overlap)
-            continue;
-          char *valid_mask = overlap.to_string();
-          logger->log("Reduction Instance " IDFMT "   Memory " IDFMT 
-                      "  Mask %s",
-                      it->first->manager->get_instance().id, 
-                      it->first->manager->get_memory().id, valid_mask);
-          free(valid_mask);
+          logger->log("Valid Reduction Instances (%d)", num_valid);
+          logger->down();
+          for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it = 
+                reduction_views.begin(); it != 
+                reduction_views.end(); it++)
+          {
+            FieldMask overlap = it->second & capture_mask;
+            if (!overlap)
+              continue;
+            char *valid_mask = overlap.to_string();
+            logger->log("Reduction Instance " IDFMT "   Memory " IDFMT 
+                        "  Mask %s",
+                        it->first->manager->get_instance().id, 
+                        it->first->manager->get_memory().id, valid_mask);
+            free(valid_mask);
+          }
+          logger->up();
         }
-        logger->up();
       }
     } 
 
@@ -5781,7 +5979,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void VersionManager::print_physical_state(RegionTreeNode *arg_node,
                                 const FieldMask &capture_mask,
-                         LegionMap<LegionColor,FieldMask>::aligned &to_traverse,
                                 TreeStateLogger *logger)
     //--------------------------------------------------------------------------
     {
@@ -5815,7 +6012,24 @@ namespace Legion {
         free(version_buffer);
       }
       logger->up();
-      temp_state.print_physical_state(capture_mask, to_traverse, logger);
+      temp_state.print_physical_state(capture_mask, logger);
+    }
+
+    //--------------------------------------------------------------------------
+    void VersionManager::update_physical_state(PhysicalState *state)
+    //--------------------------------------------------------------------------
+    {
+      for (LegionMap<VersionID,ManagerVersions>::aligned::const_iterator vit =
+           current_version_infos.begin(); vit !=
+           current_version_infos.end(); vit++)
+      {
+        for (ManagerVersions::iterator it = vit->second.begin();
+             it != vit->second.end(); it++)
+        {
+          VersionState *vs = dynamic_cast<VersionState*>(it->first);
+          vs->update_physical_state(state, it->second);
+        }
+      }
     }
 
     //--------------------------------------------------------------------------

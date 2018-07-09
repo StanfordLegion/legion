@@ -1674,7 +1674,8 @@ namespace Legion {
         const std::vector<CopySrcDstField> &src_fields,
         const std::vector<CopySrcDstField> &dst_fields,
         RegionTreeNode *dst, ApEvent precondition, PredEvent guard,
-        bool reduction_fold, bool precise, RegionTreeNode *intersect)
+        bool reduction_fold, bool precise, PhysicalTraceInfo &trace_info,
+        RegionTreeNode *intersect)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -1817,7 +1818,8 @@ namespace Legion {
         const std::vector<CopySrcDstField> &src_fields,
         const std::vector<CopySrcDstField> &dst_fields,
         RegionTreeNode *dst, ApEvent precondition, PredEvent guard,
-        bool reduction_fold, bool precise, RegionTreeNode *intersect)
+        bool reduction_fold, bool precise,
+        PhysicalTraceInfo &trace_info, RegionTreeNode *intersect)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -1825,7 +1827,8 @@ namespace Legion {
 #endif
       // Doesn't matter if this one is precise or not
       return dst->issue_copy(op, src_fields, dst_fields, precondition,
-                             guard, intersect, redop, reduction_fold);
+                             guard, trace_info, intersect, redop,
+                             reduction_fold);
     }
 
     //--------------------------------------------------------------------------
@@ -2112,6 +2115,7 @@ namespace Legion {
                 constraints.field_constraint.get_field_set();
               layout->compute_copy_offsets(fill_fields, result, dsts);
             }
+            PhysicalTraceInfo info;
 #ifdef LEGION_SPY
             std::vector<Realm::CopySrcDstField> realm_dsts(dsts.size());
             for (unsigned idx = 0; idx < dsts.size(); idx++)
@@ -2119,12 +2123,12 @@ namespace Legion {
             ApEvent filled =
               instance_domain->issue_fill(NULL/*op*/, realm_dsts, fill_buffer,
                                           reduction_op->sizeof_rhs, ready,
-                                          PredEvent::NO_PRED_EVENT);
+                                          PredEvent::NO_PRED_EVENT, info);
 #else
             ApEvent filled =
               instance_domain->issue_fill(NULL/*op*/, dsts, fill_buffer,
                                           reduction_op->sizeof_rhs, ready,
-                                          PredEvent::NO_PRED_EVENT);
+                                          PredEvent::NO_PRED_EVENT, info);
 #endif
             // We can free the buffer after we've issued the fill
             free(fill_buffer);
