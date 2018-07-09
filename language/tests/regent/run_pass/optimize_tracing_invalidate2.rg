@@ -33,6 +33,8 @@ task#foo, task#bar
 
 end
 
+local c = regentlib.c
+
 task foo(r : region(ispace(int1d), int))
 where reads writes(r) do return 1 end
 
@@ -41,12 +43,23 @@ where reads writes(r) do end
 
 task toplevel()
   var r = region(ispace(int1d, 5), int)
+  var lr = __raw(r)
+  var field = __fields(r)[0]
 
-  __demand(__trace)
+    __demand(__trace)
   for i = 0, 10 do
-    foo(r)
-    bar(r)
-    for e in r do r[e] = 1 end
+    var il =
+      c.legion_inline_launcher_create_logical_region(lr, c.READ_WRITE, c.EXCLUSIVE, lr,
+                                                     0, false, 0, 0)
+    c.legion_inline_launcher_add_field(il, field, true)
+    var pr = c.legion_inline_launcher_execute(__runtime(), __context(), il)
+    c.legion_inline_launcher_destroy(il)
+    do
+      c.legion_physical_region_wait_until_valid(pr)
+      c.legion_runtime_unmap_region(__runtime(), __context(), pr)
+      foo(r)
+      bar(r)
+    end
   end
 
   __demand(__trace)
