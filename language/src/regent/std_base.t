@@ -581,6 +581,10 @@ function base.types.is_dynamic_collective(t)
   return terralib.types.istype(t) and rawget(t, "is_dynamic_collective") or false
 end
 
+function base.types.is_regent_array(t)
+  return terralib.types.istype(t) and rawget(t, "is_regent_array") or false
+end
+
 function base.types.is_unpack_result(t)
   return terralib.types.istype(t) and rawget(t, "is_unpack_result") or false
 end
@@ -621,7 +625,7 @@ function base.types.flatten_struct_fields(struct_type)
   end
 
   if (struct_type:isstruct() or base.types.is_fspace_instance(struct_type)) and
-     not is_geometric_type(struct_type) then
+     not (is_geometric_type(struct_type) or base.types.is_regent_array(struct_type)) then
     local entries = struct_type:getentries()
     for _, entry in ipairs(entries) do
       local entry_name = entry[1] or entry.field

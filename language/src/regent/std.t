@@ -3007,6 +3007,29 @@ std.dynamic_collective = terralib.memoize(function(result_type)
   return st
 end)
 
+std.array = terralib.memoize(function(elem_type, N)
+  if not (terralib.types.istype(elem_type) and elem_type:isprimitive()) then
+    error("array expected a primitive type as argument 1, got " .. tostring(elem_type))
+  end
+  if not (type(N) == "number" and terralib.isintegral(N)) then
+    error("array expected an integer as argument 2, got " .. tostring(N))
+  end
+  local st = terralib.types.newstruct("regent_array")
+  st.entries = terralib.newlist({
+      { "impl", elem_type[N] }
+  })
+
+  st.is_regent_array = true
+  st.elem_type = elem_type
+  st.N = N
+
+  function st.metamethods.__typename(st)
+    return "regent_array(" .. tostring(st.elem_type) .. ", " .. tostring(N) .. ")"
+  end
+
+  return st
+end)
+
 do
   local function field_name(field)
     local field_name = field["field"] or field[1]

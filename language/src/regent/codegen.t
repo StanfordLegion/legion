@@ -446,29 +446,57 @@ end
 local function physical_region_get_base_pointer_setup(index_type, field_type,
                                                       runtime, physical_region, field_id)
   assert(index_type and field_type and runtime and physical_region and field_id)
-  local accessor_args = terralib.newlist({physical_region, field_id})
 
-  local base_pointer = terralib.newsymbol(&field_type, "base_pointer")
-  do -- Used to be `index_type:is_opaque()`. Now all cases are structured.
-    local dim = data.max(index_type.dim, 1)
-    local expected_stride = terralib.sizeof(field_type)
+  local dim = data.max(index_type.dim, 1)
+  local elem_type
+  if regentlib.is_regent_array(field_type) then
+    elem_type = field_type.elem_type
+  else
+    elem_type = field_type
+  end
 
-    local dims = data.range(2, dim + 1)
-    local strides = terralib.newlist()
-    strides:insert(expected_stride)
-    for i = 2, dim do
-      strides:insert(terralib.newsymbol(c.size_t, "stride" .. tostring(i)))
+  local expected_stride = terralib.sizeof(elem_type)
+  local dims = data.range(2, dim + 1)
+  local strides = terralib.newlist()
+  strides:insert(expected_stride)
+  for i = 2, dim do
+    strides:insert(terralib.newsymbol(c.size_t, "stride" .. tostring(i)))
+  end
+
+  local get_accessor = c["legion_physical_region_get_field_accessor_array_" .. tostring(dim) .. "d"]
+  local destroy_accessor = c["legion_accessor_array_" .. tostring(dim) .. "d_destroy"]
+  local raw_rect_ptr = c["legion_accessor_array_" .. tostring(dim) .. "d_raw_rect_ptr"]
+
+  local rect_t = c["legion_rect_" .. tostring(dim) .. "d_t"]
+  local domain_get_bounds = c["legion_domain_get_bounds_" .. tostring(dim) .. "d"]
+
+  local base_pointer
+  local p_base_pointer
+  local num_fields
+  local actions
+  if regentlib.is_regent_array(field_type) then
+    base_pointer = terralib.newsymbol((&elem_type)[field_type.N], "base_pointer")
+    p_base_pointer = terralib.newsymbol(&&elem_type, "p_base_pointer")
+    num_fields = field_type.N
+    actions = quote
+      var [base_pointer]
+      var [p_base_pointer] = [&&elem_type]([base_pointer])
     end
+  else
+    base_pointer = terralib.newsymbol(&field_type, "base_pointer")
+    p_base_pointer = terralib.newsymbol(&&field_type, "p_base_pointer")
+    num_fields = 1
+    actions = quote
+      var [base_pointer]
+      var [p_base_pointer] = &[base_pointer]
+    end
+  end
 
-    local get_accessor = c["legion_physical_region_get_field_accessor_array_" .. tostring(dim) .. "d"]
-    local destroy_accessor = c["legion_accessor_array_" .. tostring(dim) .. "d_destroy"]
-    local raw_rect_ptr = c["legion_accessor_array_" .. tostring(dim) .. "d_raw_rect_ptr"]
-
-    local rect_t = c["legion_rect_" .. tostring(dim) .. "d_t"]
-    local domain_get_bounds = c["legion_domain_get_bounds_" .. tostring(dim) .. "d"]
-
-    local actions = quote
-      var accessor = [get_accessor]([accessor_args])
+  actions = quote
+    [actions];
+    [dims:map(function(i) return quote var [ strides[i] ] end end)];
+    for idx = 0, [num_fields] do
+      var accessor = [get_accessor](physical_region, field_id + [idx])
 
       var region = c.legion_physical_region_get_logical_region([physical_region])
       var domain = c.legion_index_space_get_domain([runtime], region.index_space)
@@ -476,12 +504,11 @@ local function physical_region_get_base_pointer_setup(index_type, field_type,
 
       var subrect : rect_t
       var offsets : c.legion_byte_offset_t[dim]
-      var [base_pointer] = [&field_type]([raw_rect_ptr](
-          accessor, rect, &subrect, &(offsets[0])))
+      [p_base_pointer][idx] =
+        [&elem_type]([raw_rect_ptr](accessor, rect, &subrect, &(offsets[0])))
 
       -- Sanity check the outputs.
-      std.assert(base_pointer ~= nil or
-                 c.legion_domain_get_volume(domain) <= 1,
+      std.assert([p_base_pointer][idx] ~= nil or c.legion_domain_get_volume(domain) <= 1,
                  "base pointer is nil")
       [data.range(dim):map(
          function(i)
@@ -508,18 +535,18 @@ local function physical_region_get_base_pointer_setup(index_type, field_type,
       [data.range(dim):map(
          function(i)
            return quote
-             [base_pointer] = [&field_type](([&int8]([base_pointer])) - rect.lo.x[i] * offsets[i].offset)
+             [p_base_pointer][idx] = [&elem_type](([&int8]([p_base_pointer][idx])) - rect.lo.x[i] * offsets[i].offset)
            end
          end)]
 
       [dims:map(
          function(i)
-           return quote var [ strides[i] ] = offsets[i-1].offset end
+           return quote [ strides[i] ] = offsets[i-1].offset end
          end)]
       [destroy_accessor](accessor)
     end
-    return actions, base_pointer, strides
   end
+  return actions, base_pointer, strides
 end
 
 local physical_region_get_base_pointer_thunk = terralib.memoize(
@@ -551,7 +578,12 @@ local function physical_region_get_base_pointer(cx, index_type, field_type,
     local thunk, expected_strides = unpack(physical_region_get_base_pointer_thunk(
       index_type, field_type))
 
-    local base_pointer = terralib.newsymbol(&field_type, "base_pointer")
+    local base_pointer
+    if regentlib.is_regent_array(field_type) then
+      base_pointer = terralib.newsymbol((&field_type.elem_type)[field_type.N], "base_pointer")
+    else
+      base_pointer = terralib.newsymbol(&field_type, "base_pointer")
+    end
     local computed_strides = data.mapi(
       function(i, _)
         return terralib.newsymbol(c.size_t, "stride" .. tostring(i))
@@ -2547,12 +2579,22 @@ local function expr_call_setup_region_arg(
     args_setup:insert(
       quote
         var [requirement] = [add_requirement]([requirement_args])
-        [field_paths:map(
-           function(field_path)
+        [data.zip(field_paths, field_types):map(
+           function(field)
+             local field_path, field_type = unpack(field)
              local field_id = cx:region(arg_type):field_id(field_path)
-             return quote
-               add_field(
-                 [launcher], [requirement], [field_id], true)
+             if std.is_regent_array(field_type) then
+               return quote
+                 for idx = 0, [field_type.N] do
+                   add_field(
+                     [launcher], [requirement], [field_id] + idx, true)
+                 end
+               end
+             else
+               return quote
+                 add_field(
+                   [launcher], [requirement], [field_id], true)
+               end
              end
            end)]
         [add_flags]([launcher], [requirement], [flag])
@@ -2562,7 +2604,7 @@ end
 
 local function setup_list_of_regions_add_region(
     cx, param_type, container_type, value_type, value,
-    region, parent, field_paths, add_requirement, get_requirement,
+    region, parent, field_paths, field_types, add_requirement, get_requirement,
     add_field, has_field, add_flags, intersect_flags, requirement_args, flag, launcher)
   return quote
     var [region] = [raise_privilege_depth(cx, `([value].impl), param_type, field_paths, true)]
@@ -2574,12 +2616,23 @@ local function setup_list_of_regions_add_region(
     else
       [intersect_flags]([launcher], requirement, [flag])
     end
-    [field_paths:map(
-       function(field_path)
+    [data.zip(field_paths, field_types):map(
+       function(field)
+         local field_path, field_type = unpack(field)
          local field_id = cx:list_of_regions(container_type):field_id(field_path)
-         return quote
-           if not [has_field]([launcher], requirement, [field_id]) then
-             [add_field]([launcher], requirement, [field_id], true)
+         if std.is_regent_array(field_type) then
+           return quote
+             if not [has_field]([launcher], requirement, [field_id]) then
+               for idx = 0, [field_type.N] do
+                 [add_field]([launcher], requirement, [field_id] + idx, true)
+               end
+             end
+           end
+         else
+           return quote
+             if not [has_field]([launcher], requirement, [field_id]) then
+               [add_field]([launcher], requirement, [field_id], true)
+             end
            end
          end
        end)]
@@ -2588,7 +2641,7 @@ end
 
 local function setup_list_of_regions_add_list(
     cx, param_type, container_type, value_type, value,
-    region, parent, field_paths, add_requirement, get_requirement,
+    region, parent, field_paths, field_types, add_requirement, get_requirement,
     add_field, has_field, add_flags, intersect_flags, requirement_args, flag, launcher)
   local element = terralib.newsymbol(value_type.element_type)
   if std.is_list(value_type.element_type) then
@@ -2597,7 +2650,7 @@ local function setup_list_of_regions_add_list(
         var [element] = [value_type:data(value)][i]
         [setup_list_of_regions_add_list(
            cx, param_type, container_type, value_type.element_type, element,
-           region, parent, field_paths, add_requirement, get_requirement,
+           region, parent, field_paths, field_types, add_requirement, get_requirement,
            add_field, has_field, add_flags, intersect_flags, requirement_args, flag, launcher)]
       end
     end
@@ -2607,7 +2660,7 @@ local function setup_list_of_regions_add_list(
         var [element] = [value_type:data(value)][i]
         [setup_list_of_regions_add_region(
            cx, param_type, container_type, value_type.element_type, element,
-           region, parent, field_paths, add_requirement, get_requirement,
+           region, parent, field_paths, field_types, add_requirement, get_requirement,
            add_field, has_field, add_flags, intersect_flags, requirement_args, flag, launcher)]
       end
     end
@@ -2703,7 +2756,7 @@ local function expr_call_setup_list_of_regions_arg(
     args_setup:insert(
       setup_list_of_regions_add_list(
         cx, param_type, arg_type, arg_type, list,
-        region, parent, field_paths, add_requirement, get_requirement,
+        region, parent, field_paths, field_types, add_requirement, get_requirement,
         add_field, has_field, add_flags, intersect_flags, requirement_args, flag, launcher))
   end
 end
@@ -2763,12 +2816,22 @@ local function expr_call_setup_partition_arg(
       quote
       var [requirement] =
         [add_requirement]([requirement_args])
-        [field_paths:map(
-           function(field_path)
+        [data.zip(field_paths, field_types):map(
+           function(field)
+             local field_path, field_type = unpack(field)
              local field_id = cx:region(arg_type):field_id(field_path)
-             return quote
-               c.legion_index_launcher_add_field(
-                 [launcher], [requirement], [field_id], true)
+             if regentlib.is_regent_array(field_type) then
+               return quote
+                 for idx = 0, [field_type.N] do
+                   c.legion_index_launcher_add_field(
+                     [launcher], [requirement], [field_id] + idx, true)
+                 end
+               end
+             else
+               return quote
+                 c.legion_index_launcher_add_field(
+                   [launcher], [requirement], [field_id], true)
+               end
              end
            end)]
       c.legion_index_launcher_add_flags([launcher], [requirement], [flag])
@@ -3546,10 +3609,15 @@ function codegen.expr_region(cx, node)
   local field_paths, field_types = std.flatten_struct_fields(fspace_type)
   local field_privileges = field_paths:map(function(_) return "reads_writes" end)
   local field_id = 100
-  local field_ids = field_paths:map(
-    function(_)
+  local field_ids = data.zip(field_paths, field_types):map(
+    function(pair)
       field_id = field_id + 1
-      return field_id
+      local my_field_id = field_id
+      local field_path, field_type = unpack(pair)
+      if std.is_regent_array(field_type) then
+        field_id = field_id + field_type.N - 1
+      end
+      return my_field_id
     end)
   local fields_are_scratch = field_paths:map(function(_) return false end)
   local physical_regions = field_paths:map(function(_) return pr end)
@@ -3580,13 +3648,24 @@ function codegen.expr_region(cx, node)
   if fspace_type:isstruct() then
     fs_naming_actions = quote
       c.legion_field_space_attach_name([cx.runtime], [fs], [fspace_type.name], false)
-      [data.zip(field_paths, field_ids):map(
+      [data.flatmap(
          function(field)
-           local field_path, field_id = unpack(field)
+           local field_path, field_type, field_id = unpack(field)
            local field_name = field_path:mkstring("", ".", "")
-           return `(c.legion_field_id_attach_name(
-                      [cx.runtime], [fs], field_id, field_name, false))
-         end)]
+           if regentlib.is_regent_array(field_type) then
+             local attach_names = terralib.newlist()
+             for idx = 0, field_type.N - 1 do
+               local elem_name = field_name .. "[" .. tostring(idx) .. "]"
+               attach_names:insert(`(c.legion_field_id_attach_name(
+                          [cx.runtime], [fs], field_id + [idx], [elem_name], false)))
+             end
+             return attach_names
+           else
+             return `(c.legion_field_id_attach_name(
+                        [cx.runtime], [fs], field_id, field_name, false))
+           end
+         end,
+         data.zip(field_paths, field_types, field_ids))]
     end
   else
     fs_naming_actions = quote end
@@ -3598,12 +3677,23 @@ function codegen.expr_region(cx, node)
     var [is] = [ispace.value].impl
     var [fs] = c.legion_field_space_create([cx.runtime], [cx.context])
     var fsa = c.legion_field_allocator_create([cx.runtime], [cx.context],  [fs]);
-    [data.zip(field_types, field_ids):map(
+    [data.flatmap(
        function(field)
          local field_type, field_id = unpack(field)
-         return `(c.legion_field_allocator_allocate_field(
-                    fsa, terralib.sizeof([field_type]), [field_id]))
-       end)]
+         if regentlib.is_regent_array(field_type) then
+           local allocate_fields = terralib.newlist()
+           return quote
+             for idx = 0, [field_type.N] do
+               c.legion_field_allocator_allocate_field(
+                 fsa, terralib.sizeof([field_type.elem_type]), [field_id] + idx)
+             end
+           end
+         else
+           return `(c.legion_field_allocator_allocate_field(
+                      fsa, terralib.sizeof([field_type]), [field_id]))
+         end
+       end,
+       data.zip(field_types, field_ids))]
     [fs_naming_actions];
     c.legion_field_allocator_destroy(fsa)
     var [lr] = c.legion_logical_region_create([cx.runtime], [cx.context], [is], [fs], true)
@@ -3617,9 +3707,18 @@ function codegen.expr_region(cx, node)
       [codegen_hooks.gen_update_mapping_tag(tag, cx.task)]
       var il = c.legion_inline_launcher_create_logical_region(
         [lr], c.READ_WRITE, c.EXCLUSIVE, [lr], 0, false, 0, [tag]);
-      [field_ids:map(
-         function(field_id)
-           return `(c.legion_inline_launcher_add_field(il, [field_id], true))
+      [data.zip(field_ids, field_types):map(
+         function(field)
+           local field_id, field_type = unpack(field)
+           if regentlib.is_regent_array(field_type) then
+             return quote
+               for idx = 0, [field_type.N] do
+                 c.legion_inline_launcher_add_field(il, [field_id] + idx, true)
+               end
+             end
+           else
+             return `(c.legion_inline_launcher_add_field(il, [field_id], true))
+           end
          end)]
       var [pr] = c.legion_inline_launcher_execute([cx.runtime], [cx.context], il)
       c.legion_inline_launcher_destroy(il)
