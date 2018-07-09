@@ -545,10 +545,23 @@ namespace Legion {
           op->is_memoizing() && !op->is_internal_op())
       {
         if (index != last_memoized)
+        {
+          for (unsigned i = 0; i < operations.size(); ++i)
+          {
+            Operation *op = operations[i].first;
+            if (!op->is_internal_op() && op->get_memoizable() == NULL)
+              REPORT_LEGION_ERROR(ERROR_PHYSICAL_TRACING_UNSUPPORTED_OP,
+                  "Invalid memoization request. Operation of type %s (UID %lld)"
+                  " at index %d in trace %d requested memoization, but physical"
+                  " tracing does not support this operation type yet.",
+                  Operation::get_string_rep(op->get_operation_kind()),
+                  op->get_unique_op_id(), i, tid);
+          }
           REPORT_LEGION_ERROR(ERROR_INCOMPLETE_PHYSICAL_TRACING,
               "Invalid memoization request. A trace cannot be partially "
               "memoized. Please change the mapper to request memoization "
               "for all the operations in the trace");
+        }
         op->set_trace_local_id(index);
         last_memoized = index + 1;
       }
