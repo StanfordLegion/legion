@@ -552,6 +552,14 @@ namespace Legion {
         op->set_trace_local_id(index);
         last_memoized = index + 1;
       }
+      if ((is_recording() || is_replaying()) &&
+          !op->is_internal_op() && op->get_memoizable() == NULL)
+        REPORT_LEGION_ERROR(ERROR_PHYSICAL_TRACING_UNSUPPORTED_OP,
+            "Invalid memoization request. Operation of type %s (UID %lld) "
+            "at index %d in trace %d requested memoization, but physical "
+            "tracing does not support this operation type yet.",
+            Operation::get_string_rep(op->get_operation_kind()),
+            op->get_unique_op_id(), index, tid);
 
       // Only need to save this in the map if we are not done tracing
       if (tracing)

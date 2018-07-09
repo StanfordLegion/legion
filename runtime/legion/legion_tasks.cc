@@ -1084,6 +1084,14 @@ namespace Legion {
                                 parent_ctx->get_unique_id(), 
                                 get_task_name(), get_unique_id())
       }
+      if (is_recording() && !runtime->is_local(target_proc))
+        REPORT_LEGION_ERROR(ERROR_PHYSICAL_TRACING_REMOTE_MAPPING,
+                            "Mapper %s remotely mapped task %s (UID %lld) "
+                            "that is being memoized, but physical tracing "
+                            "does not support remotely mapped operations "
+                            "yet. Please change your mapper to map this task "
+                            "locally.", mapper->get_mapper_name(),
+                            get_task_name(), get_unique_id())
       return options.inline_task;
     }
 
@@ -4325,6 +4333,15 @@ namespace Legion {
                         "original index space to be sliced.",
                         mapper->get_mapper_name(), slice.domain_is.get_id(),
                         get_task_name(), get_unique_id());
+        if (is_recording() && !runtime->is_local(slice.proc))
+          REPORT_LEGION_ERROR(ERROR_PHYSICAL_TRACING_REMOTE_MAPPING,
+                              "Mapper %s remotely mapped a slice of task %s "
+                              "(UID %lld) that is being memoized, but physical "
+                              "tracing does not support remotely mapped "
+                              "operations yet. Please change your mapper to "
+                              "map this slice locally.",
+                              mapper->get_mapper_name(),
+                              get_task_name(), get_unique_id())
 #ifdef DEBUG_LEGION
         // Check to make sure the domain is not empty
         Domain &d = slice.domain;
