@@ -46,7 +46,6 @@ task toplevel()
   var lr = __raw(r)
   var field = __fields(r)[0]
 
-    __demand(__trace)
   for i = 0, 10 do
     var il =
       c.legion_inline_launcher_create_logical_region(lr, c.READ_WRITE, c.EXCLUSIVE, lr,
@@ -54,6 +53,7 @@ task toplevel()
     c.legion_inline_launcher_add_field(il, field, true)
     var pr = c.legion_inline_launcher_execute(__runtime(), __context(), il)
     c.legion_inline_launcher_destroy(il)
+    __demand(__trace)
     do
       c.legion_physical_region_wait_until_valid(pr)
       c.legion_runtime_unmap_region(__runtime(), __context(), pr)
