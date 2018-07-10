@@ -23,7 +23,7 @@ local default_options = {
   ["bounds-checks"] = false,
 
   -- Main user-facing optimization flags:
-  ["cuda"] = false,
+  ["cuda"] = true,
   ["cuda-offline"] = false,
   ["cuda-arch"] = os.getenv("GPU_ARCH") or "fermi",
   ["index-launch"] = true,
@@ -35,7 +35,7 @@ local default_options = {
   ["openmp"] = false,
   ["openmp-strict"] = false,
   ["skip-empty-tasks"] = true,
-  ["vectorize"] = false,
+  ["vectorize"] = true,
   ["vectorize-unsafe"] = false,
 
   -- Legion runtime optimization flags:
