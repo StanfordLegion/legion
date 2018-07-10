@@ -112,6 +112,7 @@ namespace Legion {
           Operation *op = operations[idx].first;
           op->remove_mapping_reference(op->get_generation());
         }
+        operations.clear();
         return;
       }
 
