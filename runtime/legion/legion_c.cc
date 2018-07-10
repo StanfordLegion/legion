@@ -2652,6 +2652,16 @@ legion_task_launcher_add_arrival_barrier(legion_task_launcher_t launcher_,
   launcher->add_arrival_barrier(bar);
 }
 
+void
+legion_task_launcher_set_point(legion_task_launcher_t launcher_,
+                               legion_domain_point_t point_)
+{
+  TaskLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+  DomainPoint point = CObjectWrapper::unwrap(point_);
+
+  launcher->point = point;
+}
+
 legion_index_launcher_t
 legion_index_launcher_create(
   legion_task_id_t tid,

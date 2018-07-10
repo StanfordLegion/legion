@@ -2276,6 +2276,13 @@ extern "C" {
                                            legion_phase_barrier_t bar);
 
   /**
+   * @see Legion::TaskLauncher::point
+   */
+  void
+  legion_task_launcher_set_point(legion_task_launcher_t launcher,
+                                 legion_domain_point_t point);
+
+  /**
    * @return Caller takes ownership of return value.
    *
    * @see Legion::IndexTaskLauncher::IndexTaskLauncher()
