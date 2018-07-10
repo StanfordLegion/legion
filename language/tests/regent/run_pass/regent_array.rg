@@ -35,44 +35,44 @@ function make_task(ty)
   task tsk(is : ispace(int1d),
            r : region(is, ty))
   where reads writes(r) do
-    var pr = __physical(r)
-    --for p in is do
-    --  var data = r[p].data
-    --  r[p].data = data
-    --  for i = 0, 10 do
-    --    r[p].data[i] += data[i] + 1
-    --    r[p].data[i] = r[p].data[i] + 2
-    --  end
-    --end
+    for p in is do
+      var data = r[p].data
+      r[p].data = data
+      for i = 0, 10 do
+        r[p].data[i] += data[i]
+      end
+      for i = 0, 10 do
+        r[p].data[i] += 1
+        r[p].data[i] = r[p].data[i] + 2
+      end
+    end
   end
   return tsk
 end
---local foo = make_task(fs1)
+local foo = make_task(fs1)
 local bar = make_task(fs2)
-
-bar:get_primary_variant():get_definition():printpretty(false)
 
 task toplevel()
   var is = ispace(int1d, 10)
-  --var r = region(is, fs1)
+  var r = region(is, fs1)
   var s = region(is, fs2)
 
   for p in is do
     for i = 0, 10 do
-      --r[p].data[i] = 100 + [int](p)
-      --s[p].data[i] = 100 + [int](p)
+      r[p].data[i] = 100 + [int](p)
+      s[p].data[i] = 100 + [int](p)
     end
   end
 
-  --foo(is, r)
-  --bar(is, s)
+  foo(is, r)
+  bar(is, s)
 
-  --for p in is do
-  --  for i = 0, 10 do
-  --    regentlib.assert(r[p].data[i] == 100 + [int](p) + 3, "test failed")
-  --    regentlib.assert(s[p].data[i] == 100 + [int](p) + 3, "test failed")
-  --  end
-  --end
+  for p in is do
+    for i = 0, 10 do
+      regentlib.assert(r[p].data[i] == 2 * (100 + [int](p)) + 3, "test failed")
+      regentlib.assert(s[p].data[i] == 2 * (100 + [int](p)) + 3, "test failed")
+    end
+  end
 end
-toplevel:get_primary_variant():get_definition():printpretty(false)
+
 regentlib.start(toplevel)

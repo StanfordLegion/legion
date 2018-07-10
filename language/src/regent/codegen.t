@@ -929,12 +929,21 @@ end
 local ref = setmetatable({}, { __index = value })
 ref.__index = ref
 
+local aref = setmetatable({}, { __index = value })
+aref.__index = aref
+
 function values.ref(node, value_expr, value_type, field_path)
   if not terralib.types.istype(value_type) or
     not (std.is_bounded_type(value_type) or std.is_vptr(value_type)) then
     error("ref requires a legion ptr type", 2)
   end
-  return setmetatable(values.value(node, value_expr, value_type, field_path), ref)
+  local meta
+  if std.is_regent_array(std.as_read(node.expr_type)) then
+    meta = aref
+  else
+    meta = ref
+  end
+  return setmetatable(values.value(node, value_expr, value_type, field_path), meta)
 end
 
 function ref:new(node, value_expr, value_type, field_path)
@@ -1298,6 +1307,132 @@ function ref:get_index(cx, node, index, result_type)
   assert(not std.is_list(value_type)) -- Shouldn't be an l-value anyway.
   local result = expr.just(quote [actions] end, `([value][ [index.value] ]))
   return values.rawref(node, result, &result_type, data.newtuple())
+end
+
+function aref:__ref(cx, index)
+  assert(index ~= nil)
+  local actions = self.expr.actions
+  local value = self.expr.value
+
+  local value_type = std.as_read(
+    std.get_field_path(self.value_type.points_to_type, self.field_path))
+  local field_type = value_type
+  local absolute_field_path = self.field_path
+
+  local region_types = self.value_type:bounds()
+  local base_pointers_by_region = region_types:map(
+    function(region_type)
+      return cx:region(region_type):base_pointer(absolute_field_path)
+    end)
+  local strides_by_region = region_types:map(
+    function(region_type)
+      return cx:region(region_type):stride(absolute_field_path)
+    end)
+
+  local base_pointer, strides
+  local field_paths = terralib.newlist { absolute_field_path }
+  if cx.check_divergence(region_types, field_paths) or #region_types == 1 then
+    base_pointer = base_pointers_by_region[1]
+    strides = strides_by_region[1]
+  else
+    base_pointer = terralib.newsymbol(&field_type, "base_pointer_" .. absolute_field_path:hash())
+    strides = cx:region(region_types[1]):stride(absolute_field_path):map(
+      function(_)
+        return terralib.newsymbol(c.size_t, "stride_" .. field_path:hash())
+      end)
+
+    local cases
+    for i = #region_types, 1, -1 do
+      local region_base_pointer = base_pointers_by_region[i]
+      local region_strides = strides_by_region[i]
+
+      local case = quote
+        [base_pointer] = [region_base_pointer]
+      end
+      for i, stride in ipairs(strides) do
+        local region_stride = region_strides[i]
+        setup = quote [case]; [stride] = [region_stride] end
+      end
+
+      if cases then
+        cases = quote
+          if [value].__index == [i] then
+            [case]
+          else
+            [cases]
+          end
+        end
+      else
+        cases = case
+      end
+    end
+
+    actions = quote
+      [actions];
+      var [base_pointer];
+      [strides:map(
+         function(stride) return quote var [stride] end end)];
+      [cases]
+    end
+  end
+
+  base_pointer = `([base_pointer][ [index] ])
+
+  value = get_element_pointer(cx, self.node, region_types, self.value_type, field_type.elem_type, base_pointer, strides, value)
+
+  return actions, value
+end
+
+function aref:get_index(cx, node, index, result_type)
+  local value_actions, value = self:__ref(cx, index.value)
+
+  local actions = terralib.newlist({value_actions, index.actions})
+  local value_type = std.as_read(self.node.expr_type)
+  if bounds_checks then
+    actions:insert(
+      quote
+        std.assert_error([index.value] >= 0 and [index.value] < [value_type.N],
+          [get_source_location(node) .. ": array access to " .. tostring(value_type) .. " is out-of-bounds"])
+      end)
+  end
+  assert(not std.is_list(value_type)) -- Shouldn't be an l-value anyway.
+  local result = expr.just(quote [actions] end, value)
+  return values.rawref(node, result, &result_type, data.newtuple())
+end
+
+function aref:read(cx, expr_type)
+  local value_type = std.as_read(self.node.expr_type)
+  assert(std.type_eq(value_type, std.as_read(expr_type)))
+
+  local value = terralib.newsymbol(value_type)
+  local index = terralib.newsymbol(int32)
+  local elem_actions, elem_value = self:__ref(cx, index)
+  local actions = quote
+    var [value];
+    for [index] = 0, [value_type.N] do
+      [elem_actions];
+      [value].impl[ [index] ] = [elem_value]
+    end
+  end
+
+  return expr.just(actions, value)
+end
+
+function aref:write(cx, value, expr_type)
+  local value_type = std.as_read(self.node.expr_type)
+  assert(std.type_eq(value_type, std.as_read(expr_type)))
+  local index = terralib.newsymbol(int32)
+  local value_expr = value:read(cx, expr_type)
+  local elem_actions, elem_value = self:__ref(cx, index)
+  local actions = quote
+    [value_expr.actions];
+    for [index] = 0, [value_type.N] do
+      [elem_actions];
+      [elem_value] = [value_expr.value].impl[ [index] ]
+    end
+  end
+
+  return expr.just(actions, quote end)
 end
 
 local vref = setmetatable({}, { __index = value })
@@ -1750,6 +1885,10 @@ function rawref:get_index(cx, node, index, result_type)
     result = expr.just(
       quote [actions] end,
       `([value_type:data(ref_expr.value)][ [index.value] ]))
+  elseif std.is_regent_array(value_type) then
+    result = expr.just(
+      quote [actions] end,
+      `([ref_expr.value].impl[ [index.value] ]))
   else
     result = expr.just(
       quote [actions] end,
