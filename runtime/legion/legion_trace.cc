@@ -76,6 +76,7 @@ namespace Legion {
       std::pair<Operation*,GenerationID> key(op,gen);
       const unsigned index = operations.size();
       op->set_trace_local_id(index);
+      op->add_mapping_reference(gen);
       operations.push_back(key);
     }
 
@@ -104,6 +105,16 @@ namespace Legion {
     void LegionTrace::end_trace_execution(FenceOp *op)
     //--------------------------------------------------------------------------
     {
+      if (is_replaying())
+      {
+        for (unsigned idx = 0; idx < operations.size(); ++idx)
+        {
+          Operation *op = operations[idx].first;
+          op->remove_mapping_reference(op->get_generation());
+        }
+        return;
+      }
+
       // Register for this fence on every one of the operations in
       // the trace and then clear out the operations data structure
       for (std::set<std::pair<Operation*,GenerationID> >::iterator it =
