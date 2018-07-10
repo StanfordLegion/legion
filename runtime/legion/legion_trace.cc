@@ -108,10 +108,8 @@ namespace Legion {
       if (is_replaying())
       {
         for (unsigned idx = 0; idx < operations.size(); ++idx)
-        {
-          Operation *op = operations[idx].first;
-          op->remove_mapping_reference(op->get_generation());
-        }
+          operations[idx].first->remove_mapping_reference(
+              operations[idx].second);
         operations.clear();
         return;
       }
