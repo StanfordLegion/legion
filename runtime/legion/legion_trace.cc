@@ -78,6 +78,9 @@ namespace Legion {
       op->set_trace_local_id(index);
       op->add_mapping_reference(gen);
       operations.push_back(key);
+#ifdef LEGION_SPY
+      current_uids[key] = op->get_unique_op_id();
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -111,6 +114,9 @@ namespace Legion {
           operations[idx].first->remove_mapping_reference(
               operations[idx].second);
         operations.clear();
+#ifdef LEGION_SPY
+        current_uids.clear();
+#endif
         return;
       }
 
@@ -943,11 +949,10 @@ namespace Legion {
                                UniqueID prev_fence_uid, UniqueID curr_fence_uid)
     //--------------------------------------------------------------------------
     {
+      UniqueID context_uid = ctx->get_unique_id();
       for (unsigned idx = 0; idx < operations.size(); ++idx)
       {
-        Operation *op = operations[idx].first;
-        UniqueID context_uid = op->get_context()->get_unique_id();
-        UniqueID uid = op->get_unique_op_id();
+        UniqueID uid = get_current_uid_by_index(idx);
         const LegionVector<DependenceRecord>::aligned &deps = dependences[idx];
         for (LegionVector<DependenceRecord>::aligned::const_iterator it =
              deps.begin(); it != deps.end(); it++)
