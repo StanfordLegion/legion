@@ -294,6 +294,7 @@ namespace Legion {
       virtual void add_to_dependence_queue(Operation *op) = 0;
       virtual void add_to_post_task_queue(TaskContext *ctx, RtEvent wait_on,
           const void *result, size_t size, PhysicalInstance instance) = 0;
+      virtual void register_executing_child(Operation *op) = 0;
       virtual void register_child_executed(Operation *op) = 0;
       virtual void register_child_complete(Operation *op) = 0;
       virtual void register_child_commit(Operation *op) = 0; 
@@ -926,6 +927,7 @@ namespace Legion {
       virtual void add_to_post_task_queue(TaskContext *ctx, RtEvent wait_on,
           const void *result, size_t size, PhysicalInstance instance);
       void process_post_end_tasks(void);
+      virtual void register_executing_child(Operation *op);
       virtual void register_child_executed(Operation *op);
       virtual void register_child_complete(Operation *op);
       virtual void register_child_commit(Operation *op); 
@@ -1536,6 +1538,7 @@ namespace Legion {
       virtual void add_to_dependence_queue(Operation *op);
       virtual void add_to_post_task_queue(TaskContext *ctx, RtEvent wait_on,
           const void *result, size_t size, PhysicalInstance instance);
+      virtual void register_executing_child(Operation *op);
       virtual void register_child_executed(Operation *op);
       virtual void register_child_complete(Operation *op);
       virtual void register_child_commit(Operation *op); 
@@ -1852,6 +1855,7 @@ namespace Legion {
       virtual void add_to_dependence_queue(Operation *op);
       virtual void add_to_post_task_queue(TaskContext *ctx, RtEvent wait_on,
           const void *result, size_t size, PhysicalInstance instance);
+      virtual void register_executing_child(Operation *op);
       virtual void register_child_executed(Operation *op);
       virtual void register_child_complete(Operation *op);
       virtual void register_child_commit(Operation *op); 

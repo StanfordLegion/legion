@@ -4829,6 +4829,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void InnerContext::register_executing_child(Operation *op)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock child_lock(child_op_lock);
+#ifdef DEBUG_LEGION
+      assert(executing_children.find(op) == executing_children.end());
+#endif
+      executing_children[op] = op->get_generation();
+    }
+
+    //--------------------------------------------------------------------------
     void InnerContext::register_child_executed(Operation *op)
     //--------------------------------------------------------------------------
     {
@@ -8618,6 +8629,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void LeafContext::register_executing_child(Operation *op)
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
     void LeafContext::register_child_executed(Operation *op)
     //--------------------------------------------------------------------------
     {
@@ -9809,6 +9827,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       enclosing->add_to_post_task_queue(ctx, wait_on, result, size, inst);
+    }
+
+    //--------------------------------------------------------------------------
+    void InlineContext::register_executing_child(Operation *op)
+    //--------------------------------------------------------------------------
+    {
+      enclosing->register_executing_child(op);
     }
 
     //--------------------------------------------------------------------------

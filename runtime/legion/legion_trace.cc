@@ -1650,7 +1650,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       size_t num_requirements = reqs.size();
-      initialize_operation(ctx, false, num_requirements);
+      initialize_operation(ctx, true, num_requirements);
       requirements = reqs;
       instances = insts;
       parent_indices = indices;
@@ -2332,6 +2332,7 @@ namespace Legion {
         TraceSummaryOp *op = runtime->get_available_summary_op();
         op->initialize_summary(context, invalidator->get_unique_op_id(),
             it->requirements, it->instances, it->parent_indices);
+        context->register_executing_child(op);
         op->execute_dependence_analysis();
         op->add_mapping_reference(op->get_generation());
       }
