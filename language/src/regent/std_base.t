@@ -1269,9 +1269,16 @@ function base.task:is_shard_task()
   return string.sub(tostring(self:get_name()), 0, 6) == "<shard"
 end
 
-function base.task:make_variant(name)
+function base.task:make_variant(name, inherit_primary)
   assert(not self.is_complete)
-  return base.new_variant(self, name)
+  local variant = base.new_variant(self, name)
+  if inherit_primary then
+    assert(self:has_primary_variant())
+    local primary_variant = self:get_primary_variant()
+    variant:set_definition(primary_variant:get_definition())
+    variant:set_config_options(primary_variant:get_config_options())
+  end
+  return variant
 end
 
 function base.task:add_complete_thunk(complete_thunk)
