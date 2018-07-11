@@ -184,6 +184,13 @@ ast.constraint:leaf("Constraint", {"lhs", "rhs", "op"})
 ast:inner("privilege")
 ast.privilege:leaf("Privilege", {"privilege", "region", "field_path"})
 
+-- Layout Constraints
+
+ast:inner("layout")
+ast.layout:leaf("Dim", {"index"})
+ast.layout:leaf("Field", {"field_path"})
+ast.layout:leaf("Ordering", {"dimensions"})
+
 -- Node Types (Unspecialized)
 
 ast:inner("unspecialized", {"span"})

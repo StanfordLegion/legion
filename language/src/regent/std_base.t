@@ -934,6 +934,22 @@ function base.variant:__tostring()
   return tostring(self.task:get_name()) .. '_' .. self:get_name()
 end
 
+function base.variant:add_layout_constraint(constraint)
+  if not self.layout_constraints then
+    self.layout_constraints = terralib.newlist()
+  end
+  self.layout_constraints:insert(constraint)
+end
+
+function base.variant:has_layout_constraints()
+  return self.layout_constraints
+end
+
+function base.variant:get_layout_constraints()
+  assert(self.layout_constraints)
+  return self.layout_constraints
+end
+
 do
   function base.new_variant(task, name)
     assert(base.is_task(task))
@@ -950,6 +966,7 @@ do
       inline = false,
       cudakernels = false,
       config_options = false,
+      layout_constraints = false,
     }, base.variant)
 
     task.variants:insert(variant)
@@ -1199,6 +1216,20 @@ end
 
 function base.task:get_variants()
   return self.variants
+end
+
+function base.task:get_variant(name)
+  local variant = nil
+  for i = 1, #self.variants do
+    if self.variants[i]:get_name() == name then
+      variant = self.variants[i]
+      break
+    end
+  end
+  if variant == nil then
+    error("variant '" .. name .. "' does not exist")
+  end
+  return variant
 end
 
 function base.task:set_primary_variant(task)

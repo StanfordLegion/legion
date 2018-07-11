@@ -4257,4 +4257,22 @@ do
   end
 end
 
+-- #####################################
+-- ## Layout Constraints
+-- #################
+
+std.layout = {}
+std.layout.dimx = ast.layout.Dim { index = 0 }
+std.layout.dimy = ast.layout.Dim { index = 1 }
+std.layout.dimz = ast.layout.Dim { index = 2 }
+function std.layout.field_path(...)
+  return data.newtuple(...)
+end
+function std.layout.field_constraint(field_path)
+  return ast.layout.Field { field_path = field_path }
+end
+function std.layout.ordering_constraint(dimensions)
+  return ast.layout.Ordering { dimensions = dimensions }
+end
+
 return std
