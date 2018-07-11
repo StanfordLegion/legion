@@ -71,6 +71,7 @@ namespace Legion {
     {
       tpl = NULL;
       memo_state = NO_MEMO;
+      need_prepipeline_stage = false;
     }
 
     //--------------------------------------------------------------------------
