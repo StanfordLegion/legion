@@ -3552,6 +3552,7 @@ function std.setup(main_task, extra_setup_thunk, task_wrappers, registration_nam
           c.legion_runtime_preregister_task_variant_fnptr(
             [task:get_task_id()],
             [task:get_name():concat(".")],
+            [variant:get_name()],
             execution_constraints, layout_constraints, options,
             [task_wrappers[variant:wrapper_name()]], nil, 0)
           c.legion_execution_constraint_set_destroy(execution_constraints)
