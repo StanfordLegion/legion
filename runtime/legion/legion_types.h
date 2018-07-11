@@ -423,6 +423,7 @@ namespace Legion {
         "Remote Physical Context Request",                        \
         "Remote Physical Context Response",                       \
         "Replay Physical Trace",                                  \
+        "Delete Physical Template",                               \
         "Remote Message",                                         \
         "Retry Shutdown",                                         \
       };
