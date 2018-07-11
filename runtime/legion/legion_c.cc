@@ -5078,6 +5078,7 @@ legion_runtime_register_task_variant_fnptr(
   legion_runtime_t runtime_,
   legion_task_id_t id /* = AUTO_GENERATE_ID */,
   const char *task_name /* = NULL*/,
+  const char *variant_name /* = NULL*/,
   bool global,
   legion_execution_constraint_set_t execution_constraints_,
   legion_task_layout_constraint_set_t layout_constraints_,
@@ -5095,7 +5096,7 @@ legion_runtime_register_task_variant_fnptr(
   if (id == AUTO_GENERATE_ID)
     id = runtime->generate_dynamic_task_id();
 
-  TaskVariantRegistrar registrar(id, task_name, global);
+  TaskVariantRegistrar registrar(id, variant_name, global);
   registrar.set_leaf(options.leaf);
   registrar.set_inner(options.inner);
   registrar.set_idempotent(options.idempotent);
@@ -5119,6 +5120,7 @@ legion_task_id_t
 legion_runtime_preregister_task_variant_fnptr(
   legion_task_id_t id /* = AUTO_GENERATE_ID */,
   const char *task_name /* = NULL*/,
+  const char *variant_name /* = NULL*/,
   legion_execution_constraint_set_t execution_constraints_,
   legion_task_layout_constraint_set_t layout_constraints_,
   legion_task_config_options_t options,
@@ -5134,7 +5136,7 @@ legion_runtime_preregister_task_variant_fnptr(
   if (id == AUTO_GENERATE_ID)
     id = Runtime::generate_static_task_id();
 
-  TaskVariantRegistrar registrar(id, task_name);
+  TaskVariantRegistrar registrar(id, variant_name);
   registrar.set_leaf(options.leaf);
   registrar.set_inner(options.inner);
   registrar.set_idempotent(options.idempotent);

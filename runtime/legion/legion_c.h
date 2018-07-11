@@ -3974,6 +3974,7 @@ extern "C" {
     legion_runtime_t runtime,
     legion_task_id_t id /* = AUTO_GENERATE_ID */,
     const char *task_name /* = NULL*/,
+    const char *variant_name /* = NULL*/,
     bool global,
     legion_execution_constraint_set_t execution_constraints,
     legion_task_layout_constraint_set_t layout_constraints,
@@ -3989,6 +3990,7 @@ extern "C" {
   legion_runtime_preregister_task_variant_fnptr(
     legion_task_id_t id /* = AUTO_GENERATE_ID */,
     const char *task_name /* = NULL*/,
+    const char *variant_name /* = NULL*/,
     legion_execution_constraint_set_t execution_constraints,
     legion_task_layout_constraint_set_t layout_constraints,
     legion_task_config_options_t options,
