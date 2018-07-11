@@ -1650,7 +1650,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       size_t num_requirements = reqs.size();
-      initialize_operation(ctx, true, num_requirements);
+      initialize_operation(ctx, false, num_requirements);
+      // We actually want to track summary operations
+      track_parent = true;
+      context_index = ctx->register_new_summary_operation(this);
       requirements = reqs;
       instances = insts;
       parent_indices = indices;
