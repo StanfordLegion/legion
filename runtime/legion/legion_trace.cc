@@ -2669,11 +2669,20 @@ namespace Legion {
       for (unsigned idx = 1; idx < instructions.size(); ++idx)
         slice_indices_by_inst[idx] = -1U;
 #endif
+      bool round_robin_for_tasks = false;
+
+      std::set<Processor> distinct_targets;
+      for (CachedMappings::iterator it = cached_mappings.begin(); it !=
+           cached_mappings.end(); ++it)
+        distinct_targets.insert(it->second.target_procs[0]);
+      round_robin_for_tasks = distinct_targets.size() < replay_parallelism;
+
       unsigned next_slice_id = 0;
       for (std::map<TraceLocalID, Operation*>::iterator it =
            operations.begin(); it != operations.end(); ++it)
       {
-        if (it->second->get_operation_kind() == Operation::TASK_OP_KIND)
+        if (!round_robin_for_tasks &&
+            it->second->get_operation_kind() == Operation::TASK_OP_KIND)
         {
           CachedMappings::iterator finder = cached_mappings.find(it->first);
 #ifdef DEBUG_LEGION
