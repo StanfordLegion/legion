@@ -43,6 +43,10 @@ public:
                 std::map<Memory, std::vector<Processor> >* sysmem_local_procs,
                 std::map<Processor, Memory>* proc_sysmems,
                 std::map<Processor, Memory>* proc_regmems);
+  virtual void map_task(const MapperContext      ctx,
+                        const Task&              task,
+                        const MapTaskInput&      input,
+                              MapTaskOutput&     output);
 private:
   // std::vector<Processor>& procs_list;
   // std::vector<Memory>& sysmems_list;
@@ -65,6 +69,56 @@ layout_test1Mapper::layout_test1Mapper(MapperRuntime *rt, Machine machine, Proce
     proc_sysmems(*_proc_sysmems)// ,
     // proc_regmems(*_proc_regmems)
 {
+}
+
+void layout_test1Mapper::map_task(const MapperContext      ctx,
+                                  const Task&              task,
+                                  const MapTaskInput&      input,
+                                        MapTaskOutput&     output)
+{
+  if (strcmp(task.get_task_name(), "foo") != 0)
+  {
+    DefaultMapper::map_task(ctx, task, input, output);
+    return;
+  }
+  std::vector<VariantID> variants;
+  runtime->find_valid_variants(ctx, task.task_id, variants,
+      Processor::LOC_PROC);
+  VariantID chosen_variant = -1U;
+  for (unsigned idx = 0; idx < variants.size(); ++idx)
+  {
+    const char *variant_name =
+      runtime->find_task_variant_name(ctx, task.task_id, variants[idx]);
+    if (strcmp(variant_name, "hybrid1") == 0)
+    {
+      chosen_variant = variants[idx];
+      break;
+    }
+  }
+  assert(chosen_variant != -1U);
+  output.chosen_variant = chosen_variant;
+  output.task_priority = default_policy_select_task_priority(ctx, task);
+  output.postmap_task = false;
+
+  default_policy_select_target_processors(ctx, task, output.target_procs);
+
+  const TaskLayoutConstraintSet &task_layout_constraints =
+    runtime->find_task_layout_constraints(ctx, task.task_id, chosen_variant);
+  for (unsigned idx = 0; idx < task.regions.size(); ++idx)
+  {
+    std::set<FieldID> missing_fields(task.regions[idx].privilege_fields);
+    Memory target_memory = default_policy_select_target_memory(ctx,
+                                                     task.target_proc,
+                                                     task.regions[idx]);
+    if (!default_create_custom_instances(ctx, task.target_proc,
+          target_memory, task.regions[idx], idx, missing_fields,
+          task_layout_constraints , true,
+          output.chosen_instances[idx]))
+    {
+      default_report_failed_instance_creation(task, idx,
+          task.target_proc, target_memory);
+    }
+  }
 }
 
 static void create_mappers(Machine machine, HighLevelRuntime *runtime, const std::set<Processor> &local_procs)

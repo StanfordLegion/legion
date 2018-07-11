@@ -32,7 +32,8 @@ do
   local cxx = os.getenv('CXX') or 'c++'
 
   local cxx_flags = os.getenv('CC_FLAGS') or ''
-  cxx_flags = cxx_flags .. " -O2 -Wall -Werror"
+  --cxx_flags = cxx_flags .. " -O2 -Wall -Werror"
+  cxx_flags = cxx_flags .. " -g -O0"
   if os.execute('test "$(uname)" = Darwin') == 0 then
     cxx_flags =
       (cxx_flags ..
@@ -72,24 +73,35 @@ task toplevel()
   foo(r, s)
 end
 
-foo:make_variant("hybrid1")
-local foo_hybrid1 = foo:get_variant("hybrid1")
+local foo_hybrid1 = foo:make_variant("hybrid1", true)
 foo_hybrid1:add_layout_constraint(
   regentlib.layout.ordering_constraint(terralib.newlist {
     regentlib.layout.field_constraint(
-      regentlib.layout.field_path("r", {"x", "z"})),
-    regentlib.dimx,
-    regentlib.dimy,
-    regentlib.dimz,
+      "r",
+      terralib.newlist {
+        regentlib.layout.field_path("x"),
+        regentlib.layout.field_path("z"),
+      }
+    ),
+    regentlib.layout.dimx,
+    regentlib.layout.dimy,
+    regentlib.layout.dimz,
   })
 )
 foo_hybrid1:add_layout_constraint(
   regentlib.layout.ordering_constraint(terralib.newlist {
-    regentlib.dimx,
-    regentlib.dimy,
-    regentlib.dimz,
+    regentlib.layout.dimx,
+    regentlib.layout.dimy,
+    regentlib.layout.dimz,
     regentlib.layout.field_constraint(
-      regentlib.layout.field_path("r", {"y", "w"})),
+      "r",
+      terralib.newlist {
+        regentlib.layout.field_path("y"),
+        regentlib.layout.field_path("w"),
+      }
+    ),
   })
 )
+regentlib.register_variant(foo_hybrid1)
+
 regentlib.start(toplevel, clayout_test1.register_mappers)

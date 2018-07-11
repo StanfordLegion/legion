@@ -187,8 +187,8 @@ ast.privilege:leaf("Privilege", {"privilege", "region", "field_path"})
 -- Layout Constraints
 
 ast:inner("layout")
-ast.layout:leaf("Dim", {"index"})
-ast.layout:leaf("Field", {"field_path"})
+ast.layout:leaf("Dim", {"index"}):set_memoize()
+ast.layout:leaf("Field", {"region_name", "field_paths"})
 ast.layout:leaf("Ordering", {"dimensions"})
 
 -- Node Types (Unspecialized)
