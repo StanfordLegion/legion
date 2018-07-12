@@ -104,6 +104,7 @@ void layout_test1Mapper::map_task(const MapperContext      ctx,
 
   const TaskLayoutConstraintSet &task_layout_constraints =
     runtime->find_task_layout_constraints(ctx, task.task_id, chosen_variant);
+  output.chosen_instances.resize(task.regions.size());
   for (unsigned idx = 0; idx < task.regions.size(); ++idx)
   {
     std::set<FieldID> missing_fields(task.regions[idx].privilege_fields);

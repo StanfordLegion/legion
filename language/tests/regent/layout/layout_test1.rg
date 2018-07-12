@@ -102,6 +102,34 @@ foo_hybrid1:add_layout_constraint(
     ),
   })
 )
+foo_hybrid1:add_layout_constraint(
+  regentlib.layout.ordering_constraint(terralib.newlist {
+    regentlib.layout.dimx,
+    regentlib.layout.dimy,
+    regentlib.layout.dimz,
+    regentlib.layout.field_constraint(
+      "s",
+      terralib.newlist {
+        regentlib.layout.field_path("x"),
+        regentlib.layout.field_path("y"),
+        regentlib.layout.field_path("z"),
+      }
+    ),
+  })
+)
+foo_hybrid1:add_layout_constraint(
+  regentlib.layout.ordering_constraint(terralib.newlist {
+    regentlib.layout.dimx,
+    regentlib.layout.dimy,
+    regentlib.layout.dimz,
+    regentlib.layout.field_constraint(
+      "s",
+      terralib.newlist {
+        regentlib.layout.field_path("w"),
+      }
+    ),
+  })
+)
 regentlib.register_variant(foo_hybrid1)
 
 regentlib.start(toplevel, clayout_test1.register_mappers)
