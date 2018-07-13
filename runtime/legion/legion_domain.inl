@@ -551,8 +551,8 @@ namespace Legion {
   //----------------------------------------------------------------------------
   {
     // Can't convert to rect if we have a sparsity map
-    assert(dense());
-    const Rect<DIM,T> result = bounds;
+    assert(this->dense());
+    const Rect<DIM,T> result = this->bounds;
     return result;
   }
 
