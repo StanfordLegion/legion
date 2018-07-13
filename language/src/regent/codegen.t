@@ -566,7 +566,12 @@ local physical_region_get_base_pointer_thunk = terralib.memoize(
 local function physical_region_get_base_pointer(cx, region_type, index_type, field_type,
                                                 field_path, physical_region, field_id)
   local fastest_index = 1
-  local expected_stride = terralib.sizeof(field_type)
+  local expected_stride
+  if regentlib.is_regent_array(field_type) then
+    expected_stride = terralib.sizeof(field_type.elem_type)
+  else
+    expected_stride = terralib.sizeof(field_type)
+  end
   if cx.orderings[region_type] and cx.orderings[region_type][field_path] then
     local ordering, stride = unpack(cx.orderings[region_type][field_path])
     assert(#ordering > 0)
