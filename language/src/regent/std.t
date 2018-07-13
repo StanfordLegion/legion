@@ -4386,17 +4386,48 @@ std.layout.dimx = ast.layout.Dim { index = c.DIM_X }
 std.layout.dimy = ast.layout.Dim { index = c.DIM_Y }
 std.layout.dimz = ast.layout.Dim { index = c.DIM_Z }
 std.layout.dimf = ast.layout.Dim { index = c.DIM_F }
+
 function std.layout.field_path(...)
   return data.newtuple(...)
 end
+
 function std.layout.field_constraint(region_name, field_paths)
   return ast.layout.Field {
     region_name = region_name,
     field_paths = field_paths,
   }
 end
+
 function std.layout.ordering_constraint(dimensions)
   return ast.layout.Ordering { dimensions = dimensions }
 end
+
+function std.layout.make_index_ordering_from_constraint(constraint)
+  assert(constraint:is(ast.layout.Ordering))
+  local ordering = terralib.newlist()
+  constraint.dimensions:map(function(dimension)
+      if dimension == std.layout.dimx then
+        ordering:insert(1)
+      elseif dimension == std.layout.dimy then
+        ordering:insert(2)
+      elseif dimension == std.layout.dimz then
+        ordering:insert(3)
+      end
+    end)
+  assert(#ordering == #constraint.dimensions - 1)
+  return ordering
+end
+
+std.layout.default_layout = terralib.memoize(function(index_type)
+  local dimensions = terralib.newlist { std.layout.dimx }
+  if index_type.dim > 1 then
+    dimensions:insert(std.layout.dimy)
+  end
+  if index_type.dim > 2 then
+    dimensions:insert(std.layout.dimz)
+  end
+  dimensions:insert(std.layout.dimf)
+  return dimensions
+end)
 
 return std

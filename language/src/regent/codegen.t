@@ -95,6 +95,7 @@ function context:new_local_scope(divergence, must_epoch, must_epoch_point, break
     variant = self.variant,
     expected_return_type = self.expected_return_type,
     constraints = self.constraints,
+    orderings = self.orderings,
     task = self.task,
     task_meta = self.task_meta,
     leaf = self.leaf,
@@ -111,12 +112,13 @@ function context:new_local_scope(divergence, must_epoch, must_epoch_point, break
   }, context)
 end
 
-function context:new_task_scope(expected_return_type, constraints, leaf, task_meta, task, ctx, runtime)
+function context:new_task_scope(expected_return_type, constraints, orderings, leaf, task_meta, task, ctx, runtime)
   assert(expected_return_type and task and ctx and runtime)
   return setmetatable({
     variant = self.variant,
     expected_return_type = expected_return_type,
     constraints = constraints,
+    orderings = orderings,
     task = task,
     task_meta = task_meta,
     leaf = leaf,
@@ -443,7 +445,7 @@ function context:get_cleanup_items()
   return quote [items] end
 end
 
-local function physical_region_get_base_pointer_setup(index_type, field_type,
+local function physical_region_get_base_pointer_setup(index_type, field_type, fastest_index, expected_stride,
                                                       runtime, physical_region, field_id)
   assert(index_type and field_type and runtime and physical_region and field_id)
 
@@ -455,7 +457,6 @@ local function physical_region_get_base_pointer_setup(index_type, field_type,
     elem_type = field_type
   end
 
-  local expected_stride = terralib.sizeof(elem_type)
   local dims = data.range(2, dim + 1)
   local strides = terralib.newlist()
   strides:insert(expected_stride)
@@ -518,15 +519,9 @@ local function physical_region_get_base_pointer_setup(index_type, field_type,
            end
          end)]
 
-      -- WARNING: The compiler assumes SOA, so the first stride should
-      -- be equal to the element size. However, the runtime gets
-      -- confused on instances with only a single element, and may
-      -- return a different value. In those cases, force the stride to
-      -- its expected value to avoid problems downstream.
-      std.assert(offsets[0].offset == [expected_stride] or
+      std.assert(offsets[ [fastest_index - 1] ].offset == [expected_stride] or
                  c.legion_domain_get_volume(domain) <= 1,
                  "stride does not match expected value")
-      offsets[0].offset = [expected_stride]
 
       -- Fix up the base pointer so it points to the origin (zero),
       -- regardless of where rect is located. This allows us to do
@@ -550,7 +545,7 @@ local function physical_region_get_base_pointer_setup(index_type, field_type,
 end
 
 local physical_region_get_base_pointer_thunk = terralib.memoize(
-  function(index_type, field_type)
+  function(index_type, field_type, fastest_index, expected_stride)
     assert(index_type and field_type)
 
     local runtime = terralib.newsymbol(c.legion_runtime_t, "runtime")
@@ -558,7 +553,7 @@ local physical_region_get_base_pointer_thunk = terralib.memoize(
     local field_id = terralib.newsymbol(c.legion_field_id_t, "field_id")
 
     local actions, base_pointer, strides = physical_region_get_base_pointer_setup(
-      index_type, field_type, runtime, physical_region, field_id)
+      index_type, field_type, fastest_index, expected_stride, runtime, physical_region, field_id)
 
     local terra get_base_pointer([runtime], [physical_region], [field_id])
       [actions]
@@ -568,15 +563,23 @@ local physical_region_get_base_pointer_thunk = terralib.memoize(
     return terralib.newlist({get_base_pointer, strides})
   end)
 
-local function physical_region_get_base_pointer(cx, index_type, field_type,
-                                                physical_region, field_id)
+local function physical_region_get_base_pointer(cx, region_type, index_type, field_type,
+                                                field_path, physical_region, field_id)
+  local fastest_index = 1
+  local expected_stride = terralib.sizeof(field_type)
+  if cx.orderings[region_type] and cx.orderings[region_type][field_path] then
+    local ordering, stride = unpack(cx.orderings[region_type][field_path])
+    assert(#ordering > 0)
+    fastest_index = ordering[1]
+    expected_stride = stride
+  end
   -- FIXME: The opt-compile-time code path improves compile time and
   -- has the same runtime performance, but has potential issues on
   -- non-x86 due to its use of an aggregate return value, so we can't
   -- make it the default just yet.
   if std.config["opt-compile-time"] then
     local thunk, expected_strides = unpack(physical_region_get_base_pointer_thunk(
-      index_type, field_type))
+      index_type, field_type, fastest_index, expected_stride))
 
     local base_pointer
     if regentlib.is_regent_array(field_type) then
@@ -609,7 +612,7 @@ local function physical_region_get_base_pointer(cx, index_type, field_type,
     return actions, base_pointer, result_strides
   else
     return physical_region_get_base_pointer_setup(
-      index_type, field_type, cx.runtime, physical_region, field_id)
+      index_type, field_type, fastest_index, expected_stride, cx.runtime, physical_region, field_id)
   end
 end
 
@@ -3762,11 +3765,11 @@ function codegen.expr_region(cx, node)
   local physical_regions = field_paths:map(function(_) return pr end)
 
   local pr_actions, base_pointers, strides = unpack(data.zip(unpack(
-    data.zip(field_types, field_ids, field_privileges):map(
+    data.zip(field_types, field_paths, field_ids, field_privileges):map(
       function(field)
-        local field_type, field_id, field_privilege = unpack(field)
+        local field_type, field_path, field_id, field_privilege = unpack(field)
         return terralib.newlist({
-          physical_region_get_base_pointer(cx, index_type, field_type, pr, field_id)})
+          physical_region_get_base_pointer(cx, region_type, index_type, field_type, field_path, pr, field_id)})
   end))))
   pr_actions = pr_actions or terralib.newlist()
   base_pointers = base_pointers or terralib.newlist()
@@ -9086,8 +9089,55 @@ function codegen.top_task(cx, node)
   local params_map_symbol = task:has_params_map_symbol() and
     task:get_params_map_symbol()
 
+  local orderings = data.newmap()
+  if variant:has_layout_constraints() then
+    local region_types = data.newmap()
+    data.filter(
+      function(symbol)
+        return std.is_region(symbol:gettype())
+      end, task:get_param_symbols()):map(
+      function(symbol)
+        region_types[symbol:getname()] = symbol:gettype()
+      end)
+    variant:get_layout_constraints():map(function(constraint)
+      local ordering = std.layout.make_index_ordering_from_constraint(constraint)
+
+      local dimensions = constraint.dimensions
+      local field_constraint_i = data.filteri(function(dimension)
+        return dimension:is(ast.layout.Field)
+      end, dimensions)
+      if #field_constraint_i > 1 or #field_constraint_i == 0 then
+        error("there must be one field constraint in the annotation")
+      end
+      local field_constraint = dimensions[field_constraint_i[1]]
+
+      local region_type = region_types[field_constraint.region_name]
+      if not orderings[region_type] then
+        orderings[region_type] = data.newmap()
+      end
+
+      if field_constraint_i[1] ~= 1 then
+        field_constraint.field_paths:map(function(field_path)
+          local field_type = std.get_field_path(region_type:fspace(), field_path)
+          local expected_stride = terralib.sizeof(field_type)
+          orderings[region_type][field_path] = data.newtuple(ordering, expected_stride)
+        end)
+      else
+        local struct_size = data.reduce(function(a, b) return a + b end,
+          field_constraint.field_paths:map(function(field_path)
+            return terralib.sizeof(std.get_field_path(region_type:fspace(), field_path))
+          end),
+          0)
+        field_constraint.field_paths:map(function(field_path)
+          orderings[region_type][field_path] = data.newtuple(ordering, struct_size)
+        end)
+      end
+    end)
+  end
+
   local cx = cx:new_task_scope(return_type,
                                task:get_constraints(),
+                               orderings,
                                variant:get_config_options().leaf,
                                task, c_task, c_context, c_runtime)
 
@@ -9234,7 +9284,7 @@ function codegen.top_task(cx, node)
               local field_path, field_type = unpack(field)
               local field_id = field_ids_by_field_path[field_path:hash()]
               return terralib.newlist({
-                physical_region_get_base_pointer(cx, index_type, field_type, physical_region, field_id)})
+                physical_region_get_base_pointer(cx, region_type, index_type, field_type, field_path, physical_region, field_id)})
         end))))
 
         physical_region_actions:insertall(pr_actions or {})

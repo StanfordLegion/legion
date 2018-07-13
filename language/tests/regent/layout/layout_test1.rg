@@ -63,7 +63,7 @@ fspace fs
 task foo(r : region(ispace(int2d), fs),
          s : region(ispace(int2d), fs))
 where
-  reads writes(r)
+  reads writes(r, s)
 do
 end
 
@@ -83,16 +83,14 @@ foo_hybrid1:add_layout_constraint(
         regentlib.layout.field_path("z"),
       }
     ),
-    regentlib.layout.dimx,
     regentlib.layout.dimy,
-    regentlib.layout.dimz,
+    regentlib.layout.dimx,
   })
 )
 foo_hybrid1:add_layout_constraint(
   regentlib.layout.ordering_constraint(terralib.newlist {
     regentlib.layout.dimx,
     regentlib.layout.dimy,
-    regentlib.layout.dimz,
     regentlib.layout.field_constraint(
       "r",
       terralib.newlist {
@@ -104,9 +102,6 @@ foo_hybrid1:add_layout_constraint(
 )
 foo_hybrid1:add_layout_constraint(
   regentlib.layout.ordering_constraint(terralib.newlist {
-    regentlib.layout.dimx,
-    regentlib.layout.dimy,
-    regentlib.layout.dimz,
     regentlib.layout.field_constraint(
       "s",
       terralib.newlist {
@@ -115,13 +110,14 @@ foo_hybrid1:add_layout_constraint(
         regentlib.layout.field_path("z"),
       }
     ),
+    regentlib.layout.dimx,
+    regentlib.layout.dimy,
   })
 )
 foo_hybrid1:add_layout_constraint(
   regentlib.layout.ordering_constraint(terralib.newlist {
     regentlib.layout.dimx,
     regentlib.layout.dimy,
-    regentlib.layout.dimz,
     regentlib.layout.field_constraint(
       "s",
       terralib.newlist {
