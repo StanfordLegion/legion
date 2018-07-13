@@ -1269,28 +1269,23 @@ function base.task:is_shard_task()
   return string.sub(tostring(self:get_name()), 0, 6) == "<shard"
 end
 
-function base.task:make_variant(name, inherit_primary)
+function base.task:make_variant(name)
   assert(not self.is_complete)
   local variant = base.new_variant(self, name)
-  if inherit_primary then
-    assert(self:has_primary_variant())
-    local primary_variant = self:get_primary_variant()
-    variant:set_definition(primary_variant:get_definition())
-    variant:set_config_options(primary_variant:get_config_options())
-  end
   return variant
 end
 
-function base.task:add_complete_thunk(complete_thunk)
+function base.task:set_compile_thunk(compile_thunk)
   assert(not self.is_complete)
-  self.complete_thunks:insert(complete_thunk)
+  self.compile_thunk = compile_thunk
 end
 
 function base.task:complete()
   if not self.is_complete then
     self.is_complete = true
-    for _, thunk in ipairs(self.complete_thunks) do
-      thunk()
+    if not self.compile_thunk then return end
+    for _, variant in ipairs(self.variants) do
+      self.compile_thunk(variant)
     end
   end
   return self
@@ -1348,7 +1343,7 @@ do
       parallel_task = false,
 
       -- Compilation continuations:
-      complete_thunks = terralib.newlist(),
+      compile_thunk = false,
       is_complete = false,
     }, base.task)
   end

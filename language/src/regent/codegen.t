@@ -9483,46 +9483,29 @@ function codegen.top(cx, node)
 
     if not node.body then return task end
 
-    if not (node.annotations.cuda:is(ast.annotation.Demand) and
-            cudahelper.check_cuda_available())
-    then
-      if node.annotations.cuda:is(ast.annotation.Demand) then
+    task:set_compile_thunk(
+      function(variant)
+        local cx = context.new_global_scope(variant)
+        return codegen.top_task(cx, node)
+    end)
+
+    local cpu_variant = task:get_primary_variant()
+    cpu_variant:set_ast(node)
+    std.register_variant(cpu_variant)
+
+    if node.annotations.cuda:is(ast.annotation.Demand) then 
+      if not cudahelper.check_cuda_available() then
         report.warn(node,
           "ignoring demand pragma at " .. node.span.source ..
           ":" .. tostring(node.span.start.line) ..
           " since the CUDA compiler is unavailable")
+      else
+        local cuda_variant = task:make_variant("cuda")
+        std.register_variant(cuda_variant)
+        task:set_cuda_variant(cuda_variant)
       end
-      local cpu_variant = task:get_primary_variant()
-      cpu_variant:set_ast(node)
-      task:add_complete_thunk(
-        function()
-          local cx = context.new_global_scope(cpu_variant)
-          return codegen.top_task(cx, node)
-      end)
-      std.register_variant(cpu_variant)
-      return task
-    else
-      local cpu_variant = task:get_primary_variant()
-      cpu_variant:set_ast(node)
-      task:add_complete_thunk(
-        function()
-          local cx = context.new_global_scope(cpu_variant)
-          return codegen.top_task(cx, node)
-      end)
-      std.register_variant(cpu_variant)
-
-      local cuda_variant = task:make_variant("cuda")
-      cuda_variant:set_is_cuda(true)
-      task:add_complete_thunk(
-        function()
-          local cx = context.new_global_scope(cuda_variant)
-          return codegen.top_task(cx, node)
-      end)
-      std.register_variant(cuda_variant)
-      task:set_cuda_variant(cuda_variant)
-
-      return task
     end
+    return task
 
   elseif node:is(ast.typed.top.Fspace) then
     return codegen.top_fspace(cx, node)

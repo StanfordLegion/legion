@@ -73,7 +73,7 @@ task toplevel()
   foo(r, s)
 end
 
-local foo_hybrid1 = foo:make_variant("hybrid1", true)
+local foo_hybrid1 = foo:make_variant("hybrid1")
 foo_hybrid1:add_layout_constraint(
   regentlib.layout.ordering_constraint(terralib.newlist {
     regentlib.layout.field_constraint(
