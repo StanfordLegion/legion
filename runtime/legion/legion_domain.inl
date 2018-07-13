@@ -546,6 +546,17 @@ namespace Legion {
   }
 
   //----------------------------------------------------------------------------
+  template<int DIM, typename T>
+  inline DomainT<DIM,T>::operator Rect<DIM,T>(void) const
+  //----------------------------------------------------------------------------
+  {
+    // Can't convert to rect if we have a sparsity map
+    assert(dense());
+    const Rect<DIM,T> result = bounds;
+    return result;
+  }
+
+  //----------------------------------------------------------------------------
   inline DomainPoint::DomainPoint(void)
     : dim(0)
   //----------------------------------------------------------------------------
