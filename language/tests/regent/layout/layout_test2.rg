@@ -1,4 +1,4 @@
--- Copyright 2018 Stanford University, Los Alamos National Laboratory
+-- Copyright 2018 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -32,7 +32,8 @@ do
   local cxx = os.getenv('CXX') or 'c++'
 
   local cxx_flags = os.getenv('CC_FLAGS') or ''
-  cxx_flags = cxx_flags .. " -O2 -Wall -Werror"
+  --cxx_flags = cxx_flags .. " -O2 -Wall -Werror"
+  cxx_flags = cxx_flags .. " -g -O0"
   if os.execute('test "$(uname)" = Darwin') == 0 then
     cxx_flags =
       (cxx_flags ..
@@ -59,31 +60,31 @@ fspace fs
   w : double;
 }
 
-task foo(is : ispace(int2d),
+task foo(is : ispace(int1d),
          r  : region(is, fs),
          s  : region(is, fs))
 where
   reads writes(r, s)
 do
   for p in is do
-    r[p].{x, y, z, w} = p.x * 3 + p.y * 11
-    s[p].{x, y, z, w} = p.x * 7 + p.y * 13
+    r[p].{x, y, z, w} = p * 11
+    s[p].{x, y, z, w} = p * 13
   end
 end
 
-task bar(is : ispace(int2d),
+task bar(is : ispace(int1d),
          r  : region(is, fs),
          s  : region(is, fs))
 where
   reads writes(r, s)
 do
   for p in is do
-    r[p].{x, y, z, w} = p.x * 3 + p.y * 11
-    s[p].{x, y, z, w} = p.x * 7 + p.y * 13
+    r[p].{x, y, z, w} = p * 11
+    s[p].{x, y, z, w} = p * 13
   end
 end
 
-task check(is : ispace(int2d),
+task check(is : ispace(int1d),
            r  : region(is, fs),
            s  : region(is, fs),
            t  : region(is, fs),
@@ -105,7 +106,7 @@ do
 end
 
 task toplevel()
-  var is = ispace(int2d, {5, 10})
+  var is = ispace(int1d, 13)
   var r  = region(is, fs)
   var s  = region(is, fs)
   var t  = region(is, fs)
@@ -125,13 +126,11 @@ foo_hybrid1:add_layout_constraint(
         regentlib.layout.field_path("z"),
       }
     ),
-    regentlib.layout.dimy,
     regentlib.layout.dimx,
   })
 )
 foo_hybrid1:add_layout_constraint(
   regentlib.layout.ordering_constraint(terralib.newlist {
-    regentlib.layout.dimy,
     regentlib.layout.dimx,
     regentlib.layout.field_constraint(
       "r",
@@ -153,13 +152,11 @@ foo_hybrid1:add_layout_constraint(
       }
     ),
     regentlib.layout.dimx,
-    regentlib.layout.dimy,
   })
 )
 foo_hybrid1:add_layout_constraint(
   regentlib.layout.ordering_constraint(terralib.newlist {
     regentlib.layout.dimx,
-    regentlib.layout.dimy,
     regentlib.layout.field_constraint(
       "s",
       terralib.newlist {

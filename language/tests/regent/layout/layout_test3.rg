@@ -32,7 +32,8 @@ do
   local cxx = os.getenv('CXX') or 'c++'
 
   local cxx_flags = os.getenv('CC_FLAGS') or ''
-  cxx_flags = cxx_flags .. " -O2 -Wall -Werror"
+  --cxx_flags = cxx_flags .. " -O2 -Wall -Werror"
+  cxx_flags = cxx_flags .. " -g -O0"
   if os.execute('test "$(uname)" = Darwin') == 0 then
     cxx_flags =
       (cxx_flags ..
@@ -59,31 +60,31 @@ fspace fs
   w : double;
 }
 
-task foo(is : ispace(int2d),
+task foo(is : ispace(int3d),
          r  : region(is, fs),
          s  : region(is, fs))
 where
   reads writes(r, s)
 do
   for p in is do
-    r[p].{x, y, z, w} = p.x * 3 + p.y * 11
-    s[p].{x, y, z, w} = p.x * 7 + p.y * 13
+    r[p].{x, y, z, w} = p.x * 3 + p.y * 11 + p.y * 123
+    s[p].{x, y, z, w} = p.x * 7 + p.y * 13 + p.y * 129
   end
 end
 
-task bar(is : ispace(int2d),
+task bar(is : ispace(int3d),
          r  : region(is, fs),
          s  : region(is, fs))
 where
   reads writes(r, s)
 do
   for p in is do
-    r[p].{x, y, z, w} = p.x * 3 + p.y * 11
-    s[p].{x, y, z, w} = p.x * 7 + p.y * 13
+    r[p].{x, y, z, w} = p.x * 3 + p.y * 11 + p.y * 123
+    s[p].{x, y, z, w} = p.x * 7 + p.y * 13 + p.y * 129
   end
 end
 
-task check(is : ispace(int2d),
+task check(is : ispace(int3d),
            r  : region(is, fs),
            s  : region(is, fs),
            t  : region(is, fs),
@@ -105,7 +106,7 @@ do
 end
 
 task toplevel()
-  var is = ispace(int2d, {5, 10})
+  var is = ispace(int3d, {7, 13, 17})
   var r  = region(is, fs)
   var s  = region(is, fs)
   var t  = region(is, fs)
@@ -125,6 +126,7 @@ foo_hybrid1:add_layout_constraint(
         regentlib.layout.field_path("z"),
       }
     ),
+    regentlib.layout.dimz,
     regentlib.layout.dimy,
     regentlib.layout.dimx,
   })
@@ -132,6 +134,7 @@ foo_hybrid1:add_layout_constraint(
 foo_hybrid1:add_layout_constraint(
   regentlib.layout.ordering_constraint(terralib.newlist {
     regentlib.layout.dimy,
+    regentlib.layout.dimz,
     regentlib.layout.dimx,
     regentlib.layout.field_constraint(
       "r",
@@ -153,11 +156,13 @@ foo_hybrid1:add_layout_constraint(
       }
     ),
     regentlib.layout.dimx,
+    regentlib.layout.dimz,
     regentlib.layout.dimy,
   })
 )
 foo_hybrid1:add_layout_constraint(
   regentlib.layout.ordering_constraint(terralib.newlist {
+    regentlib.layout.dimz,
     regentlib.layout.dimx,
     regentlib.layout.dimy,
     regentlib.layout.field_constraint(
