@@ -60,17 +60,60 @@ fspace fs
   w : double;
 }
 
-task foo(r : region(ispace(int2d), fs),
-         s : region(ispace(int2d), fs))
+task foo(is : ispace(int2d),
+         r  : region(is, fs),
+         s  : region(is, fs))
 where
   reads writes(r, s)
 do
+  for p in is do
+    r[p].{x, y, z, w} = p.x * 3 + p.y * 11
+    s[p].{x, y, z, w} = p.x * 7 + p.y * 13
+  end
+end
+
+task bar(is : ispace(int2d),
+         r  : region(is, fs),
+         s  : region(is, fs))
+where
+  reads writes(r, s)
+do
+  for p in is do
+    r[p].{x, y, z, w} = p.x * 3 + p.y * 11
+    s[p].{x, y, z, w} = p.x * 7 + p.y * 13
+  end
+end
+
+task check(is : ispace(int2d),
+           r  : region(is, fs),
+           s  : region(is, fs),
+           t  : region(is, fs),
+           w  : region(is, fs))
+where
+  reads(r, s, t, w)
+do
+  for p in is do
+    regentlib.assert(r[p].x == t[p].x, "test failed")
+    regentlib.assert(r[p].y == t[p].y, "test failed")
+    regentlib.assert(r[p].z == t[p].z, "test failed")
+    regentlib.assert(r[p].w == t[p].w, "test failed")
+
+    regentlib.assert(s[p].x == w[p].x, "test failed")
+    regentlib.assert(s[p].y == w[p].y, "test failed")
+    regentlib.assert(s[p].z == w[p].z, "test failed")
+    regentlib.assert(s[p].w == w[p].w, "test failed")
+  end
 end
 
 task toplevel()
-  var r = region(ispace(int2d, {5, 10}), fs)
-  var s = region(ispace(int2d, {5, 10}), fs)
-  foo(r, s)
+  var is = ispace(int2d, {5, 10})
+  var r  = region(is, fs)
+  var s  = region(is, fs)
+  var t  = region(is, fs)
+  var w  = region(is, fs)
+  foo(is, r, s)
+  bar(is, t, w)
+  check(is, r, s, t, w)
 end
 
 local foo_hybrid1 = foo:make_variant("hybrid1")
@@ -89,8 +132,8 @@ foo_hybrid1:add_layout_constraint(
 )
 foo_hybrid1:add_layout_constraint(
   regentlib.layout.ordering_constraint(terralib.newlist {
-    regentlib.layout.dimx,
     regentlib.layout.dimy,
+    regentlib.layout.dimx,
     regentlib.layout.field_constraint(
       "r",
       terralib.newlist {

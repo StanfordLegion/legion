@@ -457,11 +457,14 @@ local function physical_region_get_base_pointer_setup(index_type, field_type, fa
     elem_type = field_type
   end
 
-  local dims = data.range(2, dim + 1)
+  local dims = data.range(1, dim + 1)
   local strides = terralib.newlist()
-  strides:insert(expected_stride)
-  for i = 2, dim do
-    strides:insert(terralib.newsymbol(c.size_t, "stride" .. tostring(i)))
+  for i = 1, dim do
+    if fastest_index == i then
+      strides:insert(expected_stride)
+    else
+      strides:insert(terralib.newsymbol(c.size_t, "stride" .. tostring(i)))
+    end
   end
 
   local get_accessor = c["legion_physical_region_get_field_accessor_array_" .. tostring(dim) .. "d"]
@@ -495,7 +498,13 @@ local function physical_region_get_base_pointer_setup(index_type, field_type, fa
 
   actions = quote
     [actions];
-    [dims:map(function(i) return quote var [ strides[i] ] end end)];
+    [dims:map(function(i)
+      if fastest_index ~= i then
+        return quote var [ strides[i] ] end
+      else
+        return quote end
+      end
+    end)];
     for idx = 0, [num_fields] do
       var accessor = [get_accessor](physical_region, field_id + [idx])
 
@@ -536,7 +545,11 @@ local function physical_region_get_base_pointer_setup(index_type, field_type, fa
 
       [dims:map(
          function(i)
-           return quote [ strides[i] ] = offsets[i-1].offset end
+           if fastest_index ~= i then
+             return quote [ strides[i] ] = offsets[i-1].offset end
+           else
+             return quote end
+           end
          end)]
       [destroy_accessor](accessor)
     end
@@ -959,7 +972,7 @@ function ref:new(node, value_expr, value_type, field_path)
 end
 
 local function get_element_pointer(cx, node, region_types, index_type, field_type,
-                                   base_pointer, strides, index)
+                                   base_pointer, strides, field_path, index)
   if bounds_checks then
     local terra check(runtime : c.legion_runtime_t,
                       ctx : c.legion_context_t,
@@ -992,48 +1005,82 @@ local function get_element_pointer(cx, node, region_types, index_type, field_typ
     end
   end
 
+  local ordering
+  local expected_stride
+
+  for i = 1, #region_types do
+    local region_type = region_types[i]
+    if cx.orderings[region_type] and cx.orderings[region_type][field_path] then
+      local region_ordering, stride = unpack(cx.orderings[region_type][field_path])
+      assert(#region_ordering > 0)
+      if ordering then
+        --- TODO: all bounds in a bounded type must have the same layout for now
+        data.zip(ordering, region_ordering):map(function(pair)
+          local o1, o2 = unpack(pair)
+          assert(o1 == o2)
+        end)
+        assert(expected_stride == stride)
+      else
+        ordering = region_ordering
+        expected_stride = stride
+      end
+    else
+      ordering = std.layout.make_index_ordering_from_constraint(
+          std.layout.default_layout(region_type:ispace().index_type))
+      expected_stride = terralib.sizeof(field_type)
+    end
+  end
+  assert(#ordering == ((not index_type.fields and 1) or #index_type.fields))
+
   -- Note: This code is performance-critical and tends to be sensitive
   -- to small changes. Please thoroughly performance-test any changes!
+  local index_value
   if std.is_bounded_type(index_type) then
-    if not index_type.fields then
-      -- Assumes stride[1] == terralib.sizeof(field_type)
-      return `(@[&field_type](&base_pointer[ [index].__ptr.__ptr ]))
-    elseif #index_type.fields == 1 then
-      -- Assumes stride[1] == terralib.sizeof(field_type)
-      local field = index_type.fields[1]
-      return `(@[&field_type](&base_pointer[ [index].__ptr.__ptr.[field] ]))
-    else
-      local offset
-      for i, field in ipairs(index_type.fields) do
-        if offset then
-          offset = `(offset + [index].__ptr.__ptr.[ field ] * [ strides[i] ])
-        else
-          offset = `([index].__ptr.__ptr.[ field ] * [ strides[i] ])
-        end
-      end
-      return `(@([&field_type]([&int8](base_pointer) + offset)))
-    end
+    index_value = `([index].__ptr.__ptr)
   elseif std.is_index_type(index_type) then
+    index_value = `([index].__ptr)
+  else
+    assert(false)
+  end
+
+  if expected_stride == terralib.sizeof(field_type) then
     if not index_type.fields then
       -- Assumes stride[1] == terralib.sizeof(field_type)
-      return `(@[&field_type](&base_pointer[ [index].__ptr ]))
+      return `(@[&field_type](&base_pointer[ [index_value] ]))
     elseif #index_type.fields == 1 then
       -- Assumes stride[1] == terralib.sizeof(field_type)
-      local field = index_type.fields[1]
-      return `(@[&field_type](&base_pointer[ [index].__ptr.[field] ]))
+      local field = index_type.fields[ ordering[1] ]
+      return `(@[&field_type](&base_pointer[ [index_value].[field] ]))
     else
       local offset
       for i, field in ipairs(index_type.fields) do
         if offset then
-          offset = `(offset + [index].__ptr.[ field ] * [ strides[i] ])
+          offset = `(offset + [index_value].[ field ] * [ strides[i] ])
         else
-          offset = `([index].__ptr.[ field ] * [ strides[i] ])
+          offset = `([index_value].[ field ] * [ strides[i] ])
         end
       end
       return `(@([&field_type]([&int8](base_pointer) + offset)))
     end
   else
-    assert(false)
+    -- Assumes more than one field contiguously locate
+    local access_type = int8[expected_stride]
+    if not index_type.fields then
+      return `(@[&field_type](&([&access_type](base_pointer))[ [index_value] ]))
+    elseif #index_type.fields == 1 then
+      local field = index_type.fields[ ordering[1] ]
+      return `(@[&field_type](&([&access_type](base_pointer))[ [index_value].[field] ]))
+    else
+      local offset
+      for i, field in ipairs(index_type.fields) do
+        if offset then
+          offset = `(offset + [index_value].[ field ] * [ strides[i] ])
+        else
+          offset = `([index_value].[ field ] * [ strides[i] ])
+        end
+      end
+      return `(@([&field_type]([&int8](base_pointer) + offset)))
+    end
   end
 end
 
@@ -1122,23 +1169,23 @@ function ref:__ref(cx, expr_type)
 
   local values
   if not expr_type or std.type_maybe_eq(std.as_read(expr_type), value_type) then
-    values = data.zip(field_types, base_pointers, strides):map(
+    values = data.zip(field_types, base_pointers, strides, absolute_field_paths):map(
       function(field)
-        local field_type, base_pointer, stride = unpack(field)
-        return get_element_pointer(cx, self.node, region_types, self.value_type, field_type, base_pointer, stride, value)
+        local field_type, base_pointer, stride, field_path = unpack(field)
+        return get_element_pointer(cx, self.node, region_types, self.value_type, field_type, base_pointer, stride, field_path, value)
       end)
   else
     assert(expr_type:isvector() or std.is_vptr(expr_type) or std.is_sov(expr_type))
-    values = data.zip(field_types, base_pointers, strides):map(
+    values = data.zip(field_types, base_pointers, strides, absolute_field_paths):map(
       function(field)
-        local field_type, base_pointer, stride = unpack(field)
+        local field_type, base_pointer, stride, field_path = unpack(field)
         local vec
         if std.type_eq(field_type, std.ptr) then
           vec = expr_type.impl_type
         else
           vec = vector(field_type, std.as_read(expr_type).N)
         end
-        return `(@[&vec](&[get_element_pointer(cx, self.node, region_types, self.value_type, field_type, base_pointer, stride, value)]))
+        return `(@[&vec](&[get_element_pointer(cx, self.node, region_types, self.value_type, field_type, base_pointer, stride, field_path, value)]))
       end)
     value_type = expr_type
   end
@@ -1386,7 +1433,7 @@ function aref:__ref(cx, index)
 
   base_pointer = `([base_pointer][ [index] ])
 
-  value = get_element_pointer(cx, self.node, region_types, self.value_type, field_type.elem_type, base_pointer, strides, value)
+  value = get_element_pointer(cx, self.node, region_types, self.value_type, field_type.elem_type, base_pointer, strides, absolute_field_path, value)
 
   return actions, value
 end

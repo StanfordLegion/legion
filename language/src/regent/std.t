@@ -4427,7 +4427,7 @@ std.layout.default_layout = terralib.memoize(function(index_type)
     dimensions:insert(std.layout.dimz)
   end
   dimensions:insert(std.layout.dimf)
-  return dimensions
+  return std.layout.ordering_constraint(dimensions)
 end)
 
 return std
