@@ -290,10 +290,12 @@ namespace Legion {
       virtual unsigned register_new_child_operation(Operation *op,
                const std::vector<StaticDependence> *dependences) = 0;
       virtual unsigned register_new_close_operation(CloseOp *op) = 0;
+      virtual unsigned register_new_summary_operation(TraceSummaryOp *op) = 0;
       virtual void add_to_prepipeline_queue(Operation *op) = 0;
       virtual void add_to_dependence_queue(Operation *op) = 0;
       virtual void add_to_post_task_queue(TaskContext *ctx, RtEvent wait_on,
           const void *result, size_t size, PhysicalInstance instance) = 0;
+      virtual void register_executing_child(Operation *op) = 0;
       virtual void register_child_executed(Operation *op) = 0;
       virtual void register_child_complete(Operation *op) = 0;
       virtual void register_child_commit(Operation *op) = 0; 
@@ -919,6 +921,7 @@ namespace Legion {
       virtual unsigned register_new_child_operation(Operation *op,
                 const std::vector<StaticDependence> *dependences);
       virtual unsigned register_new_close_operation(CloseOp *op);
+      virtual unsigned register_new_summary_operation(TraceSummaryOp *op);
       virtual void add_to_prepipeline_queue(Operation *op);
       void process_prepipeline_stage(void);
       virtual void add_to_dependence_queue(Operation *op);
@@ -926,6 +929,7 @@ namespace Legion {
       virtual void add_to_post_task_queue(TaskContext *ctx, RtEvent wait_on,
           const void *result, size_t size, PhysicalInstance instance);
       void process_post_end_tasks(void);
+      virtual void register_executing_child(Operation *op);
       virtual void register_child_executed(Operation *op);
       virtual void register_child_complete(Operation *op);
       virtual void register_child_commit(Operation *op); 
@@ -1058,6 +1062,7 @@ namespace Legion {
       // Track whether this task has finished executing
       unsigned total_children_count; // total number of sub-operations
       unsigned total_close_count; 
+      unsigned total_summary_count;
       unsigned outstanding_children_count;
       LegionMap<Operation*,GenerationID,
                 EXECUTING_CHILD_ALLOC>::tracked executing_children;
@@ -1532,10 +1537,12 @@ namespace Legion {
       virtual unsigned register_new_child_operation(Operation *op,
                 const std::vector<StaticDependence> *dependences);
       virtual unsigned register_new_close_operation(CloseOp *op);
+      virtual unsigned register_new_summary_operation(TraceSummaryOp *op);
       virtual void add_to_prepipeline_queue(Operation *op);
       virtual void add_to_dependence_queue(Operation *op);
       virtual void add_to_post_task_queue(TaskContext *ctx, RtEvent wait_on,
           const void *result, size_t size, PhysicalInstance instance);
+      virtual void register_executing_child(Operation *op);
       virtual void register_child_executed(Operation *op);
       virtual void register_child_complete(Operation *op);
       virtual void register_child_commit(Operation *op); 
@@ -1848,10 +1855,12 @@ namespace Legion {
       virtual unsigned register_new_child_operation(Operation *op,
                 const std::vector<StaticDependence> *dependences);
       virtual unsigned register_new_close_operation(CloseOp *op);
+      virtual unsigned register_new_summary_operation(TraceSummaryOp *op);
       virtual void add_to_prepipeline_queue(Operation *op);
       virtual void add_to_dependence_queue(Operation *op);
       virtual void add_to_post_task_queue(TaskContext *ctx, RtEvent wait_on,
           const void *result, size_t size, PhysicalInstance instance);
+      virtual void register_executing_child(Operation *op);
       virtual void register_child_executed(Operation *op);
       virtual void register_child_complete(Operation *op);
       virtual void register_child_commit(Operation *op); 

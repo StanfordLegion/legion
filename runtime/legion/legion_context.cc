@@ -1923,7 +1923,7 @@ namespace Legion {
         tree_context(rt->allocate_region_tree_context()), context_uid(uid), 
         remote_context(remote), full_inner_context(full_inner),
         parent_req_indexes(parent_indexes), virtual_mapped(virt_mapped), 
-        total_children_count(0), total_close_count(0), 
+        total_children_count(0), total_close_count(0), total_summary_count(0),
         outstanding_children_count(0), outstanding_prepipeline(0),
         outstanding_dependence(false), outstanding_post_task(0),
         current_trace(NULL),previous_trace(NULL),
@@ -4517,6 +4517,25 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    unsigned InnerContext::register_new_summary_operation(TraceSummaryOp *op)
+    //--------------------------------------------------------------------------
+    {
+      // For now we just bump our counter
+      unsigned result = total_summary_count++;
+      const unsigned outstanding_count = 
+        __sync_add_and_fetch(&outstanding_children_count,1);
+      // Only need to check if we are not tracing by frames
+      if ((context_configuration.min_frames_to_schedule == 0) && 
+          (context_configuration.max_window_size > 0) && 
+            (outstanding_count > context_configuration.max_window_size))
+        perform_window_wait();
+      if (runtime->legion_spy_enabled)
+        LegionSpy::log_child_operation_index(get_context_uid(), result, 
+                                             op->get_unique_op_id()); 
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
     void InnerContext::perform_window_wait(void)
     //--------------------------------------------------------------------------
     {
@@ -4826,6 +4845,17 @@ namespace Legion {
         PostEndArgs args(launch_next_op, this);
         runtime->issue_runtime_meta_task(args, LG_THROUGHPUT_WORK_PRIORITY);
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::register_executing_child(Operation *op)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock child_lock(child_op_lock);
+#ifdef DEBUG_LEGION
+      assert(executing_children.find(op) == executing_children.end());
+#endif
+      executing_children[op] = op->get_generation();
     }
 
     //--------------------------------------------------------------------------
@@ -8596,6 +8626,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    unsigned LeafContext::register_new_summary_operation(TraceSummaryOp *op)
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+      return 0;
+    }
+
+    //--------------------------------------------------------------------------
     void LeafContext::add_to_prepipeline_queue(Operation *op)
     //--------------------------------------------------------------------------
     {
@@ -8612,6 +8650,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void LeafContext::add_to_post_task_queue(TaskContext *ctx, RtEvent wait_on,
         const void *result, size_t size, PhysicalInstance instance)
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void LeafContext::register_executing_child(Operation *op)
     //--------------------------------------------------------------------------
     {
       assert(false);
@@ -9790,6 +9835,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    unsigned InlineContext::register_new_summary_operation(TraceSummaryOp *op)
+    //--------------------------------------------------------------------------
+    {
+      return enclosing->register_new_summary_operation(op);
+    }
+
+    //--------------------------------------------------------------------------
     void InlineContext::add_to_prepipeline_queue(Operation *op)
     //--------------------------------------------------------------------------
     {
@@ -9809,6 +9861,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       enclosing->add_to_post_task_queue(ctx, wait_on, result, size, inst);
+    }
+
+    //--------------------------------------------------------------------------
+    void InlineContext::register_executing_child(Operation *op)
+    //--------------------------------------------------------------------------
+    {
+      enclosing->register_executing_child(op);
     }
 
     //--------------------------------------------------------------------------

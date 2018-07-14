@@ -1651,6 +1651,9 @@ namespace Legion {
     {
       size_t num_requirements = reqs.size();
       initialize_operation(ctx, false, num_requirements);
+      // We actually want to track summary operations
+      track_parent = true;
+      context_index = ctx->register_new_summary_operation(this);
       requirements = reqs;
       instances = insts;
       parent_indices = indices;
@@ -2332,6 +2335,7 @@ namespace Legion {
         TraceSummaryOp *op = runtime->get_available_summary_op();
         op->initialize_summary(context, invalidator->get_unique_op_id(),
             it->requirements, it->instances, it->parent_indices);
+        context->register_executing_child(op);
         op->execute_dependence_analysis();
         op->add_mapping_reference(op->get_generation());
       }
@@ -2669,11 +2673,19 @@ namespace Legion {
       for (unsigned idx = 1; idx < instructions.size(); ++idx)
         slice_indices_by_inst[idx] = -1U;
 #endif
+      bool round_robin_for_tasks = false;
+
+      std::set<Processor> distinct_targets;
+      for (CachedMappings::iterator it = cached_mappings.begin(); it !=
+           cached_mappings.end(); ++it)
+        distinct_targets.insert(it->second.target_procs[0]);
+      round_robin_for_tasks = distinct_targets.size() < replay_parallelism;
+
       unsigned next_slice_id = 0;
       for (std::map<TraceLocalID, Memoizable*>::iterator it =
            operations.begin(); it != operations.end(); ++it)
       {
-        if (it->second->is_memoizable_task())
+        if (!round_robin_for_tasks && it->second->is_memoizable_task())
         {
           CachedMappings::iterator finder = cached_mappings.find(it->first);
 #ifdef DEBUG_LEGION

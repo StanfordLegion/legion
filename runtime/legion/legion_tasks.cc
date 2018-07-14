@@ -3285,21 +3285,25 @@ namespace Legion {
         // Might have constraints for extra region requirements
         if (it->first >= physical_instances.size())
           continue;
+        const InstanceSet &instances = physical_instances[it->first]; 
+        if (no_access_regions[it->first])
+          continue;
         LayoutConstraints *constraints = 
           runtime->find_layout_constraints(it->second);
-        const InstanceSet &instances = physical_instances[it->first]; 
+        bool all_conflicts = true;
         for (unsigned idx = 0; idx < instances.size(); idx++)
         {
           PhysicalManager *manager = instances[idx].get_manager();
-          if (manager->conflicts(constraints))
-            REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
-                          "Invalid mapper output. Mapper %s selected variant "
-                          "%ld for task %s (ID %lld). But instance selected "
-                          "for region requirement %d fails to satisfy the "
-                          "corresponding constraints.", 
-                          local_mapper->get_mapper_name(), impl->vid,
-                          get_task_name(), get_unique_id(), it->first)
+          all_conflicts = all_conflicts && manager->conflicts(constraints);
         }
+        if (all_conflicts)
+          REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                        "Invalid mapper output. Mapper %s selected variant "
+                        "%ld for task %s (ID %lld). But instance selected "
+                        "for region requirement %d fails to satisfy the "
+                        "corresponding constraints.", 
+                        local_mapper->get_mapper_name(), impl->vid,
+                        get_task_name(), get_unique_id(), it->first)
       }
       // Now we can test against the execution constraints
       const ExecutionConstraintSet &execution_constraints = 

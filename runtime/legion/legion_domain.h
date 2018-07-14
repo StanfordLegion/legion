@@ -206,6 +206,9 @@ namespace Legion {
     DomainT<DIM,T>& operator=(const Realm::Rect<DIM,T2> &bounds);
     DomainT<DIM,T>& operator=(const DomainT<DIM,T> &rhs);
     DomainT<DIM,T>& operator=(const Realm::IndexSpace<DIM,T> &rhs);
+  public:
+    // Support conversion back to rect
+    operator Rect<DIM,T>(void) const;
   };
 
   /**
