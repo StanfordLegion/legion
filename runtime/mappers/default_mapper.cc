@@ -26,6 +26,7 @@
 #define STATIC_BREADTH_FIRST          false
 #define STATIC_STEALING_ENABLED       false
 #define STATIC_MAX_SCHEDULE_COUNT     8
+#define STATIC_MEMOIZE                false
 
 // This is the default implementation of the mapper interface for 
 // the general low level runtime
@@ -65,7 +66,8 @@ namespace Legion {
         max_steal_count(STATIC_MAX_STEAL_COUNT),
         breadth_first_traversal(STATIC_BREADTH_FIRST),
         stealing_enabled(STATIC_STEALING_ENABLED),
-        max_schedule_count(STATIC_MAX_SCHEDULE_COUNT)
+        max_schedule_count(STATIC_MAX_SCHEDULE_COUNT),
+        memoize(STATIC_MEMOIZE)
     //--------------------------------------------------------------------------
     {
       log_mapper.spew("Initializing the default mapper for "
@@ -85,7 +87,7 @@ namespace Legion {
           } } while(0);
 #define BOOL_ARG(argname, varname) do {       \
           if (!strcmp(argv[i], argname)) {    \
-            varname = (atoi(argv[++i]) != 0); \
+            varname = true;                   \
             continue;                         \
           } } while(0);
           INT_ARG("-dm:thefts", max_steals_per_theft);
@@ -93,6 +95,7 @@ namespace Legion {
           BOOL_ARG("-dm:steal", stealing_enabled);
           BOOL_ARG("-dm:bft", breadth_first_traversal);
           INT_ARG("-dm:sched", max_schedule_count);
+          BOOL_ARG("-dm:memoize", memoize);
 #undef BOOL_ARG
 #undef INT_ARG
         }
@@ -3582,6 +3585,16 @@ namespace Legion {
     {
       log_mapper.spew("Default map_dataflow_graph in %s", get_mapper_name());
       // TODO: Implement this
+    }
+
+    //--------------------------------------------------------------------------
+    void DefaultMapper::memoize_operation(const MapperContext  ctx,
+                                          const Mappable&      mappable,
+                                          const MemoizeInput&  input,
+                                                MemoizeOutput& output)
+    //--------------------------------------------------------------------------
+    {
+      output.memoize = input.traced && memoize;
     }
 
     //--------------------------------------------------------------------------

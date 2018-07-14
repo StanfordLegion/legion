@@ -291,13 +291,6 @@ namespace Legion {
 		      context, unique_id);
       }
 
-      static inline void log_trace_operation(UniqueID context,
-                                             UniqueID unique_id)
-      {
-        log_spy.print("Trace Operation %llu %llu",
-                      context, unique_id);
-      }
-
       static inline void log_copy_operation(UniqueID context,
                                             UniqueID unique_id)
       {
@@ -361,6 +354,19 @@ namespace Legion {
                                                   UniqueID must_op)
       {
         log_spy.print("Must Epoch Operation %llu %llu", context, must_op);
+      }
+
+      static inline void log_summary_operation(UniqueID context,
+                                               UniqueID unique_id)
+      {
+        log_spy.print("Summary Operation %llu %llu", context, unique_id);
+      }
+
+      static inline void log_summary_op_creator(UniqueID internal_op_id,
+                                                UniqueID creator_op_id)
+      {
+        log_spy.print("Summary Operation Creator %llu %llu",
+		      internal_op_id, creator_op_id);
       }
 
       static inline void log_dependent_partition_operation(UniqueID context,
@@ -798,12 +804,11 @@ namespace Legion {
                   post.id, src_fid, src_event.id, dst_fid, dst_event.id, redop);
       }
 
-      static inline void log_copy_intersect(LgEvent post, int is_region,
-                                            IDType index, unsigned field,
-                                            unsigned tree_id)
+      static inline void log_copy_intersect(LgEvent post, 
+                                            int is_region, IDType index)
       {
-        log_spy.print("Copy Intersect " IDFMT " %d " IDFMT " %d %d",
-                      post.id, is_region, index, field, tree_id);
+        log_spy.print("Copy Intersect " IDFMT " %d " IDFMT,
+                      post.id, is_region, index);
       }
 
       static inline void log_fill_events(UniqueID op_unique_id,
@@ -824,12 +829,11 @@ namespace Legion {
                       post.id, fid, dst_event.id);
       }
 
-      static inline void log_fill_intersect(LgEvent post, int is_region,
-                                            IDType index, unsigned field,
-                                            unsigned tree_id)
+      static inline void log_fill_intersect(LgEvent post, 
+                                            int is_region, IDType index)
       {
-        log_spy.print("Fill Intersect " IDFMT " %d " IDFMT " %d %d",
-		      post.id, is_region, index, field, tree_id);
+        log_spy.print("Fill Intersect " IDFMT " %d " IDFMT,
+		      post.id, is_region, index);
       } 
 
       static inline void log_deppart_events(UniqueID op_unique_id,
@@ -844,6 +848,12 @@ namespace Legion {
         log_spy.print("Deppart Events %llu %d " IDFMT " " IDFMT,
                       op_unique_id, handle.get_id(), pre.id, post.id);
       }
+
+      static inline void log_replay_operation(UniqueID op_unique_id)
+      {
+        log_spy.print("Replay Operation %llu", op_unique_id);
+      }
+
 #endif
     }; // namespace LegionSpy
 

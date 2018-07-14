@@ -1020,13 +1020,21 @@ namespace Realm {
   //
 
   LocalUtilityProcessor::LocalUtilityProcessor(Processor _me, CoreReservationSet& crs,
-					       size_t _stack_size, bool _force_kthreads)
+					       size_t _stack_size, bool _force_kthreads, bool _pin_util_proc)
     : LocalTaskProcessor(_me, Processor::UTIL_PROC)
   {
     CoreReservationParameters params;
     params.set_num_cores(1);
-    params.set_alu_usage(params.CORE_USAGE_SHARED);
-    params.set_fpu_usage(params.CORE_USAGE_MINIMAL);
+    if (_pin_util_proc)
+    {
+      params.set_alu_usage(params.CORE_USAGE_EXCLUSIVE);
+      params.set_fpu_usage(params.CORE_USAGE_EXCLUSIVE);
+    }
+    else
+    {
+      params.set_alu_usage(params.CORE_USAGE_SHARED);
+      params.set_fpu_usage(params.CORE_USAGE_MINIMAL);
+    }
     params.set_ldst_usage(params.CORE_USAGE_SHARED);
     params.set_max_stack_size(_stack_size);
 

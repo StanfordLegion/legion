@@ -159,7 +159,7 @@ do
   var nodes_subgraph = g.nodes / subgraphs
   -- upper bound is |V|-1 iterations - should normally take much less than that
   for steps = 1, g.nodes do
-    c.legion_runtime_begin_trace(__runtime(), __context(), 0)
+    c.legion_runtime_begin_trace(__runtime(), __context(), 0, false)
 
     var count = 0
     __demand(__parallel)

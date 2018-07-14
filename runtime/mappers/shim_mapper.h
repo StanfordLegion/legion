@@ -102,6 +102,7 @@ namespace Legion {
         virtual unsigned get_context_index(void) const;
         virtual int get_depth(void) const;
         virtual const char* get_task_name(void) const;
+        virtual bool has_trace(void) const;
       public:
         inline UniqueID get_unique_task_id(void) const { return unique_id; }
       public:

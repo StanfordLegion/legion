@@ -392,6 +392,49 @@ namespace Legion {
     };
 
     /**
+     * \struct PhysicalTraceInfo
+     */
+    struct PhysicalTraceInfo {
+    public:
+      explicit PhysicalTraceInfo(Operation *op, bool initialize = true);
+      PhysicalTraceInfo(Operation *op, Memoizable *memo);
+    public:
+      void record_merge_events(ApEvent &result, ApEvent e1, ApEvent e2) const;
+      void record_merge_events(ApEvent &result, ApEvent e1, 
+                               ApEvent e2, ApEvent e3) const;
+      void record_merge_events(ApEvent &result, 
+                               const std::set<ApEvent> &events) const;
+      void record_op_sync_event(ApEvent &result) const;
+    public:
+      void record_issue_copy(ApEvent &result, RegionNode *node,
+                             const std::vector<CopySrcDstField>& src_fields,
+                             const std::vector<CopySrcDstField>& dst_fields,
+                             ApEvent precondition,
+                             PredEvent predicate_guard,
+                             IndexTreeNode *intersect,
+                             IndexSpaceExpression *mask,
+                             ReductionOpID redop,
+                             bool reduction_fold) const;
+      void record_issue_fill(ApEvent &result, RegionNode *node,
+                             const std::vector<CopySrcDstField> &fields,
+                             const void *fill_buffer, size_t fill_size,
+                             ApEvent precondition,
+                             PredEvent predicate_guard,
+#ifdef LEGION_SPY
+                             UniqueID fill_uid,
+#endif
+                             IndexTreeNode *intersect,
+                             IndexSpaceExpression *mask) const;
+      void record_empty_copy(CompositeView *view,
+                             const FieldMask &copy_mask,
+                             MaterializedView *dst) const;
+    public:
+      Operation *const op;
+      PhysicalTemplate *const tpl;
+      const bool recording;
+    };
+
+    /**
      * \class ProjectionInfo
      * Projection information for index space requirements
      */
@@ -464,26 +507,26 @@ namespace Legion {
       UniqueID op_id;
       unsigned index; // region requirement index
       IndexSpaceExpression *expr;
-    }; 
+    };  
 
     /**
      * \struct TraversalInfo
      */
-    struct TraversalInfo {
+    struct TraversalInfo : public PhysicalTraceInfo {
     public:
-      TraversalInfo(ContextID ctx, Operation *op, unsigned index, 
+      TraversalInfo(ContextID ctx, const PhysicalTraceInfo &info, unsigned idx,
                     const RegionRequirement &req, VersionInfo &version_info,
                     const FieldMask &traversal_mask, 
                     std::set<RtEvent> &map_applied_events);
     public:
       const ContextID ctx;
-      Operation *const op;
       const unsigned index;
       const RegionRequirement &req;
       VersionInfo &version_info;
       const FieldMask traversal_mask;
       const UniqueID context_uid;
       std::set<RtEvent> &map_applied_events;
+      ContextID logical_ctx;
     };
 
     /**
@@ -570,7 +613,11 @@ namespace Legion {
       bool projection_domain_dominates(IndexSpaceNode *next_space) const;
     public:
       void print_state(TreeStateLogger *logger, 
-                       const FieldMask &capture_mask) const;
+                       const FieldMask &capture_mask,
+                       RegionNode *node) const;
+      void print_state(TreeStateLogger *logger, 
+                       const FieldMask &capture_mask,
+                       PartitionNode *node) const;
     public:
       OpenState open_state;
       ReductionOpID redop;
@@ -835,7 +882,6 @@ namespace Legion {
                     std::set<RtEvent> &ready_events) const;
     public:
       void print_physical_state(const FieldMask &capture_mask,
-          LegionMap<LegionColor,FieldMask>::aligned &to_traverse,
                                 TreeStateLogger *logger);
     public:
       RegionTreeNode *const node;
@@ -982,8 +1028,9 @@ namespace Legion {
     public:
       void print_physical_state(RegionTreeNode *node,
                                 const FieldMask &capture_mask,
-                         LegionMap<LegionColor,FieldMask>::aligned &to_traverse,
                                 TreeStateLogger *logger);
+    public:
+      void update_physical_state(PhysicalState *state);
     protected:
       VersionState* create_new_version_state(VersionID vid);
     public:

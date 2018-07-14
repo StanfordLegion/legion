@@ -13,8 +13,10 @@
 -- limitations under the License.
 
 -- runs-with:
--- [["-ll:cpu", "4", "-fflow-spmd", "1", "-fflow-spmd-shardsize", "4"],
---  ["-ll:cpu", "2", "-fflow-spmd", "1", "-fflow-spmd-shardsize", "8", "-map_locally"]]
+-- [["-ll:cpu", "4", "-ntx", "2", "-nty", "2", "-dm:memoize", "-tsteps", "2", "-tprune", "2"],
+--  ["-ll:cpu", "4", "-fflow-spmd", "1", "-fflow-spmd-shardsize", "4", "-ftrace", "0"],
+--  ["-ll:cpu", "4", "-fflow-spmd", "1", "-fflow-spmd-shardsize", "4", "-tsteps", "2", "-tprune", "2", "-dm:memoize"],
+--  ["-ll:cpu", "2", "-fflow-spmd", "1", "-fflow-spmd-shardsize", "8", "-map_locally", "-ftrace", "0"]]
 
 -- Inspired by https://github.com/ParRes/Kernels/tree/master/LEGION/Stencil
 
@@ -527,6 +529,7 @@ task main()
     --   fill_(private[i], init)
     -- end
 
+    __demand(__trace)
     for t = 0, tsteps do
       -- __demand(__parallel)
       for i = 0, nt2 do

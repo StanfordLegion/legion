@@ -15,9 +15,13 @@
 -- runs-with:
 -- [
 --   ["-ll:cpu", "4"],
---   ["-ll:cpu", "2", "-fflow-spmd", "1", "-fflow-spmd-shardsize", "2"],
+--   ["-ll:cpu", "2", "-fflow-spmd", "1", "-fflow-spmd-shardsize", "2", "-ftrace", "0"],
 --   ["-ll:cpu", "5", "-fflow-spmd", "1", "-fflow-spmd-shardsize", "5", "-p", "5"]
 -- ]
+
+-- This test removed for now until we apply fix from issue #407
+--   ["-ll:cpu", "4", "-dm:memoize"],
+--   ["-ll:cpu", "2", "-fflow-spmd", "1", "-fflow-spmd-shardsize", "2", "-dm:memoize"],
 
 import "regent"
 
@@ -880,9 +884,9 @@ task toplevel()
   var steps = conf.steps
   var prune = conf.prune
   var num_loops = conf.num_loops + 2*prune
-  __demand(__spmd)
+  __demand(__spmd, __trace)
   for j = 0, num_loops do
-    -- c.legion_runtime_begin_trace(__runtime(), __context(), 0)
+    -- c.legion_runtime_begin_trace(__runtime(), __context(), 0, false)
 
     --__demand(__parallel)
     for i = 0, num_superpieces do

@@ -1027,7 +1027,7 @@ do
   var dt = dtmax
   var dthydro = dtmax
   while continue_simulation(cycle, cstop, time, tstop) do
-    c.legion_runtime_begin_trace(__runtime(), __context(), 0)
+    c.legion_runtime_begin_trace(__runtime(), __context(), 0, false)
 
     __demand(__parallel)
     for i = 0, conf.npieces do

@@ -80,6 +80,7 @@ namespace Legion {
       LAYOUT_DESC_REF = 23,
       RUNTIME_REF = 24,
       IS_EXPR_REF = 25,
+      TRACE_REF = 26,
       LAST_SOURCE_REF = 26,
     };
 
@@ -116,7 +117,8 @@ namespace Legion {
       "Region Tree Reference",                      \
       "Layout Description Reference",               \
       "Runtime Reference",                          \
-      "Index Space Expression",                     \
+      "Index Space Expression Reference",           \
+      "Physical Trace Reference",                   \
     }
 
     extern Realm::Logger log_garbage;

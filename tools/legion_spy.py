@@ -87,6 +87,7 @@ TRACE_OP_KIND = 20
 TIMING_OP_KIND = 21
 PREDICATE_OP_KIND = 22
 MUST_EPOCH_OP_KIND = 23
+SUMMARY_OP_KIND = 24
 
 OPEN_NONE = 0
 OPEN_READ_ONLY = 1
@@ -4858,13 +4859,13 @@ class Operation(object):
                  'incoming', 'outgoing', 'logical_incoming', 
                  'logical_outgoing', 'physical_incoming', 'physical_outgoing', 
                  'start_event', 'finish_event', 'inter_close_ops', 'open_ops', 
-                 'advance_ops', 'task', 'task_id', 'predicate', 'predicate_result',
+                 'advance_ops', 'summary_ops', 'task', 'task_id', 'predicate', 'predicate_result',
                  'futures', 'index_owner', 'points', 'launch_rect', 'creator', 
                  'realm_copies', 'realm_fills', 'realm_depparts', 'version_numbers', 
                  'internal_idx', 'disjoint_close_fields', 'partition_kind', 
                  'partition_node', 'node_name', 'cluster_name', 'generation', 
                  'reachable_cache', 'transitive_warning_issued', 'arrival_barriers', 
-                 'wait_barriers', 'created_futures', 'used_futures', 'merged']
+                 'wait_barriers', 'created_futures', 'used_futures', 'merged', "replayed"]
                   # If you add a field here, you must update the merge method
     def __init__(self, state, uid):
         self.state = state
@@ -4885,6 +4886,7 @@ class Operation(object):
         self.inter_close_ops = None
         self.open_ops = None
         self.advance_ops = None
+        self.summary_ops = None
         self.realm_copies = None
         self.realm_depparts = None
         self.realm_fills = None
@@ -4921,6 +4923,8 @@ class Operation(object):
         self.used_futures = None
         # Check if this operation was merged
         self.merged = False
+        # Check if this operation was physical replayed
+        self.replayed = False
 
     def is_close(self):
         return self.kind == INTER_CLOSE_OP_KIND or self.kind == POST_CLOSE_OP_KIND or \
@@ -4953,6 +4957,10 @@ class Operation(object):
         if self.points is not None:
             for point in self.points.itervalues():
                 point.op.set_context(context, False)
+        # Finaly recurse for any summary operations
+        if self.summary_ops:
+            for summary in self.summary_ops:
+                summary.set_context(context, False)
         if add:
             self.context.add_operation(self)
 
@@ -4986,7 +4994,8 @@ class Operation(object):
         assert self.kind == INTER_CLOSE_OP_KIND or \
             self.kind == READ_ONLY_CLOSE_OP_KIND or \
             self.kind == POST_CLOSE_OP_KIND or \
-            self.kind == OPEN_OP_KIND or self.kind == ADVANCE_OP_KIND
+            self.kind == OPEN_OP_KIND or \
+            self.kind == ADVANCE_OP_KIND or self.kind == SUMMARY_OP_KIND
         self.creator = creator
         self.internal_idx = idx
         # If our parent context created us we don't need to be recorded 
@@ -4996,6 +5005,8 @@ class Operation(object):
                 creator.add_open_operation(self)
             elif self.kind == ADVANCE_OP_KIND:
                 creator.add_advance_operation(self)
+            elif self.kind == SUMMARY_OP_KIND:
+                creator.add_summary_operation(self)
             else:
                 creator.add_close_operation(self)
         else:
@@ -5013,6 +5024,9 @@ class Operation(object):
         if pred.logical_outgoing is None:
             pred.logical_outgoing = set()
         pred.logical_outgoing.add(self)
+
+    def set_replayed(self):
+        self.replayed = True
 
     def get_index_launch_rect(self):
         assert self.launch_rect
@@ -5032,6 +5046,11 @@ class Operation(object):
         if self.inter_close_ops is None:
             self.inter_close_ops = list()
         self.inter_close_ops.append(close)
+
+    def add_summary_operation(self, summary):
+        if self.summary_ops is None:
+            self.summary_ops = list()
+        self.summary_ops.append(summary)
 
     def get_depth(self):
         assert self.context is not None
@@ -5655,6 +5674,8 @@ class Operation(object):
         stop_index = self.context.operations.index(self)
         for index in range(start_index, stop_index):
             prev_op = self.context.operations[index]
+            if prev_op.replayed:
+                continue
             if perform_checks:
                 found = False
                 if self.incoming:
@@ -5696,6 +5717,11 @@ class Operation(object):
         return True
 
     def perform_logical_analysis(self, perform_checks):
+        if self.replayed:
+            if self.reqs is not None:
+                for idx in range(0,len(self.reqs)):
+                    self.context.check_restricted_coherence(self, self.reqs[idx])
+            return True
         # We need a context to do this
         assert self.context is not None
         # If this operation was predicated false, then there is nothing to do
@@ -6241,12 +6267,15 @@ class Operation(object):
             TIMING_OP_KIND : "turquoise",
             PREDICATE_OP_KIND : "olivedrab1",
             MUST_EPOCH_OP_KIND : "tomato",
+            SUMMARY_OP_KIND : "darkslategray4",
             }[self.kind]
 
     def print_base_node(self, printer, dataflow):
         title = str(self)+' (UID: '+str(self.uid)+')'
         if self.task is not None and self.task.point.dim > 0:
             title += ' Point: ' + self.task.point.to_string()
+        if self.replayed:
+            title += '  (replayed)'
         label = printer.generate_html_op_label(title, self.reqs, self.mappings,
                                        self.get_color(), self.state.detailed_graphs)
         printer.println(self.node_name+' [label=<'+label+'>,fontsize=14,'+\
@@ -6638,6 +6667,15 @@ class Task(object):
         else:
             assert not other.variant
 
+    def flatten_summary_operations(self):
+        flattened = list()
+        for op in self.operations:
+            if op.summary_ops is not None:
+                for summary in op.summary_ops:
+                    flattened.append(summary)
+            flattened.append(op)
+        self.operations = flattened
+
     def perform_logical_dependence_analysis(self, perform_checks):
         # If we don't have any operations we are done
         if not self.operations:
@@ -6998,6 +7036,8 @@ class Task(object):
             title = str(self)+' (UID: '+str(self.op.uid)+')'
             if self.point.dim > 0:
                 title += ' Point: ' + self.point.to_string()
+            if self.op.replayed:
+                title += '  (replayed)'
             label = printer.generate_html_op_label(title, self.op.reqs,
                                                    self.op.mappings,
                                                    self.op.get_color(), 
@@ -7901,7 +7941,7 @@ class RealmBase(object):
 
     def set_intersect(self, intersect):
         assert self.region is not None
-        if intersect is not self.region:
+        if intersect is not self.region.index_space:
             self.intersect = intersect
 
     def is_realm_operation(self):
@@ -8070,6 +8110,8 @@ class RealmCopy(RealmBase):
             label += " (intersect with "+str(self.intersect)+")"
         if self.creator is not None:
             label += " generated by "+str(self.creator)
+            if self.creator.kind == SINGLE_TASK_KIND:
+                label += " (UID: " + str(self.creator.uid) + ")"
         lines = [[{ "label" : label, "colspan" : 3 }]]
         if self.state.detailed_graphs:
             num_fields = len(self.src_fields)
@@ -8114,7 +8156,7 @@ class RealmCopy(RealmBase):
             field_size += field.size
         shape = self.region.index_space.shape
         if self.intersect:
-            shape = shape & self.intersect.index_space.shape
+            shape = shape & self.intersect.shape
         return (field_size * shape.volume())
 
 
@@ -8720,6 +8762,10 @@ predicate_op_pat         = re.compile(
     prefix+"Predicate Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
 must_epoch_op_pat        = re.compile(
     prefix+"Must Epoch Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
+summary_op_pat        = re.compile(
+    prefix+"Summary Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
+summary_op_creator_pat        = re.compile(
+    prefix+"Summary Operation Creator (?P<uid>[0-9]+) (?P<cuid>[0-9]+)")
 dep_partition_op_pat     = re.compile(
     prefix+"Dependent Partition Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+) "+
            "(?P<pid>[0-9a-f]+) (?P<kind>[0-9]+)")
@@ -8854,8 +8900,7 @@ realm_copy_field_pat    = re.compile(
     prefix+"Copy Field (?P<id>[0-9a-f]+) (?P<srcfid>[0-9]+) "+
            "(?P<srcid>[0-9a-f]+) (?P<dstfid>[0-9]+) (?P<dstid>[0-9a-f]+) (?P<redop>[0-9]+)")
 realm_copy_intersect_pat= re.compile(
-    prefix+"Copy Intersect (?P<id>[0-9a-f]+) (?P<reg>[0-1]+) "+
-           "(?P<index>[0-9a-f]+) (?P<field>[0-9]+) (?P<tid>[0-9]+)")
+    prefix+"Copy Intersect (?P<id>[0-9a-f]+) (?P<reg>[0-1]+) (?P<index>[0-9a-f]+)")
 realm_fill_pat          = re.compile(
     prefix+"Fill Events (?P<uid>[0-9]+) (?P<ispace>[0-9]+) (?P<fspace>[0-9]+) "+
            "(?P<tid>[0-9]+) (?P<preid>[0-9a-f]+) (?P<postid>[0-9a-f]+)")
@@ -8863,8 +8908,7 @@ realm_fill_field_pat    = re.compile(
     prefix+"Fill Field (?P<id>[0-9a-f]+) (?P<fid>[0-9]+) "+
            "(?P<dstid>[0-9a-f]+)")
 realm_fill_intersect_pat= re.compile(
-    prefix+"Fill Intersect (?P<id>[0-9a-f]+) (?P<reg>[0-1]+) "+
-           "(?P<index>[0-9a-f]+) (?P<field>[0-9]+) (?P<tid>[0-9]+)")
+    prefix+"Fill Intersect (?P<id>[0-9a-f]+) (?P<reg>[0-1]+) (?P<index>[0-9a-f]+)")
 realm_deppart_pat       = re.compile(
     prefix+"Deppart Events (?P<uid>[0-9]+) (?P<ispace>[0-9]+) "+
            "(?P<preid>[0-9a-f]+) (?P<postid>[0-9a-f]+)")
@@ -8872,6 +8916,8 @@ barrier_arrive_pat      = re.compile(
     prefix+"Phase Barrier Arrive (?P<uid>[0-9]+) (?P<iid>[0-9a-f]+)")
 barrier_wait_pat        = re.compile(
     prefix+"Phase Barrier Wait (?P<uid>[0-9]+) (?P<iid>[0-9a-f]+)")
+replay_op_pat    = re.compile(
+    prefix+"Replay Operation (?P<uid>[0-9]+)")
 
 def parse_legion_spy_line(line, state):
     # Quick test to see if the line is even worth considering
@@ -8954,11 +9000,9 @@ def parse_legion_spy_line(line, state):
         copy = state.get_realm_copy(e)
         is_region = True if int(m.group('reg')) == 1 else False
         if is_region:
-            copy.set_intersect(state.get_region(int(m.group('index'),16),
-              int(m.group('field')), int(m.group('tid'))))
+            copy.set_intersect(state.get_index_space(int(m.group('index'),16)))
         else:
-            copy.set_intersect(state.get_partition(int(m.group('index'),16),
-              int(m.group('field')), int(m.group('tid'))))
+            copy.set_intersect(state.get_index_partition(int(m.group('index'),16)))
         return True
     m = realm_fill_pat.match(line)
     if m is not None:
@@ -8985,11 +9029,9 @@ def parse_legion_spy_line(line, state):
         fill = state.get_realm_fill(e)
         is_region = True if int(m.group('reg')) == 1 else False
         if is_region:
-            fill.set_intersect(state.get_region(int(m.group('index'),16),
-              int(m.group('field')), int(m.group('tid'))))
+            fill.set_intersect(state.get_index_space(int(m.group('index'),16)))
         else:
-            fill.set_intersect(state.get_partition(int(m.group('index'),16),
-              int(m.group('field')), int(m.group('tid'))))
+            fill.set_intersect(state.get_index_partition(int(m.group('index'),16)))
         return True
     m = realm_deppart_pat.match(line)
     if m is not None:
@@ -9346,10 +9388,7 @@ def parse_legion_spy_line(line, state):
     m = trace_pat.match(line)
     if m is not None:
         op = state.get_operation(int(m.group('uid')))
-        op.set_op_kind(TRACE_OP_KIND)
         op.set_name("Trace Op "+m.group('uid'))
-        context = state.get_task(int(m.group('ctx')))
-        op.set_context(context)
         return True
     m = copy_op_pat.match(line)
     if m is not None:
@@ -9436,6 +9475,20 @@ def parse_legion_spy_line(line, state):
         op = state.get_operation(int(m.group('uid')))
         op.set_op_kind(MUST_EPOCH_OP_KIND)
         # Don't add it to the context for now
+        return True
+    m = summary_op_pat.match(line)
+    if m is not None:
+        op = state.get_operation(int(m.group('uid')))
+        op.set_op_kind(SUMMARY_OP_KIND)
+        op.set_name("Trace Summary Op "+m.group('uid'))
+        context = state.get_task(int(m.group('ctx')))
+        op.set_context(context, False)
+        return True
+    m = summary_op_creator_pat.match(line)
+    if m is not None:
+        op = state.get_operation(int(m.group('uid')))
+        creator = state.get_operation(int(m.group('cuid')))
+        op.set_creator(creator, None)
         return True
     m = dep_partition_op_pat.match(line)
     if m is not None:
@@ -9681,6 +9734,11 @@ def parse_legion_spy_line(line, state):
     if m is not None:
         state.set_config(True)
         return True
+    m = replay_op_pat.match(line)
+    if m is not None:
+        op = state.get_operation(int(m.group('uid')))
+        op.set_replayed()
+        return True
     return False
 
 class State(object):
@@ -9826,6 +9884,9 @@ class State(object):
                 slice_ = self.slice_slice[slice_]
             assert slice_ in self.slice_index
             self.slice_index[slice_].add_point_task(point)
+        # Flatten summary operations in each context
+        for task in self.tasks.itervalues():
+            task.flatten_summary_operations()
         # Add implicit dependencies between point and index operations
         if self.detailed_logging:
             index_owners = set()

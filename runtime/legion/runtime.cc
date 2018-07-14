@@ -334,9 +334,11 @@ namespace Legion {
              context->get_task_name(), context->get_unique_id());
         }
       }
+      if (producer_op != NULL && Internal::implicit_context != NULL)
+        Internal::implicit_context->record_blocking_call();
       if (!ready_event.has_triggered())
       {
-        TaskContext *context = 
+        TaskContext *context =
           (producer_op == NULL) ? NULL : producer_op->get_context();
         if (context != NULL)
         {
@@ -364,9 +366,11 @@ namespace Legion {
              "best practices. You may notice a severe performance degradation.",
              context->get_task_name(), context->get_unique_id())
       }
+      if (producer_op != NULL && Internal::implicit_context != NULL)
+        Internal::implicit_context->record_blocking_call();
       if (!ready_event.has_triggered())
       {
-        TaskContext *context = 
+        TaskContext *context =
           (producer_op == NULL) ? NULL : producer_op->get_context();
         if (context != NULL)
         {
@@ -411,9 +415,11 @@ namespace Legion {
               "severe performance degradation.", context->get_task_name(), 
               context->get_unique_id())
       }
+      if (block && producer_op != NULL && Internal::implicit_context != NULL)
+        Internal::implicit_context->record_blocking_call();
       if (block && !ready_event.has_triggered())
       {
-        TaskContext *context = 
+        TaskContext *context =
           (producer_op == NULL) ? NULL : producer_op->get_context();
         if (context != NULL)
         {
@@ -957,6 +963,8 @@ namespace Legion {
             "execution model best practices. You may notice a severe "
             "performance degredation.", context->get_task_name(),
             context->get_unique_id())
+      if (op != NULL && Internal::implicit_context != NULL)
+        Internal::implicit_context->record_blocking_call();
       // Wait on the event that indicates the entire task has finished
       if (valid && !ready_event.has_triggered())
       {
@@ -1016,6 +1024,8 @@ namespace Legion {
       assert(is_owner());
       assert(valid);
 #endif
+      if (op != NULL && Internal::implicit_context != NULL)
+        Internal::implicit_context->record_blocking_call();
       if (!ready_event.has_triggered())
       {
         if (context != NULL)
@@ -1181,7 +1191,7 @@ namespace Legion {
         trigger_on_unmap = false;
         Runtime::trigger_event(termination_event);
       }
-      if (!references.empty())
+      if (!references.empty() && !context->owner_task->is_replaying())
         references.remove_valid_references(PHYSICAL_REGION_REF);
     }
 
@@ -1200,6 +1210,8 @@ namespace Legion {
                                               bool warn, const char *source)
     //--------------------------------------------------------------------------
     {
+      if (context != NULL)
+        context->record_blocking_call();
       if (runtime->runtime_warnings && !silence_warnings &&
           (context != NULL) && !context->is_leaf_context())
       {
@@ -1242,7 +1254,7 @@ namespace Legion {
       // Now wait for the reference to be ready
       std::set<ApEvent> wait_on;
       references.update_wait_on_events(wait_on);
-      ApEvent ref_ready = Runtime::merge_events(wait_on);
+      ApEvent ref_ready = Runtime::merge_events(NULL, wait_on);
       bool poisoned;
       if (!ref_ready.has_triggered_faultaware(poisoned))
       {
@@ -1268,7 +1280,7 @@ namespace Legion {
       {
         std::set<ApEvent> wait_on;
         references.update_wait_on_events(wait_on);
-        ApEvent ref_ready = Runtime::merge_events(wait_on);
+        ApEvent ref_ready = Runtime::merge_events(NULL, wait_on);
         return ref_ready.has_triggered();
       }
       return false;
@@ -1458,7 +1470,7 @@ namespace Legion {
         references.update_wait_on_events(wait_on);
         wait_on.insert(ready_event);
         Runtime::trigger_event(termination_event,
-                               Runtime::merge_events(wait_on));
+                               Runtime::merge_events(NULL, wait_on));
       }
       valid = false;
       mapped = false;
@@ -1952,7 +1964,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock g_lock(grant_lock);
-      ApEvent deferred_release = Runtime::merge_events(completion_events);
+      ApEvent deferred_release = Runtime::merge_events(NULL, completion_events);
       for (std::vector<ReservationRequest>::const_iterator it = 
             requests.begin(); it != requests.end(); it++)
       {
@@ -7649,7 +7661,7 @@ namespace Legion {
           handled_kinds.insert(kind);
         }
         if (!ready_events.empty())
-          ready_event = Runtime::merge_events(ready_events);
+          ready_event = Runtime::merge_events(NULL, ready_events);
       }
       // If we have a variant name, then record it
       if (registrar.task_variant_name == NULL)
@@ -7757,7 +7769,7 @@ namespace Legion {
       if (predicate_guard.exists())
       {
         // Merge in the predicate guard
-        ApEvent pre = Runtime::merge_events(precondition, ready_event, 
+        ApEvent pre = Runtime::merge_events(NULL, precondition, ready_event, 
                                             ApEvent(predicate_guard));
         // Have to protect the result in case it misspeculates
         return Runtime::ignorefaults(target.spawn(descriptor_id, 
@@ -7768,7 +7780,7 @@ namespace Legion {
         // No predicate guard
         if (!ready_event.has_triggered())
           return ApEvent(target.spawn(descriptor_id, &ctx, sizeof(ctx),requests,
-                   Runtime::merge_events(precondition, ready_event), priority));
+             Runtime::merge_events(NULL, precondition, ready_event), priority));
         return ApEvent(target.spawn(descriptor_id, &ctx, sizeof(ctx), requests, 
                                     precondition, priority));
       }
@@ -8832,7 +8844,14 @@ namespace Legion {
         max_message_size(config.max_message_size),
         gc_epoch_size(config.gc_epoch_size),
         max_local_fields(config.max_local_fields),
+        max_replay_parallelism(config.max_replay_parallelism),
         program_order_execution(config.program_order_execution),
+        dump_physical_traces(config.dump_physical_traces),
+        no_tracing(config.no_tracing),
+        no_physical_tracing(config.no_physical_tracing),
+        no_trace_optimization(config.no_trace_optimization),
+        no_fence_elision(config.no_fence_elision),
+        replay_on_cpus(config.replay_on_cpus),
         verify_disjointness(config.verify_disjointness),
         runtime_warnings(config.runtime_warnings),
         separate_runtime_instances(config.separate_runtime_instances),
@@ -9018,7 +9037,14 @@ namespace Legion {
         max_message_size(rhs.max_message_size),
         gc_epoch_size(rhs.gc_epoch_size), 
         max_local_fields(rhs.max_local_fields),
+        max_replay_parallelism(rhs.max_replay_parallelism),
         program_order_execution(rhs.program_order_execution),
+        dump_physical_traces(rhs.dump_physical_traces),
+        no_tracing(rhs.no_tracing),
+        no_physical_tracing(rhs.no_physical_tracing),
+        no_trace_optimization(rhs.no_trace_optimization),
+        no_fence_elision(rhs.no_fence_elision),
+        replay_on_cpus(rhs.replay_on_cpus),
         verify_disjointness(rhs.verify_disjointness),
         runtime_warnings(rhs.runtime_warnings),
         separate_runtime_instances(rhs.separate_runtime_instances),
@@ -11807,12 +11833,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::begin_trace(Context ctx, TraceID tid)
+    void Runtime::begin_trace(Context ctx, TraceID tid, bool logical_only)
     //--------------------------------------------------------------------------
     {
       if (ctx == DUMMY_CONTEXT)
         REPORT_DUMMY_CONTEXT("Illegal dummy context begin trace!");
-      ctx->begin_trace(tid);
+      ctx->begin_trace(tid, logical_only);
     }
 
     //--------------------------------------------------------------------------
@@ -17012,6 +17038,27 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    TraceReplayOp* Runtime::get_available_replay_op(void)
+    //--------------------------------------------------------------------------
+    {
+      return get_available(replay_op_lock, available_replay_ops);
+    }
+
+    //--------------------------------------------------------------------------
+    TraceBeginOp* Runtime::get_available_begin_op(void)
+    //--------------------------------------------------------------------------
+    {
+      return get_available(begin_op_lock, available_begin_ops);
+    }
+
+    //--------------------------------------------------------------------------
+    TraceSummaryOp* Runtime::get_available_summary_op(void)
+    //--------------------------------------------------------------------------
+    {
+      return get_available(summary_op_lock, available_summary_ops);
+    }
+
+    //--------------------------------------------------------------------------
     MustEpochOp* Runtime::get_available_epoch_op(void)
     //--------------------------------------------------------------------------
     {
@@ -17315,6 +17362,30 @@ namespace Legion {
     {
       AutoLock t_lock(trace_op_lock);
       release_operation<false>(available_trace_ops, op);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::free_replay_op(TraceReplayOp *op)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock t_lock(replay_op_lock);
+      release_operation<false>(available_replay_ops, op);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::free_begin_op(TraceBeginOp *op)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock t_lock(begin_op_lock);
+      release_operation<false>(available_begin_ops, op);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::free_summary_op(TraceSummaryOp *op)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock t_lock(summary_op_lock);
+      release_operation<false>(available_summary_ops, op);
     }
 
     //--------------------------------------------------------------------------
@@ -18739,6 +18810,12 @@ namespace Legion {
         if (!strcmp(argv[i],"-lg:safe_mapper"))
           config.unsafe_mapper = false;
         BOOL_ARG("-lg:inorder",config.program_order_execution);
+        BOOL_ARG("-lg:dump_physical_traces",config.dump_physical_traces);
+        BOOL_ARG("-lg:no_tracing",config.no_tracing);
+        BOOL_ARG("-lg:no_physical_tracing",config.no_physical_tracing);
+        BOOL_ARG("-lg:no_trace_optimization",config.no_trace_optimization);
+        BOOL_ARG("-lg:no_fence_elision",config.no_fence_elision);
+        BOOL_ARG("-lg:replay_on_cpus",config.replay_on_cpus);
         BOOL_ARG("-lg:disjointness",config.verify_disjointness);
         INT_ARG("-lg:window", config.initial_task_window_size);
         INT_ARG("-lg:hysteresis", config.initial_task_window_hysteresis);
@@ -18747,6 +18824,7 @@ namespace Legion {
         INT_ARG("-lg:message",config.max_message_size);
         INT_ARG("-lg:epoch", config.gc_epoch_size);
         INT_ARG("-lg:local", config.max_local_fields);
+        INT_ARG("-lg:parallel_replay", config.max_replay_parallelism);
         if (!strcmp(argv[i],"-lg:no_dyn"))
           config.dynamic_independence_tests = false;
         BOOL_ARG("-lg:spy",config.legion_spy_enabled);
@@ -19191,8 +19269,9 @@ namespace Legion {
         // them otherwise register them on the CPU processors
         if ((!local_util_procs.empty() && 
               (it->first.kind() == Processor::UTIL_PROC)) ||
-            (local_util_procs.empty() &&
-              (it->first.kind() == Processor::LOC_PROC)))
+            ((local_util_procs.empty() || config.replay_on_cpus) &&
+              (it->first.kind() == Processor::LOC_PROC ||
+               it->first.kind() == Processor::IO_PROC)))
         {
           registered_events.insert(RtEvent(
                 it->first.register_task(LG_SHUTDOWN_TASK_ID, shutdown_task,
@@ -19203,7 +19282,8 @@ namespace Legion {
         }
         // Profiling tasks get registered on CPUs and utility processors
         if ((it->first.kind() == Processor::LOC_PROC) ||
-            (it->first.kind() == Processor::UTIL_PROC))
+            (it->first.kind() == Processor::UTIL_PROC) ||
+            (it->first.kind() == Processor::IO_PROC))
           registered_events.insert(RtEvent(
               it->first.register_task(LG_LEGION_PROFILING_ID, rt_profiling_task,
                 no_requests, &it->second, sizeof(it->second))));
@@ -20158,6 +20238,16 @@ namespace Legion {
             RemoteContext::defer_physical_response(args);
             break;
           }
+        case LG_REPLAY_SLICE_ID:
+          {
+            PhysicalTemplate::handle_replay_slice(args);
+            break;
+          }
+        case LG_DELETE_TEMPLATE_ID:
+          {
+            PhysicalTemplate::handle_delete_template(args);
+            break;
+          }
         case LG_RETRY_SHUTDOWN_TASK_ID:
           {
             const ShutdownManager::RetryShutdownArgs *shutdown_args = 
@@ -20335,16 +20425,15 @@ namespace Legion {
     }
 #endif
 
-
     //--------------------------------------------------------------------------
     /*static*/ char* BitMaskHelper::to_string(const uint64_t *bits, int count)
     //--------------------------------------------------------------------------
     {
-      char *result = (char*)malloc((((count + 7) >> 3) + 1)*sizeof(char));
+      char *result = (char*)malloc(((((count + 63) >> 6) << 4) + 1)*sizeof(char));
       assert(result != 0);
       char *p = result;
       // special case for non-multiple-of-64
-      if((count & 63) != 0) {
+      if((count & 63) != 0 && bits[count >> 6]) {
         // each nibble (4 bits) takes one character
         int nibbles = ((count & 63) + 3) >> 2;
         sprintf(p, "%*.*" MASK_FMT, nibbles, nibbles, bits[count >> 6]);
@@ -20352,9 +20441,11 @@ namespace Legion {
       }
       // rest are whole words
       int idx = (count >> 6);
-      while(idx >= 0) {
-        sprintf(p, "%16.16" MASK_FMT, bits[--idx]);
-        p += 16;
+      while(idx > 0) {
+        if (bits[--idx] || idx == 0) {
+          sprintf(p, "%16.16" MASK_FMT, bits[idx]);
+          p += 16;
+        }
       }
       return result;
     }

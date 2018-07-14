@@ -335,6 +335,7 @@ extern "C" {
     bool inline_task;
     bool stealable;
     bool map_locally;
+    bool memoize;
     legion_task_priority_t parent_priority;
   } legion_task_options_t;
 
@@ -2275,6 +2276,13 @@ extern "C" {
                                            legion_phase_barrier_t bar);
 
   /**
+   * @see Legion::TaskLauncher::point
+   */
+  void
+  legion_task_launcher_set_point(legion_task_launcher_t launcher,
+                                 legion_domain_point_t point);
+
+  /**
    * @return Caller takes ownership of return value.
    *
    * @see Legion::IndexTaskLauncher::IndexTaskLauncher()
@@ -3078,7 +3086,8 @@ extern "C" {
   void
   legion_runtime_begin_trace(legion_runtime_t runtime,
                              legion_context_t ctx,
-                             legion_trace_id_t tid);
+                             legion_trace_id_t tid,
+                             bool memoize);
 
   /**
    * @see Legion::Runtime::end_trace()

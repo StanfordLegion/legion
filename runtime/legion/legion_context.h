@@ -300,6 +300,8 @@ namespace Legion {
       virtual void unregister_child_operation(Operation *op) = 0;
       virtual ApEvent register_fence_dependence(Operation *op) = 0;
     public:
+      virtual RtEvent get_current_mapping_fence_event(void) = 0;
+      virtual ApEvent get_current_execution_fence_event(void) = 0;
       // Break this into two pieces since we know that there are some
       // kinds of operations (like deletions) that want to act like 
       // one-sided fences (e.g. waiting on everything before) but not
@@ -309,11 +311,15 @@ namespace Legion {
       virtual void update_current_fence(FenceOp *op, 
                                         bool mapping, bool execution) = 0;
     public:
-      virtual void begin_trace(TraceID tid) = 0;
+      virtual void begin_trace(TraceID tid, bool logical_only) = 0;
       virtual void end_trace(TraceID tid) = 0;
       virtual void begin_static_trace(
                                      const std::set<RegionTreeID> *managed) = 0;
       virtual void end_static_trace(void) = 0;
+      virtual void record_previous_trace(LegionTrace *trace) = 0;
+      virtual void invalidate_trace_cache(LegionTrace *trace,
+                                          Operation *invalidator) = 0;
+      virtual void record_blocking_call(void) = 0;
     public:
       virtual void issue_frame(FrameOp *frame, ApEvent frame_termination) = 0;
       virtual void perform_frame_issue(FrameOp *frame, 
@@ -926,15 +932,21 @@ namespace Legion {
       virtual void unregister_child_operation(Operation *op);
       virtual ApEvent register_fence_dependence(Operation *op);
     public:
+      virtual RtEvent get_current_mapping_fence_event(void);
+      virtual ApEvent get_current_execution_fence_event(void);
       virtual ApEvent perform_fence_analysis(Operation *op,
-                                          bool mapping, bool execution);
+                                             bool mapping, bool execution);
       virtual void update_current_fence(FenceOp *op,
                                         bool mapping, bool execution);
     public:
-      virtual void begin_trace(TraceID tid);
+      virtual void begin_trace(TraceID tid, bool logical_only);
       virtual void end_trace(TraceID tid);
       virtual void begin_static_trace(const std::set<RegionTreeID> *managed);
       virtual void end_static_trace(void);
+      virtual void record_previous_trace(LegionTrace *trace);
+      virtual void invalidate_trace_cache(LegionTrace *trace,
+                                          Operation *invalidator);
+      virtual void record_blocking_call(void);
     public:
       virtual void issue_frame(FrameOp *frame, ApEvent frame_termination);
       virtual void perform_frame_issue(FrameOp *frame, 
@@ -1082,6 +1094,7 @@ namespace Legion {
       // Traces for this task's execution
       LegionMap<TraceID,DynamicTrace*,TASK_TRACES_ALLOC>::tracked traces;
       LegionTrace *current_trace;
+      LegionTrace *previous_trace;
       bool valid_wait_event;
       RtUserEvent window_wait;
       std::deque<ApEvent> frame_events;
@@ -1195,6 +1208,7 @@ namespace Legion {
       virtual void set_context_index(unsigned index);
       virtual int get_depth(void) const;
       virtual const char* get_task_name(void) const;
+      virtual bool has_trace(void) const;
     public:
       RemoteContext *const owner;
       unsigned context_index;
@@ -1528,15 +1542,21 @@ namespace Legion {
       virtual void unregister_child_operation(Operation *op);
       virtual ApEvent register_fence_dependence(Operation *op);
     public:
+      virtual RtEvent get_current_mapping_fence_event(void);
+      virtual ApEvent get_current_execution_fence_event(void);
       virtual ApEvent perform_fence_analysis(Operation *op,
                                              bool mapping, bool execution);
       virtual void update_current_fence(FenceOp *op,
                                         bool mapping, bool execution);
     public:
-      virtual void begin_trace(TraceID tid);
+      virtual void begin_trace(TraceID tid, bool logical_only);
       virtual void end_trace(TraceID tid);
       virtual void begin_static_trace(const std::set<RegionTreeID> *managed);
       virtual void end_static_trace(void);
+      virtual void record_previous_trace(LegionTrace *trace);
+      virtual void invalidate_trace_cache(LegionTrace *trace,
+                                          Operation *invalidator);
+      virtual void record_blocking_call(void);
     public:
       virtual void issue_frame(FrameOp *frame, ApEvent frame_termination);
       virtual void perform_frame_issue(FrameOp *frame, 
@@ -1838,15 +1858,21 @@ namespace Legion {
       virtual void unregister_child_operation(Operation *op);
       virtual ApEvent register_fence_dependence(Operation *op);
     public:
+      virtual RtEvent get_current_mapping_fence_event(void);
+      virtual ApEvent get_current_execution_fence_event(void);
       virtual ApEvent perform_fence_analysis(Operation *op,
                                              bool mapping, bool execution);
       virtual void update_current_fence(FenceOp *op,
                                         bool mapping, bool execution);
     public:
-      virtual void begin_trace(TraceID tid);
+      virtual void begin_trace(TraceID tid, bool logical_only);
       virtual void end_trace(TraceID tid);
       virtual void begin_static_trace(const std::set<RegionTreeID> *managed);
       virtual void end_static_trace(void);
+      virtual void record_previous_trace(LegionTrace *trace);
+      virtual void invalidate_trace_cache(LegionTrace *trace,
+                                          Operation *invalidator);
+      virtual void record_blocking_call(void);
     public:
       virtual void issue_frame(FrameOp *frame, ApEvent frame_termination);
       virtual void perform_frame_issue(FrameOp *frame, 

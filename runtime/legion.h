@@ -2542,6 +2542,7 @@ namespace Legion {
         CLOSE_MAPPABLE,
         FILL_MAPPABLE,
         PARTITION_MAPPABLE,
+        DYNAMIC_COLLECTIVE_MAPPABLE,
       };
       virtual MappableType get_mappable_type(void) const = 0;
       virtual const Task* as_task(void) const = 0;
@@ -2552,6 +2553,7 @@ namespace Legion {
       virtual const Close* as_close(void) const = 0;
       virtual const Fill* as_fill(void) const = 0;
       virtual const Partition* as_partition(void) const = 0;
+      virtual const DynamicCollective* as_dynamic_collective(void) const = 0;
     public:
       MapperID                                  map_id;
       MappingTagID                              tag;
@@ -2586,6 +2588,8 @@ namespace Legion {
       virtual const Close* as_close(void) const { return NULL; }
       virtual const Fill* as_fill(void) const { return NULL; }
       virtual const Partition* as_partition(void) const { return NULL; }
+      virtual const DynamicCollective* as_dynamic_collective(void) const
+        { return NULL; }
     public:
       // Task argument information
       Processor::TaskFuncID task_id; 
@@ -2638,6 +2642,8 @@ namespace Legion {
       virtual const Close* as_close(void) const { return NULL; }
       virtual const Fill* as_fill(void) const { return NULL; }
       virtual const Partition* as_partition(void) const { return NULL; }
+      virtual const DynamicCollective* as_dynamic_collective(void) const
+        { return NULL; }
     public:
       // Copy Launcher arguments
       std::vector<RegionRequirement>    src_requirements;
@@ -2677,6 +2683,8 @@ namespace Legion {
       virtual const Close* as_close(void) const { return NULL; }
       virtual const Fill* as_fill(void) const { return NULL; }
       virtual const Partition* as_partition(void) const { return NULL; }
+      virtual const DynamicCollective* as_dynamic_collective(void) const
+        { return NULL; }
     public:
       // Inline Launcher arguments
       RegionRequirement                 requirement;
@@ -2709,6 +2717,8 @@ namespace Legion {
       virtual const Close* as_close(void) const { return NULL; }
       virtual const Fill* as_fill(void) const { return NULL; }
       virtual const Partition* as_partition(void) const { return NULL; }
+      virtual const DynamicCollective* as_dynamic_collective(void) const
+        { return NULL; }
     public:
       // Acquire Launcher arguments
       LogicalRegion                     logical_region;
@@ -2742,6 +2752,8 @@ namespace Legion {
       virtual const Close* as_close(void) const { return NULL; }
       virtual const Fill* as_fill(void) const { return NULL; }
       virtual const Partition* as_partition(void) const { return NULL; }
+      virtual const DynamicCollective* as_dynamic_collective(void) const
+        { return NULL; }
     public:
       // Release Launcher arguments
       LogicalRegion                     logical_region;
@@ -2779,6 +2791,8 @@ namespace Legion {
       virtual const Close* as_close(void) const { return this; }
       virtual const Fill* as_fill(void) const { return NULL; }
       virtual const Partition* as_partition(void) const { return NULL; }
+      virtual const DynamicCollective* as_dynamic_collective(void) const
+        { return NULL; }
     public:
       // Synthesized region requirement
       RegionRequirement                 requirement;
@@ -2808,6 +2822,8 @@ namespace Legion {
       virtual const Close* as_close(void) const { return NULL; }
       virtual const Fill* as_fill(void) const { return this; }
       virtual const Partition* as_partition(void) const { return NULL; }
+      virtual const DynamicCollective* as_dynamic_collective(void) const
+        { return NULL; }
     public:
       // Synthesized region requirement
       RegionRequirement               requirement;
@@ -2846,6 +2862,8 @@ namespace Legion {
       virtual const Close* as_close(void) const { return NULL; }
       virtual const Fill* as_fill(void) const { return NULL; }
       virtual const Partition* as_partition(void) const { return this; }
+      virtual const DynamicCollective* as_dynamic_collective(void) const
+        { return NULL; }
     public:
       enum PartitionKind {
         BY_FIELD, // create partition by field
@@ -5575,7 +5593,7 @@ namespace Legion {
        * The trace ID need only be local to the enclosing context.
        * Traces are currently not permitted to be nested.
        */
-      void begin_trace(Context ctx, TraceID tid);
+      void begin_trace(Context ctx, TraceID tid, bool logical_only = false);
       /**
        * Mark the end of trace that was being performed.
        */

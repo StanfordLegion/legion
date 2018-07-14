@@ -27,11 +27,13 @@ $HAS_GPUS = $GPUs.size > 0
 
 task#calculate_new_currents[index=$i],
 task#distribute_charge[index=$i],
-task#update_voltages[index=$i],
-task#block_task[index=$i] {
+task#update_voltages[index=$i] {
   target : $HAS_GPUS ? $GPUs[$i % $GPUs.size] : $CPUs[$i % $CPUs.size];
 }
 
+task#block_task[index=$i] {
+  target : $HAS_GPUS ? $GPUs[$i % $GPUs.size] : $CPUs[$i % $CPUs.size];
+}
 task[isa=cuda and target=$p] region {
   target : $p.memories[kind=fbmem];
 }
@@ -640,6 +642,7 @@ task toplevel()
 
   __demand(__spmd)
   for j = 0, num_loops do
+    regentlib.c.legion_runtime_begin_trace(__runtime(), __context(), 0, false)
     for i = 0, num_pieces do
       calculate_new_currents(steps, rp_private[i], rp_shared[i], rp_ghost[i], rp_wires[i])
     end
@@ -649,6 +652,7 @@ task toplevel()
     for i = 0, num_pieces do
       update_voltages(rp_private[i], rp_shared[i])
     end
+    regentlib.c.legion_runtime_end_trace(__runtime(), __context(), 0)
   end
 
   for i = 0, num_pieces do
