@@ -539,7 +539,8 @@ namespace Legion {
       virtual bool is_memoizable_task(void) const { return true; }
       virtual ApEvent get_memo_completion(bool replay)
         { const ApEvent result = get_task_completion();
-          if (replay) replay_map_task_output(); return result; }
+          if (replay) replay_map_task_output();
+          return result; }
     protected:
       // Boolean for each region saying if it is virtual mapped
       std::vector<bool> virtual_mapped;
