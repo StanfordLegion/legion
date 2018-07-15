@@ -4348,20 +4348,6 @@ namespace Legion {
       return false;
     }
 
-    //--------------------------------------------------------------------------
-    bool CompositeCopyNode::empty()
-    //--------------------------------------------------------------------------
-    {
-      if (source_views.size() > 0 || reduction_views.size() > 0) return false;
-      for (LegionMap<CompositeCopyNode*,FieldMask>::aligned::const_iterator it =
-            nested_nodes.begin(); it != nested_nodes.end(); it++)
-        if (!it->first->empty()) return false;
-      for (LegionMap<CompositeCopyNode*,FieldMask>::aligned::const_iterator it =
-            child_nodes.begin(); it != child_nodes.end(); it++)
-        if (!it->first->empty()) return false;
-      return true;
-    }
-
     /////////////////////////////////////////////////////////////
     // DeferredSingleCopier
     /////////////////////////////////////////////////////////////
