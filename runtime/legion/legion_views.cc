@@ -266,7 +266,7 @@ namespace Legion {
         pop_count = FieldMask::pop_count(it->set_mask);
         ApEvent precondition = Runtime::merge_events(&trace_info, it->elements);
 #ifndef LEGION_SPY
-        if (precondition.has_triggered())
+        if (!trace_info.recording && precondition.has_triggered_faultignorant())
           continue;
 #endif
         for (int idx = 0; idx < pop_count; idx++)
@@ -852,6 +852,8 @@ namespace Legion {
 #ifndef DISTRIBUTED_INSTANCE_VIEWS
       if (!is_logical_owner())
       {
+        if (trace_info.recording)
+          assert(false);
         // If this is not the logical owner send a message to the 
         // logical owner to perform the analysis
         Serializer rez;
@@ -1193,6 +1195,8 @@ namespace Legion {
 #ifndef DISTRIBUTED_INSTANCE_VIEWS
       if (!is_logical_owner())
       {
+        if (trace_info.recording)
+          assert(false);
         // If we're not the logical owner, send a message to the
         // owner to add the copy user
         Serializer rez;
@@ -1343,10 +1347,20 @@ namespace Legion {
         {
           AutoLock v_lock(view_lock);
           add_current_user(user, copy_term, copy_mask); 
-          if (base_user)
-            issue_collect = (outstanding_gc_events.find(copy_term) ==
-                              outstanding_gc_events.end());
-          outstanding_gc_events.insert(copy_term);
+          if (trace_info.recording)
+          {
+#ifdef DEBUG_LEGION
+            assert(trace_info.tpl != NULL && trace_info.tpl->is_recording());
+#endif
+            trace_info.tpl->record_outstanding_gc_event(this, copy_term);
+          }
+          else
+          {
+            if (base_user)
+              issue_collect = (outstanding_gc_events.find(copy_term) ==
+                                outstanding_gc_events.end());
+            outstanding_gc_events.insert(copy_term);
+          }
         }
         if (issue_collect)
         {
@@ -1403,6 +1417,8 @@ namespace Legion {
 #ifndef DISTRIBUTED_INSTANCE_VIEWS
       if (!is_logical_owner())
       {
+        if (trace_info.recording)
+          assert(false);
         ApUserEvent result = Runtime::create_ap_user_event();
         Serializer rez;
         {
@@ -1662,6 +1678,8 @@ namespace Legion {
 #ifndef DISTRIBUTED_INSTANCE_VIEWS
       if (!is_logical_owner())
       {
+        if (trace_info.recording)
+          assert(false);
         Serializer rez;
         {
           RezCheck z(rez);
@@ -1850,8 +1868,16 @@ namespace Legion {
         AutoLock v_lock(view_lock);
         // Finally add our user and return if we need to issue a GC meta-task
         add_current_user(new_user, term_event, user_mask);
-        if (outstanding_gc_events.find(term_event) == 
-            outstanding_gc_events.end())
+        if (trace_info.recording)
+        {
+#ifdef DEBUG_LEGION
+          assert(trace_info.tpl != NULL && trace_info.tpl->is_recording());
+#endif
+          trace_info.tpl->record_outstanding_gc_event(this, term_event);
+          return false;
+        }
+        else if (outstanding_gc_events.find(term_event) == 
+                  outstanding_gc_events.end())
         {
           outstanding_gc_events.insert(term_event);
           return (child_color == INVALID_COLOR);
@@ -1904,6 +1930,8 @@ namespace Legion {
 #ifndef DISTRIBUTED_INSTANCE_VIEWS
       if (!is_logical_owner())
       {
+        if (trace_info.recording)
+          assert(false);
         ApUserEvent result = Runtime::create_ap_user_event();
         Serializer rez;
         {
@@ -11497,6 +11525,8 @@ namespace Legion {
 #ifndef DISTRIBUTED_INSTANCE_VIEWS
       if (!is_logical_owner())
       {
+        if (trace_info.recording)
+          assert(false);
         Serializer rez;
         {
           RezCheck z(rez);
@@ -11605,6 +11635,8 @@ namespace Legion {
 #ifndef DISTRIBUTED_INSTANCE_VIEWS
       if (!is_logical_owner())
       {
+        if (trace_info.recording)
+          assert(false);
         ApUserEvent result = Runtime::create_ap_user_event();
         Serializer rez;
         {
