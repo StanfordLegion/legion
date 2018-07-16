@@ -8636,11 +8636,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       parent_task = ctx->get_task();
+      initialize_memoizable();
       initialize_speculation(ctx, true/*track*/,
                              1/*num region requirements*/,
                              launcher.static_dependences,
                              launcher.predicate);
-      initialize_memoizable();
       // Note we give it READ WRITE EXCLUSIVE to make sure that nobody
       // can be re-ordered around this operation for mapping or
       // normal dependences.  We won't actually read or write anything.
@@ -8897,7 +8897,8 @@ namespace Legion {
       for (unsigned idx = 0; idx < mapped_instances.size(); idx++)
         acquire_preconditions.insert(mapped_instances[idx].get_ready_event());
       ApEvent sync_precondition = compute_sync_precondition(&trace_info);
-      acquire_preconditions.insert(sync_precondition);
+      if (sync_precondition.exists())
+        acquire_preconditions.insert(sync_precondition);
       ApEvent acquire_complete = 
         Runtime::merge_events(&trace_info, acquire_preconditions);
       if (runtime->legion_spy_enabled)
@@ -9380,6 +9381,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       activate_speculative(); 
+      activate_memoizable();
       mapper = NULL;
       outstanding_profiling_requests = 1; // start at 1 to guard
       profiling_reported = RtUserEvent::NO_RT_USER_EVENT;
@@ -9577,29 +9579,15 @@ namespace Legion {
 #endif
                                               );
       version_info.apply_mapping(map_applied_conditions);
+#ifdef DEBUG_LEGION
+      dump_physical_state(&requirement, 0);
+#endif
       std::set<ApEvent> release_preconditions;
       for (unsigned idx = 0; idx < mapped_instances.size(); idx++)
         release_preconditions.insert(mapped_instances[idx].get_ready_event());
-      if (!wait_barriers.empty())
-      {
-        for (std::vector<PhaseBarrier>::const_iterator it = 
-              wait_barriers.begin(); it != wait_barriers.end(); it++)
-        {
-          ApEvent e = Runtime::get_previous_phase(*it);
-          release_preconditions.insert(e);
-          if (runtime->legion_spy_enabled)
-            LegionSpy::log_phase_barrier_wait(unique_op_id, e);
-        }
-      }
-      if (!grants.empty())
-      {
-        for (std::vector<Grant>::const_iterator it = grants.begin();
-              it != grants.end(); it++)
-        {
-          ApEvent e = it->impl->acquire_grant();
-          release_preconditions.insert(e);
-        }
-      }
+      ApEvent sync_precondition = compute_sync_precondition(&trace_info);
+      if (sync_precondition.exists())
+        release_preconditions.insert(sync_precondition);
       ApEvent release_complete = 
         Runtime::merge_events(&trace_info, release_preconditions);
       if (runtime->legion_spy_enabled)
