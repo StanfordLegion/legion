@@ -155,7 +155,7 @@ namespace Legion {
           preconditions.insert(precondition);
       }
       // Kick this off to Realm
-      ApEvent precondition = Runtime::merge_events(preconditions);
+      ApEvent precondition = Runtime::merge_events(NULL, preconditions);
       Realm::ProfilingRequestSet requests;
       if (ctx->runtime->profiler != NULL)
         ctx->runtime->profiler->add_partition_request(requests,
@@ -241,7 +241,7 @@ namespace Legion {
           preconditions.insert(precondition);
       }
       // Kick this off to Realm
-      ApEvent precondition = Runtime::merge_events(preconditions);
+      ApEvent precondition = Runtime::merge_events(NULL, preconditions);
       Realm::ProfilingRequestSet requests;
       if (ctx->runtime->profiler != NULL)
         ctx->runtime->profiler->add_partition_request(requests,
@@ -336,7 +336,8 @@ namespace Legion {
           lhs->get_expr_index_space(&lhs_space, this->type_tag, false/*tight*/);
         ApEvent right_ready = 
           rhs->get_expr_index_space(&rhs_space, this->type_tag, false/*tight*/);
-        ApEvent precondition = Runtime::merge_events(left_ready, right_ready);
+        ApEvent precondition = 
+          Runtime::merge_events(NULL, left_ready, right_ready);
         Realm::ProfilingRequestSet requests;
         if (ctx->runtime->profiler != NULL)
           ctx->runtime->profiler->add_partition_request(requests,
@@ -738,7 +739,7 @@ namespace Legion {
           preconditions.insert(ready);
       }
       // Kick this off to Realm
-      ApEvent precondition = Runtime::merge_events(preconditions);
+      ApEvent precondition = Runtime::merge_events(NULL, preconditions);
       Realm::ProfilingRequestSet requests;
       if (context->runtime->profiler != NULL)
         context->runtime->profiler->add_partition_request(requests,
@@ -773,7 +774,7 @@ namespace Legion {
           preconditions.insert(ready);
       }
       // Kick this off to Realm
-      ApEvent precondition = Runtime::merge_events(preconditions);
+      ApEvent precondition = Runtime::merge_events(NULL, preconditions);
       Realm::ProfilingRequestSet requests;
       if (context->runtime->profiler != NULL)
         context->runtime->profiler->add_partition_request(requests,
@@ -804,7 +805,7 @@ namespace Legion {
       ApEvent left_ready = left_node->get_realm_index_space(left_space, false);
       ApEvent right_ready = right_node->get_realm_index_space(right_space, 
                                                               false);
-      ApEvent precondition = Runtime::merge_events(left_ready, right_ready);
+      ApEvent precondition = Runtime::merge_events(NULL,left_ready,right_ready);
       Realm::ProfilingRequestSet requests;
       if (context->runtime->profiler != NULL)
         context->runtime->profiler->add_partition_request(requests,
@@ -885,7 +886,7 @@ namespace Legion {
       if (op->has_execution_fence_event())
         preconditions.insert(op->get_execution_fence_event());
       // Kick this off to Realm
-      ApEvent precondition = Runtime::merge_events(preconditions);
+      ApEvent precondition = Runtime::merge_events(NULL, preconditions);
       Realm::IndexSpace<DIM,T> result_space;
       if (is_union)
       {
@@ -967,7 +968,7 @@ namespace Legion {
       if (op->has_execution_fence_event())
         preconditions.insert(op->get_execution_fence_event());
       // Kick this off to Realm
-      ApEvent precondition = Runtime::merge_events(preconditions);
+      ApEvent precondition = Runtime::merge_events(NULL, preconditions);
       Realm::IndexSpace<DIM,T> result_space;
       if (is_union)
       {
@@ -1031,7 +1032,7 @@ namespace Legion {
       } 
       if (op->has_execution_fence_event())
         preconditions.insert(op->get_execution_fence_event());
-      ApEvent precondition = Runtime::merge_events(preconditions);
+      ApEvent precondition = Runtime::merge_events(NULL, preconditions);
       Realm::ProfilingRequestSet union_requests;
       Realm::ProfilingRequestSet diff_requests;
       if (context->runtime->profiler != NULL)
@@ -1051,7 +1052,7 @@ namespace Legion {
       ApEvent lhs_ready = lhs_node->get_realm_index_space(lhs_space, false);
       ApEvent result(Realm::IndexSpace<DIM,T>::compute_difference(
             lhs_space, rhs_space, result_space, diff_requests,
-            Runtime::merge_events(lhs_ready, rhs_ready)));
+            Runtime::merge_events(NULL, lhs_ready, rhs_ready)));
       set_realm_index_space(context->runtime->address_space, result_space);
       // Destroy the tempory rhs space once the computation is done
       rhs_space.destroy(result);
@@ -1368,7 +1369,8 @@ namespace Legion {
       Realm::IndexSpace<DIM,T> local_space;
       ApEvent ready = get_realm_index_space(local_space, false/*tight*/);
       if (op->has_execution_fence_event())
-        ready = Runtime::merge_events(ready, op->get_execution_fence_event());
+        ready = Runtime::merge_events(NULL, ready, 
+                  op->get_execution_fence_event());
       ApEvent result(local_space.create_equal_subspaces(count, 
             granularity, subspaces, requests, ready));
 #ifdef LEGION_SPY
@@ -1476,7 +1478,7 @@ namespace Legion {
         }
       }
       if (!done_events.empty())
-        return Runtime::merge_events(done_events);
+        return Runtime::merge_events(NULL, done_events);
       else
         return ApEvent::NO_AP_EVENT;
     }
@@ -1554,7 +1556,7 @@ namespace Legion {
                                               op, DEP_PART_UNIONS);
       if (op->has_execution_fence_event())
         preconditions.insert(op->get_execution_fence_event());
-      ApEvent precondition = Runtime::merge_events(preconditions);
+      ApEvent precondition = Runtime::merge_events(NULL, preconditions);
       ApEvent result(Realm::IndexSpace<DIM,T>::compute_unions(
             lhs_spaces, rhs_spaces, subspaces, requests, precondition));
 #ifdef LEGION_SPY
@@ -1679,7 +1681,7 @@ namespace Legion {
                                               op, DEP_PART_UNIONS);
       ApEvent result(Realm::IndexSpace<DIM,T>::compute_unions(
             lhs_spaces, rhs_spaces, subspaces, requests,
-            Runtime::merge_events(preconditions)));
+            Runtime::merge_events(NULL, preconditions)));
       // Now set the index spaces for the results
       for (unsigned idx = 0; idx < colors.size(); idx++)
       {
@@ -1765,7 +1767,7 @@ namespace Legion {
                                         op, DEP_PART_INTERSECTIONS);
       if (op->has_execution_fence_event())
         preconditions.insert(op->get_execution_fence_event());
-      ApEvent precondition = Runtime::merge_events(preconditions);
+      ApEvent precondition = Runtime::merge_events(NULL, preconditions);
       ApEvent result(Realm::IndexSpace<DIM,T>::compute_intersections(
             lhs_spaces, rhs_spaces, subspaces, requests, precondition));
 #ifdef LEGION_SPY
@@ -1890,7 +1892,7 @@ namespace Legion {
                                               op, DEP_PART_INTERSECTIONS);
       ApEvent result(Realm::IndexSpace<DIM,T>::compute_intersections(
             lhs_spaces, rhs_spaces, subspaces, requests,
-            Runtime::merge_events(preconditions)));
+            Runtime::merge_events(NULL, preconditions)));
       // Now set the index spaces for the results
       for (unsigned idx = 0; idx < colors.size(); idx++)
       {
@@ -1965,7 +1967,7 @@ namespace Legion {
         preconditions.insert(left_ready);
       if (op->has_execution_fence_event())
         preconditions.insert(op->get_execution_fence_event());
-      ApEvent precondition = Runtime::merge_events(preconditions);
+      ApEvent precondition = Runtime::merge_events(NULL, preconditions);
       ApEvent result(Realm::IndexSpace<DIM,T>::compute_intersections(
             lhs_space, rhs_spaces, subspaces, requests, precondition));
 #ifdef LEGION_SPY
@@ -2085,7 +2087,7 @@ namespace Legion {
                                           op, DEP_PART_DIFFERENCES);
       if (op->has_execution_fence_event())
         preconditions.insert(op->get_execution_fence_event());
-      ApEvent precondition = Runtime::merge_events(preconditions);
+      ApEvent precondition = Runtime::merge_events(NULL, preconditions);
       ApEvent result(Realm::IndexSpace<DIM,T>::compute_differences(
             lhs_spaces, rhs_spaces, subspaces, requests, precondition));
 #ifdef LEGION_SPY
@@ -2210,7 +2212,7 @@ namespace Legion {
                                               op, DEP_PART_DIFFERENCES);
       ApEvent result(Realm::IndexSpace<DIM,T>::compute_differences(
             lhs_spaces, rhs_spaces, subspaces, requests,
-            Runtime::merge_events(preconditions)));
+            Runtime::merge_events(NULL, preconditions)));
       // Now set the index spaces for the results
       for (unsigned idx = 0; idx < colors.size(); idx++)
       {
@@ -2402,7 +2404,7 @@ namespace Legion {
       preconditions.insert(instances_ready);
       if (op->has_execution_fence_event())
         preconditions.insert(op->get_execution_fence_event());
-      ApEvent precondition = Runtime::merge_events(preconditions);
+      ApEvent precondition = Runtime::merge_events(NULL, preconditions);
       ApEvent result(local_space.create_subspaces_by_field(
             descriptors, colors, subspaces, requests, precondition));
 #ifdef DEBUG_LEGION
@@ -2551,7 +2553,7 @@ namespace Legion {
       preconditions.insert(instances_ready);
       if (op->has_execution_fence_event())
         preconditions.insert(op->get_execution_fence_event());
-      ApEvent precondition = Runtime::merge_events(preconditions);
+      ApEvent precondition = Runtime::merge_events(NULL, preconditions);
       ApEvent result(local_space.create_subspaces_by_image(descriptors,
             sources, subspaces, requests, precondition));
 #ifdef DEBUG_LEGION
@@ -2704,7 +2706,7 @@ namespace Legion {
       preconditions.insert(instances_ready);
       if (op->has_execution_fence_event())
         preconditions.insert(op->get_execution_fence_event());
-      ApEvent precondition = Runtime::merge_events(preconditions);
+      ApEvent precondition = Runtime::merge_events(NULL, preconditions);
       ApEvent result(local_space.create_subspaces_by_image(descriptors,
             sources, subspaces, requests, precondition));
 #ifdef DEBUG_LEGION
@@ -2832,7 +2834,7 @@ namespace Legion {
       preconditions.insert(instances_ready);
       if (op->has_execution_fence_event())
         preconditions.insert(op->get_execution_fence_event());
-      ApEvent precondition = Runtime::merge_events(preconditions);
+      ApEvent precondition = Runtime::merge_events(NULL, preconditions);
       ApEvent result(local_space.create_subspaces_by_preimage(
             descriptors, targets, subspaces, requests, precondition));
 #ifdef LEGION_SPY
@@ -2978,7 +2980,7 @@ namespace Legion {
       preconditions.insert(instances_ready);
       if (op->has_execution_fence_event())
         preconditions.insert(op->get_execution_fence_event());
-      ApEvent precondition = Runtime::merge_events(preconditions);
+      ApEvent precondition = Runtime::merge_events(NULL, preconditions);
       ApEvent result(local_space.create_subspaces_by_preimage(
             descriptors, targets, subspaces, requests, precondition));
 #ifdef LEGION_SPY
@@ -3087,7 +3089,7 @@ namespace Legion {
       if (op->has_execution_fence_event())
         preconditions.insert(op->get_execution_fence_event());
       // Issue the operation
-      ApEvent precondition = Runtime::merge_events(preconditions);
+      ApEvent precondition = Runtime::merge_events(NULL, preconditions);
       ApEvent result(local_space.create_association(descriptors,
             range_space, requests, precondition));
 #ifdef LEGION_SPY
@@ -3116,14 +3118,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    ApEvent IndexSpaceNodeT<DIM,T>::issue_copy(Operation *op,
-#ifdef LEGION_SPY
-                      const std::vector<Realm::CopySrcDstField> &src_fields,
-                      const std::vector<Realm::CopySrcDstField> &dst_fields,
-#else
+    ApEvent IndexSpaceNodeT<DIM,T>::issue_copy(
+                      const PhysicalTraceInfo *info, RegionNode *node,
                       const std::vector<CopySrcDstField> &src_fields,
                       const std::vector<CopySrcDstField> &dst_fields,
-#endif
                       ApEvent precondition, PredEvent predicate_guard,
                       IndexTreeNode *intersect, IndexSpaceExpression *mask,
                       ReductionOpID redop /*=0*/,bool reduction_fold/*=true*/,
@@ -3152,11 +3150,13 @@ namespace Legion {
                              handle.get_type_tag(), true/*need tight result*/);
       if (local_space_ready.exists() && !local_space_ready.has_triggered())
       {
-        if ((op != NULL) && op->has_execution_fence_event())
-          precondition = Runtime::merge_events(precondition, local_space_ready,
-                                               op->get_execution_fence_event());
+        if ((info != NULL) && (info->op != NULL) && 
+            info->op->has_execution_fence_event())
+          precondition = Runtime::merge_events(info, precondition, 
+              local_space_ready, info->op->get_execution_fence_event());
         else
-          precondition = Runtime::merge_events(precondition, local_space_ready);
+          precondition = 
+            Runtime::merge_events(info, precondition, local_space_ready);
       }
       else if (local_space.empty())
       {
@@ -3169,9 +3169,10 @@ namespace Legion {
         return ApEvent::NO_AP_EVENT;
 #endif
       }
-      else if ((op != NULL) && op->has_execution_fence_event())
-        precondition = 
-          Runtime::merge_events(precondition, op->get_execution_fence_event());
+      else if ((info != NULL) && (info->op != NULL) && 
+                info->op->has_execution_fence_event())
+        precondition = Runtime::merge_events(info, precondition, 
+                        info->op->get_execution_fence_event());
       
       // If we make it here then record our performed write
       if (performed != NULL)
@@ -3188,27 +3189,78 @@ namespace Legion {
       ApEvent result;
       // Now that we know we're going to do this copy add any profling requests
       Realm::ProfilingRequestSet requests;
-      if (op != NULL)
-        op->add_copy_profiling_request(requests);
+      if ((info != NULL) && (info->op != NULL))
+        info->op->add_copy_profiling_request(requests);
       if (context->runtime->profiler != NULL)
-        context->runtime->profiler->add_copy_request(requests, op);
+        context->runtime->profiler->add_copy_request(requests, info->op);
+#ifdef LEGION_SPY
+      // Have to convert back to Realm structures because C++ is dumb  
+      std::vector<Realm::CopySrcDstField> realm_src_fields(src_fields.size());
+      for (unsigned idx = 0; idx < src_fields.size(); idx++)
+        realm_src_fields[idx] = src_fields[idx];
+      std::vector<Realm::CopySrcDstField> realm_dst_fields(dst_fields.size());
+      for (unsigned idx = 0; idx < dst_fields.size(); idx++)
+        realm_dst_fields[idx] = dst_fields[idx];
+#endif
       // Have to protect against misspeculation
       if (predicate_guard.exists())
       {
-        ApEvent pred_pre = Runtime::merge_events(precondition,
+        ApEvent pred_pre = Runtime::merge_events(info, precondition,
                                                  ApEvent(predicate_guard));
+#ifdef LEGION_SPY
+        result = Runtime::ignorefaults(local_space.copy(realm_src_fields, 
+              realm_dst_fields, requests, pred_pre, redop, reduction_fold));
+#else
         result = Runtime::ignorefaults(local_space.copy(src_fields, 
               dst_fields, requests, pred_pre, redop, reduction_fold));
+#endif
       }
       else
+#ifdef LEGION_SPY
+        result = ApEvent(local_space.copy(realm_src_fields, realm_dst_fields,
+                      requests, precondition, redop, reduction_fold));
+#else
         result = ApEvent(local_space.copy(src_fields, dst_fields,
                       requests, precondition, redop, reduction_fold));
-#ifdef LEGION_SPY
-      if (!result.exists())
+#endif
+      if (info->recording)
       {
-        ApUserEvent new_result = Runtime::create_ap_user_event();
-        Runtime::trigger_event(new_result);
-        result = new_result;
+#ifdef DEBUG_LEGION
+        assert(!predicate_guard.exists());
+#endif
+        info->record_issue_copy(result, node, src_fields, dst_fields,
+                                precondition, predicate_guard, intersect, 
+                                mask, redop, reduction_fold);
+      }
+#ifdef LEGION_SPY
+      if (info != NULL)
+      {
+        if (!result.exists())
+        {
+          ApUserEvent new_result = Runtime::create_ap_user_event();
+          Runtime::trigger_event(new_result);
+          result = new_result;
+        }
+        LegionSpy::log_copy_events(info->op->get_unique_op_id(), 
+            node->handle, precondition, result);
+        for (unsigned idx = 0; idx < src_fields.size(); idx++)
+          LegionSpy::log_copy_field(result, src_fields[idx].field_id,
+                                    src_fields[idx].inst_event,
+                                    dst_fields[idx].field_id,
+                                    dst_fields[idx].inst_event, redop);
+        if (intersect != NULL)
+        {
+          if (intersect->is_index_space_node())
+          {
+            IndexSpaceNode *node = intersect->as_index_space_node();
+            LegionSpy::log_copy_intersect(result, 1, node->handle.get_id());
+          }
+          else
+          {
+            IndexPartNode *node = intersect->as_index_part_node();
+            LegionSpy::log_copy_intersect(result, 0, node->handle.get_id());
+          }
+        }
       }
 #endif
       return result;
@@ -3216,14 +3268,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    ApEvent IndexSpaceNodeT<DIM,T>::issue_fill(Operation *op,
-#ifdef LEGION_SPY
-                      const std::vector<Realm::CopySrcDstField> &dst_fields,
-#else
+    ApEvent IndexSpaceNodeT<DIM,T>::issue_fill(
+                      const PhysicalTraceInfo *info, RegionNode *node,
                       const std::vector<CopySrcDstField> &dst_fields,
-#endif
                       const void *fill_value, size_t fill_size,
                       ApEvent precondition, PredEvent predicate_guard,
+#ifdef LEGION_SPY
+                      UniqueID fill_uid,
+#endif
                       IndexTreeNode *intersect, IndexSpaceExpression *mask,
                       WriteSet *performed /*=NULL*/,
                       const FieldMask *performed_mask/*=NULL*/)
@@ -3250,11 +3302,13 @@ namespace Legion {
                              handle.get_type_tag(), true/*need tight result*/);
       if (local_space_ready.exists() && !local_space_ready.has_triggered())
       {
-        if ((op != NULL) && op->has_execution_fence_event())
-          precondition = Runtime::merge_events(precondition, local_space_ready,
-                                               op->get_execution_fence_event());
+        if ((info != NULL) && (info->op != NULL) && 
+              info->op->has_execution_fence_event())
+          precondition = Runtime::merge_events(info, precondition, 
+              local_space_ready, info->op->get_execution_fence_event());
         else
-          precondition = Runtime::merge_events(precondition, local_space_ready);
+          precondition = 
+            Runtime::merge_events(info, precondition, local_space_ready);
       }
       else if (local_space.empty())
       {
@@ -3267,9 +3321,10 @@ namespace Legion {
         return ApEvent::NO_AP_EVENT;
 #endif
       }
-      else if ((op != NULL) && op->has_execution_fence_event())
-        precondition = 
-          Runtime::merge_events(precondition, op->get_execution_fence_event());
+      else if ((info != NULL) && (info->op != NULL) && 
+                info->op->has_execution_fence_event())
+        precondition = Runtime::merge_events(info, precondition, 
+                        info->op->get_execution_fence_event());
       // If we make it here then record our performed write
       if (performed != NULL)
       {
@@ -3285,29 +3340,78 @@ namespace Legion {
       ApEvent result;
       // Now that we know we're going to do this fill add any profiling requests
       Realm::ProfilingRequestSet requests;
-      if (op != NULL)
-        op->add_copy_profiling_request(requests);
+      if ((info != NULL) && (info->op != NULL))
+        info->op->add_copy_profiling_request(requests);
       if (context->runtime->profiler != NULL)
-        context->runtime->profiler->add_fill_request(requests, op);
+        context->runtime->profiler->add_fill_request(requests, info->op);
+#ifdef LEGION_SPY
+      // Have to convert back to Realm data structures because C++ is dumb
+      std::vector<Realm::CopySrcDstField> realm_dst_fields(dst_fields.size());
+      for (unsigned idx = 0; idx < dst_fields.size(); idx++)
+        realm_dst_fields[idx] = dst_fields[idx];
+#endif
       // Have to protect against misspeculation
       if (predicate_guard.exists())
       {
-        ApEvent pred_pre = Runtime::merge_events(precondition,
+        ApEvent pred_pre = Runtime::merge_events(info, precondition,
                                                  ApEvent(predicate_guard));
+#ifdef LEGION_SPY
+        result = Runtime::ignorefaults(local_space.fill(realm_dst_fields, 
+              requests, fill_value, fill_size, pred_pre));
+#else
         result = Runtime::ignorefaults(local_space.fill(dst_fields, 
               requests, fill_value, fill_size, pred_pre));
+#endif
       }
       else
+#ifdef LEGION_SPY
+        result = ApEvent(local_space.fill(realm_dst_fields, requests, 
+              fill_value, fill_size, precondition));
+#else
         result = ApEvent(local_space.fill(dst_fields, requests, 
               fill_value, fill_size, precondition));
+#endif
 #ifdef LEGION_SPY
-      if (!result.exists())
+      if (info != NULL)
       {
-        ApUserEvent new_result = Runtime::create_ap_user_event();
-        Runtime::trigger_event(new_result);
-        result = new_result;
+        if (!result.exists())
+        {
+          ApUserEvent new_result = Runtime::create_ap_user_event();
+          Runtime::trigger_event(new_result);
+          result = new_result;
+        }
+        LegionSpy::log_fill_events(info->op->get_unique_op_id(), 
+            node->handle, precondition, result, fill_uid);
+        for (unsigned idx = 0; idx < dst_fields.size(); idx++)
+          LegionSpy::log_fill_field(result, dst_fields[idx].field_id,
+                                    dst_fields[idx].inst_event);
+        if (intersect != NULL)
+        {
+          if (intersect->is_index_space_node())
+          {
+            IndexSpaceNode *node = intersect->as_index_space_node();
+            LegionSpy::log_fill_intersect(result, 1, node->handle.get_id());
+          }
+          else
+          {
+            IndexPartNode *node = intersect->as_index_part_node();
+            LegionSpy::log_fill_intersect(result, 0, node->handle.get_id());
+          }
+        }
       }
 #endif
+      if ((info != NULL) && info->recording)
+      {
+#ifdef DEBUG_LEGION
+        assert(!predicate_guard.exists());
+#endif
+        info->record_issue_fill(result, node, dst_fields,
+            fill_value, fill_size, precondition, predicate_guard,
+#ifdef LEGION_SPY
+            fill_uid,
+#endif
+            intersect, mask);
+      }
       return result;
     }
 
@@ -3615,7 +3719,7 @@ namespace Legion {
       }
       else
         return remove_base_valid_ref(APPLICATION_REF, NULL/*mutator*/);
-    }
+    } 
 
   }; // namespace Internal
 }; // namespace Legion

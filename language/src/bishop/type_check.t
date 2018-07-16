@@ -46,6 +46,8 @@ local property_type_assignment = {
     priority = { int },
     target = { std.processor_type, std.processor_list_type },
     vectorize = { std.compile_option_type },
+    map_locally = { bool },
+    memoize = { bool },
   },
   region = {
     composite = { std.compile_option_type },
@@ -306,9 +308,16 @@ function type_check.expr(type_env, expr)
     end
 
   elseif expr:is(ast.untyped.expr.Constant) then
-    local assigned_type = int
-    if math.floor(expr.value) ~= expr.value then
-      log.error(expr, "constant must be an integer value")
+    local assigned_type
+    if type(expr.value) == "number" then
+      assigned_type = int
+      if math.floor(expr.value) ~= expr.value then
+        log.error(expr, "constant must be an integer value")
+      end
+    elseif type(expr.value) == "boolean" then
+      assigned_type = bool
+    else
+      assert(false, "unexpected constant type")
     end
     return ast.typed.expr.Constant {
       value = expr.value,

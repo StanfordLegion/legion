@@ -2552,6 +2552,7 @@ namespace Legion {
         CLOSE_MAPPABLE,
         FILL_MAPPABLE,
         PARTITION_MAPPABLE,
+        DYNAMIC_COLLECTIVE_MAPPABLE,
         MUST_EPOCH_MAPPABLE,
       };
       virtual MappableType get_mappable_type(void) const = 0;
@@ -2563,6 +2564,7 @@ namespace Legion {
       virtual const Close* as_close(void) const = 0;
       virtual const Fill* as_fill(void) const = 0;
       virtual const Partition* as_partition(void) const = 0;
+      virtual const DynamicCollective* as_dynamic_collective(void) const = 0;
       virtual const MustEpoch* as_must_epoch(void) const = 0;
     public:
       MapperID                                  map_id;
@@ -2598,6 +2600,8 @@ namespace Legion {
       virtual const Close* as_close(void) const { return NULL; }
       virtual const Fill* as_fill(void) const { return NULL; }
       virtual const Partition* as_partition(void) const { return NULL; }
+      virtual const DynamicCollective* as_dynamic_collective(void) const
+        { return NULL; }
       virtual const MustEpoch* as_must_epoch(void) const { return NULL; }
     public:
       // Task argument information
@@ -2651,6 +2655,8 @@ namespace Legion {
       virtual const Close* as_close(void) const { return NULL; }
       virtual const Fill* as_fill(void) const { return NULL; }
       virtual const Partition* as_partition(void) const { return NULL; }
+      virtual const DynamicCollective* as_dynamic_collective(void) const
+        { return NULL; }
       virtual const MustEpoch* as_must_epoch(void) const { return NULL; }
     public:
       // Copy Launcher arguments
@@ -2691,6 +2697,8 @@ namespace Legion {
       virtual const Close* as_close(void) const { return NULL; }
       virtual const Fill* as_fill(void) const { return NULL; }
       virtual const Partition* as_partition(void) const { return NULL; }
+      virtual const DynamicCollective* as_dynamic_collective(void) const
+        { return NULL; }
       virtual const MustEpoch* as_must_epoch(void) const { return NULL; }
     public:
       // Inline Launcher arguments
@@ -2724,6 +2732,8 @@ namespace Legion {
       virtual const Close* as_close(void) const { return NULL; }
       virtual const Fill* as_fill(void) const { return NULL; }
       virtual const Partition* as_partition(void) const { return NULL; }
+      virtual const DynamicCollective* as_dynamic_collective(void) const
+        { return NULL; }
       virtual const MustEpoch* as_must_epoch(void) const { return NULL; }
     public:
       // Acquire Launcher arguments
@@ -2758,6 +2768,8 @@ namespace Legion {
       virtual const Close* as_close(void) const { return NULL; }
       virtual const Fill* as_fill(void) const { return NULL; }
       virtual const Partition* as_partition(void) const { return NULL; }
+      virtual const DynamicCollective* as_dynamic_collective(void) const
+        { return NULL; }
       virtual const MustEpoch* as_must_epoch(void) const { return NULL; }
     public:
       // Release Launcher arguments
@@ -2796,6 +2808,8 @@ namespace Legion {
       virtual const Close* as_close(void) const { return this; }
       virtual const Fill* as_fill(void) const { return NULL; }
       virtual const Partition* as_partition(void) const { return NULL; }
+      virtual const DynamicCollective* as_dynamic_collective(void) const
+        { return NULL; }
       virtual const MustEpoch* as_must_epoch(void) const { return NULL; }
     public:
       // Synthesized region requirement
@@ -2826,6 +2840,8 @@ namespace Legion {
       virtual const Close* as_close(void) const { return NULL; }
       virtual const Fill* as_fill(void) const { return this; }
       virtual const Partition* as_partition(void) const { return NULL; }
+      virtual const DynamicCollective* as_dynamic_collective(void) const
+        { return NULL; }
       virtual const MustEpoch* as_must_epoch(void) const { return NULL; }
     public:
       // Synthesized region requirement
@@ -2865,6 +2881,8 @@ namespace Legion {
       virtual const Close* as_close(void) const { return NULL; }
       virtual const Fill* as_fill(void) const { return NULL; }
       virtual const Partition* as_partition(void) const { return this; }
+      virtual const DynamicCollective* as_dynamic_collective(void) const
+        { return NULL; }
       virtual const MustEpoch* as_must_epoch(void) const { return NULL; }
     public:
       enum PartitionKind {
@@ -2910,6 +2928,8 @@ namespace Legion {
       virtual const Close* as_close(void) const { return NULL; }
       virtual const Fill* as_fill(void) const { return NULL; }
       virtual const Partition* as_partition(void) const { return NULL; }
+      virtual const DynamicCollective* as_dynamic_collective(void) const
+        { return NULL; }
       virtual const MustEpoch* as_must_epoch(void) const { return this; }
     public:
       std::vector<const Task*>                  individual_tasks;
@@ -5687,7 +5707,7 @@ namespace Legion {
        * The trace ID need only be local to the enclosing context.
        * Traces are currently not permitted to be nested.
        */
-      void begin_trace(Context ctx, TraceID tid);
+      void begin_trace(Context ctx, TraceID tid, bool logical_only = false);
       /**
        * Mark the end of trace that was being performed.
        */

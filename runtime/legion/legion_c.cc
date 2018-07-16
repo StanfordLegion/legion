@@ -2652,6 +2652,16 @@ legion_task_launcher_add_arrival_barrier(legion_task_launcher_t launcher_,
   launcher->add_arrival_barrier(bar);
 }
 
+void
+legion_task_launcher_set_point(legion_task_launcher_t launcher_,
+                               legion_domain_point_t point_)
+{
+  TaskLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+  DomainPoint point = CObjectWrapper::unwrap(point_);
+
+  launcher->point = point;
+}
+
 legion_index_launcher_t
 legion_index_launcher_create(
   legion_task_id_t tid,
@@ -3715,12 +3725,13 @@ legion_must_epoch_launcher_set_launch_space(
 void
 legion_runtime_begin_trace(legion_runtime_t runtime_,
                            legion_context_t ctx_,
-                           legion_trace_id_t tid)
+                           legion_trace_id_t tid,
+                           bool memoize)
 {
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_)->context();
 
-  runtime->begin_trace(ctx, tid);
+  runtime->begin_trace(ctx, tid, memoize);
 }
 
 void

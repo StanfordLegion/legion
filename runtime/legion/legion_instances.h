@@ -331,7 +331,7 @@ namespace Legion {
       virtual bool is_foldable(void) const = 0;
       virtual void find_field_offsets(const FieldMask &reduce_mask,
           std::vector<CopySrcDstField> &fields) = 0;
-      virtual ApEvent issue_reduction(Operation *op,
+      virtual ApEvent issue_reduction(const PhysicalTraceInfo &trace_info,
           const std::vector<CopySrcDstField> &src_fields,
           const std::vector<CopySrcDstField> &dst_fields,
           RegionTreeNode *dst, ApEvent precondition, PredEvent pred_guard,
@@ -402,7 +402,7 @@ namespace Legion {
       virtual bool is_foldable(void) const;
       virtual void find_field_offsets(const FieldMask &reduce_mask,
           std::vector<CopySrcDstField> &fields);
-      virtual ApEvent issue_reduction(Operation *op,
+      virtual ApEvent issue_reduction(const PhysicalTraceInfo &info,
           const std::vector<CopySrcDstField> &src_fields,
           const std::vector<CopySrcDstField> &dst_fields,
           RegionTreeNode *dst, ApEvent precondition, PredEvent pred_guard,
@@ -447,7 +447,7 @@ namespace Legion {
       virtual bool is_foldable(void) const;
       virtual void find_field_offsets(const FieldMask &reduce_mask,
           std::vector<CopySrcDstField> &fields);
-      virtual ApEvent issue_reduction(Operation *op,
+      virtual ApEvent issue_reduction(const PhysicalTraceInfo &info,
           const std::vector<CopySrcDstField> &src_fields,
           const std::vector<CopySrcDstField> &dst_fields,
           RegionTreeNode *dst, ApEvent precondition, PredEvent pred_guard,

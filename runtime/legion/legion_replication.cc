@@ -13,6 +13,7 @@
  * limitations under the License.
  */
 
+#include "legion/legion_ops.h"
 #include "legion/legion_trace.h"
 #include "legion/legion_views.h"
 #include "legion/legion_context.h"
@@ -2784,7 +2785,7 @@ namespace Legion {
       }
       RtEvent local_mapped = Runtime::merge_events(local_tasks_mapped);
       tasks_mapped.insert(local_mapped);
-      ApEvent local_complete = Runtime::merge_events(local_tasks_complete);
+      ApEvent local_complete = Runtime::merge_events(NULL,local_tasks_complete);
       tasks_complete.insert(local_complete);
 #ifdef DEBUG_LEGION
       assert(completion_exchange != NULL);
@@ -5725,7 +5726,7 @@ namespace Legion {
         }
       }
       perform_collective_sync();
-      return Runtime::merge_events(ready_events);
+      return Runtime::merge_events(NULL, ready_events);
     }
 
     //--------------------------------------------------------------------------
@@ -5740,14 +5741,15 @@ namespace Legion {
 #ifdef DEBUG_LEGION
           assert(local_preconditions[0].size() == 1);
 #endif
-          complete = Runtime::merge_events(complete,
+          complete = Runtime::merge_events(NULL, complete,
               *(local_preconditions[0].begin()));
         }
         const std::set<ApUserEvent> &to_trigger = remote_to_trigger[0];
         for (std::set<ApUserEvent>::const_iterator it = 
               to_trigger.begin(); it != to_trigger.end(); it++)
           Runtime::trigger_event(*it, complete);
-        const ApEvent done = Runtime::merge_events(local_preconditions.back());
+        const ApEvent done = 
+          Runtime::merge_events(NULL, local_preconditions.back());
         // If we have a remainder shard then we need to signal them too
         if (!remote_to_trigger[shard_collective_stages].empty())
         {
@@ -5811,7 +5813,7 @@ namespace Legion {
           // are no remainders
           if (!to_trigger.empty())
           {
-            const ApEvent stage_pre = Runtime::merge_events(preconditions);
+            const ApEvent stage_pre = Runtime::merge_events(NULL,preconditions);
             for (std::set<ApUserEvent>::const_iterator it = 
                   to_trigger.begin(); it != to_trigger.end(); it++)
               Runtime::trigger_event(*it, stage_pre);
@@ -5998,7 +6000,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       perform_collective_wait();
-      ready = Runtime::merge_events(ready_events);
+      ready = Runtime::merge_events(NULL, ready_events);
       return descriptors;
     }
 

@@ -8362,7 +8362,7 @@ function codegen.stat_begin_trace(cx, node)
   return quote
     [trace_id.actions];
     [emit_debuginfo(node)];
-    c.legion_runtime_begin_trace([cx.runtime], [cx.context], [trace_id.value])
+    c.legion_runtime_begin_trace([cx.runtime], [cx.context], [trace_id.value], false)
   end
 end
 

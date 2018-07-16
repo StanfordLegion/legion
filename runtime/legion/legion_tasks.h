@@ -132,7 +132,7 @@ namespace Legion {
      * This is the base task operation class for all
      * kinds of tasks in the system.  
      */
-    class TaskOp : public ExternalTask, public SpeculativeOp {
+    class TaskOp : public ExternalTask, public MemoizableOp<SpeculativeOp> {
     public:
       enum TaskKind {
         INDIVIDUAL_TASK_KIND,
@@ -281,7 +281,8 @@ namespace Legion {
                                   const InstanceSet &sources,
                                   std::vector<unsigned> &ranking);
       virtual void update_atomic_locks(Reservation lock, bool exclusive);
-      virtual ApEvent get_restrict_precondition(void) const;
+      virtual ApEvent get_restrict_precondition(
+                                    const PhysicalTraceInfo &info) const;
       virtual unsigned find_parent_index(unsigned idx);
       virtual VersionInfo& get_version_info(unsigned idx);
       virtual RestrictInfo& get_restrict_info(unsigned idx);
@@ -381,6 +382,7 @@ namespace Legion {
       bool commit_received;
     protected:
       bool options_selected;
+      bool memoize_selected;
       bool map_origin;
       bool replicate;
     protected:
@@ -481,6 +483,7 @@ namespace Legion {
                                     Mapper::MapTaskOutput &output,
                                     MustEpochOp *must_epoch_owner,
                                     std::vector<InstanceSet> &valid_instances); 
+      void replay_map_task_output();
     protected: // mapper helper calls
       void validate_target_processors(const std::vector<Processor> &prcs) const;
       void validate_variant_selection(MapperManager *local_mapper,
@@ -490,7 +493,7 @@ namespace Legion {
       void invoke_mapper_replicated(MustEpochOp *must_epoch_owner);
       void map_all_regions(ApEvent user_event,
                            MustEpochOp *must_epoch_owner = NULL); 
-      void perform_post_mapping(void);
+      void perform_post_mapping(const PhysicalTraceInfo &trace_info);
       void replicate_task(void);
     protected:
       void pack_single_task(Serializer &rez, AddressSpaceID target);
@@ -541,6 +544,14 @@ namespace Legion {
                                  size_t res_size, bool owned) = 0; 
       virtual void handle_post_mapped(RtEvent pre = RtEvent::NO_RT_EVENT) = 0;
       virtual void handle_misspeculation(void) = 0;
+    public:
+      // From Memoizable
+      virtual void complete_replay(ApEvent completion_event);
+      virtual bool is_memoizable_task(void) const { return true; }
+      virtual ApEvent get_memo_completion(bool replay)
+        { const ApEvent result = get_task_completion();
+          if (replay) replay_map_task_output();
+          return result; }
     protected:
       virtual InnerContext* initialize_inner_execution_context(VariantImpl *v);
     protected:
@@ -706,7 +717,8 @@ namespace Legion {
       RtEvent perform_versioning_analysis(void);
       virtual RtEvent perform_must_epoch_version_analysis(MustEpochOp *own);
     public:
-      virtual bool has_prepipeline_stage(void) const { return true; }
+      virtual bool has_prepipeline_stage(void) const
+        { return need_prepipeline_stage; }
       virtual void trigger_prepipeline_stage(void);
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
@@ -763,6 +775,9 @@ namespace Legion {
       void unpack_remote_mapped(Deserializer &derez);
       void unpack_remote_complete(Deserializer &derez);
       void unpack_remote_commit(Deserializer &derez);
+    public:
+      // From MemoizableOp
+      virtual void replay_analysis(void);
     public:
       static void process_unpack_remote_mapped(Deserializer &derez);
       static void process_unpack_remote_complete(Deserializer &derez);
@@ -869,6 +884,12 @@ namespace Legion {
       void send_back_created_state(AddressSpaceID target);
     public:
       virtual void record_reference_mutation_effect(RtEvent event);
+    public:
+      // From MemoizableOp
+      virtual void replay_analysis(void);
+    public:
+      // From Memoizable
+      virtual TraceLocalID get_trace_local_id() const;
     protected:
       friend class SliceTask;
       SliceTask                   *slice_owner;
@@ -899,6 +920,9 @@ namespace Legion {
       virtual void deactivate(void);
       virtual bool is_shard_task(void) const { return true; }
       virtual bool is_top_level_task(void) const; 
+    public:
+      // From MemoizableOp
+      virtual void replay_analysis(void);
     public:
       virtual void trigger_dependence_analysis(void);
       virtual void resolve_false(bool speculated, bool launched);
@@ -1009,7 +1033,8 @@ namespace Legion {
       void activate_index_task(void);
       void deactivate_index_task(void);
     public:
-      virtual bool has_prepipeline_stage(void) const { return true; }
+      virtual bool has_prepipeline_stage(void) const
+        { return need_prepipeline_stage; }
       virtual void trigger_prepipeline_stage(void);
       virtual void trigger_dependence_analysis(void);
       virtual void report_interfering_requirements(unsigned idx1,unsigned idx2);
@@ -1066,6 +1091,9 @@ namespace Legion {
       void unpack_slice_mapped(Deserializer &derez, AddressSpaceID source);
       void unpack_slice_complete(Deserializer &derez);
       void unpack_slice_commit(Deserializer &derez); 
+    public:
+      // From MemoizableOp
+      virtual void replay_analysis(void);
     public:
       static void process_slice_mapped(Deserializer &derez, 
                                        AddressSpaceID source);
@@ -1222,6 +1250,9 @@ namespace Legion {
                           const std::set<IndexPartition> &parts);
       virtual void register_index_partition_deletions(
                           const std::set<IndexPartition> &parts);
+    public:
+      // From MemoizableOp
+      virtual void replay_analysis(void);
     protected:
       friend class IndexTask;
       friend class PointTask;

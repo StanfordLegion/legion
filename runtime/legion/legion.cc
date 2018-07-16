@@ -6313,10 +6313,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::begin_trace(Context ctx, TraceID tid)
+    void Runtime::begin_trace(
+                        Context ctx, TraceID tid, bool logical_only /*= false*/)
     //--------------------------------------------------------------------------
     {
-      runtime->begin_trace(ctx, tid);
+      runtime->begin_trace(ctx, tid, logical_only);
     }
 
     //--------------------------------------------------------------------------

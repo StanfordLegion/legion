@@ -161,6 +161,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool ShimMapper::Task::has_trace(void) const
+    //--------------------------------------------------------------------------
+    {
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
     ShimMapper::Inline::Inline(const Legion::InlineMapping &m)
       : Legion::InlineMapping(m), unique_id(m.get_unique_id()), 
         context_index(m.get_context_index()), depth(m.get_depth())

@@ -80,9 +80,10 @@ namespace Legion {
       LAYOUT_DESC_REF = 23,
       RUNTIME_REF = 24,
       IS_EXPR_REF = 25,
-      COMPOSITE_SHARD_REF = 26,
-      REPLICATION_REF = 27,
-      LAST_SOURCE_REF = 28,
+      TRACE_REF = 26,
+      COMPOSITE_SHARD_REF = 27,
+      REPLICATION_REF = 28,
+      LAST_SOURCE_REF = 29,
     };
 
     enum ReferenceKind {
@@ -118,7 +119,8 @@ namespace Legion {
       "Region Tree Reference",                      \
       "Layout Description Reference",               \
       "Runtime Reference",                          \
-      "Index Space Expression",                     \
+      "Physical Trace Reference",                   \
+      "Index Space Expression Reference",           \
       "Composite Shard Reference",                  \
       "Replication Reference",                      \
     }

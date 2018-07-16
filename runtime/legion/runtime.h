@@ -21,6 +21,7 @@
 #include "legion/legion_spy.h"
 #include "legion/region_tree.h"
 #include "legion/mapper_manager.h"
+#include "legion/legion_analysis.h"
 #include "legion/legion_utilities.h"
 #include "legion/legion_profiling.h"
 #include "legion/legion_allocation.h"
@@ -1392,7 +1393,7 @@ namespace Legion {
     public:
       virtual const DomainPoint& get_domain_point(void) const = 0;
       virtual void set_projection_result(unsigned idx,LogicalRegion result) = 0;
-    };
+    }; 
 
     /**
      * \class ProjectionFunction
@@ -1611,7 +1612,14 @@ namespace Legion {
             max_control_replication_contexts(
                         DEFAULT_MAX_CONTROL_REPLICATION_CONTEXTS),
             max_local_fields(DEFAULT_LOCAL_FIELDS),
+            max_replay_parallelism(DEFAULT_MAX_REPLAY_PARALLELISM),
             program_order_execution(false),
+            dump_physical_traces(false),
+            no_tracing(false),
+            no_physical_tracing(false),
+            no_trace_optimization(false),
+            no_fence_elision(false),
+            replay_on_cpus(false),
             verify_disjointness(false),
             runtime_warnings(false),
             separate_runtime_instances(false),
@@ -1653,8 +1661,15 @@ namespace Legion {
         unsigned gc_epoch_size;
         unsigned max_control_replication_contexts;
         unsigned max_local_fields;
+        unsigned max_replay_parallelism;
       public:
         bool program_order_execution;
+        bool dump_physical_traces;
+        bool no_tracing;
+        bool no_physical_tracing;
+        bool no_trace_optimization;
+        bool no_fence_elision;
+        bool replay_on_cpus;
         bool verify_disjointness;
         bool runtime_warnings;
         bool separate_runtime_instances;
@@ -1769,8 +1784,15 @@ namespace Legion {
       const unsigned gc_epoch_size;
       const unsigned max_control_replication_contexts;
       const unsigned max_local_fields;
+      const unsigned max_replay_parallelism;
     public:
       const bool program_order_execution;
+      const bool dump_physical_traces;
+      const bool no_tracing;
+      const bool no_physical_tracing;
+      const bool no_trace_optimization;
+      const bool no_fence_elision;
+      const bool replay_on_cpus;
       const bool verify_disjointness;
       const bool runtime_warnings;
       const bool separate_runtime_instances;
@@ -2138,7 +2160,7 @@ namespace Legion {
       void issue_release(Context ctx, const ReleaseLauncher &launcher);
       void issue_mapping_fence(Context ctx);
       void issue_execution_fence(Context ctx);
-      void begin_trace(Context ctx, TraceID tid);
+      void begin_trace(Context ctx, TraceID tid, bool logical_only);
       void end_trace(Context ctx, TraceID tid);
       void begin_static_trace(Context ctx, 
                               const std::set<RegionTreeID> *managed);
@@ -2929,6 +2951,9 @@ namespace Legion {
       ReleaseOp*            get_available_release_op(void);
       TraceCaptureOp*       get_available_capture_op(void);
       TraceCompleteOp*      get_available_trace_op(void);
+      TraceReplayOp*        get_available_replay_op(void);
+      TraceBeginOp*         get_available_begin_op(void);
+      TraceSummaryOp*       get_available_summary_op(void);
       MustEpochOp*          get_available_epoch_op(void);
       PendingPartitionOp*   get_available_pending_partition_op(void);
       DependentPartitionOp* get_available_dependent_partition_op(void);
@@ -2982,6 +3007,9 @@ namespace Legion {
       void free_release_op(ReleaseOp *op);
       void free_capture_op(TraceCaptureOp *op);
       void free_trace_op(TraceCompleteOp *op);
+      void free_replay_op(TraceReplayOp *op);
+      void free_begin_op(TraceBeginOp *op);
+      void free_summary_op(TraceSummaryOp *op);
       void free_epoch_op(MustEpochOp *op);
       void free_pending_partition_op(PendingPartitionOp *op);
       void free_dependent_partition_op(DependentPartitionOp* op);
@@ -3299,6 +3327,9 @@ namespace Legion {
       mutable LocalLock release_op_lock;
       mutable LocalLock capture_op_lock;
       mutable LocalLock trace_op_lock;
+      mutable LocalLock replay_op_lock;
+      mutable LocalLock begin_op_lock;
+      mutable LocalLock summary_op_lock;
       mutable LocalLock epoch_op_lock;
       mutable LocalLock pending_partition_op_lock;
       mutable LocalLock dependent_partition_op_lock;
@@ -3335,6 +3366,9 @@ namespace Legion {
       std::deque<ReleaseOp*>            available_release_ops;
       std::deque<TraceCaptureOp*>       available_capture_ops;
       std::deque<TraceCompleteOp*>      available_trace_ops;
+      std::deque<TraceReplayOp*>        available_replay_ops;
+      std::deque<TraceBeginOp*>         available_begin_ops;
+      std::deque<TraceSummaryOp*>       available_summary_ops;
       std::deque<MustEpochOp*>          available_epoch_ops;
       std::deque<PendingPartitionOp*>   available_pending_partition_ops;
       std::deque<DependentPartitionOp*> available_dependent_partition_ops;
@@ -3468,9 +3502,12 @@ namespace Legion {
       static int mpi_rank;
       static std::vector<MPILegionHandshake> *pending_handshakes;
     public:
-      static inline ApEvent merge_events(ApEvent e1, ApEvent e2);
-      static inline ApEvent merge_events(ApEvent e1, ApEvent e2, ApEvent e3);
-      static inline ApEvent merge_events(const std::set<ApEvent> &events);
+      static inline ApEvent merge_events(const PhysicalTraceInfo *info,
+                                         ApEvent e1, ApEvent e2);
+      static inline ApEvent merge_events(const PhysicalTraceInfo *info,
+                                         ApEvent e1, ApEvent e2, ApEvent e3);
+      static inline ApEvent merge_events(const PhysicalTraceInfo *info,
+                                         const std::set<ApEvent> &events);
     public:
       static inline RtEvent merge_events(RtEvent e1, RtEvent e2);
       static inline RtEvent merge_events(RtEvent e1, RtEvent e2, RtEvent e3);
@@ -3600,7 +3637,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ inline ApEvent Runtime::merge_events(ApEvent e1, ApEvent e2)
+    /*static*/ inline ApEvent Runtime::merge_events(
+                          const PhysicalTraceInfo *info, ApEvent e1, ApEvent e2)
     //--------------------------------------------------------------------------
     {
       ApEvent result(Realm::Event::merge_events(e1, e2)); 
@@ -3619,12 +3657,14 @@ namespace Legion {
       LegionSpy::log_event_dependence(e1, result);
       LegionSpy::log_event_dependence(e2, result);
 #endif
+      if ((info != NULL) && info->recording)
+        info->record_merge_events(result, e1, e2);
       return result;
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ inline ApEvent Runtime::merge_events(ApEvent e1, 
-                                                    ApEvent e2, ApEvent e3) 
+    /*static*/ inline ApEvent Runtime::merge_events(
+              const PhysicalTraceInfo *info, ApEvent e1, ApEvent e2, ApEvent e3) 
     //--------------------------------------------------------------------------
     {
       ApEvent result(Realm::Event::merge_events(e1, e2, e3)); 
@@ -3646,19 +3686,41 @@ namespace Legion {
       LegionSpy::log_event_dependence(e2, result);
       LegionSpy::log_event_dependence(e3, result);
 #endif
+      if ((info != NULL) && info->recording)
+        info->record_merge_events(result, e1, e2, e3);
       return result;
     }
 
     //--------------------------------------------------------------------------
     /*static*/ inline ApEvent Runtime::merge_events(
-                                                const std::set<ApEvent> &events)
+                 const PhysicalTraceInfo *info, const std::set<ApEvent> &events)
     //--------------------------------------------------------------------------
     {
 #ifndef LEGION_SPY
       if (events.empty())
-        return ApEvent::NO_AP_EVENT;
+      {
+        // Still need to do this for tracing because of merge filter code
+        if ((info != NULL) && info->recording)
+        {
+          ApEvent result;
+          info->record_merge_events(result, events);
+          return result;
+        }
+        else
+          return ApEvent::NO_AP_EVENT;
+      }
       if (events.size() == 1)
-        return *(events.begin());
+      {
+        // Still need to do this for tracing because of merge filter code
+        if ((info != NULL) && info->recording)
+        {
+          ApEvent result = *(events.begin());
+          info->record_merge_events(result, events);
+          return result;
+        }
+        else
+          return *(events.begin());
+      }
 #endif
       const std::set<Realm::Event> *realm_events = 
         reinterpret_cast<const std::set<Realm::Event>*>(&events);
@@ -3677,6 +3739,8 @@ namespace Legion {
             it != events.end(); it++)
         LegionSpy::log_event_dependence(*it, result);
 #endif
+      if ((info != NULL) && info->recording)
+        info->record_merge_events(result, events);
       return result;
     }
 

@@ -23,6 +23,11 @@
 #include "realm/realm_defines.h"
 #endif
 
+// Turning this on in nopaint since tracing with nopaint seems to break it
+#ifndef DISABLE_BARRIER_MIGRATION
+#define DISABLE_BARRIER_MIGRATION
+#endif
+
 // if set, uses ucontext.h for user level thread switching, otherwise falls
 //  back to POSIX threads
 #if !defined(REALM_USE_NATIVE_THREADS) && !defined(__MACH__)
