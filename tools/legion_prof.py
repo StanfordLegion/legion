@@ -806,7 +806,13 @@ class Variant(StatObject):
         self.color = color
 
     def __repr__(self):
-        return self.name
+        if self.task_kind:
+            title = self.task_kind.name
+            if self.name <> None and self.name <> self.task_kind.name:
+                title += ' ['+self.name+']'
+        else:
+            title = self.name
+        return title
 
 class Base(object):
     def __init__(self):
