@@ -162,6 +162,9 @@ namespace Legion {
     void TraversalInfo::pack(Serializer &rez) const
     //--------------------------------------------------------------------------
     {
+      // We don't support tracing yet for distributed executions
+      if (recording)
+        assert(false);
       // No need to pack the ContextID, won't be used remotely
       op->pack_remote_operation(rez);
       rez.serialize(index);
