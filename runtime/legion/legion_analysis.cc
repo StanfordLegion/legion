@@ -1913,12 +1913,12 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
-    // TraceInfo 
+    // LogicalTraceInfo 
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    TraceInfo::TraceInfo(bool already_tr, LegionTrace *tr, unsigned idx,
-                         const RegionRequirement &r)
+    LogicalTraceInfo::LogicalTraceInfo(bool already_tr, LegionTrace *tr, 
+                                       unsigned idx, const RegionRequirement &r)
       : already_traced(already_tr), trace(tr), req_idx(idx), req(r)
     //--------------------------------------------------------------------------
     {
@@ -4300,9 +4300,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void LogicalCloser::initialize_close_operations(LogicalState &state, 
-                                                   Operation *creator,
-                                                   const VersionInfo &ver_info,
-                                                   const TraceInfo &trace_info)
+                                             Operation *creator,
+                                             const VersionInfo &ver_info,
+                                             const LogicalTraceInfo &trace_info)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION

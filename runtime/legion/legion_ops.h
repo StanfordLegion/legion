@@ -1290,7 +1290,7 @@ namespace Legion {
       virtual ~InternalOp(void);
     public:
       void initialize_internal(Operation *creator, int creator_req_idx,
-                               const TraceInfo &trace_info);
+                               const LogicalTraceInfo &trace_info);
       void activate_internal(void);
       void deactivate_internal(void);
     public:
@@ -1334,7 +1334,8 @@ namespace Legion {
       OpenOp& operator=(const OpenOp &rhs);
     public:
       void initialize(const FieldMask &open_mask, RegionTreeNode *start, 
-                      const RegionTreePath &path, const TraceInfo &trace_info,
+                      const RegionTreePath &path, 
+                      const LogicalTraceInfo &trace_info,
                       Operation *creator, int req_idx);
     public:
       virtual void activate(void);
@@ -1368,7 +1369,7 @@ namespace Legion {
       AdvanceOp& operator=(const AdvanceOp &rhs);
     public:
       void initialize(RegionTreeNode *parent, const FieldMask &advance,
-                      const TraceInfo &trace_info, Operation *creator, 
+                      const LogicalTraceInfo &trace_info, Operation *creator, 
                       int req_idx, bool parent_is_upper_bound);
       void set_child_node(RegionTreeNode *child);
       void set_split_child_mask(const FieldMask &split_mask);
@@ -1422,7 +1423,7 @@ namespace Legion {
       void initialize_close(Operation *creator, unsigned idx,
                             unsigned parent_req_index,
                             const RegionRequirement &req,
-                            const TraceInfo &trace_info);
+                            const LogicalTraceInfo &trace_info);
       void perform_logging(void);
     public:
       virtual void activate(void) = 0;
@@ -1455,7 +1456,7 @@ namespace Legion {
       InterCloseOp& operator=(const InterCloseOp &rhs);
     public:
       void initialize(TaskContext *ctx, const RegionRequirement &req,
-                      const TraceInfo &trace_info, int close_idx, 
+                      const LogicalTraceInfo &trace_info, int close_idx, 
                       const VersionInfo &version_info, RegionTreeNode *node,
                       const FieldMask &close_mask, Operation *create_op,
                       CompositeViewSummary &view_summary);
@@ -1527,7 +1528,7 @@ namespace Legion {
       IndexCloseOp& operator=(const IndexCloseOp &rhs);
     public:
       void initialize(TaskContext *ctx, const RegionRequirement &req,
-                      const TraceInfo &trace_info, int close_idx, 
+                      const LogicalTraceInfo &trace_info, int close_idx, 
                       const VersionInfo &version_info, RegionTreeNode *node,
                       const FieldMask &close_mask, Operation *create_op,
                       IndexSpaceNode* launch_node, CompositeViewSummary &sum);
@@ -1600,7 +1601,7 @@ namespace Legion {
       ReadCloseOp& operator=(const ReadCloseOp &rhs);
     public:
       void initialize(TaskContext *ctx, const RegionRequirement &req,
-                      const TraceInfo &trace_info, int close_idx,
+                      const LogicalTraceInfo &trace_info, int close_idx,
                       const FieldMask &close_mask, Operation *create_op);
     public:
       virtual void activate(void);
