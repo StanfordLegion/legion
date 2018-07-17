@@ -9168,19 +9168,22 @@ function codegen.top_task(cx, node)
         orderings[region_type] = data.newmap()
       end
 
+      local absolute_field_paths =
+        std.get_absolute_field_paths(region_type:fspace(), field_constraint.field_paths)
+
       if field_constraint_i[1] ~= 1 then
-        field_constraint.field_paths:map(function(field_path)
+        absolute_field_paths:map(function(field_path)
           local field_type = std.get_field_path(region_type:fspace(), field_path)
           local expected_stride = terralib.sizeof(field_type)
           orderings[region_type][field_path] = data.newtuple(ordering, expected_stride)
         end)
       else
         local struct_size = data.reduce(function(a, b) return a + b end,
-          field_constraint.field_paths:map(function(field_path)
+          absolute_field_paths:map(function(field_path)
             return terralib.sizeof(std.get_field_path(region_type:fspace(), field_path))
           end),
           0)
-        field_constraint.field_paths:map(function(field_path)
+        absolute_field_paths:map(function(field_path)
           orderings[region_type][field_path] = data.newtuple(ordering, struct_size)
         end)
       end

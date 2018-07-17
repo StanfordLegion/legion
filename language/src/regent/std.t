@@ -1192,6 +1192,15 @@ function std.get_field_path(value_type, field_path)
   return field_type
 end
 
+function std.get_absolute_field_paths(fspace_type, prefixes)
+  return data.flatmap(function(prefix)
+    local field_type = std.get_field_path(fspace_type, prefix)
+    return std.flatten_struct_fields(field_type):map(function(suffix)
+        return prefix .. suffix
+      end)
+    end, prefixes)
+end
+
 local function type_requires_force_cast(a, b)
   return (std.is_ispace(a) and std.is_ispace(b)) or
     (std.is_region(a) and std.is_region(b)) or
@@ -3428,10 +3437,13 @@ local function make_field_constraint_from_annotation(layout, region_type, field_
   local result = terralib.newlist()
   local field_ids = generate_static_field_ids(region_type)
 
-  local num_fields = #field_constraint.field_paths
+  local absolute_field_paths =
+    std.get_absolute_field_paths(region_type:fspace(), field_constraint.field_paths)
+  local num_fields = #absolute_field_paths
+
   local fields = terralib.newsymbol(c.legion_field_id_t[num_fields], "fields")
   result:insert(quote var [fields] end)
-  for i, field_path in ipairs(field_constraint.field_paths) do
+  for i, field_path in ipairs(absolute_field_paths) do
     result:insert(quote [fields][ [i - 1] ] = [ field_ids[field_path] ] end)
   end
   result:insert(quote
