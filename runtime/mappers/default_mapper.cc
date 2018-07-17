@@ -3720,7 +3720,7 @@ namespace Legion {
                                                 MemoizeOutput& output)
     //--------------------------------------------------------------------------
     {
-      output.memoize = input.traced && memoize;
+      output.memoize = memoize;
     }
 
     //--------------------------------------------------------------------------
