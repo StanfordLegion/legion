@@ -2396,7 +2396,7 @@ namespace Legion {
       void register_logical_user(ContextID ctx,
                                  const LogicalUser &user,
                                  RegionTreePath &path,
-                                 const TraceInfo &trace_info,
+                                 const LogicalTraceInfo &trace_info,
                                  VersionInfo &version_info,
                                  ProjectionInfo &projection_info,
                                  FieldMask &unopened_field_mask,
@@ -2405,17 +2405,17 @@ namespace Legion {
                                const FieldMask &open_mask,
                                const LogicalUser &creator,
                                const RegionTreePath &path,
-                               const TraceInfo &trace_info);
+                               const LogicalTraceInfo &trace_info);
       void create_logical_advance(ContextID ctx, LogicalState &state,
                                   const FieldMask &advance_mask,
                                   const LogicalUser &creator,
-                                  const TraceInfo &trace_info,
+                                  const LogicalTraceInfo &trace_info,
                     LegionMap<AdvanceOp*,LogicalUser>::aligned &advances,
                                   bool parent_is_upper_bound,
                                   const LegionColor next_child);
       void register_local_user(LogicalState &state,
                                const LogicalUser &user,
-                               const TraceInfo &trace_info);
+                               const LogicalTraceInfo &trace_info);
       void add_open_field_state(LogicalState &state, bool arrived,
                                 ProjectionInfo &projection_info,
                                 const LogicalUser &user,
@@ -2489,7 +2489,7 @@ namespace Legion {
                                      RegionTreePath &path,
                                      RestrictInfo &restrict_info,
                                      VersionInfo &version_info,
-                                     const TraceInfo &trace_info);
+                                     const LogicalTraceInfo &trace_info);
       void siphon_logical_deletion(LogicalCloser &closer,
                                    LogicalState &state,
                                    const FieldMask &current_mask,

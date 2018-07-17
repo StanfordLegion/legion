@@ -1284,7 +1284,8 @@ namespace Legion {
         parent_node->column_source->get_field_mask(req.privilege_fields);
       // Then compute the logical user
       LogicalUser user(op, idx, RegionUsage(req), user_mask); 
-      TraceInfo trace_info(op->already_traced(), op->get_trace(), idx, req); 
+      LogicalTraceInfo trace_info(op->already_traced(), 
+                                  op->get_trace(), idx, req); 
       // Update the version info to set the maximum depth
       if (projection_info.is_projecting())
         version_info.resize(path.get_max_depth(), req.handle_type, 
@@ -1348,7 +1349,7 @@ namespace Legion {
         parent_node->column_source->get_field_mask(req.privilege_fields);
       // Then compute the logical user
       LogicalUser user(op, idx, RegionUsage(req), user_mask);
-      TraceInfo trace_info(op->already_traced(), op->get_trace(), idx, req);
+      LogicalTraceInfo trace_info(op->already_traced(),op->get_trace(),idx,req);
 #ifdef DEBUG_LEGION
       TreeStateLogger::capture_state(runtime, &req, idx, op->get_logging_name(),
                                      op->get_unique_op_id(), parent_node,
@@ -10772,7 +10773,7 @@ namespace Legion {
     void RegionTreeNode::register_logical_user(ContextID ctx, 
                                                const LogicalUser &user,
                                                RegionTreePath &path,
-                                               const TraceInfo &trace_info,
+                                             const LogicalTraceInfo &trace_info,
                                                VersionInfo &version_info,
                                                ProjectionInfo &proj_info,
                                                FieldMask &unopened_field_mask,
@@ -11112,7 +11113,7 @@ namespace Legion {
                                              const FieldMask &open_mask,
                                              const LogicalUser &creator,
                                              const RegionTreePath &path,
-                                             const TraceInfo &trace_info)
+                                             const LogicalTraceInfo &trace_info)
     //--------------------------------------------------------------------------
     {
       LogicalState &state = get_logical_state(ctx);
@@ -11142,7 +11143,7 @@ namespace Legion {
                                                 LogicalState &state,
                                                 const FieldMask &advance_mask,
                                                 const LogicalUser &creator,
-                                                const TraceInfo &trace_info,
+                                             const LogicalTraceInfo &trace_info,
                            LegionMap<AdvanceOp*,LogicalUser>::aligned &advances,
                                                 bool parent_is_upper_bound,
                                                 const LegionColor next_child) 
@@ -11193,7 +11194,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void RegionTreeNode::register_local_user(LogicalState &state,
                                              const LogicalUser &user,
-                                             const TraceInfo &trace_info)
+                                             const LogicalTraceInfo &trace_info)
     //--------------------------------------------------------------------------
     {
       // Here is the only difference with tracing.  If we already
@@ -12804,12 +12805,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RegionTreeNode::register_logical_deletion(ContextID ctx,
-                                                   const LogicalUser &user,
-                                                   const FieldMask &check_mask,
-                                                   RegionTreePath &path,
-                                                   RestrictInfo &restrict_info,
-                                                   VersionInfo &version_info,
-                                                   const TraceInfo &trace_info)
+                                             const LogicalUser &user,
+                                             const FieldMask &check_mask,
+                                             RegionTreePath &path,
+                                             RestrictInfo &restrict_info,
+                                             VersionInfo &version_info,
+                                             const LogicalTraceInfo &trace_info)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(context->runtime, 
