@@ -374,16 +374,16 @@ namespace Legion {
     };
 
     /**
-     * \struct TracingInfo
+     * \struct LogicalTraceInfo
      * Information about tracing needed for logical
      * dependence analysis.
      */
-    struct TraceInfo {
+    struct LogicalTraceInfo {
     public:
-      TraceInfo(bool already_tr,
-                LegionTrace *tr,
-                unsigned idx,
-                const RegionRequirement &r);
+      LogicalTraceInfo(bool already_tr,
+                       LegionTrace *tr,
+                       unsigned idx,
+                       const RegionRequirement &r);
     public:
       bool already_traced;
       LegionTrace *trace;
@@ -745,7 +745,7 @@ namespace Legion {
       void initialize_close_operations(LogicalState &state, 
                                        Operation *creator,
                                        const VersionInfo &version_info,
-                                       const TraceInfo &trace_info);
+                                       const LogicalTraceInfo &trace_info);
       void perform_dependence_analysis(const LogicalUser &current,
                                        const FieldMask &open_below,
              LegionList<LogicalUser,CURR_LOGICAL_ALLOC>::track_aligned &cusers,

@@ -6815,7 +6815,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void InternalOp::initialize_internal(Operation *creator, int intern_idx,
-                                         const TraceInfo &trace_info)
+                                         const LogicalTraceInfo &trace_info)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -6926,7 +6926,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void OpenOp::initialize(const FieldMask &mask, RegionTreeNode *start, 
-                        const RegionTreePath &path, const TraceInfo &trace_info,
+                        const RegionTreePath &path, 
+                        const LogicalTraceInfo &trace_info,
                         Operation *creator, int req_idx)
     //--------------------------------------------------------------------------
     {
@@ -7074,8 +7075,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void AdvanceOp::initialize(RegionTreeNode *parent, const FieldMask &advance,
-                               const TraceInfo &trace_info, Operation *creator, 
-                               int req_idx, bool is_upper)
+                               const LogicalTraceInfo &trace_info, 
+                               Operation *creator, int req_idx, bool is_upper)
     //--------------------------------------------------------------------------
     {
       initialize_internal(creator, req_idx, trace_info);
@@ -7360,7 +7361,7 @@ namespace Legion {
     void CloseOp::initialize_close(Operation *creator, unsigned idx,
                                    unsigned parent_req_index,
                                    const RegionRequirement &req,
-                                   const TraceInfo &trace_info)
+                                   const LogicalTraceInfo &trace_info)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -7478,7 +7479,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void InterCloseOp::initialize(TaskContext *ctx,const RegionRequirement &req,
-                              ClosedNode *closed_t, const TraceInfo &trace_info,
+                              ClosedNode *closed_t, 
+                              const LogicalTraceInfo &trace_info,
                               int close_idx, const VersionInfo &clone_info,
                               const FieldMask &close_m, Operation *creator)
     //--------------------------------------------------------------------------
@@ -8116,8 +8118,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ReadCloseOp::initialize(TaskContext *ctx, const RegionRequirement &req,
-                                 const TraceInfo &trace_info, int close_idx,
-                                 const FieldMask &close_m, Operation *creator)
+                              const LogicalTraceInfo &trace_info, int close_idx,
+                              const FieldMask &close_m, Operation *creator)
     //--------------------------------------------------------------------------
     {
       if (runtime->legion_spy_enabled)
