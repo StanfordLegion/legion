@@ -2550,12 +2550,24 @@ namespace Legion {
       else
       {
         // No constraints so do what we want
-        // Copy over all the valid instances, then try to do an acquire on them
-        // and see which instances are no longer valid
-        output.chosen_instances = input.valid_instances;
-        if (!output.chosen_instances.empty())
-          runtime->acquire_and_filter_instances(ctx, 
-                                            output.chosen_instances);
+        target_memory = default_policy_select_target_memory(ctx,
+                                        inline_op.parent_task->current_proc,
+                                        inline_op.requirement);
+        // Copy over any valid instances for our target memory, then try to 
+        // do an acquire on them and see which instances are no longer valid
+        if (!input.valid_instances.empty())
+        {
+          for (std::vector<PhysicalInstance>::const_iterator it = 
+                input.valid_instances.begin(); it != 
+                input.valid_instances.end(); it++)
+          {
+            if (it->get_location() == target_memory)
+              output.chosen_instances.push_back(*it);
+          }
+          if (!output.chosen_instances.empty())
+            runtime->acquire_and_filter_instances(ctx, 
+                                              output.chosen_instances);
+        }
         // Now see if we have any fields which we still make space for
         std::set<FieldID> missing_fields = 
           inline_op.requirement.privilege_fields;
@@ -2571,9 +2583,6 @@ namespace Legion {
         if (missing_fields.empty())
           return;
         // Otherwise, let's make an instance for our missing fields
-        target_memory = default_policy_select_target_memory(ctx,
-                                        inline_op.parent_task->current_proc,
-                                        inline_op.requirement);
         LayoutConstraintID our_layout_id = 
          default_policy_select_layout_constraints(ctx, target_memory, 
                                                inline_op.requirement, 
@@ -3594,7 +3603,7 @@ namespace Legion {
                                                 MemoizeOutput& output)
     //--------------------------------------------------------------------------
     {
-      output.memoize = input.traced && memoize;
+      output.memoize = memoize;
     }
 
     //--------------------------------------------------------------------------
