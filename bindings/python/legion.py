@@ -276,7 +276,7 @@ class FutureMap(object):
 
     def __getitem__(self, point):
         domain_point = DomainPoint(_IndexValue(point))
-        return Future(c.legion_future_map_get_future(self.handle, domain_point.raw_value()))
+        return Future.from_cdata(c.legion_future_map_get_future(self.handle, domain_point.raw_value()))
 
 class Type(object):
     __slots__ = ['numpy_type', 'cffi_type', 'size']
