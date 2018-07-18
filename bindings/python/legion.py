@@ -553,6 +553,31 @@ class ExternTask(object):
 def extern_task(**kwargs):
     return ExternTask(**kwargs)
 
+def get_qualname(fn):
+    # Python >= 3.3 only
+    try:
+        return fn.__qualname__.split('.')
+    except AttributeError:
+        pass
+
+    # Python < 3.3
+    try:
+        import qualname
+        return qualname.qualname(fn).split('.')
+    except ImportError:
+        pass
+
+    # Hack: Issue error if we're wrapping a class method and failed to
+    # get the qualname
+    import inspect
+    context = [x[0].f_code.co_name for x in inspect.stack()
+               if '__module__' in x[0].f_code.co_names and
+               inspect.getmodule(x[0].f_code).__name__ != __name__]
+    if len(context) > 0:
+        raise Exception('To use a task defined in a class, please upgrade to Python >= 3.3 or install qualname (e.g. pip install qualname)')
+
+    return [fn.__name__]
+
 class Task (object):
     __slots__ = ['body', 'privileges', 'leaf', 'inner', 'idempotent', 'calling_convention', 'task_id', 'registered']
 
@@ -696,9 +721,13 @@ class Task (object):
         options[0].inner = self.inner
         options[0].idempotent = self.idempotent
 
-        task_name = ('%s.%s' % (self.body.__module__, self.body.__name__))
+        qualname = get_qualname(self.body)
+        task_name = ('%s.%s' % (self.body.__module__, '.'.join(qualname)))
 
-        c.legion_runtime_register_task_variant_python_source(
+        c_qualname_comps = [ffi.new('char []', comp.encode('utf-8')) for comp in qualname]
+        c_qualname = ffi.new('char *[]', c_qualname_comps)
+
+        c.legion_runtime_register_task_variant_python_source_qualname(
             c.legion_runtime_get_runtime(),
             task_id,
             task_name.encode('utf-8'),
@@ -707,7 +736,8 @@ class Task (object):
             layout_constraints,
             options[0],
             self.body.__module__.encode('utf-8'),
-            self.body.__name__.encode('utf-8'),
+            c_qualname,
+            len(qualname),
             ffi.NULL,
             0)
 
