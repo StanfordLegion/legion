@@ -6559,10 +6559,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void Runtime::register_projection_functor(ProjectionID pid,
-                                                       ProjectionFunctor *func)
+                                              ProjectionFunctor *func,
+                                              bool silence_warnings)
     //--------------------------------------------------------------------------
     {
-      runtime->register_projection_functor(pid, func);
+      runtime->register_projection_functor(pid, func, true/*need zero check*/,
+                                           silence_warnings);
     }
 
     //--------------------------------------------------------------------------
@@ -6597,10 +6599,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void Runtime::register_sharding_functor(ShardingID sid, 
-                                            ShardingFunctor *func)
+                                            ShardingFunctor *func,
+                                            bool silence_warnings)
     //--------------------------------------------------------------------------
     {
-      runtime->register_sharding_functor(sid, func);
+      runtime->register_sharding_functor(sid, func, true/*need zero check*/,
+                                         silence_warnings);
     }
 
     //--------------------------------------------------------------------------

@@ -2212,7 +2212,7 @@ namespace Legion {
       void register_projection_functor(ProjectionID pid, 
                                        ProjectionFunctor *func,
                                        bool need_zero_check = true,
-                                       bool was_preregistered = false);
+                                       bool silence_warnings = false);
       static void preregister_projection_functor(ProjectionID pid,
                                        ProjectionFunctor *func);
       ProjectionFunction* find_projection_function(ProjectionID pid);
@@ -2224,7 +2224,7 @@ namespace Legion {
       void register_sharding_functor(ShardingID sid,
                                      ShardingFunctor *func,
                                      bool need_zero_check = true,
-                                     bool was_preregistered = false);
+                                     bool silence_warnings= false);
       static void preregister_sharding_functor(ShardingID sid,
                                      ShardingFunctor *func);
       ShardingFunctor* find_sharding_functor(ShardingID sid);
