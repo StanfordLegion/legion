@@ -443,16 +443,18 @@ end
 local node_is_replicable = {
   -- Expressions:
 
-  -- We don't support any kind of external
-  -- call for replicable which could call
-  -- a random number generator, so no
-  -- non-task calls and no method calls
-  -- If the replicable field is set then we
-  -- know that the node was inserted by the
-  -- compiler and therefore must be a legion
-  -- runtime call
+  -- A function call is ok if it is:
+  --
+  --   * A task call
+  --   * Marked as "replicable" by the compiler (such calls are
+  --     inserted by compiler passes and are known to be safe)
+  --   * Contained in the whitelist of known ok C functions (so no
+  --     "rand", etc.)
+  --
+  -- General C and Terra calls are not supported because there is no
+  -- way to know in general if they do something non-deterministic.
   [ast.typed.expr.Call] = function(node)
-    return std.is_task(node.fn.value) or node.replicable
+    return std.is_task(node.fn.value) or node.replicable or std.replicable_whitelist[node.fn.value] or false
   end,
 
   [ast.typed.expr.MethodCall] = always_false,

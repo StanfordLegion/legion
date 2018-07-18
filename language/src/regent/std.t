@@ -33,6 +33,8 @@ std.config, std.args = base.config, base.args
 local c = base.c
 std.c = c
 
+std.replicable_whitelist = base.replicable_whitelist
+
 std.file_read_only = c.LEGION_FILE_READ_ONLY
 std.file_read_write = c.LEGION_FILE_READ_WRITE
 std.file_create = c.LEGION_FILE_CREATE

@@ -113,6 +113,45 @@ terra base.domain_from_bounds_3d(start : c.legion_point_3d_t,
   return c.legion_domain_from_rect_3d(rect)
 end
 
+-- A whitelist of functions that are known to be ok. We're importing a
+-- fixed list of known C headers above, so it should be ok to use a
+-- blacklist here.
+base.replicable_whitelist = {}
+do
+  local blacklist = data.set {
+    "fprintf",
+    "fscanf",
+    "printf",
+    "snprintf",
+    "sprintf",
+    "scanf",
+    "sscanf",
+    "rand",
+    "rand_r",
+    "vfscanf",
+    "vscanf",
+    "vsnprintf",
+    "vsprintf",
+    "vsscanf",
+  }
+  for k, v in pairs(c) do
+    if not blacklist[k] then
+      base.replicable_whitelist[v] = true
+    end
+  end
+
+  local other = {
+    base.assert_error,
+    base.assert,
+    base.domain_from_bounds_1d,
+    base.domain_from_bounds_2d,
+    base.domain_from_bounds_3d,
+  }
+  for _, v in ipairs(other) do
+    base.replicable_whitelist[v] = true
+  end
+end
+
 -- #####################################
 -- ## Codegen Helpers
 -- #################
