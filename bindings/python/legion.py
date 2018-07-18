@@ -189,14 +189,43 @@ class Domain(object):
 
 class Future(object):
     __slots__ = ['handle', 'value_type']
-    def __init__(self, handle, value_type=None):
-        self.handle = c.legion_future_copy(handle)
+    def __init__(self, value, value_type=None):
+        if value is None:
+            self.handle = None
+        elif isinstance(value, Future):
+            self.handle = c.legion_future_copy(value.handle)
+        elif value_type is not None:
+            value_ptr = ffi.new(ffi.getctype(value_type.cffi_type, '*'), value)
+            value_size = ffi.sizeof(value_type.cffi_type)
+            self.handle = c.legion_future_from_untyped_pointer(_my.ctx.runtime, value_ptr, value_size)
+        else:
+            value_str = pickle.dumps(value, protocol=_pickle_version)
+            value_size = len(value_str)
+            value_ptr = ffi.new('char[]', value_size)
+            ffi.buffer(value_ptr, value_size)[:] = value_str
+            self.handle = c.legion_future_from_untyped_pointer(_my.ctx.runtime, value_ptr, value_size)
+
         self.value_type = value_type
 
+    @staticmethod
+    def from_cdata(value, value_type=None):
+        result = Future(None, value_type=value_type)
+        result.handle = c.legion_future_copy(value)
+        return result
+
+    @staticmethod
+    def from_buffer(value, value_type=None):
+        result = Future(None, value_type=value_type)
+        result.handle = c.legion_future_from_untyped_pointer(_my.ctx.runtime, ffi.from_buffer(value), len(value))
+        return result
+
     def __del__(self):
-        c.legion_future_destroy(self.handle)
+        if self.handle is not None:
+            c.legion_future_destroy(self.handle)
 
     def get(self):
+        if self.handle is None:
+            return
         if self.value_type is None:
             value_ptr = c.legion_future_get_untyped_pointer(self.handle)
             value_size = c.legion_future_get_untyped_size(self.handle)
@@ -205,13 +234,20 @@ class Future(object):
             value = pickle.loads(value_str)
             return value
         else:
-            expected_size = ffi.sizeof(self.value_type)
+            expected_size = ffi.sizeof(self.value_type.cffi_type)
 
             value_ptr = c.legion_future_get_untyped_pointer(self.handle)
             value_size = c.legion_future_get_untyped_size(self.handle)
             assert value_size == expected_size
-            value = ffi.cast(ffi.getctype(self.value_type, '*'), value_ptr)[0]
+            value = ffi.cast(ffi.getctype(self.value_type.cffi_type, '*'), value_ptr)[0]
             return value
+
+    def get_buffer(self):
+        if self.handle is None:
+            return
+        value_ptr = c.legion_future_get_untyped_pointer(self.handle)
+        value_size = c.legion_future_get_untyped_size(self.handle)
+        return ffi.buffer(value_ptr, value_size)
 
 class FutureMap(object):
     __slots__ = ['handle']
@@ -226,25 +262,26 @@ class FutureMap(object):
         return Future(c.legion_future_map_get_future(self.handle, domain_point.raw_value()))
 
 class Type(object):
-    __slots__ = ['numpy_type', 'size']
+    __slots__ = ['numpy_type', 'cffi_type', 'size']
 
-    def __init__(self, numpy_type):
+    def __init__(self, numpy_type, cffi_type):
         self.numpy_type = numpy_type
+        self.cffi_type = cffi_type
         self.size = numpy.dtype(numpy_type).itemsize
 
     def __reduce__(self):
-        return (Type, (self.numpy_type,))
+        return (Type, (self.numpy_type, cffi_type))
 
 # Pre-defined Types
-float16 = Type(numpy.float16)
-float32 = Type(numpy.float32)
-float64 = Type(numpy.float64)
-int16 = Type(numpy.int16)
-int32 = Type(numpy.int32)
-int64 = Type(numpy.int64)
-uint16 = Type(numpy.uint16)
-uint32 = Type(numpy.uint32)
-uint64 = Type(numpy.uint64)
+float16 = Type(numpy.float16, 'short float')
+float32 = Type(numpy.float32, 'float')
+float64 = Type(numpy.float64, 'double')
+int16 = Type(numpy.int16, 'int16_t')
+int32 = Type(numpy.int32, 'int32_t')
+int64 = Type(numpy.int64, 'int64_t')
+uint16 = Type(numpy.uint16, 'uint16_t')
+uint32 = Type(numpy.uint32, 'uint32_t')
+uint64 = Type(numpy.uint64, 'uint64_t')
 
 class Privilege(object):
     __slots__ = ['read', 'write', 'discard']
@@ -817,7 +854,7 @@ class _TaskLauncher(object):
         c.legion_task_launcher_destroy(launcher)
 
         # Build future of result.
-        future = Future(result)
+        future = Future.from_cdata(result)
         c.legion_future_destroy(result)
         return future
 
@@ -997,7 +1034,7 @@ class Tunable(object):
     def select(tunable_id):
         result = c.legion_runtime_select_tunable_value(
             _my.ctx.runtime, _my.ctx.context, tunable_id, 0, 0)
-        future = Future(result, 'size_t')
+        future = Future.from_cdata(result, value_type=uint64_t)
         c.legion_future_destroy(result)
         return future
 
