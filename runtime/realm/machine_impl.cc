@@ -2483,8 +2483,8 @@ namespace Realm {
             for (std::map<Memory, MachineMemInfo* >::const_iterator it3 =  plist->begin(); it3 != plist->end(); ++it3)
               (_mem_cache)[restricted_kind].push_back(it3->first);
           }
+          it++;
         }
-        it++;
       }
     }
     if (found)
