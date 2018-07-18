@@ -455,7 +455,7 @@ namespace Legion {
       ProjectionInfo(void)
         : projection(NULL), projection_type(SINGULAR),
           projection_space(NULL), sharding_function(NULL),
-          dirty_reduction(false) { }
+          dirty_reduction(false), complete_write(false) { }
       ProjectionInfo(Runtime *runtime, const RegionRequirement &req,
                      IndexSpace launch_space, ShardingFunction *func = NULL);
     public:
@@ -464,6 +464,8 @@ namespace Legion {
         get_projection_epochs(void) const { return projection_epochs; }
       inline bool is_dirty_reduction(void) const { return dirty_reduction; }
       inline void set_dirty_reduction(void) { dirty_reduction = true; }
+      // This indicates if the application told us this will be a complete write
+      inline bool is_complete_write(void) const { return complete_write; }
       void record_projection_epoch(ProjectionEpochID epoch,
                                    const FieldMask &epoch_mask);
       void clear(void);
@@ -491,6 +493,8 @@ namespace Legion {
       // reduction then we have to do the extra advance to get the 
       // reduction registered with parent VersionState object
       bool dirty_reduction;
+      // Record if the application told us this was a complete write
+      bool complete_write;
     };
 
     /**
