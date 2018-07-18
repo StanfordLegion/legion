@@ -23,7 +23,9 @@ namespace Realm {
   class PythonSourceImplementation : public CodeImplementation {
   public:
     PythonSourceImplementation(const std::string& _module_name,
-                                   const std::string& _function_name);
+                               const std::vector<std::string>& _function_name);
+    PythonSourceImplementation(const std::string& _module_name,
+                               const std::string& _function_name);
 
     virtual ~PythonSourceImplementation(void);
 
@@ -45,7 +47,8 @@ namespace Realm {
     virtual void print(std::ostream& os) const;
 
   public:
-    std::string module_name, function_name;
+    std::string module_name;
+    std::vector<std::string> function_name;
   };
 
 }; // namespace Realm

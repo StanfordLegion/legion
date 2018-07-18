@@ -709,11 +709,19 @@ typedef enum legion_coherence_property_t {
 
 // Optional region requirement flags
 typedef enum legion_region_flags_t {
-  NO_FLAG         = 0x00000000,
-  VERIFIED_FLAG   = 0x00000001,
-  NO_ACCESS_FLAG  = 0x00000002, // Deprecated, user SpecializedConstraint
-  RESTRICTED_FLAG = 0x00000004,
-  MUST_PREMAP_FLAG= 0x00000008,
+  NO_FLAG             = 0x00000000,
+  VERIFIED_FLAG       = 0x00000001,
+  NO_ACCESS_FLAG      = 0x00000002, // Deprecated, user SpecializedConstraint
+  RESTRICTED_FLAG     = 0x00000004,
+  MUST_PREMAP_FLAG    = 0x00000008,
+  // For non-trivial projection functions: 
+  // tell the runtime the write is complete,
+  // will be ignored for non-index space launches
+  // and for privileges that aren't WRITE
+  // Note that if you use this incorrectly it could
+  // break the correctness of your code so be sure
+  // you know what you are doing
+  COMPLETE_PROJECTION_WRITE_FLAG = 0x00000010,
 } legion_region_flags_t;
 
 typedef enum legion_projection_type_t {

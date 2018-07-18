@@ -21,7 +21,12 @@ namespace Realm {
 
   inline void PythonSourceImplementation::print(std::ostream& os) const
   {
-    os << "pyref(" << module_name << "," << function_name << ")";
+    os << "pyref(" << module_name;
+    for (std::vector<std::string>::const_iterator it = function_name.begin(),
+           ie = function_name.end(); it != ie; ++it) {
+      os << "." << *it;
+    }
+    os << ")";
   }
 
   template <typename S>
