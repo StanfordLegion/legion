@@ -331,7 +331,7 @@ local function generate_atomic(op, typ)
         new     = [std_base.quote_binary_op(op, assumed, operand)]
         res     = cas_func([&cas_type](address), @assumed_b, @new_b)
         old     = @[&typ](&res)
-        mask    = assumed == old
+        mask    = [cas_type](assumed) == [cas_type](old)
       end
     until mask
   end
