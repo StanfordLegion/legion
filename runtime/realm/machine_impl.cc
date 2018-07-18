@@ -1127,13 +1127,13 @@ namespace Realm {
       while (!__sync_bool_compare_and_swap(&MemoryQueryImpl::init,0,1))
         continue;
       __sync_fetch_and_add(&MemoryQueryImpl::cache_invalid_count,1);
-      __sync_val_compare_and_swap(&MemoryQueryImpl::global_valid_cache,1,0);
+      (void)__sync_val_compare_and_swap(&MemoryQueryImpl::global_valid_cache,1,0);
       __sync_sub_and_fetch(&MemoryQueryImpl::init,1);
       log_query.debug("invalidate_query_caches MemoryQueryImpl::cache_invalid_count = %d \n", MemoryQueryImpl::cache_invalid_count);
       while (!__sync_bool_compare_and_swap(&ProcessorQueryImpl::init,0,1))
         continue;
       __sync_fetch_and_add(&ProcessorQueryImpl::cache_invalid_count,1);
-      __sync_val_compare_and_swap(&ProcessorQueryImpl::global_valid_cache,1,0);
+      (void)__sync_val_compare_and_swap(&ProcessorQueryImpl::global_valid_cache,1,0);
       __sync_sub_and_fetch(&ProcessorQueryImpl::init,1);
        log_query.debug("invalidate_query_caches complete ProcessorQueryImpl::cache_invalid_count = %d \n", ProcessorQueryImpl::cache_invalid_count);
     }
@@ -1608,7 +1608,7 @@ namespace Realm {
       return cur_cached_list;
     }
 
-    log_query.debug("processor cached_list: is_restricted_kind= %d, is_restricted_node = %d, predicates.size() = %lu, is_cached_mem = %d \n", is_restricted_kind, is_restricted_node, predicates.size(), is_cached_mem);
+    log_query.debug("processor cached_list: is_restricted_kind= %d, is_restricted_node = %d, is_cached_mem = %d \n", is_restricted_kind, is_restricted_node, is_cached_mem);
     // shared cache, not mutated query
     if (is_restricted_kind && (!is_restricted_node) && (!predicates.size() || is_cached_mem)) {
       // if the caches are invalid and not in the middle of a query, reset
