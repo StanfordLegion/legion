@@ -6495,10 +6495,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void Runtime::register_projection_functor(ProjectionID pid,
-                                                       ProjectionFunctor *func)
+                                              ProjectionFunctor *func,
+                                              bool silence_warnings)
     //--------------------------------------------------------------------------
     {
-      runtime->register_projection_functor(pid, func);
+      runtime->register_projection_functor(pid, func, true/*need zero check*/,
+                                           silence_warnings);
     }
 
     //--------------------------------------------------------------------------

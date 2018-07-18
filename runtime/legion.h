@@ -6256,9 +6256,11 @@ namespace Legion {
        * functor after the application has finished executing.
        * @param pid the projection ID to use for the registration
        * @param functor the object to register for handling projections
+       * @param silence_warnings disable warnings about dynamic registration
        */
       void register_projection_functor(ProjectionID pid, 
-                                       ProjectionFunctor *functor);
+                                       ProjectionFunctor *functor,
+                                       bool silence_warnings = false);
 
       /**
        * Register a projection functor before the runtime has started only.
