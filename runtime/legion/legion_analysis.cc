@@ -2066,7 +2066,8 @@ namespace Legion {
         projection_type(req.handle_type),
         projection_space((req.handle_type != SINGULAR) ?
             runtime->forest->get_node(launch_space) : NULL),
-        dirty_reduction(false)
+        dirty_reduction(false), complete_write(IS_WRITE(req) ? 
+            (req.flags & COMPLETE_PROJECTION_WRITE_FLAG) != 0 : false)
     //--------------------------------------------------------------------------
     {
     }
@@ -2093,6 +2094,7 @@ namespace Legion {
       projection_space = NULL;
       projection_epochs.clear();
       dirty_reduction = false;
+      complete_write = false;
     }
 
     //--------------------------------------------------------------------------
@@ -2107,6 +2109,7 @@ namespace Legion {
         rez.serialize(it->second);
       }
       rez.serialize<bool>(dirty_reduction);
+      rez.serialize<bool>(complete_write);
     }
 
     //--------------------------------------------------------------------------
@@ -2129,6 +2132,7 @@ namespace Legion {
         derez.deserialize(projection_epochs[epoch_id]);
       }
       derez.deserialize<bool>(dirty_reduction);
+      derez.deserialize<bool>(complete_write);
     }
 
     //--------------------------------------------------------------------------
@@ -2808,9 +2812,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // First update our projection fields
-      if ((info.projection->depth > 0) ||
+      if (!info.is_complete_write() && ((info.projection->depth > 0) ||
           (!owner->is_region() && (owner->get_num_children() != 
-                            info.projection_space->get_volume())))
+                            info.projection_space->get_volume()))))
       {
         // This is the slow path where we actually have to enumerate
         // all the points in the projection operation and evaluate
@@ -2827,7 +2831,11 @@ namespace Legion {
               "it has an incomplete index space for the partition being "
               "projected. If this is a large index space (in this case "
               "%zd points) then this could lead to a noticeable "
-              "performance degradation. Please report this use case to "
+              "performance degradation. If you know this is a complete "
+              "write of the entire upper bound logical region/partition "
+              "then you can tell the Legion runtime this by adding the "
+              "COMPLETE_PROJECTION_WRITE_FLAG to the 'flags' for this region "
+              "requirement. Regardless, please report this use case to "
               "the Legion developers mailing list.", user.idx, 
               user.op->get_logging_name(), user.op->get_unique_op_id(),
               info.projection_space->get_volume())
@@ -2839,7 +2847,11 @@ namespace Legion {
               "and Legion cannot prove the completeness of its write."
               "If this is a large index space (in this case "
               "%zd points) then this could lead to a noticeable "
-              "performance degradation. Please report this use case to "
+              "performance degradation. If you know this is a complete "
+              "write of the entire upper bound logical region/partition "
+              "then you call tell the Legion runtime this by adding the "
+              "COMPLETE_PROJECTION_WRITE_FLAG to the 'flags' for this region "
+              "requirement. Regardless, please report this use case to "
               "the Legion developers mailing list.", user.idx, 
               user.op->get_logging_name(), user.op->get_unique_op_id(),
               info.projection_space->get_volume())
