@@ -2652,6 +2652,16 @@ legion_task_launcher_add_arrival_barrier(legion_task_launcher_t launcher_,
   launcher->add_arrival_barrier(bar);
 }
 
+void
+legion_task_launcher_set_point(legion_task_launcher_t launcher_,
+                               legion_domain_point_t point_)
+{
+  TaskLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+  DomainPoint point = CObjectWrapper::unwrap(point_);
+
+  launcher->point = point;
+}
+
 legion_index_launcher_t
 legion_index_launcher_create(
   legion_task_id_t tid,
@@ -5187,6 +5197,28 @@ legion_runtime_register_task_variant_python_source(
   const void *userdata,
   size_t userlen)
 {
+  return legion_runtime_register_task_variant_python_source_qualname(
+    runtime_, id, task_name, global,
+    execution_constraints_, layout_constraints_, options,
+    module_name, &function_name, 1,
+    userdata, userlen);
+}
+
+legion_task_id_t
+legion_runtime_register_task_variant_python_source_qualname(
+  legion_runtime_t runtime_,
+  legion_task_id_t id /* = AUTO_GENERATE_ID */,
+  const char *task_name /* = NULL*/,
+  bool global,
+  legion_execution_constraint_set_t execution_constraints_,
+  legion_task_layout_constraint_set_t layout_constraints_,
+  legion_task_config_options_t options,
+  const char *module_name,
+  const char **function_qualname_,
+  size_t function_qualname_len,
+  const void *userdata,
+  size_t userlen)
+{
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   ExecutionConstraintSet *execution_constraints =
     CObjectWrapper::unwrap(execution_constraints_);
@@ -5205,8 +5237,9 @@ legion_runtime_register_task_variant_python_source(
   if (execution_constraints)
     registrar.execution_constraints = *execution_constraints;
 
+  std::vector<std::string> function_qualname(function_qualname_, function_qualname_ + function_qualname_len);
   CodeDescriptor code_desc(Realm::Type::from_cpp_type<Processor::TaskFuncPtr>());
-  code_desc.add_implementation(new Realm::PythonSourceImplementation(module_name, function_name));
+  code_desc.add_implementation(new Realm::PythonSourceImplementation(module_name, function_qualname));
 
   /*VariantID vid =*/ runtime->register_task_variant(
     registrar, code_desc, userdata, userlen);

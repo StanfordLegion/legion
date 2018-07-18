@@ -214,10 +214,20 @@ namespace Realm {
     }
     //(api->PyObject_Print)(module, stdout, 0); printf("\n");
 
-    log_py.debug() << "finding attribute '" << psi->function_name << "' in module '" << psi->module_name << "'";
-    PyObject *function = (api->PyObject_GetAttrString)(module, psi->function_name.c_str());
+    PyObject *function = module;
+    for (std::vector<std::string>::const_iterator it = psi->function_name.begin(),
+           ie = psi->function_name.end(); function && it != ie; ++it) {
+      function = (api->PyObject_GetAttrString)(function, it->c_str());
+    }
     if (!function) {
-      log_py.fatal() << "unable to import Python function " << psi->function_name << " from module" << psi->module_name;
+      {
+        LoggerMessage m = log_py.fatal();
+        m << "unable to import Python function " << psi->module_name;
+        for (std::vector<std::string>::const_iterator it = psi->function_name.begin(),
+               ie = psi->function_name.begin(); it != ie; ++it) {
+          m << "." << *it;
+        }
+      }
       (api->PyErr_PrintEx)(0);
       assert(0);
     }

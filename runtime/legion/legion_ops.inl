@@ -71,6 +71,7 @@ namespace Legion {
     {
       tpl = NULL;
       memo_state = NO_MEMO;
+      need_prepipeline_stage = false;
     }
 
     //--------------------------------------------------------------------------
@@ -142,23 +143,27 @@ namespace Legion {
     void MemoizableOp<OP>::invoke_memoize_operation(MapperID mapper_id)
     //--------------------------------------------------------------------------
     {
-      Mapper::MemoizeInput  input;
-      Mapper::MemoizeOutput output;
-      input.traced = OP::trace != NULL;
-      input.trace_id = input.traced ? OP::trace->get_trace_id() : -1U;
-      output.memoize = false;
-      Processor mapper_proc = OP::parent_ctx->get_executing_processor();
-      MapperManager *mapper = OP::runtime->find_mapper(mapper_proc, mapper_id);
-      Mappable *mappable = OP::get_mappable();
+      // If we're not in a trace or tracing isn't enabled then don't do anything
+      if ((OP::trace != NULL) && !this->runtime->no_tracing &&
+          !this->runtime->no_physical_tracing)
+      {
+        Mapper::MemoizeInput  input;
+        Mapper::MemoizeOutput output;
+        input.trace_id = OP::trace->get_trace_id();
+        output.memoize = false;
+        Processor mapper_proc = OP::parent_ctx->get_executing_processor();
+        MapperManager *mapper = OP::runtime->find_mapper(mapper_proc,mapper_id);
+        Mappable *mappable = OP::get_mappable();
 #ifdef DEBUG_LEGION
-      assert(mappable != NULL);
+        assert(mappable != NULL);
 #endif
-      mapper->invoke_memoize_operation(mappable, &input, &output);
-      if (OP::trace == NULL && output.memoize)
-        REPORT_LEGION_ERROR(ERROR_INVALID_PHYSICAL_TRACING,
-            "Invalid mapper output from 'memoize_operation'. Mapper requested"
-            " memoization of an operation that is not being traced.");
-      set_memoize(output.memoize);
+        mapper->invoke_memoize_operation(mappable, &input, &output);
+        if (OP::trace == NULL && output.memoize)
+          REPORT_LEGION_ERROR(ERROR_INVALID_PHYSICAL_TRACING,
+              "Invalid mapper output from 'memoize_operation'. Mapper requested"
+              " memoization of an operation that is not being traced.");
+        set_memoize(output.memoize);
+      }
     }
 
     //--------------------------------------------------------------------------

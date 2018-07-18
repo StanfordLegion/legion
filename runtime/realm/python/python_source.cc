@@ -28,8 +28,13 @@ namespace Realm {
   {}
 
   PythonSourceImplementation::PythonSourceImplementation(const std::string& _module_name,
-                                                                 const std::string& _function_name)
+                                                         const std::vector<std::string>& _function_name)
     : module_name(_module_name), function_name(_function_name)
+  {}
+
+  PythonSourceImplementation::PythonSourceImplementation(const std::string& _module_name,
+                                                         const std::string& _function_name)
+    : module_name(_module_name), function_name(1, _function_name)
   {}
 
   PythonSourceImplementation::~PythonSourceImplementation(void)

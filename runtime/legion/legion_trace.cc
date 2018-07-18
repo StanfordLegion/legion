@@ -76,7 +76,11 @@ namespace Legion {
       std::pair<Operation*,GenerationID> key(op,gen);
       const unsigned index = operations.size();
       op->set_trace_local_id(index);
+      op->add_mapping_reference(gen);
       operations.push_back(key);
+#ifdef LEGION_SPY
+      current_uids[key] = op->get_unique_op_id();
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -104,6 +108,18 @@ namespace Legion {
     void LegionTrace::end_trace_execution(FenceOp *op)
     //--------------------------------------------------------------------------
     {
+      if (is_replaying())
+      {
+        for (unsigned idx = 0; idx < operations.size(); ++idx)
+          operations[idx].first->remove_mapping_reference(
+              operations[idx].second);
+        operations.clear();
+#ifdef LEGION_SPY
+        current_uids.clear();
+#endif
+        return;
+      }
+
       // Register for this fence on every one of the operations in
       // the trace and then clear out the operations data structure
       for (std::set<std::pair<Operation*,GenerationID> >::iterator it =
@@ -933,11 +949,10 @@ namespace Legion {
                                UniqueID prev_fence_uid, UniqueID curr_fence_uid)
     //--------------------------------------------------------------------------
     {
+      UniqueID context_uid = ctx->get_unique_id();
       for (unsigned idx = 0; idx < operations.size(); ++idx)
       {
-        Operation *op = operations[idx].first;
-        UniqueID context_uid = op->get_context()->get_unique_id();
-        UniqueID uid = op->get_unique_op_id();
+        UniqueID uid = get_current_uid_by_index(idx);
         const LegionVector<DependenceRecord>::aligned &deps = dependences[idx];
         for (LegionVector<DependenceRecord>::aligned::const_iterator it =
              deps.begin(); it != deps.end(); it++)
@@ -1636,6 +1651,9 @@ namespace Legion {
     {
       size_t num_requirements = reqs.size();
       initialize_operation(ctx, false, num_requirements);
+      // We actually want to track summary operations
+      track_parent = true;
+      context_index = ctx->register_new_summary_operation(this);
       requirements = reqs;
       instances = insts;
       parent_indices = indices;
@@ -2317,6 +2335,7 @@ namespace Legion {
         TraceSummaryOp *op = runtime->get_available_summary_op();
         op->initialize_summary(context, invalidator->get_unique_op_id(),
             it->requirements, it->instances, it->parent_indices);
+        context->register_executing_child(op);
         op->execute_dependence_analysis();
         op->add_mapping_reference(op->get_generation());
       }
@@ -2654,11 +2673,20 @@ namespace Legion {
       for (unsigned idx = 1; idx < instructions.size(); ++idx)
         slice_indices_by_inst[idx] = -1U;
 #endif
+      bool round_robin_for_tasks = false;
+
+      std::set<Processor> distinct_targets;
+      for (CachedMappings::iterator it = cached_mappings.begin(); it !=
+           cached_mappings.end(); ++it)
+        distinct_targets.insert(it->second.target_procs[0]);
+      round_robin_for_tasks = distinct_targets.size() < replay_parallelism;
+
       unsigned next_slice_id = 0;
       for (std::map<TraceLocalID, Operation*>::iterator it =
            operations.begin(); it != operations.end(); ++it)
       {
-        if (it->second->get_operation_kind() == Operation::TASK_OP_KIND)
+        if (!round_robin_for_tasks &&
+            it->second->get_operation_kind() == Operation::TASK_OP_KIND)
         {
           CachedMappings::iterator finder = cached_mappings.find(it->first);
 #ifdef DEBUG_LEGION

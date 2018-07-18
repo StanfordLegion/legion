@@ -18,7 +18,6 @@
 #define __LEGION_TRACE__
 
 #include "legion.h"
-#include "legion/runtime.h"
 #include "legion/legion_ops.h"
 
 namespace Legion {

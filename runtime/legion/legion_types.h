@@ -423,6 +423,7 @@ namespace Legion {
         "Remote Physical Context Request",                        \
         "Remote Physical Context Response",                       \
         "Replay Physical Trace",                                  \
+        "Delete Physical Template",                               \
         "Remote Message",                                         \
         "Retry Shutdown",                                         \
       };
@@ -1462,7 +1463,8 @@ namespace Legion {
     struct GenericUser;
     struct LogicalUser;
     struct PhysicalUser;
-    struct TraceInfo;
+    struct LogicalTraceInfo;
+    struct PhysicalTraceInfo;
     class ClosedNode;
     class LogicalCloser;
     class TreeCloseImpl;
