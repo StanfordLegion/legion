@@ -141,6 +141,7 @@ namespace Realm {
       MachineNodeInfo *get_nodeinfo(int node) const;
       MachineNodeInfo *get_nodeinfo(Processor p) const;
       MachineNodeInfo *get_nodeinfo(Memory m) const;
+      void invalidate_query_caches();
     };
 
     template <typename T, typename T2>
@@ -190,29 +191,25 @@ namespace Realm {
     extern bool use_machine_query_cache;
   };
 
-    class ProcessorQueryImpl {
+  enum QueryType {
+    QUERY_NEXT = 0,
+    QUERY_FIRST,
+    QUERY_RANDOM,
+  };
+
+   class ProcessorQueryImpl {
     public:
       ProcessorQueryImpl(const Machine& _machine);
 
-      static int init;
-      static std::vector<Processor>* _toc_procs_list;
-      static std::vector<Processor>* _loc_procs_list;
-      static std::vector<Processor>* _omp_procs_list;
-      static std::vector<Processor>* _io_procs_list;
-      static std::map<Memory, std::vector<Processor> >* _sysmem_local_procs;
-      static std::map<Memory, std::vector<Processor> >* _sysmem_local_io_procs;
-      static std::map<Memory, std::vector<Processor> >* _fbmem_local_procs;
-     
+      static unsigned int init, cache_invalid_count;
+      static bool global_valid_cache;
+      static std::map<Processor::Kind, std::vector<Processor> > _proc_cache;
+      static std::map<Processor::Kind, std::map<Memory, std::vector<Processor> > > _proc_cache_affinity;
+
     protected:
       // these things are refcounted and copied-on-write
       ProcessorQueryImpl(const ProcessorQueryImpl& copy_from);
       ~ProcessorQueryImpl(void);
-
-
-      std::vector<Processor>* toc_procs_list(void) const;
-      std::vector<Processor>* loc_procs_list(void) const;
-      std::vector<Processor>* io_procs_list(void) const;
-      std::vector<Processor>* omp_procs_list(void) const;
 
     public:
       void add_reference(void);
@@ -244,13 +241,14 @@ namespace Realm {
       std::vector<ProcQueryPredicate *> predicates;     
       Memory cached_mem;
       bool is_cached_mem, shared_cached_list, valid_cache;
-      unsigned int cur_index;
       std::vector<Processor>* cur_cached_list;
-
+      unsigned int invalid_count, cur_index;
       // cached list of processors
       std::vector<Processor>* cached_list() const;
-      // cached iterator
-      bool cached_list_next(Processor after, Processor& nextp);
+      bool cached_query(Processor p, Processor &pval);
+      bool cached_query(Processor &pval, QueryType q) const;
+      bool cached_query(size_t &count) const;
+      Processor mutated_cached_query(Processor p);
       Processor next(Processor after);
     };            
 
@@ -319,10 +317,10 @@ namespace Realm {
     class MemoryQueryImpl {
     public:
       MemoryQueryImpl(const Machine& _machine);
-      static int init;
-      static std::vector<Memory>* _sysmems_list;
-      static std::vector<Memory>* _fbmems_list;
-     
+      static unsigned int init, cache_invalid_count;
+      static bool global_valid_cache;
+      static std::map<Memory::Kind, std::vector<Memory> > _mem_cache;
+
     protected:
       // these things are refcounted and copied-on-write
       MemoryQueryImpl(const MemoryQueryImpl& copy_from);
@@ -343,6 +341,10 @@ namespace Realm {
       size_t count_matches(void) const;
       Memory random_match(void) const;
       Memory cache_next(Memory after);
+      bool cached_query(Memory p, Memory &pval);
+      bool cached_query(Memory &pval, QueryType q) const;
+      bool cached_query(size_t &count) const;
+      Memory mutated_cached_query(Memory p);
 
     protected:
       int references;
@@ -352,11 +354,9 @@ namespace Realm {
       bool is_restricted_kind;
       Memory::Kind restricted_kind;
       bool   shared_cached_list, valid_cache;
-      unsigned int cur_index;
       std::vector<Memory>* cur_cached_list;
+      unsigned int invalid_count, cur_index;
       std::vector<MemoryQueryPredicate *> predicates;     
-      std::vector<Memory>* sysmems_list(void) const;
-      std::vector<Memory>* fbmems_list(void) const;
       std::vector<Memory>* cached_list() const;
       Memory next(Memory after);
     };            
