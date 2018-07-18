@@ -188,12 +188,14 @@ class Domain(object):
         return self.impl
 
 class Future(object):
-    __slots__ = ['handle', 'value_type']
-    def __init__(self, value, value_type=None):
+    __slots__ = ['handle', 'value_type', 'argument_number']
+    def __init__(self, value, value_type=None, argument_number=None):
         if value is None:
             self.handle = None
         elif isinstance(value, Future):
             self.handle = c.legion_future_copy(value.handle)
+            if value_type is None:
+                value_type = value.value_type
         elif value_type is not None:
             value_ptr = ffi.new(ffi.getctype(value_type.cffi_type, '*'), value)
             value_size = ffi.sizeof(value_type.cffi_type)
@@ -206,16 +208,17 @@ class Future(object):
             self.handle = c.legion_future_from_untyped_pointer(_my.ctx.runtime, value_ptr, value_size)
 
         self.value_type = value_type
+        self.argument_number = argument_number
 
     @staticmethod
-    def from_cdata(value, value_type=None):
-        result = Future(None, value_type=value_type)
+    def from_cdata(value, *args, **kwargs):
+        result = Future(None, *args, **kwargs)
         result.handle = c.legion_future_copy(value)
         return result
 
     @staticmethod
-    def from_buffer(value, value_type=None):
-        result = Future(None, value_type=value_type)
+    def from_buffer(value, *args, **kwargs):
+        result = Future(None, *args, **kwargs)
         result.handle = c.legion_future_from_untyped_pointer(_my.ctx.runtime, ffi.from_buffer(value), len(value))
         return result
 
@@ -223,7 +226,19 @@ class Future(object):
         if self.handle is not None:
             c.legion_future_destroy(self.handle)
 
+    def __reduce__(self):
+        if self.argument_number is None:
+            raise Exception('Cannot pickle a Future except when used as a task argument')
+        return (Future, (None, self.value_type, self.argument_number))
+
+    def resolve_handle(self):
+        if self.handle is None and self.argument_number is not None:
+            self.handle = c.legion_future_copy(
+                c.legion_task_get_future(_my.ctx.task, self.argument_number))
+
     def get(self):
+        self.resolve_handle()
+
         if self.handle is None:
             return
         if self.value_type is None:
@@ -243,6 +258,8 @@ class Future(object):
             return value
 
     def get_buffer(self):
+        self.resolve_handle()
+
         if self.handle is None:
             return
         value_ptr = c.legion_future_get_untyped_pointer(self.handle)
@@ -270,7 +287,7 @@ class Type(object):
         self.size = numpy.dtype(numpy_type).itemsize
 
     def __reduce__(self):
-        return (Type, (self.numpy_type, cffi_type))
+        return (Type, (self.numpy_type, self.cffi_type))
 
 # Pre-defined Types
 float16 = Type(numpy.float16, 'short float')
@@ -797,13 +814,23 @@ class _TaskLauncher(object):
         self.privileges = privileges
         self.calling_convention = calling_convention
 
-    def preprocess_args(self, *args):
+    def preprocess_args(self, args):
         return [
             arg._legion_preprocess_task_argument()
             if hasattr(arg, '_legion_preprocess_task_argument') else arg
             for arg in args]
 
-    def encode_args(self, *args):
+    def gather_futures(self, args):
+        normal = []
+        futures = []
+        for arg in args:
+            if isinstance(arg, Future):
+                arg = Future(arg, argument_number=len(futures))
+                futures.append(arg)
+            normal.append(arg)
+        return normal, futures
+
+    def encode_args(self, args):
         task_args = ffi.new('legion_task_argument_t *')
         task_args_buffer = None
         if self.calling_convention == 'python':
@@ -822,8 +849,9 @@ class _TaskLauncher(object):
     def spawn_task(self, *args):
         assert(isinstance(_my.ctx, Context))
 
-        args = self.preprocess_args(*args)
-        task_args, _ = self.encode_args(*args)
+        args = self.preprocess_args(args)
+        args, futures = self.gather_futures(args)
+        task_args, _ = self.encode_args(args)
 
         # Construct the task launcher.
         launcher = c.legion_task_launcher_create(
@@ -843,6 +871,8 @@ class _TaskLauncher(object):
                     if not hasattr(priv, 'fields') or name in priv.fields:
                         c.legion_task_launcher_add_field(
                             launcher, req, fid, True)
+            elif isinstance(arg, Future):
+                c.legion_task_launcher_add_future(launcher, arg.handle)
             elif self.calling_convention is None:
                 # FIXME: Task arguments aren't being encoded AT ALL;
                 # at least throw an exception so that the user knows
@@ -877,8 +907,8 @@ class _IndexLauncher(_TaskLauncher):
 
     def attach_local_args(self, index, *args):
         point = DomainPoint(index)
-        args = self.preprocess_args(*args)
-        task_args, _ = self.encode_args(*args)
+        args = self.preprocess_args(args)
+        task_args, _ = self.encode_args(args)
         c.legion_argument_map_set_point(
             self.local_args, point.raw_value(), task_args[0], False)
 

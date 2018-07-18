@@ -22,6 +22,15 @@ import codecs
 import legion
 from legion import task, Future
 
+@task
+def show(f):
+    print(f.get())
+
+@task
+def show_buffer(f):
+    value = codecs.decode(f.get_buffer(), 'utf-8')
+    print(value)
+
 @task(top_level=True)
 def main():
     # No explicit type specified, value is pickled
@@ -39,3 +48,7 @@ def main():
     h_value = codecs.decode(h.get_buffer(), 'utf-8')
     print("value of h.get_raw() is %s" % h_value)
     assert h_value == 'asdf'
+
+    show(f)
+    show(g)
+    show_buffer(h)
