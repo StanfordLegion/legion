@@ -84,6 +84,8 @@ legion_python_cxx_tests = [
     ['bindings/python/legion_python', ['hello', '-ll:py', '1', '-ll:cpu', '0']],
     ['bindings/python/legion_python', ['region', '-ll:py', '1', '-ll:cpu', '0']],
     ['bindings/python/legion_python', ['index_launch', '-ll:py', '1', '-ll:cpu', '0']],
+    ['bindings/python/legion_python', ['method', '-ll:py', '1', '-ll:cpu', '0']],
+    ['bindings/python/legion_python', ['future', '-ll:py', '1', '-ll:cpu', '0']],
 
     # Examples
     ['examples/python_interop/python_interop', ['-ll:py', '1']],

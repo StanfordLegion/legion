@@ -12491,13 +12491,13 @@ namespace Legion {
     void Runtime::register_projection_functor(ProjectionID pid,
                                               ProjectionFunctor *functor,
                                               bool need_zero_check,
-                                              bool was_preregistered)
+                                              bool silence_warnings)
     //--------------------------------------------------------------------------
     {
       if (need_zero_check && (pid == 0))
         REPORT_LEGION_ERROR(ERROR_RESERVED_PROJECTION_ID, 
                             "ProjectionID zero is reserved.\n");
-      if (!was_preregistered && (total_address_spaces > 1))
+      if (!silence_warnings && (total_address_spaces > 1))
         REPORT_LEGION_WARNING(LEGION_WARNING_DYNAMIC_PROJECTION_REG,
                         "Projection functor %d is being dynamically "
                         "registered for a multi-node run with %d nodes. It is "
