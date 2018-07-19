@@ -7209,8 +7209,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     inline void AttachLauncher::attach_array_aos(void *base, bool column_major,
-                                            const std::vector<FieldID> &fields,
-                                            Memory mem, size_t alignment)
+                          const std::vector<FieldID> &fields, Memory mem,
+                          const std::map<FieldID,size_t> *alignments /*= NULL*/)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -7237,16 +7237,18 @@ namespace Legion {
       }
       constraints.add_constraint(
           OrderingConstraint(dim_order, false/*contiguous*/));
-      for (std::vector<FieldID>::const_iterator it = fields.begin();
-            it != fields.end(); it++)
-        constraints.add_constraint(AlignmentConstraint(*it, GE_EK, alignment));
+      if (alignments != NULL)
+        for (std::map<FieldID,size_t>::const_iterator it = alignments->begin();
+             it != alignments->end(); it++)
+          constraints.add_constraint(
+              AlignmentConstraint(it->first, GE_EK, it->second));
       privilege_fields.insert(fields.begin(), fields.end());
     }
     
     //--------------------------------------------------------------------------
     inline void AttachLauncher::attach_array_soa(void *base, bool column_major,
-                                            const std::vector<FieldID> &fields,
-                                            Memory mem, size_t alignment)
+                          const std::vector<FieldID> &fields, Memory mem,
+                          const std::map<FieldID,size_t> *alignments /*= NULL*/)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -7273,9 +7275,11 @@ namespace Legion {
       dim_order[3] = DIM_F;
       constraints.add_constraint(
           OrderingConstraint(dim_order, false/*contiguous*/));
-      for (std::vector<FieldID>::const_iterator it = fields.begin();
-            it != fields.end(); it++)
-        constraints.add_constraint(AlignmentConstraint(*it, GE_EK, alignment));
+      if (alignments != NULL)
+        for (std::map<FieldID,size_t>::const_iterator it = alignments->begin();
+             it != alignments->end(); it++)
+          constraints.add_constraint(
+              AlignmentConstraint(it->first, GE_EK, it->second));
       privilege_fields.insert(fields.begin(), fields.end());
     }
 

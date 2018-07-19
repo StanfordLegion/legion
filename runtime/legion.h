@@ -1864,11 +1864,11 @@ namespace Legion {
       // Helper methods for AOS and SOA arrays, but it is totally 
       // acceptable to fill in the layout constraint set manually
       inline void attach_array_aos(void *base, bool column_major,
-                                   const std::vector<FieldID> &fields,
-                                   Memory mem, size_t alignment = 16);
+                             const std::vector<FieldID> &fields, Memory mem,
+                             const std::map<FieldID,size_t> *alignments = NULL);
       inline void attach_array_soa(void *base, bool column_major,
-                                   const std::vector<FieldID> &fields,
-                                   Memory mem, size_t alignment = 16);
+                             const std::vector<FieldID> &fields, Memory mem,
+                             const std::map<FieldID,size_t> *alignments = NULL);
     public:
       ExternalResource                              resource;
       LogicalRegion                                 handle;
