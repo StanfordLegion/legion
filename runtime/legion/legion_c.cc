@@ -2662,6 +2662,16 @@ legion_task_launcher_set_point(legion_task_launcher_t launcher_,
   launcher->point = point;
 }
 
+void
+legion_task_launcher_set_sharding_space(legion_task_launcher_t launcher_,
+                                        legion_index_space_t is_)
+{
+  TaskLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+  IndexSpace is = CObjectWrapper::unwrap(is_);
+
+  launcher->sharding_space = is;
+}
+
 legion_index_launcher_t
 legion_index_launcher_create(
   legion_task_id_t tid,
@@ -2879,6 +2889,16 @@ legion_index_launcher_add_arrival_barrier(legion_index_launcher_t launcher_,
   PhaseBarrier bar = CObjectWrapper::unwrap(bar_);
 
   launcher->add_arrival_barrier(bar);
+}
+
+void
+legion_index_launcher_set_sharding_space(legion_index_launcher_t launcher_,
+                                         legion_index_space_t is_)
+{
+  IndexTaskLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+  IndexSpace is = CObjectWrapper::unwrap(is_);
+
+  launcher->sharding_space = is;
 }
 
 // -----------------------------------------------------------------------

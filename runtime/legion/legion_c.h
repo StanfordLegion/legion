@@ -2283,6 +2283,13 @@ extern "C" {
                                  legion_domain_point_t point);
 
   /**
+   * @see Legion::TaskLauncher::sharding_space
+   */
+  void
+  legion_task_launcher_set_sharding_space(legion_task_launcher_t launcher,
+                                          legion_index_space_t is);
+
+  /**
    * @return Caller takes ownership of return value.
    *
    * @see Legion::IndexTaskLauncher::IndexTaskLauncher()
@@ -2439,6 +2446,13 @@ extern "C" {
   void
   legion_index_launcher_add_arrival_barrier(legion_index_launcher_t launcher,
                                             legion_phase_barrier_t bar);
+
+  /**
+   * @see Legion::IndexTaskLauncher::sharding_space
+   */
+  void
+  legion_index_launcher_set_sharding_space(legion_index_launcher_t launcher,
+                                           legion_index_space_t is);
 
   // -----------------------------------------------------------------------
   // Inline Mapping Operations

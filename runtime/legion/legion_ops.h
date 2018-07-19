@@ -2155,7 +2155,7 @@ namespace Legion {
       // Make this a virtual method so it can be overridden for
       // control replicated version of must epoch op
       virtual FutureMapImpl* create_future_map(TaskContext *ctx,
-                                               IndexSpace launch_space);
+                 IndexSpace launch_space, IndexSpace shard_space);
       // Another virtual method to override for control replication
       virtual void instantiate_tasks(TaskContext *ctx, bool check_privileges,
                                      const MustEpochLauncher &launcher);

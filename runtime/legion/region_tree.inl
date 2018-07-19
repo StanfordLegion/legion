@@ -3590,12 +3590,16 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     IndexSpace IndexSpaceNodeT<DIM,T>::create_shard_space(
-                                          ShardingFunction *func, ShardID shard)
+                  ShardingFunction *func, ShardID shard, IndexSpace shard_space)
     //--------------------------------------------------------------------------
     {
       DomainT<DIM,T> local_space;
       get_realm_index_space(local_space, true/*tight*/);
-      const Domain full_space = local_space;
+      Domain shard_domain;
+      if (shard_space != handle)
+        context->find_launch_space_domain(shard_space, shard_domain);
+      else
+        shard_domain = local_space;
       std::vector<Realm::Point<DIM,T> > shard_points; 
       size_t total_points = 0;
       for (Realm::IndexSpaceIterator<DIM,T> rect_itr(realm_index_space); 
@@ -3605,7 +3609,7 @@ namespace Legion {
               itr.valid; itr.step(), total_points++)
         {
           const ShardID point_shard = 
-            func->find_owner(DomainPoint(Point<DIM,T>(itr.p)), full_space);
+            func->find_owner(DomainPoint(Point<DIM,T>(itr.p)), shard_domain);
           if (point_shard == shard)
             shard_points.push_back(itr.p);
         }

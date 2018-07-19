@@ -7707,7 +7707,8 @@ namespace Legion {
       if (launcher.predicate != Predicate::TRUE_PRED)
         initialize_predicate(launcher.predicate_false_future,
                              launcher.predicate_false_result);
-      future_map = FutureMap(create_future_map(ctx));
+      future_map = FutureMap(
+          create_future_map(ctx, launch_space, launcher.sharding_space));
 #ifdef DEBUG_LEGION
       future_map.impl->add_valid_domain(index_domain);
 #endif
@@ -8489,7 +8490,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    FutureMapImpl* IndexTask::create_future_map(TaskContext *ctx) 
+    FutureMapImpl* IndexTask::create_future_map(TaskContext *ctx,
+                             IndexSpace launch_space, IndexSpace sharding_space) 
     //--------------------------------------------------------------------------
     {
       return new FutureMapImpl(ctx, this, runtime,

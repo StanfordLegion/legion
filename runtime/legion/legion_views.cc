@@ -8242,8 +8242,12 @@ namespace Legion {
           if (!overlap)
             continue;
           RegionTreeNode *node = pit->first->node;
-          Domain full_space;
+          Domain full_space, shard_space;
           pit->first->domain->get_launch_space_domain(full_space);
+          if (pit->first->sharding_domain != pit->first->domain)
+            pit->first->sharding_domain->get_launch_space_domain(shard_space);
+          else
+            shard_space = full_space;
           // Invert the projection function to find the interfering points
           std::map<DomainPoint,IndexSpaceExpression*> interfering_points;
           pit->first->projection->find_interfering_points(node->context, node,
@@ -8256,7 +8260,7 @@ namespace Legion {
                   dit != interfering_points.end(); dit++)
             {
               const ShardID shard = 
-                pit->first->sharding->find_owner(dit->first, full_space);
+                pit->first->sharding->find_owner(dit->first, shard_space);
               // Skip our origin shard since we know about that
               if (shard == origin_shard)
                 continue;
@@ -8293,8 +8297,12 @@ namespace Legion {
         const FieldMask overlap = pit->second & mask;
         if (!overlap)
           continue;
-        Domain full_space;
+        Domain full_space, shard_space;
         pit->first->domain->get_launch_space_domain(full_space);
+        if (pit->first->sharding_domain != pit->first->domain)
+          pit->first->sharding_domain->get_launch_space_domain(shard_space);
+        else
+          shard_space = full_space;
         RegionTreeNode *node = pit->first->node;
         // Invert the projection function to find the interfering points
         std::map<DomainPoint,IndexSpaceExpression*> interfering_points;
@@ -8308,7 +8316,7 @@ namespace Legion {
                 dit != interfering_points.end(); dit++)
           {
             const ShardID shard = 
-              pit->first->sharding->find_owner(dit->first, full_space);
+              pit->first->sharding->find_owner(dit->first, shard_space);
             // Skip our origin shard since we know about that
             if (shard == origin_shard)
               continue;
@@ -8347,8 +8355,12 @@ namespace Legion {
 #endif
         if (!pit->second.is_set(fidx))
           continue;
-        Domain full_space;
+        Domain full_space, shard_space;
         pit->first->domain->get_launch_space_domain(full_space);
+        if (pit->first->sharding_domain != pit->first->domain)
+          pit->first->sharding_domain->get_launch_space_domain(shard_space);
+        else
+          shard_space = full_space;
         RegionTreeNode *node = pit->first->node;
         // Invert the projection function to find the interfering points
         std::map<DomainPoint,IndexSpaceExpression*> interfering_points;
@@ -8362,7 +8374,7 @@ namespace Legion {
                 dit != interfering_points.end(); dit++)
           {
             const ShardID shard = 
-              pit->first->sharding->find_owner(dit->first, full_space);
+              pit->first->sharding->find_owner(dit->first, shard_space);
             // Skip our origin shard since we know about that
             if (shard == origin_shard)
               continue;

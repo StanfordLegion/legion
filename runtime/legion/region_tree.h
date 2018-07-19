@@ -1463,7 +1463,8 @@ namespace Legion {
                                     MultiTask *task, MapperManager *mapper) = 0;
       virtual void log_launch_space(UniqueID op_id) = 0;
       virtual IndexSpace create_shard_space(ShardingFunction *func, 
-                                            ShardID shard) = 0;
+                                            ShardID shard,
+                                            IndexSpace shard_space) = 0;
       virtual void destroy_shard_domain(const Domain &domain) = 0;
     public:
       const IndexSpace handle;
@@ -1718,7 +1719,8 @@ namespace Legion {
                                     MultiTask *task, MapperManager *mapper);
       virtual void log_launch_space(UniqueID op_id);
       virtual IndexSpace create_shard_space(ShardingFunction *func, 
-                                            ShardID shard);
+                                            ShardID shard, 
+                                            IndexSpace shard_space);
       virtual void destroy_shard_domain(const Domain &domain);
     public:
       bool contains_point(const Realm::Point<DIM,T> &point);

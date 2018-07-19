@@ -11510,7 +11510,8 @@ namespace Legion {
       if (arrived && proj_info.is_projecting())
       {
         FieldState new_state(user.usage, open_mask, proj_info.projection,
-           proj_info.projection_space, proj_info.sharding_function, this);
+           proj_info.projection_space, proj_info.sharding_function, 
+           proj_info.sharding_space, this);
         merge_new_field_state(state, new_state);
       }
       else if (next_child != INVALID_COLOR)
@@ -12218,8 +12219,8 @@ namespace Legion {
                   // Make the new state to add
                   new_states.push_back(FieldState(closer.user.usage, overlap, 
                            proj_info.projection, proj_info.projection_space, 
-                           proj_info.sharding_function, this,
-                           true/*dirty reduce*/));
+                           proj_info.sharding_function,proj_info.sharding_space,
+                           this, true/*dirty reduce*/));
                   // Mark that this is a dirty reduction
                   proj_info.set_dirty_reduction();
                   // If we are a reduction, we can go straight there
@@ -12262,7 +12263,8 @@ namespace Legion {
                       as_partition_node()->row_source->color_space;
                     new_states.push_back(FieldState(close_usage, overlap,
                         context->runtime->find_projection_function(0),
-                        color_space, NULL/*sharding func*/, this));
+                        color_space, NULL/*sharding func*/, 
+                        NULL/*sharding space*/, this));
                   }
                 }
                 it->valid_fields -= current_mask;
@@ -12302,7 +12304,8 @@ namespace Legion {
                       as_partition_node()->row_source->color_space;
                     new_states.push_back(FieldState(close_usage, overlap,
                         context->runtime->find_projection_function(0),
-                        color_space, NULL/*sharding func*/, this));
+                        color_space, NULL/*sharding func*/, 
+                        NULL/*sharding space*/, this));
                   }
                 }
                 it->valid_fields -= current_mask;
@@ -12333,7 +12336,7 @@ namespace Legion {
       {
         new_states.push_back(FieldState(closer.user.usage, open_mask, 
               proj_info.projection, proj_info.projection_space, 
-              proj_info.sharding_function, this));
+              proj_info.sharding_function, proj_info.sharding_space, this));
       }
       merge_new_field_states(state, new_states);
 #ifdef DEBUG_LEGION

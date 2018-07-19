@@ -2075,14 +2075,18 @@ namespace Legion {
     //--------------------------------------------------------------------------
     ProjectionInfo::ProjectionInfo(Runtime *runtime, 
                                    const RegionRequirement &req, 
-                                   IndexSpace launch_space, ShardingFunction *f)
+                                   IndexSpace launch_space, 
+                                   ShardingFunction *f/*=NULL*/,
+                                   IndexSpace shard_space/*=NO_SPACE*/)
       : projection((req.handle_type != SINGULAR) ? 
           runtime->find_projection_function(req.projection) : NULL),
         projection_type(req.handle_type),
         projection_space((req.handle_type != SINGULAR) ?
             runtime->forest->get_node(launch_space) : NULL),
-        sharding_function(f), dirty_reduction(false), 
-        complete_write(IS_WRITE(req) ? 
+        sharding_function(f), sharding_space(shard_space.exists() ? 
+            runtime->forest->get_node(shard_space) : 
+              (f == NULL) ? NULL : projection_space), 
+        dirty_reduction(false), complete_write(IS_WRITE(req) ? 
             (req.flags & COMPLETE_PROJECTION_WRITE_FLAG) != 0 : false)
     //--------------------------------------------------------------------------
     {
@@ -2584,24 +2588,30 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ProjectionEpoch::insert_write(ProjectionFunction *function, 
-                                 IndexSpaceNode* node, ShardingFunction *shard)
+                                       IndexSpaceNode* node, 
+                                       ShardingFunction *shard,
+                                       IndexSpaceNode *shard_domain)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(!!valid_fields);
 #endif
-      write_projections.insert(ProjectionSummary(node, function, shard));
+      write_projections.insert(ProjectionSummary(node, function, 
+                                                 shard, shard_domain));
     }
 
     //--------------------------------------------------------------------------
     void ProjectionEpoch::insert_reduce(ProjectionFunction *function, 
-                                 IndexSpaceNode* node, ShardingFunction *shard)
+                                        IndexSpaceNode* node, 
+                                        ShardingFunction *shard,
+                                        IndexSpaceNode *shard_domain)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(!!valid_fields);
 #endif
-      reduce_projections.insert(ProjectionSummary(node, function, shard));
+      reduce_projections.insert(ProjectionSummary(node, function, 
+                                                  shard, shard_domain));
     }
 
     //--------------------------------------------------------------------------
@@ -3143,7 +3153,7 @@ namespace Legion {
         if (!overlap)
           continue;
         (*it)->insert_write(info.projection, info.projection_space, 
-                            info.sharding_function);
+                            info.sharding_function, info.sharding_space);
         update_mask -= overlap;
         if (!update_mask)
           return;
@@ -3155,7 +3165,7 @@ namespace Legion {
       ProjectionEpoch *new_epoch = 
         new ProjectionEpoch(ProjectionEpoch::first_epoch, update_mask);
       new_epoch->insert_write(info.projection, info.projection_space, 
-                              info.sharding_function);
+                              info.sharding_function, info.sharding_space);
       projection_epochs.push_back(new_epoch);
     }
 
@@ -3171,7 +3181,7 @@ namespace Legion {
         if (!overlap)
           continue;
         (*it)->insert_reduce(info.projection, info.projection_space, 
-                             info.sharding_function);
+                             info.sharding_function, info.sharding_space);
         update_mask -= overlap;
         if (!update_mask)
           return;
@@ -3183,7 +3193,7 @@ namespace Legion {
       ProjectionEpoch *new_epoch = 
         new ProjectionEpoch(ProjectionEpoch::first_epoch, update_mask);
       new_epoch->insert_reduce(info.projection, info.projection_space, 
-                               info.sharding_function);
+                               info.sharding_function, info.sharding_space);
       projection_epochs.push_back(new_epoch);
     }
 
@@ -3236,7 +3246,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ProjectionSummary::ProjectionSummary(void)
-      : domain(NULL), projection(NULL), sharding(NULL)
+      : domain(NULL), projection(NULL), sharding(NULL), sharding_domain(NULL)
     //--------------------------------------------------------------------------
     {
     }
@@ -3244,8 +3254,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     ProjectionSummary::ProjectionSummary(IndexSpaceNode *is, 
                                          ProjectionFunction *p, 
-                                         ShardingFunction *s)
-      : domain(is), projection(p), sharding(s)
+                                         ShardingFunction *s,
+                                         IndexSpaceNode *sd)
+      : domain(is), projection(p), sharding(s), sharding_domain(sd)
     //--------------------------------------------------------------------------
     {
     }
@@ -3253,7 +3264,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     ProjectionSummary::ProjectionSummary(const ProjectionInfo &info) 
       : domain(info.projection_space), projection(info.projection), 
-        sharding(info.sharding_function)
+        sharding(info.sharding_function), sharding_domain(info.sharding_space)
     //--------------------------------------------------------------------------
     {
     }
@@ -3276,8 +3287,12 @@ namespace Legion {
         return true;
       else if (rhs.sharding == NULL)
         return false;
+      else if (sharding->sharding_id < rhs.sharding->sharding_id)
+        return true;
+      else if (sharding->sharding_id > rhs.sharding->sharding_id)
+        return false;
       else
-        return (sharding->sharding_id < rhs.sharding->sharding_id);
+        return sharding_domain->handle < rhs.sharding_domain->handle;
     }
 
     //--------------------------------------------------------------------------
@@ -3295,6 +3310,8 @@ namespace Legion {
       else if (rhs.sharding == NULL)
         return false;
       if (sharding->sharding_id != rhs.sharding->sharding_id)
+        return false;
+      if (sharding_domain->handle != rhs.sharding_domain->handle)
         return false;
       return true;
     }
@@ -3373,8 +3390,10 @@ namespace Legion {
       ProjectionSummary::pack_summary(rez);
 #ifdef DEBUG_LEGION
       assert(sharding != NULL);
+      assert(sharding_domain != NULL);
 #endif
       rez.serialize(sharding->sharding_id);
+      rez.serialize(sharding_domain->handle);
       if (node->is_region())
       {
         rez.serialize<bool>(true/*region*/);
@@ -3397,6 +3416,9 @@ namespace Legion {
       ShardingID sid;
       derez.deserialize(sid);
       summary.sharding = context->find_sharding_function(sid);
+      IndexSpace sd;
+      derez.deserialize(sd);
+      summary.sharding_domain = forest->get_node(sd);
       RegionTreeNode *node;
       bool is_region;
       derez.deserialize<bool>(is_region);
@@ -3620,8 +3642,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     FieldState::FieldState(const RegionUsage &usage, const FieldMask &m,
                            ProjectionFunction *proj, IndexSpaceNode *proj_space,
-                           ShardingFunction *fn, RegionTreeNode *node, 
-                           bool dirty_reduction)
+                           ShardingFunction *fn, IndexSpaceNode *shard_space,
+                           RegionTreeNode *node, bool dirty_reduction)
       : ChildState(m), redop(0), rebuild_timeout(1), disjoint_shallow(false)
     //--------------------------------------------------------------------------
     {
@@ -3641,7 +3663,7 @@ namespace Legion {
       else
       {
         open_state = OPEN_READ_WRITE_PROJ;
-        projections.insert(ProjectionSummary(proj_space, proj, fn));
+        projections.insert(ProjectionSummary(proj_space, proj, fn,shard_space));
         // Check for disjoint shallow completeness
         if ((fn == NULL) && (proj->depth == 0) && !node->is_region() &&
             node->are_all_children_disjoint())
@@ -3908,12 +3930,12 @@ namespace Legion {
         for (std::set<ProjectionSummary>::const_iterator it = 
               projections.begin(); it != projections.end(); it++)
           it->projection->construct_projection_tree(node, it->domain, 
-                                                    it->sharding, node_map);
+                        it->sharding, it->sharding_domain, node_map);
       }
       // Then construct the new projection tree
       ProjectionTree *next = 
         info.projection->construct_projection_tree(node, info.projection_space,
-                                                   info.sharding_function);
+                                   info.sharding_function, info.sharding_space);
       // First check to see if the previous dominates
       bool has_mapping = false;
       if (prev->dominates(next))

@@ -1408,6 +1408,10 @@ namespace Legion {
       MapperID                           map_id;
       MappingTagID                       tag;
       DomainPoint                        point;
+      // Only used in control replication contexts for
+      // doing sharding. If left unspecified will default
+      // to an index space of size 1 containing 'point'
+      IndexSpace                         sharding_space;
     public:
       // If the predicate is set to anything other than
       // Predicate::TRUE_PRED, then the application must 
@@ -1489,6 +1493,9 @@ namespace Legion {
       Processor::TaskFuncID              task_id;
       Domain                             launch_domain;
       IndexSpace                         launch_space;
+      // Will only be used in control replication context. If left
+      // unset it will default to launch_space/launch_domain
+      IndexSpace                         sharding_space;
       std::vector<IndexSpaceRequirement> index_requirements;
       std::vector<RegionRequirement>     region_requirements;
       std::vector<Future>                futures;
@@ -1628,6 +1635,10 @@ namespace Legion {
       MapperID                        map_id;
       MappingTagID                    tag;
       DomainPoint                     point;
+      // Only used in control replication contexts for
+      // doing sharding. If left unspecified will default
+      // to an index space of size 1 containing 'point'
+      IndexSpace                      sharding_space;
     public:
       // Inform the runtime about any static dependences
       // These will be ignored outside of static traces
@@ -1680,6 +1691,9 @@ namespace Legion {
       std::vector<PhaseBarrier>       arrive_barriers;
       Domain                          launch_domain;
       IndexSpace                      launch_space;
+      // Will only be used in control replication context. If left
+      // unset it will default to launch_space/launch_domain
+      IndexSpace                      sharding_space;
       Predicate                       predicate;
       MapperID                        map_id;
       MappingTagID                    tag;
@@ -1802,6 +1816,9 @@ namespace Legion {
     public:
       Domain                          launch_domain;
       IndexSpace                      launch_space;
+      // Will only be used in control replication context. If left
+      // unset it will default to launch_space/launch_domain
+      IndexSpace                      sharding_space;
       LogicalRegion                   region;
       LogicalPartition                partition;
       LogicalRegion                   parent;
@@ -2452,6 +2469,9 @@ namespace Legion {
     public:
       Domain                         launch_domain;
       IndexSpace                     launch_space;
+      // Will only be used in control replication context. If left
+      // unset it will default to launch_space/launch_domain
+      IndexSpace                     sharding_space;
     public:
       bool                           silence_warnings;
     };

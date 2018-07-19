@@ -1701,7 +1701,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     TaskLauncher::TaskLauncher(void)
       : task_id(0), argument(TaskArgument()), predicate(Predicate::TRUE_PRED),
-        map_id(0), tag(0), point(DomainPoint(0)), static_dependences(NULL),
+        map_id(0), tag(0), point(DomainPoint(0)), 
+        sharding_space(IndexSpace::NO_SPACE), static_dependences(NULL),
         enable_inlining(false), independent_requirements(false), 
         silence_warnings(false)
     //--------------------------------------------------------------------------
@@ -1713,7 +1714,8 @@ namespace Legion {
                                Predicate pred /*= Predicate::TRUE_PRED*/,
                                MapperID mid /*=0*/, MappingTagID t /*=0*/)
       : task_id(tid), argument(arg), predicate(pred), map_id(mid), tag(t), 
-        point(DomainPoint(0)), static_dependences(NULL), enable_inlining(false),
+        point(DomainPoint(0)), sharding_space(IndexSpace::NO_SPACE), 
+        static_dependences(NULL), enable_inlining(false),
         independent_requirements(false), silence_warnings(false)
     //--------------------------------------------------------------------------
     {
@@ -1726,7 +1728,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     IndexTaskLauncher::IndexTaskLauncher(void)
       : task_id(0), launch_domain(Domain::NO_DOMAIN), 
-        launch_space(IndexSpace::NO_SPACE), global_arg(TaskArgument()), 
+        launch_space(IndexSpace::NO_SPACE), 
+        sharding_space(IndexSpace::NO_SPACE), global_arg(TaskArgument()), 
         argument_map(ArgumentMap()), predicate(Predicate::TRUE_PRED), 
         must_parallelism(false), map_id(0), tag(0), static_dependences(NULL), 
         enable_inlining(false), independent_requirements(false), 
@@ -1743,10 +1746,10 @@ namespace Legion {
                                      bool must /*=false*/, MapperID mid /*=0*/,
                                      MappingTagID t /*=0*/)
       : task_id(tid), launch_domain(dom), launch_space(IndexSpace::NO_SPACE),
-        global_arg(global), argument_map(map), predicate(pred), 
-        must_parallelism(must), map_id(mid), tag(t), static_dependences(NULL),
-        enable_inlining(false), independent_requirements(false), 
-        silence_warnings(false)
+        sharding_space(IndexSpace::NO_SPACE), global_arg(global), 
+        argument_map(map), predicate(pred), must_parallelism(must), map_id(mid),
+        tag(t), static_dependences(NULL), enable_inlining(false), 
+        independent_requirements(false), silence_warnings(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -1760,10 +1763,10 @@ namespace Legion {
                                      bool must /*=false*/, MapperID mid /*=0*/,
                                      MappingTagID t /*=0*/)
       : task_id(tid), launch_domain(Domain::NO_DOMAIN), launch_space(space),
-        global_arg(global), argument_map(map), predicate(pred), 
-        must_parallelism(must), map_id(mid), tag(t), static_dependences(NULL),
-        enable_inlining(false), independent_requirements(false), 
-        silence_warnings(false)
+        sharding_space(IndexSpace::NO_SPACE), global_arg(global), 
+        argument_map(map), predicate(pred), must_parallelism(must), map_id(mid),
+        tag(t), static_dependences(NULL), enable_inlining(false), 
+        independent_requirements(false), silence_warnings(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -1797,7 +1800,8 @@ namespace Legion {
     CopyLauncher::CopyLauncher(Predicate pred /*= Predicate::TRUE_PRED*/,
                                MapperID mid /*=0*/, MappingTagID t /*=0*/)
       : predicate(pred), map_id(mid), tag(t), point(DomainPoint(0)),
-        static_dependences(NULL), silence_warnings(false)
+        sharding_space(IndexSpace::NO_SPACE), static_dependences(NULL), 
+        silence_warnings(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -1809,8 +1813,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     IndexCopyLauncher::IndexCopyLauncher(void) 
       : launch_domain(Domain::NO_DOMAIN), launch_space(IndexSpace::NO_SPACE),
-        predicate(Predicate::TRUE_PRED), map_id(0), tag(0),
-        static_dependences(NULL), silence_warnings(false)
+        sharding_space(IndexSpace::NO_SPACE), predicate(Predicate::TRUE_PRED), 
+        map_id(0), tag(0), static_dependences(NULL), silence_warnings(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -1819,8 +1823,9 @@ namespace Legion {
     IndexCopyLauncher::IndexCopyLauncher(Domain dom, 
                                     Predicate pred /*= Predicate::TRUE_PRED*/,
                                     MapperID mid /*=0*/, MappingTagID t /*=0*/) 
-      : launch_domain(dom), launch_space(IndexSpace::NO_SPACE), predicate(pred),
-        map_id(mid),tag(t), static_dependences(NULL), silence_warnings(false)
+      : launch_domain(dom), launch_space(IndexSpace::NO_SPACE), 
+        sharding_space(IndexSpace::NO_SPACE), predicate(pred), map_id(mid),
+        tag(t), static_dependences(NULL), silence_warnings(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -1829,8 +1834,9 @@ namespace Legion {
     IndexCopyLauncher::IndexCopyLauncher(IndexSpace space, 
                                     Predicate pred /*= Predicate::TRUE_PRED*/,
                                     MapperID mid /*=0*/, MappingTagID t /*=0*/) 
-      : launch_domain(Domain::NO_DOMAIN), launch_space(space), predicate(pred),
-        map_id(mid), tag(t), static_dependences(NULL), silence_warnings(false)
+      : launch_domain(Domain::NO_DOMAIN), launch_space(space), 
+        sharding_space(IndexSpace::NO_SPACE), predicate(pred), map_id(mid), 
+        tag(t), static_dependences(NULL), silence_warnings(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -1909,9 +1915,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     IndexFillLauncher::IndexFillLauncher(void)
       : launch_domain(Domain::NO_DOMAIN), launch_space(IndexSpace::NO_SPACE),
-        region(LogicalRegion::NO_REGION), partition(LogicalPartition::NO_PART), 
-        projection(0), map_id(0), tag(0), static_dependences(NULL), 
-        silence_warnings(false) 
+        sharding_space(IndexSpace::NO_SPACE), region(LogicalRegion::NO_REGION),
+        partition(LogicalPartition::NO_PART), projection(0), map_id(0), tag(0),
+        static_dependences(NULL), silence_warnings(false) 
     //--------------------------------------------------------------------------
     {
     }
@@ -1921,7 +1927,8 @@ namespace Legion {
                                LogicalRegion p, TaskArgument arg, 
                                ProjectionID proj, Predicate pred,
                                MapperID id /*=0*/, MappingTagID t /*=0*/)
-      : launch_domain(dom), launch_space(IndexSpace::NO_SPACE), region(h), 
+      : launch_domain(dom), launch_space(IndexSpace::NO_SPACE), 
+        sharding_space(IndexSpace::NO_SPACE), region(h), 
         partition(LogicalPartition::NO_PART), parent(p), projection(proj), 
         argument(arg), predicate(pred), map_id(id), tag(t), 
         static_dependences(NULL), silence_warnings(false)
@@ -1934,7 +1941,8 @@ namespace Legion {
                                 LogicalRegion p, Future f,
                                 ProjectionID proj, Predicate pred,
                                 MapperID id /*=0*/, MappingTagID t /*=0*/)
-      : launch_domain(dom), launch_space(IndexSpace::NO_SPACE), region(h), 
+      : launch_domain(dom), launch_space(IndexSpace::NO_SPACE), 
+        sharding_space(IndexSpace::NO_SPACE), region(h), 
         partition(LogicalPartition::NO_PART), parent(p), projection(proj), 
         future(f), predicate(pred), map_id(id), tag(t), 
         static_dependences(NULL), silence_warnings(false)
@@ -1947,7 +1955,8 @@ namespace Legion {
                                LogicalRegion p, TaskArgument arg, 
                                ProjectionID proj, Predicate pred,
                                MapperID id /*=0*/, MappingTagID t /*=0*/)
-      : launch_domain(Domain::NO_DOMAIN), launch_space(space), region(h), 
+      : launch_domain(Domain::NO_DOMAIN), launch_space(space), 
+        sharding_space(IndexSpace::NO_SPACE), region(h), 
         partition(LogicalPartition::NO_PART), parent(p), projection(proj), 
         argument(arg), predicate(pred), map_id(id), tag(t), 
         static_dependences(NULL), silence_warnings(false)
@@ -1960,7 +1969,8 @@ namespace Legion {
                                 LogicalRegion p, Future f,
                                 ProjectionID proj, Predicate pred,
                                 MapperID id /*=0*/, MappingTagID t /*=0*/)
-      : launch_domain(Domain::NO_DOMAIN), launch_space(space), region(h), 
+      : launch_domain(Domain::NO_DOMAIN), launch_space(space), 
+        sharding_space(IndexSpace::NO_SPACE), region(h), 
         partition(LogicalPartition::NO_PART), parent(p), projection(proj), 
         future(f), predicate(pred), map_id(id), tag(t), 
         static_dependences(NULL), silence_warnings(false)
@@ -1975,8 +1985,8 @@ namespace Legion {
                                          MapperID id /*=0*/, 
                                          MappingTagID t /*=0*/)
       : launch_domain(dom), launch_space(IndexSpace::NO_SPACE), 
-        region(LogicalRegion::NO_REGION), partition(h),
-        parent(p), projection(proj), argument(arg), predicate(pred),
+        sharding_space(IndexSpace::NO_SPACE), region(LogicalRegion::NO_REGION), 
+        partition(h), parent(p), projection(proj),argument(arg),predicate(pred),
         map_id(id), tag(t), static_dependences(NULL), silence_warnings(false)
     //--------------------------------------------------------------------------
     {
@@ -1989,8 +1999,8 @@ namespace Legion {
                                          MapperID id /*=0*/, 
                                          MappingTagID t /*=0*/)
       : launch_domain(dom), launch_space(IndexSpace::NO_SPACE), 
-        region(LogicalRegion::NO_REGION), partition(h),
-        parent(p), projection(proj), future(f), predicate(pred),
+        sharding_space(IndexSpace::NO_SPACE), region(LogicalRegion::NO_REGION), 
+        partition(h), parent(p), projection(proj), future(f), predicate(pred),
         map_id(id), tag(t), static_dependences(NULL), silence_warnings(false)
     //--------------------------------------------------------------------------
     {
@@ -2003,8 +2013,8 @@ namespace Legion {
                                          MapperID id /*=0*/, 
                                          MappingTagID t /*=0*/)
       : launch_domain(Domain::NO_DOMAIN), launch_space(space), 
-        region(LogicalRegion::NO_REGION), partition(h),
-        parent(p), projection(proj), argument(arg), predicate(pred),
+        sharding_space(IndexSpace::NO_SPACE), region(LogicalRegion::NO_REGION), 
+        partition(h), parent(p), projection(proj),argument(arg),predicate(pred),
         map_id(id), tag(t), static_dependences(NULL), silence_warnings(false)
     //--------------------------------------------------------------------------
     {
@@ -2017,8 +2027,8 @@ namespace Legion {
                                          MapperID id /*=0*/, 
                                          MappingTagID t /*=0*/)
       : launch_domain(Domain::NO_DOMAIN), launch_space(space), 
-        region(LogicalRegion::NO_REGION), partition(h),
-        parent(p), projection(proj), future(f), predicate(pred),
+        sharding_space(IndexSpace::NO_SPACE), region(LogicalRegion::NO_REGION),
+        partition(h), parent(p), projection(proj), future(f), predicate(pred),
         map_id(id), tag(t), static_dependences(NULL), silence_warnings(false)
     //--------------------------------------------------------------------------
     {
@@ -2068,7 +2078,8 @@ namespace Legion {
     MustEpochLauncher::MustEpochLauncher(MapperID id /*= 0*/,   
                                          MappingTagID tag/*= 0*/)
       : map_id(id), mapping_tag(tag), launch_domain(Domain::NO_DOMAIN),
-        launch_space(IndexSpace::NO_SPACE), silence_warnings(false)
+        launch_space(IndexSpace::NO_SPACE), 
+        sharding_space(IndexSpace::NO_SPACE), silence_warnings(false)
     //--------------------------------------------------------------------------
     {
     }

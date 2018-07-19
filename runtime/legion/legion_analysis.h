@@ -457,7 +457,8 @@ namespace Legion {
           projection_space(NULL), sharding_function(NULL),
           dirty_reduction(false), complete_write(false) { }
       ProjectionInfo(Runtime *runtime, const RegionRequirement &req,
-                     IndexSpace launch_space, ShardingFunction *func = NULL);
+                     IndexSpace launch_space, ShardingFunction *func = NULL,
+                     IndexSpace shard_space = IndexSpace::NO_SPACE);
     public:
       inline bool is_projecting(void) const { return (projection != NULL); }
       inline const LegionMap<ProjectionEpochID,FieldMask>::aligned&
@@ -481,6 +482,7 @@ namespace Legion {
       ProjectionType projection_type;
       IndexSpaceNode *projection_space;
       ShardingFunction *sharding_function;
+      IndexSpaceNode *sharding_space;
     protected:
       // Use this information to deduplicate between different points
       // trying to advance information for the same projection epoch
@@ -638,7 +640,8 @@ namespace Legion {
       ProjectionSummary(void);
       ProjectionSummary(IndexSpaceNode *is, 
                         ProjectionFunction *p, 
-                        ShardingFunction *s);
+                        ShardingFunction *s,
+                        IndexSpaceNode *sd);
       ProjectionSummary(const ProjectionInfo &info);
     public:
       bool operator<(const ProjectionSummary &rhs) const;
@@ -652,6 +655,7 @@ namespace Legion {
       IndexSpaceNode *domain;
       ProjectionFunction *projection;
       ShardingFunction *sharding;
+      IndexSpaceNode *sharding_domain;
     };
 
     /**
@@ -724,8 +728,9 @@ namespace Legion {
                  LegionColor child);
       FieldState(const RegionUsage &u, const FieldMask &m,
                  ProjectionFunction *proj, IndexSpaceNode *proj_space, 
-                 ShardingFunction *sharding_function, RegionTreeNode *node,
-                 bool dirty_reduction = false);
+                 ShardingFunction *sharding_function, 
+                 IndexSpaceNode *sharding_space,
+                 RegionTreeNode *node, bool dirty_reduction = false);
     public:
       inline bool is_projection_state(void) const 
         { return (open_state >= OPEN_READ_ONLY_PROJ); } 
@@ -774,9 +779,9 @@ namespace Legion {
       ProjectionEpoch& operator=(const ProjectionEpoch &rhs);
     public:
       void insert_write(ProjectionFunction *function, IndexSpaceNode *space,
-                        ShardingFunction *sharding_function);
+          ShardingFunction *sharding_function, IndexSpaceNode *sharding_domain);
       void insert_reduce(ProjectionFunction *function, IndexSpaceNode *space,
-                         ShardingFunction *sharding_function);
+          ShardingFunction *sharding_function, IndexSpaceNode *sharding_domain);
       void record_closed_projections(LogicalCloser &closer, 
                                      RegionTreeNode *node,
                                      const FieldMask &closing_mask) const;

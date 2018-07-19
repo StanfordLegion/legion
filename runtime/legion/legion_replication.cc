@@ -244,7 +244,7 @@ namespace Legion {
       owner_shard = 0;
       sharding_functor = UINT_MAX;
       sharding_function = NULL;
-      launch_space = IndexSpace::NO_SPACE;
+      sharding_space = IndexSpace::NO_SPACE;
       versioning_collective_id = UINT_MAX;
       future_collective_id = UINT_MAX;
       version_broadcast_collective = NULL;
@@ -330,7 +330,14 @@ namespace Legion {
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
       // Figure out whether this shard owns this point
-      owner_shard = sharding_function->find_owner(index_point, index_domain);
+      if (sharding_space.exists())
+      {
+        Domain shard_domain;
+        runtime->forest->find_launch_space_domain(sharding_space, shard_domain);
+        owner_shard = sharding_function->find_owner(index_point, shard_domain);
+      }
+      else
+        owner_shard = sharding_function->find_owner(index_point, index_domain);
       if (runtime->legion_spy_enabled)
         LegionSpy::log_owner_shard(get_unique_id(), owner_shard);
       // If we own it we go on the queue, otherwise we complete early
@@ -434,7 +441,7 @@ namespace Legion {
           static_cast<ReplMustEpochOp*>(must_epoch_owner);
 #endif
         owner_shard = sharding_function->find_owner(index_point, 
-                          repl_epoch_owner->get_index_domain());
+                            repl_epoch_owner->get_shard_domain());
         if (owner_shard != repl_ctx->owner_shard->shard_id)
         {
           perform_unowned_shard(repl_ctx); 
@@ -563,13 +570,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplIndividualTask::initialize_replication(ReplicateContext *ctx)
+    void ReplIndividualTask::initialize_replication(ReplicateContext *ctx,
+                                                    IndexSpace sharding_sp)
     //--------------------------------------------------------------------------
     {
       versioning_collective_id = 
         ctx->get_next_collective_index(COLLECTIVE_LOC_0);
       future_collective_id = 
         ctx->get_next_collective_index(COLLECTIVE_LOC_1);
+      sharding_space = sharding_sp;
     }
 
     //--------------------------------------------------------------------------
@@ -627,6 +636,7 @@ namespace Legion {
       activate_index_task();
       sharding_functor = UINT_MAX;
       sharding_function = NULL;
+      sharding_space = IndexSpace::NO_SPACE;
       reduction_collective = NULL;
       launch_space = IndexSpace::NO_SPACE;
 #ifdef DEBUG_LEGION
@@ -723,9 +733,14 @@ namespace Legion {
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
       // Compute the local index space of points for this shard
-      internal_space =
-        sharding_function->find_shard_space(repl_ctx->owner_shard->shard_id,
-                                            launch_space);
+      if (sharding_space.exists())
+        internal_space = 
+          sharding_function->find_shard_space(repl_ctx->owner_shard->shard_id,
+                                              launch_space, sharding_space);
+      else
+        internal_space =
+          sharding_function->find_shard_space(repl_ctx->owner_shard->shard_id,
+                                              launch_space, launch_space);
       // If it's empty we're done, otherwise we go back on the queue
       if (!internal_space.exists())
       {
@@ -747,7 +762,8 @@ namespace Legion {
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
         projection_infos[idx] = 
-         ProjectionInfo(runtime, regions[idx], launch_space, sharding_function);
+         ProjectionInfo(runtime, regions[idx], launch_space, 
+                        sharding_function, sharding_space);
         runtime->forest->perform_dependence_analysis(this, idx, regions[idx], 
                                                      restrict_infos[idx],
                                                      version_infos[idx],
@@ -798,9 +814,14 @@ namespace Legion {
         ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
         // Compute the local index space of points for this shard
-        internal_space =
-          sharding_function->find_shard_space(repl_ctx->owner_shard->shard_id,
-                                              launch_space);
+        if (sharding_space.exists())
+          internal_space = 
+            sharding_function->find_shard_space(repl_ctx->owner_shard->shard_id,
+                                                launch_space, sharding_space);
+        else
+          internal_space =
+            sharding_function->find_shard_space(repl_ctx->owner_shard->shard_id,
+                                                launch_space, launch_space);
       }
       // Now continue through and do the base case
       IndexTask::resolve_false(speculated, launched);
@@ -808,7 +829,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ReplIndexTask::initialize_replication(ReplicateContext *ctx,
-                                               IndexSpace launch_sp)
+                                               IndexSpace sharding_sp)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -835,7 +856,7 @@ namespace Legion {
       if (redop > 0)
         reduction_collective = 
           new FutureExchange(ctx, reduction_state_size, COLLECTIVE_LOC_53);
-      launch_space = launch_sp;
+      sharding_space = sharding_sp;
     } 
 
     //--------------------------------------------------------------------------
@@ -852,7 +873,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    FutureMapImpl* ReplIndexTask::create_future_map(TaskContext *ctx)
+    FutureMapImpl* ReplIndexTask::create_future_map(TaskContext *ctx,
+                                IndexSpace launch_space, IndexSpace shard_space)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -861,8 +883,13 @@ namespace Legion {
 #else
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(ctx);
 #endif
+      Domain shard_domain;
+      if (launch_space != shard_space)
+        runtime->forest->find_launch_space_domain(shard_space, shard_domain);
+      else
+        shard_domain = index_domain;
       // Make a replicate future map 
-      return new ReplFutureMapImpl(repl_ctx, this, index_domain,runtime,
+      return new ReplFutureMapImpl(repl_ctx, this, shard_domain, runtime,
           runtime->get_available_distributed_id(), runtime->address_space);
     }
 
@@ -1085,6 +1112,7 @@ namespace Legion {
       activate_index_fill();
       sharding_functor = UINT_MAX;
       sharding_function = NULL;
+      sharding_space = IndexSpace::NO_SPACE;
       launch_space = IndexSpace::NO_SPACE;
       mapper = NULL;
 #ifdef DEBUG_LEGION
@@ -1152,7 +1180,7 @@ namespace Legion {
     {
       perform_base_dependence_analysis();
       projection_info = ProjectionInfo(runtime, requirement, 
-                                       launch_space, sharding_function);
+             launch_space, sharding_function, sharding_space);
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/,
                                                    requirement,
                                                    restrict_info,
@@ -1172,9 +1200,14 @@ namespace Legion {
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
       // Compute the local index space of points for this shard
-      launch_space =
-        sharding_function->find_shard_space(repl_ctx->owner_shard->shard_id, 
-                                            launch_space);
+      if (sharding_space.exists())
+        launch_space =
+          sharding_function->find_shard_space(repl_ctx->owner_shard->shard_id, 
+                                              launch_space, sharding_space);
+      else
+        launch_space =
+          sharding_function->find_shard_space(repl_ctx->owner_shard->shard_id, 
+                                              launch_space, launch_space);
       // If it's empty we're done, otherwise we go back on the queue
       if (!launch_space.exists())
       {
@@ -1188,7 +1221,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ReplIndexFillOp::initialize_replication(ReplicateContext *ctx,
-                                                 IndexSpace launch_sp)
+                                                 IndexSpace sharding_sp)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -1207,7 +1240,7 @@ namespace Legion {
                         parent_ctx->get_unique_id())
       }
 #endif
-      launch_space = launch_sp;
+      sharding_space = sharding_sp;
     }
 
     /////////////////////////////////////////////////////////////
@@ -1246,14 +1279,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplCopyOp::initialize_replication(ReplicateContext *ctx)
+    void ReplCopyOp::initialize_replication(ReplicateContext *ctx,
+                                            IndexSpace sharding_sp)
     //--------------------------------------------------------------------------
     {
       versioning_collective_id = 
         ctx->get_next_collective_index(COLLECTIVE_LOC_2);
       // Initialize our index domain of a single point
       index_domain = Domain(index_point, index_point);
-      launch_space = ctx->find_index_launch_space(index_domain);
+      sharding_space = sharding_sp;
     }
 
     //--------------------------------------------------------------------------
@@ -1263,7 +1297,7 @@ namespace Legion {
       activate_copy();
       sharding_functor = UINT_MAX;
       sharding_function = NULL;
-      launch_space = IndexSpace::NO_SPACE;
+      sharding_space = IndexSpace::NO_SPACE;
 #ifdef DEBUG_LEGION
       sharding_collective = NULL;
 #endif
@@ -1339,8 +1373,15 @@ namespace Legion {
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
       // Figure out whether this shard owns this point
-      const ShardID owner_shard = 
-        sharding_function->find_owner(index_point, index_domain); 
+      ShardID owner_shard;
+      if (sharding_space.exists())
+      {
+        Domain shard_domain;
+        runtime->forest->find_launch_space_domain(sharding_space, shard_domain);
+        owner_shard = sharding_function->find_owner(index_point, shard_domain);
+      }
+      else
+        owner_shard = sharding_function->find_owner(index_point, index_domain); 
       if (runtime->legion_spy_enabled)
         LegionSpy::log_owner_shard(get_unique_id(), owner_shard);
       // If we own it we go on the queue, otherwise we complete early
@@ -1434,8 +1475,15 @@ namespace Legion {
 #else
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
-      const ShardID owner_shard = 
-        sharding_function->find_owner(index_point, index_domain);
+      ShardID owner_shard;
+      if (sharding_space.exists())
+      {
+        Domain shard_domain;
+        runtime->forest->find_launch_space_domain(sharding_space, shard_domain);
+        owner_shard = sharding_function->find_owner(index_point, shard_domain);
+      }
+      else
+        owner_shard = sharding_function->find_owner(index_point, index_domain);
       // Have to new this on the heap in case we end up needing to defer it
       VersioningInfoBroadcast *version_broadcast = new VersioningInfoBroadcast(
                                repl_ctx, versioning_collective_id, owner_shard);
@@ -1505,6 +1553,7 @@ namespace Legion {
       activate_index_copy();
       sharding_functor = UINT_MAX;
       sharding_function = NULL;
+      sharding_space = IndexSpace::NO_SPACE;
       launch_space = IndexSpace::NO_SPACE;
 #ifdef DEBUG_LEGION
       sharding_collective = NULL;
@@ -1574,7 +1623,7 @@ namespace Legion {
       {
         src_projection_infos[idx] = 
           ProjectionInfo(runtime, src_requirements[idx], 
-                         launch_space, sharding_function);
+                         launch_space, sharding_function, sharding_space);
         runtime->forest->perform_dependence_analysis(this, idx, 
                                                      src_requirements[idx],
                                                      src_restrict_infos[idx],
@@ -1586,7 +1635,7 @@ namespace Legion {
       {
         dst_projection_infos[idx] = 
           ProjectionInfo(runtime, dst_requirements[idx], 
-                         launch_space, sharding_function);
+                         launch_space, sharding_function, sharding_space);
         unsigned index = src_requirements.size()+idx;
         // Perform this dependence analysis as if it was READ_WRITE
         // so that we can get the version numbers correct
@@ -1616,9 +1665,14 @@ namespace Legion {
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
       // Compute the local index space of points for this shard
-      launch_space =
-        sharding_function->find_shard_space(repl_ctx->owner_shard->shard_id,
-                                            launch_space);
+      if (sharding_space.exists())
+        launch_space =
+          sharding_function->find_shard_space(repl_ctx->owner_shard->shard_id,
+                                              launch_space, sharding_space);
+      else
+        launch_space =
+          sharding_function->find_shard_space(repl_ctx->owner_shard->shard_id,
+                                              launch_space, launch_space);
       // If it's empty we're done, otherwise we go back on the queue
       if (!launch_space.exists())
       {
@@ -1632,7 +1686,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ReplIndexCopyOp::initialize_replication(ReplicateContext *ctx,
-                                                 IndexSpace launch_sp)
+                                                 IndexSpace sharding_sp)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -1652,7 +1706,7 @@ namespace Legion {
                         parent_ctx->get_unique_id())
       }
 #endif
-      launch_space = launch_sp;
+      sharding_space = sharding_sp;
     }
 
     /////////////////////////////////////////////////////////////
@@ -2213,7 +2267,7 @@ namespace Legion {
         // Compute the local index space of points for this shard
         launch_space =
           function->find_shard_space(repl_ctx->owner_shard->shard_id,
-                                     launch_space);
+                                     launch_space, launch_space);
         // If it's empty we're done, otherwise we go back on the queue
         if (!launch_space.exists())
         {
@@ -2557,6 +2611,7 @@ namespace Legion {
       activate_must_epoch_op();
       sharding_functor = UINT_MAX;
       sharding_function = NULL;
+      sharding_space = IndexSpace::NO_SPACE;
       index_domain = Domain::NO_DOMAIN;
       mapping_collective_id = 0;
       collective_map_must_epoch_call = false;
@@ -2605,7 +2660,7 @@ namespace Legion {
         if (trace != NULL)
           task->set_trace(trace, !trace->is_fixed(), NULL);
         task->must_epoch_task = true;
-        task->initialize_replication(repl_ctx);
+        task->initialize_replication(repl_ctx, launcher.sharding_space);
 #ifdef DEBUG_LEGION
         task->set_sharding_collective(new ShardingGatherCollective(repl_ctx,
                                       0/*owner shard*/, COLLECTIVE_LOC_59));
@@ -2628,7 +2683,7 @@ namespace Legion {
         if (trace != NULL)
           task->set_trace(trace, !trace->is_fixed(), NULL);
         task->must_epoch_task = true;
-        task->initialize_replication(repl_ctx, launch_space);
+        task->initialize_replication(repl_ctx, launcher.sharding_space);
 #ifdef DEBUG_LEGION
         task->set_sharding_collective(new ShardingGatherCollective(repl_ctx,
                                       0/*owner shard*/, COLLECTIVE_LOC_59));
@@ -2640,7 +2695,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FutureMapImpl* ReplMustEpochOp::create_future_map(TaskContext *ctx,
-                                                        IndexSpace launch_space)
+                                IndexSpace launch_space, IndexSpace shard_space)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -2651,7 +2706,12 @@ namespace Legion {
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(ctx);
 #endif
       runtime->forest->find_launch_space_domain(launch_space, index_domain);
-      return new ReplFutureMapImpl(repl_ctx, this, index_domain,runtime,
+      Domain shard_domain;
+      if (launch_space != shard_space)
+        runtime->forest->find_launch_space_domain(shard_space, shard_domain);
+      else
+        shard_domain = index_domain;
+      return new ReplFutureMapImpl(repl_ctx, this, shard_domain, runtime,
           runtime->get_available_distributed_id(), runtime->address_space);
     }
 
@@ -2669,11 +2729,14 @@ namespace Legion {
 #endif
       // We want to do the map must epoch call
       // First find all the tasks that we own on this shard
+      Domain shard_domain = index_domain;
+      if (sharding_space.exists())
+        runtime->forest->find_launch_space_domain(sharding_space, shard_domain);
       for (std::vector<SingleTask*>::const_iterator it = 
             single_tasks.begin(); it != single_tasks.end(); it++)
       {
-        ShardID shard = 
-          sharding_function->find_owner((*it)->index_point, index_domain);
+        const ShardID shard = 
+          sharding_function->find_owner((*it)->index_point, shard_domain);
         // If it is not our shard then we don't own it
         if (shard != repl_ctx->owner_shard->shard_id)
           continue;
@@ -3082,7 +3145,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplMustEpochOp::initialize_collectives(ReplicateContext *ctx)
+    void ReplMustEpochOp::initialize_replication(ReplicateContext *ctx,
+                                                 IndexSpace sharding_sp)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -3100,6 +3164,21 @@ namespace Legion {
         new MustEpochDependenceExchange(ctx, COLLECTIVE_LOC_70);
       completion_exchange = 
         new MustEpochCompletionExchange(ctx, COLLECTIVE_LOC_73);
+      sharding_space = sharding_sp;
+    }
+
+    //--------------------------------------------------------------------------
+    Domain ReplMustEpochOp::get_shard_domain(void) const
+    //--------------------------------------------------------------------------
+    {
+      if (sharding_space.exists())
+      {
+        Domain shard_domain;
+        runtime->forest->find_launch_space_domain(sharding_space, shard_domain);
+        return shard_domain;
+      }
+      else
+        return index_domain;
     }
 
     //--------------------------------------------------------------------------

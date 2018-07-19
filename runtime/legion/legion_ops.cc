@@ -10873,7 +10873,8 @@ namespace Legion {
       parent_task = ctx->get_task();
       // Make a new future map for storing our results
       // We'll fill it in later
-      result_map = FutureMap(create_future_map(ctx, launch_space));
+      result_map = FutureMap(
+          create_future_map(ctx, launch_space, IndexSpace::NO_SPACE));
 #ifdef DEBUG_LEGION
       size_t total_points = 0;
       for (unsigned idx = 0; idx < indiv_tasks.size(); idx++)
@@ -10907,7 +10908,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FutureMapImpl* MustEpochOp::create_future_map(TaskContext *ctx,
-                                                  IndexSpace launch_space)
+                                IndexSpace launch_space, IndexSpace shard_space)
     //--------------------------------------------------------------------------
     {
       return new FutureMapImpl(ctx, this, runtime,

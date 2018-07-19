@@ -342,7 +342,7 @@ namespace Legion {
     class ReplFutureMapImpl : public FutureMapImpl {
     public:
       ReplFutureMapImpl(ReplicateContext *ctx, Operation *op, 
-                        const Domain &full_domain, Runtime *rt, 
+                        const Domain &shard_domain, Runtime *rt, 
                         DistributedID did, AddressSpaceID owner_space);
       ReplFutureMapImpl(const ReplFutureMapImpl &rhs);
       virtual ~ReplFutureMapImpl(void);
@@ -364,7 +364,7 @@ namespace Legion {
                                              Runtime *runtime);
     public:
       ReplicateContext *const repl_ctx;
-      const Domain full_domain;
+      const Domain shard_domain;
       const ApBarrier future_map_barrier;
       const CollectiveID collective_index; // in case we have to do all-to-all
     protected:
@@ -1509,10 +1509,13 @@ namespace Legion {
                   RegionTreeNode *node, bool result);
       // From scratch
       ProjectionTree* construct_projection_tree(RegionTreeNode *root,
-                  IndexSpaceNode *launch_domain, ShardingFunction *sharding);
+                                                IndexSpaceNode *launch_domain, 
+                                                ShardingFunction *sharding,
+                                                IndexSpaceNode *shard_domain);
       // Contribute to an existing tree
       void construct_projection_tree(RegionTreeNode *root,
                   IndexSpaceNode *launch_domain, ShardingFunction *sharding,
+                  IndexSpaceNode *sharding_domain,
                   std::map<IndexTreeNode*,ProjectionTree*> &node_map);
       static void add_to_projection_tree(LogicalRegion region,
                   IndexTreeNode *root, RegionTreeForest *context, 
@@ -1567,6 +1570,39 @@ namespace Legion {
      */
     class ShardingFunction {
     public:
+      struct ShardKey {
+      public:
+        ShardKey(void) 
+          : sid(0), full_space(IndexSpace::NO_SPACE), 
+            shard_space(IndexSpace::NO_SPACE) { }
+        ShardKey(ShardID s, IndexSpace f, IndexSpace sh)
+          : sid(s), full_space(f), shard_space(sh) { }
+      public:
+        inline bool operator<(const ShardKey &rhs) const
+        {
+          if (sid < rhs.sid)
+            return true;
+          if (sid > rhs.sid)
+            return false;
+          if (full_space < rhs.full_space)
+            return true;
+          if (full_space > rhs.full_space)
+            return false;
+          return shard_space < rhs.shard_space;
+        }
+        inline bool operator==(const ShardKey &rhs) const
+        {
+          if (sid != rhs.sid)
+            return false;
+          if (full_space != rhs.full_space)
+            return false;
+          return shard_space == rhs.shard_space;
+        }
+      public:
+        ShardID sid;
+        IndexSpace full_space, shard_space;
+      };
+    public:
       ShardingFunction(ShardingFunctor *functor, RegionTreeForest *forest,
                        ShardingID sharding_id, size_t total_shards);
       ShardingFunction(const ShardingFunction &rhs);
@@ -1574,8 +1610,9 @@ namespace Legion {
     public:
       ShardingFunction& operator=(const ShardingFunction &rhs);
     public:
-      ShardID find_owner(const DomainPoint &point, const Domain &full_space);
-      IndexSpace find_shard_space(ShardID shard, IndexSpace full_space);
+      ShardID find_owner(const DomainPoint &point,const Domain &sharding_space);
+      IndexSpace find_shard_space(ShardID shard, IndexSpace full_space,
+                                  IndexSpace sharding_space);
     public:
       ShardingFunctor *const functor;
       RegionTreeForest *const forest;
@@ -1583,8 +1620,7 @@ namespace Legion {
       const size_t total_shards;
     protected:
       mutable LocalLock sharding_lock;
-      std::map<std::pair<IndexSpace/*full*/,ShardID>,
-               IndexSpace/*result*/> shard_index_spaces;
+      std::map<ShardKey,IndexSpace/*result*/> shard_index_spaces;
     };
 
     /**

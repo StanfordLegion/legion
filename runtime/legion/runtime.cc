@@ -1158,10 +1158,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ReplFutureMapImpl::ReplFutureMapImpl(ReplicateContext *ctx, Operation *op,
-                                         const Domain &dom, Runtime *rt, 
+                                         const Domain &shard_dom, Runtime *rt, 
                                          DistributedID did,AddressSpaceID owner)
       : FutureMapImpl(ctx, op, rt, did, owner), 
-        repl_ctx(ctx), full_domain(dom), 
+        repl_ctx(ctx), shard_domain(shard_dom),
         future_map_barrier(ctx->get_next_future_map_barrier()),
         collective_index(ctx->get_next_collective_index(COLLECTIVE_LOC_32)),
         sharding_function_ready(Runtime::create_rt_user_event()), 
@@ -1174,8 +1174,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ReplFutureMapImpl::ReplFutureMapImpl(const ReplFutureMapImpl &rhs)
-      : FutureMapImpl(rhs), repl_ctx(NULL), 
-        full_domain(Domain::NO_DOMAIN), collective_index(0)
+      : FutureMapImpl(rhs), repl_ctx(NULL), shard_domain(Domain::NO_DOMAIN), 
+        collective_index(0)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -1227,7 +1227,8 @@ namespace Legion {
       // the sharding function yet, if not we have to wait
       if (!sharding_function_ready.has_triggered())
         sharding_function_ready.wait();
-      ShardID owner_shard = sharding_function->find_owner(point, full_domain);
+      const ShardID owner_shard = 
+        sharding_function->find_owner(point, shard_domain);
       // If we're the owner shard we can just do the normal thing
       if (owner_shard != repl_ctx->owner_shard->shard_id)
       {
@@ -9507,7 +9508,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     ProjectionTree* ProjectionFunction::construct_projection_tree(
                             RegionTreeNode *root, IndexSpaceNode *launch_space,
-                            ShardingFunction *sharding_function)
+                            ShardingFunction *sharding_function, 
+                            IndexSpaceNode *sharding_space)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -9519,8 +9521,12 @@ namespace Legion {
       std::map<IndexTreeNode*,ProjectionTree*> node_map;
       node_map[row_source] = result;
       // Iterate over the points, compute the projections, and build the tree   
-      Domain launch_domain;
+      Domain launch_domain, sharding_domain;
       launch_space->get_launch_space_domain(launch_domain);
+      if ((sharding_function != NULL) && (launch_space != sharding_space))
+        sharding_space->get_launch_space_domain(sharding_domain);
+      else
+        sharding_domain = launch_domain;
       if (root->is_region())
       {
         RegionNode *region = root->as_region_node();
@@ -9538,8 +9544,8 @@ namespace Legion {
             continue;
           if (sharding_function != NULL)
           {
-            ShardID owner = sharding_function->find_owner(itr.p, launch_domain);
-            add_to_projection_tree(result, row_source, context, node_map,owner);
+            ShardID own = sharding_function->find_owner(itr.p, sharding_domain);
+            add_to_projection_tree(result, row_source, context, node_map, own);
           }
           else
             add_to_projection_tree(result, row_source, context, node_map);
@@ -9562,8 +9568,8 @@ namespace Legion {
             continue;
           if (sharding_function != NULL)
           {
-            ShardID owner = sharding_function->find_owner(itr.p, launch_domain);
-            add_to_projection_tree(result, row_source, context, node_map,owner);
+            ShardID own = sharding_function->find_owner(itr.p, sharding_domain);
+            add_to_projection_tree(result, row_source, context, node_map, own);
           }
           else
             add_to_projection_tree(result, row_source, context, node_map);
@@ -9575,6 +9581,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void ProjectionFunction::construct_projection_tree(RegionTreeNode *root,
           IndexSpaceNode *launch_space, ShardingFunction *sharding_function,
+          IndexSpaceNode *sharding_space, 
           std::map<IndexTreeNode*,ProjectionTree*> &node_map)
     //--------------------------------------------------------------------------
     {
@@ -9584,8 +9591,12 @@ namespace Legion {
       IndexTreeNode *row_source = root->get_row_source();
       RegionTreeForest *context = root->context;
       // Iterate over the points, compute the projections, and build the tree   
-      Domain launch_domain;
+      Domain launch_domain, sharding_domain;
       launch_space->get_launch_space_domain(launch_domain);
+      if ((sharding_function != NULL) && (launch_space != sharding_space))
+        sharding_space->get_launch_space_domain(sharding_domain);
+      else
+        sharding_domain = launch_domain;
       if (root->is_region())
       {
         RegionNode *region = root->as_region_node();
@@ -9603,8 +9614,8 @@ namespace Legion {
             continue;
           if (sharding_function != NULL)
           {
-            ShardID owner = sharding_function->find_owner(itr.p, launch_domain);
-            add_to_projection_tree(result, row_source, context, node_map,owner);
+            ShardID own = sharding_function->find_owner(itr.p, sharding_domain);
+            add_to_projection_tree(result, row_source, context, node_map, own);
           }
           else
             add_to_projection_tree(result, row_source, context, node_map);
@@ -9627,8 +9638,8 @@ namespace Legion {
             continue;
           if (sharding_function != NULL)
           {
-            ShardID owner = sharding_function->find_owner(itr.p, launch_domain);
-            add_to_projection_tree(result, row_source, context, node_map,owner);
+            ShardID own = sharding_function->find_owner(itr.p, sharding_domain);
+            add_to_projection_tree(result, row_source, context, node_map, own);
           }
           else
             add_to_projection_tree(result, row_source, context, node_map);
@@ -9795,13 +9806,13 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ShardID ShardingFunction::find_owner(const DomainPoint &point,
-                                         const Domain &full_space)
+                                         const Domain &sharding_space)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(full_space.contains(point));
+      assert(sharding_space.contains(point));
 #endif
-      ShardID result = functor->shard(point, full_space, total_shards);
+      ShardID result = functor->shard(point, sharding_space, total_shards);
       if (total_shards <= result)
         REPORT_LEGION_ERROR(ERROR_ILLEGAL_SHARDING_FUNCTOR_OUTPUT,
                             "Illegal output shard %d from sharding functor %d. "
@@ -9813,21 +9824,21 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexSpace ShardingFunction::find_shard_space(ShardID shard,
-                                                  IndexSpace full_space)
+                                  IndexSpace full_space, IndexSpace shard_space)
     //--------------------------------------------------------------------------
     {
-      const std::pair<IndexSpace,ShardID> key(full_space, shard);
+      const ShardKey key(shard, full_space, shard_space);
       // Check to see if we already have it
       {
         AutoLock s_lock(sharding_lock,1,false/*exclusive*/);
-        std::map<std::pair<IndexSpace,ShardID>,IndexSpace>::const_iterator 
+        std::map<ShardKey,IndexSpace>::const_iterator 
           finder = shard_index_spaces.find(key);
         if (finder != shard_index_spaces.end())
           return finder->second;
       }
       // Otherwise we need to make it
       IndexSpaceNode *node = forest->get_node(full_space);
-      IndexSpace result = node->create_shard_space(this, shard);
+      IndexSpace result = node->create_shard_space(this, shard, shard_space);
       AutoLock s_lock(sharding_lock);
       shard_index_spaces[key] = result;
       return result;

@@ -1075,7 +1075,8 @@ namespace Legion {
     public:
       // Make this a virtual method so for control replication we can 
       // create a different type of future map for the task
-      virtual FutureMapImpl* create_future_map(TaskContext *ctx);
+      virtual FutureMapImpl* create_future_map(TaskContext *ctx,
+                    IndexSpace launch_space, IndexSpace shard_space);
     public:
       virtual void record_reference_mutation_effect(RtEvent event);
     public:
