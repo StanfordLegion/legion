@@ -884,7 +884,7 @@ namespace Legion {
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(ctx);
 #endif
       Domain shard_domain;
-      if (launch_space != shard_space)
+      if (shard_space.exists() && (launch_space != shard_space))
         runtime->forest->find_launch_space_domain(shard_space, shard_domain);
       else
         shard_domain = index_domain;
@@ -2707,7 +2707,7 @@ namespace Legion {
 #endif
       runtime->forest->find_launch_space_domain(launch_space, index_domain);
       Domain shard_domain;
-      if (launch_space != shard_space)
+      if (shard_space.exists() && (launch_space != shard_space))
         runtime->forest->find_launch_space_domain(shard_space, shard_domain);
       else
         shard_domain = index_domain;
