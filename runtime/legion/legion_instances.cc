@@ -2260,7 +2260,7 @@ namespace Legion {
               non_empty_regions.begin(); it != 
               non_empty_regions.end(); it++, index++)
         {
-          union_spaces[index++] = (*it)->row_source->handle;
+          union_spaces[index] = (*it)->row_source->handle;
           // Also find the common ancestor
           if (index > 0)
             ancestor = find_common_ancestor(ancestor, *it);
