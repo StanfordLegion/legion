@@ -235,7 +235,7 @@ def run_test_external(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
     # Contact: Chao Chen <cchen10@stanford.edu>
     solver_dir = os.path.join(tmp_dir, 'fastSolver2')
     cmd(['git', 'clone', 'https://github.com/Charles-Chao-Chen/fastSolver2.git', solver_dir])
-    cmd(['git', 'checkout', '4c7a59de63dd46a0abcc7f296fa3b0f511e5e6d2', ], cwd=solver_dir)
+    # cmd(['git', 'checkout', '4c7a59de63dd46a0abcc7f296fa3b0f511e5e6d2', ], cwd=solver_dir)
     solver = [[os.path.join(solver_dir, 'spmd_driver/solver'),
                ['-machine', '1', '-core', '8', '-mtxlvl', '6', '-ll:cpu', '8']]]
     run_cxx(solver, flags, launcher, root_dir, None, env, thread_count)
