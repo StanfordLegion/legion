@@ -10354,7 +10354,7 @@ namespace Legion {
             launch_space = launcher.index_tasks[0].launch_space;
             if (!launch_space.exists())
               launch_space = 
-                find_index_launch_space(launcher.launch_domain);
+                find_index_launch_space(launcher.index_tasks[0].launch_domain);
           }
         }
         else
