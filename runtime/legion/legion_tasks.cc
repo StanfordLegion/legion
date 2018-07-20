@@ -5542,7 +5542,8 @@ namespace Legion {
       }
       // If we succeeded in mapping and everything was mapped
       // then we get to mark that we are done mapping
-      if ((shard_manager == NULL) && is_leaf() && !has_virtual_instances())
+      if ((shard_manager == NULL) && !is_repl_individual_task() && 
+          is_leaf() && !has_virtual_instances())
         finish_individual_mapping();
       return RtEvent::NO_RT_EVENT;
     }
@@ -7346,8 +7347,13 @@ namespace Legion {
         execution_context = repl_ctx;
         // Wait until all the other shards are ready too
         shard_manager->complete_startup_initialization();
+        // Hold a reference during this to prevent collectives 
+        // from deleting the context prematurely
+        repl_ctx->add_reference();
         // The replicate contexts all need to sync up to exchange resources 
         repl_ctx->exchange_common_resources();
+        // Remove our reference, DO NOT CHECK FOR DELETION
+        repl_ctx->remove_reference();
         return repl_ctx;
       }
       else // No control replication so do the normal thing

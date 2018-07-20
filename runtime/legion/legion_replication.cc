@@ -4792,6 +4792,7 @@ namespace Legion {
         collective_index(ctx->get_next_collective_index(loc))
     //--------------------------------------------------------------------------
     {
+      context->add_reference();
     }
 
     //--------------------------------------------------------------------------
@@ -4800,6 +4801,7 @@ namespace Legion {
         local_shard(ctx->owner_shard->shard_id), collective_index(id)
     //--------------------------------------------------------------------------
     { 
+      context->add_reference();
     }
 
     //--------------------------------------------------------------------------
@@ -4808,6 +4810,8 @@ namespace Legion {
     {
       // Unregister this with the context 
       context->unregister_collective(this);
+      if (context->remove_reference())
+        delete context;
     }
 
     //--------------------------------------------------------------------------
