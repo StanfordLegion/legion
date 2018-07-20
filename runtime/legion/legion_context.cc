@@ -10200,6 +10200,7 @@ namespace Legion {
         return;
       ReplMapOp *map_op = runtime->get_available_repl_map_op();
       map_op->initialize(this, region);
+      map_op->initialize_replication(this);
       register_inline_mapped_region(region);
       runtime->add_to_dependence_queue(this, executing_processor, map_op);
     }
