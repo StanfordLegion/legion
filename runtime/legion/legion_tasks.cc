@@ -6069,6 +6069,7 @@ namespace Legion {
       assert(is_remote());
       assert(remote_replicate);
 #endif
+      rez.serialize(get_mapped_event());
       std::vector<unsigned> write_indexes;
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
