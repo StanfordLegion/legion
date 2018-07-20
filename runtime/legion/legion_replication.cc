@@ -364,7 +364,7 @@ namespace Legion {
       // Before we can do that though we have to get the version state
       // names for any writes so we can update our local state
       version_broadcast_collective = new VersioningInfoBroadcast(repl_ctx,
-                                      versioning_collective_id, owner_shard);
+              versioning_collective_id, owner_shard, RtEvent::NO_RT_EVENT);
       RtEvent versions_ready = 
         version_broadcast_collective->perform_collective_wait(false/*block*/);
       if (versions_ready.exists() && !versions_ready.has_triggered())
@@ -452,44 +452,33 @@ namespace Legion {
       RtEvent version_ready_event = perform_versioning_analysis();
       if (version_ready_event.exists() && !version_ready_event.has_triggered())
         return defer_perform_mapping(version_ready_event, must_epoch_owner); 
-      // Grab the mapped event so we can know when to do the broadcast
-      RtEvent map_wait = get_mapped_event();
-      // Do the base call  
-#ifdef DEBUG_LEGION
-#ifndef NDEBUG
-      RtEvent result = 
-#endif
-#endif
-        IndividualTask::perform_mapping(must_epoch_owner);
-#ifdef DEBUG_LEGION
-      assert(!result.exists());
-#endif
       // Then broadcast the versioning results for any region requirements
       // that are writes which are going to advance the version numbers
       // Have to new this on the heap in case we have to defer it
-      VersioningInfoBroadcast *version_broadcast = new VersioningInfoBroadcast(
-                               repl_ctx, versioning_collective_id, owner_shard);
-#ifdef DEBUG_LEGION
-      assert(regions.size() == version_infos.size());
-#endif
-      for (unsigned idx = 0; idx < regions.size(); idx++)
-      {
-        if (IS_WRITE(regions[idx]))
-          version_broadcast->pack_advance_states(idx, version_infos[idx]);
-      }
+      version_broadcast_collective = new VersioningInfoBroadcast(repl_ctx, 
+          versioning_collective_id, owner_shard, (must_epoch_owner == NULL) ? 
+            get_mapped_event() : RtEvent::NO_RT_EVENT);
+      // Do the base call  
+      RtEvent result = IndividualTask::perform_mapping(must_epoch_owner);
       // Have to wait for the mapping to be complete before sending to 
       // guarantee correctness of mapping dependences on remote nodes
       // Must epoch launches don't need to wait as their mapping dependences
       // are handled by a different mechanism
-      if (must_epoch_owner != NULL)
+      const bool finish_mapping = is_leaf() && !has_virtual_instances();
+      if (finish_mapping || (must_epoch_owner != NULL))
       {
-        version_broadcast->perform_collective_async();
-        // We have to delete this now so we know the effects are propagated
-        delete version_broadcast;
+        pack_versioning_advance_states(*version_broadcast_collective);
+        version_broadcast_collective->perform_collective_async();
+        if (must_epoch_owner != NULL)
+        {
+          // We have to delete this now to know the effects are propagated
+          delete version_broadcast_collective;
+          version_broadcast_collective = NULL;
+        }
+        else // We're done with our mapping so we can finish this now
+          finish_individual_mapping();
       }
-      else // Will take ownership of deleting the collective
-        version_broadcast->defer_perform_collective(this, map_wait);
-      return RtEvent::NO_RT_EVENT;
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -514,6 +503,63 @@ namespace Legion {
         }
       }
       IndividualTask::handle_future(future_store, future_size, false/*owned*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplIndividualTask::pack_versioning_advance_states(
+                                            VersioningInfoBroadcast &collective)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(regions.size() == version_infos.size());
+#endif
+      for (unsigned idx = 0; idx < regions.size(); idx++)
+      {
+        if (IS_WRITE(regions[idx]))
+        {
+          // If this was virtually mapped then we have to re-run 
+          // the versioning analysis so gather the new meta-data
+          if (virtual_mapped[idx])
+          {
+            RegionTreePath privilege_path;
+            initialize_privilege_path(privilege_path, regions[idx]);
+            std::set<RtEvent> ready_events;
+            VersionInfo virtual_version_info;
+            virtual_version_info.resize(privilege_path.get_max_depth());
+            runtime->forest->perform_versioning_analysis(this, idx, 
+              regions[idx], privilege_path, virtual_version_info, ready_events);
+            collective.pack_states(idx, virtual_version_info, false/*advance*/);
+          }
+          else // Common case where this was normally mapped
+            collective.pack_states(idx, version_infos[idx]);
+        }
+      }
+      // TODO: Handle created region privileges here
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplIndividualTask::handle_post_mapped(bool deferral, 
+                                                RtEvent mapped_precondition)
+    //--------------------------------------------------------------------------
+    {
+      if (!deferral && (version_broadcast_collective != NULL))
+      {
+        if (mapped_precondition.exists() && 
+            !mapped_precondition.has_triggered())
+        {
+          mapped_precondition = 
+            version_broadcast_collective->defer_perform_collective(this, 
+                                                    mapped_precondition);
+        }
+        else
+        {
+          // It's ready now so we can do the collective here
+          pack_versioning_advance_states(*version_broadcast_collective);
+          version_broadcast_collective->perform_collective_async();
+        }
+      }
+      // Then call the base implementation
+      IndividualTask::handle_post_mapped(deferral, mapped_precondition);
     }
 
     //--------------------------------------------------------------------------
@@ -562,7 +608,7 @@ namespace Legion {
       // We put this one on the heap because we don't want to end up blocking
       // the virtual channel on which the message was sent
       version_broadcast_collective = new VersioningInfoBroadcast(repl_ctx,
-                                     versioning_collective_id, owner_shard);
+              versioning_collective_id, owner_shard, RtEvent::NO_RT_EVENT);
       // Explicitly unpack into the data structure
       version_broadcast_collective->explicit_unpack(derez);
       // Now do the broadcast
@@ -1395,7 +1441,7 @@ namespace Legion {
         assert(version_broadcast_collective == NULL);
 #endif
         version_broadcast_collective = new VersioningInfoBroadcast(repl_ctx, 
-                                        versioning_collective_id, owner_shard);
+                versioning_collective_id, owner_shard, RtEvent::NO_RT_EVENT);
         RtEvent versions_ready = 
           version_broadcast_collective->perform_collective_wait(false/*block*/);
         if (versions_ready.exists() && !versions_ready.has_triggered())
@@ -1486,29 +1532,21 @@ namespace Legion {
         owner_shard = sharding_function->find_owner(index_point, index_domain);
       // Have to new this on the heap in case we end up needing to defer it
       VersioningInfoBroadcast *version_broadcast = new VersioningInfoBroadcast(
-                               repl_ctx, versioning_collective_id, owner_shard);
+           repl_ctx, versioning_collective_id, owner_shard, get_mapped_event());
 #ifdef DEBUG_LEGION
       assert(dst_requirements.size() == dst_versions.size());
 #endif
       for (unsigned idx = 0; idx < dst_versions.size(); idx++)
-        version_broadcast->pack_advance_states(idx, dst_versions[idx]);
-      // Have to make a copy to avoid completion race
-      RtEvent map_wait = get_mapped_event();
+        version_broadcast->pack_states(idx, dst_versions[idx]);
       // Now that we have all our information, we can trigger our map user event
       Runtime::trigger_event(prevent_completion_race);
-      // See if we can send the result now or need to defer it
-      if (map_wait.has_triggered())
-      {
-        // We can do it now
-        version_broadcast->perform_collective_async();
+      // We can do it now
+      version_broadcast->perform_collective_async();
 #ifdef DEBUG_LEGION
-        assert(version_broadcast_collective == NULL);
+      assert(version_broadcast_collective == NULL);
 #endif
-        // By copying this here we take ownership of it and will clean it up
-        version_broadcast_collective = version_broadcast;
-      }
-      else // Will take ownership of deleting the collective
-        version_broadcast->defer_perform_collective(this, map_wait);
+      // By copying this here we take ownership of it and will clean it up
+      version_broadcast_collective = version_broadcast;
     }
 
     /////////////////////////////////////////////////////////////
@@ -4001,7 +4039,7 @@ namespace Legion {
           runtime->send_replicate_post_mapped(owner_space, rez);
         }
         else
-          original_task->handle_post_mapped(RtEvent::NO_RT_EVENT);
+          original_task->handle_post_mapped(false/*deferral*/);
       }
     }
 
@@ -7051,13 +7089,21 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     VersioningInfoBroadcast::VersioningInfoBroadcast(ReplicateContext *ctx,
-                                                   CollectiveID id, ShardID own)
-      : BroadcastCollective(ctx, id, own)
+                                CollectiveID id, ShardID own, RtEvent map_event)
+      : BroadcastCollective(ctx, id, own), mapped_event(map_event)
     //--------------------------------------------------------------------------
     {
       // If we own it then make our done event
       if (local_shard == origin)
+      {
         acknowledge_event = Runtime::create_rt_user_event();
+      }
+#ifdef DEBUG_LEGION
+      else
+      {
+        assert(!mapped_event.exists());
+      }
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -7111,6 +7157,7 @@ namespace Legion {
       RtUserEvent precondition = Runtime::create_rt_user_event();
       rez.serialize(precondition);
       ack_preconditions.insert(precondition);
+      rez.serialize(mapped_event);
       rez.serialize<size_t>(versions.size());
       for (std::map<unsigned,LegionMap<DistributedID,FieldMask>::aligned>::
             const_iterator vit = versions.begin(); vit != versions.end(); vit++)
@@ -7185,6 +7232,10 @@ namespace Legion {
     void VersioningInfoBroadcast::common_unpack(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(!mapped_event.exists());
+#endif
+      derez.deserialize(mapped_event);
       size_t num_versions;
       derez.deserialize(num_versions);
       for (unsigned idx1 = 0; idx1 < num_versions; idx1++)
@@ -7204,8 +7255,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void VersioningInfoBroadcast::pack_advance_states(unsigned index,
-                                                const VersionInfo &version_info)
+    void VersioningInfoBroadcast::pack_states(unsigned index,
+                           const VersionInfo &version_info, bool advance_states)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -7213,7 +7264,7 @@ namespace Legion {
       assert(local_shard == origin);
 #endif
       LegionMap<DistributedID,FieldMask>::aligned &dids = versions[index];
-      version_info.capture_base_advance_states(dids);
+      version_info.capture_base_states(advance_states, dids);
       // Record a valid reference to all the version state objects
       // that we will hold until we get acknowledgements from all
       // the other shards that we will broadcast to
@@ -7264,6 +7315,10 @@ namespace Legion {
             wait_on.insert(ready);
         }
       }
+      // Add the mapped_event from the origin to our map applied events
+      // To ensure that we get the proper preconditions for this 
+      if (mapped_event.exists())
+        applied_events.insert(mapped_event);
       if (!wait_on.empty())
       {
         RtEvent wait_for = Runtime::merge_events(wait_on);
@@ -7292,13 +7347,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void VersioningInfoBroadcast::defer_perform_collective(Operation *op,
-                                                           RtEvent precondition)
+    RtEvent VersioningInfoBroadcast::defer_perform_collective(
+                                   ReplIndividualTask *op, RtEvent precondition)
     //--------------------------------------------------------------------------
     {
       DeferVersionBroadcastArgs args(op, this);
-      context->runtime->issue_runtime_meta_task(args, 
-          LG_LATENCY_DEFERRED_PRIORITY, precondition);
+      return context->runtime->issue_runtime_meta_task(args, 
+                LG_LATENCY_DEFERRED_PRIORITY, precondition);
     }
 
     //--------------------------------------------------------------------------
@@ -7307,8 +7362,8 @@ namespace Legion {
     {
       const DeferVersionBroadcastArgs *dargs = 
         (const DeferVersionBroadcastArgs*)args;
+      dargs->task->pack_versioning_advance_states(*dargs->proxy_this);
       dargs->proxy_this->perform_collective_async();
-      delete dargs->proxy_this;
     }
 
   }; // namespace Internal

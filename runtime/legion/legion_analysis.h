@@ -288,7 +288,7 @@ namespace Legion {
                                    RegionTreeForest *forest);
     public:
       // Used by control replication for grabbing base advance states
-      void capture_base_advance_states(
+      void capture_base_states(bool advance_states,
           LegionMap<DistributedID,FieldMask>::aligned &base_states) const;
     protected:
       RegionTreeNode                   *upper_bound_node;
@@ -1049,6 +1049,8 @@ namespace Legion {
       inline bool has_advance_states(void) const 
         { return (!advance_states.empty()); } 
       void apply_state(std::set<RtEvent> &applied_conditions) const; 
+      inline const PhysicalVersions& get_version_states(void) const
+        { return version_states; }
       inline const PhysicalVersions& get_advance_states(void) const
         { return advance_states; }
     public:

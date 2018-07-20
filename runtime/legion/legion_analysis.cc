@@ -1270,7 +1270,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void VersionInfo::capture_base_advance_states(
+    void VersionInfo::capture_base_states(bool advance_states,
                  LegionMap<DistributedID,FieldMask>::aligned &base_states) const
     //--------------------------------------------------------------------------
     {
@@ -1279,8 +1279,8 @@ namespace Legion {
       assert(base_states.empty());
 #endif
       const PhysicalState *base_state = physical_states.back();
-      const VersioningSet<PHYSICAL_STATE_REF> &states = 
-        base_state->get_advance_states();
+      const VersioningSet<PHYSICAL_STATE_REF> &states = advance_states ? 
+        base_state->get_advance_states() : base_state->get_version_states();
       for (VersioningSet<PHYSICAL_STATE_REF>::iterator it = 
             states.begin(); it != states.end(); it++)
         base_states[it->first->did] = it->second;

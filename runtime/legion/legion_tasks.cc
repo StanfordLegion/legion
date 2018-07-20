@@ -5543,32 +5543,34 @@ namespace Legion {
       // If we succeeded in mapping and everything was mapped
       // then we get to mark that we are done mapping
       if ((shard_manager == NULL) && is_leaf() && !has_virtual_instances())
-      {
-        RtEvent applied_condition;
-        if (!map_applied_conditions.empty())
-        {
-          applied_condition = Runtime::merge_events(map_applied_conditions);
-          map_applied_conditions.clear();
-        }
-        if (is_remote())
-        {
-          // Send back the message saying that we finished mapping
-          Serializer rez;
-          // Only need to send back the pointer to the task instance
-          rez.serialize(orig_task);
-          rez.serialize(applied_condition);
-          // Special case for control replication when we have to 
-          // also return the version numbers for broadcast
-          if (remote_replicate)
-            pack_remote_versions(rez);
-          runtime->send_individual_remote_mapped(orig_proc, rez);
-        }
-        // Mark that we have completed mapping
-        complete_mapping(applied_condition);
-        if (!acquired_instances.empty())
-          release_acquired_instances(acquired_instances);
-      }
+        finish_individual_mapping();
       return RtEvent::NO_RT_EVENT;
+    }
+    
+    //--------------------------------------------------------------------------
+    void IndividualTask::finish_individual_mapping(void)
+    //--------------------------------------------------------------------------
+    {
+      RtEvent applied_condition;
+      if (!map_applied_conditions.empty())
+        applied_condition = Runtime::merge_events(map_applied_conditions);
+      if (is_remote())
+      {
+        // Send back the message saying that we finished mapping
+        Serializer rez;
+        // Only need to send back the pointer to the task instance
+        rez.serialize(orig_task);
+        rez.serialize(applied_condition);
+        // Special case for control replication when we have to 
+        // also return the version numbers for broadcast
+        if (remote_replicate && !is_origin_mapped())
+          pack_remote_versions(rez);
+        runtime->send_individual_remote_mapped(orig_proc, rez);
+      }
+      // Now we can complete this task
+      if (!acquired_instances.empty())
+        release_acquired_instances(acquired_instances);
+      complete_mapping(applied_condition);
     }
 
     //--------------------------------------------------------------------------
@@ -5775,7 +5777,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndividualTask::handle_post_mapped(RtEvent mapped_precondition)
+    void IndividualTask::handle_post_mapped(bool deferral,
+                                            RtEvent mapped_precondition)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, INDIVIDUAL_POST_MAPPED_CALL);
@@ -5783,6 +5786,9 @@ namespace Legion {
       // we need to wait before completing our mapping
       if (!mapped_precondition.has_triggered())
       {
+#ifdef DEBUG_LEGION
+        assert(!deferral);
+#endif
         SingleTask::DeferredPostMappedArgs args(this);
         runtime->issue_runtime_meta_task(args, LG_THROUGHPUT_DEFERRED_PRIORITY,
                                          mapped_precondition);
@@ -5794,33 +5800,7 @@ namespace Legion {
       // done when the virtual instances are returned in return_virtual_task
       // If we have any virtual instances then we need to apply
       // the changes for them now
-      if (!is_remote())
-      {
-        if (!acquired_instances.empty())
-          release_acquired_instances(acquired_instances);
-        if (!map_applied_conditions.empty())
-          complete_mapping(Runtime::merge_events(map_applied_conditions));
-        else 
-          complete_mapping();
-        return;
-      }
-      RtEvent applied_condition;
-      if (!map_applied_conditions.empty())
-        applied_condition = Runtime::merge_events(map_applied_conditions);
-      // Send back the message saying that we finished mapping
-      Serializer rez;
-      // Only need to send back the pointer to the task instance
-      rez.serialize(orig_task);
-      rez.serialize(applied_condition);
-      // Special case for control replication when we have to 
-      // also return the version numbers for broadcast
-      if (remote_replicate && !is_origin_mapped())
-        pack_remote_versions(rez);
-      runtime->send_individual_remote_mapped(orig_proc, rez);
-      // Now we can complete this task
-      if (!acquired_instances.empty())
-        release_acquired_instances(acquired_instances);
-      complete_mapping(applied_condition);
+      finish_individual_mapping();
     } 
 
     //--------------------------------------------------------------------------
@@ -6104,7 +6084,7 @@ namespace Legion {
           const unsigned index = write_indexes[idx];
           rez.serialize(index);
           LegionMap<DistributedID,FieldMask>::aligned advance_states;
-          version_infos[index].capture_base_advance_states(advance_states);
+          version_infos[index].capture_base_states(true/*adv*/, advance_states);
           rez.serialize<size_t>(advance_states.size());
           for (LegionMap<DistributedID,FieldMask>::aligned::const_iterator 
                 it = advance_states.begin(); it != advance_states.end(); it++)
@@ -6837,12 +6817,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PointTask::handle_post_mapped(RtEvent mapped_precondition)
+    void PointTask::handle_post_mapped(bool deferral, 
+                                       RtEvent mapped_precondition)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, POINT_TASK_POST_MAPPED_CALL);
       if (!mapped_precondition.has_triggered())
       {
+#ifdef DEBUG_LEGION
+        assert(!deferral);
+#endif
         SingleTask::DeferredPostMappedArgs args(this);
         runtime->issue_runtime_meta_task(args, LG_LATENCY_DEFERRED_PRIORITY,
                                          mapped_precondition);
@@ -7312,11 +7296,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ShardTask::handle_post_mapped(RtEvent mapped_precondition)
+    void ShardTask::handle_post_mapped(bool deferral, 
+                                       RtEvent mapped_precondition)
     //--------------------------------------------------------------------------
     {
       if (!mapped_precondition.has_triggered())
       {
+#ifdef DEBUG_LEGION
+        assert(!deferral);
+#endif
         SingleTask::DeferredPostMappedArgs args(this);
         runtime->issue_runtime_meta_task(args, LG_THROUGHPUT_DEFERRED_PRIORITY,
                                          mapped_precondition);

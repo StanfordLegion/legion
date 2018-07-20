@@ -607,54 +607,11 @@ namespace Legion {
     protected:
       std::set<RtEvent> tasks_mapped;
       std::set<ApEvent> tasks_complete;
-    };
+    }; 
 
-    /**
-     * \class VersioningInfoBroadcast
-     * A class for broadcasting the names of version state
-     * objects for one or more region requirements
-     */
-    class VersioningInfoBroadcast : public BroadcastCollective {
-    public:
-      struct DeferVersionBroadcastArgs :
-        public LgTaskArgs<DeferVersionBroadcastArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_DEFER_VERSION_BROADCAST_TASK_ID;
-      public:
-        DeferVersionBroadcastArgs(Operation *op, VersioningInfoBroadcast *b)
-          : LgTaskArgs<DeferVersionBroadcastArgs>(op->get_unique_op_id()),
-            proxy_this(b) { }
-      public:
-        VersioningInfoBroadcast *proxy_this;
-      };
-    public:
-      VersioningInfoBroadcast(ReplicateContext *ctx,
-                    CollectiveID id, ShardID owner);
-      VersioningInfoBroadcast(const VersioningInfoBroadcast &rhs);
-      virtual ~VersioningInfoBroadcast(void);
-    public:
-      VersioningInfoBroadcast& operator=(const VersioningInfoBroadcast &rhs);
-    public:
-      virtual void pack_collective(Serializer &rez) const;
-      virtual void unpack_collective(Deserializer &derez);
-    public:
-      void explicit_unpack(Deserializer &derez);
-      void common_unpack(Deserializer &derez);
-      void pack_advance_states(unsigned index, const VersionInfo &version_info);
-      void wait_for_states(std::set<RtEvent> &applied_events);
-      const VersioningSet<>& find_advance_states(unsigned index) const;
-      void record_precondition(RtEvent precondition);
-      void defer_perform_collective(Operation *op, RtEvent precondition);
-      static void handle_deferral(const void *args);
-    protected:
-      std::map<unsigned/*index*/,
-               LegionMap<DistributedID,FieldMask>::aligned> versions;
-      LegionMap<unsigned/*index*/,VersioningSet<> >::aligned results;
-    protected:
-      RtUserEvent acknowledge_event;
-      mutable std::set<RtEvent> ack_preconditions;
-      std::set<VersionState*> held_references;
-    };
+
+    // Forward declaration for this here, but it lives below
+    class VersioningInfoBroadcast;
 
     /**
      * \class ReplIndividualTask
@@ -679,6 +636,8 @@ namespace Legion {
     public:
       // Override these so we can broadcast the future result
       virtual void handle_future(const void *res, size_t res_size, bool owned);
+      virtual void handle_post_mapped(bool deferral, 
+                                      RtEvent pre = RtEvent::NO_RT_EVENT);
       virtual void trigger_task_complete(void);
     public:
       virtual bool is_repl_individual_task(void) const { return true; }
@@ -687,6 +646,7 @@ namespace Legion {
       void initialize_replication(ReplicateContext *ctx,IndexSpace shard_space);
       void set_sharding_function(ShardingID functor,ShardingFunction *function);
       void perform_unowned_shard(ReplicateContext *ctx);
+      void pack_versioning_advance_states(VersioningInfoBroadcast &broad);
     protected:
       ShardID owner_shard;
       ShardingID sharding_functor;
@@ -1422,6 +1382,58 @@ namespace Legion {
       // A unique set of address spaces on which shards exist 
       std::set<AddressSpaceID> unique_shard_spaces;
     }; 
+
+    /**
+     * \class VersioningInfoBroadcast
+     * A class for broadcasting the names of version state
+     * objects for one or more region requirements
+     */
+    class VersioningInfoBroadcast : public BroadcastCollective {
+    public:
+      struct DeferVersionBroadcastArgs :
+        public LgTaskArgs<DeferVersionBroadcastArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_DEFER_VERSION_BROADCAST_TASK_ID;
+      public:
+        DeferVersionBroadcastArgs(ReplIndividualTask *t, 
+                                  VersioningInfoBroadcast *b)
+          : LgTaskArgs<DeferVersionBroadcastArgs>(t->get_unique_op_id()),
+            proxy_this(b), task(t) { }
+      public:
+        VersioningInfoBroadcast *proxy_this;
+        ReplIndividualTask *task;
+      };
+    public:
+      VersioningInfoBroadcast(ReplicateContext *ctx, CollectiveID id, 
+                              ShardID owner, RtEvent mapped_event);
+      VersioningInfoBroadcast(const VersioningInfoBroadcast &rhs);
+      virtual ~VersioningInfoBroadcast(void);
+    public:
+      VersioningInfoBroadcast& operator=(const VersioningInfoBroadcast &rhs);
+    public:
+      virtual void pack_collective(Serializer &rez) const;
+      virtual void unpack_collective(Deserializer &derez);
+    public:
+      void explicit_unpack(Deserializer &derez);
+      void common_unpack(Deserializer &derez);
+      void pack_states(unsigned index, 
+                 const VersionInfo &version_info, bool advance = true);
+      void wait_for_states(std::set<RtEvent> &applied_events);
+      const VersioningSet<>& find_advance_states(unsigned index) const;
+      void record_precondition(RtEvent precondition);
+      RtEvent defer_perform_collective(ReplIndividualTask *task, 
+                                       RtEvent precondition);
+      static void handle_deferral(const void *args);
+    protected:
+      std::map<unsigned/*index*/,
+               LegionMap<DistributedID,FieldMask>::aligned> versions;
+      LegionMap<unsigned/*index*/,VersioningSet<> >::aligned results;
+    protected:
+      RtEvent mapped_event;
+      RtUserEvent acknowledge_event;
+      mutable std::set<RtEvent> ack_preconditions;
+      std::set<VersionState*> held_references;
+    };
 
   }; // namespace Internal
 }; // namespace Legion

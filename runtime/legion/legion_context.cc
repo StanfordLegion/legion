@@ -6796,9 +6796,10 @@ namespace Legion {
           }
         }
         if (!preconditions.empty())
-          single_task->handle_post_mapped(Runtime::merge_events(preconditions));
+          single_task->handle_post_mapped(false/*deferral*/,
+              Runtime::merge_events(preconditions));
         else
-          single_task->handle_post_mapped();
+          single_task->handle_post_mapped(false/*deferral*/);
       } 
       if (need_complete)
         owner_task->trigger_children_complete();

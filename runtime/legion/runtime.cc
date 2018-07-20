@@ -21946,7 +21946,7 @@ namespace Legion {
           {
             const SingleTask::DeferredPostMappedArgs *post_mapped_args = 
               (const SingleTask::DeferredPostMappedArgs*)args;
-            post_mapped_args->task->handle_post_mapped();
+            post_mapped_args->task->handle_post_mapped(true/*deferral*/);
             break;
           }
         case LG_DEFERRED_EXECUTE_ID:

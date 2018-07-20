@@ -542,7 +542,8 @@ namespace Legion {
     public:
       virtual void handle_future(const void *res, 
                                  size_t res_size, bool owned) = 0; 
-      virtual void handle_post_mapped(RtEvent pre = RtEvent::NO_RT_EVENT) = 0;
+      virtual void handle_post_mapped(bool deferral,
+                          RtEvent pre = RtEvent::NO_RT_EVENT) = 0;
       virtual void handle_misspeculation(void) = 0;
     public:
       // From Memoizable
@@ -713,6 +714,7 @@ namespace Legion {
                              bool track = true);
       void set_top_level(void);
       void perform_base_dependence_analysis(void);
+      void finish_individual_mapping(void);
     public:
       RtEvent perform_versioning_analysis(void);
       virtual RtEvent perform_must_epoch_version_analysis(MustEpochOp *own);
@@ -749,7 +751,8 @@ namespace Legion {
     public:
       virtual void handle_future(const void *res, 
                                  size_t res_size, bool owned);
-      virtual void handle_post_mapped(RtEvent pre = RtEvent::NO_RT_EVENT);
+      virtual void handle_post_mapped(bool deferral, 
+                          RtEvent pre = RtEvent::NO_RT_EVENT);
       virtual void handle_misspeculation(void);
     public:
       virtual void record_reference_mutation_effect(RtEvent event);
@@ -872,7 +875,8 @@ namespace Legion {
     public:
       virtual void handle_future(const void *res, 
                                  size_t res_size, bool owned);
-      virtual void handle_post_mapped(RtEvent pre = RtEvent::NO_RT_EVENT);
+      virtual void handle_post_mapped(bool deferral,
+                          RtEvent pre = RtEvent::NO_RT_EVENT);
       virtual void handle_misspeculation(void);
     public:
       // ProjectionPoint methods
@@ -961,7 +965,8 @@ namespace Legion {
     public:
       virtual void handle_future(const void *res, 
                                  size_t res_size, bool owned); 
-      virtual void handle_post_mapped(RtEvent pre = RtEvent::NO_RT_EVENT);
+      virtual void handle_post_mapped(bool deferral,
+                          RtEvent pre = RtEvent::NO_RT_EVENT);
       virtual void handle_misspeculation(void);
     protected:
       virtual InnerContext* initialize_inner_execution_context(VariantImpl *v);
