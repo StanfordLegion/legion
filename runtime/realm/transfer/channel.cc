@@ -1819,6 +1819,10 @@ namespace Realm {
 	  // always ask the HDF5 size for a step first
 	  size_t hdf5_bytes = hdf5_iter->step(max_bytes, hdf5_info,
 					      true /*tentative*/);
+          if(hdf5_bytes == 0) {
+            // not enough space for even a single element - try again later
+            break;
+          }
 	  // TODO: support 2D/3D for memory side of an HDF transfer?
 	  size_t mem_bytes = mem_iter->step(hdf5_bytes, mem_info, 0);
 	  if(mem_bytes == hdf5_bytes) {
