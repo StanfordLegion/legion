@@ -1840,11 +1840,11 @@ namespace Legion {
       // Helper methods for AOS and SOA arrays, but it is totally 
       // acceptable to fill in the layout constraint set manually
       inline void attach_array_aos(void *base, bool column_major,
-                                   const std::vector<FieldID> &fields,
-                                   Memory mem, size_t alignment = 16);
+                             const std::vector<FieldID> &fields, Memory mem,
+                             const std::map<FieldID,size_t> *alignments = NULL);
       inline void attach_array_soa(void *base, bool column_major,
-                                   const std::vector<FieldID> &fields,
-                                   Memory mem, size_t alignment = 16);
+                             const std::vector<FieldID> &fields, Memory mem,
+                             const std::map<FieldID,size_t> *alignments = NULL);
     public:
       ExternalResource                              resource;
       LogicalRegion                                 handle;
@@ -6256,9 +6256,11 @@ namespace Legion {
        * functor after the application has finished executing.
        * @param pid the projection ID to use for the registration
        * @param functor the object to register for handling projections
+       * @param silence_warnings disable warnings about dynamic registration
        */
       void register_projection_functor(ProjectionID pid, 
-                                       ProjectionFunctor *functor);
+                                       ProjectionFunctor *functor,
+                                       bool silence_warnings = false);
 
       /**
        * Register a projection functor before the runtime has started only.

@@ -2240,7 +2240,7 @@ namespace Legion {
               non_empty_regions.begin(); it != 
               non_empty_regions.end(); it++, index++)
         {
-          union_spaces[index++] = (*it)->row_source->handle;
+          union_spaces[index] = (*it)->row_source->handle;
           // Also find the common ancestor
           if (index > 0)
             ancestor = find_common_ancestor(ancestor, *it);
@@ -2494,6 +2494,48 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       const OrderingConstraint &ord = constraints.ordering_constraint;
+
+      std::map<FieldID, size_t> field_alignments;
+      if (ord.ordering.front() == DIM_F)
+      {
+        // AOS - all field in same group
+        // Use a GCD of field sizes by default to make fields tighly packed
+#ifdef DEBUG_LEGION
+        assert(field_set.size() > 0);
+        assert(field_sizes.size() > 0);
+#endif
+        size_t gcd = field_sizes[0];
+        for (unsigned idx = 0; idx < field_set.size(); idx++)
+        {
+          while (field_sizes[idx] % gcd != 0)
+            gcd >>= 1;
+        }
+#ifdef DEBUG_LEGION
+        assert(gcd != 0);
+#endif
+        for (unsigned idx = 0; idx < field_set.size(); idx++)
+          field_alignments[field_set[idx]] = gcd;
+      }
+      else if (ord.ordering.back() == DIM_F)
+      {
+        // SOA - each field is its own group
+        // Use natural alignment by default
+        for (unsigned idx = 0; idx < field_set.size(); idx++)
+          field_alignments[field_set[idx]] = field_sizes[idx];
+      }
+      else // Have to be AOS or SOA for now
+        assert(false);
+
+      const std::vector<AlignmentConstraint> &alignments =
+        constraints.alignment_constraints;
+      for (std::vector<AlignmentConstraint>::const_iterator it =
+           alignments.begin(); it != alignments.end(); ++it)
+      {
+        // TODO: We support only equality constraints for now
+        assert(it->eqk != EQ_EK);
+        field_alignments[it->fid] = it->alignment;
+      }
+
       if (ord.ordering.front() == DIM_F)
       {
         // AOS - all field in same group
@@ -2501,11 +2543,15 @@ namespace Legion {
         realm_constraints.field_groups[0].resize(field_set.size());
         for (unsigned idx = 0; idx < field_set.size(); idx++)
         {
+#ifdef DEBUG_LEGION
+          assert(field_alignments.find(field_set[idx]) !=
+                 field_alignments.end());
+#endif
           realm_constraints.field_groups[0][idx].field_id = field_set[idx];
           realm_constraints.field_groups[0][idx].offset = -1;
           realm_constraints.field_groups[0][idx].size = field_sizes[idx];
-          // Natrual alignment
-          realm_constraints.field_groups[0][idx].alignment = field_sizes[idx];
+          realm_constraints.field_groups[0][idx].alignment =
+            field_alignments[field_set[idx]];
         }
       }
       else if (ord.ordering.back() == DIM_F)
@@ -2514,20 +2560,21 @@ namespace Legion {
         realm_constraints.field_groups.resize(field_set.size());
         for (unsigned idx = 0; idx < field_set.size(); idx++)
         {
+#ifdef DEBUG_LEGION
+          assert(field_alignments.find(field_set[idx]) !=
+                 field_alignments.end());
+#endif
           realm_constraints.field_groups[idx].resize(1);
           realm_constraints.field_groups[idx][0].field_id = field_set[idx];
           realm_constraints.field_groups[idx][0].offset = -1;
           realm_constraints.field_groups[idx][0].size = field_sizes[idx];
-          // Natural alignment
-          realm_constraints.field_groups[idx][0].alignment = field_sizes[idx];
+          realm_constraints.field_groups[idx][0].alignment =
+            field_alignments[field_set[idx]];
         }
       }
       else // Have to be AOS or SOA for now
         assert(false);
       // TODO: Next go through and check for any offset constraints for fields
-
-      // TODO: Then update the alignments per the alignment constraints
-
     }
     
   }; // namespace Internal
