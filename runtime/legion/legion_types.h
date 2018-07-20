@@ -1527,6 +1527,7 @@ namespace Legion {
       COLLECTIVE_LOC_71 = 71,
       COLLECTIVE_LOC_72 = 72,
       COLLECTIVE_LOC_73 = 73,
+      COLLECTIVE_LOC_74 = 74,
     };
 
     // legion_types.h
@@ -1849,6 +1850,7 @@ namespace Legion {
     class ReplMustEpochOp;
     class ReplTimingOp;
     class ReplFenceOp;
+    class ReplMapOp;
     class ShardMapping;
     class ShardManager;
     class ShardCollective;

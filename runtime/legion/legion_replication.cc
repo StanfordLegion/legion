@@ -3583,6 +3583,82 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
+    // Repl Map Op 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    ReplMapOp::ReplMapOp(Runtime *rt)
+      : MapOp(rt)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    ReplMapOp::ReplMapOp(const ReplMapOp &rhs)
+      : MapOp(rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    ReplMapOp::~ReplMapOp(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    ReplMapOp& ReplMapOp::operator=(const ReplMapOp &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplMapOp::initialize_replication(ReplicateContext *ctx)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(exchange == NULL);
+#endif
+      // We only check the results of the mapping if the runtime requests it
+      exchange = new InlineMappingExchange(COLLECTIVE_LOC_74, ctx, this,
+                         ctx->owner_shard->shard_id, !runtime->unsafe_mapper);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplMapOp::activate(void)
+    //--------------------------------------------------------------------------
+    {
+      MapOp::activate();
+      exchange = NULL;
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplMapOp::deactivate(void)
+    //--------------------------------------------------------------------------
+    {
+      deactivate_map_op();
+      if (exchange != NULL)
+        delete exchange;
+      runtime->free_repl_map_op(this);
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent ReplMapOp::complete_inline_mapping(RtEvent mapping_applied,
+                                               const InstanceSet &mapped_insts)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(exchange != NULL);
+#endif
+      return exchange->exchange_inline_mappings(mapping_applied, mapped_insts);
+    }
+
+    /////////////////////////////////////////////////////////////
     // Shard Manager 
     /////////////////////////////////////////////////////////////
 
@@ -7085,6 +7161,239 @@ namespace Legion {
       // No need to hold the lock after the collective is complete
       all_mapped.swap(tasks_mapped);
       all_complete.swap(tasks_complete);
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Inline Mapping Exchange 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    InlineMappingExchange::InlineMappingExchange(CollectiveIndexLocation loc,
+             ReplicateContext *ctx, ReplMapOp *op, ShardID sid, bool check_map)
+      : AllGatherCollective(loc, ctx), map_op(op), shard_id(sid), 
+        check_mappings(check_map)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    InlineMappingExchange::InlineMappingExchange(const InlineMappingExchange &i)
+      : AllGatherCollective(i), map_op(NULL), shard_id(0), check_mappings(false)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    InlineMappingExchange::~InlineMappingExchange(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    InlineMappingExchange& InlineMappingExchange::operator=(
+                                               const InlineMappingExchange &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void InlineMappingExchange::pack_collective_stage(Serializer &rez, 
+                                                      int stage) const
+    //--------------------------------------------------------------------------
+    {
+      if (stage == -1)
+      {
+        if (participating)
+        {
+          RtEvent done = Runtime::merge_events(local_preconditions.back());
+          rez.serialize(done);
+        }
+        else
+          rez.serialize(local_mapped_event);
+      }
+      else
+      {
+        if (stage == 0)
+        {
+          if (prestage_event.exists())
+          {
+            local_mapped_event = 
+              Runtime::merge_events(local_mapped_event, prestage_event);
+            // Clear it for when we get packed again
+            prestage_event = RtEvent::NO_RT_EVENT;
+          }
+          rez.serialize(local_mapped_event);
+        }
+        else
+        {
+          std::set<RtEvent> &previous = local_preconditions[stage-1];
+          if (previous.size() > 1)
+          {
+            RtEvent stage_done = Runtime::merge_events(previous);
+            previous.clear();
+            previous.insert(stage_done);
+            rez.serialize(stage_done);
+          }
+          else
+            rez.serialize(*(previous.begin()));
+        }
+      }
+      if (check_mappings)
+      {
+        rez.serialize<size_t>(mappings.size());
+        for (std::map<PhysicalInstance,LegionMap<ShardID,FieldMask>::aligned>::
+              const_iterator mit = mappings.begin(); 
+              mit != mappings.end(); mit++)
+        {
+          rez.serialize(mit->first);
+          rez.serialize<size_t>(mit->second.size());
+          for (LegionMap<ShardID,FieldMask>::aligned::const_iterator it = 
+                mit->second.begin(); it != mit->second.end(); it++)
+          {
+            rez.serialize(it->first);
+            rez.serialize(it->second);
+          }
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void InlineMappingExchange::unpack_collective_stage(Deserializer &derez,
+                                                        int stage)
+    //--------------------------------------------------------------------------
+    {
+      RtEvent precondition;
+      derez.deserialize(precondition);
+      if (stage == -1)
+      {
+        if (participating)
+        {
+#ifdef DEBUG_LEGION
+          assert(!prestage_event.exists());
+#endif
+          prestage_event = precondition;
+        }
+        else
+        {
+#ifdef DEBUG_LEGION
+          assert(local_preconditions.size() == 1);
+          assert(local_preconditions[0].empty());
+#endif
+          local_preconditions[0].insert(precondition);
+        }
+      }
+      else
+      {
+#ifdef DEBUG_LEGION
+        assert(stage < int(local_preconditions.size()));
+#endif
+        local_preconditions[stage].insert(precondition);
+      }
+      if (check_mappings)
+      {
+        size_t num_mappings;
+        derez.deserialize(num_mappings);
+        for (unsigned idx1 = 0; idx1 < num_mappings; idx1++)
+        {
+          PhysicalInstance inst;
+          derez.deserialize(inst);
+          size_t num_shards;
+          derez.deserialize(num_shards);
+          LegionMap<ShardID,FieldMask>::aligned &inst_map = mappings[inst];
+          for (unsigned idx2 = 0; idx2 < num_shards; idx2++)
+          {
+            ShardID sid;
+            derez.deserialize(sid);
+            LegionMap<ShardID,FieldMask>::aligned::iterator finder = 
+              inst_map.find(sid);
+            if (finder != inst_map.end())
+            {
+              FieldMask mask;
+              derez.deserialize(mask);
+              finder->second |= mask;
+            }
+            else
+              derez.deserialize(inst_map[sid]);
+          }
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent InlineMappingExchange::exchange_inline_mappings(RtEvent local_map,
+                                              const InstanceSet &local_mappings)
+    //--------------------------------------------------------------------------
+    {
+      {
+        AutoLock c_lock(collective_lock);
+#ifdef DEBUG_LEGION
+        assert(!local_mapped_event.exists());
+#endif
+        local_mapped_event = local_map;
+        if (participating)
+          local_preconditions.resize(shard_collective_stages);
+        else
+          local_preconditions.resize(1);
+        if (check_mappings)
+        {
+          // Populate the data structure with instance names
+          for (unsigned idx = 0; idx < local_mappings.size(); idx++)
+          {
+            const InstanceRef &mapping = local_mappings[idx];
+            const PhysicalInstance inst = mapping.get_manager()->instance;
+            const FieldMask &mask = mapping.get_valid_fields();
+            LegionMap<ShardID,FieldMask>::aligned &inst_map = mappings[inst];
+            LegionMap<ShardID,FieldMask>::aligned::iterator finder = 
+              inst_map.find(shard_id);
+            if (finder == inst_map.end())
+              inst_map[shard_id] = mask;
+            else
+              finder->second |= mask;
+          }
+        }
+      }
+      perform_collective_sync();
+      if (check_mappings)
+      {
+        // Check to see if our mappings interfere with any others
+        for (unsigned idx = 0; idx < local_mappings.size(); idx++)
+        {
+          const InstanceRef &mapping = local_mappings[idx];
+          const PhysicalInstance inst = mapping.get_manager()->instance;
+          const FieldMask &mask = mapping.get_valid_fields();
+          const std::map<PhysicalInstance,
+                LegionMap<ShardID,FieldMask>::aligned>::const_iterator
+            finder = mappings.find(inst);
+#ifdef DEBUG_LEGION
+          // We should have at least our own
+          assert(finder != mappings.end());
+#endif
+          for (LegionMap<ShardID,FieldMask>::aligned::const_iterator it = 
+                finder->second.begin(); it != finder->second.end(); it++)
+          {
+            // We can skip ourself
+            if (it->first == shard_id)
+              continue;
+            const FieldMask overlap = mask & it->second;
+            if (!overlap)
+              continue;
+            // This is the error condition
+            TaskContext *ctx = map_op->get_context();
+            REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                "Inline mappings in control replicated contexts must "
+                "map to different instances for the same field. Inline "
+                "mapping in shard %d conflicts with mapping in shard %d "
+                "of control replciated task %s (UID %lld)",
+                shard_id, it->first, ctx->get_task_name(), ctx->get_unique_id())
+          }
+        }
+      }
+      return Runtime::merge_events(local_preconditions.back());
     }
 
     /////////////////////////////////////////////////////////////

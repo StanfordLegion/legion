@@ -10136,6 +10136,75 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    PhysicalRegion ReplicateContext::map_region(const InlineLauncher &launcher)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      if (IS_NO_ACCESS(launcher.requirement))
+        return PhysicalRegion();
+      ReplMapOp *map_op = runtime->get_available_repl_map_op();
+#ifdef DEBUG_LEGION
+      PhysicalRegion result = 
+        map_op->initialize(this, launcher, runtime->check_privileges);
+      log_run.debug("Registering a map operation for region "
+                    "(%x,%x,%x) in task %s (ID %lld)",
+                    launcher.requirement.region.index_space.id, 
+                    launcher.requirement.region.field_space.id, 
+                    launcher.requirement.region.tree_id, 
+                    get_task_name(), get_unique_id());
+#else
+      PhysicalRegion result = map_op->initialize(this, launcher, 
+                                                 false/*check privileges*/);
+#endif
+      map_op->initialize_replication(this);
+      bool parent_conflict = false, inline_conflict = false;  
+      const int index = 
+        has_conflicting_regions(map_op, parent_conflict, inline_conflict);
+      if (parent_conflict)
+        REPORT_LEGION_ERROR(ERROR_ATTEMPTED_INLINE_MAPPING_REGION,
+          "Attempted an inline mapping of region "
+                      "(%x,%x,%x) that conflicts with mapped region " 
+                      "(%x,%x,%x) at index %d of parent task %s "
+                      "(ID %lld) that would ultimately result in "
+                      "deadlock. Instead you receive this error message.",
+                      launcher.requirement.region.index_space.id,
+                      launcher.requirement.region.field_space.id,
+                      launcher.requirement.region.tree_id,
+                      regions[index].region.index_space.id,
+                      regions[index].region.field_space.id,
+                      regions[index].region.tree_id,
+                      index, get_task_name(), get_unique_id())
+      if (inline_conflict)
+        REPORT_LEGION_ERROR(ERROR_ATTEMPTED_INLINE_MAPPING_REGION,
+          "Attempted an inline mapping of region (%x,%x,%x) "
+                      "that conflicts with previous inline mapping in "
+                      "task %s (ID %lld) that would ultimately result in "
+                      "deadlock.  Instead you receive this error message.",
+                      launcher.requirement.region.index_space.id,
+                      launcher.requirement.region.field_space.id,
+                      launcher.requirement.region.tree_id,
+                      get_task_name(), get_unique_id())
+      register_inline_mapped_region(result);
+      runtime->add_to_dependence_queue(this, executing_processor, map_op);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplicateContext::remap_region(PhysicalRegion region)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      // Check to see if the region is already mapped,
+      // if it is then we are done
+      if (region.is_mapped())
+        return;
+      ReplMapOp *map_op = runtime->get_available_repl_map_op();
+      map_op->initialize(this, region);
+      register_inline_mapped_region(region);
+      runtime->add_to_dependence_queue(this, executing_processor, map_op);
+    }
+
+    //--------------------------------------------------------------------------
     void ReplicateContext::fill_fields(const IndexFillLauncher &launcher)
     //--------------------------------------------------------------------------
     {

@@ -2257,7 +2257,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MapOp::deactivate(void)
+    void MapOp::deactivate_map_op(void)
     //--------------------------------------------------------------------------
     {
       deactivate_operation();
@@ -2283,6 +2283,13 @@ namespace Legion {
         mapper_data = NULL;
         mapper_data_size = 0;
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void MapOp::deactivate(void)
+    //--------------------------------------------------------------------------
+    {
+      deactivate_map_op(); 
       // Now return this operation to the queue
       runtime->free_map_op(this);
     } 
@@ -2518,9 +2525,11 @@ namespace Legion {
       // Now we can trigger the mapping event and indicate
       // to all our mapping dependences that we are mapped.
       if (!map_applied_conditions.empty())
-        complete_mapping(Runtime::merge_events(map_applied_conditions));
+        complete_mapping(complete_inline_mapping(
+              Runtime::merge_events(map_applied_conditions), mapped_instances));
       else
-        complete_mapping();
+        complete_mapping(complete_inline_mapping(
+              RtEvent::NO_RT_EVENT, mapped_instances));
       if (!acquired_instances.empty())
         release_acquired_instances(acquired_instances);
       
@@ -2630,6 +2639,15 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       mapped_preconditions.insert(restrict_postcondition);
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent MapOp::complete_inline_mapping(RtEvent mapping_applied,
+                                           const InstanceSet &mapped_instances)
+    //--------------------------------------------------------------------------
+    {
+      // Easy case here, something different happens for control replication
+      return mapping_applied;
     }
 
     //--------------------------------------------------------------------------

@@ -10450,6 +10450,13 @@ namespace Legion {
         delete (*it);
       }
       available_repl_fence_ops.clear();
+      for (std::deque<ReplMapOp*>::const_iterator it = 
+            available_repl_map_ops.begin(); it != 
+            available_repl_map_ops.end(); it++)
+      {
+        delete (*it);
+      }
+      available_repl_map_ops.clear();
       for (std::map<TaskID,TaskImpl*>::const_iterator it = 
             task_table.begin(); it != task_table.end(); it++)
       {
@@ -19145,6 +19152,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    ReplMapOp* Runtime::get_available_repl_map_op(void) 
+    //--------------------------------------------------------------------------
+    {
+      return get_available(map_op_lock, available_repl_map_ops);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::free_individual_task(IndividualTask *task)
     //--------------------------------------------------------------------------
     {
@@ -19594,6 +19608,14 @@ namespace Legion {
     {
       AutoLock t_lock(fence_op_lock);
       release_operation<false>(available_repl_fence_ops, op);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::free_repl_map_op(ReplMapOp *op)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock m_lock(map_op_lock);
+      release_operation<false>(available_repl_map_ops, op);
     }
 
     //--------------------------------------------------------------------------

@@ -3014,6 +3014,7 @@ namespace Legion {
       ReplMustEpochOp*      get_available_repl_epoch_op(void);
       ReplTimingOp*         get_available_repl_timing_op(void);
       ReplFenceOp*          get_available_repl_fence_op(void);
+      ReplMapOp*            get_available_repl_map_op(void);
     public:
       void free_individual_task(IndividualTask *task);
       void free_point_task(PointTask *task);
@@ -3070,6 +3071,7 @@ namespace Legion {
       void free_repl_epoch_op(ReplMustEpochOp *op);
       void free_repl_timing_op(ReplTimingOp *op);
       void free_repl_fence_op(ReplFenceOp *op);
+      void free_repl_map_op(ReplMapOp *op);
     public:
       RegionTreeContext allocate_region_tree_context(void);
       void free_region_tree_context(RegionTreeContext tree_ctx); 
@@ -3431,6 +3433,7 @@ namespace Legion {
       std::deque<ReplMustEpochOp*>      available_repl_must_epoch_ops;
       std::deque<ReplTimingOp*>         available_repl_timing_ops;
       std::deque<ReplFenceOp*>          available_repl_fence_ops;
+      std::deque<ReplMapOp*>            available_repl_map_ops;
 #ifdef DEBUG_LEGION
       TreeStateLogger *tree_state_logger;
       // For debugging purposes keep track of

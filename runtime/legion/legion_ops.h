@@ -858,6 +858,8 @@ namespace Legion {
       void initialize(TaskContext *ctx, const PhysicalRegion &region);
       inline const RegionRequirement& get_requirement(void) const
         { return requirement; }
+    protected:
+      void deactivate_map_op(void);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -882,6 +884,9 @@ namespace Legion {
       virtual void update_atomic_locks(Reservation lock, bool exclusive);
       virtual void record_reference_mutation_effect(RtEvent event);
       virtual void record_restrict_postcondition(ApEvent postcondition);
+      // Some additional help for control replication contexts
+      virtual RtEvent complete_inline_mapping(RtEvent mapping_applied,
+                                  const InstanceSet &mapped_instances);
     public:
       virtual UniqueID get_unique_id(void) const;
       virtual unsigned get_context_index(void) const;
