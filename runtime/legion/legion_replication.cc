@@ -476,10 +476,8 @@ namespace Legion {
           version_broadcast_collective = NULL;
         }
         // We're done with our mapping so we can finish this now
-        // TODO: need to handle created regions flowing back from 
-        // non-leaf tasks, we know virtual mappings can't exist 
-        // for must-epoch launches
-        finish_individual_mapping();
+        if (finish_mapping) 
+          finish_individual_mapping();
       }
       return result;
     }
