@@ -562,6 +562,9 @@ namespace Legion {
       // Memoize physical analysis for logically traced operations
       // Controlled by -dm:memoize (false by default)
       bool memoize;
+      // Whether to map tasks locally
+      // Controlled by -dm:map_locally (false by default)
+      bool map_locally;
     };
 
   }; // namespace Mapping
