@@ -7430,6 +7430,7 @@ namespace Legion {
       future_map_barrier = manager->get_future_map_barrier();
       creation_barrier = manager->get_creation_barrier();
       deletion_barrier = manager->get_deletion_barrier();
+      inline_mapping_barrier = manager->get_inline_mapping_barrier();
       mapping_fence_barrier = manager->get_mapping_fence_barrier();
       execution_fence_barrier = manager->get_execution_fence_barrier();
 #ifdef DEBUG_LEGION_COLLECTIVES
@@ -10156,7 +10157,8 @@ namespace Legion {
       PhysicalRegion result = map_op->initialize(this, launcher, 
                                                  false/*check privileges*/);
 #endif
-      map_op->initialize_replication(this);
+      map_op->initialize_replication(this, inline_mapping_barrier);
+      Runtime::advance_barrier(inline_mapping_barrier);
       bool parent_conflict = false, inline_conflict = false;  
       const int index = 
         has_conflicting_regions(map_op, parent_conflict, inline_conflict);
@@ -10200,7 +10202,8 @@ namespace Legion {
         return;
       ReplMapOp *map_op = runtime->get_available_repl_map_op();
       map_op->initialize(this, region);
-      map_op->initialize_replication(this);
+      map_op->initialize_replication(this, inline_mapping_barrier);
+      Runtime::advance_barrier(inline_mapping_barrier);
       register_inline_mapped_region(region);
       runtime->add_to_dependence_queue(this, executing_processor, map_op);
     }

@@ -885,8 +885,13 @@ namespace Legion {
       virtual void record_reference_mutation_effect(RtEvent event);
       virtual void record_restrict_postcondition(ApEvent postcondition);
       // Some additional help for control replication contexts
+      virtual bool is_ctrl_repl_map_op(void) const { return false; }
+      virtual void add_deferred_users(InstanceSet &mapped_instances,
+                                      const PhysicalTraceInfo &trace_info)
+        { assert(false); }
       virtual RtEvent complete_inline_mapping(RtEvent mapping_applied,
-                                  const InstanceSet &mapped_instances);
+                                              const InstanceSet &mapped_insts)
+        { return mapping_applied; }
     public:
       virtual UniqueID get_unique_id(void) const;
       virtual unsigned get_context_index(void) const;

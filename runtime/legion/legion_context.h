@@ -1721,6 +1721,7 @@ namespace Legion {
       ApBarrier future_map_barrier;
       RtBarrier creation_barrier;
       RtBarrier deletion_barrier;
+      RtBarrier inline_mapping_barrier;
       RtBarrier mapping_fence_barrier;
       ApBarrier execution_fence_barrier;
 #ifdef DEBUG_LEGION_COLLECTIVES

@@ -3618,15 +3618,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplMapOp::initialize_replication(ReplicateContext *ctx)
+    void ReplMapOp::initialize_replication(ReplicateContext *ctx, RtBarrier bar)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(exchange == NULL);
 #endif
+      inline_barrier = bar;
       // We only check the results of the mapping if the runtime requests it
+      // We can skip the check though if this is a read-only requirement
+      const bool perform_checks = 
+        !IS_READ_ONLY(requirement) && !runtime->unsafe_mapper;
       exchange = new InlineMappingExchange(COLLECTIVE_LOC_74, ctx, this,
-                         ctx->owner_shard->shard_id, !runtime->unsafe_mapper);
+                                   ctx->owner_shard->shard_id, perform_checks);
     }
 
     //--------------------------------------------------------------------------
@@ -3635,6 +3639,11 @@ namespace Legion {
     {
       MapOp::activate();
       exchange = NULL;
+#ifdef DEBUG_LEGION
+      assert(!repl_mapping_applied.exists() || 
+              repl_mapping_applied.has_triggered());
+#endif
+      repl_mapping_applied = Runtime::create_rt_user_event();
     }
 
     //--------------------------------------------------------------------------
@@ -3648,14 +3657,56 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ReplMapOp::add_deferred_users(InstanceSet &mapped_instances,
+                                       const PhysicalTraceInfo &trace_info)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(exchange != NULL);
+      assert(inline_barrier.exists());
+      assert(repl_mapping_applied.exists() && 
+              !repl_mapping_applied.has_triggered());
+#endif
+      // First kick off the exchange to get that in flight
+      exchange->initiate_exchange(repl_mapping_applied, mapped_instances);
+      // Then make sure that we've done all our applied mapping effects  
+      // for any copies that we may have issued
+      if (!map_applied_conditions.empty())
+      {
+        RtEvent wait_on = Runtime::merge_events(map_applied_conditions);
+        Runtime::phase_barrier_arrive(inline_barrier, 1/*count*/, wait_on);
+        // We can clear this since we're about to wait on it implicitly
+        map_applied_conditions.clear();
+      }
+      else
+        Runtime::phase_barrier_arrive(inline_barrier, 1/*count*/);
+      // Wait for everyone else to finish their registration too
+      inline_barrier.wait();
+      // Now we can do our registration with the region tree
+      runtime->forest->physical_register_users(this, termination_event,
+                                               requirement,
+                                               version_info,
+                                               restrict_info,
+                                               mapped_instances,
+                                               map_applied_conditions,
+                                               trace_info);
+    }
+
+    //--------------------------------------------------------------------------
     RtEvent ReplMapOp::complete_inline_mapping(RtEvent mapping_applied,
                                                const InstanceSet &mapped_insts)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(exchange != NULL);
+      assert(repl_mapping_applied.exists() && 
+              !repl_mapping_applied.has_triggered());
 #endif
-      return exchange->exchange_inline_mappings(mapping_applied, mapped_insts);
+      // Trigger the user event that we provided earlier for the exchange
+      Runtime::trigger_event(repl_mapping_applied, mapping_applied);
+      // Return the result of the exchange that indicates that all the
+      // inline mapping operations are done with their mapping
+      return exchange->complete_exchange(mapped_insts);
     }
 
     /////////////////////////////////////////////////////////////
@@ -3782,6 +3833,10 @@ namespace Legion {
         // Same thing as above for deletion barriers
         deletion_barrier = 
           RtBarrier(Realm::Barrier::create_barrier(total_shards));
+        // Inline mapping barrier for synchronizing inline mappings
+        // across all the shards
+        inline_mapping_barrier = 
+          RtBarrier(Realm::Barrier::create_barrier(total_shards));
         // Fence barriers need arrivals from everyone
         mapping_fence_barrier = 
           RtBarrier(Realm::Barrier::create_barrier(total_shards));
@@ -3837,6 +3892,7 @@ namespace Legion {
           future_map_barrier.destroy_barrier();
           creation_barrier.destroy_barrier();
           deletion_barrier.destroy_barrier();
+          inline_mapping_barrier.destroy_barrier();
           mapping_fence_barrier.destroy_barrier();
           execution_fence_barrier.destroy_barrier();
 #ifdef DEBUG_LEGION_COLLECTIVES
@@ -3982,6 +4038,7 @@ namespace Legion {
           assert(future_map_barrier.exists());
           assert(creation_barrier.exists());
           assert(deletion_barrier.exists());
+          assert(inline_mapping_barrier.exists());
           assert(mapping_fence_barrier.exists());
           assert(execution_fence_barrier.exists());
           assert(shard_mapping.size() == total_shards);
@@ -3990,6 +4047,7 @@ namespace Legion {
           rez.serialize(future_map_barrier);
           rez.serialize(creation_barrier);
           rez.serialize(deletion_barrier);
+          rez.serialize(inline_mapping_barrier);
           rez.serialize(mapping_fence_barrier);
           rez.serialize(execution_fence_barrier);
 #ifdef DEBUG_LEGION_COLLECTIVES
@@ -4032,6 +4090,7 @@ namespace Legion {
         derez.deserialize(future_map_barrier);
         derez.deserialize(creation_barrier);
         derez.deserialize(deletion_barrier);
+        derez.deserialize(inline_mapping_barrier);
         derez.deserialize(mapping_fence_barrier);
         derez.deserialize(execution_fence_barrier);
 #ifdef DEBUG_LEGION_COLLECTIVES
@@ -7325,7 +7384,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtEvent InlineMappingExchange::exchange_inline_mappings(RtEvent local_map,
+    void InlineMappingExchange::initiate_exchange(RtEvent local_map,
                                               const InstanceSet &local_mappings)
     //--------------------------------------------------------------------------
     {
@@ -7357,7 +7416,15 @@ namespace Legion {
           }
         }
       }
-      perform_collective_sync();
+      perform_collective_async();
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent InlineMappingExchange::complete_exchange(
+                                              const InstanceSet &local_mappings)
+    //--------------------------------------------------------------------------
+    {
+      perform_collective_wait();
       if (check_mappings)
       {
         // Check to see if our mappings interfere with any others

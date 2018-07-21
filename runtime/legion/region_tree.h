@@ -408,6 +408,13 @@ namespace Legion {
                                  );
       // For when we deferred registration of users
       void physical_register_users(Operation *op, ApEvent term_event,
+                                   const RegionRequirement &requirement,
+                                   VersionInfo &version_info,
+                                   RestrictInfo &restrict_info,
+                                   InstanceSet &targets,
+                                   std::set<RtEvent> &map_applied_events,
+                                   const PhysicalTraceInfo &trace_info);
+      void physical_register_users(Operation *op, ApEvent term_event,
                    const std::vector<RegionRequirement> &regions,
                    const std::vector<bool> &to_skip,
                    std::vector<VersionInfo> &version_infos,

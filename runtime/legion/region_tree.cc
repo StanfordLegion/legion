@@ -2279,6 +2279,126 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RegionTreeForest::physical_register_users(
+                                         Operation *op, ApEvent term_event,
+                                         const RegionRequirement &req,
+                                         VersionInfo &version_info,
+                                         RestrictInfo &restrict_info,
+                                         InstanceSet &targets,
+                                         std::set<RtEvent> &map_applied_events,
+                                         const PhysicalTraceInfo &trace_info)
+    //--------------------------------------------------------------------------
+    {
+      DETAILED_PROFILER(runtime, REGION_TREE_PHYSICAL_REGISTER_USERS_CALL);
+      InnerContext *context = op->find_physical_context(0/*index*/);
+      RegionNode *region_node = get_node(req.region);
+      std::vector<InstanceView*> target_views(targets.size());
+      region_node->convert_target_views(targets, context, target_views);
+      RegionUsage usage(req);
+      ContextID logical_ctx = -1U;
+      if (trace_info.recording)
+      {
+        TaskContext *context = op->find_logical_context(0/*index*/);
+        logical_ctx = context->get_context().get_id();
+#ifdef DEBUG_LEGION
+        assert(trace_info.tpl != NULL && trace_info.tpl->is_recording());
+#endif
+        trace_info.tpl->record_summary_info(req, targets,
+            op->find_parent_index(0/*index*/));
+      }
+      for (unsigned idx = 0; idx < targets.size(); idx++)
+      {
+        InstanceRef &ref = targets[idx];
+#ifdef DEBUG_LEGION
+        assert(!ref.is_virtual_ref());
+#endif
+        ApEvent ready = target_views[idx]->find_user_precondition(usage, 
+                          term_event, ref.get_valid_fields(), 
+                          op->get_unique_op_id(), 0/*index*/, 
+                          &version_info, map_applied_events, trace_info);
+        if (trace_info.recording)
+        {
+#ifdef DEBUG_LEGION
+          assert(trace_info.tpl != NULL && trace_info.tpl->is_recording());
+          assert(logical_ctx != -1U);
+#endif
+          ContextID physical_ctx = context->get_context().get_id();
+          trace_info.tpl->record_set_ready_event(op, 0, idx, ready, req,
+                                             region_node, target_views[idx],
+                                             ref.get_valid_fields(),
+                                             logical_ctx, physical_ctx);
+        }
+        ref.set_ready_event(ready);
+      }
+      // Now we can do the registration pass
+      // Information for dealing with restrictions
+      FieldMask restricted_fields;
+      LegionMap<LogicalView*,FieldMask>::aligned copy_out_views;
+      LegionMap<ReductionView*,FieldMask>::aligned reduce_out_views;
+      if (restrict_info.has_restrictions())
+        restrict_info.populate_restrict_fields(restricted_fields);
+      const bool restricted_out = !!restricted_fields && !IS_READ_ONLY(req);
+      for (unsigned idx = 0; idx < targets.size(); idx++)
+      {
+        InstanceRef &ref = targets[idx];
+        target_views[idx]->add_user(usage, term_event, ref.get_valid_fields(), 
+                                    op, 0/*index*/, &version_info, 
+                                    map_applied_events, trace_info);
+        if (restricted_out)
+        {
+          FieldMask restricted = ref.get_valid_fields() & restricted_fields;
+          if (!!restricted)
+          {
+            if (target_views[idx]->is_reduction_view())
+            {
+              ReductionView *reduction_view = 
+                target_views[idx]->as_reduction_view();
+              reduce_out_views[reduction_view] = restricted;
+            }
+            else
+              copy_out_views[target_views[idx]] = restricted;
+          }
+        }
+      }
+      // Handle any restricted copy out operations we need to do
+      if (!copy_out_views.empty())
+      {
+        RegionNode *node = get_node(req.region);
+        RegionTreeContext ctx = context->get_context();
+#ifdef DEBUG_LEGION
+        assert(ctx.exists());
+#endif
+        TraversalInfo traversal_info(ctx.get_id(), trace_info, 0, req, 
+                           version_info, restricted_fields, map_applied_events);
+        const InstanceSet &restricted_instances = restrict_info.get_instances();
+        std::vector<MaterializedView*> restricted_views(
+                                           restricted_instances.size());
+        node->convert_target_views(restricted_instances, context,
+                                   restricted_views);
+        node->issue_restricted_copies(traversal_info, restrict_info,
+            restricted_instances, restricted_views, copy_out_views);
+      }
+      if (!reduce_out_views.empty())
+      {
+        RegionNode *node = get_node(req.region);
+        RegionTreeContext ctx = context->get_context();
+#ifdef DEBUG_LEGION
+        assert(ctx.exists());
+#endif
+        TraversalInfo traversal_info(ctx.get_id(), trace_info, 0, req, 
+                           version_info, restricted_fields, map_applied_events);
+        const InstanceSet &restricted_instances = restrict_info.get_instances();
+        std::vector<InstanceView*> restricted_views(
+                                           restricted_instances.size());
+        node->convert_target_views(restricted_instances, context,
+                                   restricted_views);
+        node->issue_restricted_reductions(traversal_info, 
+            restrict_info, restricted_instances, 
+            restricted_views, reduce_out_views);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeForest::physical_register_users(
                                   Operation *op, ApEvent term_event,
                                   const std::vector<RegionRequirement> &regions,
                                   const std::vector<bool> &to_skip,

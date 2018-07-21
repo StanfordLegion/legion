@@ -2381,6 +2381,8 @@ namespace Legion {
     {
       const PhysicalTraceInfo trace_info(this);
       InstanceSet mapped_instances;
+      // If this is a control replicated op we may need to defer adding users
+      const bool defer_add_users = is_ctrl_repl_map_op();
       // If we are remapping then we know the answer
       // so we don't need to do any premapping
       if (remap_region)
@@ -2390,7 +2392,7 @@ namespace Legion {
                                                 version_info, restrict_info,
                                                 this, 0/*idx*/, 
                                                 termination_event,
-                                                false/*defer add users*/,
+                                                defer_add_users,
                                                 true/*read only locks*/,
                                                 map_applied_conditions,
                                                 mapped_instances, 
@@ -2416,7 +2418,7 @@ namespace Legion {
                                                 version_info, restrict_info,
                                                 this, 0/*idx*/,
                                                 termination_event, 
-                                                false/*defer add users*/,
+                                                defer_add_users,
                                                 true/*read only locks*/,
                                                 map_applied_conditions,
                                                 mapped_instances,
@@ -2428,6 +2430,11 @@ namespace Legion {
 #endif
                                                 );
       }
+      // In a control replication context this is where we do a synchronization
+      // between all copies of this map op in the different shards to make
+      // sure everyone is done with their copies before registering users
+      if (defer_add_users)
+        add_deferred_users(mapped_instances, trace_info); 
       if (!IS_NO_ACCESS(requirement) && !requirement.privilege_fields.empty())
       {
 #ifdef DEBUG_LEGION
@@ -2528,8 +2535,8 @@ namespace Legion {
         complete_mapping(complete_inline_mapping(
               Runtime::merge_events(map_applied_conditions), mapped_instances));
       else
-        complete_mapping(complete_inline_mapping(
-              RtEvent::NO_RT_EVENT, mapped_instances));
+        complete_mapping(
+            complete_inline_mapping(RtEvent::NO_RT_EVENT, mapped_instances));
       if (!acquired_instances.empty())
         release_acquired_instances(acquired_instances);
       
@@ -2639,15 +2646,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       mapped_preconditions.insert(restrict_postcondition);
-    }
-
-    //--------------------------------------------------------------------------
-    RtEvent MapOp::complete_inline_mapping(RtEvent mapping_applied,
-                                           const InstanceSet &mapped_instances)
-    //--------------------------------------------------------------------------
-    {
-      // Easy case here, something different happens for control replication
-      return mapping_applied;
     }
 
     //--------------------------------------------------------------------------

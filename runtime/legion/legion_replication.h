@@ -626,8 +626,9 @@ namespace Legion {
       virtual void pack_collective_stage(Serializer &rez, int stage) const;
       virtual void unpack_collective_stage(Deserializer &derez, int stage);
     public:
-      RtEvent exchange_inline_mappings(RtEvent local_mapped_precondition,
-                                       const InstanceSet &mappings);
+      void initiate_exchange(RtEvent local_mapped_precondition,
+                             const InstanceSet &mappings);
+      RtEvent complete_exchange(const InstanceSet &mappings);
     public:
       ReplMapOp *const map_op;
       const ShardID shard_id;
@@ -1279,13 +1280,18 @@ namespace Legion {
     public:
       ReplMapOp& operator=(const ReplMapOp &rhs);
     public:
-      void initialize_replication(ReplicateContext *ctx);
+      void initialize_replication(ReplicateContext *ctx, RtBarrier inline_bar);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
+      virtual bool is_ctrl_repl_map_op(void) const { return true; }
+      virtual void add_deferred_users(InstanceSet &mapped_instances,
+                                      const PhysicalTraceInfo &trace_info);
       virtual RtEvent complete_inline_mapping(RtEvent mapping_applied,
                                   const InstanceSet &mapped_instances);
     protected:
+      RtBarrier inline_barrier;
+      RtUserEvent repl_mapping_applied;
       InlineMappingExchange *exchange; 
     };
 
@@ -1355,6 +1361,8 @@ namespace Legion {
         { return creation_barrier; }
       inline RtBarrier get_deletion_barrier(void) const
         { return deletion_barrier; }
+      inline RtBarrier get_inline_mapping_barrier(void) const
+        { return inline_mapping_barrier; }
       inline RtBarrier get_mapping_fence_barrier(void) const
         { return mapping_fence_barrier; }
       inline ApBarrier get_execution_fence_barrier(void) const
@@ -1481,6 +1489,7 @@ namespace Legion {
       ApBarrier future_map_barrier;
       RtBarrier creation_barrier;
       RtBarrier deletion_barrier;
+      RtBarrier inline_mapping_barrier;
       RtBarrier mapping_fence_barrier;
       ApBarrier execution_fence_barrier;
 #ifdef DEBUG_LEGION_COLLECTIVES
