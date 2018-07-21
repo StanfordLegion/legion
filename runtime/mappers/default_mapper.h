@@ -565,6 +565,9 @@ namespace Legion {
       // Whether to map tasks locally
       // Controlled by -dm:map_locally (false by default)
       bool map_locally;
+      // Whether to enable control replication
+      // Controlled by -dm:replicate (true by default)
+      bool replication_enabled;
     };
 
   }; // namespace Mapping

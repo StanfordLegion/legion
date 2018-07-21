@@ -28,6 +28,7 @@
 #define STATIC_MAX_SCHEDULE_COUNT     8
 #define STATIC_MEMOIZE                false
 #define STATIC_MAP_LOCALLY            false
+#define STATIC_REPLICATION_ENABLED    true
 
 // This is the default implementation of the mapper interface for 
 // the general low level runtime
@@ -69,7 +70,8 @@ namespace Legion {
         stealing_enabled(STATIC_STEALING_ENABLED),
         max_schedule_count(STATIC_MAX_SCHEDULE_COUNT),
         memoize(STATIC_MEMOIZE),
-        map_locally(STATIC_MAP_LOCALLY)
+        map_locally(STATIC_MAP_LOCALLY),
+        replication_enabled(STATIC_REPLICATION_ENABLED)
     //--------------------------------------------------------------------------
     {
       log_mapper.spew("Initializing the default mapper for "
@@ -99,6 +101,7 @@ namespace Legion {
           INT_ARG("-dm:sched", max_schedule_count);
           BOOL_ARG("-dm:memoize", memoize);
           BOOL_ARG("-dm:map_locally", map_locally);
+          BOOL_ARG("-dm:replicate", replication_enabled);
 #undef BOOL_ARG
 #undef INT_ARG
         }
@@ -366,7 +369,7 @@ namespace Legion {
 #else
       if ((total_nodes > 1) && (task.get_depth() == 0))
 #endif
-        output.replicate = true;
+        output.replicate = replication_enabled;
       else
         output.replicate = false;
     }
