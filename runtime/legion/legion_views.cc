@@ -3928,8 +3928,10 @@ namespace Legion {
     DeferredCopier::DeferredCopier(const TraversalInfo *in, MaterializedView *d,
                             const FieldMask &m, const RestrictInfo &res, bool r)
       : info(in), dst(d), across_helper(NULL), restrict_info(&res), 
-        restrict_out(r), deferred_copy_mask(m), current_reduction_epoch(0), 
-        finalized(false)
+        restrict_out(r), deferred_copy_mask(m), current_reduction_epoch(0)
+#ifdef DEBUG_LEGION
+        , finalized(false)
+#endif
     //--------------------------------------------------------------------------
     {
     }
@@ -3938,8 +3940,10 @@ namespace Legion {
     DeferredCopier::DeferredCopier(const TraversalInfo *in, MaterializedView *d,
        const FieldMask &m, ApEvent p, CopyAcrossHelper *h)
       : info(in), dst(d), across_helper(h), restrict_info(NULL), 
-        restrict_out(false), deferred_copy_mask(m), current_reduction_epoch(0),
-        finalized(false)
+        restrict_out(false), deferred_copy_mask(m), current_reduction_epoch(0)
+#ifdef DEBUG_LEGION
+        , finalized(false)
+#endif
     //--------------------------------------------------------------------------
     {
       dst_preconditions[p] = m;
@@ -3959,8 +3963,9 @@ namespace Legion {
     DeferredCopier::~DeferredCopier(void)
     //--------------------------------------------------------------------------
     {
-      if (!finalized)
-        finalize();
+#ifdef DEBUG_LEGION
+      assert(finalized);
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -4103,14 +4108,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void DeferredCopier::finalize(std::set<ApEvent> *postconditions/*=NULL*/)
+    void DeferredCopier::finalize(WriteSet &performed_writes,
+                                  std::set<ApEvent> *postconditions/*=NULL*/)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(!finalized);
       assert(current_reduction_epoch == 0);
-#endif
+      assert(!finalized);
       finalized = true;
+#endif
       // Apply any pending reductions using the proper preconditions
       if (!reduction_epochs.empty())
       {
@@ -4167,7 +4173,7 @@ namespace Legion {
             if (!overlap)
               continue;
             if (issue_reductions(epoch, it->first, overlap, 
-                                 reduction_postconditions))
+                  performed_writes, reduction_postconditions))
               break;
             // We've now done all these fields for a reduction
             epoch_mask -= it->second;
@@ -4178,7 +4184,7 @@ namespace Legion {
           // Issue any copies for which we have no precondition
           if (!!epoch_mask)
             issue_reductions(epoch, ApEvent::NO_AP_EVENT, epoch_mask,
-                             reduction_postconditions);
+                performed_writes, reduction_postconditions);
           // Fold the reduction post conditions into the copy postconditions
           for (LegionMap<ApEvent,FieldMask>::aligned::const_iterator it = 
                 reduction_postconditions.begin(); it != 
@@ -4210,12 +4216,25 @@ namespace Legion {
         if (restrict_out && (restrict_info != NULL) && 
             restrict_info->has_restrictions())
           restrict_info->populate_restrict_fields(restrict_mask);
-        IndexSpaceExpression *dst_expr = 
-          dst->logical_node->get_index_space_expression();
         // Apply the destination users
         for (LegionMap<ApEvent,FieldMask>::aligned::const_iterator it = 
              copy_postconditions.begin(); it != copy_postconditions.end(); it++)
         {
+          // Compute the performed write expression for these set of fields
+          std::set<IndexSpaceExpression*> write_exprs;
+          for (WriteSet::const_iterator wit = performed_writes.begin();
+                wit != performed_writes.end(); wit++)
+          {
+            if (wit->second * it->second)
+              continue;
+            write_exprs.insert(wit->first);
+          }
+          // Should not be empty
+#ifdef DEBUG_LEGION
+          assert(!write_exprs.empty());
+#endif
+          IndexSpaceExpression *dst_expr = 
+            dst->context->union_index_spaces(write_exprs);
           dst->add_copy_user(0/*redop*/, it->first, &info->version_info, 
                              dst_expr, info->op->get_unique_op_id(),info->index,
                              it->second, false/*reading*/, restrict_out,
@@ -4291,7 +4310,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool DeferredCopier::issue_reductions(const int epoch,ApEvent reduction_pre,
-                                          const FieldMask &reduction_mask,
+                    const FieldMask &reduction_mask, WriteSet &performed_writes,
                 LegionMap<ApEvent,FieldMask>::aligned &reduction_postconditions)
     //--------------------------------------------------------------------------
     {
@@ -4311,11 +4330,12 @@ namespace Legion {
             it++;
             continue;
           }
+          IndexSpaceExpression *reduce_expr;
           // Issue the deferred reduction
           ApEvent reduction_post = pit->first->perform_deferred_reduction(
-              dst, overlap, it->version_tracker, reduction_pre,
-              info->op, info->index, it->pred_guard, across_helper,
-              it->intersect, it->mask, info->map_applied_events, *info);
+              dst, overlap, it->version_tracker, reduction_pre, info->op, 
+              info->index, it->pred_guard, across_helper, it->intersect, 
+              it->mask, info->map_applied_events, *info, reduce_expr);
           if (reduction_post.exists())
           {
             LegionMap<ApEvent,FieldMask>::aligned::iterator finder =
@@ -4325,6 +4345,9 @@ namespace Legion {
             else
               finder->second |= overlap;
           }
+          // Record our reduce expression if it exists
+          if ((reduce_expr != NULL) && !reduce_expr->is_empty())
+            performed_writes.insert(reduce_expr, overlap);
           // Remove these fields from the pending reduction record
           it->reduction_mask -= overlap;
           if (!it->reduction_mask)
@@ -4357,7 +4380,10 @@ namespace Legion {
         MaterializedView *d, const FieldMask &m, const RestrictInfo &res,bool r)
       : field_index(m.find_first_set()), copy_mask(m), info(in), dst(d),
         across_helper(NULL), restrict_info(&res), restrict_out(r),
-        current_reduction_epoch(0),has_dst_preconditions(false),finalized(false)
+        current_reduction_epoch(0), has_dst_preconditions(false)
+#ifdef DEBUG_LEGION
+        , finalized(false)
+#endif
     //--------------------------------------------------------------------------
     {
     }
@@ -4367,7 +4393,10 @@ namespace Legion {
         MaterializedView *d, const FieldMask &m, ApEvent p, CopyAcrossHelper *h)
       : field_index(m.find_first_set()), copy_mask(m), info(in), dst(d),
         across_helper(h), restrict_info(NULL), restrict_out(false),
-        current_reduction_epoch(0), has_dst_preconditions(true),finalized(false)
+        current_reduction_epoch(0), has_dst_preconditions(true)
+#ifdef DEBUG_LEGION
+        , finalized(false)
+#endif
     //--------------------------------------------------------------------------
     {
       dst_preconditions.insert(p);
@@ -4388,8 +4417,9 @@ namespace Legion {
     DeferredSingleCopier::~DeferredSingleCopier(void)
     //--------------------------------------------------------------------------
     {
-      if (!finalized)
-        finalize();
+#ifdef DEBUG_LEGION
+      assert(finalized);
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -4480,13 +4510,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void DeferredSingleCopier::finalize(std::set<ApEvent> *postconditions)
+    void DeferredSingleCopier::finalize(IndexSpaceExpression *&performed_write,
+                                        std::set<ApEvent> *postconditions)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(!finalized);
-#endif
       finalized = true;
+#endif
       // Apply any pending reductions using the proper preconditions
       if (!reduction_epochs.empty())
       {
@@ -4498,6 +4529,8 @@ namespace Legion {
           dst_preconditions.insert(copy_postconditions.begin(),
                                    copy_postconditions.end());
         ApEvent reduction_pre = Runtime::merge_events(info, dst_preconditions);
+        // Track the reduction expressions so we can update our write expr
+        std::set<IndexSpaceExpression*> reduce_exprs;
         // Iterate epochs in reverse order as the deepest ones are the
         // ones that should be issued first
         for (int epoch = reduction_epochs.size()-1; epoch >= 0; epoch--)
@@ -4510,13 +4543,16 @@ namespace Legion {
           for (PendingReductions::const_iterator it = 
                pending_reductions.begin(); it != pending_reductions.end(); it++)
           {
+            IndexSpaceExpression *reduce_expr = NULL;
             ApEvent reduction_post = it->first->perform_deferred_reduction(
                 dst, copy_mask, it->second.version_tracker, reduction_pre,
                 info->op, info->index, it->second.pred_guard, across_helper,
                 it->second.intersect, it->second.mask,
-                info->map_applied_events, *info);
+                info->map_applied_events, *info, reduce_expr);
             if (reduction_post.exists())
               reduction_postconditions.insert(reduction_post);
+            if ((reduce_expr != NULL) && !reduce_expr->is_empty())
+              reduce_exprs.insert(reduce_expr);
           }
           if (!reduction_postconditions.empty())
           {
@@ -4532,6 +4568,13 @@ namespace Legion {
                                          reduction_postconditions.end());
           }
         }
+        // If we have any reduction expressions then update the performed write
+        if (!reduce_exprs.empty())
+        {
+          if (performed_write != NULL)
+            reduce_exprs.insert(performed_write);
+          performed_write = dst->context->union_index_spaces(reduce_exprs);
+        }
       }
       // If we have no copy post conditions at this point we're done
       if (copy_postconditions.empty())
@@ -4544,11 +4587,13 @@ namespace Legion {
         {
           const AddressSpaceID local_space = 
             dst->context->runtime->address_space;
+          // Use the actually performed write to record what we wrote
+          // If we're not precise we get performance bugs and deadlocks
           dst->add_copy_user(0/*redop*/, copy_done, &info->version_info,
-                             dst->logical_node->get_index_space_expression(),
-                             info->op->get_unique_op_id(), info->index,
-                             copy_mask, false/*reading*/, restrict_out,
-                             local_space, info->map_applied_events, *info);
+                             performed_write, info->op->get_unique_op_id(), 
+                             info->index, copy_mask, false/*reading*/, 
+                             restrict_out, local_space, 
+                             info->map_applied_events, *info);
           // Handle any restriction cases
           if (restrict_out && (restrict_info != NULL))
           {
@@ -4641,7 +4686,7 @@ namespace Legion {
           DeferredSingleCopier copier(&info, dst, src_mask, precondition);
           issue_deferred_copies_single(copier, NULL/*write mask*/,
                                        write_performed, guard);
-          copier.finalize(&postconditions);
+          copier.finalize(write_performed, &postconditions);
         }
         else
         {
@@ -4653,7 +4698,7 @@ namespace Legion {
                                       precondition, &across_helper);
           issue_deferred_copies_single(copier, NULL/*write mask*/,
                                        write_performed, guard);
-          copier.finalize(&postconditions);
+          copier.finalize(write_performed, &postconditions);
         }
       }
       else
@@ -4665,7 +4710,7 @@ namespace Legion {
           DeferredCopier copier(&info, dst, src_mask, precondition);
           issue_deferred_copies(copier, src_mask, write_masks, 
                                 performed_writes, guard);
-          copier.finalize(&postconditions);
+          copier.finalize(performed_writes, &postconditions);
         }
         else
         {
@@ -4676,7 +4721,7 @@ namespace Legion {
           DeferredCopier copier(&info,dst,src_mask,precondition,&across_helper);
           issue_deferred_copies(copier, src_mask, write_masks,
                                 performed_writes, guard);
-          copier.finalize(&postconditions);
+          copier.finalize(performed_writes, &postconditions);
         }
       }
     }
@@ -4802,11 +4847,17 @@ namespace Legion {
           // need to check for any reductions though
           if (!global_copy_mask)
           {
-            // If we have source reductions then we still need to record them
-            if (!source_reductions.empty())
-              break;
-            else
+            // If we don't have any source reductions we can just return
+            if (source_reductions.empty())
+            {
+              // Record any merges on the way up
+              if (!child_writes.empty())
+                performed_writes.merge(child_writes);
               return;
+            }
+            else 
+              // If we have source reductions then we still need to record them
+              break;
           }
         }
         if (!source_views.empty())
@@ -5217,16 +5268,18 @@ namespace Legion {
           union_is = context->union_index_spaces(it->elements); 
         else
           union_is = *(it->elements.begin()); 
+        write_masks.insert(union_is, it->set_mask);
         // Compute the pending difference so we can do the check
         // to see if it is done writing to this index space or not
         // If it's done writing we can remove the fields from the
         // global copy mask, otherwise just keep the union_is
-        IndexSpaceExpression *diff_is = 
-          context->subtract_index_spaces(dst_is, union_is);
-        if (!diff_is->is_empty())
-          write_masks.insert(union_is, it->set_mask);
-        else if (prune_global)
-          global_copy_mask -= it->set_mask;
+        if (prune_global)
+        {
+          IndexSpaceExpression *diff_is = 
+            context->subtract_index_spaces(dst_is, union_is);
+          if (diff_is->is_empty())
+            global_copy_mask -= it->set_mask;
+        }
       }
     }
 
@@ -5851,6 +5904,7 @@ namespace Legion {
         IndexSpaceExpression *write_performed = NULL;
         issue_deferred_copies_single(copier, NULL/*write mask*/,
                                      write_performed, PredEvent::NO_PRED_EVENT);
+        copier.finalize(write_performed);
         if (info.recording && 
             (write_performed == NULL) && !copier.has_reductions())
           info.record_empty_copy(this, copy_mask, dst);
@@ -5862,6 +5916,7 @@ namespace Legion {
         WriteSet performed_writes;
         issue_deferred_copies(copier, copy_mask, write_masks, 
                               performed_writes, PredEvent::NO_PRED_EVENT);
+        copier.finalize(performed_writes);
         if (info.recording && 
             performed_writes.empty() && !copier.has_reductions())
           info.record_empty_copy(this, copy_mask, dst);
@@ -7494,6 +7549,7 @@ namespace Legion {
         IndexSpaceExpression *performed_write;
         issue_deferred_copies_single(copier, NULL/*write mask*/,
                                      performed_write, PredEvent::NO_PRED_EVENT);
+        copier.finalize(performed_write);
       }
       else
       {
@@ -7502,6 +7558,7 @@ namespace Legion {
         WriteSet performed_writes;
         issue_deferred_copies(copier, copy_mask, write_masks, 
                               performed_writes, PredEvent::NO_PRED_EVENT);
+        copier.finalize(performed_writes);
       }
     }
 
@@ -8020,7 +8077,8 @@ namespace Legion {
                                                       RegionTreeNode *intersect,
                                                      IndexSpaceExpression *mask,
                                           std::set<RtEvent> &map_applied_events,
-                                            const PhysicalTraceInfo &trace_info)
+                                            const PhysicalTraceInfo &trace_info,
+                                             IndexSpaceExpression *&reduce_expr)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(context->runtime, 
@@ -8031,8 +8089,7 @@ namespace Legion {
                                     dst_fields, helper);
       this->reduce_from(manager->redop, red_mask, src_fields);
       RegionTreeForest *context = target->logical_node->context;
-      IndexSpaceExpression *reduce_expr = 
-        target->logical_node->get_index_space_expression();
+      reduce_expr = target->logical_node->get_index_space_expression();
       if (intersect != NULL)
         reduce_expr = context->intersect_index_spaces(reduce_expr,
             intersect->get_index_space_expression());

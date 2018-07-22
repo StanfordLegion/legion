@@ -803,7 +803,8 @@ namespace Legion {
                                          RegionTreeNode *intersect,
                                          IndexSpaceExpression *mask,
                                          std::set<RtEvent> &map_applied_events,
-                                         const PhysicalTraceInfo &trace_info);
+                                         const PhysicalTraceInfo &trace_info,
+                                         IndexSpaceExpression *&reduce_expr);
     public:
       virtual bool has_manager(void) const { return true; } 
       virtual PhysicalManager* get_manager(void) const;
@@ -982,14 +983,15 @@ namespace Legion {
       void end_guard_protection(void);
       void begin_reduction_epoch(void);
       void end_reduction_epoch(void);
-      void finalize(std::set<ApEvent> *postconditions = NULL);
+      void finalize(WriteSet &performed_writes,
+                    std::set<ApEvent> *postconditions = NULL);
       inline bool has_reductions(void) const 
         { return !reduction_epochs.empty(); }
     protected:
       void uniquify_copy_postconditions(void);
       void compute_dst_preconditions(const FieldMask &mask);
       bool issue_reductions(const int epoch, ApEvent reduction_pre, 
-                            const FieldMask &mask,
+                            const FieldMask &mask, WriteSet &performed_writes,
               LegionMap<ApEvent,FieldMask>::aligned &reduction_postconditions);
     public: // const fields
       const TraversalInfo *const info;
@@ -1011,7 +1013,9 @@ namespace Legion {
     protected:
       // Handle protection of events for guarded operations
       std::vector<LegionMap<ApEvent,FieldMask>::aligned> protected_copy_posts;
+#ifdef DEBUG_LEGION
       bool finalized;
+#endif
     };
 
     /**
@@ -1060,7 +1064,8 @@ namespace Legion {
       void end_guard_protection(void);
       void begin_reduction_epoch(void);
       void end_reduction_epoch(void);
-      void finalize(std::set<ApEvent> *postconditions = NULL);
+      void finalize(IndexSpaceExpression *&write_performed,
+                    std::set<ApEvent> *postconditions = NULL);
       inline void record_postcondition(ApEvent post)
         { copy_postconditions.insert(post); }
       inline bool has_reductions(void) const 
@@ -1084,7 +1089,9 @@ namespace Legion {
       std::set<ApEvent> dst_preconditions;
       std::vector<std::set<ApEvent> > protected_copy_posts;
       bool has_dst_preconditions;
+#ifdef DEBUG_LEGION
       bool finalized;
+#endif
     };
 
     /**
