@@ -864,7 +864,8 @@ namespace Legion {
                                          RegionTreeNode *intersect,
                                          IndexSpaceExpression *mask,
                                          std::set<RtEvent> &map_applied_events,
-                                         const PhysicalTraceInfo &trace_info);
+                                         const PhysicalTraceInfo &trace_info,
+                                         IndexSpaceExpression *&reduce_expr);
     public:
       virtual bool has_manager(void) const { return true; } 
       virtual PhysicalManager* get_manager(void) const;
@@ -1111,7 +1112,8 @@ namespace Legion {
       void end_guard_protection(void);
       void begin_reduction_epoch(void);
       void end_reduction_epoch(void);
-      void finalize(std::set<ApEvent> *postconditions = NULL);
+      void finalize(WriteSet &performed_writes,
+                    std::set<ApEvent> *postconditions = NULL);
 #ifndef DISABLE_CVOPT
       void pack_copier(Serializer &rez, const FieldMask &copy_mask);
 #endif
@@ -1120,9 +1122,9 @@ namespace Legion {
     protected:
       void uniquify_copy_postconditions(void);
       void compute_dst_preconditions(const FieldMask &mask);
-      void apply_reduction_epochs(void);
+      void apply_reduction_epochs(WriteSet &performed_writes);
       bool issue_reductions(const int epoch, ApEvent reduction_pre, 
-                            const FieldMask &mask,
+                            const FieldMask &mask, WriteSet &performed_writes,
               LegionMap<ApEvent,FieldMask>::aligned &reduction_postconditions);
     public: // const fields
       const TraversalInfo *const info;
@@ -1148,7 +1150,9 @@ namespace Legion {
     protected:
       // Handle protection of events for guarded operations
       std::vector<LegionMap<ApEvent,FieldMask>::aligned> protected_copy_posts;
+#ifdef DEBUG_LEGION
       bool finalized;
+#endif
     };
 
 #ifndef DISABLE_CVOPT
@@ -1173,7 +1177,8 @@ namespace Legion {
       virtual bool is_remote(void) const { return true; }
     public:
       void unpack(Deserializer &derez, const FieldMask &copy_mask);
-      void finalize(std::map<unsigned,ApUserEvent> &done_events);
+      void finalize(WriteSet &performed_writes,
+                    std::map<unsigned,ApUserEvent> &done_events);
     public:
       static RemoteDeferredCopier* unpack_copier(Deserializer &derez, 
             Runtime *runtime, const FieldMask &copy_mask, InnerContext *ctx);
@@ -1273,7 +1278,8 @@ namespace Legion {
       void end_guard_protection(void);
       void begin_reduction_epoch(void);
       void end_reduction_epoch(void);
-      void finalize(std::set<ApEvent> *postconditions = NULL);
+      void finalize(IndexSpaceExpression *&write_performed,
+                    std::set<ApEvent> *postconditions = NULL);
 #ifndef DISABLE_CVOPT
       void pack_copier(Serializer &rez);
 #endif
@@ -1283,7 +1289,7 @@ namespace Legion {
         { return !reduction_epochs.empty(); }
     protected:
       void compute_dst_preconditions(void);
-      void apply_reduction_epochs(void);
+      void apply_reduction_epochs(IndexSpaceExpression *&performed_write);
     public: // const fields
       const unsigned field_index;
       const FieldMask copy_mask;
@@ -1305,7 +1311,9 @@ namespace Legion {
       std::set<ApEvent> dst_preconditions;
       std::vector<std::set<ApEvent> > protected_copy_posts;
       bool has_dst_preconditions;
+#ifdef DEBUG_LEGION
       bool finalized;
+#endif
     };
 
 #ifndef DISABLE_CVOPT
@@ -1331,7 +1339,8 @@ namespace Legion {
       virtual bool is_remote(void) const { return true; }
     public:
       void unpack(Deserializer &derez);
-      void finalize(ApUserEvent done_event);
+      void finalize(IndexSpaceExpression *&performed_write, 
+                    ApUserEvent done_event);
     public:
       static RemoteDeferredSingleCopier* unpack_copier(Deserializer &derez,
                Runtime *runtime, const FieldMask &copy_mask, InnerContext *ctx);
@@ -1452,6 +1461,8 @@ namespace Legion {
       void unpack(Deserializer &derez);
       ApEvent find_precondition(const FieldMask &mask) const;
       void record_postcondition(ApEvent done, const FieldMask &mask);
+      void record_expression(IndexSpaceExpression *expr, const FieldMask &mask)
+        { assert(false); } // TODO
       void finalize(std::map<unsigned,ApUserEvent> &done_events);
     public:
       TraversalInfo *const info;
@@ -1485,6 +1496,8 @@ namespace Legion {
       void finalize(ApUserEvent done_event);
       inline void record_postcondition(ApEvent post)
         { reduce_postconditions.insert(post); }
+      inline void record_expression(IndexSpaceExpression *expr)
+        { assert(false); } // TODO
     public:
       TraversalInfo *const info;
       InnerContext *const context;
