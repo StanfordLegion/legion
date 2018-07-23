@@ -5386,6 +5386,114 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
+    // Pending Index Space Expression
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    PendingIndexSpaceExpression::PendingIndexSpaceExpression(
+        IndexSpaceExpression *upper, RegionTreeForest *ctx, IndexSpaceExprID id)
+      : IntermediateExpression(upper->type_tag, ctx, id), upper_bound(upper),
+        ready_event(Runtime::create_rt_user_event()), result(NULL)
+    //--------------------------------------------------------------------------
+    {
+    }
+    
+    //--------------------------------------------------------------------------
+    PendingIndexSpaceExpression::PendingIndexSpaceExpression(
+                                         const PendingIndexSpaceExpression &rhs)
+      : IntermediateExpression(rhs), upper_bound(NULL)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    PendingIndexSpaceExpression::~PendingIndexSpaceExpression(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(result != NULL);
+#endif
+      if (result->remove_expression_reference())
+        delete result;
+    }
+
+    //--------------------------------------------------------------------------
+    PendingIndexSpaceExpression& PendingIndexSpaceExpression::operator=(
+                                         const PendingIndexSpaceExpression &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    ApEvent PendingIndexSpaceExpression::get_expr_index_space(
+                                 void *res, TypeTag tag, bool need_tight_result)
+    //--------------------------------------------------------------------------
+    {
+      if (!ready_event.has_triggered())
+        ready_event.wait();
+#ifdef DEBUG_LEGION
+      assert(result != NULL);
+#endif
+      return result->get_expr_index_space(res, tag, need_tight_result);
+    }
+
+    //--------------------------------------------------------------------------
+    void PendingIndexSpaceExpression::tighten_index_space(void)
+    //--------------------------------------------------------------------------
+    {
+      if (!ready_event.has_triggered())
+        ready_event.wait();
+#ifdef DEBUG_LEGION
+      assert(result != NULL);
+#endif
+      result->tighten_index_space();
+    }
+
+    //--------------------------------------------------------------------------
+    bool PendingIndexSpaceExpression::check_empty(void)
+    //--------------------------------------------------------------------------
+    {
+      if (!ready_event.has_triggered())
+        ready_event.wait();
+#ifdef DEBUG_LEGION
+      assert(result != NULL);
+#endif
+      return result->check_empty();
+    }
+
+    //--------------------------------------------------------------------------
+    void PendingIndexSpaceExpression::pack_expression(
+                                         Serializer &rez, AddressSpaceID target)
+    //--------------------------------------------------------------------------
+    {
+      if (!ready_event.has_triggered())
+        ready_event.wait();
+#ifdef DEBUG_LEGION
+      assert(result != NULL);
+#endif
+      result->pack_expression(rez, target);
+    }
+
+    //--------------------------------------------------------------------------
+    void PendingIndexSpaceExpression::set_result(IndexSpaceExpression *res)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(result == NULL);
+      assert(!ready_event.has_triggered());
+#endif
+      result = res;
+      // Keep a reference on it until we're deleted
+      result->add_expression_reference();
+      Runtime::trigger_event(ready_event);
+    }
+
+    /////////////////////////////////////////////////////////////
     // Expression Trie Node 
     /////////////////////////////////////////////////////////////
 

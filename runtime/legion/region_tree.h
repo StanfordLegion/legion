@@ -1035,6 +1035,37 @@ namespace Legion {
     };
 
     /**
+     * \class PendingIndexSpaceExpression
+     * This class is a thunk that is used to represent index space
+     * expressions that haven't been computed yet. It allows for 
+     * partial specification of an upper bound expression that
+     * allows us to do partial intersection testing.
+     */
+    class PendingIndexSpaceExpression : public IntermediateExpression {
+    public:
+      PendingIndexSpaceExpression(IndexSpaceExpression *upper_bound, 
+                         RegionTreeForest *ctx, IndexSpaceExprID expr_id); 
+      PendingIndexSpaceExpression(const PendingIndexSpaceExpression &rhs);
+      virtual ~PendingIndexSpaceExpression(void);
+    public:
+      PendingIndexSpaceExpression& operator=(
+                                  const PendingIndexSpaceExpression &rhs);
+    public:
+      virtual ApEvent get_expr_index_space(void *result, TypeTag tag, 
+                                           bool need_tight_result);
+      virtual void tighten_index_space(void);
+      virtual bool check_empty(void);
+      virtual void pack_expression(Serializer &rez, AddressSpaceID target);
+    public:
+      void set_result(IndexSpaceExpression *result);
+    public:
+      IndexSpaceExpression *const upper_bound;
+    protected:
+      RtUserEvent ready_event;
+      IndexSpaceExpression *result;
+    };
+
+    /**
      * \class ExpressionTrieNode
      * This is a class for constructing a trie for index space
      * expressions so we can quickly detect commmon subexpression
