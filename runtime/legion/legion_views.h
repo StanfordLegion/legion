@@ -1112,7 +1112,9 @@ namespace Legion {
       void end_guard_protection(void);
       void begin_reduction_epoch(void);
       void end_reduction_epoch(void);
-      void finalize(WriteSet &performed_writes,
+      void record_previously_valid(IndexSpaceExpression *expr, 
+                                   const FieldMask &mask);
+      void finalize(DeferredView *src_view,
                     std::set<ApEvent> *postconditions = NULL);
 #ifndef DISABLE_CVOPT
       void pack_copier(Serializer &rez, const FieldMask &copy_mask);
@@ -1122,9 +1124,9 @@ namespace Legion {
     protected:
       void uniquify_copy_postconditions(void);
       void compute_dst_preconditions(const FieldMask &mask);
-      void apply_reduction_epochs(WriteSet &performed_writes);
+      void apply_reduction_epochs(WriteSet &reduce_exprs);
       bool issue_reductions(const int epoch, ApEvent reduction_pre, 
-                            const FieldMask &mask, WriteSet &performed_writes,
+                            const FieldMask &mask, WriteSet &reduce_exprs,
               LegionMap<ApEvent,FieldMask>::aligned &reduction_postconditions);
     public: // const fields
       const TraversalInfo *const info;
@@ -1136,6 +1138,10 @@ namespace Legion {
     public: // visible mutable fields
       FieldMask deferred_copy_mask;
       LegionMap<ApEvent,FieldMask>::aligned copy_postconditions;
+      // Keep track of expressions for data that was already valid
+      // in the desintation instance, this will allow us to compute
+      // an expression for the actual write set of the copy
+      WriteSet dst_previously_valid;
     protected: // internal members
       LegionMap<ApEvent,FieldMask>::aligned dst_preconditions;
       FieldMask dst_precondition_mask;
@@ -1278,7 +1284,8 @@ namespace Legion {
       void end_guard_protection(void);
       void begin_reduction_epoch(void);
       void end_reduction_epoch(void);
-      void finalize(IndexSpaceExpression *&write_performed,
+      void record_previously_valid(IndexSpaceExpression *expr);
+      void finalize(DeferredView *src_view,
                     std::set<ApEvent> *postconditions = NULL);
 #ifndef DISABLE_CVOPT
       void pack_copier(Serializer &rez);
@@ -1289,7 +1296,7 @@ namespace Legion {
         { return !reduction_epochs.empty(); }
     protected:
       void compute_dst_preconditions(void);
-      void apply_reduction_epochs(IndexSpaceExpression *&performed_write);
+      void apply_reduction_epochs(std::set<IndexSpaceExpression*> &red_exprs);
     public: // const fields
       const unsigned field_index;
       const FieldMask copy_mask;
@@ -1302,6 +1309,10 @@ namespace Legion {
     public:
       std::set<ApEvent> copy_postconditions;
     protected: // internal members
+      // Keep track of expressions for data that was already valid
+      // in the desintation instance, this will allow us to compute
+      // an expression for the actual write set of the copy
+      std::set<IndexSpaceExpression*> dst_previously_valid;
       unsigned current_reduction_epoch;
       std::vector<PendingReductions> reduction_epochs;
 #ifndef DISABLE_CVOPT
