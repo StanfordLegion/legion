@@ -495,7 +495,7 @@ namespace Legion {
     public:
       static const AllocationType alloc_type = PHYSICAL_USER_ALLOC;
     public:
-      PhysicalUser(void);
+      PhysicalUser(IndexSpaceExpression *expr);
       PhysicalUser(const RegionUsage &u, LegionColor child, 
                    UniqueID op_id, unsigned index, IndexSpaceExpression *expr);
       PhysicalUser(const PhysicalUser &rhs);
@@ -511,7 +511,7 @@ namespace Legion {
       LegionColor child;
       UniqueID op_id;
       unsigned index; // region requirement index
-      IndexSpaceExpression *expr;
+      IndexSpaceExpression *const expr;
     };  
 
     /**
