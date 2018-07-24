@@ -615,7 +615,7 @@ namespace Legion {
                              IndexSpaceExpression *mask,
                              ReductionOpID redop,
                              bool reduction_fold);
-      void record_empty_copy(CompositeView *src,
+      void record_empty_copy(DeferredView *src,
                              const FieldMask &copy_mask,
                              MaterializedView *dst);
       void record_summary_info(const RegionRequirement &region,

@@ -3324,7 +3324,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::record_empty_copy(CompositeView *src,
+    void PhysicalTemplate::record_empty_copy(DeferredView *src,
                                              const FieldMask &copy_mask,
                                              MaterializedView *dst)
     //--------------------------------------------------------------------------

@@ -425,7 +425,7 @@ namespace Legion {
 #endif
                              IndexTreeNode *intersect,
                              IndexSpaceExpression *mask) const;
-      void record_empty_copy(CompositeView *view,
+      void record_empty_copy(DeferredView *view,
                              const FieldMask &copy_mask,
                              MaterializedView *dst) const;
     public:

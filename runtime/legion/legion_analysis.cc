@@ -2056,7 +2056,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTraceInfo::record_empty_copy(CompositeView *view,
+    void PhysicalTraceInfo::record_empty_copy(DeferredView *view,
                                               const FieldMask &copy_mask,
                                               MaterializedView *dst) const
     //--------------------------------------------------------------------------
