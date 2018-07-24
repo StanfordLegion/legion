@@ -70,9 +70,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    PhysicalUser::PhysicalUser(void)
+    PhysicalUser::PhysicalUser(IndexSpaceExpression *e)
+      : expr(e)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(expr != NULL);
+#endif
+      expr->add_expression_reference();
     }
     
     //--------------------------------------------------------------------------
@@ -81,10 +86,15 @@ namespace Legion {
       : usage(u), child(c), op_id(id), index(x), expr(e)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(expr != NULL);
+#endif
+      expr->add_expression_reference();
     }
 
     //--------------------------------------------------------------------------
-    PhysicalUser::PhysicalUser(const PhysicalUser &rhs)
+    PhysicalUser::PhysicalUser(const PhysicalUser &rhs) 
+      : expr(NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -95,6 +105,11 @@ namespace Legion {
     PhysicalUser::~PhysicalUser(void)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(expr != NULL);
+#endif
+      if (expr->remove_expression_reference())
+        delete expr;
     }
 
     //--------------------------------------------------------------------------
@@ -110,13 +125,13 @@ namespace Legion {
     void PhysicalUser::pack_user(Serializer &rez, AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
+      expr->pack_expression(rez, target);
       rez.serialize(child);
       rez.serialize(usage.privilege);
       rez.serialize(usage.prop);
       rez.serialize(usage.redop);
       rez.serialize(op_id);
       rez.serialize(index);
-      expr->pack_expression(rez, target);
     }
 
     //--------------------------------------------------------------------------
@@ -124,18 +139,18 @@ namespace Legion {
         bool add_reference, RegionTreeForest *forest, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      PhysicalUser *result = new PhysicalUser();
+      IndexSpaceExpression *expr = 
+          IndexSpaceExpression::unpack_expression(derez, forest, source);
+#ifdef DEBUG_LEGION
+      assert(expr != NULL);
+#endif
+      PhysicalUser *result = new PhysicalUser(expr);
       derez.deserialize(result->child);
       derez.deserialize(result->usage.privilege);
       derez.deserialize(result->usage.prop);
       derez.deserialize(result->usage.redop);
       derez.deserialize(result->op_id);
       derez.deserialize(result->index);
-      result->expr = 
-        IndexSpaceExpression::unpack_expression(derez, forest, source);
-#ifdef DEBUG_LEGION
-      assert(result->expr != NULL);
-#endif
       if (add_reference)
         result->add_reference();
       return result;

@@ -4843,29 +4843,52 @@ namespace Legion {
         if (restrict_out && (restrict_info != NULL) && 
             restrict_info->has_restrictions())
           restrict_info->populate_restrict_fields(restrict_mask);
+        RegionTreeForest *forest = dst->context;
         // Apply the destination users
         for (LegionMap<ApEvent,FieldMask>::aligned::const_iterator it = 
              copy_postconditions.begin(); it != copy_postconditions.end(); it++)
         {
+#ifdef DEBUG_LEGION
+          FieldMask observed;
+#endif
           // Compute the performed write expression for these set of fields
-          std::set<IndexSpaceExpression*> write_exprs;
+          WriteSet field_writes;
           for (WriteSet::const_iterator wit = performed_writes.begin();
                 wit != performed_writes.end(); wit++)
           {
-            if (wit->second * it->second)
+            const FieldMask overlap = wit->second & it->second;
+            if (!overlap)
               continue;
-            write_exprs.insert(wit->first);
-          }
-          // Should not be empty
+            field_writes.insert(wit->first, overlap);
 #ifdef DEBUG_LEGION
-          assert(!write_exprs.empty());
+            observed |= overlap;
 #endif
-          IndexSpaceExpression *dst_expr = 
-            dst->context->union_index_spaces(write_exprs);
-          dst->add_copy_user(0/*redop*/, it->first, &info->version_info, 
-                             dst_expr, info->op->get_unique_op_id(),info->index,
-                             it->second, false/*reading*/, restrict_out,
-                             local_space, info->map_applied_events, *info);
+          }
+#ifdef DEBUG_LEGION
+          // Should have seen an expression for each field
+          assert(!(it->second - observed));
+#endif
+          // Sort the expressions and add a user for each one
+          LegionList<FieldSet<IndexSpaceExpression*> >::aligned write_sets;
+          // Can use an empty field mask since we checked that we saw
+          // at least one write expression for each field
+          field_writes.compute_field_sets(FieldMask(), write_sets);
+          for (LegionList<FieldSet<IndexSpaceExpression*> >::aligned::
+                const_iterator wit = write_sets.begin(); 
+                wit != write_sets.end(); wit++)
+          {
+#ifdef DEBUG_LEGION
+            assert(!wit->elements.empty());
+#endif
+            // Compute the write expression
+            IndexSpaceExpression *dst_expr = (wit->elements.size() == 1) ?
+              *(wit->elements.begin()) : 
+              forest->union_index_spaces(wit->elements);
+            dst->add_copy_user(0/*redop*/, it->first, &info->version_info, 
+                               dst_expr, info->op->get_unique_op_id(),info->index,
+                               wit->set_mask, false/*reading*/, restrict_out,
+                               local_space, info->map_applied_events, *info);
+          }
           if (restrict_out && !(it->second * restrict_mask))
             info->op->record_restrict_postcondition(it->first);
         }
