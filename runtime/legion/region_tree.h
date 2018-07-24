@@ -1044,7 +1044,7 @@ namespace Legion {
     class PendingIndexSpaceExpression : public IntermediateExpression {
     public:
       PendingIndexSpaceExpression(IndexSpaceExpression *upper_bound, 
-                         RegionTreeForest *ctx, IndexSpaceExprID expr_id); 
+                                  RegionTreeForest *ctx); 
       PendingIndexSpaceExpression(const PendingIndexSpaceExpression &rhs);
       virtual ~PendingIndexSpaceExpression(void);
     public:

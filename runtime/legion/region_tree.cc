@@ -5391,8 +5391,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PendingIndexSpaceExpression::PendingIndexSpaceExpression(
-        IndexSpaceExpression *upper, RegionTreeForest *ctx, IndexSpaceExprID id)
-      : IntermediateExpression(upper->type_tag, ctx, id), upper_bound(upper),
+                             IndexSpaceExpression *upper, RegionTreeForest *ctx)
+      : IntermediateExpression(upper->type_tag, ctx), upper_bound(upper),
         ready_event(Runtime::create_rt_user_event()), result(NULL)
     //--------------------------------------------------------------------------
     {
