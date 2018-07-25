@@ -4819,6 +4819,9 @@ namespace Legion {
                                                  const FieldMask &mask)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(across_helper == NULL);
+#endif
       WriteSet::iterator finder = dst_previously_valid.find(expr);
       if (finder == dst_previously_valid.end())
         dst_previously_valid.insert(expr, mask);
@@ -4911,6 +4914,9 @@ namespace Legion {
         for (LegionMap<ApEvent,FieldMask>::aligned::iterator it = 
              copy_postconditions.begin(); it != copy_postconditions.end(); it++)
         {
+          // handle any restricted postconditions
+          if (restrict_out && !(it->second * restrict_mask))
+            info->op->record_restrict_postcondition(it->first);
           // Compute the performed write expression for each of these
           // fields. This is the destination expression minus any 
           // any expressions for where the instance was already valid
@@ -4942,9 +4948,6 @@ namespace Legion {
                            dst_expr, info->op->get_unique_op_id(), info->index,
                            it->second, false/*reading*/, restrict_out,
                            local_space, info->map_applied_events, *info);
-          // handle any restricted postconditions
-          if (restrict_out && !(it->second * restrict_mask))
-            info->op->record_restrict_postcondition(it->first);
         }
       }
       else
@@ -5627,6 +5630,9 @@ namespace Legion {
     void DeferredSingleCopier::record_previously_valid(IndexSpaceExpression *ex)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(across_helper == NULL);
+#endif
       dst_previously_valid.insert(ex);
     }
 
@@ -6947,6 +6953,7 @@ namespace Legion {
         (dst_is->expr_id == local_is->expr_id) ? local_is : 
         context->intersect_index_spaces(dst_is, local_is);
       // First check to see if the target is already valid
+      if (copier.across_helper == NULL)
       {
         PhysicalManager *dst_manager = dst->get_manager();
         for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it =
@@ -7163,6 +7170,9 @@ namespace Legion {
       if (dst->logical_node->sort_copy_instances_single(info, dst,
             copier.copy_mask, source_views, src_instance, deferred_instance))
       {
+#ifdef DEBUG_LEGION
+        assert(copier.across_helper == NULL);
+#endif
         // If we get here then the destination is already valid
         // Construct the write expression, intersect then subtract
         if (write_mask != NULL)
