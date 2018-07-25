@@ -2642,7 +2642,7 @@ namespace Legion {
             {
               TriggerEvent *trigger = inst->as_trigger_event();
               int subst = substs[trigger->rhs];
-              if (subst > 0) trigger->rhs = (unsigned)subst;
+              if (subst >= 0) trigger->rhs = (unsigned)subst;
               break;
             }
           case MERGE_EVENT :
@@ -2653,7 +2653,7 @@ namespace Legion {
                    it != merge->rhs.end(); ++it)
               {
                 int subst = substs[*it];
-                if (subst > 0) new_rhs.insert((unsigned)subst);
+                if (subst >= 0) new_rhs.insert((unsigned)subst);
                 else new_rhs.insert(*it);
               }
               merge->rhs.swap(new_rhs);
@@ -2664,7 +2664,7 @@ namespace Legion {
             {
               IssueCopy *copy = inst->as_issue_copy();
               int subst = substs[copy->precondition_idx];
-              if (subst > 0) copy->precondition_idx = (unsigned)subst;
+              if (subst >= 0) copy->precondition_idx = (unsigned)subst;
               lhs = copy->lhs;
               break;
             }
@@ -2672,7 +2672,7 @@ namespace Legion {
             {
               IssueFill *fill = inst->as_issue_fill();
               int subst = substs[fill->precondition_idx];
-              if (subst > 0) fill->precondition_idx = (unsigned)subst;
+              if (subst >= 0) fill->precondition_idx = (unsigned)subst;
               lhs = fill->lhs;
               break;
             }
@@ -2691,7 +2691,7 @@ namespace Legion {
             {
               CompleteReplay *replay = inst->as_complete_replay();
               int subst = substs[replay->rhs];
-              if (subst > 0) replay->rhs = (unsigned)subst;
+              if (subst >= 0) replay->rhs = (unsigned)subst;
               break;
             }
           default:
