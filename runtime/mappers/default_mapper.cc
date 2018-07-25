@@ -2235,6 +2235,8 @@ namespace Legion {
       LogicalRegion target_region = 
         default_policy_select_instance_region(ctx, target_memory, req,
                                               constraints, force_new, meets);
+      bool tight_region_bounds = (req.tag & DefaultMapper::EXACT_REGION) != 0;
+
       // TODO: deal with task layout constraints that require multiple
       // region requirements to be mapped to the same instance
       std::vector<LogicalRegion> target_regions(1, target_region);
@@ -2244,7 +2246,8 @@ namespace Legion {
           return false;
       } else {
         if (!runtime->find_or_create_physical_instance(ctx, 
-              target_memory, constraints, target_regions, result, created))
+              target_memory, constraints, target_regions, result, created,
+              true/*acquire*/, 0/*priority*/, tight_region_bounds))
           return false;
       }
       if (created)

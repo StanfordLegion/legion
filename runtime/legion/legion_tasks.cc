@@ -3207,9 +3207,6 @@ namespace Legion {
         target_processors = procs;
 
       virtual_mapped.resize(regions.size(), false);
-      std::map<PhysicalManager*,std::pair<unsigned,bool> > *acquired =
-        get_acquired_instances_ref();
-      std::pair<unsigned,bool> init(1,false);
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
         InstanceSet &instances = physical_instances[idx];
@@ -3217,17 +3214,6 @@ namespace Legion {
           continue;
         if (instances.is_virtual_mapping())
           virtual_mapped[idx] = true;
-        else
-        {
-          size_t num_instances = instances.size();
-          for (unsigned iidx = 0; iidx < num_instances; ++iidx)
-          {
-            PhysicalManager *manager = instances[iidx].get_manager();
-            if (acquired->find(manager) == acquired->end())
-              acquired->insert(std::pair<PhysicalManager*,
-                  std::pair<unsigned,bool> >(manager, init));
-          }
-        }
         if (runtime->legion_spy_enabled)
           runtime->forest->log_mapping_decision(unique_op_id, idx,
                                                 regions[idx],
