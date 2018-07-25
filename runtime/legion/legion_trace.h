@@ -490,6 +490,8 @@ namespace Legion {
       void optimize(void);
       void elide_fences(std::vector<unsigned> &gen);
       void propagate_merges(std::vector<unsigned> &gen);
+      void transitive_reduction(void);
+      void propagate_copies(std::vector<unsigned> &gen);
       void prepare_parallel_replay(const std::vector<unsigned> &gen);
       void push_complete_replays();
       void dump_template(void);

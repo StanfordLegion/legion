@@ -2009,7 +2009,12 @@ namespace Legion {
         for (unsigned idx = 0; idx < events.size(); ++idx)
           gen[idx] = idx;
       }
-      if (!implicit_runtime->no_trace_optimization) propagate_merges(gen);
+      if (!implicit_runtime->no_trace_optimization)
+      {
+        propagate_merges(gen);
+        transitive_reduction();
+        propagate_copies(gen);
+      }
       prepare_parallel_replay(gen);
       push_complete_replays();
     }
@@ -2380,6 +2385,322 @@ namespace Legion {
           if (crossing_found)
             merge->rhs.swap(new_rhs);
         }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTemplate::transitive_reduction(void)
+    //--------------------------------------------------------------------------
+    {
+      // Transitive reduction inspired by Klaus Simon,
+      // "An improved algorithm for transitive closure on acyclic digraphs"
+
+      // Build a DAG with outgoing edges and find a topological ordering
+      std::vector<unsigned> topo_order;
+      std::vector<unsigned> inv_topo_order;
+      std::vector<std::vector<unsigned> > outgoing;
+      inv_topo_order.resize(events.size());
+      outgoing.resize(events.size());
+
+      // First, insert frontiers of the last iteration to the ordering as they
+      // have no incoming edges
+      for (std::map<unsigned, unsigned>::iterator it = frontiers.begin();
+           it != frontiers.end(); ++it)
+      {
+        inv_topo_order[it->second] = topo_order.size();
+        topo_order.push_back(it->second);
+      }
+
+      std::map<TraceLocalID, Instruction*> term_insts;
+      for (unsigned idx = 0; idx < instructions.size(); ++idx)
+      {
+        Instruction *inst = instructions[idx];
+        switch (inst->get_kind())
+        {
+          // Pass these instructions as their events will be added later
+          case GET_TERM_EVENT :
+          case GET_OP_TERM_EVENT :
+            {
+              term_insts[inst->owner] = inst;
+              break;
+            }
+          case CREATE_AP_USER_EVENT :
+            {
+              break;
+            }
+          case TRIGGER_EVENT :
+            {
+              TriggerEvent *trigger = inst->as_trigger_event();
+              inv_topo_order[trigger->lhs] = topo_order.size();
+              topo_order.push_back(trigger->lhs);
+              outgoing[trigger->rhs].push_back(trigger->lhs);
+              break;
+            }
+          case MERGE_EVENT :
+            {
+              MergeEvent *merge = inst->as_merge_event();
+              inv_topo_order[merge->lhs] = topo_order.size();
+              topo_order.push_back(merge->lhs);
+              for (std::set<unsigned>::iterator it = merge->rhs.begin();
+                   it != merge->rhs.end(); ++it)
+                outgoing[*it].push_back(merge->lhs);
+              break;
+            }
+          case ISSUE_COPY :
+            {
+              IssueCopy *copy = inst->as_issue_copy();
+              inv_topo_order[copy->lhs] = topo_order.size();
+              topo_order.push_back(copy->lhs);
+              outgoing[copy->precondition_idx].push_back(copy->lhs);
+              break;
+            }
+          case ISSUE_FILL :
+            {
+              IssueFill *fill = inst->as_issue_fill();
+              inv_topo_order[fill->lhs] = topo_order.size();
+              topo_order.push_back(fill->lhs);
+              outgoing[fill->precondition_idx].push_back(fill->lhs);
+              break;
+            }
+          case SET_OP_SYNC_EVENT :
+            {
+              SetOpSyncEvent *sync = inst->as_set_op_sync_event();
+              inv_topo_order[sync->lhs] = topo_order.size();
+              topo_order.push_back(sync->lhs);
+              break;
+            }
+          case ASSIGN_FENCE_COMPLETION :
+            {
+              inv_topo_order[fence_completion_id] = topo_order.size();
+              topo_order.push_back(fence_completion_id);
+              break;
+            }
+          case COMPLETE_REPLAY :
+            {
+              CompleteReplay *replay = inst->as_complete_replay();
+#ifdef DEBUG_LEGION
+              assert(term_insts.find(replay->owner) != term_insts.end());
+#endif
+              Instruction *term_inst = term_insts[replay->owner];
+              unsigned lhs = -1U;
+              switch (term_inst->get_kind())
+              {
+                case GET_TERM_EVENT :
+                  {
+                    GetTermEvent *term = term_inst->as_get_term_event();
+                    lhs = term->lhs;
+                    break;
+                  }
+                case GET_OP_TERM_EVENT :
+                  {
+                    GetOpTermEvent *term = term_inst->as_get_op_term_event();
+                    lhs = term->lhs;
+                    break;
+                  }
+                default:
+                  {
+                    assert(false);
+                    break;
+                  }
+              }
+#ifdef DEBUG_LEGION
+              assert(lhs != -1U);
+#endif
+              inv_topo_order[lhs] = topo_order.size();
+              topo_order.push_back(lhs);
+              outgoing[replay->rhs].push_back(lhs);
+              break;
+            }
+          default:
+            {
+              assert(false);
+              break;
+            }
+        }
+      }
+
+      // Second, construct a chain decomposition
+      unsigned num_chains = 0;
+      std::vector<unsigned> chain_indices(topo_order.size(), -1U);
+
+      unsigned pos = 0;
+      while (true)
+      {
+        while (chain_indices[pos] != -1U && pos < chain_indices.size())
+          ++pos;
+        if (pos >= topo_order.size()) break;
+        unsigned curr = topo_order[pos];
+        while (outgoing[curr].size() > 0)
+        {
+          chain_indices[inv_topo_order[curr]] = num_chains;
+          const std::vector<unsigned> &out = outgoing[curr];
+          bool found = false;
+          for (unsigned oidx = 0; oidx < out.size(); ++oidx)
+          {
+            unsigned next = out[oidx];
+            if (chain_indices[inv_topo_order[next]] == -1U)
+            {
+              found = true;
+              curr = next;
+              chain_indices[inv_topo_order[curr]] = num_chains;
+              break;
+            }
+          }
+          if (!found) break;
+        }
+        chain_indices[inv_topo_order[curr]] = num_chains;
+        ++num_chains;
+      }
+
+      // Lastly, suppress transitive dependences using chains
+      for (unsigned idx = 0; idx < instructions.size(); ++idx)
+        if (instructions[idx]->get_kind() == MERGE_EVENT)
+        {
+          MergeEvent *merge = instructions[idx]->as_merge_event();
+          std::vector<int> chain_frontiers(num_chains, -1);
+          for (std::set<unsigned>::iterator it = merge->rhs.begin();
+               it != merge->rhs.end(); ++it)
+          {
+            int rank = inv_topo_order[*it];
+            unsigned chain_idx = chain_indices[rank];
+#ifdef DEBUG_LEGION
+            assert(chain_idx != -1U);
+#endif
+            chain_frontiers[chain_idx] =
+              std::max(chain_frontiers[chain_idx], rank);
+          }
+
+          std::set<unsigned> new_rhs;
+          for (unsigned idx = 0; idx < chain_frontiers.size(); ++idx)
+            if (chain_frontiers[idx] >= 0)
+              new_rhs.insert(topo_order[chain_frontiers[idx]]);
+          if (new_rhs.size() < merge->rhs.size())
+            merge->rhs.swap(new_rhs);
+        }
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTemplate::propagate_copies(std::vector<unsigned> &gen)
+    //--------------------------------------------------------------------------
+    {
+      std::vector<int> substs(events.size(), -1);
+      std::vector<Instruction*> new_instructions;
+      new_instructions.reserve(instructions.size());
+      for (unsigned idx = 0; idx < instructions.size(); ++idx)
+      {
+        Instruction *inst = instructions[idx];
+        if (instructions[idx]->get_kind() == MERGE_EVENT)
+        {
+          MergeEvent *merge = instructions[idx]->as_merge_event();
+#ifdef DEBUG_LEGION
+          assert(merge->rhs.size() > 0);
+#endif
+          if (merge->rhs.size() == 1)
+          {
+            substs[merge->lhs] = *merge->rhs.begin();
+#ifdef DEBUG_LEGION
+            assert(merge->lhs != (unsigned)substs[merge->lhs]);
+#endif
+            delete inst;
+          }
+          else
+            new_instructions.push_back(inst);
+        }
+        else
+          new_instructions.push_back(inst);
+      }
+
+      if (instructions.size() == new_instructions.size()) return;
+
+      instructions.swap(new_instructions);
+
+      for (unsigned idx = 0; idx < instructions.size(); ++idx)
+      {
+        Instruction *inst = instructions[idx];
+        int lhs = -1;
+        switch (inst->get_kind())
+        {
+          case GET_TERM_EVENT :
+            {
+              GetTermEvent *term = inst->as_get_term_event();
+              lhs = term->lhs;
+              break;
+            }
+          case GET_OP_TERM_EVENT :
+            {
+              GetOpTermEvent *term = inst->as_get_op_term_event();
+              lhs = term->lhs;
+              break;
+            }
+          case CREATE_AP_USER_EVENT :
+            {
+              CreateApUserEvent *create = inst->as_create_ap_user_event();
+              lhs = create->lhs;
+              break;
+            }
+          case TRIGGER_EVENT :
+            {
+              TriggerEvent *trigger = inst->as_trigger_event();
+              int subst = substs[trigger->rhs];
+              if (subst > 0) trigger->rhs = (unsigned)subst;
+              break;
+            }
+          case MERGE_EVENT :
+            {
+              MergeEvent *merge = inst->as_merge_event();
+              std::set<unsigned> new_rhs;
+              for (std::set<unsigned>::iterator it = merge->rhs.begin();
+                   it != merge->rhs.end(); ++it)
+              {
+                int subst = substs[*it];
+                if (subst > 0) new_rhs.insert((unsigned)subst);
+                else new_rhs.insert(*it);
+              }
+              merge->rhs.swap(new_rhs);
+              lhs = merge->lhs;
+              break;
+            }
+          case ISSUE_COPY :
+            {
+              IssueCopy *copy = inst->as_issue_copy();
+              int subst = substs[copy->precondition_idx];
+              if (subst > 0) copy->precondition_idx = (unsigned)subst;
+              lhs = copy->lhs;
+              break;
+            }
+          case ISSUE_FILL :
+            {
+              IssueFill *fill = inst->as_issue_fill();
+              int subst = substs[fill->precondition_idx];
+              if (subst > 0) fill->precondition_idx = (unsigned)subst;
+              lhs = fill->lhs;
+              break;
+            }
+          case SET_OP_SYNC_EVENT :
+            {
+              SetOpSyncEvent *sync = inst->as_set_op_sync_event();
+              lhs = sync->lhs;
+              break;
+            }
+          case ASSIGN_FENCE_COMPLETION :
+            {
+              lhs = fence_completion_id;
+              break;
+            }
+          case COMPLETE_REPLAY :
+            {
+              CompleteReplay *replay = inst->as_complete_replay();
+              int subst = substs[replay->rhs];
+              if (subst > 0) replay->rhs = (unsigned)subst;
+              break;
+            }
+          default:
+            {
+              break;
+            }
+        }
+        if (lhs != -1)
+          gen[lhs] = idx;
       }
     }
 
