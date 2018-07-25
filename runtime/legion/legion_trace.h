@@ -742,7 +742,6 @@ namespace Legion {
     enum InstructionKind
     {
       GET_TERM_EVENT = 0,
-      GET_OP_TERM_EVENT,
       CREATE_AP_USER_EVENT,
       TRIGGER_EVENT,
       MERGE_EVENT,

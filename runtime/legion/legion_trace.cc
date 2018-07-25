@@ -2618,7 +2618,6 @@ namespace Legion {
               break;
             }
           case GET_TERM_EVENT:
-          case GET_OP_TERM_EVENT:
           case CREATE_AP_USER_EVENT:
           case SET_OP_SYNC_EVENT:
           case ASSIGN_FENCE_COMPLETION:
@@ -2793,7 +2792,7 @@ namespace Legion {
         topo_order.push_back(it->second);
       }
 
-      std::map<TraceLocalID, Instruction*> term_insts;
+      std::map<TraceLocalID, GetTermEvent*> term_insts;
       for (unsigned idx = 0; idx < instructions.size(); ++idx)
       {
         Instruction *inst = instructions[idx];
@@ -2801,9 +2800,11 @@ namespace Legion {
         {
           // Pass these instructions as their events will be added later
           case GET_TERM_EVENT :
-          case GET_OP_TERM_EVENT :
             {
-              term_insts[inst->owner] = inst;
+#ifdef DEBUG_LEGION
+              assert(inst->as_get_term_event() != NULL);
+#endif
+              term_insts[inst->owner] = inst->as_get_term_event();
               break;
             }
           case CREATE_AP_USER_EVENT :
@@ -2863,28 +2864,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
               assert(term_insts.find(replay->owner) != term_insts.end());
 #endif
-              Instruction *term_inst = term_insts[replay->owner];
-              unsigned lhs = -1U;
-              switch (term_inst->get_kind())
-              {
-                case GET_TERM_EVENT :
-                  {
-                    GetTermEvent *term = term_inst->as_get_term_event();
-                    lhs = term->lhs;
-                    break;
-                  }
-                case GET_OP_TERM_EVENT :
-                  {
-                    GetOpTermEvent *term = term_inst->as_get_op_term_event();
-                    lhs = term->lhs;
-                    break;
-                  }
-                default:
-                  {
-                    assert(false);
-                    break;
-                  }
-              }
+              GetTermEvent *term = term_insts[replay->owner];
+              unsigned lhs = term->lhs;
 #ifdef DEBUG_LEGION
               assert(lhs != -1U);
 #endif
@@ -3005,12 +2986,6 @@ namespace Legion {
           case GET_TERM_EVENT :
             {
               GetTermEvent *term = inst->as_get_term_event();
-              lhs = term->lhs;
-              break;
-            }
-          case GET_OP_TERM_EVENT :
-            {
-              GetOpTermEvent *term = inst->as_get_op_term_event();
               lhs = term->lhs;
               break;
             }
