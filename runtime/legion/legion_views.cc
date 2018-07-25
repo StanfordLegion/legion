@@ -5075,9 +5075,9 @@ namespace Legion {
                                                  const FieldMask &mask)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(across_helper == NULL);
-#endif
+      // No need to record this if we're doing an across copy
+      if (across_helper != NULL)
+        return;
       WriteSet::iterator finder = dst_previously_valid.find(expr);
       if (finder == dst_previously_valid.end())
         dst_previously_valid.insert(expr, mask);
@@ -6059,9 +6059,9 @@ namespace Legion {
     void DeferredSingleCopier::record_previously_valid(IndexSpaceExpression *ex)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(across_helper == NULL);
-#endif
+      // No need to record this if we're doing an across copy
+      if (across_helper != NULL)
+        return;
       dst_previously_valid.insert(ex);
     }
 
@@ -7785,9 +7785,6 @@ namespace Legion {
       if (dst->logical_node->sort_copy_instances_single(info, dst,
             copier.copy_mask, source_views, src_instance, deferred_instance))
       {
-#ifdef DEBUG_LEGION
-        assert(copier.across_helper == NULL);
-#endif
         // If we get here then the destination is already valid
         // Construct the write expression, intersect then subtract
         if (write_mask != NULL)

@@ -1098,12 +1098,12 @@ namespace Legion {
     public:
       void set_result(IndexSpaceExpression *result);
       // This can be racy but in a good way
-      inline IndexSpaceExpression* get_ready_expression(void) const
+      inline IndexSpaceExpression* get_ready_expression(void)
       {
         if (result != NULL)
           return result;
         else
-          return upper_bound;
+          return this;
       }
     public:
       IndexSpaceExpression *const upper_bound;
