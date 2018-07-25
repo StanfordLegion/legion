@@ -7840,6 +7840,8 @@ namespace Legion {
           if (copy_post.exists())
             copier.record_postcondition(copy_post);
         }
+        else // Have to record any previously valid expressions
+          copier.record_previously_valid(copy_expr);
         return copy_expr;
       }
       else
