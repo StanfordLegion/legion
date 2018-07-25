@@ -4587,6 +4587,244 @@ namespace Legion {
 #endif // DISTRIBUTED_INSTANCE_VIEWS
 
     /////////////////////////////////////////////////////////////
+    // ShardedWriteTracker
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    ShardedWriteTracker::ShardedWriteTracker(unsigned fidx, RegionTreeForest *f,
+                                             IndexSpaceExpression *bound,
+                                             ShardedWriteTracker *remote,
+                                             RtUserEvent event,
+                                             AddressSpaceID target)
+      : field_index(fidx), forest(f), upper_bound(bound), pending_expr((remote 
+            == NULL) ? new PendingIndexSpaceExpression(upper_bound,f) : NULL), 
+        remote_tracker(remote), remote_event(event), remote_target(target)
+    //--------------------------------------------------------------------------
+    {
+      if (pending_expr != NULL)
+        pending_expr->add_expression_reference(); 
+    }
+
+    //--------------------------------------------------------------------------
+    ShardedWriteTracker::ShardedWriteTracker(const ShardedWriteTracker &rhs)
+      : field_index(0), forest(NULL), upper_bound(NULL), pending_expr(NULL),
+        remote_tracker(NULL), remote_event(RtUserEvent::NO_RT_USER_EVENT),
+        remote_target(0)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    ShardedWriteTracker::~ShardedWriteTracker(void) 
+    //--------------------------------------------------------------------------
+    {
+      if ((pending_expr != NULL) && pending_expr->remove_expression_reference())
+        delete pending_expr;
+    }
+
+    //--------------------------------------------------------------------------
+    ShardedWriteTracker& ShardedWriteTracker::operator=(
+                                                 const ShardedWriteTracker &rhs) 
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardedWriteTracker::pack_for_remote_shard(Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      RtUserEvent result = Runtime::create_rt_user_event();
+      rez.serialize(this);
+      rez.serialize(result);
+      // Can do this without the lock since we know adding this is sequential
+      remote_events.insert(result);
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardedWriteTracker::record_valid_expression(IndexSpaceExpression *exp)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock e_lock(expr_lock);
+      valid_expressions.insert(exp);
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardedWriteTracker::record_sub_expression(IndexSpaceExpression *expr)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock e_lock(expr_lock);
+      sub_expressions.insert(expr);
+    }
+
+    //--------------------------------------------------------------------------
+    bool ShardedWriteTracker::arm(void)
+    //--------------------------------------------------------------------------
+    {
+      // Add a reference to ourselves first
+      add_reference();
+      if (!remote_events.empty())
+      {
+        RtEvent wait_for = Runtime::merge_events(remote_events);
+        if (wait_for.exists() && !wait_for.has_triggered())
+        {
+          ShardedWriteTrackerArgs args;
+          args.tracker = this;
+          forest->runtime->issue_runtime_meta_task(args, 
+              LG_LATENCY_DEFERRED_PRIORITY, wait_for);
+          return false;
+        }
+      }
+      // If we make it here, then we can do the computation
+      evaluate();
+      return remove_reference();
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardedWriteTracker::evaluate(void)
+    //--------------------------------------------------------------------------
+    {
+      // Don't need the lock here since we know everything is ready
+      // and won't be changing
+      if (remote_tracker != NULL)
+      {
+#ifdef DEBUG_LEGION
+        assert(pending_expr == NULL);
+#endif
+        // Remote case
+        if (!valid_expressions.empty())
+        {
+          IndexSpaceExpression *valid = 
+            forest->union_index_spaces(valid_expressions);
+          if (!sub_expressions.empty())
+          {
+            IndexSpaceExpression *sub = 
+              forest->union_index_spaces(sub_expressions);
+            valid = forest->subtract_index_spaces(valid, sub);
+          }
+          if (!valid->is_empty())
+            send_shard_valid(forest->runtime, remote_tracker,
+                             remote_target, valid, remote_event);
+          else
+            Runtime::trigger_event(remote_event);
+        }
+        else // We can just trigger our event since we're done
+          Runtime::trigger_event(remote_event);
+      }
+      else
+      {
+#ifdef DEBUG_LEGION
+        assert(pending_expr != NULL);
+#endif
+        // Owner case
+        if (!valid_expressions.empty())
+        {
+          IndexSpaceExpression *valid = 
+            forest->union_index_spaces(valid_expressions);
+          if (!sub_expressions.empty())
+          {
+            IndexSpaceExpression *sub = 
+              forest->union_index_spaces(sub_expressions);
+            valid = forest->subtract_index_spaces(valid, sub);
+          }
+          pending_expr->set_result(
+              forest->subtract_index_spaces(upper_bound, valid));
+        }
+        else
+          pending_expr->set_result(upper_bound); // same as the upper bound
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ShardedWriteTracker::handle_evaluate(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const ShardedWriteTrackerArgs *sargs = 
+        (const ShardedWriteTrackerArgs*)args;
+      sargs->tracker->evaluate();
+      if (sargs->tracker->remove_reference())
+        delete sargs->tracker;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ShardedWriteTracker::unpack_tracker(Deserializer &derez,
+                              ShardedWriteTracker *&tracker, RtUserEvent &event)
+    //--------------------------------------------------------------------------
+    {
+      derez.deserialize(tracker);
+      derez.deserialize(event);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ ShardedWriteTracker* ShardedWriteTracker::unpack_tracker(
+         unsigned fidx, AddressSpaceID source, Runtime *rt, Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      ShardedWriteTracker *remote;
+      derez.deserialize(remote);
+      RtUserEvent remote_done;
+      derez.deserialize(remote_done);
+      return new ShardedWriteTracker(fidx, rt->forest, NULL,
+                                     remote, remote_done, source);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ShardedWriteTracker::send_shard_valid(Runtime *runtime,
+                                                  ShardedWriteTracker *tracker, 
+                                                  AddressSpaceID target, 
+                                                  IndexSpaceExpression *expr,
+                                                  RtUserEvent done_event)
+    //--------------------------------------------------------------------------
+    {
+      Serializer rez;
+      rez.serialize(tracker);
+      expr->pack_expression(rez, target);
+      rez.serialize(done_event);
+      rez.serialize<bool>(true); // valid
+      runtime->send_control_replicate_composite_view_write_summary(target, rez);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ShardedWriteTracker::send_shard_sub(Runtime *runtime,
+                                                  ShardedWriteTracker *tracker, 
+                                                  AddressSpaceID target, 
+                                                  IndexSpaceExpression *expr,
+                                                  RtUserEvent done_event)
+    //--------------------------------------------------------------------------
+    {
+      Serializer rez;
+      rez.serialize(tracker);
+      expr->pack_expression(rez, target);
+      rez.serialize(done_event);
+      rez.serialize<bool>(false); // sub
+      runtime->send_control_replicate_composite_view_write_summary(target, rez);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ShardedWriteTracker::process_shard_summary(
+           Deserializer &derez, RegionTreeForest *forest, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      ShardedWriteTracker *tracker;
+      derez.deserialize(tracker);
+      IndexSpaceExpression *expr = 
+        IndexSpaceExpression::unpack_expression(derez, forest, source);
+      RtUserEvent done_event;
+      derez.deserialize(done_event);
+      bool valid;
+      derez.deserialize<bool>(valid);
+      if (valid)
+        tracker->record_valid_expression(expr);
+      else
+        tracker->record_sub_expression(expr);
+      Runtime::trigger_event(done_event);
+    }
+
+    /////////////////////////////////////////////////////////////
     // DeferredCopier
     /////////////////////////////////////////////////////////////
 
@@ -4859,57 +5097,25 @@ namespace Legion {
         if (restrict_out && (restrict_info != NULL) && 
             restrict_info->has_restrictions())
           restrict_info->populate_restrict_fields(restrict_mask);
-        RegionTreeForest *forest = dst->context;
         // Compute the performed write expression for each of these
-        // fields. This is the destination expression minus any 
-        // any expressions for where the instance was already valid
-        std::vector<IndexSpaceExpression*> actual_dst_exprs;
-        LegionVector<FieldMask>::aligned previously_valid_masks;
+        // fields. 
         IndexSpaceExpression *dst_expr = 
           dst->logical_node->get_index_space_expression();
+        // If we have any write trackers, the first thing we want to
+        // do is update them to get them in flight and to filter out
+        // any fields we don't need to worry about for the rest of
+        // this computation
+        if (!write_trackers.empty())
+          arm_write_trackers(reduce_exprs, true/*add reference*/);
+        // Next we can compute the performed write expressions for
+        // any fields for which we still have previsously valid data
+        // This is the destination expression minus any any expressions 
+        // for where the instance was already valid
+        std::vector<IndexSpaceExpression*> actual_dst_exprs;
+        LegionVector<FieldMask>::aligned previously_valid_masks;
         if (!dst_previously_valid.empty())
-        {
-          LegionList<FieldSet<IndexSpaceExpression*> >::aligned 
-            valid_sets, reduction_sets;
-          dst_previously_valid.compute_field_sets(FieldMask(), valid_sets);
-          if (!reduce_exprs.empty())
-            reduce_exprs.compute_field_sets(FieldMask(), reduction_sets);
-          for (LegionList<FieldSet<IndexSpaceExpression*> >::aligned::iterator 
-                it = valid_sets.begin(); it != valid_sets.end(); it++)
-          {
-            IndexSpaceExpression *union_expr = 
-                forest->union_index_spaces(it->elements);
-            // See if we have any reduction sets that need to be subtracted
-            if (!reduction_sets.empty())
-            {
-              for (LegionList<FieldSet<IndexSpaceExpression*> >::aligned::
-                    const_iterator rit = reduction_sets.begin(); 
-                    rit != reduction_sets.end(); rit++)
-              {
-                const FieldMask overlap = it->set_mask & rit->set_mask;
-                if (!overlap)
-                  continue;
-                previously_valid_masks.push_back(overlap);
-                IndexSpaceExpression *reduce_expr = 
-                  forest->union_index_spaces(rit->elements);
-                IndexSpaceExpression *diff_expr = 
-                  forest->subtract_index_spaces(union_expr, reduce_expr);
-                actual_dst_exprs.push_back(
-                    forest->subtract_index_spaces(dst_expr, diff_expr));
-                it->set_mask -= overlap;
-                if (!it->set_mask)
-                  break;
-              }
-            }
-            // Handle any remaining fields
-            if (!!it->set_mask)
-            {
-              previously_valid_masks.push_back(it->set_mask);
-              actual_dst_exprs.push_back(
-                forest->subtract_index_spaces(dst_expr, union_expr));
-            }
-          }
-        }
+          compute_actual_dst_exprs(dst_expr, reduce_exprs,
+                                   actual_dst_exprs, previously_valid_masks);
         // Apply the destination users
         for (LegionMap<ApEvent,FieldMask>::aligned::iterator it = 
              copy_postconditions.begin(); it != copy_postconditions.end(); it++)
@@ -4917,6 +5123,32 @@ namespace Legion {
           // handle any restricted postconditions
           if (restrict_out && !(it->second * restrict_mask))
             info->op->record_restrict_postcondition(it->first);
+          // If we have any write trackers for the fields for this event
+          // then we use them as the write expressions for the copy user
+          if (!write_trackers.empty())
+          {
+            // Iterate over the fields in the field mask
+            int index = it->second.find_first_set();
+            while (index >= 0)
+            {
+              std::map<unsigned,ShardedWriteTracker*>::const_iterator finder =
+                write_trackers.find(index);
+              if (finder != write_trackers.end())
+              {
+                FieldMask write_mask;
+                write_mask.set_bit(index);
+                dst->add_copy_user(0/*redop*/, it->first, &info->version_info,
+                         finder->second->pending_expr->get_ready_expression(),
+                         info->op->get_unique_op_id(), info->index,
+                         write_mask, false/*reading*/, restrict_out,
+                         local_space, info->map_applied_events,*info);
+                // Unset the bit since we handled it
+                it->second.unset_bit(index);
+              }
+              // Do the next field
+              index = it->second.find_next_set(index+1);
+            }
+          }
           // Compute the performed write expression for each of these
           // fields. This is the destination expression minus any 
           // any expressions for where the instance was already valid
@@ -4949,9 +5181,22 @@ namespace Legion {
                            it->second, false/*reading*/, restrict_out,
                            local_space, info->map_applied_events, *info);
         }
+        // Once we're done with all the registrations then we can remove
+        // the references that we added to the write trackers
+        if (!write_trackers.empty())
+        {
+          for (std::map<unsigned,ShardedWriteTracker*>::const_iterator it =
+                write_trackers.begin(); it != write_trackers.end(); it++)
+            if (it->second->remove_reference())
+              delete it->second;
+          write_trackers.clear();
+        }
       }
       else
       {
+        // Arm our write trackers so they are ready to go
+        if (!write_trackers.empty())
+          arm_write_trackers(reduce_exprs, false/*add reference*/);
         // Just merge in the copy postcondition events
         for (LegionMap<ApEvent,FieldMask>::aligned::const_iterator it = 
               copy_postconditions.begin(); it != 
@@ -4996,6 +5241,24 @@ namespace Legion {
       }
     }
 #endif
+
+    //--------------------------------------------------------------------------
+    void DeferredCopier::pack_sharded_write_tracker(unsigned field_index,
+                                                    Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      std::map<unsigned,ShardedWriteTracker*>::const_iterator finder = 
+        write_trackers.find(field_index);
+      if (finder == write_trackers.end())
+      {
+        ShardedWriteTracker *result = new ShardedWriteTracker(field_index,
+          dst->context, dst->logical_node->get_index_space_expression());
+        result->pack_for_remote_shard(rez);
+        write_trackers[field_index] = result;
+      }
+      else
+        finder->second->pack_for_remote_shard(rez);
+    }
 
     //--------------------------------------------------------------------------
     void DeferredCopier::uniquify_copy_postconditions(void)
@@ -5156,6 +5419,8 @@ namespace Legion {
                       reduction_postconditions.end());
 #endif
               reduction_postconditions[field_done].set_bit(index);
+              if (across_helper != NULL)
+                pack_sharded_write_tracker(index, rez);
             }
             // We also need destination preconditions for the reductions
             if (pop_count > 1)
@@ -5308,6 +5573,137 @@ namespace Legion {
       return false;
     }
 
+    //--------------------------------------------------------------------------
+    void DeferredCopier::arm_write_trackers(WriteSet &reduce_exprs, 
+                                            bool add_reference)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!write_trackers.empty());
+#endif
+      FieldMask tracker_mask;
+      // Build a mask for the trackers
+      if (!dst_previously_valid.empty() || !reduce_exprs.empty())
+      {
+        for (std::map<unsigned,ShardedWriteTracker*>::const_iterator it = 
+              write_trackers.begin(); it != write_trackers.end(); it++)
+          tracker_mask.set_bit(it->first);
+      }
+      if (!dst_previously_valid.empty())
+      {
+        std::vector<IndexSpaceExpression*> to_delete;
+        for (WriteSet::iterator it = dst_previously_valid.begin();
+              it != dst_previously_valid.end(); it++)
+        {
+          const FieldMask overlap = it->second & tracker_mask;
+          if (!overlap)
+            continue;
+          int index = overlap.find_first_set();
+          while (index >= 0)
+          {
+#ifdef DEBUG_LEGION
+            assert(write_trackers.find(index) != write_trackers.end());
+#endif
+            write_trackers[index]->record_valid_expression(it->first); 
+          }
+          it.filter(overlap);
+          if (!it->second)
+            to_delete.push_back(it->first);
+        }
+        if (!to_delete.empty())
+          for (std::vector<IndexSpaceExpression*>::const_iterator it = 
+                to_delete.begin(); it != to_delete.end(); it++)
+            dst_previously_valid.erase(*it);
+      }
+      if (!reduce_exprs.empty())
+      {
+        std::vector<IndexSpaceExpression*> to_delete;
+        for (WriteSet::iterator it = reduce_exprs.begin();
+              it != reduce_exprs.end(); it++)
+        {
+          const FieldMask overlap = it->second & tracker_mask;
+          if (!overlap)
+            continue;
+          int index = overlap.find_first_set();
+          while (index >= 0)
+          {
+#ifdef DEBUG_LEGION
+            assert(write_trackers.find(index) != write_trackers.end());
+#endif
+            write_trackers[index]->record_sub_expression(it->first); 
+          }
+          it.filter(overlap);
+          if (!it->second)
+            to_delete.push_back(it->first);
+        }
+        if (!to_delete.empty())
+          for (std::vector<IndexSpaceExpression*>::const_iterator it = 
+                to_delete.begin(); it != to_delete.end(); it++)
+            reduce_exprs.erase(*it);
+      }
+      // Now we can arm all the write trackers
+      for (std::map<unsigned,ShardedWriteTracker*>::const_iterator it = 
+            write_trackers.begin(); it != write_trackers.end(); it++)
+      {
+        if (add_reference)
+          it->second->add_reference();
+        if (it->second->arm())
+          delete it->second;
+      }
+      if (!add_reference)
+        write_trackers.clear();
+    }
+
+    //--------------------------------------------------------------------------
+    void DeferredCopier::compute_actual_dst_exprs(
+                       IndexSpaceExpression *dst_expr, WriteSet &reduce_exprs,
+                       std::vector<IndexSpaceExpression*> &actual_dst_exprs,
+                       LegionVector<FieldMask>::aligned &previously_valid_masks)
+    //--------------------------------------------------------------------------
+    {
+      RegionTreeForest *forest = dst->context;
+      LegionList<FieldSet<IndexSpaceExpression*> >::aligned 
+        valid_sets, reduction_sets;
+      dst_previously_valid.compute_field_sets(FieldMask(), valid_sets);
+      if (!reduce_exprs.empty())
+        reduce_exprs.compute_field_sets(FieldMask(), reduction_sets);
+      for (LegionList<FieldSet<IndexSpaceExpression*> >::aligned::iterator 
+            it = valid_sets.begin(); it != valid_sets.end(); it++)
+      {
+        IndexSpaceExpression *union_expr = 
+            forest->union_index_spaces(it->elements);
+        // See if we have any reduction sets that need to be subtracted
+        if (!reduction_sets.empty())
+        {
+          for (LegionList<FieldSet<IndexSpaceExpression*> >::aligned::
+                const_iterator rit = reduction_sets.begin(); 
+                rit != reduction_sets.end(); rit++)
+          {
+            const FieldMask overlap = it->set_mask & rit->set_mask;
+            if (!overlap)
+              continue;
+            previously_valid_masks.push_back(overlap);
+            IndexSpaceExpression *reduce_expr = 
+              forest->union_index_spaces(rit->elements);
+            IndexSpaceExpression *diff_expr = 
+              forest->subtract_index_spaces(union_expr, reduce_expr);
+            actual_dst_exprs.push_back(
+                forest->subtract_index_spaces(dst_expr, diff_expr));
+            it->set_mask -= overlap;
+            if (!it->set_mask)
+              break;
+          }
+        }
+        // Handle any remaining fields
+        if (!!it->set_mask)
+        {
+          previously_valid_masks.push_back(it->set_mask);
+          actual_dst_exprs.push_back(
+            forest->subtract_index_spaces(dst_expr, union_expr));
+        }
+      }
+    }
+
 #ifndef DISABLE_CVOPT
     /////////////////////////////////////////////////////////////
     // RemoteDeferredCopier
@@ -5376,7 +5772,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RemoteDeferredCopier::finalize(WriteSet &performed_writes,
+    void RemoteDeferredCopier::unpack_write_tracker(unsigned field_index,
+                   AddressSpaceID source, Runtime *runtime, Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(write_trackers.find(field_index) == write_trackers.end());
+#endif
+      write_trackers[field_index] = 
+       ShardedWriteTracker::unpack_tracker(field_index, source, runtime, derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteDeferredCopier::finalize(
                                     std::map<unsigned,ApUserEvent> &done_events)
     //--------------------------------------------------------------------------
     {
@@ -5386,8 +5794,11 @@ namespace Legion {
 #endif
       finalized = true;
       // Apply any reductions that we might have
+      WriteSet reduce_exprs;
       if (!reduction_epoch_masks.empty())
-        apply_reduction_epochs(performed_writes);
+        apply_reduction_epochs(reduce_exprs);
+      // Arm our sharded write trackers so they can send back their results
+      arm_write_trackers(reduce_exprs, false/*add reference*/);
       if (!copy_postconditions.empty())
       {
         // Need to uniquify our copy_postconditions before doing this
@@ -5464,7 +5875,7 @@ namespace Legion {
       : field_index(m.find_first_set()), copy_mask(m), info(in), 
         shard_context(ctx), dst(d), across_helper(NULL), restrict_info(&res), 
         restrict_out(r), current_reduction_epoch(0), 
-        has_dst_preconditions(false)
+        write_tracker(NULL), has_dst_preconditions(false)
 #ifdef DEBUG_LEGION
         , finalized(false)
 #endif
@@ -5479,7 +5890,7 @@ namespace Legion {
       : field_index(m.find_first_set()), copy_mask(m), info(in), 
         shard_context(ctx), dst(d), across_helper(h), restrict_info(NULL), 
         restrict_out(false), current_reduction_epoch(0), 
-        has_dst_preconditions(true)
+        write_tracker(NULL), has_dst_preconditions(true)
 #ifdef DEBUG_LEGION
         , finalized(false)
 #endif
@@ -5668,34 +6079,57 @@ namespace Legion {
           const AddressSpaceID local_space = 
             dst->context->runtime->address_space;
           // Compute our actual write condition
-          IndexSpaceExpression *dst_expr = 
-            dst->logical_node->get_index_space_expression();
-          // Subtract out any previously valid index space expressions
-          if (!dst_previously_valid.empty())
+          // Check to see if we have a write tracker that helps
+          // with the computation of the expression
+          if (write_tracker != NULL)
           {
-            RegionTreeForest *forest = dst->context;
-            IndexSpaceExpression *prev_expr = 
-              forest->union_index_spaces(dst_previously_valid);
-            // If we had any reductions though that overlapped then
-            // we don't include those in the prev_expr
-            if (!reduce_exprs.empty())
-            {
-              IndexSpaceExpression *reduce_expr = 
-                forest->union_index_spaces(reduce_exprs);
-              prev_expr = forest->subtract_index_spaces(prev_expr, reduce_expr);
-            }
-            dst_expr = forest->subtract_index_spaces(dst_expr, prev_expr);
-            // Tell the recorder about any empty composite views
-            if (info->recording && dst_expr->is_empty())
-              info->record_empty_copy(src_view, copy_mask, dst);
+            // Arm our write tracker
+            arm_write_tracker(reduce_exprs, true/*add reference*/);
+            // Get whatever the tightest ready expression is
+            IndexSpaceExpression *dst_expr = 
+              write_tracker->pending_expr->get_ready_expression();
+            dst->add_copy_user(0/*redop*/, copy_done, &info->version_info,
+                               dst_expr, info->op->get_unique_op_id(), 
+                               info->index, copy_mask, false/*reading*/, 
+                               restrict_out, local_space, 
+                               info->map_applied_events, *info);
+            // Remove our reference and clean things up
+            if (write_tracker->remove_reference())
+              delete write_tracker;
+            write_tracker = NULL;
           }
-          // Use the actually performed write to record what we wrote
-          // If we're not precise we get performance bugs and deadlocks
-          dst->add_copy_user(0/*redop*/, copy_done, &info->version_info,
-                             dst_expr, info->op->get_unique_op_id(), 
-                             info->index, copy_mask, false/*reading*/, 
-                             restrict_out, local_space, 
-                             info->map_applied_events, *info);
+          else
+          {
+            IndexSpaceExpression *dst_expr = 
+              dst->logical_node->get_index_space_expression();
+            // Subtract out any previously valid index space expressions
+            if (!dst_previously_valid.empty())
+            {
+              RegionTreeForest *forest = dst->context;
+              IndexSpaceExpression *prev_expr = 
+                forest->union_index_spaces(dst_previously_valid);
+              // If we had any reductions though that overlapped then
+              // we don't include those in the prev_expr
+              if (!reduce_exprs.empty())
+              {
+                IndexSpaceExpression *reduce_expr = 
+                  forest->union_index_spaces(reduce_exprs);
+                prev_expr = 
+                  forest->subtract_index_spaces(prev_expr, reduce_expr);
+              }
+              dst_expr = forest->subtract_index_spaces(dst_expr, prev_expr);
+              // Tell the recorder about any empty composite views
+              if (info->recording && dst_expr->is_empty())
+                info->record_empty_copy(src_view, copy_mask, dst);
+            }
+            // Use the actually performed write to record what we wrote
+            // If we're not precise we get performance bugs and deadlocks
+            dst->add_copy_user(0/*redop*/, copy_done, &info->version_info,
+                               dst_expr, info->op->get_unique_op_id(), 
+                               info->index, copy_mask, false/*reading*/, 
+                               restrict_out, local_space, 
+                               info->map_applied_events, *info);
+          }
           // Handle any restriction cases
           if (restrict_out && (restrict_info != NULL))
           {
@@ -5707,8 +6141,43 @@ namespace Legion {
         }
       }
       else
+      {
+        // Arm our write tracker if we have one
+        if (write_tracker != NULL)
+          arm_write_tracker(reduce_exprs, false/*reference*/);
         postconditions->insert(copy_postconditions.begin(),
                                copy_postconditions.end());
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void DeferredSingleCopier::arm_write_tracker(
+        const std::set<IndexSpaceExpression*> &reduce_exprs, bool add_reference)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(write_tracker != NULL);
+#endif
+      // We have a write tracker so we save any updates for it
+      if (!dst_previously_valid.empty())
+      {
+        for (std::set<IndexSpaceExpression*>::const_iterator it = 
+              dst_previously_valid.begin(); it != 
+              dst_previously_valid.end(); it++)
+          write_tracker->record_valid_expression(*it);
+      }
+      if (!reduce_exprs.empty())
+      {
+        for (std::set<IndexSpaceExpression*>::const_iterator it = 
+              reduce_exprs.begin(); it != reduce_exprs.end(); it++)
+          write_tracker->record_sub_expression(*it);
+      }
+      if (add_reference)
+        write_tracker->add_reference();
+      if (write_tracker->arm())
+        delete write_tracker;
+      if (!add_reference)
+        write_tracker = NULL;
     }
 
 #ifndef DISABLE_CVOPT
@@ -5733,6 +6202,16 @@ namespace Legion {
         rez.serialize(*it);
     }
 #endif
+
+    //--------------------------------------------------------------------------
+    void DeferredSingleCopier::pack_sharded_write_tracker(Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      if (write_tracker == NULL)
+        write_tracker = new ShardedWriteTracker(field_index,
+            dst->context, dst->logical_node->get_index_space_expression());
+      write_tracker->pack_for_remote_shard(rez);
+    }
 
     //--------------------------------------------------------------------------
     void DeferredSingleCopier::compute_dst_preconditions(void)
@@ -5818,10 +6297,12 @@ namespace Legion {
           it->second.mask->pack_expression(rez,
               shard_context->find_shard_space(it->first.shard));
           ApUserEvent done_event = Runtime::create_ap_user_event();
-          rez.serialize(done_event);
           reduction_postconditions.insert(done_event);
+          rez.serialize(done_event);
           // Also need to send the preconditions for the reductions
           rez.serialize(reduction_pre);
+          if (across_helper != NULL)
+            pack_sharded_write_tracker(rez);
           shard_context->send_composite_view_shard_reduction_request(
                                                 it->first.shard, rez);
         }
@@ -5924,17 +6405,32 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RemoteDeferredSingleCopier::finalize(
-                 IndexSpaceExpression *&performed_write, ApUserEvent done_event)
+    void RemoteDeferredSingleCopier::unpack_write_tracker(AddressSpaceID source,
+                                          Runtime *runtime, Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(write_tracker == NULL);
+#endif
+      write_tracker = 
+       ShardedWriteTracker::unpack_tracker(field_index, source, runtime, derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteDeferredSingleCopier::finalize(ApUserEvent done_event)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(!finalized);
 #endif
       finalized = true;
+      std::set<IndexSpaceExpression*> reduce_exprs;
       // Apply any pending reductions using the proper preconditions
       if (!reduction_epochs.empty() || !reduction_shards.empty())
-        apply_reduction_epochs(performed_write);
+        apply_reduction_epochs(reduce_exprs);
+      // Arm our sharded write tracker so that it can send back its result
+      arm_write_tracker(reduce_exprs, false/*add reference*/);
+      // Trigger our dependent events
       if (!copy_postconditions.empty())
         Runtime::trigger_event(done_event, 
             Runtime::merge_events(info, copy_postconditions));
@@ -6200,6 +6696,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void CompositeReducer::unpack_write_tracker(unsigned field_index,
+                                                Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(remote_trackers.find(field_index) == remote_trackers.end());
+#endif
+      std::pair<ShardedWriteTracker*,RtUserEvent> &tracker = 
+        remote_trackers[field_index];
+      ShardedWriteTracker::unpack_tracker(derez, tracker.first, tracker.second);
+    }
+
+    //--------------------------------------------------------------------------
     void CompositeReducer::unpack(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
@@ -6242,7 +6751,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void CompositeReducer::finalize(std::map<unsigned,ApUserEvent> &done_events)
+    void CompositeReducer::record_expression(IndexSpaceExpression *expr,
+                                             const FieldMask &expr_mask)
+    //--------------------------------------------------------------------------
+    {
+      WriteSet::iterator finder = reduce_expressions.find(expr);
+      if (finder == reduce_expressions.end())
+        reduce_expressions.insert(expr, expr_mask);
+      else
+        finder.merge(expr_mask);
+    }
+
+    //--------------------------------------------------------------------------
+    void CompositeReducer::finalize(std::map<unsigned,ApUserEvent> &done_events,
+                                    Runtime *runtime, AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
       // Short our postconditions into event sets
@@ -6283,6 +6805,57 @@ namespace Legion {
           Runtime::trigger_event(it->second);
         done_events.clear();
       }
+      if (!remote_trackers.empty())
+      {
+        LegionList<FieldSet<IndexSpaceExpression*> >::aligned reduce_sets;
+        reduce_expressions.compute_field_sets(reduction_mask, reduce_sets);
+        for (LegionList<FieldSet<IndexSpaceExpression*> >::aligned::
+              const_iterator it = reduce_sets.begin(); 
+              it != reduce_sets.end(); it++)
+        {
+          if (it->elements.empty())
+          {
+            int field_index = it->set_mask.find_first_set();
+            while (field_index >= 0)
+            {
+              std::map<unsigned,
+                       std::pair<ShardedWriteTracker*,RtUserEvent> >::iterator
+                  finder = remote_trackers.find(field_index);
+#ifdef DEBUG_LEGION
+              assert(finder != remote_trackers.end());
+#endif
+              Runtime::trigger_event(finder->second.second);
+              remote_trackers.erase(finder);
+              // find the next field to handle
+              field_index = it->set_mask.find_next_set(field_index+1);
+            }
+          }
+          else
+          {
+            IndexSpaceExpression *union_expr = 
+              runtime->forest->union_index_spaces(it->elements);
+            int field_index = it->set_mask.find_first_set();
+            while (field_index >= 0)
+            {
+               std::map<unsigned,
+                       std::pair<ShardedWriteTracker*,RtUserEvent> >::iterator
+                  finder = remote_trackers.find(field_index);
+#ifdef DEBUG_LEGION
+              assert(finder != remote_trackers.end());
+#endif
+              ShardedWriteTracker::send_shard_sub(runtime, finder->second.first,
+                                     target, union_expr, finder->second.second);
+              remote_trackers.erase(finder);
+              // find the next field to handle
+              field_index = it->set_mask.find_next_set(field_index+1);
+            }
+          }
+        }
+#ifdef DEBUG_LEGION
+        // We should have handled all the remote trackers
+        assert(remote_trackers.empty());
+#endif
+      }
     }
 
     /////////////////////////////////////////////////////////////
@@ -6295,7 +6868,8 @@ namespace Legion {
                                        const FieldMask &r, ApEvent p,
                                        CopyAcrossHelper *h)
       : info(in), context(ctx), dst(d), reduction_mask(r), 
-        field_index(r.find_first_set()), reduce_pre(p), across_helper(h)
+        field_index(r.find_first_set()), reduce_pre(p), across_helper(h),
+        remote_tracker(NULL), remote_event(RtUserEvent::NO_RT_USER_EVENT)
     //--------------------------------------------------------------------------
     {
     }
@@ -6329,7 +6903,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void CompositeSingleReducer::finalize(ApUserEvent done_event)
+    void CompositeSingleReducer::unpack_write_tracker(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(remote_tracker == NULL);
+#endif
+      ShardedWriteTracker::unpack_tracker(derez, remote_tracker, remote_event);
+    }
+
+    //--------------------------------------------------------------------------
+    void CompositeSingleReducer::finalize(ApUserEvent done_event,
+                                        Runtime *runtime, AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
       if (!reduce_postconditions.empty())
@@ -6337,6 +6922,18 @@ namespace Legion {
             Runtime::merge_events(info, reduce_postconditions));
       else
         Runtime::trigger_event(done_event);
+      if (remote_tracker != NULL)
+      {
+        if (!reduce_expressions.empty())
+        {
+          IndexSpaceExpression *union_expr = 
+            runtime->forest->union_index_spaces(reduce_expressions);
+          ShardedWriteTracker::send_shard_sub(runtime, remote_tracker, 
+                                              target, union_expr, remote_event);
+        }
+        else
+          Runtime::trigger_event(remote_event);
+      }
     }
 
     /////////////////////////////////////////////////////////////
@@ -8176,13 +8773,11 @@ namespace Legion {
 #endif
             // This puts the event in the set and sets the bit for the field
             copier.copy_postconditions[field_done].set_bit(index);
+            // Find the sharded write tracker we'll use to tell about writes
+            // Don't need a write-tracker though if this is a copy-across
+            if (copier.across_helper == NULL)
+              copier.pack_sharded_write_tracker(index, rez);
           }
-          // Also update the performed writes set here
-          WriteMasks::iterator finder = performed_writes.find(wit->first);
-          if (finder != performed_writes.end())
-            finder.merge(wit->second);
-          else
-            performed_writes.insert(wit->first, wit->second);
         }
         // Now we can send the copy message to the remote node
         owner_context->send_composite_view_shard_copy_request(it->first, rez);
@@ -8241,8 +8836,6 @@ namespace Legion {
          logical_node->context->subtract_index_spaces(target_expr,it->second);
         mask->pack_expression(rez,
             owner_context->find_shard_space(it->first));
-        // Save the write expression in the shard writes
-        shard_writes.insert(it->second);
         ApUserEvent field_done = Runtime::create_ap_user_event();
         rez.serialize(field_done);
 #ifdef DEBUG_LEGION
@@ -8250,6 +8843,10 @@ namespace Legion {
                 copier.copy_postconditions.end());
 #endif
         copier.record_postcondition(field_done);
+        // Pack the sharded write tracker if this is not a copy-across
+        // Don't need one for copy-across since we know we always write it all
+        if (copier.across_helper == NULL)
+          copier.pack_sharded_write_tracker(rez);
         // Now we can send the copy message to the remote node
         owner_context->send_composite_view_shard_copy_request(it->first, rez);
       }
@@ -9207,16 +9804,19 @@ namespace Legion {
         RemoteDeferredSingleCopier *copier = 
           RemoteDeferredSingleCopier::unpack_copier(derez, rt, copy_mask, ctx);
         IndexSpaceExpression *write_mask = 
-          IndexSpaceExpression::unpack_expression(derez,runtime->forest,source);
+          IndexSpaceExpression::unpack_expression(derez, rt->forest, source);
         write_mask->add_expression_reference();
         ApUserEvent done_event;
         derez.deserialize(done_event);
+        // Also unpack the write tracker
+        if (copier->across_helper == NULL)
+          copier->unpack_write_tracker(source, rt, derez);
         // Now we can perform the copies
         IndexSpaceExpression *performed_write = NULL;
         issue_deferred_copies_single(*copier, write_mask, 
                                      performed_write, pred_guard);
         // Do the finalization for the copy
-        copier->finalize(performed_write, done_event);
+        copier->finalize(done_event);
         // Lastly do the clean-up
         delete copier;
         if (write_mask->remove_expression_reference())
@@ -9236,7 +9836,7 @@ namespace Legion {
         {
           IndexSpaceExpression *expression = 
             IndexSpaceExpression::unpack_expression(derez, 
-                                  runtime->forest, source);
+                                  rt->forest, source);
           expression->add_expression_reference();
           FieldMask expr_mask;
           size_t field_count;
@@ -9246,12 +9846,13 @@ namespace Legion {
             unsigned field_index;
             derez.deserialize(field_index);
             expr_mask.set_bit(field_index);
-            ApUserEvent field_done;
-            derez.deserialize(field_done);
 #ifdef DEBUG_LEGION
             assert(done_events.find(field_index) == done_events.end());
 #endif
-            done_events[field_index] = field_done;
+            derez.deserialize(done_events[field_index]);
+            // Also unpack the write tracker
+            if (copier->across_helper == NULL)
+              copier->unpack_write_tracker(field_index, source, rt, derez);
           }
           if (!!expr_mask)
             write_masks.insert(expression, expr_mask);
@@ -9261,7 +9862,7 @@ namespace Legion {
         issue_deferred_copies(*copier, copy_mask, write_masks,
                               performed_writes, pred_guard);
         // Do the finalization
-        copier->finalize(performed_writes, done_events);
+        copier->finalize(done_events);
         // Lastly do the clean-up
         delete copier;
         for (WriteMasks::const_iterator it = write_masks.begin();
@@ -9319,23 +9920,15 @@ namespace Legion {
             dst_view = dst->as_materialized_view();
           }
           CompositeSingleReducer reducer(info, ctx, dst_view, reduction_mask,
-                                         reduce_pre,across_helper);
+                                         reduce_pre, across_helper);
+          if (across_helper != NULL)
+            reducer.unpack_write_tracker(derez);
           issue_composite_reductions_single(reducer, expression, logical_node, 
                                             pred_guard, this);
-          reducer.finalize(done_event);
+          reducer.finalize(done_event, runtime, source);
         }
         else
         {
-          std::map<unsigned,ApUserEvent> done_events;
-          for (unsigned idx = 0; idx < pop_count; idx++)
-          {
-            unsigned index;
-            derez.deserialize(index);
-#ifdef DEBUG_LEGION
-            assert(done_events.find(index) == done_events.end());
-#endif
-            derez.deserialize(done_events[index]);
-          }
           if (dst_view == NULL)
           {
             if (!dst_ready.has_triggered())
@@ -9347,12 +9940,24 @@ namespace Legion {
           }
           CompositeReducer reducer(info, ctx, dst_view,
                                    reduction_mask, across_helper);
+          std::map<unsigned,ApUserEvent> done_events;
+          for (unsigned idx = 0; idx < pop_count; idx++)
+          {
+            unsigned index;
+            derez.deserialize(index);
+#ifdef DEBUG_LEGION
+            assert(done_events.find(index) == done_events.end());
+#endif
+            derez.deserialize(done_events[index]);
+            if (across_helper != NULL)
+              reducer.unpack_write_tracker(index, derez);
+          }
           reducer.unpack(derez);
           WriteMasks reduce_masks;
           reduce_masks.insert(expression, reduction_mask);
           issue_composite_reductions(reducer, reduction_mask, reduce_masks, 
                                      logical_node, pred_guard, this);
-          reducer.finalize(done_events);
+          reducer.finalize(done_events, runtime, source);
         }
       }
       // Cleanup the resources that we own

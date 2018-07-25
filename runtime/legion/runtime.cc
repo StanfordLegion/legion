@@ -6416,6 +6416,12 @@ namespace Legion {
               break;
             }
 #endif
+          case SEND_REPL_COMPOSITE_VIEW_WRITE_SUMMARY:
+            {
+              runtime->handle_control_replicate_composite_view_write_summary(
+                                                  derez, remote_address_space);
+              break;
+            }
           case SEND_REPL_TOP_VIEW_REQUEST:
             {
               runtime->handle_control_replicate_top_view_request(derez,
@@ -15430,6 +15436,16 @@ namespace Legion {
 #endif
 
     //--------------------------------------------------------------------------
+    void Runtime::send_control_replicate_composite_view_write_summary(
+                                         AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, 
+          SEND_REPL_COMPOSITE_VIEW_WRITE_SUMMARY, COLLECTIVE_VIRTUAL_CHANNEL,
+          true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_control_replicate_top_view_request(AddressSpaceID target,
                                                           Serializer &rez)
     //--------------------------------------------------------------------------
@@ -16859,6 +16875,14 @@ namespace Legion {
       CompositeView::handle_composite_view_response(derez, this); 
     }
 #endif
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_control_replicate_composite_view_write_summary(
+                                     Deserializer &derez, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      ShardedWriteTracker::process_shard_summary(derez, forest, source);
+    }
 
     //--------------------------------------------------------------------------
     void Runtime::handle_control_replicate_top_view_request(Deserializer &derez,
@@ -22491,6 +22515,11 @@ namespace Legion {
         case LG_DELETE_TEMPLATE_ID:
           {
             PhysicalTemplate::handle_delete_template(args);
+            break;
+          }
+        case LG_COMPUTE_SHARDED_WRITE_TASK_ID:
+          {
+            ShardedWriteTracker::handle_evaluate(args);
             break;
           }
         case LG_RETRY_SHUTDOWN_TASK_ID:

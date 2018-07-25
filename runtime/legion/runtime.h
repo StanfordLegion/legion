@@ -2473,6 +2473,8 @@ namespace Legion {
       void send_control_replicate_composite_view_response(AddressSpaceID target,
                                                           Serializer &rez);
 #endif
+      void send_control_replicate_composite_view_write_summary(
+                                    AddressSpaceID target, Serializer &rez);
       void send_control_replicate_top_view_request(AddressSpaceID target,
                                                    Serializer &rez);
       void send_control_replicate_top_view_response(AddressSpaceID target,
@@ -2715,8 +2717,11 @@ namespace Legion {
                                 Deserializer &derez, AddressSpaceID source);
 #else
       void handle_control_replicate_composite_view_request(Deserializer &derez);
-      void handle_control_replicate_composite_view_response(Deserializer &derez);
+      void handle_control_replicate_composite_view_response(
+                                                           Deserializer &derez);
 #endif
+      void handle_control_replicate_composite_view_write_summary(
+                                    Deserializer &derez, AddressSpaceID source);
       void handle_control_replicate_top_view_request(Deserializer &derez,
                                                      AddressSpaceID source);
       void handle_control_replicate_top_view_response(Deserializer &derez);

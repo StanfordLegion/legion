@@ -343,6 +343,7 @@ namespace Legion {
       LG_REMOTE_PHYSICAL_RESPONSE_TASK_ID,
       LG_REPLAY_SLICE_ID,
       LG_DELETE_TEMPLATE_ID,
+      LG_COMPUTE_SHARDED_WRITE_TASK_ID,
       LG_MESSAGE_ID, // These two must be the last two
       LG_RETRY_SHUTDOWN_TASK_ID,
       LG_LAST_TASK_ID, // This one should always be last
@@ -434,6 +435,7 @@ namespace Legion {
         "Remote Physical Context Response",                       \
         "Replay Physical Trace",                                  \
         "Delete Physical Template",                               \
+        "Compute Sharded Write",                                  \
         "Remote Message",                                         \
         "Retry Shutdown",                                         \
       };
@@ -704,6 +706,7 @@ namespace Legion {
       SEND_REPL_COMPOSITE_VIEW_REQUEST,
       SEND_REPL_COMPOSITE_VIEW_RESPONSE,
 #endif
+      SEND_REPL_COMPOSITE_VIEW_WRITE_SUMMARY,
       SEND_REPL_TOP_VIEW_REQUEST,
       SEND_REPL_TOP_VIEW_RESPONSE,
       SEND_REPL_CLONE_BARRIER,
@@ -876,6 +879,7 @@ namespace Legion {
         "Send Replicate Future Map Response",                         \
         "Send Replicate Copy Request",                                \
         "Send Replicate Reduction Request",                           \
+        "Send Replicate Write Summary",                               \
         "Send Replicate Top View Request",                            \
         "Send Replicate Top View Response",                           \
         "Send Replicate Clone Barrier",                               \
@@ -1042,6 +1046,7 @@ namespace Legion {
         "Send Replicate Future Map Response",                         \
         "Send Replicate Composite View Request",                      \
         "Send Replicate Composite View Response",                     \
+        "Send Replicate Write Summary",                               \
         "Send Replicate Top View Request",                            \
         "Send Replicate Top View Response",                           \
         "Send Replicate Clone Barrier",                               \

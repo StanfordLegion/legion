@@ -1012,6 +1012,72 @@ namespace Legion {
     };
 
     /**
+     * \class ShardedWriteTracker
+     * A sharded write tracker is used for tracking the write
+     * sets of composite copy requests from remote shards for a
+     * particular field. It actually does this by tracking the 
+     * complement of the write set (set of things not written
+     * because they were already valid) since the common case will
+     * be that we actually do write to instances from remote shards.
+     */
+    class ShardedWriteTracker : public Collectable {
+    public:
+      struct ShardedWriteTrackerArgs : 
+        public LgTaskArgs<ShardedWriteTrackerArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_COMPUTE_SHARDED_WRITE_TASK_ID;
+      public:
+        ShardedWriteTracker *tracker;
+      };
+    public:
+      ShardedWriteTracker(unsigned field_index, RegionTreeForest *forest,
+                          IndexSpaceExpression *upper_bound,
+                          ShardedWriteTracker *remote_tracker = NULL,
+                          RtUserEvent event = RtUserEvent::NO_RT_USER_EVENT,
+                          AddressSpaceID remote_target = 0);
+      ShardedWriteTracker(const ShardedWriteTracker &rhs);
+      ~ShardedWriteTracker(void);
+    public:
+      ShardedWriteTracker& operator=(const ShardedWriteTracker &rhs);
+    public:
+      void pack_for_remote_shard(Serializer &rez);
+      void record_valid_expression(IndexSpaceExpression *expr);
+      void record_sub_expression(IndexSpaceExpression *expr);
+      // Return true if we can delete the object
+      bool arm(void);
+    public:
+      void evaluate(void);
+    public:
+      static void handle_evaluate(const void *args);
+      static void unpack_tracker(Deserializer &derez,
+                     ShardedWriteTracker *&tracker, RtUserEvent &event);
+      static ShardedWriteTracker* unpack_tracker(unsigned field_index,
+          AddressSpaceID source, Runtime *runtime, Deserializer &derez);
+      static void send_shard_valid(Runtime *rt, ShardedWriteTracker *tracker,
+                          AddressSpaceID target, IndexSpaceExpression *expr,
+                          RtUserEvent done_event);
+      static void send_shard_sub(Runtime *rt, ShardedWriteTracker *tracker,
+                          AddressSpaceID target, IndexSpaceExpression *expr,
+                          RtUserEvent done_event);
+      static void process_shard_summary(Deserializer &derez, 
+          RegionTreeForest *forest, AddressSpaceID source);
+    public:
+      const unsigned field_index;
+      RegionTreeForest *const forest;
+      IndexSpaceExpression *const upper_bound;
+      PendingIndexSpaceExpression *const pending_expr;
+      // In case we're a remote copy of a tracker
+      ShardedWriteTracker *const remote_tracker;
+      const RtUserEvent remote_event;
+      const AddressSpaceID remote_target;
+    protected:
+      mutable LocalLock expr_lock;
+      std::set<RtEvent> remote_events;
+      std::set<IndexSpaceExpression*> valid_expressions;
+      std::set<IndexSpaceExpression*> sub_expressions;
+    };
+
+    /**
      * \struct DeferredCopier 
      * This is a helper class for performing copies from a deferred 
      * instance. It stores all of the arguments that need to be passed 
@@ -1119,6 +1185,7 @@ namespace Legion {
 #ifndef DISABLE_CVOPT
       void pack_copier(Serializer &rez, const FieldMask &copy_mask);
 #endif
+      void pack_sharded_write_tracker(unsigned field_index, Serializer &rez);
       inline bool has_reductions(void) const 
         { return !reduction_epochs.empty(); }
     protected:
@@ -1128,6 +1195,11 @@ namespace Legion {
       bool issue_reductions(const int epoch, ApEvent reduction_pre, 
                             const FieldMask &mask, WriteSet &reduce_exprs,
               LegionMap<ApEvent,FieldMask>::aligned &reduction_postconditions);
+      void arm_write_trackers(WriteSet &reduce_exprs, bool add_reference);
+      void compute_actual_dst_exprs(IndexSpaceExpression *dst_expr,
+                                    WriteSet &reduce_exprs,
+              std::vector<IndexSpaceExpression*> &actual_dst_exprs,
+              LegionVector<FieldMask>::aligned &previously_valid_masks);
     public: // const fields
       const TraversalInfo *const info;
       InnerContext *const shard_context;
@@ -1138,10 +1210,6 @@ namespace Legion {
     public: // visible mutable fields
       FieldMask deferred_copy_mask;
       LegionMap<ApEvent,FieldMask>::aligned copy_postconditions;
-      // Keep track of expressions for data that was already valid
-      // in the desintation instance, this will allow us to compute
-      // an expression for the actual write set of the copy
-      WriteSet dst_previously_valid;
     protected: // internal members
       LegionMap<ApEvent,FieldMask>::aligned dst_preconditions;
       FieldMask dst_precondition_mask;
@@ -1149,6 +1217,13 @@ namespace Legion {
       // Reduction data 
       unsigned current_reduction_epoch;
       std::vector<PendingReductions> reduction_epochs;
+    protected:
+      // Keep track of expressions for data that was already valid
+      // in the desintation instance, this will allow us to compute
+      // an expression for the actual write set of the copy
+      WriteSet dst_previously_valid;
+      // For control replication computations of dst_previously_valid
+      std::map<unsigned/*field index*/,ShardedWriteTracker*> write_trackers;
 #ifndef DISABLE_CVOPT
       std::vector<PendingReductionShards> reduction_shards;
 #endif
@@ -1183,8 +1258,9 @@ namespace Legion {
       virtual bool is_remote(void) const { return true; }
     public:
       void unpack(Deserializer &derez, const FieldMask &copy_mask);
-      void finalize(WriteSet &performed_writes,
-                    std::map<unsigned,ApUserEvent> &done_events);
+      void unpack_write_tracker(unsigned field_index, AddressSpaceID source,
+                                Runtime *runtime, Deserializer &derez);
+      void finalize(std::map<unsigned,ApUserEvent> &done_events);
     public:
       static RemoteDeferredCopier* unpack_copier(Deserializer &derez, 
             Runtime *runtime, const FieldMask &copy_mask, InnerContext *ctx);
@@ -1287,9 +1363,12 @@ namespace Legion {
       void record_previously_valid(IndexSpaceExpression *expr);
       void finalize(DeferredView *src_view,
                     std::set<ApEvent> *postconditions = NULL);
+      void arm_write_tracker(const std::set<IndexSpaceExpression*> &reduce_exps,
+                             bool add_reference);
 #ifndef DISABLE_CVOPT
       void pack_copier(Serializer &rez);
 #endif
+      void pack_sharded_write_tracker(Serializer &rez);
       inline void record_postcondition(ApEvent post)
         { copy_postconditions.insert(post); }
       inline bool has_reductions(void) const 
@@ -1315,6 +1394,7 @@ namespace Legion {
       std::set<IndexSpaceExpression*> dst_previously_valid;
       unsigned current_reduction_epoch;
       std::vector<PendingReductions> reduction_epochs;
+      ShardedWriteTracker *write_tracker;
 #ifndef DISABLE_CVOPT
       std::vector<PendingReductionShards> reduction_shards;
 #endif
@@ -1350,8 +1430,9 @@ namespace Legion {
       virtual bool is_remote(void) const { return true; }
     public:
       void unpack(Deserializer &derez);
-      void finalize(IndexSpaceExpression *&performed_write, 
-                    ApUserEvent done_event);
+      void unpack_write_tracker(AddressSpaceID source, Runtime *runtime,
+                                Deserializer &derez);
+      void finalize(ApUserEvent done_event);
     public:
       static RemoteDeferredSingleCopier* unpack_copier(Deserializer &derez,
                Runtime *runtime, const FieldMask &copy_mask, InnerContext *ctx);
@@ -1470,11 +1551,12 @@ namespace Legion {
       CompositeReducer& operator=(const CompositeReducer &rhs);
     public:
       void unpack(Deserializer &derez);
+      void unpack_write_tracker(unsigned field_index, Deserializer &derez);
       ApEvent find_precondition(const FieldMask &mask) const;
       void record_postcondition(ApEvent done, const FieldMask &mask);
-      void record_expression(IndexSpaceExpression *expr, const FieldMask &mask)
-        { assert(false); } // TODO
-      void finalize(std::map<unsigned,ApUserEvent> &done_events);
+      void record_expression(IndexSpaceExpression *expr, const FieldMask &mask);
+      void finalize(std::map<unsigned,ApUserEvent> &done_events,
+                    Runtime *runtime, AddressSpaceID target);
     public:
       TraversalInfo *const info;
       InnerContext *const context;
@@ -1484,6 +1566,11 @@ namespace Legion {
     protected:
       LegionMap<ApEvent,FieldMask>::aligned reduce_preconditions;
       LegionMap<ApEvent,FieldMask>::aligned reduce_postconditions;
+    protected:
+      // For sending back to our sharded write trackers
+      WriteSet reduce_expressions;
+      std::map<unsigned/*fidx*/,
+               std::pair<ShardedWriteTracker*,RtUserEvent> > remote_trackers;
     };
 
     /**
@@ -1504,11 +1591,12 @@ namespace Legion {
     public:
       CompositeSingleReducer& operator=(const CompositeSingleReducer &rhs);
     public:
-      void finalize(ApUserEvent done_event);
-      inline void record_postcondition(ApEvent post)
+       inline void record_postcondition(ApEvent post)
         { reduce_postconditions.insert(post); }
+      void unpack_write_tracker(Deserializer &derez);
       inline void record_expression(IndexSpaceExpression *expr)
-        { assert(false); } // TODO
+        { if (remote_tracker != NULL) reduce_expressions.insert(expr); }
+      void finalize(ApUserEvent done_event, Runtime *rt, AddressSpaceID target);
     public:
       TraversalInfo *const info;
       InnerContext *const context;
@@ -1519,6 +1607,11 @@ namespace Legion {
       CopyAcrossHelper *const across_helper;
     protected:
       std::set<ApEvent> reduce_postconditions;
+    protected:
+      // For sending back to our sharded write tracker
+      std::set<IndexSpaceExpression*> reduce_expressions;
+      ShardedWriteTracker *remote_tracker;
+      RtUserEvent remote_event;
     };
 
     /**

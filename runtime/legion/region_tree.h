@@ -1097,6 +1097,14 @@ namespace Legion {
       virtual void pack_expression(Serializer &rez, AddressSpaceID target);
     public:
       void set_result(IndexSpaceExpression *result);
+      // This can be racy but in a good way
+      inline IndexSpaceExpression* get_ready_expression(void) const
+      {
+        if (result != NULL)
+          return result;
+        else
+          return upper_bound;
+      }
     public:
       IndexSpaceExpression *const upper_bound;
     protected:
