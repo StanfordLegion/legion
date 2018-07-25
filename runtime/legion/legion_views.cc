@@ -5791,8 +5791,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(!finalized);
       assert(current_reduction_epoch == 0);
-#endif
       finalized = true;
+#endif
       // Apply any reductions that we might have
       WriteSet reduce_exprs;
       if (!reduction_epoch_masks.empty())
@@ -6422,8 +6422,8 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(!finalized);
-#endif
       finalized = true;
+#endif
       std::set<IndexSpaceExpression*> reduce_exprs;
       // Apply any pending reductions using the proper preconditions
       if (!reduction_epochs.empty() || !reduction_shards.empty())
