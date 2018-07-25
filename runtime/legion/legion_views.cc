@@ -4780,12 +4780,21 @@ namespace Legion {
                                                   RtUserEvent done_event)
     //--------------------------------------------------------------------------
     {
-      Serializer rez;
-      rez.serialize(tracker);
-      expr->pack_expression(rez, target);
-      rez.serialize(done_event);
-      rez.serialize<bool>(true); // valid
-      runtime->send_control_replicate_composite_view_write_summary(target, rez);
+      if (target == runtime->address_space)
+      {
+        tracker->record_valid_expression(expr);
+        Runtime::trigger_event(done_event);
+      }
+      else
+      {
+        Serializer rez;
+        rez.serialize(tracker);
+        expr->pack_expression(rez, target);
+        rez.serialize(done_event);
+        rez.serialize<bool>(true); // valid
+        runtime->send_control_replicate_composite_view_write_summary(target, 
+                                                                     rez);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -4796,12 +4805,21 @@ namespace Legion {
                                                   RtUserEvent done_event)
     //--------------------------------------------------------------------------
     {
-      Serializer rez;
-      rez.serialize(tracker);
-      expr->pack_expression(rez, target);
-      rez.serialize(done_event);
-      rez.serialize<bool>(false); // sub
-      runtime->send_control_replicate_composite_view_write_summary(target, rez);
+      if (target == runtime->address_space)
+      {
+        tracker->record_sub_expression(expr);
+        Runtime::trigger_event(done_event);
+      }
+      else
+      {
+        Serializer rez;
+        rez.serialize(tracker);
+        expr->pack_expression(rez, target);
+        rez.serialize(done_event);
+        rez.serialize<bool>(false); // sub
+        runtime->send_control_replicate_composite_view_write_summary(target,
+                                                                     rez);
+      }
     }
 
     //--------------------------------------------------------------------------
