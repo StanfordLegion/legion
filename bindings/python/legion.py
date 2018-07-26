@@ -1064,7 +1064,7 @@ class Tunable(object):
     def select(tunable_id):
         result = c.legion_runtime_select_tunable_value(
             _my.ctx.runtime, _my.ctx.context, tunable_id, 0, 0)
-        future = Future.from_cdata(result, value_type=uint64_t)
+        future = Future.from_cdata(result, value_type=uint64)
         c.legion_future_destroy(result)
         return future
 
