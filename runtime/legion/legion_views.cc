@@ -3268,11 +3268,12 @@ namespace Legion {
           observed |= overlap;
         if (event_users.single)
         {
+          ApEvent pre = cit->first;
           if (has_local_precondition(event_users.users.single_user, usage,
-                                     child_color, op_id, index, user_expr))
+                                     child_color, op_id, index, user_expr, pre))
           {
-            preconditions.insert(cit->first);
-            if (TRACK_DOM)
+            preconditions.insert(pre);
+            if (TRACK_DOM && (pre == cit->first))
               filter_events[cit->first] = overlap;
           }
           else if (TRACK_DOM)
@@ -3287,11 +3288,12 @@ namespace Legion {
             const FieldMask user_overlap = user_mask & it->second;
             if (!user_overlap)
               continue;
+            ApEvent pre = cit->first;
             if (has_local_precondition(it->first, usage, child_color, 
-                                       op_id, index, user_expr))
+                                       op_id, index, user_expr, pre))
             {
-              preconditions.insert(cit->first);
-              if (TRACK_DOM)
+              preconditions.insert(pre);
+              if (TRACK_DOM && (pre == cit->first))
                 filter_events[cit->first] |= user_overlap;
             }
             else if (TRACK_DOM)
@@ -3340,9 +3342,10 @@ namespace Legion {
           continue;
         if (event_users.single)
         {
+          ApEvent pre = pit->first;
           if (has_local_precondition(event_users.users.single_user, usage,
-                                     child_color, op_id, index, user_expr))
-            preconditions.insert(pit->first);
+                                     child_color, op_id, index, user_expr, pre))
+            preconditions.insert(pre);
         }
         else
         {
@@ -3352,9 +3355,10 @@ namespace Legion {
           {
             if (user_mask * it->second)
               continue;
+            ApEvent pre = pit->first;
             if (has_local_precondition(it->first, usage, child_color, 
-                                       op_id, index, user_expr))
-              preconditions.insert(pit->first);
+                                       op_id, index, user_expr, pre))
+              preconditions.insert(pre);
           }
         }
       }
@@ -3409,14 +3413,17 @@ namespace Legion {
           observed |= overlap;
         if (event_users.single)
         {
+          ApEvent pre = cit->first;
           if (has_local_precondition(event_users.users.single_user, usage,
-                                     child_color, op_id, index, user_expr))
+                                     child_color, op_id, index, user_expr, pre))
           {
-            if (finder == preconditions.end())
+            if (pre != cit->first)
+              preconditions[pre] |= overlap;
+            else if (finder == preconditions.end())
               preconditions[cit->first] = overlap;
             else
               finder->second |= overlap;
-            if (TRACK_DOM)
+            if (TRACK_DOM && (pre == cit->first))
               filter_events[cit->first] = overlap;
           }
           else if (TRACK_DOM)
@@ -3431,14 +3438,17 @@ namespace Legion {
             const FieldMask user_overlap = user_mask & it->second;
             if (!user_overlap)
               continue;
+            ApEvent pre = cit->first;
             if (has_local_precondition(it->first, usage, child_color, 
-                                       op_id, index, user_expr))
+                                       op_id, index, user_expr, pre))
             {
-              if (finder == preconditions.end())
+              if (pre != cit->first)
+                preconditions[pre] |= user_overlap;
+              else if (finder == preconditions.end())
                 preconditions[cit->first] = user_overlap;
               else
                 finder->second |= user_overlap;
-              if (TRACK_DOM)
+              if (TRACK_DOM && (pre == cit->first))
                 filter_events[cit->first] |= user_overlap;
             }
             else if (TRACK_DOM)
@@ -3492,10 +3502,13 @@ namespace Legion {
 #endif
         if (event_users.single)
         {
+          ApEvent pre = pit->first;
           if (has_local_precondition(event_users.users.single_user, usage,
-                                     child_color, op_id, index, user_expr))
+                                     child_color, op_id, index, user_expr, pre))
           {
-            if (finder == preconditions.end())
+            if (pre != pit->first)
+              preconditions[pre] |= overlap;
+            else if (finder == preconditions.end())
               preconditions[pit->first] = overlap;
             else
               finder->second |= overlap;
@@ -3510,10 +3523,13 @@ namespace Legion {
             const FieldMask user_overlap = overlap & it->second;
             if (!user_overlap)
               continue;
+            ApEvent pre = pit->first;
             if (has_local_precondition(it->first, usage, child_color, 
-                                       op_id, index, user_expr))
+                                       op_id, index, user_expr, pre))
             {
-              if (finder == preconditions.end())
+              if (pre != pit->first)
+                preconditions[pre] |= user_overlap;
+              else if (finder == preconditions.end())
               {
                 preconditions[pit->first] = user_overlap;
                 // Needed for when we go around the loop again

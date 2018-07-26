@@ -787,6 +787,8 @@ namespace Legion {
         { assert(false); }
       virtual void add_expression_reference(void) = 0;
       virtual bool remove_expression_reference(void) = 0;
+      virtual bool test_intersection_nonblocking(IndexSpaceExpression *expr,
+         RegionTreeForest *context, ApEvent &precondition, bool second = false);
     public:
       static void handle_tighten_index_space(const void *args);
     public:
@@ -1082,6 +1084,39 @@ namespace Legion {
      */
     class PendingIndexSpaceExpression : public IntermediateExpression {
     public:
+      struct PendingIntersectionTest {
+      public:
+        PendingIntersectionTest(void) : other(NULL), 
+          original_precondition(ApEvent::NO_AP_EVENT), second(false) { }
+        PendingIntersectionTest(IndexSpaceExpression *o, ApEvent e, bool s)
+          : other(o), original_precondition(e), second(s) { }
+      public:
+        inline bool operator<(const PendingIntersectionTest &rhs) const
+        {
+          if (other->expr_id < rhs.other->expr_id)
+            return true;
+          if (other->expr_id > rhs.other->expr_id)
+            return false;
+          if (original_precondition.id < rhs.original_precondition.id)
+            return true;
+          if (original_precondition.id > rhs.original_precondition.id)
+            return false;
+          return second < rhs.second;
+        }
+        inline bool operator==(const PendingIntersectionTest &rhs) const
+        {
+          if (other->expr_id != rhs.other->expr_id)
+            return false;
+          if (original_precondition.id != rhs.original_precondition.id)
+            return false;
+          return second == rhs.second;
+        }
+      public:
+        IndexSpaceExpression *other;
+        ApEvent original_precondition;
+        bool second;
+      };
+    public:
       PendingIndexSpaceExpression(IndexSpaceExpression *upper_bound, 
                                   RegionTreeForest *ctx); 
       PendingIndexSpaceExpression(const PendingIndexSpaceExpression &rhs);
@@ -1095,6 +1130,8 @@ namespace Legion {
       virtual void tighten_index_space(void);
       virtual bool check_empty(void);
       virtual void pack_expression(Serializer &rez, AddressSpaceID target);
+      virtual bool test_intersection_nonblocking(IndexSpaceExpression *expr,
+         RegionTreeForest *context, ApEvent &precondition, bool second = false);
     public:
       void set_result(IndexSpaceExpression *result);
       // This can be racy but in a good way
@@ -1107,9 +1144,12 @@ namespace Legion {
       }
     public:
       IndexSpaceExpression *const upper_bound;
+      RegionTreeForest *const context;
     protected:
       RtUserEvent ready_event;
       IndexSpaceExpression *result;
+      // Pending intersection tests
+      std::map<PendingIntersectionTest,ApUserEvent> intersection_tests;
     };
 
     /**

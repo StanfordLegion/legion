@@ -669,7 +669,8 @@ namespace Legion {
                                      const LegionColor child_color,
                                      const UniqueID op_id,
                                      const unsigned index,
-                                     IndexSpaceExpression *user_expr);
+                                     IndexSpaceExpression *user_expr,
+                                     ApEvent &precondition_event);
     public:
       void find_atomic_reservations(const FieldMask &mask, 
                                     Operation *op, bool exclusive);
@@ -2554,7 +2555,8 @@ namespace Legion {
                                                const LegionColor child_color,
                                                const UniqueID op_id,
                                                const unsigned index,
-                                               IndexSpaceExpression *user_expr)
+                                               IndexSpaceExpression *user_expr,
+                                               ApEvent &precondition)
     //--------------------------------------------------------------------------
     {
       // Different region requirements of the same operation 
@@ -2591,13 +2593,11 @@ namespace Legion {
             logical_node->are_children_disjoint(child_color, user->child))
         return false;
       // This is the most expensive test so we do it last
-      // See if the two user expressions intersect
-      IndexSpaceExpression *overlap = 
-        logical_node->context->intersect_index_spaces(user->expr, user_expr);
-      // If they don't overlap then there is no dependence
-      if (overlap->check_empty())
-        return false;
-      return true;
+      // See if the two user expressions intersect, note that we have to
+      // do this with a special intersection test because either of these
+      // could be pending index space expression and we don't want to block
+      return user_expr->test_intersection_nonblocking(user->expr, 
+                                            context, precondition);
     }
 
   }; // namespace Internal 

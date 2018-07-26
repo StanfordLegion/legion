@@ -5589,6 +5589,27 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool IndexSpaceExpression::test_intersection_nonblocking(
+                        IndexSpaceExpression *other, RegionTreeForest *context,
+                        ApEvent &precondition, bool second)
+    //--------------------------------------------------------------------------
+    {
+      if (second)
+      {
+        // We've got two non pending expressions, so we can just test them
+        IndexSpaceExpression *overlap = 
+          context->intersect_index_spaces(this, other);
+        return !overlap->is_empty();
+      }
+      else
+      {
+        // First time through, we're not pending so keep going
+        return other->test_intersection_nonblocking(this, context, 
+                                        precondition, true/*second*/);
+      }
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ IndexSpaceExpression* IndexSpaceExpression::unpack_expression(
            Deserializer &derez, RegionTreeForest *forest, AddressSpaceID source)
     //--------------------------------------------------------------------------
@@ -5774,7 +5795,7 @@ namespace Legion {
     PendingIndexSpaceExpression::PendingIndexSpaceExpression(
                              IndexSpaceExpression *upper, RegionTreeForest *ctx)
       : IntermediateExpression(upper->type_tag, ctx), upper_bound(upper),
-        ready_event(Runtime::create_rt_user_event()), result(NULL)
+        context(ctx), ready_event(Runtime::create_rt_user_event()), result(NULL)
     //--------------------------------------------------------------------------
     {
     }
@@ -5782,7 +5803,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     PendingIndexSpaceExpression::PendingIndexSpaceExpression(
                                          const PendingIndexSpaceExpression &rhs)
-      : IntermediateExpression(rhs), upper_bound(NULL)
+      : IntermediateExpression(rhs), upper_bound(NULL), context(NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -5868,10 +5889,82 @@ namespace Legion {
       assert(result == NULL);
       assert(!ready_event.has_triggered());
 #endif
-      result = res;
       // Keep a reference on it until we're deleted
-      result->add_expression_reference();
+      res->add_expression_reference();
+      // Atomically set the result and then grab any pending tests we 
+      // need to perform
+      std::map<PendingIntersectionTest,ApUserEvent> to_perform;
+      {
+        AutoLock i_lock(inter_lock);
+        result = res;
+        to_perform.swap(intersection_tests);
+      }
+      // Mark that we're ready which unblocks lots of stuff
       Runtime::trigger_event(ready_event);
+      // Then perform all the tests we need to do
+      if (!to_perform.empty())
+      {
+        for (std::map<PendingIntersectionTest,ApUserEvent>::iterator
+              it = to_perform.begin(); it != to_perform.end(); it++)
+        {
+          ApEvent precondition = it->first.original_precondition;
+          // Perform the original test with the result
+          if (result->test_intersection_nonblocking(it->first.other, context,
+                                              precondition, it->first.second))
+            Runtime::trigger_event(it->second, precondition);
+          else // No dependence so we can trigger right now
+            Runtime::trigger_event(it->second);
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    bool PendingIndexSpaceExpression::test_intersection_nonblocking(
+                        IndexSpaceExpression *other, RegionTreeForest *ctx,
+                        ApEvent &precondition, bool second)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(ctx == context); // contexts should be the same
+#endif
+      // If we already have an answer we can just do it
+      // Make sure to call this method again in case the result is pending
+      if (result != NULL)
+        return result->test_intersection_nonblocking(other, context, 
+                                                     precondition, second);
+      // We're not ready yet, so do a test against the upper bound
+      // If the upper bound is non-intersecting then we're done no matter what
+      // Use a dummy precondition since we just want to make sure this
+      // doesn't block us in anyway
+      ApEvent dummy_precondition;
+      if (!upper_bound->test_intersection_nonblocking(other, context, 
+                                          dummy_precondition, second))
+        return false;
+      {
+        // We might intersect, so take the lock and save the test
+        AutoLock i_lock(inter_lock);
+        // Check to make sure we didn't lose the race
+        if (result == NULL)
+        {
+          // Didn't lose the race, see if we already made this test
+          const PendingIntersectionTest key(other, precondition, second);
+          std::map<PendingIntersectionTest,ApUserEvent>::const_iterator 
+            finder = intersection_tests.find(key);
+          if (finder == intersection_tests.end())
+          {
+            ApUserEvent our_precondition = Runtime::create_ap_user_event();
+            precondition = our_precondition;
+            intersection_tests[key] = our_precondition;
+          }
+          else
+            precondition = finder->second;
+          // We might intersect so return true
+          return true;
+        }
+      }
+      // If we fall through it's because the result is ready
+      return result->test_intersection_nonblocking(other, context, 
+                                                   precondition, second);
     }
 
     /////////////////////////////////////////////////////////////
