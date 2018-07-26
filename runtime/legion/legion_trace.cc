@@ -2493,7 +2493,7 @@ namespace Legion {
                    it != reqs.end(); ++it)
                 for (std::vector<FieldID>::const_iterator fit =
                      it->fields.begin(); fit != it->fields.end(); ++fit)
-                  find_last_users(it->instance, *fit, users);
+                  find_last_users(it->instance, it->node, *fit, users);
               precondition_idx = &replay->rhs;
               break;
             }
@@ -2503,12 +2503,12 @@ namespace Legion {
               for (unsigned idx = 0; idx < copy->src_fields.size(); ++idx)
               {
                 const CopySrcDstField &field = copy->src_fields[idx];
-                find_last_users(field.inst, field.field_id, users);
+                find_last_users(field.inst, copy->node, field.field_id, users);
               }
               for (unsigned idx = 0; idx < copy->dst_fields.size(); ++idx)
               {
                 const CopySrcDstField &field = copy->dst_fields[idx];
-                find_last_users(field.inst, field.field_id, users);
+                find_last_users(field.inst, copy->node, field.field_id, users);
               }
               precondition_idx = &copy->precondition_idx;
               break;
@@ -2519,7 +2519,7 @@ namespace Legion {
               for (unsigned idx = 0; idx < fill->fields.size(); ++idx)
               {
                 const CopySrcDstField &field = fill->fields[idx];
-                find_last_users(field.inst, field.field_id, users);
+                find_last_users(field.inst, fill->node, field.field_id, users);
               }
               precondition_idx = &fill->precondition_idx;
               break;
@@ -3864,6 +3864,7 @@ namespace Legion {
 #endif
       InstanceReq inst_req;
       inst_req.instance = view->get_manager()->get_instance();
+      inst_req.node = region_node;
       region_node->get_column_source()->get_field_set(fields, inst_req.fields);
       inst_req.read = IS_READ_ONLY(req);
       op_reqs[op_key].push_back(inst_req);
@@ -4179,6 +4180,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     inline void PhysicalTemplate::find_last_users(const PhysicalInstance &inst,
+                                                  RegionNode *node,
                                                   unsigned field,
                                                   std::set<unsigned> &users)
     //--------------------------------------------------------------------------
@@ -4193,12 +4195,13 @@ namespace Legion {
            uit != finder->second.end(); ++uit)
         for (std::set<unsigned>::iterator it = uit->users.begin(); it !=
              uit->users.end(); ++it)
-        {
+          if (node->intersects_with(uit->node, false))
+          {
 #ifdef DEBUG_LEGION
-          assert(frontiers.find(*it) != frontiers.end());
+            assert(frontiers.find(*it) != frontiers.end());
 #endif
-          users.insert(frontiers[*it]);
-        }
+            users.insert(frontiers[*it]);
+          }
     }
 
     /////////////////////////////////////////////////////////////

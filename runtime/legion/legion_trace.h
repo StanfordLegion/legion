@@ -672,8 +672,8 @@ namespace Legion {
                              ContextID physical_ctx);
       void record_last_user(const PhysicalInstance &inst, RegionNode *node,
                             unsigned field, unsigned user, bool read);
-      void find_last_users(const PhysicalInstance &inst, unsigned field,
-                           std::set<unsigned> &users);
+      void find_last_users(const PhysicalInstance &inst, RegionNode *node,
+                           unsigned field, std::set<unsigned> &users);
     private:
       PhysicalTrace *trace;
       volatile bool recording;
@@ -702,6 +702,7 @@ namespace Legion {
       struct InstanceReq {
         bool read;
         PhysicalInstance instance;
+        RegionNode *node;
         std::vector<FieldID> fields;
       };
       std::map<TraceLocalID, std::vector<InstanceReq> > op_reqs;
