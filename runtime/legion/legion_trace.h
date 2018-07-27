@@ -695,6 +695,7 @@ namespace Legion {
       std::map<ApEvent, unsigned> event_map;
       std::vector<Instruction*> instructions;
       std::vector<std::vector<Instruction*> > slices;
+      std::vector<std::vector<TraceLocalID> > slice_tasks;
       std::map<TraceLocalID, unsigned> task_entries;
       typedef std::pair<PhysicalInstance, unsigned> InstanceAccess;
       struct UserInfo {

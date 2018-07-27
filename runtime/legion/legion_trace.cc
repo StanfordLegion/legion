@@ -2322,10 +2322,15 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(slice_idx < slices.size());
 #endif
+      ApUserEvent fence = Runtime::create_ap_user_event();
+      const std::vector<TraceLocalID> &tasks = slice_tasks[slice_idx];
+      for (unsigned idx = 0; idx < tasks.size(); ++idx)
+        operations[tasks[idx]]->set_execution_fence_event(fence);
       std::vector<Instruction*> &instructions = slices[slice_idx];
       for (std::vector<Instruction*>::const_iterator it = instructions.begin();
            it != instructions.end(); ++it)
         (*it)->execute();
+      Runtime::trigger_event(fence);
     }
 
     //--------------------------------------------------------------------------
@@ -2676,6 +2681,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       slices.resize(replay_parallelism);
+      slice_tasks.resize(replay_parallelism);
       std::map<TraceLocalID, unsigned> slice_indices_by_owner;
       std::vector<unsigned> slice_indices_by_inst;
       slice_indices_by_inst.resize(instructions.size());
@@ -2695,6 +2701,7 @@ namespace Legion {
       for (std::map<TraceLocalID, Operation*>::iterator it =
            operations.begin(); it != operations.end(); ++it)
       {
+        unsigned slice_index = -1U;
         if (!round_robin_for_tasks &&
             it->second->get_operation_kind() == Operation::TASK_OP_KIND)
         {
@@ -2703,7 +2710,7 @@ namespace Legion {
           assert(finder != cached_mappings.end());
           assert(finder->second.target_procs.size() > 0);
 #endif
-          slice_indices_by_owner[it->first] =
+          slice_index =
             finder->second.target_procs[0].id % replay_parallelism;
         }
         else
@@ -2712,9 +2719,16 @@ namespace Legion {
           assert(slice_indices_by_owner.find(it->first) ==
               slice_indices_by_owner.end());
 #endif
-          slice_indices_by_owner[it->first] = next_slice_id;
+          slice_index = next_slice_id;
           next_slice_id = (next_slice_id + 1) % replay_parallelism;
         }
+
+#ifdef DEBUG_LEGION
+        assert(slice_index != -1U);
+#endif
+        slice_indices_by_owner[it->first] = slice_index;
+        if (it->second->get_operation_kind() == Operation::TASK_OP_KIND)
+          slice_tasks[slice_index].push_back(it->first);
       }
       for (unsigned idx = 1; idx < instructions.size(); ++idx)
       {
