@@ -1302,6 +1302,8 @@ namespace Legion {
         local_trace->end_trace_execution(this);
         parent_ctx->update_current_fence(this, true, true);
         parent_ctx->record_previous_trace(local_trace);
+        local_trace->get_physical_trace()->record_previous_template_completion(
+            template_completion);
         local_trace->initialize_tracing_state();
         replayed = true;
         return;
@@ -1503,7 +1505,10 @@ namespace Legion {
         if (!fence_registered)
           execution_precondition =
             parent_ctx->get_current_execution_fence_event();
-        physical_trace->initialize_template(get_completion_event(), recurrent);
+        ApEvent fence_completion =
+          recurrent ? physical_trace->get_previous_template_completion()
+                    : get_completion_event();
+        physical_trace->initialize_template(fence_completion, recurrent);
         local_trace->set_state_replay();
 #ifdef LEGION_SPY
         physical_trace->get_current_template()->set_fence_uid(unique_op_id);
