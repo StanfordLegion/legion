@@ -474,6 +474,11 @@ namespace Legion {
       PhysicalTemplate* get_current_template(void) { return current_template; }
       bool has_any_templates(void) const { return templates.size() > 0; }
     public:
+      void record_previous_template_completion(ApEvent template_completion)
+        { previous_template_completion = template_completion; }
+      ApEvent get_previous_template_completion(void) const
+        { return previous_template_completion; }
+    public:
       PhysicalTemplate* start_new_template(ApEvent fence_event);
       RtEvent fix_trace(PhysicalTemplate *tpl, bool has_blocking_call);
     public:
@@ -488,6 +493,7 @@ namespace Legion {
       unsigned nonreplayable_count;
     public:
       std::vector<Processor> replay_targets;
+      ApEvent previous_template_completion;
     };
 
     struct CachedMapping
@@ -687,6 +693,7 @@ namespace Legion {
       std::map<ApEvent, unsigned> event_map;
       std::vector<Instruction*> instructions;
       std::vector<std::vector<Instruction*> > slices;
+      std::vector<std::vector<TraceLocalID> > slice_tasks;
       std::map<TraceLocalID, unsigned> memo_entries;
       typedef std::pair<PhysicalInstance, unsigned> InstanceAccess;
       struct UserInfo {

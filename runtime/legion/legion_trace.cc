@@ -1302,6 +1302,8 @@ namespace Legion {
         local_trace->end_trace_execution(this);
         parent_ctx->update_current_fence(this, true, true);
         parent_ctx->record_previous_trace(local_trace);
+        local_trace->get_physical_trace()->record_previous_template_completion(
+            template_completion);
         local_trace->initialize_tracing_state();
         replayed = true;
         return;
@@ -1503,7 +1505,10 @@ namespace Legion {
         if (!fence_registered)
           execution_precondition =
             parent_ctx->get_current_execution_fence_event();
-        physical_trace->initialize_template(get_completion_event(), recurrent);
+        ApEvent fence_completion =
+          recurrent ? physical_trace->get_previous_template_completion()
+                    : get_completion_event();
+        physical_trace->initialize_template(fence_completion, recurrent);
         local_trace->set_state_replay();
 #ifdef LEGION_SPY
         physical_trace->get_current_template()->set_fence_uid(unique_op_id);
@@ -2317,10 +2322,16 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(slice_idx < slices.size());
 #endif
+      ApUserEvent fence = Runtime::create_ap_user_event();
+      const std::vector<TraceLocalID> &tasks = slice_tasks[slice_idx];
+      for (unsigned idx = 0; idx < tasks.size(); ++idx)
+        operations[tasks[idx]]
+          ->get_operation()->set_execution_fence_event(fence);
       std::vector<Instruction*> &instructions = slices[slice_idx];
       for (std::vector<Instruction*>::const_iterator it = instructions.begin();
            it != instructions.end(); ++it)
         (*it)->execute();
+      Runtime::trigger_event(fence);
     }
 
     //--------------------------------------------------------------------------
@@ -2670,6 +2681,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       slices.resize(replay_parallelism);
+      slice_tasks.resize(replay_parallelism);
       std::map<TraceLocalID, unsigned> slice_indices_by_owner;
       std::vector<unsigned> slice_indices_by_inst;
       slice_indices_by_inst.resize(instructions.size());
@@ -2689,6 +2701,7 @@ namespace Legion {
       for (std::map<TraceLocalID, Memoizable*>::iterator it =
            operations.begin(); it != operations.end(); ++it)
       {
+        unsigned slice_index = -1U;
         if (!round_robin_for_tasks && it->second->is_memoizable_task())
         {
           CachedMappings::iterator finder = cached_mappings.find(it->first);
@@ -2696,7 +2709,7 @@ namespace Legion {
           assert(finder != cached_mappings.end());
           assert(finder->second.target_procs.size() > 0);
 #endif
-          slice_indices_by_owner[it->first] =
+          slice_index =
             finder->second.target_procs[0].id % replay_parallelism;
         }
         else
@@ -2705,9 +2718,16 @@ namespace Legion {
           assert(slice_indices_by_owner.find(it->first) ==
               slice_indices_by_owner.end());
 #endif
-          slice_indices_by_owner[it->first] = next_slice_id;
+          slice_index = next_slice_id;
           next_slice_id = (next_slice_id + 1) % replay_parallelism;
         }
+
+#ifdef DEBUG_LEGION
+        assert(slice_index != -1U);
+#endif
+        slice_indices_by_owner[it->first] = slice_index;
+        if (it->second->is_memoizable_task())
+          slice_tasks[slice_index].push_back(it->first);
       }
       for (unsigned idx = 1; idx < instructions.size(); ++idx)
       {
