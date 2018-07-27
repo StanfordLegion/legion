@@ -2791,6 +2791,63 @@ namespace Legion {
           if (crossing_found)
             merge->rhs.swap(new_rhs);
         }
+        else
+        {
+          unsigned *event_to_check = NULL;
+          switch (inst->get_kind())
+          {
+            case TRIGGER_EVENT :
+              {
+                event_to_check = &inst->as_trigger_event()->rhs;
+                break;
+              }
+            case ISSUE_COPY :
+              {
+                event_to_check = &inst->as_issue_copy()->precondition_idx;
+                break;
+              }
+            case ISSUE_FILL :
+              {
+                event_to_check = &inst->as_issue_fill()->precondition_idx;
+                break;
+              }
+            case COMPLETE_REPLAY :
+              {
+                event_to_check = &inst->as_complete_replay()->rhs;
+                break;
+              }
+            default:
+              {
+                break;
+              }
+          }
+          if (event_to_check != NULL)
+          {
+            unsigned ev = *event_to_check;
+            unsigned generator_slice = slice_indices_by_inst[gen[ev]];
+#ifdef DEBUG_LEGION
+            assert(generator_slice != -1U);
+#endif
+            if (generator_slice != slice_index)
+            {
+              std::map<unsigned, unsigned>::iterator finder =
+                crossing_events.find(ev);
+              if (finder != crossing_events.end())
+                *event_to_check = finder->second;
+              else
+              {
+                unsigned new_crossing_event = events.size();
+                events.resize(events.size() + 1);
+                user_events.resize(events.size());
+                crossing_events[ev] = new_crossing_event;
+                *event_to_check = new_crossing_event;
+                slices[generator_slice].push_back(
+                    new TriggerEvent(*this, new_crossing_event, ev,
+                      instructions[gen[ev]]->owner));
+              }
+            }
+          }
+        }
       }
     }
 
