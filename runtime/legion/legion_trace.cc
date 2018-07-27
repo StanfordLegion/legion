@@ -1168,6 +1168,8 @@ namespace Legion {
 #endif
         current_template =
           local_trace->get_physical_trace()->get_current_template();
+        local_trace->get_physical_trace()->record_previous_template_completion(
+            get_completion_event());
       }
     }
 
@@ -1315,6 +1317,8 @@ namespace Legion {
 #endif
         current_template =
           local_trace->get_physical_trace()->get_current_template();
+        local_trace->get_physical_trace()->record_previous_template_completion(
+            get_completion_event());
       }
 
       // Indicate that this trace is done being captured
