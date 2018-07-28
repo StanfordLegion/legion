@@ -2230,6 +2230,26 @@ namespace Legion {
                                                  VersionInfo &version_info)
     //--------------------------------------------------------------------------
     {
+#ifndef DISTRIBUTED_INSTANCE_VIEWS
+      if (!is_logical_owner())
+      {
+        // Send a message to the logical owner to do the analysis
+        RtUserEvent wait_on = Runtime::create_rt_user_event();
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(did);
+          rez.serialize(to_filter);
+          version_info.pack_writing_version_numbers(rez);
+          rez.serialize(&to_filter);
+          rez.serialize(wait_on);
+        }
+        runtime->send_view_filter_invalid_fields_request(logical_owner, rez);
+        // Wait for the result to be ready
+        wait_on.wait();
+        return;
+      }
+#endif
       // If we're not the parent then keep going up
       if ((parent != NULL) && !version_info.is_upper_bound_node(logical_node))
         parent->filter_invalid_fields(to_filter, version_info);
@@ -2240,25 +2260,6 @@ namespace Legion {
         // If we're not the owner then make sure that we are up to date
         if (!is_logical_owner())
           perform_remote_valid_check(to_filter, &version_info, true/*reading*/);
-#else
-        if (!is_logical_owner())
-        {
-          // Send a message to the logical owner to do the analysis
-          RtUserEvent wait_on = Runtime::create_rt_user_event();
-          Serializer rez;
-          {
-            RezCheck z(rez);
-            rez.serialize(did);
-            rez.serialize(to_filter);
-            version_info.pack_writing_version_numbers(rez);
-            rez.serialize(&to_filter);
-            rez.serialize(wait_on);
-          }
-          runtime->send_view_filter_invalid_fields_request(logical_owner, rez);
-          // Wait for the result to be ready
-          wait_on.wait();
-          return;
-        }
 #endif
         // Get the version numbers that we need 
         FieldVersions needed_versions;
@@ -2456,7 +2457,7 @@ namespace Legion {
 #endif // DISTRIBUTED_INSTANCE_VIEWS
       {
         // This is the common path
-        if (!!filter_mask)
+        if (!!filter_mask || !add_only.empty())
           filter_and_add(filter_mask, add_only);
         if (!advance.empty())
         {
@@ -2468,10 +2469,13 @@ namespace Legion {
             // Someone else could already have advanced this
             if (finder == current_versions.end())
               continue;
-            finder->second -= it->second;
+            const FieldMask overlap = finder->second & it->second;
+            if (!overlap)
+              continue;
+            finder->second -= overlap;
             if (!finder->second)
               current_versions.erase(finder);
-            current_versions[it->first+1] |= it->second;
+            current_versions[it->first+1] |= overlap;
           }
         }
       }
