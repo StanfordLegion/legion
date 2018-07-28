@@ -1170,6 +1170,8 @@ namespace Legion {
 #endif
         current_template =
           local_trace->get_physical_trace()->get_current_template();
+        local_trace->get_physical_trace()->record_previous_template_completion(
+            get_completion_event());
       }
     }
 
@@ -1304,6 +1306,8 @@ namespace Legion {
         local_trace->end_trace_execution(this);
         parent_ctx->update_current_fence(this, true, true);
         parent_ctx->record_previous_trace(local_trace);
+        local_trace->get_physical_trace()->record_previous_template_completion(
+            template_completion);
         local_trace->initialize_tracing_state();
         replayed = true;
         return;
@@ -1315,6 +1319,8 @@ namespace Legion {
 #endif
         current_template =
           local_trace->get_physical_trace()->get_current_template();
+        local_trace->get_physical_trace()->record_previous_template_completion(
+            get_completion_event());
       }
 
       // Indicate that this trace is done being captured
@@ -1505,7 +1511,10 @@ namespace Legion {
         if (!fence_registered)
           execution_precondition =
             parent_ctx->get_current_execution_fence_event();
-        physical_trace->initialize_template(get_completion_event(), recurrent);
+        ApEvent fence_completion =
+          recurrent ? physical_trace->get_previous_template_completion()
+                    : get_completion_event();
+        physical_trace->initialize_template(fence_completion, recurrent);
         local_trace->set_state_replay();
 #ifdef LEGION_SPY
         physical_trace->get_current_template()->set_fence_uid(unique_op_id);
@@ -2327,10 +2336,16 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(slice_idx < slices.size());
 #endif
+      ApUserEvent fence = Runtime::create_ap_user_event();
+      const std::vector<TraceLocalID> &tasks = slice_tasks[slice_idx];
+      for (unsigned idx = 0; idx < tasks.size(); ++idx)
+        operations[tasks[idx]]
+          ->get_operation()->set_execution_fence_event(fence);
       std::vector<Instruction*> &instructions = slices[slice_idx];
       for (std::vector<Instruction*>::const_iterator it = instructions.begin();
            it != instructions.end(); ++it)
         (*it)->execute();
+      Runtime::trigger_event(fence);
     }
 
     //--------------------------------------------------------------------------
@@ -2400,7 +2415,12 @@ namespace Legion {
         for (unsigned idx = 0; idx < events.size(); ++idx)
           gen[idx] = idx;
       }
-      if (!implicit_runtime->no_trace_optimization) propagate_merges(gen);
+      if (!implicit_runtime->no_trace_optimization)
+      {
+        propagate_merges(gen);
+        transitive_reduction();
+        propagate_copies(gen);
+      }
       prepare_parallel_replay(gen);
       push_complete_replays();
     }
@@ -2498,7 +2518,7 @@ namespace Legion {
                    it != reqs.end(); ++it)
                 for (std::vector<FieldID>::const_iterator fit =
                      it->fields.begin(); fit != it->fields.end(); ++fit)
-                  find_last_users(it->instance, *fit, users);
+                  find_last_users(it->instance, it->node, *fit, users);
               precondition_idx = &replay->rhs;
               break;
             }
@@ -2508,12 +2528,12 @@ namespace Legion {
               for (unsigned idx = 0; idx < copy->src_fields.size(); ++idx)
               {
                 const CopySrcDstField &field = copy->src_fields[idx];
-                find_last_users(field.inst, field.field_id, users);
+                find_last_users(field.inst, copy->node, field.field_id, users);
               }
               for (unsigned idx = 0; idx < copy->dst_fields.size(); ++idx)
               {
                 const CopySrcDstField &field = copy->dst_fields[idx];
-                find_last_users(field.inst, field.field_id, users);
+                find_last_users(field.inst, copy->node, field.field_id, users);
               }
               precondition_idx = &copy->precondition_idx;
               break;
@@ -2524,7 +2544,7 @@ namespace Legion {
               for (unsigned idx = 0; idx < fill->fields.size(); ++idx)
               {
                 const CopySrcDstField &field = fill->fields[idx];
-                find_last_users(field.inst, field.field_id, users);
+                find_last_users(field.inst, fill->node, field.field_id, users);
               }
               precondition_idx = &fill->precondition_idx;
               break;
@@ -2623,7 +2643,6 @@ namespace Legion {
               break;
             }
           case GET_TERM_EVENT:
-          case GET_OP_TERM_EVENT:
           case CREATE_AP_USER_EVENT:
           case SET_OP_SYNC_EVENT:
           case ASSIGN_FENCE_COMPLETION:
@@ -2676,6 +2695,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       slices.resize(replay_parallelism);
+      slice_tasks.resize(replay_parallelism);
       std::map<TraceLocalID, unsigned> slice_indices_by_owner;
       std::vector<unsigned> slice_indices_by_inst;
       slice_indices_by_inst.resize(instructions.size());
@@ -2695,6 +2715,7 @@ namespace Legion {
       for (std::map<TraceLocalID, Memoizable*>::iterator it =
            operations.begin(); it != operations.end(); ++it)
       {
+        unsigned slice_index = -1U;
         if (!round_robin_for_tasks && it->second->is_memoizable_task())
         {
           CachedMappings::iterator finder = cached_mappings.find(it->first);
@@ -2702,7 +2723,7 @@ namespace Legion {
           assert(finder != cached_mappings.end());
           assert(finder->second.target_procs.size() > 0);
 #endif
-          slice_indices_by_owner[it->first] =
+          slice_index =
             finder->second.target_procs[0].id % replay_parallelism;
         }
         else
@@ -2711,9 +2732,16 @@ namespace Legion {
           assert(slice_indices_by_owner.find(it->first) ==
               slice_indices_by_owner.end());
 #endif
-          slice_indices_by_owner[it->first] = next_slice_id;
+          slice_index = next_slice_id;
           next_slice_id = (next_slice_id + 1) % replay_parallelism;
         }
+
+#ifdef DEBUG_LEGION
+        assert(slice_index != -1U);
+#endif
+        slice_indices_by_owner[it->first] = slice_index;
+        if (it->second->is_memoizable_task())
+          slice_tasks[slice_index].push_back(it->first);
       }
       for (unsigned idx = 1; idx < instructions.size(); ++idx)
       {
@@ -2772,6 +2800,409 @@ namespace Legion {
           if (crossing_found)
             merge->rhs.swap(new_rhs);
         }
+        else
+        {
+          unsigned *event_to_check = NULL;
+          switch (inst->get_kind())
+          {
+            case TRIGGER_EVENT :
+              {
+                event_to_check = &inst->as_trigger_event()->rhs;
+                break;
+              }
+            case ISSUE_COPY :
+              {
+                event_to_check = &inst->as_issue_copy()->precondition_idx;
+                break;
+              }
+            case ISSUE_FILL :
+              {
+                event_to_check = &inst->as_issue_fill()->precondition_idx;
+                break;
+              }
+            case COMPLETE_REPLAY :
+              {
+                event_to_check = &inst->as_complete_replay()->rhs;
+                break;
+              }
+            default:
+              {
+                break;
+              }
+          }
+          if (event_to_check != NULL)
+          {
+            unsigned ev = *event_to_check;
+            unsigned generator_slice = slice_indices_by_inst[gen[ev]];
+#ifdef DEBUG_LEGION
+            assert(generator_slice != -1U);
+#endif
+            if (generator_slice != slice_index)
+            {
+              std::map<unsigned, unsigned>::iterator finder =
+                crossing_events.find(ev);
+              if (finder != crossing_events.end())
+                *event_to_check = finder->second;
+              else
+              {
+                unsigned new_crossing_event = events.size();
+                events.resize(events.size() + 1);
+                user_events.resize(events.size());
+                crossing_events[ev] = new_crossing_event;
+                *event_to_check = new_crossing_event;
+                slices[generator_slice].push_back(
+                    new TriggerEvent(*this, new_crossing_event, ev,
+                      instructions[gen[ev]]->owner));
+              }
+            }
+          }
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTemplate::transitive_reduction(void)
+    //--------------------------------------------------------------------------
+    {
+      // Transitive reduction inspired by Klaus Simon,
+      // "An improved algorithm for transitive closure on acyclic digraphs"
+
+      // First, build a DAG and find nodes with no incoming edges
+      std::vector<unsigned> topo_order;
+      topo_order.reserve(instructions.size());
+      std::vector<unsigned> inv_topo_order(events.size(), -1U);
+      std::vector<std::vector<unsigned> > incoming;
+      std::vector<std::vector<unsigned> > outgoing;
+      incoming.resize(events.size());
+      outgoing.resize(events.size());
+
+      for (std::map<unsigned, unsigned>::iterator it = frontiers.begin();
+           it != frontiers.end(); ++it)
+      {
+        inv_topo_order[it->second] = topo_order.size();
+        topo_order.push_back(it->second);
+      }
+
+      std::map<TraceLocalID, GetTermEvent*> term_insts;
+      for (unsigned idx = 0; idx < instructions.size(); ++idx)
+      {
+        Instruction *inst = instructions[idx];
+        switch (inst->get_kind())
+        {
+          // Pass these instructions as their events will be added later
+          case GET_TERM_EVENT :
+            {
+#ifdef DEBUG_LEGION
+              assert(inst->as_get_term_event() != NULL);
+#endif
+              term_insts[inst->owner] = inst->as_get_term_event();
+              break;
+            }
+          case CREATE_AP_USER_EVENT :
+            {
+              break;
+            }
+          case TRIGGER_EVENT :
+            {
+              TriggerEvent *trigger = inst->as_trigger_event();
+              incoming[trigger->lhs].push_back(trigger->rhs);
+              outgoing[trigger->rhs].push_back(trigger->lhs);
+              break;
+            }
+          case MERGE_EVENT :
+            {
+              MergeEvent *merge = inst->as_merge_event();
+              for (std::set<unsigned>::iterator it = merge->rhs.begin();
+                   it != merge->rhs.end(); ++it)
+              {
+                incoming[merge->lhs].push_back(*it);
+                outgoing[*it].push_back(merge->lhs);
+              }
+              break;
+            }
+          case ISSUE_COPY :
+            {
+              IssueCopy *copy = inst->as_issue_copy();
+              incoming[copy->lhs].push_back(copy->precondition_idx);
+              outgoing[copy->precondition_idx].push_back(copy->lhs);
+              break;
+            }
+          case ISSUE_FILL :
+            {
+              IssueFill *fill = inst->as_issue_fill();
+              incoming[fill->lhs].push_back(fill->precondition_idx);
+              outgoing[fill->precondition_idx].push_back(fill->lhs);
+              break;
+            }
+          case SET_OP_SYNC_EVENT :
+            {
+              SetOpSyncEvent *sync = inst->as_set_op_sync_event();
+              inv_topo_order[sync->lhs] = topo_order.size();
+              topo_order.push_back(sync->lhs);
+              break;
+            }
+          case ASSIGN_FENCE_COMPLETION :
+            {
+              inv_topo_order[fence_completion_id] = topo_order.size();
+              topo_order.push_back(fence_completion_id);
+              break;
+            }
+          case COMPLETE_REPLAY :
+            {
+              CompleteReplay *replay = inst->as_complete_replay();
+#ifdef DEBUG_LEGION
+              assert(term_insts.find(replay->owner) != term_insts.end());
+#endif
+              GetTermEvent *term = term_insts[replay->owner];
+              unsigned lhs = term->lhs;
+#ifdef DEBUG_LEGION
+              assert(lhs != -1U);
+#endif
+              incoming[lhs].push_back(replay->rhs);
+              outgoing[replay->rhs].push_back(lhs);
+              break;
+            }
+          default:
+            {
+              assert(false);
+              break;
+            }
+        }
+      }
+
+      // Second, do a toposort on nodes via BFS
+      std::vector<unsigned> remaining_edges;
+      remaining_edges.resize(incoming.size());
+      for (unsigned idx = 0; idx < incoming.size(); ++idx)
+        remaining_edges[idx] = incoming[idx].size();
+
+      unsigned idx = 0;
+      while (idx < topo_order.size())
+      {
+        unsigned node = topo_order[idx];
+#ifdef DEBUG_LEGION
+        assert(remaining_edges[node] == 0);
+#endif
+        const std::vector<unsigned> &out = outgoing[node];
+        for (unsigned oidx = 0; oidx < out.size(); ++oidx)
+        {
+          unsigned next = out[oidx];
+          if (--remaining_edges[next] == 0)
+          {
+            inv_topo_order[next] = topo_order.size();
+            topo_order.push_back(next);
+          }
+        }
+        ++idx;
+      }
+
+      // Third, construct a chain decomposition
+      unsigned num_chains = 0;
+      std::vector<unsigned> chain_indices(topo_order.size(), -1U);
+
+      int pos = chain_indices.size() - 1;
+      while (true)
+      {
+        while (chain_indices[pos] != -1U && pos >= 0)
+          --pos;
+        if (pos < 0) break;
+        unsigned curr = topo_order[pos];
+        while (incoming[curr].size() > 0)
+        {
+          chain_indices[inv_topo_order[curr]] = num_chains;
+          const std::vector<unsigned> &in = incoming[curr];
+          bool found = false;
+          for (unsigned iidx = 0; iidx < in.size(); ++iidx)
+          {
+            unsigned next = in[iidx];
+            if (chain_indices[inv_topo_order[next]] == -1U)
+            {
+              found = true;
+              curr = next;
+              chain_indices[inv_topo_order[curr]] = num_chains;
+              break;
+            }
+          }
+          if (!found) break;
+        }
+        chain_indices[inv_topo_order[curr]] = num_chains;
+        ++num_chains;
+      }
+
+      // Fourth, find the frontiers of chains that are connected to each node
+      std::vector<std::vector<int> > all_chain_frontiers;
+      std::vector<std::vector<unsigned> > incoming_reduced;
+      all_chain_frontiers.resize(topo_order.size());
+      incoming_reduced.resize(topo_order.size());
+      for (unsigned idx = 0; idx < topo_order.size(); ++idx)
+      {
+        std::vector<int> chain_frontiers(num_chains, -1);
+        const std::vector<unsigned> &in = incoming[topo_order[idx]];
+        std::vector<unsigned> &in_reduced = incoming_reduced[idx];
+        for (unsigned iidx = 0; iidx < in.size(); ++iidx)
+        {
+          int rank = inv_topo_order[in[iidx]];
+#ifdef DEBUG_LEGION
+          assert((unsigned)rank < idx);
+#endif
+          const std::vector<int> &pred_chain_frontiers =
+            all_chain_frontiers[rank];
+          for (unsigned k = 0; k < num_chains; ++k)
+            chain_frontiers[k] =
+              std::max(chain_frontiers[k], pred_chain_frontiers[k]);
+        }
+        for (unsigned iidx = 0; iidx < in.size(); ++iidx)
+        {
+          int rank = inv_topo_order[in[iidx]];
+          unsigned chain_idx = chain_indices[rank];
+          if (chain_frontiers[chain_idx] < rank)
+          {
+            in_reduced.push_back(in[iidx]);
+            chain_frontiers[chain_idx] = rank;
+          }
+        }
+#ifdef DEBUG_LEGION
+        assert(in.size() == 0 || in_reduced.size() > 0);
+#endif
+        all_chain_frontiers[idx].swap(chain_frontiers);
+      }
+
+      // Lastly, suppress transitive dependences using chains
+      for (unsigned idx = 0; idx < instructions.size(); ++idx)
+        if (instructions[idx]->get_kind() == MERGE_EVENT)
+        {
+          MergeEvent *merge = instructions[idx]->as_merge_event();
+          const std::vector<unsigned> &in_reduced =
+            incoming_reduced[inv_topo_order[merge->lhs]];
+          std::set<unsigned> new_rhs;
+          for (unsigned iidx = 0; iidx < in_reduced.size(); ++iidx)
+          {
+#ifdef DEBUG_LEGION
+            assert(merge->rhs.find(in_reduced[iidx]) != merge->rhs.end());
+#endif
+            new_rhs.insert(in_reduced[iidx]);
+          }
+          if (new_rhs.size() < merge->rhs.size())
+            merge->rhs.swap(new_rhs);
+        }
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTemplate::propagate_copies(std::vector<unsigned> &gen)
+    //--------------------------------------------------------------------------
+    {
+      std::vector<int> substs(events.size(), -1);
+      std::vector<Instruction*> new_instructions;
+      new_instructions.reserve(instructions.size());
+      for (unsigned idx = 0; idx < instructions.size(); ++idx)
+      {
+        Instruction *inst = instructions[idx];
+        if (instructions[idx]->get_kind() == MERGE_EVENT)
+        {
+          MergeEvent *merge = instructions[idx]->as_merge_event();
+#ifdef DEBUG_LEGION
+          assert(merge->rhs.size() > 0);
+#endif
+          if (merge->rhs.size() == 1)
+          {
+            substs[merge->lhs] = *merge->rhs.begin();
+#ifdef DEBUG_LEGION
+            assert(merge->lhs != (unsigned)substs[merge->lhs]);
+#endif
+            delete inst;
+          }
+          else
+            new_instructions.push_back(inst);
+        }
+        else
+          new_instructions.push_back(inst);
+      }
+
+      if (instructions.size() == new_instructions.size()) return;
+
+      instructions.swap(new_instructions);
+
+      for (unsigned idx = 0; idx < instructions.size(); ++idx)
+      {
+        Instruction *inst = instructions[idx];
+        int lhs = -1;
+        switch (inst->get_kind())
+        {
+          case GET_TERM_EVENT :
+            {
+              GetTermEvent *term = inst->as_get_term_event();
+              lhs = term->lhs;
+              break;
+            }
+          case CREATE_AP_USER_EVENT :
+            {
+              CreateApUserEvent *create = inst->as_create_ap_user_event();
+              lhs = create->lhs;
+              break;
+            }
+          case TRIGGER_EVENT :
+            {
+              TriggerEvent *trigger = inst->as_trigger_event();
+              int subst = substs[trigger->rhs];
+              if (subst >= 0) trigger->rhs = (unsigned)subst;
+              break;
+            }
+          case MERGE_EVENT :
+            {
+              MergeEvent *merge = inst->as_merge_event();
+              std::set<unsigned> new_rhs;
+              for (std::set<unsigned>::iterator it = merge->rhs.begin();
+                   it != merge->rhs.end(); ++it)
+              {
+                int subst = substs[*it];
+                if (subst >= 0) new_rhs.insert((unsigned)subst);
+                else new_rhs.insert(*it);
+              }
+              merge->rhs.swap(new_rhs);
+              lhs = merge->lhs;
+              break;
+            }
+          case ISSUE_COPY :
+            {
+              IssueCopy *copy = inst->as_issue_copy();
+              int subst = substs[copy->precondition_idx];
+              if (subst >= 0) copy->precondition_idx = (unsigned)subst;
+              lhs = copy->lhs;
+              break;
+            }
+          case ISSUE_FILL :
+            {
+              IssueFill *fill = inst->as_issue_fill();
+              int subst = substs[fill->precondition_idx];
+              if (subst >= 0) fill->precondition_idx = (unsigned)subst;
+              lhs = fill->lhs;
+              break;
+            }
+          case SET_OP_SYNC_EVENT :
+            {
+              SetOpSyncEvent *sync = inst->as_set_op_sync_event();
+              lhs = sync->lhs;
+              break;
+            }
+          case ASSIGN_FENCE_COMPLETION :
+            {
+              lhs = fence_completion_id;
+              break;
+            }
+          case COMPLETE_REPLAY :
+            {
+              CompleteReplay *replay = inst->as_complete_replay();
+              int subst = substs[replay->rhs];
+              if (subst >= 0) replay->rhs = (unsigned)subst;
+              break;
+            }
+          default:
+            {
+              break;
+            }
+        }
+        if (lhs != -1)
+          gen[lhs] = idx;
       }
     }
 
@@ -3578,6 +4009,7 @@ namespace Legion {
 #endif
       InstanceReq inst_req;
       inst_req.instance = view->get_manager()->get_instance();
+      inst_req.node = region_node;
       region_node->get_column_source()->get_field_set(fields, inst_req.fields);
       inst_req.read = IS_READ_ONLY(req);
       op_reqs[op_key].push_back(inst_req);
@@ -3893,6 +4325,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     inline void PhysicalTemplate::find_last_users(const PhysicalInstance &inst,
+                                                  RegionNode *node,
                                                   unsigned field,
                                                   std::set<unsigned> &users)
     //--------------------------------------------------------------------------
@@ -3907,12 +4340,13 @@ namespace Legion {
            uit != finder->second.end(); ++uit)
         for (std::set<unsigned>::iterator it = uit->users.begin(); it !=
              uit->users.end(); ++it)
-        {
+          if (node->intersects_with(uit->node, false))
+          {
 #ifdef DEBUG_LEGION
-          assert(frontiers.find(*it) != frontiers.end());
+            assert(frontiers.find(*it) != frontiers.end());
 #endif
-          users.insert(frontiers[*it]);
-        }
+            users.insert(frontiers[*it]);
+          }
     }
 
     /////////////////////////////////////////////////////////////

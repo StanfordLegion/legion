@@ -474,6 +474,11 @@ namespace Legion {
       PhysicalTemplate* get_current_template(void) { return current_template; }
       bool has_any_templates(void) const { return templates.size() > 0; }
     public:
+      void record_previous_template_completion(ApEvent template_completion)
+        { previous_template_completion = template_completion; }
+      ApEvent get_previous_template_completion(void) const
+        { return previous_template_completion; }
+    public:
       PhysicalTemplate* start_new_template(ApEvent fence_event);
       RtEvent fix_trace(PhysicalTemplate *tpl, bool has_blocking_call);
     public:
@@ -488,6 +493,7 @@ namespace Legion {
       unsigned nonreplayable_count;
     public:
       std::vector<Processor> replay_targets;
+      ApEvent previous_template_completion;
     };
 
     struct CachedMapping
@@ -559,6 +565,8 @@ namespace Legion {
       void optimize(void);
       void elide_fences(std::vector<unsigned> &gen);
       void propagate_merges(std::vector<unsigned> &gen);
+      void transitive_reduction(void);
+      void propagate_copies(std::vector<unsigned> &gen);
       void prepare_parallel_replay(const std::vector<unsigned> &gen);
       void push_complete_replays();
       void generate_summary_operations(void);
@@ -670,8 +678,8 @@ namespace Legion {
                              ContextID physical_ctx);
       void record_last_user(const PhysicalInstance &inst, RegionNode *node,
                             unsigned field, unsigned user, bool read);
-      void find_last_users(const PhysicalInstance &inst, unsigned field,
-                           std::set<unsigned> &users);
+      void find_last_users(const PhysicalInstance &inst, RegionNode *node,
+                           unsigned field, std::set<unsigned> &users);
     private:
       PhysicalTrace *trace;
       volatile bool recording;
@@ -685,6 +693,7 @@ namespace Legion {
       std::map<ApEvent, unsigned> event_map;
       std::vector<Instruction*> instructions;
       std::vector<std::vector<Instruction*> > slices;
+      std::vector<std::vector<TraceLocalID> > slice_tasks;
       std::map<TraceLocalID, unsigned> memo_entries;
       typedef std::pair<PhysicalInstance, unsigned> InstanceAccess;
       struct UserInfo {
@@ -700,6 +709,7 @@ namespace Legion {
       struct InstanceReq {
         bool read;
         PhysicalInstance instance;
+        RegionNode *node;
         std::vector<FieldID> fields;
       };
       std::map<TraceLocalID, std::vector<InstanceReq> > op_reqs;
@@ -740,7 +750,6 @@ namespace Legion {
     enum InstructionKind
     {
       GET_TERM_EVENT = 0,
-      GET_OP_TERM_EVENT,
       CREATE_AP_USER_EVENT,
       TRIGGER_EVENT,
       MERGE_EVENT,

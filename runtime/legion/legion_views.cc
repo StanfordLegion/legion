@@ -5328,12 +5328,18 @@ namespace Legion {
       assert(mask * dst_precondition_mask);
 #endif
       const AddressSpaceID local_space = dst->context->runtime->address_space;
+      // Note here that we set 'can_filter' to false because this is an
+      // over-approximation for the copy that we're eventually going to
+      // be issuing, so we can't be sure we're writing all of it
+      // The only exception here is in the case where we're doing a copy
+      // across in which case we know we're going to write everything
       dst->find_copy_preconditions(0/*redop*/, false/*reading*/,
                              false/*single copy*/, restrict_out, mask, 
                              dst->logical_node->get_index_space_expression(), 
                              &info->version_info, info->op->get_unique_op_id(),
                              info->index, local_space, dst_preconditions,
-                             info->map_applied_events, *info);
+                             info->map_applied_events, *info,
+                             (across_helper != NULL)/*can filter*/);
       if ((restrict_info != NULL) && restrict_info->has_restrictions())
       {
         FieldMask restrict_mask;
@@ -6261,13 +6267,19 @@ namespace Legion {
       has_dst_preconditions = true;
       const AddressSpaceID local_space = dst->context->runtime->address_space;
       LegionMap<ApEvent,FieldMask>::aligned temp_preconditions;
+      // Note here that we set 'can_filter' to false because this is an
+      // over-approximation for the copy that we're eventually going to
+      // be issuing, so we can't be sure we're writing all of it
+      // The only exception here is in the case where we're doing a copy
+      // across in which case we know we're going to write everything
       dst->find_copy_preconditions(0/*redop*/, false/*reading*/,
                                false/*single copy*/, restrict_out, copy_mask,
                                dst->logical_node->get_index_space_expression(),
                                &info->version_info,
                                info->op->get_unique_op_id(), info->index,
                                local_space, temp_preconditions,
-                               info->map_applied_events, *info);
+                               info->map_applied_events, *info,
+                               (across_helper != NULL)/*can filter*/);
       for (LegionMap<ApEvent,FieldMask>::aligned::const_iterator it = 
             temp_preconditions.begin(); it != temp_preconditions.end(); it++)
         dst_preconditions.insert(it->first);

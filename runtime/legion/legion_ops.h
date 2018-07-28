@@ -265,6 +265,8 @@ namespace Legion {
         { return execution_fence_event; }
       inline bool has_execution_fence_event(void) const 
         { return execution_fence_event.exists(); }
+      inline void set_execution_fence_event(ApEvent fence_event)
+        { execution_fence_event = fence_event; }
       inline TaskContext* get_context(void) const { return parent_ctx; }
       inline UniqueID get_unique_op_id(void) const { return unique_op_id; } 
       virtual bool is_memoizing(void) const { return false; }
