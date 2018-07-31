@@ -244,7 +244,6 @@ namespace Legion {
       owner_shard = 0;
       sharding_functor = UINT_MAX;
       sharding_function = NULL;
-      sharding_space = IndexSpace::NO_SPACE;
       versioning_collective_id = UINT_MAX;
       future_collective_id = UINT_MAX;
       version_broadcast_collective = NULL;
@@ -617,15 +616,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplIndividualTask::initialize_replication(ReplicateContext *ctx,
-                                                    IndexSpace sharding_sp)
+    void ReplIndividualTask::initialize_replication(ReplicateContext *ctx)
     //--------------------------------------------------------------------------
     {
       versioning_collective_id = 
         ctx->get_next_collective_index(COLLECTIVE_LOC_0);
       future_collective_id = 
         ctx->get_next_collective_index(COLLECTIVE_LOC_1);
-      sharding_space = sharding_sp;
     }
 
     //--------------------------------------------------------------------------
@@ -683,7 +680,6 @@ namespace Legion {
       activate_index_task();
       sharding_functor = UINT_MAX;
       sharding_function = NULL;
-      sharding_space = IndexSpace::NO_SPACE;
       reduction_collective = NULL;
       launch_space = IndexSpace::NO_SPACE;
 #ifdef DEBUG_LEGION
@@ -875,8 +871,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplIndexTask::initialize_replication(ReplicateContext *ctx,
-                                               IndexSpace sharding_sp)
+    void ReplIndexTask::initialize_replication(ReplicateContext *ctx)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -903,7 +898,6 @@ namespace Legion {
       if (redop > 0)
         reduction_collective = 
           new FutureExchange(ctx, reduction_state_size, COLLECTIVE_LOC_53);
-      sharding_space = sharding_sp;
     } 
 
     //--------------------------------------------------------------------------
@@ -1159,7 +1153,6 @@ namespace Legion {
       activate_index_fill();
       sharding_functor = UINT_MAX;
       sharding_function = NULL;
-      sharding_space = IndexSpace::NO_SPACE;
       launch_space = IndexSpace::NO_SPACE;
       mapper = NULL;
 #ifdef DEBUG_LEGION
@@ -1267,8 +1260,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplIndexFillOp::initialize_replication(ReplicateContext *ctx,
-                                                 IndexSpace sharding_sp)
+    void ReplIndexFillOp::initialize_replication(ReplicateContext *ctx)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -1287,7 +1279,6 @@ namespace Legion {
                         parent_ctx->get_unique_id())
       }
 #endif
-      sharding_space = sharding_sp;
     }
 
     /////////////////////////////////////////////////////////////
@@ -1326,15 +1317,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplCopyOp::initialize_replication(ReplicateContext *ctx,
-                                            IndexSpace sharding_sp)
+    void ReplCopyOp::initialize_replication(ReplicateContext *ctx)
     //--------------------------------------------------------------------------
     {
       versioning_collective_id = 
         ctx->get_next_collective_index(COLLECTIVE_LOC_2);
       // Initialize our index domain of a single point
       index_domain = Domain(index_point, index_point);
-      sharding_space = sharding_sp;
     }
 
     //--------------------------------------------------------------------------
@@ -1344,7 +1333,6 @@ namespace Legion {
       activate_copy();
       sharding_functor = UINT_MAX;
       sharding_function = NULL;
-      sharding_space = IndexSpace::NO_SPACE;
 #ifdef DEBUG_LEGION
       sharding_collective = NULL;
 #endif
@@ -1592,7 +1580,6 @@ namespace Legion {
       activate_index_copy();
       sharding_functor = UINT_MAX;
       sharding_function = NULL;
-      sharding_space = IndexSpace::NO_SPACE;
       launch_space = IndexSpace::NO_SPACE;
 #ifdef DEBUG_LEGION
       sharding_collective = NULL;
@@ -1724,8 +1711,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplIndexCopyOp::initialize_replication(ReplicateContext *ctx,
-                                                 IndexSpace sharding_sp)
+    void ReplIndexCopyOp::initialize_replication(ReplicateContext *ctx)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -1745,7 +1731,6 @@ namespace Legion {
                         parent_ctx->get_unique_id())
       }
 #endif
-      sharding_space = sharding_sp;
     }
 
     /////////////////////////////////////////////////////////////
@@ -2650,8 +2635,6 @@ namespace Legion {
       activate_must_epoch_op();
       sharding_functor = UINT_MAX;
       sharding_function = NULL;
-      sharding_space = IndexSpace::NO_SPACE;
-      index_domain = Domain::NO_DOMAIN;
       mapping_collective_id = 0;
       collective_map_must_epoch_call = false;
       mapping_broadcast = NULL;
@@ -2699,7 +2682,9 @@ namespace Legion {
         if (trace != NULL)
           task->set_trace(trace, !trace->is_fixed(), NULL);
         task->must_epoch_task = true;
-        task->initialize_replication(repl_ctx, launcher.sharding_space);
+        task->initialize_replication(repl_ctx);
+        task->index_domain = this->launch_domain;
+        task->sharding_space = this->sharding_space;
 #ifdef DEBUG_LEGION
         task->set_sharding_collective(new ShardingGatherCollective(repl_ctx,
                                       0/*owner shard*/, COLLECTIVE_LOC_59));
@@ -2722,7 +2707,9 @@ namespace Legion {
         if (trace != NULL)
           task->set_trace(trace, !trace->is_fixed(), NULL);
         task->must_epoch_task = true;
-        task->initialize_replication(repl_ctx, launcher.sharding_space);
+        task->initialize_replication(repl_ctx);
+        task->index_domain = this->launch_domain;
+        task->sharding_space = this->sharding_space;
 #ifdef DEBUG_LEGION
         task->set_sharding_collective(new ShardingGatherCollective(repl_ctx,
                                       0/*owner shard*/, COLLECTIVE_LOC_59));
@@ -2744,12 +2731,11 @@ namespace Legion {
 #else
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(ctx);
 #endif
-      runtime->forest->find_launch_space_domain(launch_space, index_domain);
       Domain shard_domain;
       if (shard_space.exists() && (launch_space != shard_space))
         runtime->forest->find_launch_space_domain(shard_space, shard_domain);
       else
-        shard_domain = index_domain;
+        shard_domain = launch_domain;
       return new ReplFutureMapImpl(repl_ctx, this, shard_domain, runtime,
           runtime->get_available_distributed_id(), runtime->address_space);
     }
@@ -2768,7 +2754,7 @@ namespace Legion {
 #endif
       // We want to do the map must epoch call
       // First find all the tasks that we own on this shard
-      Domain shard_domain = index_domain;
+      Domain shard_domain = launch_domain;
       if (sharding_space.exists())
         runtime->forest->find_launch_space_domain(sharding_space, shard_domain);
       for (std::vector<SingleTask*>::const_iterator it = 
@@ -3184,8 +3170,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplMustEpochOp::initialize_replication(ReplicateContext *ctx,
-                                                 IndexSpace sharding_sp)
+    void ReplMustEpochOp::initialize_replication(ReplicateContext *ctx)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -3203,7 +3188,6 @@ namespace Legion {
         new MustEpochDependenceExchange(ctx, COLLECTIVE_LOC_70);
       completion_exchange = 
         new MustEpochCompletionExchange(ctx, COLLECTIVE_LOC_73);
-      sharding_space = sharding_sp;
     }
 
     //--------------------------------------------------------------------------
@@ -3217,7 +3201,7 @@ namespace Legion {
         return shard_domain;
       }
       else
-        return index_domain;
+        return launch_domain;
     }
 
     //--------------------------------------------------------------------------

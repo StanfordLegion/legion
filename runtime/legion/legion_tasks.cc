@@ -450,6 +450,7 @@ namespace Legion {
       rez.serialize(must_epoch_task);
       rez.serialize(index_domain);
       rez.serialize(index_point);
+      rez.serialize(sharding_space);
       rez.serialize(local_arglen);
       rez.serialize(local_args,local_arglen);
       rez.serialize(orig_proc);
@@ -543,6 +544,7 @@ namespace Legion {
       derez.deserialize(must_epoch_task);
       derez.deserialize(index_domain);
       derez.deserialize(index_point);
+      derez.deserialize(sharding_space);
       derez.deserialize(local_arglen);
       if (local_arglen > 0)
       {
@@ -4717,6 +4719,7 @@ namespace Legion {
       this->clone_task_op_from(rhs, p, stealable, false/*duplicate*/);
       this->index_domain = rhs->index_domain;
       this->launch_space = rhs->launch_space;
+      this->sharding_space = rhs->sharding_space;
       this->internal_space = is;
       this->must_epoch_task = rhs->must_epoch_task;
       this->sliced = !recurse;
@@ -5097,6 +5100,7 @@ namespace Legion {
       tag = launcher.tag;
       index_point = launcher.point;
       index_domain = Domain(index_point, index_point);
+      sharding_space = launcher.sharding_space;
       is_index_space = false;
       initialize_base_task(ctx, track, launcher.static_dependences,
                            launcher.predicate, task_id);
@@ -7682,6 +7686,7 @@ namespace Legion {
       else
         index_domain = launcher.launch_domain;
       internal_space = launch_space;
+      sharding_space = launcher.sharding_space;
       need_intra_task_alias_analysis = !launcher.independent_requirements;
       initialize_base_task(ctx, track, launcher.static_dependences,
                            launcher.predicate, task_id);
@@ -7751,6 +7756,7 @@ namespace Legion {
       else
         index_domain = launcher.launch_domain;
       internal_space = launch_space;
+      sharding_space = launcher.sharding_space;
       need_intra_task_alias_analysis = !launcher.independent_requirements;
       redop = redop_id;
       reduction_op = Runtime::get_reduction_op(redop);
@@ -9502,6 +9508,7 @@ namespace Legion {
       result->is_index_space = true;
       result->must_epoch_task = this->must_epoch_task;
       result->index_domain = this->index_domain;
+      result->sharding_space = this->sharding_space;
       result->trace_local_id = trace_local_id;
       result->tpl = tpl;
       result->memo_state = memo_state;

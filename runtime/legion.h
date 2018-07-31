@@ -1409,8 +1409,8 @@ namespace Legion {
       MappingTagID                       tag;
       DomainPoint                        point;
       // Only used in control replication contexts for
-      // doing sharding. If left unspecified will default
-      // to an index space of size 1 containing 'point'
+      // doing sharding. If left unspecified the runtime
+      // will use an index space of size 1 containing 'point'
       IndexSpace                         sharding_space;
     public:
       // If the predicate is set to anything other than
@@ -1494,7 +1494,7 @@ namespace Legion {
       Domain                             launch_domain;
       IndexSpace                         launch_space;
       // Will only be used in control replication context. If left
-      // unset it will default to launch_space/launch_domain
+      // unset the runtime will use launch_domain/launch_space
       IndexSpace                         sharding_space;
       std::vector<IndexSpaceRequirement> index_requirements;
       std::vector<RegionRequirement>     region_requirements;
@@ -1636,8 +1636,8 @@ namespace Legion {
       MappingTagID                    tag;
       DomainPoint                     point;
       // Only used in control replication contexts for
-      // doing sharding. If left unspecified will default
-      // to an index space of size 1 containing 'point'
+      // doing sharding. If left unspecified the runtime
+      // will use an index space of size 1 containing 'point'
       IndexSpace                      sharding_space;
     public:
       // Inform the runtime about any static dependences
@@ -1692,7 +1692,7 @@ namespace Legion {
       Domain                          launch_domain;
       IndexSpace                      launch_space;
       // Will only be used in control replication context. If left
-      // unset it will default to launch_space/launch_domain
+      // unset the runtime will use launch_domain/launch_space
       IndexSpace                      sharding_space;
       Predicate                       predicate;
       MapperID                        map_id;
@@ -1742,6 +1742,10 @@ namespace Legion {
       MapperID                        map_id;
       MappingTagID                    tag;
       DomainPoint                     point;
+      // Only used in control replication contexts for
+      // doing sharding. If left unspecified the runtime
+      // will use an index space of size 1 containing 'point'
+      IndexSpace                      sharding_space;
     public:
       // Inform the runtime about any static dependences
       // These will be ignored outside of static traces
@@ -1817,7 +1821,7 @@ namespace Legion {
       Domain                          launch_domain;
       IndexSpace                      launch_space;
       // Will only be used in control replication context. If left
-      // unset it will default to launch_space/launch_domain
+      // unset the runtime will use launch_domain/launch_space
       IndexSpace                      sharding_space;
       LogicalRegion                   region;
       LogicalPartition                partition;
@@ -2470,7 +2474,7 @@ namespace Legion {
       Domain                         launch_domain;
       IndexSpace                     launch_space;
       // Will only be used in control replication context. If left
-      // unset it will default to launch_space/launch_domain
+      // unset the runtime will use launch_space/launch_domain
       IndexSpace                     sharding_space;
     public:
       bool                           silence_warnings;
@@ -2640,6 +2644,7 @@ namespace Legion {
       bool                                must_epoch_task; 
       Domain                              index_domain;
       DomainPoint                         index_point;
+      IndexSpace                          sharding_space;
       void*                               local_args;
       size_t                              local_arglen;
     public:
@@ -2692,6 +2697,7 @@ namespace Legion {
       bool                              is_index_space;
       Domain                            index_domain;
       DomainPoint                       index_point;
+      IndexSpace                        sharding_space;
     public:
       // Parent task for the copy operation
       const Task*                       parent_task;
@@ -2874,6 +2880,7 @@ namespace Legion {
       bool                              is_index_space;
       Domain                            index_domain;
       DomainPoint                       index_point;
+      IndexSpace                        sharding_space;
     public:
       // Parent task for the fill operation
       const Task*                       parent_task;
@@ -2957,6 +2964,7 @@ namespace Legion {
     public:
       // Index space of points for the must epoch operation
       Domain                                    launch_domain;
+      IndexSpace                                sharding_space;
     public:
       // Parent task for the must epoch operation
       const Task*                               parent_task;

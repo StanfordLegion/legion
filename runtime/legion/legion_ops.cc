@@ -3244,6 +3244,8 @@ namespace Legion {
       map_id = launcher.map_id;
       tag = launcher.tag;
       index_point = launcher.point;
+      index_domain = Domain(index_point, index_point);
+      sharding_space = launcher.sharding_space;
       if (check_privileges)
       {
         if (src_requirements.size() != dst_requirements.size())
@@ -4831,6 +4833,7 @@ namespace Legion {
         runtime->forest->find_launch_space_domain(launch_space, index_domain);
       else
         index_domain = launcher.launch_domain;
+      sharding_space = launcher.sharding_space;
       src_requirements.resize(launcher.src_requirements.size());
       dst_requirements.resize(launcher.dst_requirements.size());
       src_versions.resize(launcher.src_requirements.size());
@@ -5093,6 +5096,7 @@ namespace Legion {
     {
       activate_copy();
       index_domain = Domain::NO_DOMAIN;
+      sharding_space = IndexSpace::NO_SPACE;
       launch_space = IndexSpace::NO_SPACE;
       points_committed = 0;
       commit_request = false;
@@ -5768,6 +5772,7 @@ namespace Legion {
       initialize_operation(own->get_context(), false/*track*/, 
           own->src_requirements.size() + own->dst_requirements.size());
       index_point = p;
+      sharding_space = own->sharding_space;
       owner = own;
       execution_fence_event = own->get_execution_fence_event();
       // From Copy
@@ -10886,6 +10891,7 @@ namespace Legion {
       tag = launcher.mapping_tag;
       if (launch_space.exists())
         runtime->forest->find_launch_space_domain(launch_space, launch_domain);
+      sharding_space = launcher.sharding_space;
       parent_task = ctx->get_task();
       // Make a new future map for storing our results
       // We'll fill it in later
@@ -13475,6 +13481,9 @@ namespace Legion {
       arrive_barriers = launcher.arrive_barriers;
       map_id = launcher.map_id;
       tag = launcher.tag;
+      index_point = launcher.point;
+      index_domain = Domain(index_point, index_point);
+      sharding_space = launcher.sharding_space;
       if (check_privileges)
         check_fill_privilege();
       if (runtime->legion_spy_enabled)
@@ -14185,6 +14194,7 @@ namespace Legion {
         runtime->forest->find_launch_space_domain(launch_space, index_domain);
       else
         index_domain = launcher.launch_domain;
+      sharding_space = launcher.sharding_space;
       if (launcher.region.exists())
       {
 #ifdef DEBUG_LEGION
@@ -14244,6 +14254,7 @@ namespace Legion {
     {
       activate_fill();
       index_domain = Domain::NO_DOMAIN;
+      sharding_space = IndexSpace::NO_SPACE;
       launch_space = IndexSpace::NO_SPACE;
       points_committed = 0;
       commit_request = false;
@@ -14551,6 +14562,8 @@ namespace Legion {
       // Initialize the operation
       initialize_operation(own->get_context(), false/*track*/, 1/*regions*/); 
       index_point = p;
+      index_domain = own->index_domain;
+      sharding_space = own->sharding_space;
       owner = own;
       execution_fence_event = own->get_execution_fence_event();
       // From Fill

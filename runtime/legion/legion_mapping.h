@@ -434,6 +434,7 @@ namespace Legion {
       struct SliceTaskInput {
         IndexSpace                             domain_is;
         Domain                                 domain;
+        IndexSpace                             sharding_is;
       };
       struct SliceTaskOutput {
         std::vector<TaskSlice>                 slices;

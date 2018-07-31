@@ -676,7 +676,7 @@ namespace Legion {
       virtual bool is_repl_individual_task(void) const { return true; }
       virtual void unpack_remote_versions(Deserializer &derez);
     public:
-      void initialize_replication(ReplicateContext *ctx,IndexSpace shard_space);
+      void initialize_replication(ReplicateContext *ctx);
       void set_sharding_function(ShardingID functor,ShardingFunction *function);
       void perform_unowned_shard(ReplicateContext *ctx);
       void pack_versioning_advance_states(VersioningInfoBroadcast &broad);
@@ -684,7 +684,6 @@ namespace Legion {
       ShardID owner_shard;
       ShardingID sharding_functor;
       ShardingFunction *sharding_function;
-      IndexSpace sharding_space;
       std::vector<ProjectionInfo> projection_infos;
       CollectiveID versioning_collective_id; // id for version state broadcasts
       CollectiveID future_collective_id; // id for the future broadcast 
@@ -776,14 +775,13 @@ namespace Legion {
       // case that we misspeculate
       virtual void resolve_false(bool speculated, bool launched);
     public:
-      void initialize_replication(ReplicateContext *ctx,IndexSpace shard_space);
+      void initialize_replication(ReplicateContext *ctx);
       void set_sharding_function(ShardingID functor,ShardingFunction *function);
       virtual FutureMapImpl* create_future_map(TaskContext *ctx,
                     IndexSpace launch_space, IndexSpace shard_space);
     protected:
       ShardingID sharding_functor;
       ShardingFunction *sharding_function;
-      IndexSpace sharding_space;
       FutureExchange *reduction_collective;
 #ifdef DEBUG_LEGION
     public:
@@ -870,11 +868,10 @@ namespace Legion {
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
     public:
-      void initialize_replication(ReplicateContext *ctx,IndexSpace shard_space);
+      void initialize_replication(ReplicateContext *ctx);
     protected:
       ShardingID sharding_functor;
       ShardingFunction *sharding_function;
-      IndexSpace sharding_space;
       MapperManager *mapper;
 #ifdef DEBUG_LEGION
     public:
@@ -898,7 +895,7 @@ namespace Legion {
     public:
       ReplCopyOp& operator=(const ReplCopyOp &rhs);
     public:
-      void initialize_replication(ReplicateContext *ctx,IndexSpace shard_space);
+      void initialize_replication(ReplicateContext *ctx);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -910,7 +907,6 @@ namespace Legion {
     protected:
       ShardingID sharding_functor;
       ShardingFunction *sharding_function;
-      IndexSpace sharding_space;
     public:
       std::vector<ProjectionInfo>   src_projection_infos;
       std::vector<ProjectionInfo>   dst_projection_infos;
@@ -946,11 +942,10 @@ namespace Legion {
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
     public:
-      void initialize_replication(ReplicateContext *ctx, IndexSpace launch_sp);
+      void initialize_replication(ReplicateContext *ctx);
     protected:
       ShardingID sharding_functor;
       ShardingFunction *sharding_function;
-      IndexSpace sharding_space;
 #ifdef DEBUG_LEGION
     public:
       inline void set_sharding_collective(ShardingGatherCollective *collective)
@@ -1186,7 +1181,7 @@ namespace Legion {
       void map_replicate_tasks(void) const;
       void distribute_replicate_tasks(void) const;
     public:
-      void initialize_replication(ReplicateContext *ctx,IndexSpace shard_space);
+      void initialize_replication(ReplicateContext *ctx);
       Domain get_shard_domain(void) const;
     public:
       static IndexSpace create_temporary_launch_space(Runtime *runtime,
@@ -1195,8 +1190,6 @@ namespace Legion {
     protected:
       ShardingID sharding_functor;
       ShardingFunction *sharding_function;
-      IndexSpace sharding_space;
-      Domain index_domain;
       CollectiveID mapping_collective_id;
       bool collective_map_must_epoch_call;
       MustEpochMappingBroadcast *mapping_broadcast;
