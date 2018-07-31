@@ -1784,6 +1784,9 @@ namespace Legion {
       Color get_index_space_color(MapperContext ctx, 
                                             IndexSpace handle) const;
 
+      DomainPoint get_index_space_color_point(MapperContext ctx,
+                                              IndexSpace handle) const;
+
       Color get_index_partition_color(MapperContext ctx, 
                                                 IndexPartition handle) const;
 
