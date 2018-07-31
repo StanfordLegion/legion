@@ -2673,6 +2673,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    DomainPoint MapperManager::get_index_space_color_point(MappingCallInfo *ctx,
+                                                           IndexSpace handle)
+    //--------------------------------------------------------------------------
+    {
+      pause_mapper_call(ctx);
+      DomainPoint result = runtime->get_index_space_color_point(handle);
+      resume_mapper_call(ctx);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
     Color MapperManager::get_index_partition_color(MappingCallInfo *ctx,
                                                    IndexPartition handle)
     //--------------------------------------------------------------------------

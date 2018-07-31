@@ -948,6 +948,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    DomainPoint MapperRuntime::get_index_space_color_point(MapperContext ctx, 
+                                                        IndexSpace handle) const
+    //--------------------------------------------------------------------------
+    {
+      return ctx->manager->get_index_space_color_point(ctx, handle);
+    }
+
+    //--------------------------------------------------------------------------
     Color MapperRuntime::get_index_partition_color(MapperContext ctx,
                                                     IndexPartition handle) const
     //--------------------------------------------------------------------------
