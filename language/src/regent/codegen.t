@@ -7099,7 +7099,8 @@ function codegen.stat_for_list(cx, node)
   local cleanup_actions = quote end
 
   local iterator_has_next, iterator_next_span -- For unstructured
-  local domain -- For structured
+  local rect_it, rect_it_create, rect_it_destroy -- For structured
+  local rect_it_valid, rect_it_step, rect_it_get, domain -- For structured
   if ispace_type.dim == 0 then
     if it and cache_index_iterator then
       iterator_has_next = c.legion_terra_cached_index_iterator_has_next
@@ -7122,9 +7123,26 @@ function codegen.stat_for_list(cx, node)
     end
   else
     domain = terralib.newsymbol(c.legion_domain_t, "domain")
+    local rect_it_type =
+      c["legion_rect_in_domain_iterator_" .. tostring(ispace_type.dim) .. "d_t"]
+    rect_it = terralib.newsymbol(rect_it_type, "rect_it")
+    rect_it_create =
+      c["legion_rect_in_domain_iterator_create_" .. tostring(ispace_type.dim) .. "d"]
+    rect_it_destroy =
+      c["legion_rect_in_domain_iterator_destroy_" .. tostring(ispace_type.dim) .. "d"]
+    rect_it_valid =
+      c["legion_rect_in_domain_iterator_valid_" .. tostring(ispace_type.dim) .. "d"]
+    rect_it_step =
+      c["legion_rect_in_domain_iterator_step_" .. tostring(ispace_type.dim) .. "d"]
+    rect_it_get =
+      c["legion_rect_in_domain_iterator_get_rect_" .. tostring(ispace_type.dim) .. "d"]
     actions = quote
       [actions]
       var [domain] = c.legion_index_space_get_domain([cx.runtime], [is])
+      var [rect_it] = [rect_it_create]([domain])
+    end
+    cleanup_actions = quote
+      [rect_it_destroy]([rect_it])
     end
   end
 
@@ -7236,8 +7254,11 @@ function codegen.stat_for_list(cx, node)
           end
           return quote
             [actions]
-            var [rect] = [domain_get_rect]([domain])
-            [body]
+            while [rect_it_valid]([rect_it]) do
+              var [rect] = [rect_it_get]([rect_it])
+              [body]
+              [rect_it_step]([rect_it])
+            end
             ::[break_label]::
             [cleanup_actions]
           end
