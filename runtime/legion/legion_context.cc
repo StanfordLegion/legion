@@ -1833,36 +1833,20 @@ namespace Legion {
                       "task %s (UID %lld). Static traces must perfectly "
                       "manage their physical mappings with no runtime help.",
                       get_task_name(), get_unique_id())
-      if (unmapped_regions.size() == 1)
+      std::set<ApEvent> mapped_events;
+      for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
       {
-        MapOp *op = runtime->get_available_map_op();
-        op->initialize(this, unmapped_regions[0]);
-        ApEvent mapped_event = op->get_completion_event();
-        runtime->add_to_dependence_queue(this, executing_processor, op);
-        if (mapped_event.has_triggered())
-          return;
-        begin_task_wait(true/*from runtime*/);
-        mapped_event.wait();
-        end_task_wait();
+        const ApEvent ready = remap_region(unmapped_regions[idx]);
+        if (ready.exists())
+          mapped_events.insert(ready);
       }
-      else
-      {
-        std::set<ApEvent> mapped_events;
-        for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
-        {
-          MapOp *op = runtime->get_available_map_op();
-          op->initialize(this, unmapped_regions[idx]);
-          mapped_events.insert(op->get_completion_event());
-          runtime->add_to_dependence_queue(this, executing_processor, op);
-        }
-        // Wait for all the re-mapping operations to complete
-        ApEvent mapped_event = Runtime::merge_events(NULL, mapped_events);
-        if (mapped_event.has_triggered())
-          return;
-        begin_task_wait(true/*from runtime*/);
-        mapped_event.wait();
-        end_task_wait();
-      }
+      // Wait for all the re-mapping operations to complete
+      const ApEvent mapped_event = Runtime::merge_events(NULL, mapped_events);
+      if (mapped_event.has_triggered())
+        return;
+      begin_task_wait(true/*from runtime*/);
+      mapped_event.wait();
+      end_task_wait();
     }
 
     //--------------------------------------------------------------------------
@@ -3919,18 +3903,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InnerContext::remap_region(PhysicalRegion region)
+    ApEvent InnerContext::remap_region(PhysicalRegion region)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
       // Check to see if the region is already mapped,
       // if it is then we are done
       if (region.is_mapped())
-        return;
+        return ApEvent::NO_AP_EVENT;
       MapOp *map_op = runtime->get_available_map_op();
       map_op->initialize(this, region);
       register_inline_mapped_region(region);
+      const ApEvent result = map_op->get_completion_event();
       runtime->add_to_dependence_queue(this, executing_processor, map_op);
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -8430,12 +8416,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LeafContext::remap_region(PhysicalRegion region)
+    ApEvent LeafContext::remap_region(PhysicalRegion region)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_REMAP_OPERATION,
         "Illegal remap operation performed in leaf task %s "
                      "(ID %lld)", get_task_name(), get_unique_id())
+      return ApEvent::NO_AP_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -9684,10 +9671,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InlineContext::remap_region(PhysicalRegion region)
+    ApEvent InlineContext::remap_region(PhysicalRegion region)
     //--------------------------------------------------------------------------
     {
-      enclosing->remap_region(region);
+      return enclosing->remap_region(region);
     }
 
     //--------------------------------------------------------------------------

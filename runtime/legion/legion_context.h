@@ -259,7 +259,7 @@ namespace Legion {
       virtual Future execute_index_space(const IndexTaskLauncher &launcher,
                                          ReductionOpID redop) = 0; 
       virtual PhysicalRegion map_region(const InlineLauncher &launcher) = 0;
-      virtual void remap_region(PhysicalRegion region) = 0;
+      virtual ApEvent remap_region(PhysicalRegion region) = 0;
       virtual void unmap_region(PhysicalRegion region) = 0;
       virtual void fill_fields(const FillLauncher &launcher) = 0;
       virtual void fill_fields(const IndexFillLauncher &launcher) = 0;
@@ -893,7 +893,7 @@ namespace Legion {
       virtual Future execute_index_space(const IndexTaskLauncher &launcher,
                                          ReductionOpID redop);
       virtual PhysicalRegion map_region(const InlineLauncher &launcher);
-      virtual void remap_region(PhysicalRegion region);
+      virtual ApEvent remap_region(PhysicalRegion region);
       virtual void unmap_region(PhysicalRegion region);
       virtual void fill_fields(const FillLauncher &launcher);
       virtual void fill_fields(const IndexFillLauncher &launcher);
@@ -1509,7 +1509,7 @@ namespace Legion {
       virtual Future execute_index_space(const IndexTaskLauncher &launcher,
                                          ReductionOpID redop);
       virtual PhysicalRegion map_region(const InlineLauncher &launcher);
-      virtual void remap_region(PhysicalRegion region);
+      virtual ApEvent remap_region(PhysicalRegion region);
       virtual void unmap_region(PhysicalRegion region);
       virtual void fill_fields(const FillLauncher &launcher);
       virtual void fill_fields(const IndexFillLauncher &launcher);
@@ -1827,7 +1827,7 @@ namespace Legion {
       virtual Future execute_index_space(const IndexTaskLauncher &launcher,
                                          ReductionOpID redop);
       virtual PhysicalRegion map_region(const InlineLauncher &launcher);
-      virtual void remap_region(PhysicalRegion region);
+      virtual ApEvent remap_region(PhysicalRegion region);
       virtual void unmap_region(PhysicalRegion region);
       virtual void fill_fields(const FillLauncher &launcher);
       virtual void fill_fields(const IndexFillLauncher &launcher);
