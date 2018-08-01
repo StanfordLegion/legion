@@ -292,6 +292,23 @@ def run_test_external(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
     ])
     cmd(['make', '-C', os.path.join(task_amr_dir)], env=task_amr_env)
 
+    # Barnes-Hut
+    # Contact: Haithem Turki <turki.haithem@gmail.com>
+    barnes_hut_dir = os.path.join(tmp_dir, 'barnes_hut')
+    cmd(['git', 'clone', 'https://github.com/StanfordLegion/barnes-hut.git', barnes_hut_dir])
+    regent_path = os.path.join(root_dir, 'language', 'regent.py')
+    cmd([regent_path, 'hdf5_converter.rg',
+         '-i', 'input/bodies-16384-blitz.csv',
+         '-o', 'bodies-16384-blitz.h5',
+         '-n', '16384'],
+        cwd=barnes_hut_dir,
+        env=env)
+    cmd([regent_path, 'barnes_hut.rg',
+         '-i', 'bodies-16384-blitz.h5',
+         '-n', '16384'],
+        cwd=barnes_hut_dir,
+        env=env)
+
 def run_test_private(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
     flags = ['-logfile', 'out_%.log']
 
