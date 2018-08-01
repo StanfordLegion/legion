@@ -47,6 +47,9 @@ extern "C" {
   NEW_OPAQUE_TYPE(legion_runtime_t);
   NEW_OPAQUE_TYPE(legion_context_t);
   NEW_OPAQUE_TYPE(legion_domain_point_iterator_t);
+  NEW_OPAQUE_TYPE(legion_rect_in_domain_iterator_1d_t);
+  NEW_OPAQUE_TYPE(legion_rect_in_domain_iterator_2d_t);
+  NEW_OPAQUE_TYPE(legion_rect_in_domain_iterator_3d_t);
   NEW_OPAQUE_TYPE(legion_coloring_t);
   NEW_OPAQUE_TYPE(legion_domain_coloring_t);
   NEW_OPAQUE_TYPE(legion_point_coloring_t);
@@ -628,6 +631,79 @@ extern "C" {
    */
   legion_domain_point_t
   legion_domain_point_iterator_next(legion_domain_point_iterator_t handle);
+
+  // -----------------------------------------------------------------------
+  // Rect in Domain Iterator
+  // -----------------------------------------------------------------------
+
+  /**
+   * @return Caller takes ownership of return value.
+   *
+   * @see Legion::Domain::RectInDomainIterator::RectInDomainIterator()
+   */
+  legion_rect_in_domain_iterator_1d_t
+  legion_rect_in_domain_iterator_create_1d(legion_domain_t handle);
+
+  legion_rect_in_domain_iterator_2d_t
+  legion_rect_in_domain_iterator_create_2d(legion_domain_t handle);
+
+  legion_rect_in_domain_iterator_3d_t
+  legion_rect_in_domain_iterator_create_3d(legion_domain_t handle);
+
+  /**
+   * @param handle Caller must have ownership of parameter `handle`.
+   *
+   * @see Legion::Domain::RectInDomainIterator::~RectInDomainIterator()
+   */
+  void
+  legion_rect_in_domain_iterator_destroy_1d(
+                                    legion_rect_in_domain_iterator_1d_t handle);
+  void
+  legion_rect_in_domain_iterator_destroy_2d(
+                                    legion_rect_in_domain_iterator_2d_t handle);
+  void
+  legion_rect_in_domain_iterator_destroy_3d(
+                                    legion_rect_in_domain_iterator_3d_t handle);
+
+  /**
+   * @see Legion::Domain::RectInDomainIterator::valid()
+   */
+  bool
+  legion_rect_in_domain_iterator_valid_1d(
+                                    legion_rect_in_domain_iterator_1d_t handle);
+  bool
+  legion_rect_in_domain_iterator_valid_2d(
+                                    legion_rect_in_domain_iterator_2d_t handle);
+  bool
+  legion_rect_in_domain_iterator_valid_3d(
+                                    legion_rect_in_domain_iterator_3d_t handle);
+
+  /**
+   * @see Legion::Domain::RectInDomainIterator::step()
+   */
+  bool
+  legion_rect_in_domain_iterator_step_1d(
+                                    legion_rect_in_domain_iterator_1d_t handle);
+  bool
+  legion_rect_in_domain_iterator_step_2d(
+                                    legion_rect_in_domain_iterator_2d_t handle);
+  bool
+  legion_rect_in_domain_iterator_step_3d(
+                                    legion_rect_in_domain_iterator_3d_t handle);
+
+  /**
+   * @see Legion::Domain::RectInDomainIterator::operator*()
+   */
+  legion_rect_1d_t
+  legion_rect_in_domain_iterator_get_rect_1d(
+                                    legion_rect_in_domain_iterator_1d_t handle);
+  legion_rect_2d_t
+  legion_rect_in_domain_iterator_get_rect_2d(
+                                    legion_rect_in_domain_iterator_2d_t handle);
+  legion_rect_3d_t
+  legion_rect_in_domain_iterator_get_rect_3d(
+                                    legion_rect_in_domain_iterator_3d_t handle);
+
 
   // -----------------------------------------------------------------------
   // Coloring Operations

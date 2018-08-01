@@ -478,6 +478,58 @@ legion_domain_point_iterator_next(legion_domain_point_iterator_t handle_)
   return CObjectWrapper::wrap(next);
 }
 
+// -----------------------------------------------------------------------
+// Rect in Domain Iterator
+// -----------------------------------------------------------------------
+
+#define DEFINE_RECT_IN_DOMAIN_ITERATOR(N)                                      \
+                                                                               \
+legion_rect_in_domain_iterator_##N##d_t                                        \
+legion_rect_in_domain_iterator_create_##N##d(legion_domain_t handle_)          \
+{                                                                              \
+  Domain domain = CObjectWrapper::unwrap(handle_);                             \
+  assert(domain.dim == N);                                                     \
+  RectInDomainIterator<N,coord_t> *itr =                                       \
+    new RectInDomainIterator<N,coord_t>(DomainT<N,coord_t>(domain));           \
+  return CObjectWrapper::wrap(itr);                                            \
+}                                                                              \
+                                                                               \
+void                                                                           \
+legion_rect_in_domain_iterator_destroy_##N##d(                                 \
+                              legion_rect_in_domain_iterator_##N##d_t handle_) \
+{                                                                              \
+  RectInDomainIterator<N,coord_t> *itr = CObjectWrapper::unwrap(handle_);      \
+  delete itr;                                                                  \
+}                                                                              \
+                                                                               \
+bool                                                                           \
+legion_rect_in_domain_iterator_valid_##N##d(                                   \
+                              legion_rect_in_domain_iterator_##N##d_t handle_) \
+{                                                                              \
+  RectInDomainIterator<N,coord_t> *itr = CObjectWrapper::unwrap(handle_);      \
+  return itr->valid();                                                         \
+}                                                                              \
+                                                                               \
+bool                                                                           \
+legion_rect_in_domain_iterator_step_##N##d(                                    \
+                              legion_rect_in_domain_iterator_##N##d_t handle_) \
+{                                                                              \
+  RectInDomainIterator<N,coord_t> *itr = CObjectWrapper::unwrap(handle_);      \
+  return itr->step();                                                          \
+}                                                                              \
+                                                                               \
+legion_rect_##N##d_t                                                           \
+legion_rect_in_domain_iterator_get_rect_##N##d(                                \
+                              legion_rect_in_domain_iterator_##N##d_t handle_) \
+{                                                                              \
+  RectInDomainIterator<N,coord_t> *itr = CObjectWrapper::unwrap(handle_);      \
+  return CObjectWrapper::wrap(**itr);                                          \
+}                                                                              \
+
+DEFINE_RECT_IN_DOMAIN_ITERATOR(1)
+DEFINE_RECT_IN_DOMAIN_ITERATOR(2)
+DEFINE_RECT_IN_DOMAIN_ITERATOR(3)
+
 // -------------------------------------------------------
 // Coloring Operations
 // -------------------------------------------------------
