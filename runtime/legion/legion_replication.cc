@@ -2684,7 +2684,7 @@ namespace Legion {
         task->must_epoch_task = true;
         task->initialize_replication(repl_ctx);
         task->index_domain = this->launch_domain;
-        task->sharding_space = this->sharding_space;
+        task->sharding_space = launcher.sharding_space;
 #ifdef DEBUG_LEGION
         task->set_sharding_collective(new ShardingGatherCollective(repl_ctx,
                                       0/*owner shard*/, COLLECTIVE_LOC_59));
@@ -2708,8 +2708,7 @@ namespace Legion {
           task->set_trace(trace, !trace->is_fixed(), NULL);
         task->must_epoch_task = true;
         task->initialize_replication(repl_ctx);
-        task->index_domain = this->launch_domain;
-        task->sharding_space = this->sharding_space;
+        task->sharding_space = launcher.sharding_space;
 #ifdef DEBUG_LEGION
         task->set_sharding_collective(new ShardingGatherCollective(repl_ctx,
                                       0/*owner shard*/, COLLECTIVE_LOC_59));
