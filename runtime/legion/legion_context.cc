@@ -10178,20 +10178,22 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplicateContext::remap_region(PhysicalRegion region)
+    ApEvent ReplicateContext::remap_region(PhysicalRegion region)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
       // Check to see if the region is already mapped,
       // if it is then we are done
       if (region.is_mapped())
-        return;
+        return ApEvent::NO_AP_EVENT;
       ReplMapOp *map_op = runtime->get_available_repl_map_op();
       map_op->initialize(this, region);
       map_op->initialize_replication(this, inline_mapping_barrier);
       Runtime::advance_barrier(inline_mapping_barrier);
       register_inline_mapped_region(region);
+      const ApEvent result = map_op->get_completion_event();
       runtime->add_to_dependence_queue(this, executing_processor, map_op);
+      return result;
     }
 
     //--------------------------------------------------------------------------

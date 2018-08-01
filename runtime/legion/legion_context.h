@@ -1568,7 +1568,7 @@ namespace Legion {
       virtual Future execute_index_space(const IndexTaskLauncher &launcher,
                                          ReductionOpID redop);
       virtual PhysicalRegion map_region(const InlineLauncher &launcher);
-      virtual void remap_region(PhysicalRegion region);
+      virtual ApEvent remap_region(PhysicalRegion region);
       // Unmapping region is the same as for an inner context
       // Single fill ops are the same as normal inner context
       virtual void fill_fields(const IndexFillLauncher &launcher);
