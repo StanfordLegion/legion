@@ -7317,12 +7317,15 @@ function codegen.stat_for_list(cx, node)
         if not openmp then
           return quote
             [actions]
-            var rect = c.legion_domain_get_rect_1d([domain])
-            for i = rect.lo.x[0], rect.hi.x[0] + 1 do
-              var [symbol] = [symbol.type]{ __ptr = i }
-              do
-                [block]
+            while [rect_it_valid]([rect_it]) do
+              var rect = [rect_it_get]([rect_it])
+              for i = rect.lo.x[0], rect.hi.x[0] + 1 do
+                var [symbol] = [symbol.type]{ __ptr = i }
+                do
+                  [block]
+                end
               end
+              [rect_it_step]([rect_it])
             end
             ::[break_label]::
             [cleanup_actions]
