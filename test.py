@@ -304,12 +304,12 @@ def run_test_external(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
     barnes_hut_env = dict(list(env.items()) + [
         ('SAVEOBJ', '1'),
     ])
-    cmd([regent_path, 'bares_hut.rg',
+    cmd([regent_path, 'barnes_hut.rg',
          '-i', 'bodies-16384-blitz.h5',
          '-n', '16384'],
         cwd=barnes_hut_dir,
         env=barnes_hut_env)
-    cmd(['bares_hut',
+    cmd(['barnes_hut',
          '-i', 'bodies-16384-blitz.h5',
          '-n', '16384'],
         cwd=barnes_hut_dir,
