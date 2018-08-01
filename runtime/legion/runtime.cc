@@ -12579,7 +12579,7 @@ namespace Legion {
     {
       if (ctx == DUMMY_CONTEXT)
         REPORT_DUMMY_CONTEXT("Illegal dummy context remap region!");
-      return ctx->remap_region(region); 
+      ctx->remap_region(region); 
     }
 
     //--------------------------------------------------------------------------
