@@ -249,13 +249,21 @@ namespace Legion {
       public:
         static const LgTaskID TASK_ID = LG_DEFER_MATERIALIZED_VIEW_TASK_ID;
       public:
-        DistributedID did;
-        AddressSpaceID owner_space;
-        AddressSpaceID logical_owner;
-        RegionTreeNode *target_node;
-        PhysicalManager *manager;
-        MaterializedView *parent;
-        UniqueID context_uid;
+        DeferMaterializedViewArgs(DistributedID id, AddressSpaceID own,
+                                  AddressSpaceID log, RegionTreeNode *target,
+                                  PhysicalManager *man, MaterializedView *par,
+                                  UniqueID ctx_uid)
+          : LgTaskArgs<DeferMaterializedViewArgs>(implicit_provenance),
+            did(id), owner_space(own), logical_owner(log), target_node(target),
+            manager(man), parent(par), context_uid(ctx_uid) { }
+      public:
+        const DistributedID did;
+        const AddressSpaceID owner_space;
+        const AddressSpaceID logical_owner;
+        RegionTreeNode *const target_node;
+        PhysicalManager *const manager;
+        MaterializedView *const parent;
+        const UniqueID context_uid;
       };
     public:
       struct EventUsers {
@@ -1280,8 +1288,12 @@ namespace Legion {
       public:
         static const LgTaskID TASK_ID = LG_DEFER_COMPOSITE_VIEW_REF_TASK_ID;
       public:
-        DistributedCollectable *dc;
-        DistributedID did;
+        DeferCompositeViewRefArgs(DistributedCollectable *d, DistributedID id)
+          : LgTaskArgs<DeferCompositeViewRefArgs>(implicit_provenance),
+            dc(d), did(id) { }
+      public:
+        DistributedCollectable *const dc;
+        const DistributedID did;
       };
       struct DeferCompositeViewRegistrationArgs : 
         public LgTaskArgs<DeferCompositeViewRegistrationArgs> {
@@ -1289,7 +1301,11 @@ namespace Legion {
         static const LgTaskID TASK_ID = 
           LG_DEFER_COMPOSITE_VIEW_REGISTRATION_TASK_ID;
       public:
-        CompositeView *view;
+        DeferCompositeViewRegistrationArgs(CompositeView *v)
+          : LgTaskArgs<DeferCompositeViewRegistrationArgs>(implicit_provenance),
+            view(v) { }
+      public:
+        CompositeView *const view;
       };
     public:
       struct NodeVersionInfo {
@@ -1427,15 +1443,23 @@ namespace Legion {
       public:
         static const LgTaskID TASK_ID = LG_DEFER_COMPOSITE_NODE_REF_TASK_ID;
       public:
-        VersionState *state;
-        DistributedID owner_did;
+        DeferCompositeNodeRefArgs(VersionState *s, DistributedID did)
+          : LgTaskArgs<DeferCompositeNodeRefArgs>(implicit_provenance),
+            state(s), owner_did(did) { }
+      public:
+        VersionState *const state;
+        const DistributedID owner_did;
       };
       struct DeferCaptureArgs : public LgTaskArgs<DeferCaptureArgs> {
       public:
         static const LgTaskID TASK_ID = LG_DEFER_COMPOSITE_NODE_CAPTURE_TASK_ID;
       public:
-        CompositeNode *proxy_this;
-        RtUserEvent capture_event;
+        DeferCaptureArgs(CompositeNode *proxy, RtUserEvent capture)
+          : LgTaskArgs<DeferCaptureArgs>(implicit_provenance),
+            proxy_this(proxy), capture_event(capture) { }
+      public:
+        CompositeNode *const proxy_this;
+        const RtUserEvent capture_event;
       };
     public:
       CompositeNode(RegionTreeNode *node, CompositeBase *parent,
@@ -1611,8 +1635,12 @@ namespace Legion {
         static const LgTaskID TASK_ID =
           LG_DEFER_PHI_VIEW_REF_TASK_ID;
       public:
-        DistributedCollectable *dc;
-        DistributedID did; 
+        DeferPhiViewRefArgs(DistributedCollectable *d, DistributedID id)
+          : LgTaskArgs<DeferPhiViewRefArgs>(implicit_provenance),
+            dc(d), did(id) { }
+      public:
+        DistributedCollectable *const dc;
+        const DistributedID did; 
       };
       struct DeferPhiViewRegistrationArgs : 
         public LgTaskArgs<DeferPhiViewRegistrationArgs> {
@@ -1620,7 +1648,11 @@ namespace Legion {
         static const LgTaskID TASK_ID = 
           LG_DEFER_PHI_VIEW_REGISTRATION_TASK_ID;
       public:
-        PhiView *view;
+        DeferPhiViewRegistrationArgs(PhiView *v)
+          : LgTaskArgs<DeferPhiViewRegistrationArgs>(implicit_provenance),
+            view(v) { }
+      public:
+        PhiView *const view;
       };
     public:
       PhiView(RegionTreeForest *ctx, DistributedID did,

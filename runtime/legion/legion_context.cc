@@ -1736,7 +1736,7 @@ namespace Legion {
       implicit_context = this;
       implicit_runtime = this->runtime;
       rt = this->runtime->external;
-      task_profiling_provenance = owner_task->get_unique_op_id();
+      implicit_provenance = owner_task->get_unique_op_id();
       if (overhead_tracker != NULL)
         previous_profiling_time = Realm::Clock::current_time_in_nanoseconds();
       // Switch over the executing processor to the one
@@ -5077,12 +5077,9 @@ namespace Legion {
         for (std::map<Operation*,GenerationID>::const_iterator it = 
               executing_children.begin(); it != executing_children.end(); it++)
         {
-          // Grab this now so we have a copy before doing the generation test
-          const unsigned op_index = it->first->get_ctx_index();
-          // Need a memory fence to prevent load reordering
-          __sync_synchronize();
           if (it->first->get_generation() != it->second)
             continue;
+          const unsigned op_index = it->first->get_ctx_index();
           // If it's older than the previous fence then we don't care
           if (op_index < current_mapping_fence_index)
             continue;
@@ -5093,12 +5090,9 @@ namespace Legion {
         for (std::map<Operation*,GenerationID>::const_iterator it = 
               executed_children.begin(); it != executed_children.end(); it++)
         {
-          // Grab this now so we have a copy before doing the generation test
-          const unsigned op_index = it->first->get_ctx_index();
-          // Need a memory fence to prevent load reordering
-          __sync_synchronize();
           if (it->first->get_generation() != it->second)
             continue;
+          const unsigned op_index = it->first->get_ctx_index();
           // If it's older than the previous fence then we don't care
           if (op_index < current_mapping_fence_index)
             continue;
@@ -5109,12 +5103,9 @@ namespace Legion {
         for (std::map<Operation*,GenerationID>::const_iterator it = 
               complete_children.begin(); it != complete_children.end(); it++)
         {
-          // Grab this now so we have a copy before doing the generation test
-          const unsigned op_index = it->first->get_ctx_index();
-          // Need a memory fence to prevent load reordering
-          __sync_synchronize();
           if (it->first->get_generation() != it->second)
             continue;
+          const unsigned op_index = it->first->get_ctx_index();
           // If it's older than the previous fence then we don't care
           if (op_index < current_mapping_fence_index)
             continue;
@@ -5130,53 +5121,41 @@ namespace Legion {
         for (std::map<Operation*,GenerationID>::const_iterator it = 
               executing_children.begin(); it != executing_children.end(); it++)
         {
-          // Hoist these so we have them before doing the generation test
-          const unsigned op_index = it->first->get_ctx_index();
-          const ApEvent prev_event = it->first->get_completion_event();
-          // Need a memory fence to prevent load reordering
-          __sync_synchronize();
           if (it->first->get_generation() != it->second)
             continue;
+          const unsigned op_index = it->first->get_ctx_index();
           // If it's older than the previous fence then we don't care
           if (op_index < current_execution_fence_index)
             continue;
           // Record a dependence if it didn't come after our fence
           if (op_index < next_fence_index)
-            previous_events.insert(prev_event);
+            previous_events.insert(it->first->get_completion_event());
         }
         for (std::map<Operation*,GenerationID>::const_iterator it = 
               executed_children.begin(); it != executed_children.end(); it++)
         {
-          // Hoist these so we have them before doing the generation test
-          const unsigned op_index = it->first->get_ctx_index();
-          const ApEvent prev_event = it->first->get_completion_event();
-          // Need a memory fence to prevent load reordering
-          __sync_synchronize();
           if (it->first->get_generation() != it->second)
             continue;
+          const unsigned op_index = it->first->get_ctx_index();
           // If it's older than the previous fence then we don't care
           if (op_index < current_execution_fence_index)
             continue;
           // Record a dependence if it didn't come after our fence
           if (op_index < next_fence_index)
-            previous_events.insert(prev_event);
+            previous_events.insert(it->first->get_completion_event());
         }
         for (std::map<Operation*,GenerationID>::const_iterator it = 
               complete_children.begin(); it != complete_children.end(); it++)
         {
-          // Hoist these so we have them before doing the generation test
-          const unsigned op_index = it->first->get_ctx_index();
-          const ApEvent prev_event = it->first->get_completion_event();
-          // Need a memory fence to prevent load reordering
-          __sync_synchronize();
           if (it->first->get_generation() != it->second)
             continue;
+          const unsigned op_index = it->first->get_ctx_index();
           // If it's older than the previous fence then we don't care
           if (op_index < current_execution_fence_index)
             continue;
           // Record a dependence if it didn't come after our fence
           if (op_index < next_fence_index)
-            previous_events.insert(prev_event);
+            previous_events.insert(it->first->get_completion_event());
         }
       }
       else
@@ -5186,56 +5165,44 @@ namespace Legion {
         for (std::map<Operation*,GenerationID>::const_iterator it = 
               executing_children.begin(); it != executing_children.end(); it++)
         {
-          // Hoist these so we have them before doing the generation test
-          const unsigned op_index = it->first->get_ctx_index();
-          const ApEvent prev_event = it->first->get_completion_event();
-          // Need a memory fence to prevent load reordering
-          __sync_synchronize();
           if (it->first->get_generation() != it->second)
             continue;
+          const unsigned op_index = it->first->get_ctx_index();
           // If it's younger than our fence we don't care
           if (op_index >= next_fence_index)
             continue;
           if (op_index >= current_mapping_fence_index)
             previous_operations.insert(*it);
           if (op_index >= current_execution_fence_index)
-            previous_events.insert(prev_event);
+            previous_events.insert(it->first->get_completion_event());
         }
         for (std::map<Operation*,GenerationID>::const_iterator it = 
               executed_children.begin(); it != executed_children.end(); it++)
         {
-          // Hoist these so we have them before doing the generation test
-          const unsigned op_index = it->first->get_ctx_index();
-          const ApEvent prev_event = it->first->get_completion_event();
-          // Need a memory fence to prevent load reordering
-          __sync_synchronize();
           if (it->first->get_generation() != it->second)
             continue;
+          const unsigned op_index = it->first->get_ctx_index();
           // If it's younger than our fence we don't care
           if (op_index >= next_fence_index)
             continue;
           if (op_index >= current_mapping_fence_index)
             previous_operations.insert(*it);
           if (op_index >= current_execution_fence_index)
-            previous_events.insert(prev_event);
+            previous_events.insert(it->first->get_completion_event());
         }
         for (std::map<Operation*,GenerationID>::const_iterator it = 
               complete_children.begin(); it != complete_children.end(); it++)
         {
-          // Hoist these so we have them before doing the generation test
-          const unsigned op_index = it->first->get_ctx_index();
-          const ApEvent prev_event = it->first->get_completion_event();
-          // Need a memory fence to prevent load reordering
-          __sync_synchronize();
           if (it->first->get_generation() != it->second)
             continue;
+          const unsigned op_index = it->first->get_ctx_index();
           // If it's younger than our fence we don't care
           if (op_index >= next_fence_index)
             continue;
           if (op_index >= current_mapping_fence_index)
             previous_operations.insert(*it);
           if (op_index >= current_execution_fence_index)
-            previous_events.insert(prev_event);
+            previous_events.insert(it->first->get_completion_event());
         }
       }
 
@@ -5699,8 +5666,7 @@ namespace Legion {
       {
         if (need_deferral)
         {
-          PostDecrementArgs post_decrement_args;
-          post_decrement_args.parent_ctx = this;
+          PostDecrementArgs post_decrement_args(this);
           RtEvent done = runtime->issue_runtime_meta_task(post_decrement_args,
               LG_LATENCY_WORK_PRIORITY, wait_on); 
           Runtime::trigger_event(to_trigger, done);
@@ -6277,12 +6243,7 @@ namespace Legion {
       // know it's possible for the update channel to block waiting on
       // the view virtual channel (paging views), so to avoid the cycle
       // we have to launch a meta-task and record when it is done
-      RemoteCreateViewArgs args;
-      args.proxy_this = context;
-      args.manager = manager;
-      args.target = target;
-      args.to_trigger = to_trigger;
-      args.source = source;
+      RemoteCreateViewArgs args(context, manager, target, to_trigger, source);
       runtime->issue_runtime_meta_task(args, LG_LATENCY_DEFERRED_PRIORITY);
     }
 
@@ -7729,13 +7690,8 @@ namespace Legion {
       derez.deserialize(to_trigger);
 
       // Always defer this in case it blocks, we can't block the virtual channel
-      RemotePhysicalRequestArgs args;
-      args.context_uid = context_uid;
-      args.target = target;
-      args.index = index;
-      args.source = source;
-      args.to_trigger = to_trigger;
-      args.runtime = runtime;
+      RemotePhysicalRequestArgs args(context_uid, target, index, 
+                                     source, to_trigger, runtime);
       runtime->issue_runtime_meta_task(args, LG_LATENCY_DEFERRED_PRIORITY);
     }
 
@@ -7806,12 +7762,7 @@ namespace Legion {
       {
         // Launch a continuation in case we need to page in the context
         // We obviously can't block the virtual channel
-        RemotePhysicalResponseArgs args;
-        args.target = target;
-        args.index = index;
-        args.result_uid = result_uid;
-        args.handle = handle;
-        args.runtime = runtime;
+        RemotePhysicalResponseArgs args(target,index,result_uid,handle,runtime);
         RtEvent done = 
           runtime->issue_runtime_meta_task(args, LG_LATENCY_DEFERRED_PRIORITY);
         Runtime::trigger_event(to_trigger, done);

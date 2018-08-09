@@ -334,9 +334,7 @@ namespace Legion {
           {
             if (pre.exists() && !pre.has_triggered())
             {
-              VersioningSetRefArgs args;
-              args.state = state;
-              args.kind = REF_KIND;
+              VersioningSetRefArgs args(state, REF_KIND);
               return runtime->issue_runtime_meta_task(args, 
                       LG_LATENCY_WORK_PRIORITY, pre);
             }
@@ -366,9 +364,7 @@ namespace Legion {
           {
             if (pre.exists() && !pre.has_triggered())
             {
-              VersioningSetRefArgs args;
-              args.state = state;
-              args.kind = REF_KIND;
+              VersioningSetRefArgs args(state, REF_KIND);
               return runtime->issue_runtime_meta_task(args, 
                       LG_LATENCY_WORK_PRIORITY, pre);
             }
@@ -395,9 +391,7 @@ namespace Legion {
           {
             if (pre.exists() && !pre.has_triggered())
             {
-              VersioningSetRefArgs args;
-              args.state = state;
-              args.kind = REF_KIND;
+              VersioningSetRefArgs args(state, REF_KIND);
               return runtime->issue_runtime_meta_task(args, 
                       LG_LATENCY_WORK_PRIORITY, pre);
             }
@@ -1424,8 +1418,7 @@ namespace Legion {
         derez.deserialize(restrictions[manager]);
         if (ready.exists() && !ready.has_triggered())
         {
-          DeferRestrictedManagerArgs args;
-          args.manager = manager;
+          DeferRestrictedManagerArgs args(manager);
           ready = runtime->issue_runtime_meta_task(args, 
               LG_LATENCY_DEFERRED_PRIORITY, ready);
           ready_events.insert(ready);
@@ -5306,9 +5299,7 @@ namespace Legion {
           pending_remote_advance_summary |= valid_overlap;
         }
         // Launch off a meta-task to reclaim the advanced field
-        PendingAdvanceArgs args;
-        args.proxy_this = this;
-        args.to_reclaim = advanced;
+        PendingAdvanceArgs args(this, advanced);
         RtEvent done = 
           runtime->issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY,
                                            advanced);
@@ -5751,10 +5742,8 @@ namespace Legion {
                 FieldMask overlap = it->second & state_overlap;
                 if (!overlap)
                   continue;
-                DirtyUpdateArgs args;
-                args.previous = mit->first;
-                args.target = it->first;
-                args.capture_mask = new FieldMask(overlap);
+                DirtyUpdateArgs args(mit->first, it->first, 
+                                    new FieldMask(overlap));
                 RtEvent done = 
                   runtime->issue_runtime_meta_task(args, 
                       LG_LATENCY_WORK_PRIORITY, precondition);
@@ -7717,13 +7706,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(!!request_mask);
 #endif
-      SendVersionStateArgs args;
-      args.proxy_this = this;
-      args.target = target;
-      args.context = context;
-      args.request_mask = new FieldMask(request_mask);
-      args.request_kind = request_kind;
-      args.to_trigger = to_trigger;
+      SendVersionStateArgs args(this, target, context, 
+          new FieldMask(request_mask), request_kind, to_trigger);
       // There is imprecision in our tracking of which nodes have valid
       // meta-data for different fields (i.e. we don't track it at all
       // currently), therefore we may get requests for updates that we
@@ -8088,11 +8072,8 @@ namespace Legion {
                 if (!precondition.has_triggered())
                 {
                   // Launch a task to do the merge later
-                  UpdateStateReduceArgs args;
-                  args.proxy_this = this;
-                  args.child_color = child;
                   // Takes ownership for deallocation
-                  args.children = deferred_children;
+                  UpdateStateReduceArgs args(this, child, deferred_children);
                   // Need resource priority since we asked for the lock
                   RtEvent done = runtime->issue_runtime_meta_task(args, 
                           LG_LATENCY_WORK_PRIORITY, precondition);
@@ -8151,11 +8132,8 @@ namespace Legion {
                 if (!precondition.has_triggered())
                 {
                   // Launch a task to do the merge later
-                  UpdateStateReduceArgs args;
-                  args.proxy_this = this;
-                  args.child_color = child;
                   // Takes ownership for deallocation
-                  args.children = reduce_children;
+                  UpdateStateReduceArgs args(this, child, reduce_children);
                   // Need resource priority since we asked for the lock
                   RtEvent done = runtime->issue_runtime_meta_task(args,
                           LG_LATENCY_WORK_PRIORITY, precondition);
@@ -8201,10 +8179,7 @@ namespace Legion {
                 pending_instances.find(manager);
             if (finder == pending_instances.end())
             {
-              ConvertViewArgs args;
-              args.proxy_this = this;
-              args.manager = manager;
-              args.context = context;
+              ConvertViewArgs args(this, manager, context);
               std::pair<RtEvent,FieldMask> &entry = pending_instances[manager];
               entry.first = runtime->issue_runtime_meta_task(args,
                                        LG_LATENCY_WORK_PRIORITY, ready);
@@ -8340,8 +8315,7 @@ namespace Legion {
       }
       if (!pending_views.empty())
       {
-        UpdateViewReferences args;
-        args.did = this->did;
+        UpdateViewReferences args(this->did);
         for (std::map<LogicalView*,RtEvent>::const_iterator it = 
               pending_views.begin(); it != pending_views.end(); it++)
         {
@@ -8394,9 +8368,7 @@ namespace Legion {
                                                 RtEvent done_event)
     //--------------------------------------------------------------------------
     {
-      RemoveVersionStateRefArgs args;
-      args.proxy_this = this;
-      args.ref_kind = ref_kind;
+      RemoveVersionStateRefArgs args(this, ref_kind);
       runtime->issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY,
                                        done_event);
     }

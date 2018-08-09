@@ -648,7 +648,11 @@ namespace Legion {
       public:
         static const LgTaskID TASK_ID = LG_POST_DECREMENT_TASK_ID;
       public:
-        InnerContext *parent_ctx;
+        PostDecrementArgs(InnerContext *ctx)
+          : LgTaskArgs<PostDecrementArgs>(ctx->get_context_uid()),
+            parent_ctx(ctx) { }
+      public:
+        InnerContext *const parent_ctx;
       };
       struct IssueFrameArgs : public LgTaskArgs<IssueFrameArgs> {
       public:
@@ -667,11 +671,17 @@ namespace Legion {
       public:
         static const LgTaskID TASK_ID = LG_REMOTE_VIEW_CREATION_TASK_ID;
       public:
-        InnerContext *proxy_this;
-        PhysicalManager *manager;
+        RemoteCreateViewArgs(InnerContext *proxy, PhysicalManager *man,
+               InstanceView **tar, RtUserEvent trig, AddressSpaceID src)
+          : LgTaskArgs<RemoteCreateViewArgs>(implicit_provenance),
+            proxy_this(proxy), manager(man), target(tar), 
+            to_trigger(trig), source(src) { }
+      public:
+        InnerContext *const proxy_this;
+        PhysicalManager *const manager;
         InstanceView **target;
-        RtUserEvent to_trigger;
-        AddressSpaceID source;
+        const RtUserEvent to_trigger;
+        const AddressSpaceID source;
       };
       struct LocalFieldInfo {
       public:
@@ -1231,23 +1241,35 @@ namespace Legion {
       public:
         static const LgTaskID TASK_ID = LG_REMOTE_PHYSICAL_REQUEST_TASK_ID;
       public:
-        UniqueID context_uid;
-        RemoteContext *target;
-        unsigned index;
-        AddressSpaceID source;
-        RtUserEvent to_trigger;
-        Runtime *runtime;
+        RemotePhysicalRequestArgs(UniqueID uid, RemoteContext *ctx,
+                                  unsigned idx, AddressSpaceID src,
+                                  RtUserEvent trig, Runtime *rt)
+          : LgTaskArgs<RemotePhysicalRequestArgs>(implicit_provenance), 
+            context_uid(uid), target(ctx), index(idx), source(src), 
+            to_trigger(trig), runtime(rt) { }
+      public:
+        const UniqueID context_uid;
+        RemoteContext *const target;
+        const unsigned index;
+        const AddressSpaceID source;
+        const RtUserEvent to_trigger;
+        Runtime *const runtime;
       };
       struct RemotePhysicalResponseArgs : 
         public LgTaskArgs<RemotePhysicalResponseArgs> {
       public:
         static const LgTaskID TASK_ID = LG_REMOTE_PHYSICAL_RESPONSE_TASK_ID;
       public:
-        RemoteContext *target;
-        unsigned index;
-        UniqueID result_uid;
-        LogicalRegion handle;
-        Runtime *runtime;
+        RemotePhysicalResponseArgs(RemoteContext *ctx, unsigned idx,
+                                   UniqueID uid, LogicalRegion r, Runtime *rt)
+          : LgTaskArgs<RemotePhysicalResponseArgs>(implicit_provenance), 
+            target(ctx), index(idx), result_uid(uid), handle(r), runtime(rt) { }
+      public:
+        RemoteContext *const target;
+        const unsigned index;
+        const UniqueID result_uid;
+        const LogicalRegion handle;
+        Runtime *const runtime;
       };
     public:
       RemoteContext(Runtime *runtime, UniqueID context_uid);

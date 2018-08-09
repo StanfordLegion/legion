@@ -750,12 +750,14 @@ namespace Legion {
 
       static inline void log_ap_user_event(ApUserEvent event)
       {
-        log_spy.print("Ap User Event " IDFMT, event.id);
+        log_spy.print("Ap User Event " IDFMT " %llu", 
+                      event.id, implicit_provenance);
       }
 
       static inline void log_rt_user_event(RtUserEvent event)
       {
-        log_spy.print("Rt User Event " IDFMT, event.id);
+        log_spy.print("Rt User Event " IDFMT " %llu", 
+                      event.id, implicit_provenance);
       }
 
       static inline void log_pred_event(PredEvent event)

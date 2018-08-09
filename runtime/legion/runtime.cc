@@ -72,7 +72,7 @@ namespace Legion {
     __thread TaskContext *implicit_context = NULL;
     __thread Runtime *implicit_runtime = NULL;
     __thread AutoLock *local_lock_list = NULL;
-    __thread UniqueID task_profiling_provenance = 0;
+    __thread UniqueID implicit_provenance = 0;
 
     const LgEvent LgEvent::NO_LG_EVENT = LgEvent();
     const ApEvent ApEvent::NO_AP_EVENT = ApEvent();
@@ -713,10 +713,7 @@ namespace Legion {
         // First add a garbage collection reference so we don't get
         // collected while we are waiting for the contribution task to run
         add_base_gc_ref(PENDING_COLLECTIVE_REF);
-        ContributeCollectiveArgs args;
-        args.impl = this;
-        args.dc = dc;
-        args.count = count;
+        ContributeCollectiveArgs args(this, dc, count);
         // Spawn the task dependent on the future being ready
         runtime->issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY,
                                          Runtime::protect_event(ready_event));
@@ -2637,8 +2634,7 @@ namespace Legion {
     void ProcessorManager::launch_task_scheduler(void)
     //--------------------------------------------------------------------------
     {
-      SchedulerArgs sched_args;
-      sched_args.proc = local_proc;
+      SchedulerArgs sched_args(local_proc);
       runtime->issue_runtime_meta_task(sched_args, LG_LATENCY_WORK_PRIORITY);
     } 
 
@@ -3066,10 +3062,7 @@ namespace Legion {
                           "'deferral_event' in the 'output' struct.",
                           mapper->get_mapper_name())
           // Launch a task to remove the deferred mapper event when it triggers
-          DeferMapperSchedulerArgs args;
-          args.proxy_this = this;
-          args.map_id = map_id;
-          args.deferral_event = wait_on;
+          DeferMapperSchedulerArgs args(this, map_id, wait_on);
           runtime->issue_runtime_meta_task(args, LG_LATENCY_DEFERRED_PRIORITY,
                                            wait_on);
           // We can continue because there is nothing left to do for this mapper
@@ -5448,7 +5441,7 @@ namespace Legion {
       size_t buffer_size = rez.get_used_bytes();
       const char *buffer = (const char*)rez.get_buffer();
       const size_t header_size = 
-        sizeof(k) + sizeof(task_profiling_provenance) + sizeof(buffer_size);
+        sizeof(k) + sizeof(implicit_provenance) + sizeof(buffer_size);
       // Need to hold the lock when manipulating the buffer
       AutoLock s_lock(send_lock);
       if ((sending_index+header_size+buffer_size) > sending_buffer_size)
@@ -5461,8 +5454,8 @@ namespace Legion {
         packaged_messages++;
         *((MessageKind*)(sending_buffer+sending_index)) = k;
         sending_index += sizeof(k);
-        *((UniqueID*)(sending_buffer+sending_index)) =task_profiling_provenance;
-        sending_index += sizeof(task_profiling_provenance);
+        *((UniqueID*)(sending_buffer+sending_index)) = implicit_provenance;
+        sending_index += sizeof(implicit_provenance);
         *((size_t*)(sending_buffer+sending_index)) = buffer_size;
         sending_index += sizeof(buffer_size);
         while (buffer_size > 0)
@@ -5490,8 +5483,8 @@ namespace Legion {
         // Package up the kind and the size first
         *((MessageKind*)(sending_buffer+sending_index)) = k;
         sending_index += sizeof(k);
-        *((UniqueID*)(sending_buffer+sending_index)) =task_profiling_provenance;
-        sending_index += sizeof(task_profiling_provenance);
+        *((UniqueID*)(sending_buffer+sending_index)) = implicit_provenance;
+        sending_index += sizeof(implicit_provenance);
         *((size_t*)(sending_buffer+sending_index)) = buffer_size;
         sending_index += sizeof(buffer_size);
         // Then copy over the buffer
@@ -5672,9 +5665,9 @@ namespace Legion {
           observed_recent = true;
         args += sizeof(kind);
         arglen -= sizeof(kind);
-        task_profiling_provenance = *((const UniqueID*)args);
-        args += sizeof(task_profiling_provenance);
-        arglen -= sizeof(task_profiling_provenance);
+        implicit_provenance = *((const UniqueID*)args);
+        args += sizeof(implicit_provenance);
+        arglen -= sizeof(implicit_provenance);
         size_t message_size = *((const size_t*)args);
         args += sizeof(message_size);
         arglen -= sizeof(message_size);
@@ -6738,11 +6731,8 @@ namespace Legion {
         if (!wait_for.empty())
           precondition = Runtime::merge_events(wait_for);
         // If we failed an even phase we go back to the one before it
-        RetryShutdownArgs args;
-        if ((phase % 2) == 0)
-          args.phase = (ShutdownPhase)(phase-1);
-        else
-          args.phase = phase;
+        RetryShutdownArgs args(((phase % 2) == 0) ?
+            (ShutdownPhase)(phase-1) : phase);
         runtime->issue_runtime_meta_task(args, LG_LOW_PRIORITY,
                                          precondition);
       }
@@ -6873,8 +6863,7 @@ namespace Legion {
     {
       // Set remaining to the total number of collections
       remaining = collections.size();
-      GarbageCollectionArgs args;
-      args.epoch = this;
+      GarbageCollectionArgs args(this);
       std::set<RtEvent> events;
       for (std::map<LogicalView*,std::set<ApEvent> >::const_iterator it =
             collections.begin(); it != collections.end(); /*nothing*/)
@@ -7515,10 +7504,7 @@ namespace Legion {
         else
         {
           // Defer this until the semantic condition is ready
-          SemanticRequestArgs args;
-          args.proxy_this = this;
-          args.tag = tag;
-          args.source = target;
+          SemanticRequestArgs args(this, tag, target);
           runtime->issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY, 
                                            precondition);
         }
@@ -9896,8 +9882,7 @@ namespace Legion {
         increment_outstanding_top_level_tasks();
         // Launch a task to deactivate the top-level context
         // when the top-level task is done
-        TopFinishArgs args;
-        args.ctx = top_context;
+        TopFinishArgs args(top_context);
         ApEvent pre = top_task->get_task_completion();
         issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY,
                                 Runtime::protect_event(pre));
@@ -9951,12 +9936,7 @@ namespace Legion {
       // Add a reference to the future impl to prevent it being collected
       f.impl->add_base_gc_ref(FUTURE_HANDLE_REF);
       // Create a meta-task to return the results to the mapper
-      MapperTaskArgs args;
-      args.future = f.impl;
-      args.map_id = map_id;
-      args.proc = proc;
-      args.event = result;
-      args.ctx = map_context;
+      MapperTaskArgs args(f.impl, map_id, proc, result, map_context);
       ApEvent pre = f.impl->get_ready_event();
       ApEvent post(issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY,
                                            Runtime::protect_event(pre)));
@@ -11919,14 +11899,10 @@ namespace Legion {
       // Make this here to get a local reference on it now
       Future result_future(result);
       result->add_base_gc_ref(FUTURE_HANDLE_REF);
-      SelectTunableArgs args(ctx->get_owner_task()->get_unique_op_id());
-      args.mapper_id = mid;
-      args.tag = tag;
-      args.tunable_id = tid;
+      SelectTunableArgs args(ctx->get_owner_task()->get_unique_op_id(),
+          mid, tag, tid, ctx, result);
       if (legion_spy_enabled)
         args.tunable_index = ctx->get_tunable_index();
-      args.ctx = ctx;
-      args.result = result;
       issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY); 
       ctx->end_runtime_call();
       return result_future;
@@ -16144,8 +16120,7 @@ namespace Legion {
 #endif
       if (!recycle_event.has_triggered())
       {
-        DeferredRecycleArgs deferred_recycle_args;
-        deferred_recycle_args.did = did;
+        DeferredRecycleArgs deferred_recycle_args(did);
         return issue_runtime_meta_task(deferred_recycle_args, 
                 LG_THROUGHPUT_WORK_PRIORITY, recycle_event);
       }
@@ -16646,8 +16621,8 @@ namespace Legion {
     void Runtime::issue_runtime_shutdown_attempt(void)
     //--------------------------------------------------------------------------
     {
-      ShutdownManager::RetryShutdownArgs args;
-      args.phase = ShutdownManager::CHECK_TERMINATION;
+      ShutdownManager::RetryShutdownArgs args(
+            ShutdownManager::CHECK_TERMINATION);
       // Issue this with a low priority so that other meta-tasks
       // have an opportunity to run
       issue_runtime_meta_task(args, LG_LOW_PRIORITY);
@@ -19690,9 +19665,9 @@ namespace Legion {
       LgTaskID tid = *((const LgTaskID*)data);
       data += sizeof(tid);
       arglen -= sizeof(tid);
-      task_profiling_provenance = *((const UniqueID*)data);
-      data += sizeof(task_profiling_provenance);
-      arglen -= sizeof(task_profiling_provenance);
+      implicit_provenance = *((const UniqueID*)data);
+      data += sizeof(implicit_provenance);
+      arglen -= sizeof(implicit_provenance);
       switch (tid)
       {
         case LG_SCHEDULER_ID:

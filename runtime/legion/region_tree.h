@@ -67,8 +67,12 @@ namespace Legion {
       public:
         static const LgTaskID TASK_ID = LG_DISJOINTNESS_TASK_ID;
       public:
-        IndexPartition handle;
-        RtUserEvent ready;
+        DisjointnessArgs(IndexPartition h, RtUserEvent r)
+          : LgTaskArgs<DisjointnessArgs>(implicit_provenance),
+            handle(h), ready(r) { }
+      public:
+        const IndexPartition handle;
+        const RtUserEvent ready;
       };   
     public:
       RegionTreeForest(Runtime *rt);
@@ -728,7 +732,8 @@ namespace Legion {
           LG_TIGHTEN_INDEX_SPACE_TASK_ID;
       public:
         TightenIndexSpaceArgs(IndexSpaceExpression *proxy)
-          : proxy_this(proxy) { proxy->add_expression_reference(); }
+          : LgTaskArgs<TightenIndexSpaceArgs>(implicit_provenance),
+            proxy_this(proxy) { proxy->add_expression_reference(); }
       public:
         IndexSpaceExpression *const proxy_this;
       };
@@ -1168,27 +1173,43 @@ namespace Legion {
       public:
         static const LgTaskID TASK_ID = LG_PART_INDEPENDENCE_TASK_ID;
       public:
-        IndexSpaceNode *parent;
-        IndexPartNode *left, *right;
+        DynamicIndependenceArgs(IndexSpaceNode *par, 
+                                IndexPartNode *l, IndexPartNode *r)
+          : LgTaskArgs<DynamicIndependenceArgs>(implicit_provenance),
+            parent(par), left(l), right(r) { }
+      public:
+        IndexSpaceNode *const parent;
+        IndexPartNode *const left, *const right;
       };
       struct SemanticRequestArgs : public LgTaskArgs<SemanticRequestArgs> {
       public:
         static const LgTaskID TASK_ID = 
           LG_INDEX_SPACE_SEMANTIC_INFO_REQ_TASK_ID;
       public:
-        IndexSpaceNode *proxy_this;
-        SemanticTag tag;
-        AddressSpaceID source;
-      }; 
+        SemanticRequestArgs(IndexSpaceNode *proxy, 
+                            SemanticTag t, AddressSpaceID src)
+          : LgTaskArgs<SemanticRequestArgs>(implicit_provenance),
+            proxy_this(proxy), tag(t), source(src) { }
+      public:
+        IndexSpaceNode *const proxy_this;
+        const SemanticTag tag;
+        const AddressSpaceID source;
+      };
       struct DeferChildArgs : public LgTaskArgs<DeferChildArgs> {
       public:
         static const LgTaskID TASK_ID = LG_INDEX_SPACE_DEFER_CHILD_TASK_ID;
       public:
-        IndexSpaceNode *proxy_this;
-        LegionColor child_color;
-        IndexPartNode *target;
-        RtUserEvent to_trigger;
-        AddressSpaceID source;
+        DeferChildArgs(IndexSpaceNode *proxy, LegionColor child, 
+                       IndexPartNode *tar, RtUserEvent trig, AddressSpaceID src)
+          : LgTaskArgs<DeferChildArgs>(implicit_provenance),
+            proxy_this(proxy), child_color(child), target(tar), 
+            to_trigger(trig), source(src) { }
+      public:
+        IndexSpaceNode *const proxy_this;
+        const LegionColor child_color;
+        IndexPartNode *const target;
+        const RtUserEvent to_trigger;
+        const AddressSpaceID source;
       };
       class IndexSpaceSetFunctor {
       public:
@@ -1847,33 +1868,53 @@ namespace Legion {
       public:
         static const LgTaskID TASK_ID = LG_SPACE_INDEPENDENCE_TASK_ID;
       public:
-        IndexPartNode *parent;
-        IndexSpaceNode *left, *right;
+        DynamicIndependenceArgs(IndexPartNode *par, 
+                                IndexSpaceNode *l, IndexSpaceNode *r)
+          : LgTaskArgs<DynamicIndependenceArgs>(implicit_provenance),
+            parent(par), left(l), right(r) { }
+      public:
+        IndexPartNode *const parent;
+        IndexSpaceNode *const left, *const right;
       };
       struct PendingChildArgs : public LgTaskArgs<PendingChildArgs> {
       public:
         static const LgTaskID TASK_ID = LG_PENDING_CHILD_TASK_ID;
       public:
-        IndexPartNode *parent;
-        LegionColor pending_child;
+        PendingChildArgs(IndexPartNode *par, LegionColor child)
+          : LgTaskArgs<PendingChildArgs>(implicit_provenance),
+            parent(par), pending_child(child) { }
+      public:
+        IndexPartNode *const parent;
+        const LegionColor pending_child;
       };
       struct SemanticRequestArgs : public LgTaskArgs<SemanticRequestArgs> {
       public:
         static const LgTaskID TASK_ID = LG_INDEX_PART_SEMANTIC_INFO_REQ_TASK_ID;
       public:
-        IndexPartNode *proxy_this;
-        SemanticTag tag;
-        AddressSpaceID source;
+        SemanticRequestArgs(IndexPartNode *proxy, 
+                            SemanticTag t, AddressSpaceID src)
+          : LgTaskArgs<SemanticRequestArgs>(implicit_provenance),
+            proxy_this(proxy), tag(t), source(src) { }
+      public:
+        IndexPartNode *const proxy_this;
+        const SemanticTag tag;
+        const AddressSpaceID source;
       };
       struct DeferChildArgs : public LgTaskArgs<DeferChildArgs> {
       public:
         static const LgTaskID TASK_ID = LG_INDEX_PART_DEFER_CHILD_TASK_ID;
       public:
-        IndexPartNode *proxy_this;
-        LegionColor child_color;
-        IndexSpace *target;
-        RtUserEvent to_trigger;
-        AddressSpaceID source;
+        DeferChildArgs(IndexPartNode *proxy, LegionColor child,
+                       IndexSpace *tar, RtUserEvent trig, AddressSpaceID src)
+          : LgTaskArgs<DeferChildArgs>(implicit_provenance),
+            proxy_this(proxy), child_color(child), target(tar),
+            to_trigger(trig), source(src) { }
+      public:
+        IndexPartNode *const proxy_this;
+        const LegionColor child_color;
+        IndexSpace *const target;
+        const RtUserEvent to_trigger;
+        const AddressSpaceID source;
       };
       class DestructionFunctor {
       public:
@@ -2137,9 +2178,14 @@ namespace Legion {
         static const LgTaskID TASK_ID = 
           LG_FIELD_SPACE_SEMANTIC_INFO_REQ_TASK_ID;
       public:
-        FieldSpaceNode *proxy_this;
-        SemanticTag tag;
-        AddressSpaceID source;
+        SemanticRequestArgs(FieldSpaceNode *proxy, 
+                            SemanticTag t, AddressSpaceID src)
+          : LgTaskArgs<SemanticRequestArgs>(implicit_provenance),
+            proxy_this(proxy), tag(t), source(src) { }
+      public:
+        FieldSpaceNode *const proxy_this;
+        const SemanticTag tag;
+        const AddressSpaceID source;
       };
       struct SemanticFieldRequestArgs : 
         public LgTaskArgs<SemanticFieldRequestArgs> {
@@ -2147,10 +2193,15 @@ namespace Legion {
         static const LgTaskID TASK_ID = 
           LG_FIELD_SEMANTIC_INFO_REQ_TASK_ID;
       public:
-        FieldSpaceNode *proxy_this;
-        FieldID fid;
-        SemanticTag tag;
-        AddressSpaceID source;
+        SemanticFieldRequestArgs(FieldSpaceNode *proxy, FieldID f,
+                                 SemanticTag t, AddressSpaceID src)
+          : LgTaskArgs<SemanticFieldRequestArgs>(implicit_provenance),
+            proxy_this(proxy), fid(f), tag(t), source(src) { }
+      public:
+        FieldSpaceNode *const proxy_this;
+        const FieldID fid;
+        const SemanticTag tag;
+        const AddressSpaceID source;
       };
       class DestructionFunctor {
       public:
@@ -2828,9 +2879,14 @@ namespace Legion {
       public:
         static const LgTaskID TASK_ID = LG_REGION_SEMANTIC_INFO_REQ_TASK_ID;
       public:
-        RegionNode *proxy_this;
-        SemanticTag tag;
-        AddressSpaceID source;
+        SemanticRequestArgs(RegionNode *proxy, 
+                            SemanticTag t, AddressSpaceID src)
+          : LgTaskArgs<SemanticRequestArgs>(implicit_provenance),
+            proxy_this(proxy), tag(t), source(src) { }
+      public:
+        RegionNode *const proxy_this;
+        const SemanticTag tag;
+        const AddressSpaceID source;
       };
       class DestructionFunctor {
       public:
@@ -3015,9 +3071,14 @@ namespace Legion {
       public:
         static const LgTaskID TASK_ID = LG_PARTITION_SEMANTIC_INFO_REQ_TASK_ID;
       public:
-        PartitionNode *proxy_this;
-        SemanticTag tag;
-        AddressSpaceID source;
+        SemanticRequestArgs(PartitionNode *proxy,
+                            SemanticTag t, AddressSpaceID src)
+          : LgTaskArgs<SemanticRequestArgs>(implicit_provenance),
+            proxy_this(proxy), tag(t), source(src) { }
+      public:
+        PartitionNode *const proxy_this;
+        const SemanticTag tag;
+        const AddressSpaceID source;
       };
       class DestructionFunctor {
       public:
