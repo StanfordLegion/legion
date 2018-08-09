@@ -5245,9 +5245,12 @@ namespace Legion {
         for (std::map<Operation*,GenerationID>::const_iterator it = 
               executing_children.begin(); it != executing_children.end(); it++)
         {
+          // Grab this now so we have a copy before doing the generation test
+          const unsigned op_index = it->first->get_ctx_index();
+          // Need a memory fence to prevent load reordering
+          __sync_synchronize();
           if (it->first->get_generation() != it->second)
             continue;
-          const unsigned op_index = it->first->get_ctx_index();
           // If it's older than the previous fence then we don't care
           if (op_index < current_mapping_fence_index)
             continue;
@@ -5258,9 +5261,12 @@ namespace Legion {
         for (std::map<Operation*,GenerationID>::const_iterator it = 
               executed_children.begin(); it != executed_children.end(); it++)
         {
+          // Grab this now so we have a copy before doing the generation test
+          const unsigned op_index = it->first->get_ctx_index();
+          // Need a memory fence to prevent load reordering
+          __sync_synchronize();
           if (it->first->get_generation() != it->second)
             continue;
-          const unsigned op_index = it->first->get_ctx_index();
           // If it's older than the previous fence then we don't care
           if (op_index < current_mapping_fence_index)
             continue;
@@ -5271,9 +5277,12 @@ namespace Legion {
         for (std::map<Operation*,GenerationID>::const_iterator it = 
               complete_children.begin(); it != complete_children.end(); it++)
         {
+          // Grab this now so we have a copy before doing the generation test
+          const unsigned op_index = it->first->get_ctx_index();
+          // Need a memory fence to prevent load reordering
+          __sync_synchronize();
           if (it->first->get_generation() != it->second)
             continue;
-          const unsigned op_index = it->first->get_ctx_index();
           // If it's older than the previous fence then we don't care
           if (op_index < current_mapping_fence_index)
             continue;
@@ -5289,41 +5298,53 @@ namespace Legion {
         for (std::map<Operation*,GenerationID>::const_iterator it = 
               executing_children.begin(); it != executing_children.end(); it++)
         {
+          // Hoist these so we have them before doing the generation test
+          const unsigned op_index = it->first->get_ctx_index();
+          const ApEvent prev_event = it->first->get_completion_event();
+          // Need a memory fence to prevent load reordering
+          __sync_synchronize();
           if (it->first->get_generation() != it->second)
             continue;
-          const unsigned op_index = it->first->get_ctx_index();
           // If it's older than the previous fence then we don't care
           if (op_index < current_execution_fence_index)
             continue;
           // Record a dependence if it didn't come after our fence
           if (op_index < next_fence_index)
-            previous_events.insert(it->first->get_completion_event());
+            previous_events.insert(prev_event);
         }
         for (std::map<Operation*,GenerationID>::const_iterator it = 
               executed_children.begin(); it != executed_children.end(); it++)
         {
+          // Hoist these so we have them before doing the generation test
+          const unsigned op_index = it->first->get_ctx_index();
+          const ApEvent prev_event = it->first->get_completion_event();
+          // Need a memory fence to prevent load reordering
+          __sync_synchronize();
           if (it->first->get_generation() != it->second)
             continue;
-          const unsigned op_index = it->first->get_ctx_index();
           // If it's older than the previous fence then we don't care
           if (op_index < current_execution_fence_index)
             continue;
           // Record a dependence if it didn't come after our fence
           if (op_index < next_fence_index)
-            previous_events.insert(it->first->get_completion_event());
+            previous_events.insert(prev_event);
         }
         for (std::map<Operation*,GenerationID>::const_iterator it = 
               complete_children.begin(); it != complete_children.end(); it++)
         {
+          // Hoist these so we have them before doing the generation test
+          const unsigned op_index = it->first->get_ctx_index();
+          const ApEvent prev_event = it->first->get_completion_event();
+          // Need a memory fence to prevent load reordering
+          __sync_synchronize();
           if (it->first->get_generation() != it->second)
             continue;
-          const unsigned op_index = it->first->get_ctx_index();
           // If it's older than the previous fence then we don't care
           if (op_index < current_execution_fence_index)
             continue;
           // Record a dependence if it didn't come after our fence
           if (op_index < next_fence_index)
-            previous_events.insert(it->first->get_completion_event());
+            previous_events.insert(prev_event);
         }
       }
       else
@@ -5333,44 +5354,56 @@ namespace Legion {
         for (std::map<Operation*,GenerationID>::const_iterator it = 
               executing_children.begin(); it != executing_children.end(); it++)
         {
+          // Hoist these so we have them before doing the generation test
+          const unsigned op_index = it->first->get_ctx_index();
+          const ApEvent prev_event = it->first->get_completion_event();
+          // Need a memory fence to prevent load reordering
+          __sync_synchronize();
           if (it->first->get_generation() != it->second)
             continue;
-          const unsigned op_index = it->first->get_ctx_index();
           // If it's younger than our fence we don't care
           if (op_index >= next_fence_index)
             continue;
           if (op_index >= current_mapping_fence_index)
             previous_operations.insert(*it);
           if (op_index >= current_execution_fence_index)
-            previous_events.insert(it->first->get_completion_event());
+            previous_events.insert(prev_event);
         }
         for (std::map<Operation*,GenerationID>::const_iterator it = 
               executed_children.begin(); it != executed_children.end(); it++)
         {
+          // Hoist these so we have them before doing the generation test
+          const unsigned op_index = it->first->get_ctx_index();
+          const ApEvent prev_event = it->first->get_completion_event();
+          // Need a memory fence to prevent load reordering
+          __sync_synchronize();
           if (it->first->get_generation() != it->second)
             continue;
-          const unsigned op_index = it->first->get_ctx_index();
           // If it's younger than our fence we don't care
           if (op_index >= next_fence_index)
             continue;
           if (op_index >= current_mapping_fence_index)
             previous_operations.insert(*it);
           if (op_index >= current_execution_fence_index)
-            previous_events.insert(it->first->get_completion_event());
+            previous_events.insert(prev_event);
         }
         for (std::map<Operation*,GenerationID>::const_iterator it = 
               complete_children.begin(); it != complete_children.end(); it++)
         {
+          // Hoist these so we have them before doing the generation test
+          const unsigned op_index = it->first->get_ctx_index();
+          const ApEvent prev_event = it->first->get_completion_event();
+          // Need a memory fence to prevent load reordering
+          __sync_synchronize();
           if (it->first->get_generation() != it->second)
             continue;
-          const unsigned op_index = it->first->get_ctx_index();
           // If it's younger than our fence we don't care
           if (op_index >= next_fence_index)
             continue;
           if (op_index >= current_mapping_fence_index)
             previous_operations.insert(*it);
           if (op_index >= current_execution_fence_index)
-            previous_events.insert(it->first->get_completion_event());
+            previous_events.insert(prev_event);
         }
       }
 
