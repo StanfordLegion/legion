@@ -1327,7 +1327,11 @@ namespace Legion {
       public:
         static const LgTaskID TASK_ID = LG_CONTROL_REP_LAUNCH_TASK_ID;
       public:
-        ShardTask *shard;
+        ShardManagerLaunchArgs(ShardTask *s)
+          : LgTaskArgs<ShardManagerLaunchArgs>(s->get_unique_op_id()), 
+            shard(s) { }
+      public:
+        ShardTask *const shard;
       };
       struct ShardManagerDeleteArgs :
         public LgTaskArgs<ShardManagerDeleteArgs> {

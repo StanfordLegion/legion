@@ -3788,15 +3788,10 @@ namespace Legion {
         if (par_ready.exists() && !par_ready.has_triggered())
         {
           // Need to avoid virtual channel deadlock here so defer it
-          DeferMaterializedViewArgs args;
-          args.did = did;
-          args.owner_space = owner_space;
-          args.logical_owner = logical_owner;
-          args.target_node = target_node;
-          args.manager = phy_man;
-          // Have to static cast this since it might not be ready
-          args.parent = static_cast<MaterializedView*>(par_view);
-          args.context_uid = context_uid;
+          DeferMaterializedViewArgs args(did, owner_space, logical_owner, 
+              // Have to static cast this since it might not be ready
+              target_node, phy_man, static_cast<MaterializedView*>(par_view), 
+              context_uid);
           runtime->issue_runtime_meta_task(args, LG_LATENCY_DEFERRED_PRIORITY,
                                   Runtime::merge_events(par_ready, man_ready));
           return;
@@ -4692,8 +4687,7 @@ namespace Legion {
         RtEvent wait_for = Runtime::merge_events(remote_events);
         if (wait_for.exists() && !wait_for.has_triggered())
         {
-          ShardedWriteTrackerArgs args;
-          args.tracker = this;
+          ShardedWriteTrackerArgs args(this);
           forest->runtime->issue_runtime_meta_task(args, 
               LG_LATENCY_DEFERRED_PRIORITY, wait_for);
           return false;
@@ -8320,8 +8314,7 @@ namespace Legion {
         Runtime::phase_barrier_arrive(shard_invalid_barrier, 1/*count*/);
         // Launch the task to do the removal of the reference
         // when the shard invalid barrier has triggered
-        DeferInvalidateArgs args;
-        args.view = this;
+        DeferInvalidateArgs args(this);
         runtime->issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY, 
                                          shard_invalid_barrier);
       }
@@ -9392,8 +9385,7 @@ namespace Legion {
       if (!ready_events.empty())
       {
         RtEvent wait_on = Runtime::merge_events(ready_events);
-        DeferCompositeViewRegistrationArgs args;
-        args.view = view;
+        DeferCompositeViewRegistrationArgs args(view);
         runtime->issue_runtime_meta_task(args, LG_LATENCY_DEFERRED_PRIORITY,
                                          wait_on);
         // Not ready to perform registration yet
@@ -9760,9 +9752,7 @@ namespace Legion {
                                                RtEvent precondition) const
     //--------------------------------------------------------------------------
     {
-      DeferCompositeViewRefArgs args;
-      args.dc = dc;
-      args.did = did;
+      DeferCompositeViewRefArgs args(dc, did);
       return context->runtime->issue_runtime_meta_task(args, 
           LG_LATENCY_DEFERRED_PRIORITY, precondition);
     }
@@ -10328,13 +10318,10 @@ namespace Legion {
               Runtime::merge_events(version_preconditions);
             if (version_precondition.exists())
             {
-              DeferCaptureArgs args;
-              args.proxy_this = this;
-              args.version_state = it->first;
               // Little scary, but safe since we're going to
               // wait inside this scope and needed_states will
               // not be changing while this is occurring
-              args.capture_mask = &it->second;
+              DeferCaptureArgs args(this, it->first, &it->second);
               capture_preconditions.insert(
                 owner_context->runtime->issue_runtime_meta_task(args,
                   LG_LATENCY_WORK_PRIORITY, version_precondition));
@@ -10574,11 +10561,7 @@ namespace Legion {
           derez.deserialize(version_states[state]);
         if (ready.exists() && !ready.has_triggered())
         {
-          DeferCompositeNodeStateArgs args;
-          args.proxy_this = this;
-          args.state = state;
-          args.owner_did = owner_did;
-          args.root_owner = root_owner;
+          DeferCompositeNodeStateArgs args(this, state, owner_did, root_owner);
           RtEvent precondition = 
             runtime->issue_runtime_meta_task(args, 
                 LG_LATENCY_DEFERRED_PRIORITY, ready);
@@ -10616,13 +10599,10 @@ namespace Legion {
           if (ready.exists() && !ready.has_triggered())
           {
             // Defer adding this state
-            DeferCompositeNodeStateArgs args;
-            args.proxy_this = this;
-            args.state = state;
-            args.owner_did = owner_did;
-            args.root_owner = root_owner;
-            args.mask = new FieldMask();
-            derez.deserialize(*args.mask);
+            FieldMask *mask = new FieldMask();
+            derez.deserialize(*mask);
+            DeferCompositeNodeStateArgs args(this, state, owner_did, 
+                                             mask, root_owner);
             RtEvent precondition = 
               runtime->issue_runtime_meta_task(args, 
                   LG_LATENCY_DEFERRED_PRIORITY, ready);
@@ -11655,9 +11635,7 @@ namespace Legion {
                                          RtEvent precondition) const
     //--------------------------------------------------------------------------
     {
-      DeferPhiViewRefArgs args;
-      args.dc = dc;
-      args.did = did;
+      DeferPhiViewRefArgs args(dc, did);
       return context->runtime->issue_runtime_meta_task(args,
           LG_LATENCY_DEFERRED_PRIORITY, precondition);
     }
@@ -11795,8 +11773,7 @@ namespace Legion {
       if (!ready_events.empty())
       {
         RtEvent wait_on = Runtime::merge_events(ready_events);
-        DeferPhiViewRegistrationArgs args;
-        args.view = view;
+        DeferPhiViewRegistrationArgs args(view);
         runtime->issue_runtime_meta_task(args, LG_LATENCY_DEFERRED_PRIORITY,
                                          wait_on);
         return;

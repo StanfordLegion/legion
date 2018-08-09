@@ -56,12 +56,18 @@ namespace Legion {
       public:
         static const LgTaskID TASK_ID = LG_DEFER_MAPPER_MESSAGE_TASK_ID;
       public:
-        MapperManager *manager;
-        Processor sender;
-        unsigned kind;
-        void *message;
-        size_t size;
-        bool broadcast;
+        DeferMessageArgs(MapperManager *man, Processor p, unsigned k,
+                         void *m, size_t s, bool b)
+          : LgTaskArgs<DeferMessageArgs>(implicit_provenance),
+            manager(man), sender(p), kind(k), 
+            message(m), size(s), broadcast(b) { }
+      public:
+        MapperManager *const manager;
+        const Processor sender;
+        const unsigned kind;
+        void *const message;
+        const size_t size;
+        const bool broadcast;
       };
     public:
       MapperManager(Runtime *runtime, Mapping::Mapper *mapper, 

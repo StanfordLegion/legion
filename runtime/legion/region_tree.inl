@@ -159,7 +159,7 @@ namespace Legion {
       Realm::ProfilingRequestSet requests;
       if (ctx->runtime->profiler != NULL)
         ctx->runtime->profiler->add_partition_request(requests,
-                      task_profiling_provenance, DEP_PART_UNION_REDUCTION);
+                      implicit_provenance, DEP_PART_UNION_REDUCTION);
       this->realm_index_space_ready = ApEvent(
           Realm::IndexSpace<DIM,T>::compute_union(
               spaces, this->realm_index_space, requests, precondition));
@@ -245,7 +245,7 @@ namespace Legion {
       Realm::ProfilingRequestSet requests;
       if (ctx->runtime->profiler != NULL)
         ctx->runtime->profiler->add_partition_request(requests,
-                task_profiling_provenance, DEP_PART_INTERSECTION_REDUCTION);
+                implicit_provenance, DEP_PART_INTERSECTION_REDUCTION);
       this->realm_index_space_ready = ApEvent(
           Realm::IndexSpace<DIM,T>::compute_intersection(
               spaces, this->realm_index_space, requests, precondition));
@@ -341,7 +341,7 @@ namespace Legion {
         Realm::ProfilingRequestSet requests;
         if (ctx->runtime->profiler != NULL)
           ctx->runtime->profiler->add_partition_request(requests,
-                                task_profiling_provenance, DEP_PART_DIFFERENCE);
+                                implicit_provenance, DEP_PART_DIFFERENCE);
         this->realm_index_space_ready = ApEvent(
             Realm::IndexSpace<DIM,T>::compute_difference(lhs_space, rhs_space, 
                               this->realm_index_space, requests, precondition));
