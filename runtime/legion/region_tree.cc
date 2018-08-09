@@ -281,9 +281,7 @@ namespace Legion {
         assert(disjointness_event.exists());
 #endif
         // Launch a task to compute the disjointness
-        DisjointnessArgs args;
-        args.handle = pid;
-        args.ready = disjointness_event;
+        DisjointnessArgs args(pid, disjointness_event);
         runtime->issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY,
                                      Runtime::protect_event(partition_ready));
       }
@@ -5140,10 +5138,7 @@ namespace Legion {
         else
         {
           // Defer this until the semantic condition is ready
-          SemanticRequestArgs args;
-          args.proxy_this = this;
-          args.tag = tag;
-          args.source = source;
+          SemanticRequestArgs args(this, tag, source);
           context->runtime->issue_runtime_meta_task(args, 
               LG_LATENCY_WORK_PRIORITY, precondition);
         }
@@ -5357,10 +5352,7 @@ namespace Legion {
           finder = pending_tests.find(key);
         if (finder == pending_tests.end())
         {
-          DynamicIndependenceArgs args;
-          args.parent = this;
-          args.left = left;
-          args.right = right;
+          DynamicIndependenceArgs args(this, left, right);
           // Get the preconditions for domains 
           RtEvent pre = Runtime::protect_event(
               Runtime::merge_events(left->partition_ready,
@@ -5698,12 +5690,7 @@ namespace Legion {
         // Build a continuation and run it when the node is 
         // ready, we have to do this in order to avoid blocking
         // the virtual channel for nested index tree requests
-        DeferChildArgs args;
-        args.proxy_this = parent;
-        args.child_color = child_color;
-        args.target = target;
-        args.to_trigger = to_trigger;
-        args.source = source;
+        DeferChildArgs args(parent, child_color, target, to_trigger, source);
         forest->runtime->issue_runtime_meta_task(args, 
             LG_LATENCY_DEFERRED_PRIORITY, defer);
         return;
@@ -6086,10 +6073,7 @@ namespace Legion {
         else
         {
           // Defer this until the semantic condition is ready
-          SemanticRequestArgs args;
-          args.proxy_this = this;
-          args.tag = tag;
-          args.source = source;
+          SemanticRequestArgs args(this, tag, source);
           context->runtime->issue_runtime_meta_task(args, 
               LG_LATENCY_WORK_PRIORITY, precondition);
         }
@@ -6432,10 +6416,7 @@ namespace Legion {
           finder = pending_tests.find(key);
         if (finder == pending_tests.end())
         {
-          DynamicIndependenceArgs args;
-          args.parent = this;
-          args.left = left;
-          args.right = right;
+          DynamicIndependenceArgs args(this, left, right);
           ApEvent pre = Runtime::merge_events(left_pre, right_pre);
           ready_event = context->runtime->issue_runtime_meta_task(args, 
                   LG_LATENCY_WORK_PRIORITY, Runtime::protect_event(pre));
@@ -6594,9 +6575,7 @@ namespace Legion {
       }
       if (launch_remove)
       {
-        PendingChildArgs args;
-        args.parent = this;
-        args.pending_child = child_color;
+        PendingChildArgs args(this, child_color);
         // Don't remove the pending child until the handle is ready
         context->runtime->issue_runtime_meta_task(args,
           LG_LATENCY_WORK_PRIORITY, Runtime::protect_event(domain_ready));
@@ -6846,12 +6825,7 @@ namespace Legion {
       // to avoid blocking the virtual channel for nested index tree requests
       if (defer.exists())
       {
-        DeferChildArgs args;
-        args.proxy_this = parent;
-        args.child_color = child_color;
-        args.target = target;
-        args.to_trigger = to_trigger;
-        args.source = source;
+        DeferChildArgs args(parent, child_color, target, to_trigger, source);
         forest->runtime->issue_runtime_meta_task(args, 
             LG_LATENCY_DEFERRED_PRIORITY, defer);
       }
@@ -7553,10 +7527,7 @@ namespace Legion {
         else
         {
           // Defer this until the semantic condition is ready
-          SemanticRequestArgs args;
-          args.proxy_this = this;
-          args.tag = tag;
-          args.source = source;
+          SemanticRequestArgs args(this, tag, source);
           context->runtime->issue_runtime_meta_task(args, 
               LG_LATENCY_WORK_PRIORITY, precondition);
         }
@@ -7610,11 +7581,7 @@ namespace Legion {
         else
         {
           // Defer this until the semantic condition is ready
-          SemanticFieldRequestArgs args;
-          args.proxy_this = this;
-          args.fid = fid;
-          args.tag = tag;
-          args.source = source;
+          SemanticFieldRequestArgs args(this, fid, tag, source);
           context->runtime->issue_runtime_meta_task(args, 
               LG_LATENCY_WORK_PRIORITY, precondition);
         }
@@ -15430,10 +15397,7 @@ namespace Legion {
         else
         {
           // Defer this until the semantic condition is ready
-          SemanticRequestArgs args;
-          args.proxy_this = this;
-          args.tag = tag;
-          args.source = source;
+          SemanticRequestArgs args(this, tag, source);
           context->runtime->issue_runtime_meta_task(args, 
               LG_LATENCY_WORK_PRIORITY, precondition);
         }
@@ -16425,10 +16389,7 @@ namespace Legion {
         else
         {
           // Defer this until the semantic condition is ready
-          SemanticRequestArgs args;
-          args.proxy_this = this;
-          args.tag = tag;
-          args.source = source;
+          SemanticRequestArgs args(this, tag, source);
           context->runtime->issue_runtime_meta_task(args, 
               LG_LATENCY_WORK_PRIORITY, precondition);
         }

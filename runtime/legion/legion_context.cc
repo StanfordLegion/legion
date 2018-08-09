@@ -1736,7 +1736,7 @@ namespace Legion {
       implicit_context = this;
       implicit_runtime = this->runtime;
       rt = this->runtime->external;
-      task_profiling_provenance = owner_task->get_unique_op_id();
+      implicit_provenance = owner_task->get_unique_op_id();
       if (overhead_tracker != NULL)
         previous_profiling_time = Realm::Clock::current_time_in_nanoseconds();
       // Switch over the executing processor to the one
@@ -5666,8 +5666,7 @@ namespace Legion {
       {
         if (need_deferral)
         {
-          PostDecrementArgs post_decrement_args;
-          post_decrement_args.parent_ctx = this;
+          PostDecrementArgs post_decrement_args(this);
           RtEvent done = runtime->issue_runtime_meta_task(post_decrement_args,
               LG_LATENCY_WORK_PRIORITY, wait_on); 
           Runtime::trigger_event(to_trigger, done);
@@ -6244,12 +6243,7 @@ namespace Legion {
       // know it's possible for the update channel to block waiting on
       // the view virtual channel (paging views), so to avoid the cycle
       // we have to launch a meta-task and record when it is done
-      RemoteCreateViewArgs args;
-      args.proxy_this = context;
-      args.manager = manager;
-      args.target = target;
-      args.to_trigger = to_trigger;
-      args.source = source;
+      RemoteCreateViewArgs args(context, manager, target, to_trigger, source);
       runtime->issue_runtime_meta_task(args, LG_LATENCY_DEFERRED_PRIORITY);
     }
 
@@ -7696,13 +7690,8 @@ namespace Legion {
       derez.deserialize(to_trigger);
 
       // Always defer this in case it blocks, we can't block the virtual channel
-      RemotePhysicalRequestArgs args;
-      args.context_uid = context_uid;
-      args.target = target;
-      args.index = index;
-      args.source = source;
-      args.to_trigger = to_trigger;
-      args.runtime = runtime;
+      RemotePhysicalRequestArgs args(context_uid, target, index, 
+                                     source, to_trigger, runtime);
       runtime->issue_runtime_meta_task(args, LG_LATENCY_DEFERRED_PRIORITY);
     }
 
@@ -7773,12 +7762,7 @@ namespace Legion {
       {
         // Launch a continuation in case we need to page in the context
         // We obviously can't block the virtual channel
-        RemotePhysicalResponseArgs args;
-        args.target = target;
-        args.index = index;
-        args.result_uid = result_uid;
-        args.handle = handle;
-        args.runtime = runtime;
+        RemotePhysicalResponseArgs args(target,index,result_uid,handle,runtime);
         RtEvent done = 
           runtime->issue_runtime_meta_task(args, LG_LATENCY_DEFERRED_PRIORITY);
         Runtime::trigger_event(to_trigger, done);

@@ -3123,14 +3123,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Acquire the lock as the precondition
-      DeferMessageArgs args;
-      args.manager = this;
-      args.sender = message->sender;
-      args.kind = message->kind;
-      args.size = message->size;
-      args.message = malloc(args.size);
+      DeferMessageArgs args(this, message->sender, message->kind, 
+                            malloc(message->size), message->size,
+                            message->broadcast);
       memcpy(args.message, message->message, args.size);
-      args.broadcast = message->broadcast;
       runtime->issue_runtime_meta_task(args, LG_RESOURCE_PRIORITY);
     }
 
@@ -3781,7 +3777,7 @@ namespace Legion {
                                    Operation *op)
     //--------------------------------------------------------------------------
     {
-      ContinuationArgs args((op == NULL) ? task_profiling_provenance :
+      ContinuationArgs args((op == NULL) ? implicit_provenance :
                               op->get_unique_op_id(), this);
       // Give this resource priority in case we are holding the mapper lock
       RtEvent wait_on = runtime->issue_runtime_meta_task(args,
