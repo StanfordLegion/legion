@@ -703,7 +703,8 @@ namespace Realm {
 
     if(sysmem_size_in_mb > 0) {
       Memory m = runtime->next_local_memory_id();
-      MemoryImpl *mi = new LocalCPUMemory(m, sysmem_size_in_mb << 20);
+      MemoryImpl *mi = new LocalCPUMemory(m, sysmem_size_in_mb << 20, 
+          -1/*don't care numa domain*/, Memory::SYSTEM_MEM);
       runtime->add_memory(mi);
     }
   }
@@ -1451,6 +1452,8 @@ namespace Realm {
 	Memory m = get_runtime()->next_local_memory_id();
 	regmem = new LocalCPUMemory(m,
 				    reg_mem_size_in_mb << 20,
+                                    -1/*don't care numa domain*/,
+                                    Memory::REGDMA_MEM,
 				    regmem_base,
 				    true);
 	get_runtime()->add_memory(regmem);
@@ -1478,6 +1481,8 @@ namespace Realm {
 	Memory m = get_runtime()->next_local_ib_memory_id();
 	reg_ib_mem = new LocalCPUMemory(m,
 				        reg_ib_mem_size_in_mb << 20,
+                                        -1/*don't care numa domain*/,
+                                        Memory::REGDMA_MEM,
 				        reg_ib_mem_base,
 				        true);
 	get_runtime()->add_ib_memory(reg_ib_mem);
