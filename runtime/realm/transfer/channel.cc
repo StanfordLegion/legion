@@ -2284,7 +2284,8 @@ namespace Realm {
 
       static const Memory::Kind cpu_mem_kinds[] = { Memory::SYSTEM_MEM,
 						    Memory::REGDMA_MEM,
-						    Memory::Z_COPY_MEM };
+						    Memory::Z_COPY_MEM,
+                                                    Memory::SOCKET_MEM };
       static const size_t num_cpu_mem_kinds = sizeof(cpu_mem_kinds) / sizeof(cpu_mem_kinds[0]);
 
       MemcpyChannel::MemcpyChannel(long max_nr)
@@ -2299,7 +2300,7 @@ namespace Realm {
         //cbs = (MemcpyRequest**) calloc(max_nr, sizeof(MemcpyRequest*));
 	unsigned bw = 0; // TODO
 	unsigned latency = 0;
-	// any combination of SYSTEM/REGDMA/Z_COPY_MEM
+	// any combination of SYSTEM/REGDMA/Z_COPY/SOCKET_MEM
 	for(size_t i = 0; i < num_cpu_mem_kinds; i++)
 	  for(size_t j = 0; j < num_cpu_mem_kinds; j++)
 	    add_path(cpu_mem_kinds[i], false,
@@ -2857,7 +2858,7 @@ namespace Realm {
 
 	unsigned bw = 0; // TODO
 	unsigned latency = 0;
-	// any combination of SYSTEM/REGDMA/Z_COPY_MEM
+	// any combination of SYSTEM/REGDMA/Z_COPY/SOCKET_MEM
 	for(size_t i = 0; i < num_cpu_mem_kinds; i++)
 	  if(_kind == XferDes::XFER_GASNET_READ)
 	    add_path(Memory::GLOBAL_MEM, true,
@@ -2918,7 +2919,7 @@ namespace Realm {
 
 	unsigned bw = 0; // TODO
 	unsigned latency = 0;
-	// any combination of SYSTEM/REGDMA/Z_COPY_MEM
+	// any combination of SYSTEM/REGDMA/Z_COPY/SOCKET_MEM
 	for(size_t i = 0; i < num_cpu_mem_kinds; i++)
 	  add_path(cpu_mem_kinds[i], false,
 		   Memory::REGDMA_MEM, true,
