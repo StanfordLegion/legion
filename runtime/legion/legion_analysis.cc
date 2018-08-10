@@ -3964,7 +3964,7 @@ namespace Legion {
         if (!unwritten)
           return;
       }
-      if (!!complete_writes)
+      if (!!state.write_fields)
       {
         // First record any updates that we have at this level, we can skip
         // anything that was already recorded as written above
