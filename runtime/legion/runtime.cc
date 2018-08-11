@@ -20147,6 +20147,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    IndexSpace Runtime::help_create_index_space_handle(TypeTag type_tag)
+    //--------------------------------------------------------------------------
+    {
+      IndexSpace handle(get_unique_index_space_id(),
+                        get_unique_index_tree_id(), type_tag);
+      return handle;
+    }
+
+    //--------------------------------------------------------------------------
     unsigned Runtime::generate_random_integer(void)
     //--------------------------------------------------------------------------
     {

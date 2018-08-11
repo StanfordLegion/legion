@@ -2403,19 +2403,7 @@ namespace Legion {
       if (spaces.empty())
         return IndexSpace::NO_SPACE;
       AutoRuntimeCall call(this); 
-      IndexSpace handle(runtime->get_unique_index_space_id(),
-                        runtime->get_unique_index_tree_id(), 
-                        spaces[0].get_type_tag());
-      DistributedID did = runtime->get_available_distributed_id();
-#ifdef DEBUG_LEGION
-      log_index.debug("Creating index space %x in task%s (ID %lld)", 
-                      handle.id, get_task_name(), get_unique_id()); 
-#endif
-      if (runtime->legion_spy_enabled)
-        LegionSpy::log_top_index_space(handle.id);
-      forest->create_union_space(handle, owner_task, spaces, did); 
-      register_index_space_creation(handle);
-      return handle;
+      return forest->find_or_create_union_space(this, spaces);
     }
 
     //--------------------------------------------------------------------------
@@ -2426,19 +2414,7 @@ namespace Legion {
       if (spaces.empty())
         return IndexSpace::NO_SPACE;
       AutoRuntimeCall call(this); 
-      IndexSpace handle(runtime->get_unique_index_space_id(),
-                        runtime->get_unique_index_tree_id(), 
-                        spaces[0].get_type_tag());
-      DistributedID did = runtime->get_available_distributed_id();
-#ifdef DEBUG_LEGION
-      log_index.debug("Creating index space %x in task%s (ID %lld)", 
-                      handle.id, get_task_name(), get_unique_id()); 
-#endif
-      if (runtime->legion_spy_enabled)
-        LegionSpy::log_top_index_space(handle.id);
-      forest->create_intersection_space(handle, owner_task, spaces, did);
-      register_index_space_creation(handle);
-      return handle;
+      return forest->find_or_create_intersection_space(this, spaces);
     }
 
     //--------------------------------------------------------------------------
@@ -2447,19 +2423,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this); 
-      IndexSpace handle(runtime->get_unique_index_space_id(),
-                        runtime->get_unique_index_tree_id(), 
-                        left.get_type_tag());
-      DistributedID did = runtime->get_available_distributed_id();
-#ifdef DEBUG_LEGION
-      log_index.debug("Creating index space %x in task%s (ID %lld)", 
-                      handle.id, get_task_name(), get_unique_id()); 
-#endif
-      if (runtime->legion_spy_enabled)
-        LegionSpy::log_top_index_space(handle.id);
-      forest->create_difference_space(handle, owner_task, left, right, did);
-      register_index_space_creation(handle);
-      return handle;
+      return forest->find_or_create_difference_space(this, left, right); 
     }
 
     //--------------------------------------------------------------------------
@@ -7660,26 +7624,18 @@ namespace Legion {
       if (owner_shard->shard_id == index_space_allocator_shard)
       {
         // We're the owner, so make it locally and then broadcast it
-        handle = IndexSpace(runtime->get_unique_index_space_id(),
-                            runtime->get_unique_index_tree_id(), 
-                            spaces[0].get_type_tag());
-        const DistributedID did = runtime->get_available_distributed_id();
-        // Have to do our registration before broadcasting the result
-        forest->create_union_space(handle, owner_task, spaces, did,
-                                   shard_manager->get_mapping());
+        handle = forest->find_or_create_union_space(this, spaces,
+                                  shard_manager->get_mapping());
+        IndexSpaceNode *node = forest->get_node(handle);
         ValueBroadcast<ISBroadcast> collective_space(this, COLLECTIVE_LOC_4);
-        collective_space.broadcast(ISBroadcast(handle, did));
-#ifdef DEBUG_LEGION
-        log_index.debug("Creating index space %x in task%s (ID %lld)", 
-                        handle.id, get_task_name(), get_unique_id()); 
-#endif
-        if (runtime->legion_spy_enabled)
-          LegionSpy::log_top_index_space(handle.id);
+        collective_space.broadcast(ISBroadcast(handle, node->did));
         // Wait for the creation to finish
         creation_barrier.wait();
       }
       else
       {
+        // Do our own local version of this
+        IndexSpace local = forest->find_or_create_union_space(NULL, spaces);
         // We need to get the barrier result 
         ValueBroadcast<ISBroadcast> collective_space(this,
                             index_space_allocator_shard, COLLECTIVE_LOC_4);
@@ -7688,9 +7644,11 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(handle.exists());
 #endif
-        // Now we can do our local registration
-        forest->create_union_space(handle, owner_task, spaces, value.did,
-                                   shard_manager->get_mapping());
+        // Check to see if they are the same, if not find or make one
+        // with the right name here and the local computation result
+        if (local != handle)
+          forest->find_or_create_sharded_index_space(this, handle, local, 
+                                value.did, shard_manager->get_mapping());
         // Signal we're done our creation
         Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
       }
@@ -7716,26 +7674,19 @@ namespace Legion {
       if (owner_shard->shard_id == index_space_allocator_shard)
       {
         // We're the owner, so make it locally and then broadcast it
-        handle = IndexSpace(runtime->get_unique_index_space_id(),
-                            runtime->get_unique_index_tree_id(),
-                            spaces[0].get_type_tag());
-        const DistributedID did = runtime->get_available_distributed_id();
-        // Have to do our registration before broadcasting the result
-        forest->create_intersection_space(handle, owner_task, spaces, did,
+        handle = forest->find_or_create_intersection_space(this, spaces,
                                           shard_manager->get_mapping());
+        IndexSpaceNode *node = forest->get_node(handle);
         ValueBroadcast<ISBroadcast> space_collective(this, COLLECTIVE_LOC_5);
-        space_collective.broadcast(ISBroadcast(handle, did));
-#ifdef DEBUG_LEGION
-        log_index.debug("Creating index space %x in task%s (ID %lld)", 
-                        handle.id, get_task_name(), get_unique_id()); 
-#endif
-        if (runtime->legion_spy_enabled)
-          LegionSpy::log_top_index_space(handle.id);
+        space_collective.broadcast(ISBroadcast(handle, node->did));
         // Wait for the creation to finish
         creation_barrier.wait();
       }
       else
       {
+        // Do our own local version of this
+        IndexSpace local = 
+          forest->find_or_create_intersection_space(NULL, spaces);
         // We need to get the barrier result 
         ValueBroadcast<ISBroadcast> space_collective(this,
                             index_space_allocator_shard, COLLECTIVE_LOC_5);
@@ -7744,15 +7695,15 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(handle.exists());
 #endif
-        // Once we have the answer we can do our own registration
-        forest->create_intersection_space(handle, owner_task, spaces,value.did,
-                                          shard_manager->get_mapping());
+        // Check to see if they are the same, if not find or make one
+        // with the right name here and the local computation result
+        if (local != handle)
+          forest->find_or_create_sharded_index_space(this, handle, local, 
+                                value.did, shard_manager->get_mapping());
         // Signal that we're done our creation
         Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
       }
       Runtime::advance_barrier(creation_barrier);
-      // Register the creation
-      register_index_space_creation(handle);
       // Update the index space allocator shard
       index_space_allocator_shard++;
       if (index_space_allocator_shard == total_shards)
@@ -7770,26 +7721,19 @@ namespace Legion {
       if (owner_shard->shard_id == index_space_allocator_shard)
       {
         // We're the owner, so make it locally and then broadcast it
-        handle = IndexSpace(runtime->get_unique_index_space_id(),
-                            runtime->get_unique_index_tree_id(), 
-                            left.get_type_tag());
-        const DistributedID did = runtime->get_available_distributed_id();
-        // Have to do our registration before broadcasting
-        forest->create_difference_space(handle, owner_task, left, right, did,
-                                        shard_manager->get_mapping());
+        handle = forest->find_or_create_difference_space(this, left, right,
+                                              shard_manager->get_mapping());
+       IndexSpaceNode *node = forest->get_node(handle); 
         ValueBroadcast<ISBroadcast> space_collective(this, COLLECTIVE_LOC_6);
-        space_collective.broadcast(ISBroadcast(handle, did));
-#ifdef DEBUG_LEGION
-        log_index.debug("Creating index space %x in task%s (ID %lld)", 
-                        handle.id, get_task_name(), get_unique_id()); 
-#endif
-        if (runtime->legion_spy_enabled)
-          LegionSpy::log_top_index_space(handle.id);
+        space_collective.broadcast(ISBroadcast(handle, node->did));
         // Wait for the creation to finish
         creation_barrier.wait();
       }
       else
       {
+        // Do our own local version of this
+        IndexSpace local = 
+          forest->find_or_create_difference_space(NULL, left, right);
         // We need to get the barrier result 
         ValueBroadcast<ISBroadcast> space_collective(this, 
                             index_space_allocator_shard, COLLECTIVE_LOC_6);
@@ -7798,15 +7742,15 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(handle.exists());
 #endif
-        // Do our own registration
-        forest->create_difference_space(handle, owner_task, left, right, 
+        // Check to see if they are the same, if not find or make one
+        // with the right name here and the local computation result
+        if (local != handle)
+          forest->find_or_create_sharded_index_space(this, handle, local, 
                                 value.did, shard_manager->get_mapping());
         // Signal that we're done our creation
         Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
       }
       Runtime::advance_barrier(creation_barrier);
-      // Record our created space
-      register_index_space_creation(handle);
       // Update the allocation shard
       index_space_allocator_shard++;
       if (index_space_allocator_shard == total_shards)

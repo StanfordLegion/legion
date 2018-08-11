@@ -161,66 +161,98 @@ namespace Legion {
     {
       IndexSpaceNode *node = 
         create_node(handle, realm_is, NULL/*parent*/, 0/*color*/, did, 
-                    ApEvent::NO_AP_EVENT, mapping);
+                    ApEvent::NO_AP_EVENT, 0/*expr id*/, mapping);
       if (runtime->legion_spy_enabled)
         node->log_index_space_points();
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeForest::create_union_space(IndexSpace handle, TaskOp *op,
-                                       const std::vector<IndexSpace> &handles, 
+    IndexSpace RegionTreeForest::find_or_create_union_space(InnerContext *ctx,
+                                         const std::vector<IndexSpace> &sources,
+                                         ShardMapping *shard_mapping/*=NULL*/)
+    //--------------------------------------------------------------------------
+    {
+      // Construct the set of index space expressions
+      std::set<IndexSpaceExpression*> exprs;
+      for (std::vector<IndexSpace>::const_iterator it = 
+            sources.begin(); it != sources.end(); it++)
+      {
+        if (!it->exists())
+          continue;
+        if (sources[0].get_type_tag() != it->get_type_tag())
+          REPORT_LEGION_ERROR(ERROR_DYNAMIC_TYPE_MISMATCH,
+                        "Dynamic type mismatch in 'union_index_spaces' "
+                        "performed in task %s (UID %lld)",
+                        ctx->get_task_name(), ctx->get_unique_id())
+        exprs.insert(get_node(*it));
+      }
+      if (exprs.empty())
+        return IndexSpace::NO_SPACE;
+      IndexSpaceExpression *expr = union_index_spaces(exprs);
+      IndexSpaceNode *node = expr->find_or_create_node(ctx, shard_mapping);
+      return node->handle;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace RegionTreeForest::find_or_create_intersection_space(
+                      InnerContext *ctx, const std::vector<IndexSpace> &sources,
+                      ShardMapping *shard_mapping/*=NULL*/)
+    //--------------------------------------------------------------------------
+    {
+      // Construct the set of index space expressions
+      std::set<IndexSpaceExpression*> exprs;
+      for (std::vector<IndexSpace>::const_iterator it = 
+            sources.begin(); it != sources.end(); it++)
+      {
+        if (!it->exists())
+          continue;
+        if (sources[0].get_type_tag() != it->get_type_tag())
+          REPORT_LEGION_ERROR(ERROR_DYNAMIC_TYPE_MISMATCH,
+                        "Dynamic type mismatch in 'intersect_index_spaces' "
+                        "performed in task %s (UID %lld)",
+                        ctx->get_task_name(), ctx->get_unique_id())
+        exprs.insert(get_node(*it));
+      }
+      if (exprs.empty())
+        return IndexSpace::NO_SPACE;
+      IndexSpaceExpression *expr = intersect_index_spaces(exprs);
+      IndexSpaceNode *node = expr->find_or_create_node(ctx, shard_mapping);
+      return node->handle;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace RegionTreeForest::find_or_create_difference_space(
+                           InnerContext *ctx, IndexSpace left, IndexSpace right,
+                           ShardMapping *shard_mapping/*=NULL*/)
+    //--------------------------------------------------------------------------
+    {
+      if (!left.exists())
+        return IndexSpace::NO_SPACE;
+      if (!right.exists())
+        return left;
+      IndexSpaceNode *lhs = get_node(left);
+      IndexSpaceNode *rhs = get_node(right);
+      IndexSpaceExpression *expr = subtract_index_spaces(lhs, rhs);
+      IndexSpaceNode *node = expr->find_or_create_node(ctx, shard_mapping);
+      return node->handle;
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeForest::find_or_create_sharded_index_space(InnerContext *ctx,
+                                       IndexSpace handle, IndexSpace local,
                                        DistributedID did, ShardMapping *mapping)
     //--------------------------------------------------------------------------
     {
-      ApUserEvent to_trigger = Runtime::create_ap_user_event();
-      IndexSpaceNode *node = 
-        create_node(handle, NULL, NULL/*parent*/, 0/*color*/, 
-                    did, to_trigger, mapping);
-      node->initialize_union_space(to_trigger, op, handles);
+      // Quick unsafe test to see if we already have it
+      // in which case we can skip the rest of this
+      if (has_node(handle))
+        return;
+      IndexSpaceNode *local_node = get_node(local); 
+      local_node->create_sharded_alias(handle, did, mapping);
+      if (ctx != NULL)
+        ctx->register_index_space_creation(handle);
       if (runtime->legion_spy_enabled)
-      {
-        if (!node->index_space_ready.has_triggered())
-          node->index_space_ready.wait();
-        node->log_index_space_points();
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void RegionTreeForest::create_intersection_space(IndexSpace handle,
-                             TaskOp *op, const std::vector<IndexSpace> &handles,
-                             DistributedID did, ShardMapping *mapping)
-    //--------------------------------------------------------------------------
-    {
-      ApUserEvent to_trigger = Runtime::create_ap_user_event();
-      IndexSpaceNode *node = 
-        create_node(handle, NULL, NULL/*parent*/, 0/*color*/, 
-                    did, to_trigger, mapping);
-      node->initialize_intersection_space(to_trigger, op, handles);
-      if (runtime->legion_spy_enabled)
-      {
-        if (!node->index_space_ready.has_triggered())
-          node->index_space_ready.wait();
-        node->log_index_space_points();
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void RegionTreeForest::create_difference_space(IndexSpace handle,
-                                 TaskOp *op, IndexSpace left, IndexSpace right,
-                                 DistributedID did, ShardMapping *mapping)
-    //--------------------------------------------------------------------------
-    {
-      ApUserEvent to_trigger = Runtime::create_ap_user_event();
-      IndexSpaceNode *node = 
-        create_node(handle, NULL, NULL/*parent*/, 0/*color*/, 
-                    did, to_trigger, mapping);
-      node->initialize_difference_space(to_trigger, op, left, right);
-      if (runtime->legion_spy_enabled)
-      {
-        if (!node->index_space_ready.has_triggered())
-          node->index_space_ready.wait();
-        node->log_index_space_points();
-      }
+        LegionSpy::log_top_index_space(handle.get_id());
     }
 
     //--------------------------------------------------------------------------
@@ -3508,11 +3540,12 @@ namespace Legion {
                                                   LegionColor color,
                                                   DistributedID did,
                                                   ApEvent is_ready,
+                                                  IndexSpaceExprID expr_id,
                                                   ShardMapping *mapping)
     //--------------------------------------------------------------------------
     { 
       IndexSpaceCreator creator(this, sp, realm_is, parent, 
-                                color, did, is_ready);
+                                color, did, is_ready, expr_id);
       NT_TemplateHelper::demux<IndexSpaceCreator>(sp.get_type_tag(), &creator);
       IndexSpaceNode *result = creator.result;  
 #ifdef DEBUG_LEGION
@@ -3579,7 +3612,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     { 
       IndexSpaceCreator creator(this, sp, realm_is, parent, 
-                                color, did, is_ready);
+                                color, did, is_ready, 0/*expr id*/);
       NT_TemplateHelper::demux<IndexSpaceCreator>(sp.get_type_tag(), &creator);
       IndexSpaceNode *result = creator.result;  
 #ifdef DEBUG_LEGION
@@ -5633,7 +5666,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     IntermediateExpression::IntermediateExpression(TypeTag tag,
                                                    RegionTreeForest *ctx)
-      : IndexSpaceExpression(tag, ctx->runtime, inter_lock), context(ctx)
+      : IndexSpaceExpression(tag, ctx->runtime, inter_lock), 
+        context(ctx), node(NULL)
     //--------------------------------------------------------------------------
     {
     }
@@ -5641,7 +5675,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     IntermediateExpression::IntermediateExpression(TypeTag tag,
                                      RegionTreeForest *ctx, IndexSpaceExprID id)
-      : IndexSpaceExpression(tag, id, inter_lock), context(ctx)
+      : IndexSpaceExpression(tag, id, inter_lock), context(ctx), node(NULL)
     //--------------------------------------------------------------------------
     {
     }
@@ -5870,6 +5904,19 @@ namespace Legion {
       assert(result != NULL);
 #endif
       result->pack_expression(rez, target);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpaceNode* PendingIndexSpaceExpression::find_or_create_node(
+                                       InnerContext *ctx, ShardMapping *mapping)
+    //--------------------------------------------------------------------------
+    {
+      if (!ready_event.has_triggered())
+        ready_event.wait();
+#ifdef DEBUG_LEGION
+      assert(result != NULL);
+#endif
+      return result->find_or_create_node(ctx, mapping);
     }
 
     //--------------------------------------------------------------------------
@@ -6510,10 +6557,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     IndexSpaceNode::IndexSpaceNode(RegionTreeForest *ctx, IndexSpace h, 
                                    IndexPartNode *par, LegionColor c,
-                                   DistributedID did, ApEvent ready)
+                                   DistributedID did, ApEvent ready,
+                                   IndexSpaceExprID expr_id)
       : IndexTreeNode(ctx, (par == NULL) ? 0 : par->depth + 1, c,
                       did, get_owner_space(h, ctx->runtime)),
-        IndexSpaceExpression(h.type_tag, ctx->runtime, node_lock),
+        IndexSpaceExpression(h.type_tag, expr_id > 0 ? expr_id : 
+            runtime->get_unique_index_space_expr_id(), node_lock),
         handle(h), parent(par), index_space_ready(ready), 
         realm_index_space_set(Runtime::create_rt_user_event()), 
         tight_index_space_set(Runtime::create_rt_user_event()),
