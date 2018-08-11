@@ -3101,14 +3101,20 @@ namespace Legion {
     void SerializingManager::lock_mapper(MappingCallInfo *info, bool read_only)
     //--------------------------------------------------------------------------
     {
-      // Nothing to do
+      REPORT_LEGION_ERROR(ERROR_MAPPER_SYNCHRONIZATION,
+                          "Illegal 'lock_mapper' call performed in mapper %s "
+                          "with the serialized synchronization model. Use the "
+                          "'disable_reentrant' call instead.",get_mapper_name())
     }
 
     //--------------------------------------------------------------------------
     void SerializingManager::unlock_mapper(MappingCallInfo *info)
     //--------------------------------------------------------------------------
     {
-      // Nothing to do
+      REPORT_LEGION_ERROR(ERROR_MAPPER_SYNCHRONIZATION,
+                          "Illegal 'unlock_mapper' call performed in mapper %s "
+                          "with the serialized synchronization model. Use the "
+                          "'enable_reentrant' call instead.", get_mapper_name())
     }
 
     //--------------------------------------------------------------------------
@@ -3500,14 +3506,20 @@ namespace Legion {
     void ConcurrentManager::enable_reentrant(MappingCallInfo *info)
     //--------------------------------------------------------------------------
     {
-      // Nothing to do 
+      REPORT_LEGION_ERROR(ERROR_MAPPER_SYNCHRONIZATION,
+                          "Illegal 'enable_reentrant' call performed in mapper "
+                          "%s with the concurrent synchronization model. Use "
+                          "the 'unlock_mapper' call instead.",get_mapper_name())
     }
 
     //--------------------------------------------------------------------------
     void ConcurrentManager::disable_reentrant(MappingCallInfo *info)
     //--------------------------------------------------------------------------
     {
-      // Nothing to do
+      REPORT_LEGION_ERROR(ERROR_MAPPER_SYNCHRONIZATION,
+                          "Illegal 'disable_reentrant' call performed in mapper"
+                          " %s with the concurrent synchronization model. Use "
+                          "the 'lock_mapper' call instead.", get_mapper_name())
     }
 
     //--------------------------------------------------------------------------

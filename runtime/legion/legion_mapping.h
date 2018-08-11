@@ -1524,7 +1524,7 @@ namespace Legion {
     public:
       //------------------------------------------------------------------------
       // Methods for managing access to mapper state in the concurrent model
-      // These calls are no-ops in the serialized mapper model 
+      // These calls are illegal in the serialized mapper model 
       //------------------------------------------------------------------------
       bool is_locked(MapperContext ctx) const;
       void lock_mapper(MapperContext ctx, 
@@ -1533,7 +1533,7 @@ namespace Legion {
     public:
       //------------------------------------------------------------------------
       // Methods for managing the re-entrant state in the serialized model
-      // These calls are no-ops in the concurrent mapper model
+      // These calls are illegal in the concurrent mapper model
       //------------------------------------------------------------------------
       bool is_reentrant(MapperContext ctx) const;
       void enable_reentrant(MapperContext ctx) const;
