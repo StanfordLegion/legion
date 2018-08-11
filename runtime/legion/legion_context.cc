@@ -2341,19 +2341,7 @@ namespace Legion {
       if (spaces.empty())
         return IndexSpace::NO_SPACE;
       AutoRuntimeCall call(this); 
-      IndexSpace handle(runtime->get_unique_index_space_id(),
-                        runtime->get_unique_index_tree_id(), 
-                        spaces[0].get_type_tag());
-      DistributedID did = runtime->get_available_distributed_id();
-#ifdef DEBUG_LEGION
-      log_index.debug("Creating index space %x in task%s (ID %lld)", 
-                      handle.id, get_task_name(), get_unique_id()); 
-#endif
-      if (runtime->legion_spy_enabled)
-        LegionSpy::log_top_index_space(handle.id);
-      forest->create_union_space(handle, owner_task, spaces, did); 
-      register_index_space_creation(handle);
-      return handle;
+      return forest->find_or_create_union_space(this, spaces);
     }
 
     //--------------------------------------------------------------------------
@@ -2364,19 +2352,7 @@ namespace Legion {
       if (spaces.empty())
         return IndexSpace::NO_SPACE;
       AutoRuntimeCall call(this); 
-      IndexSpace handle(runtime->get_unique_index_space_id(),
-                        runtime->get_unique_index_tree_id(), 
-                        spaces[0].get_type_tag());
-      DistributedID did = runtime->get_available_distributed_id();
-#ifdef DEBUG_LEGION
-      log_index.debug("Creating index space %x in task%s (ID %lld)", 
-                      handle.id, get_task_name(), get_unique_id()); 
-#endif
-      if (runtime->legion_spy_enabled)
-        LegionSpy::log_top_index_space(handle.id);
-      forest->create_intersection_space(handle, owner_task, spaces, did);
-      register_index_space_creation(handle);
-      return handle;
+      return forest->find_or_create_intersection_space(this, spaces);
     }
 
     //--------------------------------------------------------------------------
@@ -2385,19 +2361,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this); 
-      IndexSpace handle(runtime->get_unique_index_space_id(),
-                        runtime->get_unique_index_tree_id(), 
-                        left.get_type_tag());
-      DistributedID did = runtime->get_available_distributed_id();
-#ifdef DEBUG_LEGION
-      log_index.debug("Creating index space %x in task%s (ID %lld)", 
-                      handle.id, get_task_name(), get_unique_id()); 
-#endif
-      if (runtime->legion_spy_enabled)
-        LegionSpy::log_top_index_space(handle.id);
-      forest->create_difference_space(handle, owner_task, left, right, did);
-      register_index_space_creation(handle);
-      return handle;
+      return forest->find_or_create_difference_space(this, left, right); 
     }
 
     //--------------------------------------------------------------------------

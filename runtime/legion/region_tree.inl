@@ -133,6 +133,45 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
+    IndexSpaceNode* IndexSpaceOperationT<DIM,T>::find_or_create_node(
+                                                              InnerContext *ctx)
+    //--------------------------------------------------------------------------
+    {
+      if (node != NULL)
+        return node;
+      Runtime *runtime = context->runtime;
+      {
+        AutoLock i_lock(inter_lock);
+        // Retest after we get the lock
+        if (node != NULL)
+          return node;
+        // Make a handle and DID to use for this index space
+        IndexSpace handle = runtime->help_create_index_space_handle(type_tag);
+        DistributedID did = runtime->get_available_distributed_id();
+#ifdef DEBUG_LEGION
+        if (ctx != NULL)
+          log_index.debug("Creating index space %x in task%s (ID %lld)", 
+                handle.get_id(), ctx->get_task_name(), ctx->get_unique_id());
+#endif
+        
+        if (is_index_space_tight)
+          node = context->create_node(handle, &tight_index_space,
+                                      NULL/*parent*/, 0/*color*/, did,
+                                      realm_index_space_ready, expr_id);
+        else
+          node = context->create_node(handle, &realm_index_space,
+                                      NULL/*parent*/, 0/*color*/, did,
+                                      realm_index_space_ready, expr_id);
+      }
+      if (ctx != NULL)
+        ctx->register_index_space_creation(node->handle);
+      if (runtime->legion_spy_enabled)
+        LegionSpy::log_top_index_space(node->handle.get_id());
+      return node;
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
     IndexSpaceUnion<DIM,T>::IndexSpaceUnion(
                             const std::vector<IndexSpaceExpression*> &to_union,
                             RegionTreeForest *ctx)
@@ -502,6 +541,41 @@ namespace Legion {
       record_remote_instance(target);
     }
 
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    IndexSpaceNode* RemoteExpression<DIM,T>::find_or_create_node(
+                                                              InnerContext *ctx)
+    //--------------------------------------------------------------------------
+    {
+      if (node != NULL)
+        return node;
+      Runtime *runtime = context->runtime;
+      {
+        AutoLock i_lock(inter_lock);
+        // Retest after we get the lock
+        if (node != NULL)
+          return node;
+        // Make a handle and DID to use for this index space
+        IndexSpace handle = runtime->help_create_index_space_handle(type_tag);
+         
+        DistributedID did = runtime->get_available_distributed_id();
+#ifdef DEBUG_LEGION
+        if (ctx != NULL)
+          log_index.debug("Creating index space %x in task%s (ID %lld)", 
+                handle.get_id(), ctx->get_task_name(), ctx->get_unique_id());
+#endif
+        
+        node = context->create_node(handle, &realm_index_space,
+                                    NULL/*parent*/, 0/*color*/, did,
+                                    realm_index_space_ready, expr_id);
+      }
+      if (ctx != NULL)
+        ctx->register_index_space_creation(node->handle);
+      if (runtime->legion_spy_enabled)
+        LegionSpy::log_top_index_space(node->handle.get_id());
+      return node;
+    }
+
     /////////////////////////////////////////////////////////////
     // Templated Index Space Node 
     /////////////////////////////////////////////////////////////
@@ -510,8 +584,9 @@ namespace Legion {
     template<int DIM, typename T>
     IndexSpaceNodeT<DIM,T>::IndexSpaceNodeT(RegionTreeForest *ctx, 
         IndexSpace handle, IndexPartNode *parent, LegionColor color,
-        const Realm::IndexSpace<DIM,T> *is, DistributedID did, ApEvent ready)
-      : IndexSpaceNode(ctx, handle, parent, color, did, ready), 
+        const Realm::IndexSpace<DIM,T> *is, DistributedID did, 
+        ApEvent ready, IndexSpaceExprID expr_id)
+      : IndexSpaceNode(ctx, handle, parent, color, did, ready, expr_id), 
         linearization_ready(false)
     //--------------------------------------------------------------------------
     {
@@ -715,107 +790,6 @@ namespace Legion {
       }
       else
         rez.serialize<IndexSpaceExpression*>(this);
-    }
-
-    //--------------------------------------------------------------------------
-    template<int DIM, typename T>
-    void IndexSpaceNodeT<DIM,T>::initialize_union_space(ApUserEvent to_trigger,
-                             TaskOp *op, const std::vector<IndexSpace> &handles)
-    //--------------------------------------------------------------------------
-    {
-      std::set<ApEvent> preconditions;
-      std::vector<Realm::IndexSpace<DIM,T> > spaces(handles.size());
-      for (unsigned idx = 0; idx < handles.size(); idx++)
-      {
-        IndexSpaceNode *node = context->get_node(handles[idx]);
-        if (handles[idx].get_type_tag() != handle.get_type_tag())
-          REPORT_LEGION_ERROR(ERROR_DYNAMIC_TYPE_MISMATCH,
-                        "Dynamic type mismatch in 'union_index_spaces' "
-                        "performed in task %s (UID %lld)",
-                        op->get_task_name(), op->get_unique_id())
-        IndexSpaceNodeT<DIM,T> *space = 
-          static_cast<IndexSpaceNodeT<DIM,T>*>(node);
-        ApEvent ready = space->get_realm_index_space(spaces[idx], false);
-        if (ready.exists())
-          preconditions.insert(ready);
-      }
-      // Kick this off to Realm
-      ApEvent precondition = Runtime::merge_events(NULL, preconditions);
-      Realm::ProfilingRequestSet requests;
-      if (context->runtime->profiler != NULL)
-        context->runtime->profiler->add_partition_request(requests,
-                                      op, DEP_PART_UNION_REDUCTION);
-      Realm::IndexSpace<DIM,T> result_space;
-      ApEvent done(Realm::IndexSpace<DIM,T>::compute_union(
-            spaces, result_space, requests, precondition));
-      set_realm_index_space(context->runtime->address_space, result_space);
-      Runtime::trigger_event(to_trigger, done);
-    }
-
-    //--------------------------------------------------------------------------
-    template<int DIM, typename T>
-    void IndexSpaceNodeT<DIM,T>::initialize_intersection_space(
-     ApUserEvent to_trigger, TaskOp *op, const std::vector<IndexSpace> &handles)
-    //--------------------------------------------------------------------------
-    {
-      std::set<ApEvent> preconditions;
-      std::vector<Realm::IndexSpace<DIM,T> > spaces(handles.size());
-      for (unsigned idx = 0; idx < handles.size(); idx++)
-      {
-        IndexSpaceNode *node = context->get_node(handles[idx]);
-        if (handles[idx].get_type_tag() != handle.get_type_tag())
-          REPORT_LEGION_ERROR(ERROR_DYNAMIC_TYPE_MISMATCH,
-                        "Dynamic type mismatch in 'intersect_index_spaces' "
-                        "performed in task %s (UID %lld)",
-                        op->get_task_name(), op->get_unique_id())
-        IndexSpaceNodeT<DIM,T> *space = 
-          static_cast<IndexSpaceNodeT<DIM,T>*>(node);
-        ApEvent ready = space->get_realm_index_space(spaces[idx], false);
-        if (ready.exists())
-          preconditions.insert(ready);
-      }
-      // Kick this off to Realm
-      ApEvent precondition = Runtime::merge_events(NULL, preconditions);
-      Realm::ProfilingRequestSet requests;
-      if (context->runtime->profiler != NULL)
-        context->runtime->profiler->add_partition_request(requests,
-                                      op, DEP_PART_INTERSECTION_REDUCTION);
-      Realm::IndexSpace<DIM,T> result_space;
-      ApEvent done(Realm::IndexSpace<DIM,T>::compute_intersection(
-            spaces, result_space, requests, precondition));
-      set_realm_index_space(context->runtime->address_space, result_space);
-      Runtime::trigger_event(to_trigger, done);
-    }
-    
-    //--------------------------------------------------------------------------
-    template<int DIM, typename T>
-    void IndexSpaceNodeT<DIM,T>::initialize_difference_space(
-          ApUserEvent to_trigger, TaskOp *op, IndexSpace left, IndexSpace right)
-    //--------------------------------------------------------------------------
-    {
-      if (left.get_type_tag() != right.get_type_tag())
-        REPORT_LEGION_ERROR(ERROR_DYNAMIC_TYPE_MISMATCH,
-                      "Dynamic type mismatch in 'subtract_index_spaces' "
-                      "performed in task %s (UID %lld)",
-                      op->get_task_name(), op->get_unique_id())
-      IndexSpaceNodeT<DIM,T> *left_node = 
-        static_cast<IndexSpaceNodeT<DIM,T>*>(context->get_node(left));
-      IndexSpaceNodeT<DIM,T> *right_node = 
-        static_cast<IndexSpaceNodeT<DIM,T>*>(context->get_node(right));
-      Realm::IndexSpace<DIM,T> left_space, right_space;
-      ApEvent left_ready = left_node->get_realm_index_space(left_space, false);
-      ApEvent right_ready = right_node->get_realm_index_space(right_space, 
-                                                              false);
-      ApEvent precondition = Runtime::merge_events(NULL,left_ready,right_ready);
-      Realm::ProfilingRequestSet requests;
-      if (context->runtime->profiler != NULL)
-        context->runtime->profiler->add_partition_request(requests,
-                                          op, DEP_PART_DIFFERENCE);
-      Realm::IndexSpace<DIM,T> result_space;
-      ApEvent done(Realm::IndexSpace<DIM,T>::compute_difference(
-           left_space, right_space, result_space, requests, precondition));
-      set_realm_index_space(context->runtime->address_space, result_space);
-      Runtime::trigger_event(to_trigger, done);
     }
 
     //--------------------------------------------------------------------------

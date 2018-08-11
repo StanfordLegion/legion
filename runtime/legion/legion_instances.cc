@@ -2240,13 +2240,8 @@ namespace Legion {
           if (index > 0)
             ancestor = find_common_ancestor(ancestor, *it);
         }
-        IndexSpace union_space(forest->runtime->get_unique_index_space_id(),
-                               ancestor->handle.index_space.get_tree_id(),
-                               ancestor->handle.get_type_tag());
-        DistributedID did = 
-          forest->runtime->get_available_distributed_id();
-        forest->create_union_space(union_space, NULL/*task op*/,
-                                   union_spaces, did);
+        IndexSpace union_space = 
+          forest->find_or_create_union_space(NULL, union_spaces);
         instance_domain = forest->get_node(union_space);
         own_domain = true;
       }

@@ -2745,6 +2745,7 @@ namespace Legion {
       Future help_create_future(Operation *op = NULL);
       void help_complete_future(const Future &f);
       bool help_reset_future(const Future &f);
+      IndexSpace help_create_index_space_handle(TypeTag type_tag);
     public:
       unsigned generate_random_integer(void);
 #ifdef TRACE_ALLOCATION
