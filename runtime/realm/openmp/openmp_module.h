@@ -66,7 +66,7 @@ namespace Realm {
       bool cfg_fake_cpukind;
       size_t cfg_stack_size_in_mb;
 
-      std::set<int> active_numa_domains;
+      std::vector<int> active_numa_domains;
     };
 
     REGISTER_REALM_MODULE(OpenMPModule);

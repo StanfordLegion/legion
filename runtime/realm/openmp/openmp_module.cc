@@ -207,15 +207,18 @@ namespace Realm {
 	if(numasysif_numa_available() &&
 	   numasysif_get_cpu_info(cpuinfo) &&
 	   !cpuinfo.empty()) {
-	  // filter out any numa domains with insufficient core counts
-	  int cores_needed = (m->cfg_num_openmp_cpus *
+          // Figure out how many OpenMP processors we need per NUMA domain
+          int openmp_cpus_per_numa_node = 
+            (m->cfg_num_openmp_cpus + cpuinfo.size() - 1) / cpuinfo.size();
+	  int cores_needed = (openmp_cpus_per_numa_node *
 			      m->cfg_num_threads_per_cpu);
+	  // filter out any numa domains with insufficient core counts
 	  for(std::map<int, NumaNodeCpuInfo>::const_iterator it = cpuinfo.begin();
 	      it != cpuinfo.end();
 	      ++it) {
 	    const NumaNodeCpuInfo& ci = it->second;
 	    if(ci.cores_available >= cores_needed) {
-	      m->active_numa_domains.insert(ci.node_id);
+	      m->active_numa_domains.push_back(ci.node_id);
 	    } else {
 	      log_omp.warning() << "not enough cores in NUMA domain " << ci.node_id << " (" << ci.cores_available << " < " << cores_needed << ")";
 	    }
@@ -230,7 +233,7 @@ namespace Realm {
       //  use NUMA_DOMAIN_DONTCARE
       // actually, use the value (-1) since it seems to cause link errors!?
       if(m->active_numa_domains.empty())
-	m->active_numa_domains.insert(-1 /*CoreReservationParameters::NUMA_DOMAIN_DONTCARE*/);
+	m->active_numa_domains.push_back(-1 /*CoreReservationParameters::NUMA_DOMAIN_DONTCARE*/);
 
       return m;
     }
@@ -249,78 +252,75 @@ namespace Realm {
     {
       Module::create_processors(runtime);
 
-      for(std::set<int>::const_iterator it = active_numa_domains.begin();
-	  it != active_numa_domains.end();
-	  ++it) {
-	int cpu_node = *it;
-	for(int i = 0; i < cfg_num_openmp_cpus; i++) {
-	  Processor p = runtime->next_local_processor_id();
-	  ProcessorImpl *pi = new LocalOpenMPProcessor(p, cpu_node,
-						       cfg_num_threads_per_cpu,
-						       cfg_fake_cpukind,
-						       runtime->core_reservation_set(),
-						       cfg_stack_size_in_mb << 20,
-						       Config::force_kernel_threads);
-	  runtime->add_processor(pi);
+      assert(!active_numa_domains.empty());
+      for(int i = 0; i < cfg_num_openmp_cpus; i++) {
+        int cpu_node = active_numa_domains[i % active_numa_domains.size()];
+        Processor p = runtime->next_local_processor_id();
+        ProcessorImpl *pi = new LocalOpenMPProcessor(p, cpu_node,
+                                                     cfg_num_threads_per_cpu,
+                                                     cfg_fake_cpukind,
+                                                     runtime->core_reservation_set(),
+                                                     cfg_stack_size_in_mb << 20,
+                                                     Config::force_kernel_threads);
+        runtime->add_processor(pi);
 
-	  // FIXME: once the stuff in runtime_impl.cc is removed, remove
-	  //  this 'continue' so that we create affinities here
-	  if(cfg_fake_cpukind) continue;
+        // FIXME: once the stuff in runtime_impl.cc is removed, remove
+        //  this 'continue' so that we create affinities here
+        if(cfg_fake_cpukind) continue;
 
-	  // create affinities between this processor and system/reg memories
-	  // if the memory is one we created, use the kernel-reported distance
-	  // to adjust the answer
-	  std::vector<MemoryImpl *>& local_mems = runtime->nodes[my_node_id].memories;
-	  for(std::vector<MemoryImpl *>::iterator it2 = local_mems.begin();
-	      it2 != local_mems.end();
-	      ++it2) {
-	    Memory::Kind kind = (*it2)->get_kind();
-	    if((kind != Memory::SYSTEM_MEM) && (kind != Memory::REGDMA_MEM) &&
-               (kind != Memory::SOCKET_MEM) && (kind != Memory::Z_COPY_MEM))
-	      continue;
+        // create affinities between this processor and system/reg memories
+        // if the memory is one we created, use the kernel-reported distance
+        // to adjust the answer
+        std::vector<MemoryImpl *>& local_mems = runtime->nodes[my_node_id].memories;
+        for(std::vector<MemoryImpl *>::iterator it2 = local_mems.begin();
+            it2 != local_mems.end();
+            ++it2) {
+          Memory::Kind kind = (*it2)->get_kind();
+          if((kind != Memory::SYSTEM_MEM) && (kind != Memory::REGDMA_MEM) &&
+             (kind != Memory::SOCKET_MEM) && (kind != Memory::Z_COPY_MEM))
+            continue;
 
-	    Machine::ProcessorMemoryAffinity pma;
-	    pma.p = p;
-	    pma.m = (*it2)->me;
+          Machine::ProcessorMemoryAffinity pma;
+          pma.p = p;
+          pma.m = (*it2)->me;
 
-	    // use the same made-up numbers as in
-	    //  runtime_impl.cc
-	    if(kind == Memory::SYSTEM_MEM) {
-	      pma.bandwidth = 100;  // "large"
-	      pma.latency = 5;      // "small"
-            } else if (kind == Memory::Z_COPY_MEM) {
-              pma.bandwidth = 40; // "large"
-              pma.latency = 3; // "small"
-	    } else if (kind == Memory::REGDMA_MEM) {
-	      pma.bandwidth = 80;   // "large"
-	      pma.latency = 10;     // "small"
-	    } else {
-              // This is a numa domain, see if it is the same as ours or not
-              if (cfg_use_numa) {
-                // Figure out which numa node the memory is in
-                LocalCPUMemory *cpu_mem = static_cast<LocalCPUMemory*>(*it2);
-                int mem_node = cpu_mem->numa_node;
-                assert(mem_node >= 0);
-                // We know our numa node
-                int distance = numasysif_get_distance(cpu_node, mem_node);
-                if (distance >= 0) {
-                  pma.bandwidth = 150 - distance;
-                  pma.latency = distance / 10;     // Linux uses a cost of ~10/hop
-                } else {
-                  // same as random sysmem
-                  pma.bandwidth = 100;
-                  pma.latency = 5;
-                }
+          // use the same made-up numbers as in
+          //  runtime_impl.cc
+          if(kind == Memory::SYSTEM_MEM) {
+            pma.bandwidth = 100;  // "large"
+            pma.latency = 5;      // "small"
+          } else if (kind == Memory::Z_COPY_MEM) {
+            pma.bandwidth = 40; // "large"
+            pma.latency = 3; // "small"
+          } else if (kind == Memory::REGDMA_MEM) {
+            pma.bandwidth = 80;   // "large"
+            pma.latency = 10;     // "small"
+          } else {
+            // This is a numa domain, see if it is the same as ours or not
+            if (cfg_use_numa) {
+              // Figure out which numa node the memory is in
+              LocalCPUMemory *cpu_mem = static_cast<LocalCPUMemory*>(*it2);
+              int mem_node = cpu_mem->numa_node;
+              assert(mem_node >= 0);
+              // We know our numa node
+              int distance = numasysif_get_distance(cpu_node, mem_node);
+              if (distance >= 0) {
+                pma.bandwidth = 150 - distance;
+                pma.latency = distance / 10;     // Linux uses a cost of ~10/hop
               } else {
-                // NUMA not available so use system memory settings
-                pma.bandwidth = 100; // "large"
-                pma.latency = 5; // "small"
+                // same as random sysmem
+                pma.bandwidth = 100;
+                pma.latency = 5;
               }
+            } else {
+              // NUMA not available so use system memory settings
+              pma.bandwidth = 100; // "large"
+              pma.latency = 5; // "small"
             }
-	    
-	    runtime->add_proc_mem_affinity(pma);
-	  }
-	}
+          }
+          
+          runtime->add_proc_mem_affinity(pma);
+        }
       }
     }
     
