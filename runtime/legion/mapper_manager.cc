@@ -15,6 +15,7 @@
 
 #include "legion.h"
 #include "legion/legion_ops.h"
+#include "legion/region_tree.h"
 #include "legion/legion_tasks.h"
 #include "legion/mapper_manager.h"
 #include "legion/legion_instances.h"
@@ -2230,6 +2231,95 @@ namespace Legion {
         runtime->find_or_create_index_launch_space(domain, realm_is, type_tag);
       resume_mapper_call(ctx);
       return result; 
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace MapperManager::union_index_spaces(MappingCallInfo *ctx,
+                                         const std::vector<IndexSpace> &sources)
+    //--------------------------------------------------------------------------
+    {
+      pause_mapper_call(ctx);
+      IndexSpace result = 
+        runtime->forest->find_or_create_union_space(NULL, sources);
+      resume_mapper_call(ctx);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace MapperManager::intersect_index_spaces(MappingCallInfo *ctx,
+                                         const std::vector<IndexSpace> &sources)
+    //--------------------------------------------------------------------------
+    {
+      pause_mapper_call(ctx);
+      IndexSpace result = 
+        runtime->forest->find_or_create_intersection_space(NULL, sources);
+      resume_mapper_call(ctx);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace MapperManager::subtract_index_spaces(MappingCallInfo *ctx,
+                                              IndexSpace left, IndexSpace right)
+    //--------------------------------------------------------------------------
+    {
+      pause_mapper_call(ctx);
+      IndexSpace result = 
+        runtime->forest->find_or_create_difference_space(NULL, left, right);
+      resume_mapper_call(ctx);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    bool MapperManager::is_index_space_empty(MappingCallInfo *ctx,
+                                             IndexSpace handle)
+    //--------------------------------------------------------------------------
+    {
+      if (!handle.exists())
+        return true;
+      pause_mapper_call(ctx);
+      IndexSpaceNode *node = runtime->forest->get_node(handle);
+      bool result = node->is_empty();
+      resume_mapper_call(ctx);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    bool MapperManager::index_spaces_overlap(MappingCallInfo *ctx,
+                                             IndexSpace one, IndexSpace two)
+    //--------------------------------------------------------------------------
+    {
+      pause_mapper_call(ctx);
+      std::vector<IndexSpace> spaces(2);
+      spaces[0] = one;
+      spaces[1] = two;
+      IndexSpace intersection = 
+        runtime->forest->find_or_create_intersection_space(NULL, spaces);
+      bool result = false;
+      if (intersection.exists())
+      {
+        IndexSpaceNode *node = runtime->forest->get_node(intersection);
+        result = !node->is_empty();
+      }
+      resume_mapper_call(ctx);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    bool MapperManager::index_space_dominates(MappingCallInfo *ctx,
+                                              IndexSpace left, IndexSpace right)
+    //--------------------------------------------------------------------------
+    {
+      pause_mapper_call(ctx);
+      IndexSpace diff = 
+        runtime->forest->find_or_create_difference_space(NULL, left, right);
+      bool result = true;
+      if (diff.exists())
+      {
+        IndexSpaceNode *node = runtime->forest->get_node(diff);
+        result = node->is_empty();
+      }
+      resume_mapper_call(ctx);
+      return result;
     }
 
     //--------------------------------------------------------------------------

@@ -66,6 +66,69 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    inline IndexSpaceT<DIM,T> MapperRuntime::union_index_spaces(
+          MapperContext ctx, const std::vector<IndexSpaceT<DIM,T> > &srcs) const
+    //--------------------------------------------------------------------------
+    {
+      // C++ type system is dumb
+      std::vector<IndexSpace> sources(srcs.size());
+      for (unsigned idx = 0; idx < sources.size(); idx++)
+        sources[idx] = srcs[idx];
+      return IndexSpaceT<DIM,T>(union_index_spaces(ctx, sources));
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    inline IndexSpaceT<DIM,T> MapperRuntime::intersect_index_spaces(
+          MapperContext ctx, const std::vector<IndexSpaceT<DIM,T> > &srcs) const
+    //--------------------------------------------------------------------------
+    {
+      // C++ type system is dumb
+      std::vector<IndexSpace> sources(srcs.size());
+      for (unsigned idx = 0; idx < sources.size(); idx++)
+        sources[idx] = srcs[idx];
+      return IndexSpaceT<DIM,T>(intersect_index_spaces(ctx, sources));
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    inline IndexSpaceT<DIM,T> MapperRuntime::subtract_index_spaces(
+     MapperContext ctx, IndexSpaceT<DIM,T> left, IndexSpaceT<DIM,T> right) const
+    //--------------------------------------------------------------------------
+    {
+      return IndexSpaceT<DIM,T>(subtract_index_spaces(ctx, 
+                                (IndexSpace)left, (IndexSpace)right));
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    inline bool MapperRuntime::is_index_space_empty(MapperContext ctx,
+                                                IndexSpaceT<DIM,T> handle) const
+    //--------------------------------------------------------------------------
+    {
+      return is_index_space_empty(ctx, (IndexSpace)handle);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    inline bool MapperRuntime::index_spaces_overlap(MapperContext ctx,
+                           IndexSpaceT<DIM,T> one, IndexSpaceT<DIM,T> two) const
+    //--------------------------------------------------------------------------
+    {
+      return index_spaces_overlap(ctx, (IndexSpace)one, (IndexSpace)two);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    inline bool MapperRuntime::index_space_dominates(MapperContext ctx,
+                        IndexSpaceT<DIM,T> left, IndexSpaceT<DIM,T> right) const
+    //--------------------------------------------------------------------------
+    {
+      return index_space_dominates(ctx, (IndexSpace)left, (IndexSpace)right);
+    }
+
+    //--------------------------------------------------------------------------
     inline ProfilingRequest::ProfilingRequest(void)
     //--------------------------------------------------------------------------
     {

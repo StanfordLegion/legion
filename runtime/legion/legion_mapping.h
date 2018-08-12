@@ -1741,9 +1741,51 @@ namespace Legion {
       template<int DIM, typename COORD_T>
       IndexSpaceT<DIM,COORD_T> create_index_space(MapperContext ctx,
                       const std::vector<Rect<DIM,COORD_T> > &rects) const;
+
+      IndexSpace union_index_spaces(MapperContext ctx,
+                      const std::vector<IndexSpace> &sources) const;
+      // Template version
+      template<int DIM, typename COORD_T>
+      IndexSpaceT<DIM,COORD_T> union_index_spaces(MapperContext ctx,
+                const std::vector<IndexSpaceT<DIM,COORD_T> > &sources) const;
+
+      IndexSpace intersect_index_spaces(MapperContext ctx,
+                      const std::vector<IndexSpace> &sources) const;
+      // Template version
+      template<int DIM, typename COORD_T>
+      IndexSpaceT<DIM,COORD_T> intersect_index_spaces(MapperContext ctx,
+                const std::vector<IndexSpaceT<DIM,COORD_T> > &sources) const;
+
+      IndexSpace subtract_index_spaces(MapperContext ctx,
+                        IndexSpace left, IndexSpace right) const;
+      // Template version
+      template<int DIM, typename COORD_T>
+      IndexSpaceT<DIM,COORD_T> subtract_index_spaces(MapperContext ctx,
+          IndexSpaceT<DIM,COORD_T> left, IndexSpaceT<DIM,COORD_T> right) const;
     protected:
       IndexSpace create_index_space_internal(MapperContext ctx, const Domain &d,
                   const void *realm_is, TypeTag type_tag) const;
+    public:
+      //------------------------------------------------------------------------
+      // Convenience methods for introspecting index spaces
+      //------------------------------------------------------------------------
+      bool is_index_space_empty(MapperContext ctx, IndexSpace handle) const;
+      template<int DIM, typename COORD_T>
+      bool is_index_space_empty(MapperContext ctx,
+                                IndexSpaceT<DIM,COORD_T> handle) const;
+
+      bool index_spaces_overlap(MapperContext ctx,
+                                IndexSpace one, IndexSpace two) const;
+      template<int DIM, typename COORD_T>
+      bool index_spaces_overlap(MapperContext ctx, IndexSpaceT<DIM,COORD_T> one,
+                                IndexSpaceT<DIM,COORD_T> two) const;
+
+      bool index_space_dominates(MapperContext ctx,
+                                 IndexSpace test, IndexSpace dominator) const;
+      template<int DIM, typename COORD_T>
+      bool index_space_dominates(MapperContext ctx, 
+                                 IndexSpaceT<DIM,COORD_T> test,
+                                 IndexSpaceT<DIM,COORD_T> dominator) const;
     public:
       //------------------------------------------------------------------------
       // Methods for introspecting index space trees 
