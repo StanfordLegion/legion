@@ -3244,7 +3244,7 @@ namespace Legion {
         if (paused_calls > 0)
         {
 #ifdef DEBUG_LEGION
-          assert(!info->resume.exists());
+          assert(!info->resume.exists() || info->resume.has_triggered());
 #endif
           RtUserEvent ready_event = Runtime::create_rt_user_event();
           info->resume = ready_event;
