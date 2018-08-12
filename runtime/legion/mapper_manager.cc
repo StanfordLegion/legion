@@ -3523,24 +3523,46 @@ namespace Legion {
       // No need to hold the lock since we know we are exclusive
       if (permit_reentrant)
       {
+        // We're going to pretent to do a pause here
+        pending_pause_call = true; 
         // If there are paused calls, we need to wait for them all 
         // to finish before we can continue execution 
-        if (paused_calls > 0)
+        RtUserEvent to_trigger;
+        RtEvent ready_event;
         {
+          AutoLock m_lock(mapper_lock);
+          if (pending_pause_call)
+            to_trigger = complete_pending_pause_mapper_call();
 #ifdef DEBUG_LEGION
+          assert(paused_calls > 0);
           assert(!info->resume.exists() || info->resume.has_triggered());
 #endif
-          RtUserEvent ready_event = Runtime::create_rt_user_event();
-          info->resume = ready_event;
-          non_reentrant_calls.push_back(info);
-          ready_event.wait();
-          // When we wake up, we should be non-reentrant
-#ifdef DEBUG_LEGION
-          assert(!permit_reentrant);
-#endif
+          // remove our pretend pause call
+          paused_calls--;
+          // If there are any paused calls or an already executing call or 
+          // then we can't run since we need everything to be done
+          if ((paused_calls > 0) || (executing_call != NULL))
+          {
+            info->resume = Runtime::create_rt_user_event();
+            ready_event = info->resume;
+            non_reentrant_calls.push_back(info);
+          }
+          else // There are no more outstanding calls other than us
+          {
+            executing_call = info;
+            permit_reentrant = false;
+          }
         }
-        else
-          permit_reentrant = false;
+        // If we have an event to trigger do that first
+        if (to_trigger.exists())
+          Runtime::trigger_event(to_trigger);
+        // Then wait if we have to in order to be notified we can run
+        if (ready_event.exists())
+          ready_event.wait();
+        // At this point we should be non-reentrant
+#ifdef DEBUG_LEGION
+        assert(!permit_reentrant);
+#endif
       }
     }
 
