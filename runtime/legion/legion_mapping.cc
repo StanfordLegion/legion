@@ -852,6 +852,54 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    IndexSpace MapperRuntime::union_index_spaces(MapperContext ctx,
+                                   const std::vector<IndexSpace> &sources) const
+    //--------------------------------------------------------------------------
+    {
+      return ctx->manager->union_index_spaces(ctx, sources);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace MapperRuntime::intersect_index_spaces(MapperContext ctx,
+                                   const std::vector<IndexSpace> &sources) const
+    //--------------------------------------------------------------------------
+    {
+      return ctx->manager->intersect_index_spaces(ctx, sources);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace MapperRuntime::subtract_index_spaces(MapperContext ctx,
+                                        IndexSpace left, IndexSpace right) const
+    //--------------------------------------------------------------------------
+    {
+      return ctx->manager->subtract_index_spaces(ctx, left, right);
+    }
+
+    //--------------------------------------------------------------------------
+    bool MapperRuntime::is_index_space_empty(MapperContext ctx,
+                                             IndexSpace handle) const
+    //--------------------------------------------------------------------------
+    {
+      return ctx->manager->is_index_space_empty(ctx, handle);
+    }
+
+    //--------------------------------------------------------------------------
+    bool MapperRuntime::index_spaces_overlap(MapperContext ctx,
+                                           IndexSpace one, IndexSpace two) const
+    //--------------------------------------------------------------------------
+    {
+      return ctx->manager->index_spaces_overlap(ctx, one, two);
+    }
+
+    //--------------------------------------------------------------------------
+    bool MapperRuntime::index_space_dominates(MapperContext ctx,
+                                        IndexSpace left, IndexSpace right) const
+    //--------------------------------------------------------------------------
+    {
+      return ctx->manager->index_space_dominates(ctx, left, right);
+    }
+
+    //--------------------------------------------------------------------------
     bool MapperRuntime::has_index_partition(MapperContext ctx,
                                            IndexSpace parent, Color color) const
     //--------------------------------------------------------------------------

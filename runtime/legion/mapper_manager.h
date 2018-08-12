@@ -403,6 +403,17 @@ namespace Legion {
     public:
       IndexSpace create_index_space(MappingCallInfo *info, const Domain &domain,
                                     const void *realm_is, TypeTag type_tag);
+      IndexSpace union_index_spaces(MappingCallInfo *info, 
+                                    const std::vector<IndexSpace> &sources);
+      IndexSpace intersect_index_spaces(MappingCallInfo *info,
+                                        const std::vector<IndexSpace> &sources);
+      IndexSpace subtract_index_spaces(MappingCallInfo *info,
+                                       IndexSpace left, IndexSpace right);
+      bool is_index_space_empty(MappingCallInfo *info, IndexSpace handle);
+      bool index_spaces_overlap(MappingCallInfo *info, 
+                                IndexSpace one, IndexSpace two);
+      bool index_space_dominates(MappingCallInfo *info,
+                                 IndexSpace left, IndexSpace right);
       bool has_index_partition(MappingCallInfo *info,
                                IndexSpace parent, Color color);
       IndexPartition get_index_partition(MappingCallInfo *info,
