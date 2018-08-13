@@ -3359,7 +3359,7 @@ namespace Legion {
               fill_value, fill_size, precondition));
 #endif
 #ifdef LEGION_SPY
-      if (info != NULL)
+      if ((info != NULL) && (info->op != NULL))
       {
         if (!result.exists())
         {
