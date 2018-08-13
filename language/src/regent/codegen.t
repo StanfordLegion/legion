@@ -9606,6 +9606,7 @@ function codegen.top(cx, node)
           " since the CUDA compiler is unavailable")
       else
         local cuda_variant = task:make_variant("cuda")
+        cuda_variant:set_is_cuda(true)
         std.register_variant(cuda_variant)
         task:set_cuda_variant(cuda_variant)
       end
