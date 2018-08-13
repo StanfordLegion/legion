@@ -2144,14 +2144,15 @@ namespace Legion {
                 constraints.field_constraint.get_field_set();
               layout->compute_copy_offsets(fill_fields, result, dsts);
             }
+            PhysicalTraceInfo fake_info(NULL);
 #ifdef LEGION_SPY
             ApEvent filled =
-              instance_domain->issue_fill(NULL, ancestor, dsts, fill_buffer,
+              instance_domain->issue_fill(&fake_info, ancestor,dsts,fill_buffer,
                                           reduction_op->sizeof_rhs, ready,
                                           PredEvent::NO_PRED_EVENT, 0/*uid*/);
 #else
             ApEvent filled =
-              instance_domain->issue_fill(NULL, ancestor, dsts, fill_buffer,
+              instance_domain->issue_fill(&fake_info, ancestor,dsts,fill_buffer,
                                           reduction_op->sizeof_rhs, ready,
                                           PredEvent::NO_PRED_EVENT);
 #endif
