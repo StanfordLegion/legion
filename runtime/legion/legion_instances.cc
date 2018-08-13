@@ -545,10 +545,15 @@ namespace Legion {
       // Remote references removed by DistributedCollectable destructor
       if (!is_owner())
         memory_manager->unregister_remote_instance(this);
+#if 0
+      // Disable this for now since we can't accurately know who owns
+      // this domain. See legion issue 418, which when fixed should
+      // allow us to know again who owns this domain
       // If we own our domain, then we need to delete it now
       if (own_domain && is_owner())
         region_node->context->destroy_index_space(instance_domain->handle,
                                                   runtime->address_space);
+#endif
       if ((layout != NULL) && layout->remove_reference())
         delete layout;
     }
