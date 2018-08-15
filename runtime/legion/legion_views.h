@@ -344,6 +344,7 @@ namespace Legion {
                                            const PhysicalTraceInfo &trace_info,
                                            bool can_filter = true);
     protected: 
+      template<typename T>
       void find_copy_preconditions_above(ReductionOpID redop, bool reading,
                                          bool single_copy, bool restrict_out,
                                          const FieldMask &copy_mask,
@@ -353,12 +354,10 @@ namespace Legion {
                                          const UniqueID creator_op_id,
                                          const unsigned index,
                                          const AddressSpaceID source,
-                       LegionMap<ApEvent,FieldMask>::aligned &preconditions,
+                         typename LegionMap<ApEvent,T>::aligned &preconditions,
                                          std::set<RtEvent> &applied_events,
                                          const PhysicalTraceInfo &trace_info);
-      friend class CompositeView;
-      // Give composite views special access here so they can filter
-      // back just the users at the particular level
+      template<typename T>
       void find_local_copy_preconditions(ReductionOpID redop, bool reading,
                                          bool single_copy, bool restrict_out,
                                          const FieldMask &copy_mask,
@@ -368,9 +367,10 @@ namespace Legion {
                                          const UniqueID creator_op_id,
                                          const unsigned index,
                                          const AddressSpaceID source,
-                           LegionMap<ApEvent,FieldMask>::aligned &preconditions,
+                        typename LegionMap<ApEvent,T>::aligned &preconditions,
                                          std::set<RtEvent> &applied_events,
                                          const PhysicalTraceInfo &trace_info);
+      template<typename T>
       void find_local_copy_preconditions_above(ReductionOpID redop,bool reading,
                                          bool single_copy, bool restrict_out,
                                          const FieldMask &copy_mask,
@@ -380,10 +380,28 @@ namespace Legion {
                                          const UniqueID creator_op_id,
                                          const unsigned index,
                                          const AddressSpaceID source,
-                           LegionMap<ApEvent,FieldMask>::aligned &preconditions,
+                          typename LegionMap<ApEvent,T>::aligned &preconditions,
                                          std::set<RtEvent> &applied_events,
                                          const PhysicalTraceInfo &trace_info,
                                          const bool actually_above = true);
+      // Give composite views special access here so they can filter
+      // back just the users at the particular level
+      friend class CompositeView;
+      friend struct DeferredCopier;
+      friend struct DeferredSingleCopier;
+      void find_composite_copy_preconditions(ReductionOpID redop, bool reading,
+                                   bool single_copy/*only for writing*/,
+                                   bool restrict_out,
+                                   const FieldMask &copy_mask,
+                                   IndexSpaceExpression *copy_expr,
+                                   VersionTracker *version_tracker,
+                                   const UniqueID creator_op_id,
+                                   const unsigned index,
+                                   const AddressSpaceID source,
+                 LegionMap<ApEvent,WriteSet>::aligned &preconditions,
+                                   std::set<RtEvent> &applied_events,
+                                   const PhysicalTraceInfo &trace_info,
+                                   bool can_filter = true);
     public:
       virtual void add_copy_user(ReductionOpID redop, ApEvent copy_term,
                                  VersionTracker *version_tracker,
@@ -615,6 +633,30 @@ namespace Legion {
                                       const UniqueID op_id,
                                       const unsigned index,
                   LegionMap<ApEvent,FieldMask>::aligned &preconditions,
+                                      std::set<ApEvent> &dead_events,
+                                      const PhysicalTraceInfo &trace_info);
+      // More overload versions for even more precise information including
+      // the index space expressions for individual events and fields
+      template<bool TRACK_DOM>
+      void find_current_preconditions(const FieldMask &user_mask,
+                                      const RegionUsage &usage,
+                                      const LegionColor child_color,
+                                      IndexSpaceExpression *user_expr,
+                                      const UniqueID op_id,
+                                      const unsigned index,
+                  LegionMap<ApEvent,WriteSet>::aligned &preconditions,
+                                      std::set<ApEvent> &dead_events,
+                  LegionMap<ApEvent,FieldMask>::aligned &filter_events,
+                                      FieldMask &observed, 
+                                      FieldMask &non_dominated,
+                                      const PhysicalTraceInfo &trace_info);
+      void find_previous_preconditions(const FieldMask &user_mask,
+                                      const RegionUsage &usage,
+                                      const LegionColor child_color,
+                                      IndexSpaceExpression *user_expr,
+                                      const UniqueID op_id,
+                                      const unsigned index,
+                  LegionMap<ApEvent,WriteSet>::aligned &preconditions,
                                       std::set<ApEvent> &dead_events,
                                       const PhysicalTraceInfo &trace_info);
       void find_previous_filter_users(const FieldMask &dominated_mask,
@@ -982,7 +1024,9 @@ namespace Legion {
       DeferredCopier& operator=(const DeferredCopier &rhs);
     public:
       void merge_destination_preconditions(const FieldMask &copy_mask,
-                LegionMap<ApEvent,FieldMask>::aligned &preconditions);
+                                           IndexSpaceExpression *intersect,
+                                           const WriteMasks *masks,
+                        LegionMap<ApEvent,FieldMask>::aligned &preconditions);
       void buffer_reductions(VersionTracker *tracker, PredEvent pred_guard, 
                              RegionTreeNode *intersect,
                              const WriteMasks &write_masks,
@@ -1001,11 +1045,12 @@ namespace Legion {
       void uniquify_copy_postconditions(void);
       void compute_dst_preconditions(const FieldMask &mask);
       bool issue_reductions(const int epoch, ApEvent reduction_pre, 
-                            const FieldMask &mask, WriteSet &reduce_exprs,
+              const FieldMask &mask, WriteSet &reduce_exprs,
               LegionMap<ApEvent,FieldMask>::aligned &reduction_postconditions);
     public: // const fields
       const TraversalInfo *const info;
       MaterializedView *const dst;
+      IndexSpaceExpression *const dst_expr;
       CopyAcrossHelper *const across_helper;
       const RestrictInfo *const restrict_info;
       const bool restrict_out;
@@ -1017,7 +1062,7 @@ namespace Legion {
       // an expression for the actual write set of the copy
       WriteSet dst_previously_valid;
     protected: // internal members
-      LegionMap<ApEvent,FieldMask>::aligned dst_preconditions;
+      LegionMap<ApEvent,WriteSet>::aligned dst_preconditions;
       FieldMask dst_precondition_mask;
     protected: 
       // Reduction data 
@@ -1070,7 +1115,9 @@ namespace Legion {
     public:
       DeferredSingleCopier& operator=(const DeferredSingleCopier &rhs);
     public:
-      void merge_destination_preconditions(std::set<ApEvent> &preconditions);
+      void merge_destination_preconditions(IndexSpaceExpression *intersect,
+                                           IndexSpaceExpression *mask,
+                                           std::set<ApEvent> &preconditions);
       void buffer_reductions(VersionTracker *tracker, PredEvent pred_guard,
                              RegionTreeNode *intersect, IndexSpaceExpression *mask,
                              std::vector<ReductionView*> &source_reductions);
@@ -1092,6 +1139,7 @@ namespace Legion {
       const FieldMask copy_mask;
       const TraversalInfo *const info;
       MaterializedView *const dst;
+      IndexSpaceExpression *const dst_expr;
       CopyAcrossHelper *const across_helper;
       const RestrictInfo *const restrict_info;
       const bool restrict_out;
@@ -1105,7 +1153,7 @@ namespace Legion {
       unsigned current_reduction_epoch;
       std::vector<PendingReductions> reduction_epochs;
     protected:
-      std::set<ApEvent> dst_preconditions;
+      std::map<ApEvent,IndexSpaceExpression*> dst_preconditions;
       std::vector<std::set<ApEvent> > protected_copy_posts;
       bool has_dst_preconditions;
 #ifdef DEBUG_LEGION
