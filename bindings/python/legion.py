@@ -193,6 +193,7 @@ class Future(object):
         if value is None:
             self.handle = None
         elif isinstance(value, Future):
+            value.resolve_handle()
             self.handle = c.legion_future_copy(value.handle)
             if value_type is None:
                 value_type = value.value_type
