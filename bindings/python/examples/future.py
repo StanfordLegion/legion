@@ -27,6 +27,10 @@ def show(f):
     print(f.get())
 
 @task
+def show_index(i, f):
+    print("at index %s: %s" % (i, f.get()))
+
+@task
 def show_buffer(f):
     value = codecs.decode(f.get_buffer(), 'utf-8')
     print(value)
@@ -52,3 +56,6 @@ def main():
     show(f)
     show(g)
     show_buffer(h)
+
+    for i in legion.IndexLaunch([3]):
+        show_index(i, f)
