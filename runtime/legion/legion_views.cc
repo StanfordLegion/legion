@@ -1186,8 +1186,6 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void MaterializedView::find_composite_copy_preconditions(
-                                           ReductionOpID redop, bool reading,
-                                           bool single_copy/*only for writing*/,
                                            bool restrict_out,
                                            const FieldMask &copy_mask,
                                            IndexSpaceExpression *copy_expr,
@@ -1214,14 +1212,14 @@ namespace Legion {
       // If we can filter we can do the normal case, otherwise
       // we do the above case where we don't filter
       if (can_filter)
-        find_local_copy_preconditions<WriteSet>(
-                                      redop, reading, single_copy, restrict_out,
+        find_local_copy_preconditions<WriteSet>(0/*redop*/, false/*reading*/,
+                                      false/*single copy*/, restrict_out,
                                       copy_mask, INVALID_COLOR, copy_expr, 
                                       versions, creator_op_id, index, source, 
                                       preconditions, applied_events,trace_info);
       else
-        find_local_copy_preconditions_above<WriteSet>(
-                                      redop, reading, single_copy, 
+        find_local_copy_preconditions_above<WriteSet>(0/*redop*/, 
+                                      false/*reading*/, false/*single copy*/,
                                       restrict_out, copy_mask, INVALID_COLOR, 
                                       copy_expr, versions,creator_op_id,index,
                                       source, preconditions, applied_events,
@@ -1229,9 +1227,10 @@ namespace Legion {
       if ((parent != NULL) && !versions->is_upper_bound_node(logical_node))
       {
         const LegionColor local_point = logical_node->get_color();
-        parent->find_copy_preconditions_above<WriteSet>(redop, reading, 
-          single_copy, restrict_out, copy_mask, local_point, copy_expr,versions,
-          creator_op_id, index, source,preconditions,applied_events,trace_info);
+        parent->find_copy_preconditions_above<WriteSet>(0/*redop*/, 
+          false/*reading*/, false/*single copy*/, restrict_out, copy_mask, 
+          local_point, copy_expr, versions, creator_op_id, index, source,
+          preconditions, applied_events, trace_info);
       } 
     }
 
@@ -5637,8 +5636,7 @@ namespace Legion {
       // be issuing, so we can't be sure we're writing all of it
       // The only exception here is in the case where we're doing a copy
       // across in which case we know we're going to write everything
-      dst->find_composite_copy_preconditions(0/*redop*/, false/*reading*/,
-                             false/*single copy*/, restrict_out, mask, dst_expr,
+      dst->find_composite_copy_preconditions(restrict_out, mask, dst_expr,
                              &info->version_info, info->op->get_unique_op_id(),
                              info->index, local_space, dst_preconditions,
                              info->map_applied_events, *info,
@@ -6642,8 +6640,7 @@ namespace Legion {
       // be issuing, so we can't be sure we're writing all of it
       // The only exception here is in the case where we're doing a copy
       // across in which case we know we're going to write everything
-      dst->find_composite_copy_preconditions(0/*redop*/, false/*reading*/,
-                               false/*single copy*/, restrict_out, copy_mask,
+      dst->find_composite_copy_preconditions(restrict_out, copy_mask,
                                dst_expr, &info->version_info,
                                info->op->get_unique_op_id(), info->index,
                                local_space, temp_preconditions,
