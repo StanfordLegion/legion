@@ -389,9 +389,7 @@ namespace Legion {
       friend class CompositeView;
       friend struct DeferredCopier;
       friend struct DeferredSingleCopier;
-      void find_composite_copy_preconditions(ReductionOpID redop, bool reading,
-                                   bool single_copy/*only for writing*/,
-                                   bool restrict_out,
+      void find_composite_copy_preconditions(bool restrict_out,
                                    const FieldMask &copy_mask,
                                    IndexSpaceExpression *copy_expr,
                                    VersionTracker *version_tracker,
