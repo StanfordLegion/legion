@@ -1199,6 +1199,37 @@ namespace Legion {
                                            bool can_filter)
     //--------------------------------------------------------------------------
     {
+#ifndef DISTRIBUTED_INSTANCE_VIEWS
+      if (!is_logical_owner())
+      {
+        if (trace_info.recording)
+          assert(false);
+        // If this is not the logical owner send a message to the 
+        // logical owner to perform the analysis
+        // We can't fake this so we need to block for the result
+        RtUserEvent wait_on = Runtime::create_rt_user_event();
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(did);
+          rez.serialize<bool>(restrict_out);
+          rez.serialize(copy_mask);
+          copy_expr->pack_expression(rez, logical_owner);
+          versions->pack_writing_version_numbers(rez);
+          rez.serialize(creator_op_id);
+          rez.serialize(index);
+          rez.serialize<bool>(can_filter);
+          rez.serialize(&preconditions);
+          rez.serialize(&applied_events);
+          rez.serialize(wait_on);
+        }
+        runtime->send_instance_view_find_composite_copy_preconditions_request(
+                                                            logical_owner, rez);
+        // Wait for the result
+        wait_on.wait();
+        return;
+      }
+#endif
       ApEvent start_use_event = manager->get_use_event();
       if (start_use_event.exists())
       {
@@ -4792,6 +4823,126 @@ namespace Legion {
       Runtime::trigger_event(done_event);
     }
 #else // DISTRIBUTED_INSTANCE_VIEWS
+    //--------------------------------------------------------------------------
+    /*static*/ 
+      void MaterializedView::handle_composite_copy_preconditions_request(
+                   Deserializer &derez, Runtime *runtime, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez); 
+      DistributedID did;
+      derez.deserialize(did);
+      RtEvent ready;
+      LogicalView *view = runtime->find_or_request_logical_view(did, ready);
+
+      bool restrict_out, can_filter;
+      derez.deserialize<bool>(restrict_out);
+      FieldMask copy_mask;
+      derez.deserialize(copy_mask);
+      IndexSpaceExpression *copy_expr = 
+        IndexSpaceExpression::unpack_expression(derez, runtime->forest, source);
+      VersionInfo version_info;
+      version_info.unpack_version_numbers(derez, runtime->forest);
+      UniqueID creator_op_id;
+      derez.deserialize(creator_op_id);
+      unsigned index;
+      derez.deserialize(index);
+      derez.deserialize<bool>(can_filter);
+      LegionMap<ApEvent,WriteSet>::aligned *remote_ptr;
+      derez.deserialize(remote_ptr);
+      std::set<RtEvent> *remote_applied;
+      derez.deserialize(remote_applied);
+      RtUserEvent done_event;
+      derez.deserialize(done_event);
+
+      std::set<RtEvent> applied_events;
+      LegionMap<ApEvent,WriteSet>::aligned result;
+      const PhysicalTraceInfo trace_info(NULL);
+      if (ready.exists())
+        ready.wait();
+#ifdef DEBUG_LEGION
+      assert(view->is_materialized_view());
+#endif
+      MaterializedView *mat_view = view->as_materialized_view();
+      mat_view->find_composite_copy_preconditions(restrict_out, copy_mask,
+          copy_expr, &version_info, creator_op_id, index, source, result,
+          applied_events, trace_info, can_filter);
+      // Now send back the results
+      if (result.empty() && applied_events.empty())
+      {
+        // Nothing to send back so just trigger
+        Runtime::trigger_event(done_event);
+        return;
+      }
+      Serializer rez;
+      {
+        RezCheck z(rez);
+        rez.serialize(remote_ptr);
+        rez.serialize<size_t>(result.size());
+        for (LegionMap<ApEvent,WriteSet>::aligned::const_iterator rit = 
+              result.begin(); rit != result.end(); rit++)
+        {
+          rez.serialize(rit->first);
+          rez.serialize<size_t>(rit->second.size());
+          for (WriteSet::const_iterator it = rit->second.begin();
+                it != rit->second.end(); it++)
+          {
+            it->first->pack_expression(rez, source);
+            rez.serialize(it->second);
+          }
+        }
+        rez.serialize(remote_applied);
+        if (!applied_events.empty())
+        {
+          RtEvent applied = Runtime::merge_events(applied_events);
+          rez.serialize(applied);
+        }
+        else
+          rez.serialize(RtEvent::NO_RT_EVENT);
+        rez.serialize(done_event);
+      }
+      runtime->send_instance_view_find_composite_copy_preconditions_response(
+                                                                  source, rez);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ 
+      void MaterializedView::handle_composite_copy_preconditions_response(
+                   Deserializer &derez, Runtime *runtime, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      LegionMap<ApEvent,WriteSet>::aligned *result_ptr;
+      derez.deserialize(result_ptr);
+      size_t num_events;
+      derez.deserialize(num_events);
+      for (unsigned idx1 = 0; idx1 < num_events; idx1++)
+      {
+        ApEvent event;
+        derez.deserialize(event);
+        WriteSet &write_set = (*result_ptr)[event];
+        size_t num_exprs;
+        derez.deserialize(num_exprs);
+        for (unsigned idx2 = 0; idx2 < num_exprs; idx2++)
+        {
+          IndexSpaceExpression *expr = IndexSpaceExpression::unpack_expression(
+                                                derez, runtime->forest, source);
+          FieldMask expr_mask;
+          derez.deserialize(expr_mask);
+          write_set.insert(expr, expr_mask);
+        }
+      }
+      std::set<RtEvent> *applied_events;
+      derez.deserialize(applied_events);
+      RtEvent applied_event;
+      derez.deserialize(applied_event);
+      if (applied_event.exists())
+        applied_events->insert(applied_event);
+      RtUserEvent done_event;
+      derez.deserialize(done_event);
+      Runtime::trigger_event(done_event);
+    }
+
     //--------------------------------------------------------------------------
     /*static*/ void MaterializedView::handle_filter_invalid_fields_request(
                    Deserializer &derez, Runtime *runtime, AddressSpaceID source)

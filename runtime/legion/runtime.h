@@ -2480,6 +2480,10 @@ namespace Legion {
                                                     Serializer &rez);
       void send_instance_view_find_copy_preconditions(AddressSpaceID target,
                                                       Serializer &rez);
+      void send_instance_view_find_composite_copy_preconditions_request(
+                                  AddressSpaceID target, Serializer &rez);
+      void send_instance_view_find_composite_copy_preconditions_response(
+                                  AddressSpaceID target, Serializer &rez);
       void send_instance_view_add_copy_user(AddressSpaceID target, 
                                             Serializer &rez);
       void send_instance_view_find_user_preconditions(AddressSpaceID target,
@@ -2729,6 +2733,10 @@ namespace Legion {
       void handle_view_filter_invalid_fields_response(Deserializer &derez);
       void handle_instance_view_copy_preconditions(Deserializer &derez,
                                                    AddressSpaceID source);
+      void handle_instance_view_composite_copy_request(Deserializer &derez,
+                                                       AddressSpaceID source);
+      void handle_instance_view_composite_copy_response(Deserializer &derez,
+                                                        AddressSpaceID source);
       void handle_instance_view_add_copy(Deserializer &derez, 
                                          AddressSpaceID source);
       void handle_instance_view_user_preconditions(Deserializer &derez,

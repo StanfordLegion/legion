@@ -772,6 +772,10 @@ namespace Legion {
                                              RtUserEvent done_event); 
 #else
     public:
+      static void handle_composite_copy_preconditions_request(
+          Deserializer &derez, Runtime *runtime, AddressSpaceID source);
+      static void handle_composite_copy_preconditions_response(
+          Deserializer &derez, Runtime *runtime, AddressSpaceID source);
       static void handle_filter_invalid_fields_request(Deserializer &derez,
                                   Runtime *runtime, AddressSpaceID source);
       static void handle_filter_invalid_fields_response(Deserializer &derez);

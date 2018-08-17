@@ -6323,6 +6323,18 @@ namespace Legion {
                                                 remote_address_space);
               break;
             }
+          case SEND_INSTANCE_VIEW_COMPOSITE_COPY_PRECONDITIONS_REQUEST:
+            {
+              runtime->handle_instance_view_composite_copy_request(
+                                        derez, remote_address_space);
+              break;
+            }
+          case SEND_INSTANCE_VIEW_COMPOSITE_COPY_PRECONDITIONS_RESPONSE:
+            {
+              runtime->handle_instance_view_composite_copy_response(
+                                        derez, remote_address_space);
+              break;
+            }
           case SEND_INSTANCE_VIEW_ADD_COPY:
             {
               runtime->handle_instance_view_add_copy(derez, 
@@ -15279,6 +15291,26 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_instance_view_find_composite_copy_preconditions_request(
+                                         AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez,
+          SEND_INSTANCE_VIEW_COMPOSITE_COPY_PRECONDITIONS_REQUEST,
+          UPDATE_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_instance_view_find_composite_copy_preconditions_response(
+                                         AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez,
+          SEND_INSTANCE_VIEW_COMPOSITE_COPY_PRECONDITIONS_RESPONSE,
+          UPDATE_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_instance_view_add_copy_user(AddressSpaceID target,
                                                    Serializer &rez)
     //--------------------------------------------------------------------------
@@ -16714,6 +16746,32 @@ namespace Legion {
       assert(false); 
 #else
       InstanceView::handle_view_copy_preconditions(derez, this, source);
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_instance_view_composite_copy_request(
+                                     Deserializer &derez, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DISTRIBUTED_INSTANCE_VIEWS
+      assert(false); 
+#else
+      MaterializedView::handle_composite_copy_preconditions_request(derez, 
+                                                            this, source);
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_instance_view_composite_copy_response(
+                                     Deserializer &derez, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DISTRIBUTED_INSTANCE_VIEWS
+      assert(false); 
+#else
+      MaterializedView::handle_composite_copy_preconditions_response(derez, 
+                                                              this, source);
 #endif
     }
 

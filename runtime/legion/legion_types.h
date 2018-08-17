@@ -688,6 +688,8 @@ namespace Legion {
       SEND_VIEW_FILTER_INVALID_FIELDS_REQUEST,
       SEND_VIEW_FILTER_INVALID_FIELDS_RESPONSE,
       SEND_INSTANCE_VIEW_COPY_PRECONDITIONS,
+      SEND_INSTANCE_VIEW_COMPOSITE_COPY_PRECONDITIONS_REQUEST,
+      SEND_INSTANCE_VIEW_COMPOSITE_COPY_PRECONDITIONS_RESPONSE,
       SEND_INSTANCE_VIEW_ADD_COPY,
       SEND_INSTANCE_VIEW_USER_PRECONDITIONS,
       SEND_INSTANCE_VIEW_ADD_USER,
@@ -866,6 +868,8 @@ namespace Legion {
         "Send View Filter Invalid Fields Request",                    \
         "Send View Filter Invalid Fields Response",                   \
         "Send Instance View Copy Preconditions",                      \
+        "Send Instance View Composite Copy Preconditions Request",    \
+        "Send Instance View Composite Copy Preconditions Response",   \
         "Send Instance View Add Copy",                                \
         "Send Instance View User Preconditions",                      \
         "Send Instance View Add User",                                \
@@ -1033,6 +1037,8 @@ namespace Legion {
         "Send View Filter Invalid Fields Request",                    \
         "Send View Filter Invalid Fields Response",                   \
         "Send Instance View Copy Preconditions",                      \
+        "Send Instance View Composite Copy Preconditions Request",    \
+        "Send Instance View Composite Copy Preconditions Response",   \
         "Send Instance View Add Copy",                                \
         "Send Instance View User Preconditions",                      \
         "Send Instance View Add User",                                \
