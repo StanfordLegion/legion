@@ -209,13 +209,7 @@ namespace Legion {
       DistributedID did;
       derez.deserialize(did);
       RtEvent ready;
-      LogicalView *view = runtime->find_or_request_logical_view(did, ready);
-      if (ready.exists())
-        ready.wait();
-#ifdef DEBUG_LEGION
-      assert(view->is_instance_view());
-#endif
-      InstanceView *inst_view = view->as_instance_view();
+      LogicalView *view = runtime->find_or_request_logical_view(did, ready); 
 
       ReductionOpID redop;
       derez.deserialize(redop);
@@ -252,6 +246,12 @@ namespace Legion {
       LegionMap<ApEvent,FieldMask>::aligned preconditions;
       std::set<RtEvent> applied_events;
       const PhysicalTraceInfo trace_info(NULL);
+      if (ready.exists())
+        ready.wait();
+#ifdef DEBUG_LEGION
+      assert(view->is_instance_view());
+#endif
+      InstanceView *inst_view = view->as_instance_view();
       inst_view->find_copy_preconditions(redop, reading, single_copy, 
           restrict_out, copy_mask, copy_expr, &version_info, creator_op_id, 
           index, source, preconditions, applied_events, trace_info, can_filter);
@@ -306,13 +306,7 @@ namespace Legion {
       DistributedID did;
       derez.deserialize(did);
       RtEvent ready;
-      LogicalView *view = runtime->find_or_request_logical_view(did, ready);
-      if (ready.exists())
-        ready.wait();
-#ifdef DEBUG_LEGION
-      assert(view->is_instance_view());
-#endif
-      InstanceView *inst_view = view->as_instance_view();
+      LogicalView *view = runtime->find_or_request_logical_view(did, ready); 
 
       ReductionOpID redop;
       derez.deserialize(redop);
@@ -340,6 +334,12 @@ namespace Legion {
       // Do the base call
       std::set<RtEvent> applied_events;
       const PhysicalTraceInfo trace_info(NULL);
+      if (ready.exists())
+        ready.wait();
+#ifdef DEBUG_LEGION
+      assert(view->is_instance_view());
+#endif
+      InstanceView *inst_view = view->as_instance_view();
       inst_view->add_copy_user(redop, copy_term, &version_info, copy_expr,
                                creator_op_id, index, copy_mask, reading, 
                                restrict_out, source, applied_events,trace_info);
@@ -361,12 +361,6 @@ namespace Legion {
       derez.deserialize(did);
       RtEvent ready;
       LogicalView *view = runtime->find_or_request_logical_view(did, ready);
-      if (ready.exists())
-        ready.wait();
-#ifdef DEBUG_LEGION
-      assert(view->is_instance_view());
-#endif
-      InstanceView *inst_view = view->as_instance_view();
 
       RegionUsage usage;
       derez.deserialize(usage);
@@ -390,6 +384,12 @@ namespace Legion {
 
       std::set<RtEvent> applied_events;
       const PhysicalTraceInfo trace_info(NULL);
+      if (ready.exists())
+        ready.wait();
+#ifdef DEBUG_LEGION
+      assert(view->is_instance_view());
+#endif
+      InstanceView *inst_view = view->as_instance_view();
       ApEvent result = inst_view->find_user_precondition(usage, term_event, 
           user_mask, op_id, index, &version_info, applied_events, trace_info);
 
@@ -410,13 +410,7 @@ namespace Legion {
       DistributedID did;
       derez.deserialize(did);
       RtEvent ready;
-      LogicalView *view = runtime->find_or_request_logical_view(did, ready);
-      if (ready.exists())
-        ready.wait();
-#ifdef DEBUG_LEGION
-      assert(view->is_instance_view());
-#endif
-      InstanceView *inst_view = view->as_instance_view();
+      LogicalView *view = runtime->find_or_request_logical_view(did, ready); 
 
       RegionUsage usage;
       derez.deserialize(usage);
@@ -438,6 +432,12 @@ namespace Legion {
 
       std::set<RtEvent> applied_events;
       const PhysicalTraceInfo trace_info(NULL);
+      if (ready.exists())
+        ready.wait();
+#ifdef DEBUG_LEGION
+      assert(view->is_instance_view());
+#endif
+      InstanceView *inst_view = view->as_instance_view();
       inst_view->add_user_base(usage, term_event, user_mask, op_id, index,
                        source, &version_info, applied_events, trace_info);
 
@@ -457,13 +457,7 @@ namespace Legion {
       DistributedID did;
       derez.deserialize(did);
       RtEvent ready;
-      LogicalView *view = runtime->find_or_request_logical_view(did, ready);
-      if (ready.exists())
-        ready.wait();
-#ifdef DEBUG_LEGION
-      assert(view->is_instance_view());
-#endif
-      InstanceView *inst_view = view->as_instance_view();
+      LogicalView *view = runtime->find_or_request_logical_view(did, ready); 
 
       RegionUsage usage;
       derez.deserialize(usage);
@@ -489,6 +483,12 @@ namespace Legion {
 
       std::set<RtEvent> applied_events;
       const PhysicalTraceInfo trace_info(NULL);
+      if (ready.exists())
+        ready.wait();
+#ifdef DEBUG_LEGION
+      assert(view->is_instance_view());
+#endif
+      InstanceView *inst_view = view->as_instance_view();
       ApEvent result = inst_view->add_user_fused_base(usage, term_event, 
                          user_mask, op_id, index, &version_info, source, 
                          applied_events, trace_info, update_versions);
