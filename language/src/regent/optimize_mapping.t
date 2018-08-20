@@ -484,6 +484,11 @@ function optimize_mapping.stat_raw_delete(cx, node)
   return annotate(node, usage, usage)
 end
 
+function optimize_mapping.stat_fence(cx, node)
+  local usage = analyze_usage(cx, node)
+  return annotate(node, usage, usage)
+end
+
 function optimize_mapping.stat(cx, node)
   if node:is(ast.typed.stat.If) then
     return optimize_mapping.stat_if(cx, node)
@@ -535,6 +540,9 @@ function optimize_mapping.stat(cx, node)
 
   elseif node:is(ast.typed.stat.RawDelete) then
     return optimize_mapping.stat_raw_delete(cx, node)
+
+  elseif node:is(ast.typed.stat.Fence) then
+    return optimize_mapping.stat_fence(cx, node)
 
   else
     assert(false, "unexpected node type " .. tostring(node:type()))
