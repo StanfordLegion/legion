@@ -31,6 +31,15 @@ def show_buffer(f):
     value = codecs.decode(f.get_buffer(), 'utf-8')
     print(value)
 
+@task
+def show_nested(f):
+    print("nested: %s" % f)
+    show(f)
+
+@task
+def show_index(i, f):
+    print("at index %s: %s" % (i, f.get()))
+
 @task(top_level=True)
 def main():
     # No explicit type specified, value is pickled
@@ -52,3 +61,8 @@ def main():
     show(f)
     show(g)
     show_buffer(h)
+
+    show_nested(f)
+
+    for i in legion.IndexLaunch([3]):
+        show_index(i, f)

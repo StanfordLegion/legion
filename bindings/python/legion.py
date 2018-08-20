@@ -193,6 +193,7 @@ class Future(object):
         if value is None:
             self.handle = None
         elif isinstance(value, Future):
+            value.resolve_handle()
             self.handle = c.legion_future_copy(value.handle)
             if value_type is None:
                 value_type = value.value_type
@@ -890,13 +891,14 @@ class _TaskLauncher(object):
 
 class _IndexLauncher(_TaskLauncher):
     __slots__ = ['task_id', 'privileges', 'calling_convention',
-                 'domain', 'local_args', 'future_map']
+                 'domain', 'local_args', 'future_args', 'future_map']
 
     def __init__(self, task_id, privileges, calling_convention, domain):
         super(_IndexLauncher, self).__init__(
             task_id, privileges, calling_convention)
         self.domain = domain
         self.local_args = c.legion_argument_map_create()
+        self.future_args = []
         self.future_map = None
 
     def __del__(self):
@@ -907,10 +909,12 @@ class _IndexLauncher(_TaskLauncher):
 
     def attach_local_args(self, index, *args):
         point = DomainPoint(index)
-        args = self.preprocess_args(args)
         task_args, _ = self.encode_args(args)
         c.legion_argument_map_set_point(
             self.local_args, point.raw_value(), task_args[0], False)
+
+    def attach_future_args(self, *args):
+        self.future_args = args
 
     def launch(self):
         # All arguments are passed as local, so global is NULL.
@@ -923,6 +927,9 @@ class _IndexLauncher(_TaskLauncher):
             self.task_id, self.domain.raw_value(),
             global_args[0], self.local_args,
             c.legion_predicate_true(), False, 0, 0)
+
+        for arg in self.future_args:
+            c.legion_index_launcher_add_future(launcher, arg.handle)
 
         # Launch the task.
         result = c.legion_index_launcher_execute(
@@ -1010,9 +1017,13 @@ class IndexLaunch(object):
         #   * Only one task can be launched.
         #   * The arguments must be compatible:
         #       * At a given argument position, the value must always
-        #         be a region, or always not.
+        #         be a special value, or always not.
+        #       * Special values include: regions and futures.
         #       * If a region, the value must be symbolic (i.e. able
         #         to be analyzed as a function of the index expression).
+        #       * If a future, the values must be literally identical
+        #         (i.e. each argument slot in the launch can only
+        #         accept a single future value.)
 
         if self.saved_task is None:
             self.saved_task = task
@@ -1025,13 +1036,18 @@ class IndexLaunch(object):
             # TODO: Add support for region arguments
             if isinstance(arg, Region) or isinstance(arg, RegionField):
                 raise Exception('TODO: Support region arguments to an IndexLaunch')
+            elif isinstance(arg, Future):
+                if arg != saved_arg:
+                    raise Exception('Future argument to IndexLaunch does not match previous value at this position')
 
     def spawn_task(self, task, *args):
         self.ensure_launcher(task)
         self.check_compatibility(task, *args)
+        args = self.launcher.preprocess_args(args)
+        args, futures = self.launcher.gather_futures(args)
         self.launcher.attach_local_args(self.point, *args)
+        self.launcher.attach_future_args(*futures)
         # TODO: attach region args
-        # TODO: attach future args
         return _FuturePoint(self.launcher, int(self.point))
 
     def launch(self):
