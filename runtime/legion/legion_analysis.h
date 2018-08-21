@@ -446,46 +446,16 @@ namespace Legion {
     public:
       ProjectionInfo(void)
         : projection(NULL), projection_type(SINGULAR),
-          projection_space(NULL), dirty_reduction(false),
-          complete_write(false) { }
+          projection_space(NULL) { }
       ProjectionInfo(Runtime *runtime, const RegionRequirement &req,
                      IndexSpace launch_space);
     public:
       inline bool is_projecting(void) const { return (projection != NULL); }
-      inline const LegionMap<ProjectionEpochID,FieldMask>::aligned&
-        get_projection_epochs(void) const { return projection_epochs; }
-      inline bool is_dirty_reduction(void) const { return dirty_reduction; }
-      inline void set_dirty_reduction(void) { dirty_reduction = true; }
-      // This indicates if the application told us this will be a complete write
-      inline bool is_complete_write(void) const { return complete_write; }
-      void record_projection_epoch(ProjectionEpochID epoch,
-                                   const FieldMask &epoch_mask);
       void clear(void);
-    public:
-      void pack_info(Serializer &rez) const;
-      void unpack_info(Deserializer &derez, Runtime *runtime,
-          const RegionRequirement &req, IndexSpaceNode* launch_node);
-    public:
-      void pack_epochs(Serializer &rez) const;
-      void unpack_epochs(Deserializer &derez);
     public:
       ProjectionFunction *projection;
       ProjectionType projection_type;
       IndexSpaceNode *projection_space;
-    protected:
-      // Use this information to deduplicate between different points
-      // trying to advance information for the same projection epoch
-      LegionMap<ProjectionEpochID,FieldMask>::aligned projection_epochs;
-    protected:
-      // Track whether this is a dirty reduction, which means that we
-      // know that an advance has already been done by a previous write
-      // so that we know we don't have do an advance to get our reduction
-      // registered with the parent version state. If it is not a dirty
-      // reduction then we have to do the extra advance to get the 
-      // reduction registered with parent VersionState object
-      bool dirty_reduction;
-      // Record if the application told us this was a complete write
-      bool complete_write;
     };
 
     /**
@@ -712,7 +682,7 @@ namespace Legion {
     public:
       void advance_projection_epochs(const FieldMask &advance_mask);
       void capture_projection_epochs(FieldMask capture_mask,
-                                     ProjectionInfo &info);
+                                     const ProjectionInfo &info);
       void update_write_projection_epochs(FieldMask update_mask,
                                           const LogicalUser &user,
                                           const ProjectionInfo &info);
@@ -765,16 +735,9 @@ namespace Legion {
     public:
       LogicalCloser& operator=(const LogicalCloser &rhs);
     public:
-      inline bool has_close_operations(void) const 
-        { return (!!normal_close_mask) || (!!read_only_close_mask) ||
-                  (!!flush_only_close_mask); }
+      inline bool has_close_operations(void) const { return !!close_mask; }
       // Record normal closes like this
       void record_close_operation(const FieldMask &mask);
-      void record_projection_close(const FieldMask &mask, LogicalState &state,
-                                   bool disjoint_close = false);
-      void record_overwriting_close(const FieldMask &mask, bool projection);
-      void record_read_only_close(const FieldMask &mask, bool projection);
-      void record_flush_only_close(const FieldMask &mask);
       void record_closed_user(const LogicalUser &user, 
                               const FieldMask &mask, bool read_only);
       
@@ -783,7 +746,6 @@ namespace Legion {
 #endif
       void initialize_close_operations(LogicalState &state, 
                                        Operation *creator,
-                                       const VersionInfo &version_info,
                                        const LogicalTraceInfo &trace_info);
       void perform_dependence_analysis(const LogicalUser &current,
                                        const FieldMask &open_below,
@@ -820,34 +782,16 @@ namespace Legion {
       LegionList<LogicalUser,CLOSE_LOGICAL_ALLOC>::track_aligned 
                                                       read_only_closed_users;
     protected:
-      FieldMask normal_close_mask;
-      FieldMask read_only_close_mask;
-      FieldMask flush_only_close_mask;
-      // Read-only closes because we're overwriting without reading
-      FieldMask overwriting_close_mask;
-      // Closes for which we are actually closing up individual children
-      FieldMask disjoint_close_mask;
-      // Fields which closed up a projection operation from this level 
-      FieldMask closed_projections;
-      // Fields that we did complete writes to from for this close operation
-      FieldMask complete_writes;
-    protected:
-      // Use these for computing the close summaries of what has been written
-      LegionDeque<FieldMaskSet<RegionTreeNode> >::aligned written_children;
-      LegionDeque<WriteSet>::aligned partial_writes;
-      LegionDeque<FieldMask>::aligned written_above;
+      FieldMask close_mask;
     protected:
       // At most we will ever generate three close operations at a node
-      InterCloseOp *normal_close_op;
-      ReadCloseOp *read_only_close_op;
-      InterCloseOp *flush_only_close_op;
+      MergeCloseOp *close_op;
     protected:
       // Cache the generation IDs so we can kick off ops before adding users
-      GenerationID normal_close_gen;
-      GenerationID read_only_close_gen;
-      GenerationID flush_only_close_gen;
+      GenerationID merge_close_gen;
     }; 
 
+#if 0
     /**
      * \class PhysicalState
      * A physical state is a temporary buffer for holding a merged
@@ -913,6 +857,7 @@ namespace Legion {
     protected:
       bool captured;
     };
+#endif
 
     /**
      * \class VersionManager
@@ -1267,8 +1212,6 @@ namespace Legion {
                                   const FieldMask &update_mask) const;
       void update_physical_state(PhysicalState *state, 
                                  const FieldMask &update_mask) const; 
-      void perform_disjoint_close(InterCloseOp *op, unsigned index,
-            InnerContext *context, const FieldMask &close_mask) const;
     public: // methods for applying state information
       void merge_physical_state(const PhysicalState *state, 
                                 const FieldMask &merge_mask,
@@ -1353,14 +1296,6 @@ namespace Legion {
                                                 Deserializer &derez);
       static void process_version_state_update_response(Runtime *rt,
                                                  Deserializer &derez); 
-    public:
-      void capture_root(CompositeView *target, 
-                        const FieldMask &capture_mask,
-                        ReferenceMutator *mutator) const;
-      void capture(CompositeNode *target, const FieldMask &capture_mask,
-                   ReferenceMutator *mutator) const;
-      void capture_dirty_instances(const FieldMask &capture_mask, 
-                                   VersionState *target) const;
     public:
       const VersionID version_number;
       RegionTreeNode *const logical_node;

@@ -284,8 +284,7 @@ namespace Legion {
       void perform_dependence_analysis(Operation *op, unsigned idx,
                                        RegionRequirement &req,
                                        RestrictInfo &restrict_info,
-                                       VersionInfo &version_info,
-                                       ProjectionInfo &projection_info,
+                                       const ProjectionInfo &projection_info,
                                        RegionTreePath &path);
       void perform_deletion_analysis(DeletionOp *op, unsigned idx,
                                      RegionRequirement &req,
@@ -303,18 +302,8 @@ namespace Legion {
     public:
       void perform_versioning_analysis(Operation *op, unsigned idx,
                                        const RegionRequirement &req,
-                                       const RegionTreePath &path,
                                        VersionInfo &version_info,
-                                       std::set<RtEvent> &ready_events,
-                                       bool partial_traversal = false,
-                                       bool disjoint_close = false,
-                                       FieldMask *filter_mask = NULL,
-                                       RegionTreeNode *parent_node = NULL,
-              // For computing split masks for projection epochs only
-                                       UniqueID logical_context_uid = 0,
-              const LegionMap<ProjectionEpochID,
-                              FieldMask>::aligned *advance_epochs = NULL,
-                                       bool skip_parent_check = false);
+                                       std::set<RtEvent> &ready_events);
       void advance_version_numbers(Operation *op, unsigned idx,
                                    bool update_parent_state,
                                    bool parent_is_upper_bound,
@@ -372,7 +361,6 @@ namespace Legion {
                                   bool need_read_only_reservations,
                                   std::set<RtEvent> &map_applied,
                                   InstanceSet &targets,
-                                  const ProjectionInfo *proj_info,
                                   const PhysicalTraceInfo &trace_info
 #ifdef DEBUG_LEGION
                                  , const char *log_name
@@ -388,28 +376,6 @@ namespace Legion {
                    std::deque<InstanceSet> &targets,
                    std::set<RtEvent> &map_applied_events,
                    const PhysicalTraceInfo &trace_info);
-      void physical_perform_close(const RegionRequirement &req,
-                                  VersionInfo &version_info,
-                                  Operation *op, unsigned index,
-                                  RegionTreeNode *close_node,
-                                  const FieldMask &closing_mask,
-                                  const FieldMask &complete_mask,
-                                  WriteSet &partial_writes,
-                                  std::set<RtEvent> &map_applied,
-                                  const RestrictInfo &restrict_info,
-                                  const InstanceSet &targets,
-                                  // projection_info can be NULL
-                                  const ProjectionInfo *projection_info,
-                                  const PhysicalTraceInfo &trace_info
-#ifdef DEBUG_LEGION
-                                  , const char *log_name
-                                  , UniqueID uid
-#endif
-                                  );
-      void physical_disjoint_close(InterCloseOp *op, unsigned index, 
-                                   RegionTreeNode *close_node,
-                                   const FieldMask &closing_mask,
-                                   VersionInfo &version_info);
       ApEvent physical_close_context(RegionTreeContext ctx,
                                      const RegionRequirement &req,
                                      VersionInfo &version_info,
@@ -2483,40 +2449,16 @@ namespace Legion {
                                  const LogicalUser &user,
                                  RegionTreePath &path,
                                  const LogicalTraceInfo &trace_info,
-                                 VersionInfo &version_info,
-                                 ProjectionInfo &projection_info,
-                                 FieldMask &unopened_field_mask,
-                     LegionMap<AdvanceOp*,LogicalUser>::aligned &advances);
-      void create_logical_open(ContextID ctx,
-                               const FieldMask &open_mask,
-                               const LogicalUser &creator,
-                               const RegionTreePath &path,
-                               const LogicalTraceInfo &trace_info);
-      void create_logical_advance(ContextID ctx, LogicalState &state,
-                                  const FieldMask &advance_mask,
-                                  const LogicalUser &creator,
-                                  const LogicalTraceInfo &trace_info,
-                    LegionMap<AdvanceOp*,LogicalUser>::aligned &advances,
-                                  bool parent_is_upper_bound,
-                                  const LegionColor next_child);
+                                 const ProjectionInfo &projection_info,
+                                 FieldMask &unopened_field_mask);
       void register_local_user(LogicalState &state,
                                const LogicalUser &user,
                                const LogicalTraceInfo &trace_info);
       void add_open_field_state(LogicalState &state, bool arrived,
-                                ProjectionInfo &projection_info,
+                                const ProjectionInfo &projection_info,
                                 const LogicalUser &user,
                                 const FieldMask &open_mask,
                                 const LegionColor next_child);
-      void traverse_advance_analysis(ContextID ctx, AdvanceOp *advance,
-                                     const LogicalUser &advance_user,
-                                     const LogicalUser &create_user);
-      void perform_advance_analysis(ContextID ctx, LogicalState &state, 
-                                    AdvanceOp *advance,
-                                    const LogicalUser &advance_user,
-                                    const LogicalUser &create_user,
-                                    const LegionColor next_child,
-                                    const bool already_traced,
-                                    const bool advance_root = true);
       void close_logical_node(LogicalCloser &closer,
                               const FieldMask &closing_mask,
                               bool read_only_close);
@@ -2530,7 +2472,7 @@ namespace Legion {
       void siphon_logical_projection(LogicalCloser &closer,
                                      LogicalState &state,
                                      const FieldMask &closing_mask,
-                                     ProjectionInfo &proj_info,
+                                     const ProjectionInfo &proj_info,
                                      bool record_close_operations,
                                      FieldMask &open_below);
       void flush_logical_reductions(LogicalCloser &closer,
@@ -2574,7 +2516,6 @@ namespace Legion {
                                      const FieldMask &check_mask,
                                      RegionTreePath &path,
                                      RestrictInfo &restrict_info,
-                                     VersionInfo &version_info,
                                      const LogicalTraceInfo &trace_info);
       void siphon_logical_deletion(LogicalCloser &closer,
                                    LogicalState &state,
@@ -2623,16 +2564,6 @@ namespace Legion {
       bool invalidate_version_state(ContextID ctx);
       void invalidate_version_managers(void);
     public:
-      // Physical traversal operations
-      CompositeView* create_composite_instance(ContextID ctx_id,
-                                     const FieldMask &closing_mask,
-                                     VersionInfo &version_info,
-                                     UniqueID logical_context_uid,
-                                     InnerContext *owner_context,
-                                     const FieldMask &complete_mask,
-                                     WriteSet &partial_writes,
-                                     std::set<RtEvent> &ready_events,
-                                     const ProjectionInfo *proj_info);
       // This method will always add valid references to the set of views
       // that are returned.  It is up to the caller to remove the references.
       void find_valid_instance_views(ContextID ctx,
@@ -3150,10 +3081,6 @@ namespace Legion {
                                   std::vector<bool> &up_mask, 
                                   InnerContext *context,
                                   std::vector<InstanceView*> &results);
-    public:
-      void perform_disjoint_close(InterCloseOp *op, unsigned idx,
-              InnerContext *context, const FieldMask &closing_mask, 
-              VersionInfo &version_info);
     public:
       virtual void send_semantic_request(AddressSpaceID target, 
            SemanticTag tag, bool can_fail, bool wait_until, RtUserEvent ready);

@@ -46,10 +46,7 @@ namespace Legion {
         FENCE_OP_KIND,
         FRAME_OP_KIND,
         DELETION_OP_KIND,
-        OPEN_OP_KIND,
-        ADVANCE_OP_KIND,
-        INTER_CLOSE_OP_KIND,
-        READ_CLOSE_OP_KIND,
+        MERGE_CLOSE_OP_KIND,
         POST_CLOSE_OP_KIND,
         VIRTUAL_CLOSE_OP_KIND,
         RETURN_CLOSE_OP_KIND,
@@ -82,10 +79,7 @@ namespace Legion {
         "Fence",                    \
         "Frame",                    \
         "Deletion",                 \
-        "Open",                     \
-        "Advance",                  \
-        "Inter Close",              \
-        "Read Close",               \
+        "Merge Close",              \
         "Post Close",               \
         "Virtual Close",            \
         "Return Close",             \
@@ -506,8 +500,6 @@ namespace Legion {
       void record_logical_dependence(const LogicalUser &user);
       inline LegionList<LogicalUser,LOGICAL_REC_ALLOC>::track_aligned&
           get_logical_records(void) { return logical_records; }
-      inline LegionList<LogicalUser,LOGICAL_REC_ALLOC>::track_aligned&
-          get_logical_advances(void) { return logical_advances; }
       void clear_logical_records(void);
     public:
       // Notify when a region from a dependent task has 
@@ -530,15 +522,6 @@ namespace Legion {
           const std::deque<MappingInstance>         &output,
           const InstanceSet                         &sources,
           std::vector<unsigned>                     &ranking) const;
-    public:
-      // Perform the versioning analysis for a projection requirement
-      void perform_projection_version_analysis(const ProjectionInfo &proj_info,
-                                      const RegionRequirement &owner_req,
-                                      const RegionRequirement &local_req,
-                                      const unsigned idx,
-                                      const UniqueID logical_context_uid,
-                                      VersionInfo &version_info,
-                                      std::set<RtEvent> &ready_events);
 #ifdef DEBUG_LEGION
     protected:
       virtual void dump_physical_state(RegionRequirement *req, unsigned idx,
@@ -620,8 +603,6 @@ namespace Legion {
       MustEpochOp *must_epoch;
       // A set list or recorded dependences during logical traversal
       LegionList<LogicalUser,LOGICAL_REC_ALLOC>::track_aligned logical_records;
-      // A set of advance operations recorded during logical traversal
-      LegionList<LogicalUser,LOGICAL_REC_ALLOC>::track_aligned logical_advances;
       // Dependence trackers for detecting when it is safe to map and commit
       MappingDependenceTracker *mapping_tracker;
       CommitDependenceTracker  *commit_tracker;
@@ -973,7 +954,6 @@ namespace Legion {
       virtual UniqueID get_unique_id(void) const;
       virtual unsigned get_context_index(void) const;
       virtual int get_depth(void) const;
-      virtual const ProjectionInfo* get_projection_info(unsigned idx);
     protected:
       void check_copy_privilege(const RegionRequirement &req, unsigned idx,
                                 bool permit_projection = false);
@@ -1066,14 +1046,7 @@ namespace Legion {
       void check_point_requirements(void);
 #endif
     public:
-      virtual const ProjectionInfo* get_projection_info(unsigned idx);
-    public:
       IndexSpace                    launch_space;
-    public:
-      std::vector<ProjectionInfo>   src_projection_infos;
-      std::vector<ProjectionInfo>   dst_projection_infos;
-      std::vector<ProjectionInfo>   gather_projection_infos;
-      std::vector<ProjectionInfo>   scatter_projection_infos;
     protected:
       std::vector<PointCopyOp*>     points;
       unsigned                      points_committed;
@@ -1104,7 +1077,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       void check_domination(void) const;
 #endif
-      void launch(const std::set<RtEvent> &preconditions);
+      void launch(void);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -1117,8 +1090,6 @@ namespace Legion {
       // From ProjectionPoint
       virtual const DomainPoint& get_domain_point(void) const;
       virtual void set_projection_result(unsigned idx,LogicalRegion result);
-    public:
-      virtual const ProjectionInfo* get_projection_info(unsigned idx);
     protected:
       IndexCopyOp*              owner;
     };
@@ -1301,83 +1272,6 @@ namespace Legion {
     };
 
     /**
-     * \class OpenOp
-     * Open operatoins are only visible internally inside
-     * the runtime and are issued to open a region tree
-     * down to the level immediately above the one being
-     * accessed by a given operation. Open operations
-     * record whether they are advancing the version
-     * number information at a given level or not.
-     */
-    class OpenOp : public InternalOp, public LegionHeapify<OpenOp> {
-    public:
-      static const AllocationType alloc_type = OPEN_OP_ALLOC;
-    public:
-      OpenOp(Runtime *rt);
-      OpenOp(const OpenOp &rhs);
-      virtual ~OpenOp(void);
-    public:
-      OpenOp& operator=(const OpenOp &rhs);
-    public:
-      void initialize(const FieldMask &open_mask, RegionTreeNode *start, 
-                      const RegionTreePath &path, 
-                      const LogicalTraceInfo &trace_info,
-                      Operation *creator, int req_idx);
-    public:
-      virtual void activate(void);
-      virtual void deactivate(void);
-      virtual const char* get_logging_name(void) const;
-      virtual OpKind get_operation_kind(void) const;
-      virtual const FieldMask& get_internal_mask(void) const;
-    public:
-      virtual void trigger_ready(void);
-    protected:
-      RegionTreeNode *start_node;
-      RegionTreePath  open_path;
-      FieldMask       open_mask;
-    };
-
-    /**
-     * \class AdvanceOp
-     * Advance operations are only visible internally inside
-     * the runtime and are issued to advance version numbers
-     * on intermediate nodes in the region tree when data
-     * is being written to a subregion.
-     */
-    class AdvanceOp : public InternalOp, public LegionHeapify<AdvanceOp> {
-    public:
-      static const AllocationType alloc_type = ADVANCE_OP_ALLOC;
-    public:
-      AdvanceOp(Runtime *rt);
-      AdvanceOp(const AdvanceOp &rhs);
-      virtual ~AdvanceOp(void);
-    public:
-      AdvanceOp& operator=(const AdvanceOp &rhs);
-    public:
-      void initialize(RegionTreeNode *parent, const FieldMask &advance,
-                      const LogicalTraceInfo &trace_info, Operation *creator, 
-                      int req_idx, bool parent_is_upper_bound);
-      void set_child_node(RegionTreeNode *child);
-      void set_split_child_mask(const FieldMask &split_mask);
-      void record_dirty_previous(unsigned depth, const FieldMask &dirty_mask);
-    public:
-      virtual void activate(void);
-      virtual void deactivate(void);
-      virtual const char* get_logging_name(void) const;
-      virtual OpKind get_operation_kind(void) const;
-      virtual const FieldMask& get_internal_mask(void) const;
-    public:
-      virtual void trigger_ready(void);
-    protected:
-      RegionTreeNode *parent_node;
-      RegionTreeNode *child_node; // inclusive
-      FieldMask       advance_mask;
-      FieldMask       split_child_mask; // only for partial reductions
-      LegionMap<unsigned,FieldMask>::aligned dirty_previous;
-      bool parent_is_upper_bound;
-    };
-
-    /**
      * \class CloseOp
      * Close operations are only visible internally inside
      * the runtime and are issued to help close up the 
@@ -1427,120 +1321,18 @@ namespace Legion {
     };
 
     /**
-     * \class InterCloseOp
-     * Intermediate close operations are issued by the runtime
+     * \class MergeCloseOp
+     * merge close operations are issued by the runtime
      * for closing up region trees as part of the normal execution
      * of an application.
      */
-    class InterCloseOp : public CloseOp, public LegionHeapify<InterCloseOp> {
+    class MergeCloseOp : public CloseOp, public LegionHeapify<MergeCloseOp> {
     public:
-      struct DisjointCloseInfo {
-      public:
-        FieldMask close_mask;
-        VersionInfo version_info;
-        std::set<RtEvent> ready_events;
-      };
-      struct DisjointCloseArgs : public LgTaskArgs<DisjointCloseArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_DISJOINT_CLOSE_TASK_ID;
-      public:
-        DisjointCloseArgs(InterCloseOp *op, 
-                          RegionTreeNode *child, InnerContext *ctx)
-          : LgTaskArgs<DisjointCloseArgs>(op->get_unique_op_id()),
-            proxy_this(op), child_node(child), context(ctx) { }
-      public:
-        InterCloseOp *const proxy_this;
-        RegionTreeNode *const child_node;
-        InnerContext *const context;
-      };
+      MergeCloseOp(Runtime *runtime);
+      MergeCloseOp(const MergeCloseOp &rhs);
+      virtual ~MergeCloseOp(void);
     public:
-      InterCloseOp(Runtime *runtime);
-      InterCloseOp(const InterCloseOp &rhs);
-      virtual ~InterCloseOp(void);
-    public:
-      InterCloseOp& operator=(const InterCloseOp &rhs);
-    public:
-      void initialize(TaskContext *ctx, const RegionRequirement &req,
-                      const LogicalTraceInfo &trace_info, int close_idx, 
-                      const VersionInfo &version_info, RegionTreeNode *node,
-                      const FieldMask &close_mask, Operation *create_op,
-                      const FieldMask &complete_mask, WriteSet &partial);
-      ProjectionInfo& initialize_disjoint_close(const FieldMask &disjoint_mask,
-                                                IndexSpace launch_space);
-      DisjointCloseInfo* find_disjoint_close_child(unsigned index,
-                                                   RegionTreeNode *child);
-      void perform_disjoint_close(RegionTreeNode *child_to_close, 
-                                  DisjointCloseInfo &close_info,
-                                  InnerContext *context,
-                                  std::set<RtEvent> &ready_events);
-    public:
-      virtual void activate(void);
-      virtual void deactivate(void);
-      virtual const char* get_logging_name(void) const;
-      virtual OpKind get_operation_kind(void) const;
-      virtual const FieldMask& get_internal_mask(void) const;
-    public:
-      virtual void trigger_ready(void);
-      virtual void trigger_mapping(void);
-      virtual void trigger_commit(void);
-      virtual unsigned find_parent_index(unsigned idx);
-      virtual void select_sources(const InstanceRef &target,
-                                  const InstanceSet &sources,
-                                  std::vector<unsigned> &ranking);
-      virtual std::map<PhysicalManager*,std::pair<unsigned,bool> >*
-                   get_acquired_instances_ref(void);
-      virtual void record_reference_mutation_effect(RtEvent event);
-    protected:
-      void invoke_mapper(const InstanceSet &valid_instances);
-      virtual void add_copy_profiling_request(
-                                          Realm::ProfilingRequestSet &reqeusts);
-      virtual void handle_profiling_response(
-                                    const Realm::ProfilingResponse &response);
-    public:
-      static void handle_disjoint_close(const void *args);
-    protected:
-      FieldMask close_mask;
-      // Fields which we are doing complete writes for
-      FieldMask complete_mask;
-      // Any partial writes that we have
-      WriteSet partial_writes;
-      InstanceSet chosen_instances;
-    protected:
-      // For disjoint partition closes with projections
-      FieldMask disjoint_close_mask;
-      ProjectionInfo projection_info;
-      LegionMap<RegionTreeNode*,DisjointCloseInfo>::aligned children_to_close;
-    protected:
-      unsigned parent_req_index;
-      std::map<PhysicalManager*,std::pair<unsigned,bool> > acquired_instances;
-      std::set<RtEvent> map_applied_conditions;
-    protected:
-      MapperManager *mapper;
-    protected:
-      std::vector<ProfilingMeasurementID> profiling_requests;
-      int                                 profiling_priority;
-      int                     outstanding_profiling_requests;
-      RtUserEvent                         profiling_reported;
-    };
-    
-    /**
-     * \class ReadCloseOp
-     * Read close operations are close ops that act as 
-     * place holders for closing up read-only partitions.
-     * Closing a read-only partition doesn't actually involve
-     * any work, but we do need something to ensure that all
-     * the mapping dependences are satisfied for later operations
-     * that traverse different subtrees. Read close operations
-     * are summaries for all those dependences to reduce the
-     * overhead of testing against everything in a subtree.
-     */
-    class ReadCloseOp : public CloseOp, public LegionHeapify<ReadCloseOp> {
-    public:
-      ReadCloseOp(Runtime *runtime);
-      ReadCloseOp(const ReadCloseOp &rhs);
-      virtual ~ReadCloseOp(void);
-    public:
-      ReadCloseOp& operator=(const ReadCloseOp &rhs);
+      MergeCloseOp& operator=(const MergeCloseOp &rhs);
     public:
       void initialize(TaskContext *ctx, const RegionRequirement &req,
                       const LogicalTraceInfo &trace_info, int close_idx,
@@ -2643,7 +2435,6 @@ namespace Legion {
     public:
       void handle_point_commit(RtEvent point_committed);
     public:
-      ProjectionInfo projection_info;
       VersionInfo version_info;
       RestrictInfo restrict_info;
       RegionTreePath privilege_path;
@@ -2688,7 +2479,7 @@ namespace Legion {
       PointDepPartOp& operator=(const PointDepPartOp &rhs);
     public:
       void initialize(DependentPartitionOp *owner, const DomainPoint &point);
-      void launch(const std::set<RtEvent> &preconditions);
+      void launch(void);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -2755,7 +2546,6 @@ namespace Legion {
       virtual void trigger_commit(void);
       virtual ApEvent get_restrict_precondition(
                          const PhysicalTraceInfo &info) const;
-      virtual const ProjectionInfo* get_projection_info(void);
     public:
       void check_fill_privilege(void);
       void compute_parent_index(void);
@@ -2809,9 +2599,6 @@ namespace Legion {
       void check_point_requirements(void);
 #endif
     public:
-      virtual const ProjectionInfo* get_projection_info(void);
-    public:
-      ProjectionInfo                projection_info;
       IndexSpace                    launch_space;
     protected:
       std::vector<PointFillOp*>     points;
@@ -2834,7 +2621,7 @@ namespace Legion {
       PointFillOp& operator=(const PointFillOp &rhs);
     public:
       void initialize(IndexFillOp *owner, const DomainPoint &point);
-      void launch(const std::set<RtEvent> &preconditions);
+      void launch(void);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -2847,8 +2634,6 @@ namespace Legion {
       // From ProjectionPoint
       virtual const DomainPoint& get_domain_point(void) const;
       virtual void set_projection_result(unsigned idx,LogicalRegion result);
-    public:
-      virtual const ProjectionInfo* get_projection_info(void);
     protected:
       IndexFillOp*              owner;
     };

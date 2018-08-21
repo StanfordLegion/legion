@@ -850,29 +850,8 @@ namespace Legion {
                                     const CopyProfilingInfo& input)  = 0;
       //------------------------------------------------------------------------
     public: // Close operations
-      /**
-       * ----------------------------------------------------------------------
-       *  Map Close 
-       * ----------------------------------------------------------------------
-       * Close operations are never explicitly requested by the application
-       * but are created by the runtime whenever a one partition of a
-       * region tree needs to be closed in order to access another partition.
-       * As part of this process, the close operation must be mapped. This
-       * can be done in one of two ways. First, the application can choose
-       * to create an explicit physical instance to be the target of the 
-       * close operation. Alternatively, the close operation can create a
-       * composite instance by setting the 'create_composite' field to true.
-       * A composite instance defers any necessary copy operations associated
-       * with a close to a later point in time, which allows mappers to avoid
-       * creating an explicit physical instance as the target of the close.
-       * Creating a composite instance is usually higher performance unless
-       * an application needs to actually use a physical instance of the 
-       * region being closed. While composite instances are usually higher
-       * performance they are also require a more expensive dynamic analysis
-       * when being used. Usually Legion will be able to hide this cost, 
-       * but it is possible that it can show up, especially if composite
-       * instances need to be moved between different nodes.
-       */
+      // These are here for backwards compatibility
+      // The mapper call these were used by no longer exists
       struct MapCloseInput {
         std::vector<PhysicalInstance>               valid_instances;
       };
@@ -881,12 +860,6 @@ namespace Legion {
         ProfilingRequest                            profiling_requests;
         TaskPriority                                profiling_priority;
       };
-      //------------------------------------------------------------------------
-      virtual void map_close(const MapperContext       ctx,
-                             const Close&              close,
-                             const MapCloseInput&      input,
-                                   MapCloseOutput&     output) = 0;
-      //------------------------------------------------------------------------
 
       /**
        * ----------------------------------------------------------------------

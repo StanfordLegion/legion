@@ -311,10 +311,6 @@ namespace Legion {
       LG_DEFERRED_ENQUEUE_OP_ID,
       LG_DEFERRED_ENQUEUE_TASK_ID,
       LG_DEFER_MAPPER_MESSAGE_TASK_ID,
-      LG_DEFER_COMPOSITE_VIEW_REF_TASK_ID,
-      LG_DEFER_COMPOSITE_VIEW_REGISTRATION_TASK_ID,
-      LG_DEFER_COMPOSITE_NODE_REF_TASK_ID,
-      LG_DEFER_COMPOSITE_NODE_CAPTURE_TASK_ID,
       LG_CONVERT_VIEW_TASK_ID,
       LG_UPDATE_VIEW_REFERENCES_TASK_ID,
       LG_REMOVE_VERSION_STATE_REF_TASK_ID,
@@ -327,7 +323,6 @@ namespace Legion {
       LG_ADD_VERSIONING_SET_REF_TASK_ID,
       LG_VERSION_STATE_CAPTURE_DIRTY_TASK_ID,
       LG_VERSION_STATE_PENDING_ADVANCE_TASK_ID,
-      LG_DISJOINT_CLOSE_TASK_ID,
       LG_DEFER_MATERIALIZED_VIEW_TASK_ID,
       LG_MISSPECULATE_TASK_ID,
       LG_DEFER_PHI_VIEW_REF_TASK_ID,
@@ -398,10 +393,6 @@ namespace Legion {
         "Deferred Enqueue Op",                                    \
         "Deferred Enqueue Task",                                  \
         "Deferred Mapper Message",                                \
-        "Deferred Composite View Ref",                            \
-        "Deferred Composite View Registration",                   \
-        "Deferred Composite Node Ref",                            \
-        "Deferred Composite Node Capture",                        \
         "Convert View for Version State",                         \
         "Update View References for Version State",               \
         "Deferred Remove Version State Valid Ref",                \
@@ -414,7 +405,6 @@ namespace Legion {
         "Defer Versioning Set Reference",                         \
         "Version State Capture Dirty",                            \
         "Version State Reclaim Pending Advance",                  \
-        "Disjoint Close",                                         \
         "Defer Materialized View Creation",                       \
         "Handle Mapping Misspeculation",                          \
         "Defer Phi View Reference",                               \
@@ -447,7 +437,6 @@ namespace Legion {
       COPY_SELECT_SOURCES_CALL,
       COPY_SPECULATE_CALL,
       COPY_REPORT_PROFILING_CALL,
-      MAP_CLOSE_CALL,
       CLOSE_SELECT_SOURCES_CALL,
       CLOSE_REPORT_PROFILING_CALL,
       MAP_ACQUIRE_CALL,
@@ -494,7 +483,6 @@ namespace Legion {
       "select_copy_sources",                        \
       "speculate (for copy)",                       \
       "report_profiling (for copy)",                \
-      "map_close",                                  \
       "select_close_sources",                       \
       "report_profiling (for close)",               \
       "map_acquire",                                \
@@ -639,7 +627,6 @@ namespace Legion {
       SEND_ATOMIC_RESERVATION_RESPONSE,
       SEND_BACK_LOGICAL_STATE,
       SEND_MATERIALIZED_VIEW,
-      SEND_COMPOSITE_VIEW,
       SEND_FILL_VIEW,
       SEND_PHI_VIEW,
       SEND_REDUCTION_VIEW,
@@ -779,7 +766,6 @@ namespace Legion {
         "Send Atomic Reservation Response",                           \
         "Send Back Logical State",                                    \
         "Send Materialized View",                                     \
-        "Send Composite View",                                        \
         "Send Fill View",                                             \
         "Send Phi View",                                              \
         "Send Reduction View",                                        \
@@ -1004,10 +990,6 @@ namespace Legion {
       MATERIALIZED_VIEW_FILTER_PREVIOUS_USERS_CALL,
       MATERIALIZED_VIEW_FILTER_CURRENT_USERS_CALL,
       MATERIALIZED_VIEW_FILTER_LOCAL_USERS_CALL,
-      COMPOSITE_VIEW_SIMPLIFY_CALL,
-      COMPOSITE_VIEW_ISSUE_DEFERRED_COPIES_CALL,
-      COMPOSITE_NODE_CAPTURE_PHYSICAL_STATE_CALL,
-      COMPOSITE_NODE_SIMPLIFY_CALL,
       REDUCTION_VIEW_PERFORM_REDUCTION_CALL,
       REDUCTION_VIEW_PERFORM_DEFERRED_REDUCTION_CALL,
       REDUCTION_VIEW_PERFORM_DEFERRED_REDUCTION_ACROSS_CALL,
@@ -1165,10 +1147,6 @@ namespace Legion {
       "Materialized View Filter Previous Users",                      \
       "Materialized View Filter Current Users",                       \
       "Materialized View Filter Local Users",                         \
-      "Composite View Simplify",                                      \
-      "Composite View Issue Deferred Copies",                         \
-      "Composite Node Capture Physical State",                        \
-      "Composite Node Simplify",                                      \
       "Reduction View Perform Reduction",                             \
       "Reduction View Perform Deferred Reduction",                    \
       "Reduction View Perform Deferred Reduction Across",             \
@@ -1270,11 +1248,8 @@ namespace Legion {
     class FrameOp;
     class DeletionOp;
     class InternalOp;
-    class OpenOp;
-    class AdvanceOp;
     class CloseOp;
-    class InterCloseOp;
-    class ReadCloseOp;
+    class MergeCloseOp;
     class PostCloseOp;
     class VirtualCloseOp;
     class AcquireOp;
@@ -1436,10 +1411,6 @@ namespace Legion {
     class InstanceView;
     class DeferredView;
     class MaterializedView;
-    class CompositeBase;
-    class CompositeView;
-    class CompositeVersionInfo;
-    class CompositeNode;
     class FillView;
     class PhiView;
     class MappingRef;
@@ -1456,8 +1427,6 @@ namespace Legion {
     class RegionAnalyzer;
     class RegionMapper;
 
-    struct EscapedUser;
-    struct EscapedCopy;
     struct GenericUser;
     struct LogicalUser;
     struct PhysicalUser;
@@ -1501,11 +1470,8 @@ namespace Legion {
     friend class Internal::DynamicCollectiveOp;             \
     friend class Internal::FuturePredOp;                    \
     friend class Internal::DeletionOp;                      \
-    friend class Internal::OpenOp;                          \
-    friend class Internal::AdvanceOp;                       \
     friend class Internal::CloseOp;                         \
-    friend class Internal::InterCloseOp;                    \
-    friend class Internal::ReadCloseOp;                     \
+    friend class Internal::MergeCloseOp;                    \
     friend class Internal::PostCloseOp;                     \
     friend class Internal::VirtualCloseOp;                  \
     friend class Internal::AcquireOp;                       \
@@ -1545,8 +1511,6 @@ namespace Legion {
     friend class Internal::DeferredView;                    \
     friend class Internal::ReductionView;                   \
     friend class Internal::MaterializedView;                \
-    friend class Internal::CompositeView;                   \
-    friend class Internal::CompositeNode;                   \
     friend class Internal::FillView;                        \
     friend class Internal::LayoutDescription;               \
     friend class Internal::PhysicalManager;                 \

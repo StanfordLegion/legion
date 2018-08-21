@@ -2207,7 +2207,6 @@ namespace Legion {
       void send_atomic_reservation_response(AddressSpaceID target, 
                                             Serializer &rez);
       void send_materialized_view(AddressSpaceID target, Serializer &rez);
-      void send_composite_view(AddressSpaceID target, Serializer &rez);
       void send_fill_view(AddressSpaceID target, Serializer &rez);
       void send_phi_view(AddressSpaceID target, Serializer &rez);
       void send_reduction_view(AddressSpaceID target, Serializer &rez);
@@ -2384,8 +2383,6 @@ namespace Legion {
       void handle_send_atomic_reservation_response(Deserializer &derez);
       void handle_send_materialized_view(Deserializer &derez, 
                                          AddressSpaceID source);
-      void handle_send_composite_view(Deserializer &derez,
-                                      AddressSpaceID source);
       void handle_send_fill_view(Deserializer &derez, AddressSpaceID source);
       void handle_send_phi_view(Deserializer &derez, AddressSpaceID source);
       void handle_send_reduction_view(Deserializer &derez,
@@ -2642,10 +2639,7 @@ namespace Legion {
       FenceOp*              get_available_fence_op(void);
       FrameOp*              get_available_frame_op(void);
       DeletionOp*           get_available_deletion_op(void);
-      OpenOp*               get_available_open_op(void);
-      AdvanceOp*            get_available_advance_op(void);
-      InterCloseOp*         get_available_inter_close_op(void);
-      ReadCloseOp*          get_available_read_close_op(void);
+      MergeCloseOp*         get_available_merge_close_op(void);
       PostCloseOp*          get_available_post_close_op(void);
       VirtualCloseOp*       get_available_virtual_close_op(void);
       DynamicCollectiveOp*  get_available_dynamic_collective_op(void);
@@ -2682,10 +2676,7 @@ namespace Legion {
       void free_fence_op(FenceOp *op);
       void free_frame_op(FrameOp *op);
       void free_deletion_op(DeletionOp *op);
-      void free_open_op(OpenOp *op);
-      void free_advance_op(AdvanceOp *op);
-      void free_inter_close_op(InterCloseOp *op); 
-      void free_read_close_op(ReadCloseOp *op);
+      void free_merge_close_op(MergeCloseOp *op); 
       void free_post_close_op(PostCloseOp *op);
       void free_virtual_close_op(VirtualCloseOp *op);
       void free_dynamic_collective_op(DynamicCollectiveOp *op);
@@ -2963,10 +2954,7 @@ namespace Legion {
       mutable LocalLock fence_op_lock;
       mutable LocalLock frame_op_lock;
       mutable LocalLock deletion_op_lock;
-      mutable LocalLock open_op_lock;
-      mutable LocalLock advance_op_lock;
-      mutable LocalLock inter_close_op_lock;
-      mutable LocalLock read_close_op_lock;
+      mutable LocalLock merge_close_op_lock;
       mutable LocalLock post_close_op_lock;
       mutable LocalLock virtual_close_op_lock;
       mutable LocalLock dynamic_collective_op_lock;
@@ -3000,10 +2988,7 @@ namespace Legion {
       std::deque<FenceOp*>              available_fence_ops;
       std::deque<FrameOp*>              available_frame_ops;
       std::deque<DeletionOp*>           available_deletion_ops;
-      std::deque<OpenOp*>               available_open_ops;
-      std::deque<AdvanceOp*>            available_advance_ops;
-      std::deque<InterCloseOp*>         available_inter_close_ops;
-      std::deque<ReadCloseOp*>          available_read_close_ops;
+      std::deque<MergeCloseOp*>         available_merge_close_ops;
       std::deque<PostCloseOp*>          available_post_close_ops;
       std::deque<VirtualCloseOp*>       available_virtual_close_ops;
       std::deque<DynamicCollectiveOp*>  available_dynamic_collective_ops;

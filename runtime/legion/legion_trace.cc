@@ -1761,7 +1761,6 @@ namespace Legion {
         runtime->forest->perform_dependence_analysis(this, idx,
                                                      requirements[idx],
                                                      restrict_infos[idx],
-                                                     version_infos[idx],
                                                      projection_info,
                                                      privilege_paths[idx]);
       }
@@ -1776,7 +1775,6 @@ namespace Legion {
       for (unsigned idx = 0; idx < requirements.size(); ++idx)
         runtime->forest->perform_versioning_analysis(this, idx,
                                                      requirements[idx],
-                                                     privilege_paths[idx],
                                                      version_infos[idx],
                                                      preconditions);
       if (!preconditions.empty())
@@ -1800,7 +1798,6 @@ namespace Legion {
                                                 false/*read only locks*/,
                                                 map_applied_conditions,
                                                 instances[idx],
-                                                NULL/*advance projections*/,
                                                 trace_info
 #ifdef DEBUG_LEGION
                                                 , get_logging_name()
@@ -2188,6 +2185,7 @@ namespace Legion {
       return projs.size() == 0;
     }
 
+#if 0
     //--------------------------------------------------------------------------
     bool PhysicalTemplate::check_preconditions(void)
     //--------------------------------------------------------------------------
@@ -2268,6 +2266,7 @@ namespace Legion {
 
       return true;
     }
+#endif
 
     //--------------------------------------------------------------------------
     bool PhysicalTemplate::check_replayable(void) const

@@ -1279,15 +1279,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const ProjectionInfo* TaskOp::get_projection_info(unsigned idx)
-    //--------------------------------------------------------------------------
-    {
-      // this should never be called
-      assert(false);
-      return NULL;
-    }
-
-    //--------------------------------------------------------------------------
     const std::vector<VersionInfo>* TaskOp::get_version_infos(void)
     //--------------------------------------------------------------------------
     {
@@ -1452,58 +1443,6 @@ namespace Legion {
           assert(index < infos.size());
 #endif
           infos[index].unpack_info(derez, runtime, ready_events);
-        }
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void TaskOp::pack_projection_infos(Serializer &rez, 
-                                       std::vector<ProjectionInfo> &infos)
-    //--------------------------------------------------------------------------
-    {
-      RezCheck z(rez);
-      size_t count = 0;
-      for (unsigned idx = 0; idx < infos.size(); idx++)
-      {
-        if (infos[idx].is_projecting())
-          count++;
-      }
-      rez.serialize(count);
-      if (count > 0)
-      {
-        for (unsigned idx = 0; idx < infos.size(); idx++)
-        {
-          if (infos[idx].is_projecting())
-          {
-            rez.serialize(idx);
-            infos[idx].pack_info(rez);
-          }
-        }
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void TaskOp::unpack_projection_infos(Deserializer &derez,
-                                         std::vector<ProjectionInfo> &infos,
-                                         IndexSpace launch_space)
-    //--------------------------------------------------------------------------
-    {
-      DerezCheck z(derez);
-      infos.resize(regions.size());
-      size_t num_projections;
-      derez.deserialize(num_projections);
-      if (num_projections > 0)
-      {
-        IndexSpaceNode *launch_node = runtime->forest->get_node(launch_space);
-        for (unsigned idx = 0; idx < num_projections; idx++)
-        {
-          unsigned index;
-          derez.deserialize(index);
-#ifdef DEBUG_LEGION
-          assert(index < infos.size());
-#endif
-          infos[index].unpack_info(derez, runtime, 
-                                   regions[index], launch_node);
         }
       }
     }
@@ -1985,11 +1924,8 @@ namespace Legion {
         VersionInfo &version_info = get_version_info(*it); 
         if (version_info.has_physical_states())
           continue;
-        RegionTreePath &privilege_path = get_privilege_path(*it); 
         runtime->forest->perform_versioning_analysis(this, *it, regions[*it],
-                                                     privilege_path,
-                                                     version_info,
-                                                     version_ready_events);
+                                          version_info, version_ready_events);
       }
       Mapper::PremapTaskInput input;
       Mapper::PremapTaskOutput output;
@@ -2169,8 +2105,7 @@ namespace Legion {
                               version_info, restrict_info, this, *it,
                               completion_event, true/*defer users*/, 
                               true/*need read only reservations*/,
-                              applied_conditions, chosen_instances,
-                              get_projection_info(*it), trace_info
+                              applied_conditions, chosen_instances, trace_info
 #ifdef DEBUG_LEGION
                               , get_logging_name(), unique_op_id
 #endif
@@ -3558,7 +3493,6 @@ namespace Legion {
                                     !multiple_requirements/*read only locks*/,
                                     map_applied_conditions,
                                     physical_instances[idx],
-                                    get_projection_info(idx),
                                     trace_info
 #ifdef DEBUG_LEGION
                                     , get_logging_name()
@@ -3780,8 +3714,7 @@ namespace Legion {
                           ApEvent::NO_AP_EVENT/*done immediately*/, 
                           true/*defer add users*/, 
                           true/*need read only locks*/,
-                          map_applied_conditions, result, 
-                          get_projection_info(idx), trace_info
+                          map_applied_conditions, result, trace_info
 #ifdef DEBUG_LEGION
                           , get_logging_name(), unique_op_id
 #endif
@@ -4205,9 +4138,7 @@ namespace Legion {
       // Remove our reference to the point arguments 
       point_arguments = FutureMap();
       slices.clear(); 
-      version_infos.clear();
       restrict_infos.clear();
-      projection_infos.clear();
       if (predicate_false_result != NULL)
       {
         legion_free(PREDICATE_ALLOC, predicate_false_result, 
@@ -4410,7 +4341,6 @@ namespace Legion {
         initialize_reduction_state();
       }
       this->restrict_infos = rhs->restrict_infos;
-      this->projection_infos = rhs->projection_infos;
       this->predicate_false_future = rhs->predicate_false_future;
       this->predicate_false_size = rhs->predicate_false_size;
       if (this->predicate_false_size > 0)
@@ -4421,18 +4351,6 @@ namespace Legion {
         this->predicate_false_result = malloc(this->predicate_false_size);
         memcpy(this->predicate_false_result, rhs->predicate_false_result,
                this->predicate_false_size);
-      }
-      // Copy over the version infos that we need, we can skip this if
-      // we are remote and origin mapped
-      if (!is_remote() || !is_origin_mapped())
-      {
-        this->version_infos.resize(rhs->version_infos.size());
-        for (unsigned idx = 0; idx < this->version_infos.size(); idx++)
-        {
-          if (IS_NO_ACCESS(regions[idx]))
-            continue;
-          this->version_infos[idx] = rhs->version_infos[idx];
-        }
       }
     }
 
@@ -4608,16 +4526,6 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
-    VersionInfo& MultiTask::get_version_info(unsigned idx)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(idx < version_infos.size());
-#endif
-      return version_infos[idx];
-    }
-
-    //--------------------------------------------------------------------------
     RestrictInfo& MultiTask::get_restrict_info(unsigned idx)
     //--------------------------------------------------------------------------
     {
@@ -4625,23 +4533,6 @@ namespace Legion {
       assert(idx < restrict_infos.size());
 #endif
       return restrict_infos[idx];
-    }
-
-    //--------------------------------------------------------------------------
-    const ProjectionInfo* MultiTask::get_projection_info(unsigned idx)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(idx < projection_infos.size());
-#endif
-      return &projection_infos[idx]; 
-    }
-
-    //--------------------------------------------------------------------------
-    const std::vector<VersionInfo>* MultiTask::get_version_infos(void)
-    //--------------------------------------------------------------------------
-    {
-      return &version_infos;
     }
 
     //--------------------------------------------------------------------------
@@ -4959,7 +4850,6 @@ namespace Legion {
       {
         runtime->forest->perform_dependence_analysis(this, idx, regions[idx], 
                                                      restrict_infos[idx],
-                                                     version_infos[idx],
                                                      projection_info,
                                                      privilege_paths[idx]);
       }
@@ -5016,12 +4906,8 @@ namespace Legion {
           VersionInfo &version_info = version_infos[idx];
           if (version_info.has_physical_states())
             continue;
-          RegionTreePath privilege_path;
-          initialize_privilege_path(privilege_path, regions[idx]);
           runtime->forest->perform_versioning_analysis(this, idx, regions[idx],
-                                                       privilege_path,
-                                                       version_info,
-                                                       ready_events);
+                                                    version_info, ready_events);
         }
       }
       else
@@ -5034,9 +4920,7 @@ namespace Legion {
           if (version_info.has_physical_states())
             continue;
           runtime->forest->perform_versioning_analysis(this, idx, regions[idx],
-                                                       privilege_paths[idx],
-                                                       version_info,
-                                                       ready_events);
+                                                   version_info, ready_events);
         }
       }
       if (!ready_events.empty())
@@ -5278,13 +5162,6 @@ namespace Legion {
       assert(idx < restrict_infos.size());
 #endif
       return restrict_infos[idx];
-    }
-
-    //--------------------------------------------------------------------------
-    const ProjectionInfo* IndividualTask::get_projection_info(unsigned idx)
-    //--------------------------------------------------------------------------
-    {
-      return NULL;
     }
 
     //--------------------------------------------------------------------------
@@ -5924,135 +5801,10 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(version_infos.empty());
 #endif
-      // Copy the version info information over from our slice owner
-      version_infos = slice_owner->version_infos;
-#ifdef DEBUG_LEGION
-      assert(version_infos.size() == regions.size());
-#endif
-      // We have to walk down the tree from the upper bound node
-      // to where we are asking for privileges, along the way we
-      // first have to check to see if the tree is open, and then
-      // again to see if it has been advanced if we are going to 
-      // be writing/reducing below in the tree
-      const LegionMap<unsigned,FieldMask>::aligned empty_dirty_previous;
-      const UniqueID logical_context_uid = parent_ctx->get_context_uid();
+      version_infos.resize(regions.size());
       for (unsigned idx = 0; idx < regions.size(); idx++)
-      {
-        if (IS_NO_ACCESS(regions[idx]))
-          continue;
-        // If this is an early mapped region then we don't need to do anything
-        if (early_mapped_regions.find(idx) != early_mapped_regions.end())
-          continue;
-        ProjectionInfo &proj_info = slice_owner->projection_infos[idx]; 
-        RegionTreeNode *parent_node;
-        const RegionRequirement &slice_req = slice_owner->regions[idx];
-        if (slice_req.handle_type == PART_PROJECTION)
-          parent_node = runtime->forest->get_node(slice_req.partition);
-        else
-          parent_node = runtime->forest->get_node(slice_req.region);
-#ifdef DEBUG_LEGION
-        assert(regions[idx].handle_type == SINGULAR);
-#endif
-        RegionTreeNode *child_node = 
-          runtime->forest->get_node(regions[idx].region);
-        // If they are the same node, we are already done
-        if (child_node == parent_node)
-          continue;
-        // Compute our privilege full projection path 
-        RegionTreePath projection_path;
-        runtime->forest->initialize_path(child_node->get_row_source(),
-                       parent_node->get_row_source(), projection_path);
-        // Any opens/advances have already been generated to the
-        // upper bound node, so we don't have to handle that node, 
-        // therefore all our paths must start at one node below the
-        // upper bound node
-        RegionTreeNode *one_below = parent_node->get_tree_child(
-                projection_path.get_child(parent_node->get_depth()));
-        RegionTreePath one_below_path;
-        one_below_path.initialize(projection_path.get_min_depth()+1, 
-                                  projection_path.get_max_depth());
-        for (unsigned idx2 = projection_path.get_min_depth()+1; 
-              idx2 < projection_path.get_max_depth(); idx2++)
-          one_below_path.register_child(idx2, projection_path.get_child(idx2));
-        const LegionMap<ProjectionEpochID,FieldMask>::aligned &proj_epochs = 
-          proj_info.get_projection_epochs();
-        // Do the analysis to see if we've opened all the nodes to the child
-        {
-          for (LegionMap<ProjectionEpochID,FieldMask>::aligned::const_iterator
-                it = proj_epochs.begin(); it != proj_epochs.end(); it++)
-          {
-            // Advance version numbers from one below the upper bound
-            // all the way down to the child
-            runtime->forest->advance_version_numbers(this, idx, 
-                false/*update parent state*/, false/*doesn't matter*/,
-                logical_context_uid, true/*dedup opens*/, 
-                false/*dedup advance*/, it->first, 0/*id*/, one_below, 
-                one_below_path, it->second, empty_dirty_previous, ready_events);
-          }
-        }
-        // If we're doing something other than reading, we need
-        // to also do the advance for anything open below, we do
-        // this from the one below node to the node above the child node
-        // The exception is if we are reducing in which case we go from
-        // the all the way to the bottom so that the first reduction
-        // point bumps the version number appropriately. Another exception is 
-        // for dirty reductions where we know that there is already a write 
-        // at the base level so we don't need to do an advance to get our 
-        // reduction registered with the parent VersionState object
-
-        if (!IS_READ_ONLY(regions[idx]) && 
-            ((one_below != child_node) || 
-             (IS_REDUCE(regions[idx]) && !proj_info.is_dirty_reduction())))
-        {
-          RegionTreePath advance_path;
-          // If we're a reduction we go all the way to the bottom
-          // otherwise if we're read-write we go to the level above
-          // because our version_analysis call will do the advance
-          // at the destination node.           
-          if (IS_REDUCE(regions[idx]) && !proj_info.is_dirty_reduction())
-          {
-#ifdef DEBUG_LEGION
-            assert((one_below->get_depth() < child_node->get_depth()) ||
-                   (one_below == child_node)); 
-#endif
-            advance_path = one_below_path;
-          }
-          else
-          {
-#ifdef DEBUG_LEGION
-            assert(one_below->get_depth() < child_node->get_depth()); 
-#endif
-            advance_path.initialize(one_below_path.get_min_depth(), 
-                                    one_below_path.get_max_depth()-1);
-            for (unsigned idx2 = one_below_path.get_min_depth(); 
-                  idx2 < (one_below_path.get_max_depth()-1); idx2++)
-              advance_path.register_child(idx2, one_below_path.get_child(idx2));
-          }
-          const bool parent_is_upper_bound = 
-            (slice_req.handle_type != PART_PROJECTION) && 
-            (slice_req.region == slice_req.parent);
-          for (LegionMap<ProjectionEpochID,FieldMask>::aligned::const_iterator
-                it = proj_epochs.begin(); it != proj_epochs.end(); it++)
-          {
-            // Advance version numbers from the upper bound to one above
-            // the target child for split version numbers
-            runtime->forest->advance_version_numbers(this, idx, 
-                true/*update parent state*/, parent_is_upper_bound,
-                logical_context_uid, false/*dedup opens*/, 
-                true/*dedup advances*/, 0/*id*/, it->first, one_below, 
-                advance_path, it->second, empty_dirty_previous, ready_events);
-          }
-        }
-        // Now we can record our version numbers just like everyone else
-        // We can skip the check for virtual version information because
-        // our owner slice already did it
-        runtime->forest->perform_versioning_analysis(this, idx, regions[idx],
-                                      one_below_path, version_infos[idx], 
-                                      ready_events, false/*partial*/, 
-                                      false/*disjoint close*/, NULL/*filter*/,
-                                      one_below, logical_context_uid, 
-                                      &proj_epochs, true/*skip parent check*/);
-      }
+        runtime->forest->perform_versioning_analysis(this, idx,
+                regions[idx], version_infos[idx], ready_events);
     }
 
     //--------------------------------------------------------------------------
@@ -6239,13 +5991,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return slice_owner->get_restrict_info(idx);
-    }
-
-    //--------------------------------------------------------------------------
-    const ProjectionInfo* PointTask::get_projection_info(unsigned idx)
-    //--------------------------------------------------------------------------
-    {
-      return slice_owner->get_projection_info(idx);
     }
 
     //--------------------------------------------------------------------------
@@ -6977,15 +6722,12 @@ namespace Legion {
       register_predicate_dependence();
       version_infos.resize(regions.size());
       restrict_infos.resize(regions.size());
-      projection_infos.resize(regions.size());
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
-        projection_infos[idx] = 
-          ProjectionInfo(runtime, regions[idx], launch_space);
+        ProjectionInfo projection_info(runtime, regions[idx], launch_space);
         runtime->forest->perform_dependence_analysis(this, idx, regions[idx], 
                                                      restrict_infos[idx],
-                                                     version_infos[idx],
-                                                     projection_infos[idx],
+                                                     projection_info,
                                                      privilege_paths[idx]);
       }
     }
@@ -8001,59 +7743,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtEvent SliceTask::perform_versioning_analysis(void)
-    //--------------------------------------------------------------------------
-    {
-      if (is_replaying())
-      {
-        need_versioning_analysis = false;
-        return RtEvent::NO_RT_EVENT;
-      }
-#ifdef DEBUG_LEGION
-      assert(!points.empty());
-      assert(need_versioning_analysis);
-      assert(regions.size() == version_infos.size());
-#endif
-      // Once we return from this function we'll be done with versioning
-      need_versioning_analysis = false;
-      // If we're origin mapped and already remote then we know
-      // we are done mapping so there is no need to do any
-      // versioning computation
-      if (is_remote() && is_origin_mapped())
-        return RtEvent::NO_RT_EVENT;
-      std::set<RtEvent> ready_events;
-      for (unsigned idx = 0; idx < regions.size(); idx++)
-      {
-        // If this was early mapped, then we can skip it
-        if (early_mapped_regions.find(idx) != early_mapped_regions.end())
-          continue;
-        VersionInfo &version_info = version_infos[idx];
-        // If we already have physical state for it then we've 
-        // done this before so there is no need to do it again
-        if (version_info.has_physical_states())
-          continue;
-        ProjectionInfo &proj_info = projection_infos[idx];
-        const bool partial_traversal = 
-          (proj_info.projection_type == PART_PROJECTION) ||
-          ((proj_info.projection_type != SINGULAR) && 
-           (proj_info.projection->depth > 0));
-        RegionTreePath privilege_path;
-        initialize_privilege_path(privilege_path, regions[idx]);
-        runtime->forest->perform_versioning_analysis(this, idx, regions[idx],
-                                                     privilege_path,
-                                                     version_info,
-                                                     ready_events,
-                                                     partial_traversal);
-      }
-      // Now do the analysis for each of our points
-      for (unsigned idx = 0; idx < points.size(); idx++)
-        points[idx]->perform_versioning_analysis(ready_events);
-      if (!ready_events.empty())
-        return Runtime::merge_events(ready_events);
-      return RtEvent::NO_RT_EVENT;
-    }
-
-    //--------------------------------------------------------------------------
     std::map<PhysicalManager*,std::pair<unsigned,bool> >* 
                                      SliceTask::get_acquired_instances_ref(void)
     //--------------------------------------------------------------------------
@@ -8277,10 +7966,6 @@ namespace Legion {
         pack_restrict_infos(rez, restrict_infos);
       else
         index_owner->pack_restrict_infos(rez, index_owner->restrict_infos);
-      if (is_remote())
-        pack_projection_infos(rez, projection_infos);
-      else
-        index_owner->pack_projection_infos(rez, index_owner->projection_infos);
       if (predicate_false_future.impl != NULL)
         rez.serialize(predicate_false_future.impl->did);
       else
@@ -8339,7 +8024,6 @@ namespace Legion {
       derez.deserialize(internal_space);
       unpack_version_infos(derez, version_infos, ready_events);
       unpack_restrict_infos(derez, restrict_infos, ready_events);
-      unpack_projection_infos(derez, projection_infos, launch_space);
       if (runtime->legion_spy_enabled)
         LegionSpy::log_slice_slice(remote_unique_id, get_unique_id());
       if (runtime->profiler != NULL)

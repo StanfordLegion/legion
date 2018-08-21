@@ -824,56 +824,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MaterializedView::find_composite_copy_preconditions(
-                                           bool restrict_out,
-                                           const FieldMask &copy_mask,
-                                           IndexSpaceExpression *copy_expr,
-                                           VersionTracker *versions,
-                                           const UniqueID creator_op_id,
-                                           const unsigned index,
-                                           const AddressSpaceID source,
-                         LegionMap<ApEvent,WriteSet>::aligned &preconditions,
-                                           std::set<RtEvent> &applied_events,
-                                           const PhysicalTraceInfo &trace_info,
-                                           bool can_filter)
-    //--------------------------------------------------------------------------
-    {
-      ApEvent start_use_event = manager->get_use_event();
-      if (start_use_event.exists())
-      {
-        LegionMap<ApEvent,WriteSet>::aligned::iterator finder = 
-          preconditions.find(start_use_event);
-        if (finder == preconditions.end())
-          preconditions[start_use_event].insert(copy_expr, copy_mask);
-        else
-          finder->second.insert(copy_expr, copy_mask);
-      }
-      // If we can filter we can do the normal case, otherwise
-      // we do the above case where we don't filter
-      if (can_filter)
-        find_local_copy_preconditions<WriteSet>(0/*redop*/, false/*reading*/,
-                                      false/*single copy*/, restrict_out,
-                                      copy_mask, INVALID_COLOR, copy_expr, 
-                                      versions, creator_op_id, index, source, 
-                                      preconditions, applied_events,trace_info);
-      else
-        find_local_copy_preconditions_above<WriteSet>(0/*redop*/, 
-                                      false/*reading*/, false/*single copy*/,
-                                      restrict_out, copy_mask, INVALID_COLOR, 
-                                      copy_expr, versions,creator_op_id,index,
-                                      source, preconditions, applied_events,
-                                      trace_info, false/*actually above*/);
-      if ((parent != NULL) && !versions->is_upper_bound_node(logical_node))
-      {
-        const LegionColor local_point = logical_node->get_color();
-        parent->find_copy_preconditions_above<WriteSet>(0/*redop*/, 
-          false/*reading*/, false/*single copy*/, restrict_out, copy_mask, 
-          local_point, copy_expr, versions, creator_op_id, index, source,
-          preconditions, applied_events, trace_info);
-      } 
-    }
-
-    //--------------------------------------------------------------------------
     void MaterializedView::add_copy_user(ReductionOpID redop, ApEvent copy_term,
                                          VersionTracker *versions,
                                          IndexSpaceExpression *copy_expr,
@@ -4147,6 +4097,7 @@ namespace Legion {
       Runtime::trigger_event(done_event);
     }
 
+#if 0
     /////////////////////////////////////////////////////////////
     // DeferredCopier
     /////////////////////////////////////////////////////////////
@@ -8425,6 +8376,7 @@ namespace Legion {
         (const DeferPhiViewRegistrationArgs*)args;
       pargs->view->register_with_runtime(NULL/*no remote registration*/);
     }
+#endif
 
     /////////////////////////////////////////////////////////////
     // ReductionView 

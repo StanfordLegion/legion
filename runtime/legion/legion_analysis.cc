@@ -684,6 +684,7 @@ namespace Legion {
     }
 #endif
 
+#if 0
     /////////////////////////////////////////////////////////////
     // VersionInfo 
     /////////////////////////////////////////////////////////////
@@ -1280,6 +1281,7 @@ namespace Legion {
         upper_bound_node = forest->get_node(handle);
       }
     }
+#endif
 
     /////////////////////////////////////////////////////////////
     // RestrictInfo 
@@ -2062,6 +2064,7 @@ namespace Legion {
       tpl->record_empty_copy(view, copy_mask, dst);
     }
 
+#if 0
     /////////////////////////////////////////////////////////////
     // ProjectionInfo 
     /////////////////////////////////////////////////////////////
@@ -2172,6 +2175,7 @@ namespace Legion {
         derez.deserialize(projection_epochs[epoch]);
       }
     }
+#endif
 
     /////////////////////////////////////////////////////////////
     // PathTraverser 
@@ -2588,6 +2592,7 @@ namespace Legion {
     // LogicalState 
     ///////////////////////////////////////////////////////////// 
 
+#if 0
     //--------------------------------------------------------------------------
     LogicalState::LogicalState(RegionTreeNode *node, ContextID ctx)
       : owner(node)
@@ -2953,6 +2958,7 @@ namespace Legion {
         }
       }
     }
+#endif
 
     /////////////////////////////////////////////////////////////
     // FieldState 
@@ -3300,6 +3306,7 @@ namespace Legion {
     // Logical Closer 
     /////////////////////////////////////////////////////////////
 
+#if 0
     //--------------------------------------------------------------------------
     LogicalCloser::LogicalCloser(ContextID c, const LogicalUser &u, 
                                  RegionTreeNode *r, bool val, bool capture)
@@ -8689,6 +8696,7 @@ namespace Legion {
         }
       }
     }
+#endif
 
     /////////////////////////////////////////////////////////////
     // RegionTreePath 

@@ -283,7 +283,6 @@ namespace Legion {
       virtual unsigned find_parent_index(unsigned idx);
       virtual VersionInfo& get_version_info(unsigned idx);
       virtual RestrictInfo& get_restrict_info(unsigned idx);
-      virtual const ProjectionInfo* get_projection_info(unsigned idx);
       virtual const std::vector<VersionInfo>* get_version_infos(void);
       virtual const std::vector<RestrictInfo>* get_restrict_infos(void);
       virtual RegionTreePath& get_privilege_path(unsigned idx);
@@ -326,11 +325,6 @@ namespace Legion {
       void unpack_restrict_infos(Deserializer &derez,
                                  std::vector<RestrictInfo> &infos,
                                  std::set<RtEvent> &ready_events);
-      void pack_projection_infos(Serializer &rez,
-                                 std::vector<ProjectionInfo> &infos);
-      void unpack_projection_infos(Deserializer &derez,
-                                   std::vector<ProjectionInfo> &infos,
-                                   IndexSpace launch_space);
     public:
       // Tell the parent context that this task is in a ready queue
       void activate_outstanding_task(void);
@@ -612,7 +606,6 @@ namespace Legion {
       virtual void map_and_launch(void) = 0;
       virtual VersionInfo& get_version_info(unsigned idx);
       virtual RestrictInfo& get_restrict_info(unsigned idx);
-      virtual const ProjectionInfo* get_projection_info(unsigned idx);
       virtual const std::vector<VersionInfo>* get_version_infos(void);
       virtual const std::vector<RestrictInfo>* get_restrict_infos(void);
     public:
@@ -647,7 +640,6 @@ namespace Legion {
       std::list<SliceTask*> slices;
       std::vector<VersionInfo> version_infos;
       std::vector<RestrictInfo> restrict_infos;
-      std::vector<ProjectionInfo> projection_infos;
       bool sliced;
     protected:
       IndexSpace launch_space; // global set of points
@@ -715,7 +707,6 @@ namespace Legion {
       virtual bool can_early_complete(ApUserEvent &chain_event);
       virtual VersionInfo& get_version_info(unsigned idx);
       virtual RestrictInfo& get_restrict_info(unsigned idx);
-      virtual const ProjectionInfo* get_projection_info(unsigned idx);
       virtual const std::vector<VersionInfo>* get_version_infos(void);
       virtual const std::vector<RestrictInfo>* get_restrict_infos(void);
       virtual RegionTreePath& get_privilege_path(unsigned idx);
@@ -827,7 +818,6 @@ namespace Legion {
       virtual bool can_early_complete(ApUserEvent &chain_event);
       virtual VersionInfo& get_version_info(unsigned idx);
       virtual RestrictInfo& get_restrict_info(unsigned idx);
-      virtual const ProjectionInfo* get_projection_info(unsigned idx);
       virtual const std::vector<VersionInfo>* get_version_infos(void);
       virtual const std::vector<RestrictInfo>* get_restrict_infos(void);
     public:

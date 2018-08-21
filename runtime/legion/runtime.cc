@@ -5976,11 +5976,6 @@ namespace Legion {
                                                      remote_address_space);
               break;
             }
-          case SEND_COMPOSITE_VIEW:
-            {
-              runtime->handle_send_composite_view(derez, remote_address_space);
-              break;
-            }
           case SEND_FILL_VIEW:
             {
               runtime->handle_send_fill_view(derez, remote_address_space);
@@ -9168,33 +9163,13 @@ namespace Legion {
         delete (*it);
       }
       available_deletion_ops.clear();
-      for (std::deque<OpenOp*>::const_iterator it = 
-            available_open_ops.begin(); it !=
-            available_open_ops.end(); it++)
+      for (std::deque<MergeCloseOp*>::const_iterator it = 
+            available_merge_close_ops.begin(); it !=
+            available_merge_close_ops.end(); it++)
       {
         delete (*it);
       }
-      available_open_ops.clear();
-      for (std::deque<AdvanceOp*>::const_iterator it = 
-            available_advance_ops.begin(); it !=
-            available_advance_ops.end(); it++)
-      {
-        delete (*it);
-      }
-      available_advance_ops.clear();
-      for (std::deque<InterCloseOp*>::const_iterator it = 
-            available_inter_close_ops.begin(); it !=
-            available_inter_close_ops.end(); it++)
-      {
-        delete (*it);
-      }
-      available_inter_close_ops.clear();
-      for (std::deque<ReadCloseOp*>::const_iterator it = 
-            available_read_close_ops.begin(); it != 
-            available_read_close_ops.end(); it++)
-      {
-        delete (*it);
-      }
+      available_merge_close_ops.clear();
       for (std::deque<PostCloseOp*>::const_iterator it = 
             available_post_close_ops.begin(); it !=
             available_post_close_ops.end(); it++)
@@ -13825,14 +13800,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_composite_view(AddressSpaceID target, Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message(rez, SEND_COMPOSITE_VIEW,
-                                       VIEW_VIRTUAL_CHANNEL, true/*flush*/);
-    } 
-
-    //--------------------------------------------------------------------------
     void Runtime::send_fill_view(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -14946,14 +14913,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       MaterializedView::handle_send_materialized_view(this, derez, source); 
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_send_composite_view(Deserializer &derez,
-                                             AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      CompositeView::handle_send_composite_view(this, derez, source);
     }
 
     //--------------------------------------------------------------------------
@@ -16284,9 +16243,6 @@ namespace Legion {
       else if (LogicalView::is_reduction_did(did))
         dc = find_or_request_distributed_collectable<
           ReductionView, SEND_VIEW_REQUEST, VIEW_VIRTUAL_CHANNEL>(did, ready);
-      else if (LogicalView::is_composite_did(did))
-        dc = find_or_request_distributed_collectable<
-          CompositeView, SEND_VIEW_REQUEST, VIEW_VIRTUAL_CHANNEL>(did, ready);
       else if (LogicalView::is_fill_did(did))
         dc = find_or_request_distributed_collectable<
           FillView, SEND_VIEW_REQUEST, VIEW_VIRTUAL_CHANNEL>(did, ready);
@@ -16907,31 +16863,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    OpenOp* Runtime::get_available_open_op(void)
+    MergeCloseOp* Runtime::get_available_merge_close_op(void)
     //--------------------------------------------------------------------------
     {
-      return get_available(open_op_lock, available_open_ops);
-    }
-
-    //--------------------------------------------------------------------------
-    AdvanceOp* Runtime::get_available_advance_op(void)
-    //--------------------------------------------------------------------------
-    {
-      return get_available(advance_op_lock, available_advance_ops);
-    }
-
-    //--------------------------------------------------------------------------
-    InterCloseOp* Runtime::get_available_inter_close_op(void)
-    //--------------------------------------------------------------------------
-    {
-      return get_available(inter_close_op_lock, available_inter_close_ops);
-    }
-
-    //--------------------------------------------------------------------------
-    ReadCloseOp* Runtime::get_available_read_close_op(void)
-    //--------------------------------------------------------------------------
-    {
-      return get_available(read_close_op_lock, available_read_close_ops);
+      return get_available(merge_close_op_lock, available_merge_close_ops);
     }
 
     //--------------------------------------------------------------------------
@@ -17220,35 +17155,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::free_open_op(OpenOp *op)
+    void Runtime::free_merge_close_op(MergeCloseOp *op)
     //--------------------------------------------------------------------------
     {
-      AutoLock o_lock(open_op_lock);
-      release_operation<false>(available_open_ops, op);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::free_advance_op(AdvanceOp *op)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock a_lock(advance_op_lock);
-      release_operation<false>(available_advance_ops, op);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::free_inter_close_op(InterCloseOp *op)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock i_lock(inter_close_op_lock);
-      release_operation<false>(available_inter_close_ops, op);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::free_read_close_op(ReadCloseOp *op)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock r_lock(read_close_op_lock);
-      release_operation<false>(available_read_close_ops, op);
+      AutoLock i_lock(merge_close_op_lock);
+      release_operation<false>(available_merge_close_ops, op);
     }
 
     //--------------------------------------------------------------------------
@@ -18031,8 +17942,6 @@ namespace Legion {
           return "List Reduction Manager";
         case FOLD_MANAGER_ALLOC:
           return "Fold Reduction Manager";
-        case COMPOSITE_NODE_ALLOC:
-          return "Composite Node";
         case TREE_CLOSE_ALLOC:
           return "Tree Close List";
         case TREE_CLOSE_IMPL_ALLOC:
@@ -18041,8 +17950,6 @@ namespace Legion {
           return "Materialized View";
         case REDUCTION_VIEW_ALLOC:
           return "Reduction View";
-        case COMPOSITE_VIEW_ALLOC:
-          return "Composite View";
         case FILL_VIEW_ALLOC:
           return "Fill View";
         case PHI_VIEW_ALLOC:
@@ -18071,10 +17978,6 @@ namespace Legion {
           return "Frame Op";
         case DELETION_OP_ALLOC:
           return "Deletion Op";
-        case OPEN_OP_ALLOC:
-          return "Open Op";
-        case ADVANCE_OP_ALLOC:
-          return "Advance Op";
         case CLOSE_OP_ALLOC:
           return "Close Op";
         case DYNAMIC_COLLECTIVE_OP_ALLOC:
@@ -20081,26 +19984,6 @@ namespace Legion {
             MapperManager::handle_deferred_message(args);
             break;
           }
-        case LG_DEFER_COMPOSITE_VIEW_REF_TASK_ID:
-          {
-            CompositeView::handle_deferred_view_ref(args);
-            break;
-          }
-        case LG_DEFER_COMPOSITE_VIEW_REGISTRATION_TASK_ID:
-          {
-            CompositeView::handle_deferred_view_registration(args);
-            break;
-          }
-        case LG_DEFER_COMPOSITE_NODE_REF_TASK_ID:
-          {
-            CompositeNode::handle_deferred_node_ref(args);
-            break;
-          }
-        case LG_DEFER_COMPOSITE_NODE_CAPTURE_TASK_ID:
-          {
-            CompositeNode::handle_deferred_capture(args);
-            break;
-          }
         case LG_CONVERT_VIEW_TASK_ID:
           {
             VersionState::process_convert_view(args);
@@ -20178,11 +20061,6 @@ namespace Legion {
         case LG_VERSION_STATE_PENDING_ADVANCE_TASK_ID:
           {
             VersionManager::process_pending_advance(args);
-            break;
-          }
-        case LG_DISJOINT_CLOSE_TASK_ID:
-          {
-            InterCloseOp::handle_disjoint_close(args);
             break;
           }
         case LG_DEFER_MATERIALIZED_VIEW_TASK_ID:
