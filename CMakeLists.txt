@@ -180,6 +180,8 @@ if(Legion_USE_Python)
   list(GET PYTHON_VERSION_SPLIT 0 PYTHON_VERSION_MAJOR)
 endif()
 
+set(BINDINGS_DEFAULT_MODULE "" CACHE STRING "module to load by default in Python bindings, if any")
+
 #------------------------------------------------------------------------------#
 # CUDA configuration
 #------------------------------------------------------------------------------#

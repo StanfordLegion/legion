@@ -25,7 +25,9 @@ endif()
 add_executable(legion_python main.cc)
 set_target_properties(legion_python PROPERTIES OUTPUT_NAME "legion_python${INSTALL_SUFFIX}")
 target_link_libraries(legion_python Legion::Legion)
-target_compile_definitions(legion_python PRIVATE BINDINGS_AUGMENT_PYTHONPATH)
+if(BINDINGS_DEFAULT_MODULE)
+  target_compile_definitions(legion_python PRIVATE "BINDINGS_DEFAULT_MODULE=${BINDINGS_DEFAULT_MODULE}")
+endif()
 install(TARGETS legion_python
   LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
   ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}

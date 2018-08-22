@@ -27,7 +27,7 @@ enum TaskIDs {
 
 int main(int argc, char **argv)
 {
-#if BINDINGS_AUGMENT_PYTHONPATH
+#ifdef BINDINGS_AUGMENT_PYTHONPATH
   // Add the binary directory to PYTHONPATH. This is needed for
   // in-place builds to find legion.py.
 
@@ -61,14 +61,25 @@ int main(int argc, char **argv)
   }
 #endif
 
+#ifdef BINDINGS_DEFAULT_MODULE
+#define str(x) #x
+  Realm::Python::PythonModule::import_python_module(str(BINDINGS_DEFAULT_MODULE));
+#undef str
+#else
   if (argc < 2) {
     fprintf(stderr, "usage: %s <module_name>\n", argv[0]);
     exit(1);
   }
+#endif
 
-  const char *module_name = argv[1];
+  if (argc >= 2) {
+    const char *module_name = argv[1];
 
-  Realm::Python::PythonModule::import_python_module(module_name);
+    if (argv[1][0] != '-') {
+      Realm::Python::PythonModule::import_python_module(module_name);
+    }
+  }
+
 
   Runtime::set_top_level_task_id(MAIN_TASK_ID);
 
