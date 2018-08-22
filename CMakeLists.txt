@@ -38,6 +38,8 @@ endif()
 #library api version, bump from time to time
 set(SOVERSION 1)
 
+set(INSTALL_SUFFIX "" CACHE STRING "Suffix to add to installed libraries and binaries")
+
 #------------------------------------------------------------------------------#
 # Build type and shared vs static library
 #------------------------------------------------------------------------------#
