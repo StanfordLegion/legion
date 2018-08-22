@@ -27,6 +27,7 @@ enum TaskIDs {
 
 int main(int argc, char **argv)
 {
+#if BINDINGS_AUGMENT_PYTHONPATH
   // Add the binary directory to PYTHONPATH. This is needed for
   // in-place builds to find legion.py.
 
@@ -58,6 +59,7 @@ int main(int argc, char **argv)
 
     free(bin_path);
   }
+#endif
 
   if (argc < 2) {
     fprintf(stderr, "usage: %s <module_name>\n", argv[0]);
