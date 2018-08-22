@@ -451,7 +451,6 @@ namespace Legion {
                      IndexSpace launch_space);
     public:
       inline bool is_projecting(void) const { return (projection != NULL); }
-      void clear(void);
     public:
       ProjectionFunction *projection;
       ProjectionType projection_type;
@@ -650,45 +649,14 @@ namespace Legion {
     public:
       LogicalState& operator=(const LogicalState &rhs);
     public:
-      inline void keep_dirty_fields(FieldMask &to_keep) const
-      {
-        FieldMask dirty_fields = write_fields | reduction_fields;
-        if (!partial_writes.empty())
-          dirty_fields |= partial_writes.get_valid_mask();
-        to_keep &= dirty_fields;
-      }
-      inline void filter_dirty_fields(FieldMask &to_filter) const
-      {
-        FieldMask dirty_fields = write_fields | reduction_fields;
-        if (!partial_writes.empty())
-          dirty_fields |= partial_writes.get_valid_mask();
-        to_filter -= dirty_fields;
-      }
-      inline void update_write_fields(const FieldMask &update)
-      {
-        write_fields |= update;
-        // we can also filter out any partial writes once we
-        // get a write at this level too
-        if (partial_writes.empty() ||
-            (partial_writes.get_valid_mask() * update))
-          return;
-        partial_writes.filter(update);
-      }
-    public:
       void check_init(void);
       void clear_logical_users(void);
       void reset(void);
       void clear_deleted_state(const FieldMask &deleted_mask);
     public:
       void advance_projection_epochs(const FieldMask &advance_mask);
-      void capture_projection_epochs(FieldMask capture_mask,
-                                     const ProjectionInfo &info);
-      void update_write_projection_epochs(FieldMask update_mask,
-                                          const LogicalUser &user,
-                                          const ProjectionInfo &info);
-      void find_projection_writes(FieldMask mask,
-                                  FieldMask &complete_writes,
-                                  WriteSet &partial_writes) const;
+      void update_projection_epochs(FieldMask capture_mask,
+                                    const ProjectionInfo &info);
     public:
       RegionTreeNode *const owner;
     public:
@@ -699,23 +667,12 @@ namespace Legion {
       LegionList<LogicalUser,PREV_LOGICAL_ALLOC>::track_aligned 
                                                             prev_epoch_users;
     public:
-      // Fields which we know have been mutated below in the region tree
-      FieldMask dirty_below;
-      // Fields that we know have been written at the current level
-      // (reductions don't count, we want to know they were actually written)
-      FieldMask write_fields;
-      // Furthermore keep track of any partial writes that we see,
-      // either from projection writes or from close operations
-      WriteSet partial_writes;
       // Keep track of which fields we've done a reduction to here
       FieldMask reduction_fields;
       LegionMap<ReductionOpID,FieldMask>::aligned outstanding_reductions;
     public:
       // Keep track of the current projection epoch for each field
       std::list<ProjectionEpoch*> projection_epochs;
-      // Also keep track of any complete projection writes that we've done
-      FieldMask projection_write_fields;
-      WriteSet projection_partial_writes;
     };
 
     typedef DynamicTableAllocator<LogicalState,10,8> LogicalStateAllocator;
@@ -729,7 +686,7 @@ namespace Legion {
     class LogicalCloser {
     public:
       LogicalCloser(ContextID ctx, const LogicalUser &u,
-                    RegionTreeNode *root, bool validates, bool captures);
+                    RegionTreeNode *root, bool validates);
       LogicalCloser(const LogicalCloser &rhs);
       ~LogicalCloser(void);
     public:
@@ -738,11 +695,9 @@ namespace Legion {
       inline bool has_close_operations(void) const { return !!close_mask; }
       // Record normal closes like this
       void record_close_operation(const FieldMask &mask);
-      void record_closed_user(const LogicalUser &user, 
-                              const FieldMask &mask, bool read_only);
-      
+      void record_closed_user(const LogicalUser &user, const FieldMask &mask);
 #ifndef LEGION_SPY
-      void pop_closed_user(bool read_only);
+      void pop_closed_user(void);
 #endif
       void initialize_close_operations(LogicalState &state, 
                                        Operation *creator,
@@ -751,14 +706,6 @@ namespace Legion {
                                        const FieldMask &open_below,
              LegionList<LogicalUser,CURR_LOGICAL_ALLOC>::track_aligned &cusers,
              LegionList<LogicalUser,PREV_LOGICAL_ALLOC>::track_aligned &pusers);
-      void begin_close_children(const FieldMask &closing_mask,
-                                RegionTreeNode *closing_node,
-                                const LogicalState &state);
-      void end_close_children(FieldMask closed_mask,
-                              RegionTreeNode *closed_node);
-      void update_close_writes(const FieldMask &closing_mask,
-                               RegionTreeNode *closing_node,
-                               const LogicalState &state);
       void update_state(LogicalState &state);
       void register_close_operations(
               LegionList<LogicalUser,CURR_LOGICAL_ALLOC>::track_aligned &users);
@@ -776,11 +723,7 @@ namespace Legion {
       const LogicalUser &user;
       RegionTreeNode *const root_node;
       const bool validates;
-      const bool capture_users;
-      LegionList<LogicalUser,CLOSE_LOGICAL_ALLOC>::track_aligned 
-                                                      normal_closed_users;
-      LegionList<LogicalUser,CLOSE_LOGICAL_ALLOC>::track_aligned 
-                                                      read_only_closed_users;
+      LegionList<LogicalUser,CLOSE_LOGICAL_ALLOC>::track_aligned closed_users;
     protected:
       FieldMask close_mask;
     protected:
@@ -860,6 +803,71 @@ namespace Legion {
 #endif
 
     /**
+     * \class EquivalenceSet
+     * The equivalence set class tracks the physical state of a
+     * set of points in a logical region for all the fields. There
+     * is an owner node for the equivlance set that uses a ESI
+     * protocol in order to manage local and remote copies of 
+     * the equivalence set for each of the different fields.
+     * It's also possible for the equivalence set to be refined
+     * into sub equivalence sets which then subsum it's responsibility.
+     */
+    class EquivalenceSet : public DistributedCollectable,
+                           public LegionHeapify<EquivalenceSet> {
+    public:
+      static const AllocationType alloc_type = EQUIVALENCE_SET_ALLOC;
+    public:
+      EquivalenceSet(Runtime *rt, DistributedID did,
+                     AddressSpaceID owner_space, 
+                     IndexSpaceExpression *expr, bool register_now);
+      EquivalenceSet(const EquivalenceSet &rhs);
+      virtual ~EquivalenceSet(void);
+    public:
+      EquivalenceSet& operator=(const EquivalenceSet &rhs);
+    public:
+      // From distributed collectable
+      virtual void notify_active(ReferenceMutator *mutator);
+      virtual void notify_inactive(ReferenceMutator *mutator);
+      virtual void notify_valid(ReferenceMutator *mutator);
+      virtual void notify_invalid(ReferenceMutator *mutator);
+    public:
+      void perform_versioning_analysis(const RegionUsage &usage,
+                                       const FieldMask &version_mask,
+                                       VersionInfo &version_info,
+                                       std::set<RtEvent> &ready_events,
+                                       std::set<RtEvent> &applied_events);
+    protected:
+      void send_equivalence_set(AddressSpaceID target);
+    public:
+      static void handle_equivalence_set_request(Deserializer &derez,
+                            Runtime *runtime, AddressSpaceID source);
+      static void handle_equivalence_set_response(Deserializer &derez,
+                            Runtime *runtime, AddressSpaceID source);
+    public:
+      IndexSpaceExpression *const set_expr;
+    protected:
+      // This is the actual physical state of the equivalence class
+      FieldMaskSet<LogicalView> valid_instances;
+      FieldMaskSet<ReductionView> reduction_instances;
+    protected:
+      // This is the current version number of the equivalence set
+      // Each field should appear in exactly one mask
+      LegionMap<VersionID,FieldMask>::aligned version_numbers;
+    protected:
+      // If we have sub sets then we track those here
+      // If this data structure is not empty, everything above is invalid
+      std::set<EquivalenceSet*> subsets;
+    protected:
+      // Used for tracking which fields have valid data here
+      // The owner node starts with all the valid fields
+      FieldMask local_valid_fields;
+      // The remainder of these members are only valid on the owner node
+      FieldMask exclusive_fields;
+      FieldMask shared_fields;
+      LegionMap<AddressSpaceID,FieldMask>::aligned remote_valid;
+    };
+
+    /**
      * \class VersionManager
      * The VersionManager class tracks the current version state
      * objects for a given region tree node in a specific context
@@ -873,54 +881,25 @@ namespace Legion {
      */
     class VersionManager : public LegionHeapify<VersionManager> {
     public:
-      struct ProjectionEpoch {
-      public:
-        ProjectionEpoch(void) : logical_ctx_id(0), epoch_id(0) { }
-        ProjectionEpoch(UniqueID logical_ctx, ProjectionEpochID epoch)
-          : logical_ctx_id(logical_ctx), epoch_id(epoch) { }
-      public:
-        inline bool operator==(const ProjectionEpoch &rhs) const
-          { return ((logical_ctx_id == rhs.logical_ctx_id) && 
-                    (epoch_id == rhs.epoch_id)); }
-        inline bool operator<(const ProjectionEpoch &rhs) const
-          {
-            if (logical_ctx_id < rhs.logical_ctx_id) return true;
-            if (logical_ctx_id > rhs.logical_ctx_id) return false;
-            return (epoch_id < rhs.epoch_id);
-          }
-      public:
-        UniqueID logical_ctx_id;
-        ProjectionEpochID epoch_id;
-      };
-      struct DirtyUpdateArgs : public LgTaskArgs<DirtyUpdateArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_VERSION_STATE_CAPTURE_DIRTY_TASK_ID;
-      public:
-        DirtyUpdateArgs(VersionState *prev, VersionState *tar, FieldMask *mask)
-          : LgTaskArgs<DirtyUpdateArgs>(implicit_provenance),
-            previous(prev), target(tar), capture_mask(mask) { }
-      public:
-        VersionState *const previous;
-        VersionState *const target;
-        FieldMask *const capture_mask;
-      };
-      struct PendingAdvanceArgs : public LgTaskArgs<PendingAdvanceArgs> {
-      public:
-        static const LgTaskID TASK_ID = 
-          LG_VERSION_STATE_PENDING_ADVANCE_TASK_ID;
-      public:
-        PendingAdvanceArgs(VersionManager *proxy, RtEvent reclaim)
-          : LgTaskArgs<PendingAdvanceArgs>(implicit_provenance),
-            proxy_this(proxy), to_reclaim(reclaim) { }
-      public:
-        VersionManager *const proxy_this;
-        const RtEvent to_reclaim;
-      };
-    public:
       static const AllocationType alloc_type = VERSION_MANAGER_ALLOC;
       static const VersionID init_version = 1;
     public:
-      typedef VersioningSet<VERSION_MANAGER_REF> ManagerVersions;
+      struct DeferVersionManagerRequestArgs : 
+        public LgTaskArgs<DeferVersionManagerRequestArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_DEFER_VERSION_MANAGER_TASK_ID;
+      public:
+        DeferVersionManagerRequestArgs(VersionManager *proxy, 
+            VersionManager *remote, AddressSpaceID tar, bool c)
+          : LgTaskArgs<DeferVersionManagerRequestArgs>(implicit_provenance),
+            proxy_this(proxy), remote_manager(remote), 
+            target(tar), compute(c) { }
+      public:
+        VersionManager *const proxy_this;
+        VersionManager *const remote_manager;
+        const AddressSpaceID target;
+        const bool compute;
+      };
     public:
       VersionManager(RegionTreeNode *node, ContextID ctx); 
       VersionManager(const VersionManager &manager);
@@ -938,122 +917,33 @@ namespace Legion {
                             const std::vector<LogicalView*> &corresponding,
                             std::set<RtEvent> &applied_events);
     public:
-      void record_current_versions(const FieldMask &version_mask,
-                                   FieldMask &unversioned_mask,
-                                   InnerContext *context,
-                                   Operation *op, unsigned index,
-                                   const RegionUsage &usage,
-                                   VersionInfo &version_info,
-                                   std::set<RtEvent> &ready_events);
-      void record_advance_versions(const FieldMask &version_mask,
-                                   InnerContext *context,
-                                   VersionInfo &version_info,
-                                   std::set<RtEvent> &ready_events);
-      void compute_advance_split_mask(VersionInfo &version_info,
-                                      UniqueID logical_context_uid,
-                                      InnerContext *context,
-                                      const FieldMask &version_mask,
-                                      std::set<RtEvent> &ready_events,
-         const LegionMap<ProjectionEpochID,FieldMask>::aligned &advance_epochs);
-      void record_path_only_versions(const FieldMask &version_mask,
-                                     const FieldMask &split_mask,
-                                     FieldMask &unversioned_mask,
-                                     InnerContext *context,
-                                     Operation *op, unsigned index,
-                                     const RegionUsage &usage,
-                                     VersionInfo &version_info,
-                                     std::set<RtEvent> &ready_events);
-      void record_disjoint_close_versions(const FieldMask &version_mask,
-                                          InnerContext *context,
-                                          Operation *op, unsigned index,
-                                          VersionInfo &version_info,
-                                          std::set<RtEvent> &ready_events);
-      void advance_versions(FieldMask version_mask, 
-                            UniqueID logical_context_uid,
-                            InnerContext *physical_context,
-                            bool update_parent_state,
-                            std::set<RtEvent> &applied_events,
-                            bool dedup_opens = false,
-                            ProjectionEpochID open_epoch = 0,
-                            bool dedup_advances = false, 
-                            ProjectionEpochID advance_epoch = 0,
-                            const FieldMask *dirty_previous = NULL,
-                            const ProjectionInfo *proj_info = NULL);
-      void reclaim_pending_advance(RtEvent done_event);
-      void update_child_versions(InnerContext *context,
-                                 LegionColor child_color,
-                                 VersioningSet<> &new_states,
-                                 std::set<RtEvent> &applied_events);
-      void invalidate_version_infos(const FieldMask &invalidate_mask);
-      static void filter_version_info(const FieldMask &invalidate_mask,
-              LegionMap<VersionID,ManagerVersions>::aligned &to_filter);
+      void perform_versioning_analysis(const RegionUsage &usage,
+                                       const FieldMask &version_mask,
+                                       InnerContext *parent_ctx,
+                                       VersionInfo &version_info,
+                                       std::set<RtEvent> &ready_events,
+                                       std::set<RtEvent> &applied_events);
+    protected:
+      void compute_equivalence_sets(void);
     public:
       void print_physical_state(RegionTreeNode *node,
                                 const FieldMask &capture_mask,
                                 TreeStateLogger *logger);
-    public:
-      void update_physical_state(PhysicalState *state);
     protected:
-      VersionState* create_new_version_state(VersionID vid);
+      void process_request(VersionManager *remote_manager, 
+                           AddressSpaceID source);
+      void send_response(VersionManager *remote_manager, AddressSpaceID target);
+      void process_defer_request(VersionManager *remote_manager,
+                                 AddressSpaceID target, bool compute_sets);
+      void process_response(Deserializer &derez);
     public:
-      RtEvent send_remote_advance(const FieldMask &advance_mask,
-                                  bool update_parent_state,
-                                  UniqueID logical_context_uid,
-                                  bool dedup_opens, 
-                                  ProjectionEpochID open_epoch,
-                                  bool dedup_advances,
-                                  ProjectionEpochID advance_epoch,
-                                  const FieldMask *dirty_previous,
-                                  const ProjectionInfo *proj_info);
-      static void handle_remote_advance(Deserializer &derez, Runtime *runtime);
-    public:
-      RtEvent send_remote_invalidate(AddressSpaceID target,
-                                     const FieldMask &invalidate_mask);
-      static void handle_remote_invalidate(Deserializer &derez, 
-                                           Runtime *runtime);
-    public:
-      RtEvent send_remote_version_request(FieldMask request_mask,
-                                          std::set<RtEvent> &ready_events);
       static void handle_request(Deserializer &derez, Runtime *runtime,
                                  AddressSpaceID source_space);
-    public:
-      void pack_response(Serializer &rez, AddressSpaceID target,
-                         const FieldMask &request_mask);
-      static void find_send_infos(
-          LegionMap<VersionID,ManagerVersions>::aligned &version_infos,
-                                  const FieldMask &request_mask, 
-          LegionMap<VersionState*,FieldMask>::aligned& send_infos);
-      static void pack_send_infos(Serializer &rez, const
-          LegionMap<VersionState*,FieldMask>::aligned& send_infos);
-    public:
-      void unpack_response(Deserializer &derez, RtUserEvent done_event,
-                           const FieldMask &update_mask,
-                           std::set<RtEvent> *applied_events);
-      static void unpack_send_infos(Deserializer &derez,
-          LegionMap<VersionState*,FieldMask>::aligned &infos,
-          Runtime *runtime, std::set<RtEvent> &preconditions);
-      static void merge_send_infos(
-          LegionMap<VersionID,ManagerVersions>::aligned &target_infos,
-          const LegionMap<VersionState*,FieldMask>::aligned &source_infos,
-                ReferenceMutator *mutator);
+      static void handle_deferred_request(const void *args);
       static void handle_response(Deserializer &derez);
-    public:
-      void find_or_create_unversioned_states(FieldMask unversioned,
-          LegionMap<VersionState*,FieldMask>::aligned &unversioned_states,
-                                             ReferenceMutator *mutator);
-      static void handle_unversioned_request(Deserializer &derez,
-                          Runtime *runtime, AddressSpaceID source);
-      static void handle_unversioned_response(Deserializer &derez,
-                                              Runtime *runtime);
-    public:
-      static void process_capture_dirty(const void *args);
-      static void process_pending_advance(const void *args);
-    protected:
-      void sanity_check(void);
     public:
       const ContextID ctx;
       RegionTreeNode *const node;
-      const unsigned depth;
       Runtime *const runtime;
     protected:
       mutable LocalLock manager_lock;
@@ -1063,33 +953,9 @@ namespace Legion {
       bool is_owner;
       AddressSpaceID owner_space;
     protected: 
-      LegionMap<VersionID,ManagerVersions>::aligned current_version_infos;
-      LegionMap<VersionID,ManagerVersions>::aligned previous_version_infos;
-    protected:
-      // On the owner node this is the set of fields for which there are
-      // remote copies. On remote nodes this is the set of fields which
-      // are locally valid.
-      FieldMask remote_valid_fields;
-      // Only used on remote nodes to track the set of pending advances
-      // which may indicate that remove_valid_fields is stale
-      FieldMask pending_remote_advance_summary;
-      LegionMap<RtEvent,FieldMask>::aligned pending_remote_advances;
-    protected:
-      // Owner information about which nodes have remote copies
-      LegionMap<AddressSpaceID,FieldMask>::aligned remote_valid;
-      // There is something really subtle going on here: note that the
-      // both the previous_opens and previous_advances have pairs of
-      // UniqueIDs and ProjectionEpochIDs as their keys. This is to 
-      // handle the case of virtual mappings, where projection epoch
-      // IDs can come from two different logical contexts, but be used
-      // in the same physical context due to a virtual mapping. We 
-      // disambiguate the projection epoch ID using the context ID.
-      // Information about preivous opens
-      LegionMap<ProjectionEpoch,FieldMask>::aligned previous_opens;
-      // Information about previous advances
-      LegionMap<ProjectionEpoch,FieldMask>::aligned previous_advancers;
-      // Remote information about outstanding requests we've made
-      LegionMap<RtUserEvent,FieldMask>::aligned outstanding_requests;
+      std::set<EquivalenceSet*> equivalence_sets; 
+      RtUserEvent equivalence_sets_ready;
+      volatile bool has_equivalence_sets;
     };
 
     typedef DynamicTableAllocator<VersionManager,10,8> VersionManagerAllocator;

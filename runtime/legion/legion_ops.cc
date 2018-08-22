@@ -2221,7 +2221,8 @@ namespace Legion {
       runtime->forest->perform_versioning_analysis(this, 0/*idx*/,
                                                    requirement, 
                                                    version_info,
-                                                   preconditions);
+                                                   preconditions,
+                                                   map_applied_conditions);
       if (!preconditions.empty())
         enqueue_ready_operation(Runtime::merge_events(preconditions));
       else
@@ -3606,7 +3607,8 @@ namespace Legion {
         runtime->forest->perform_versioning_analysis(this, idx,
                                                      src_requirements[idx],
                                                      src_versions[idx],
-                                                     preconditions);
+                                                     preconditions,
+                                                     map_applied_conditions);
       unsigned offset = src_requirements.size();
       for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
       {
@@ -3618,7 +3620,8 @@ namespace Legion {
         runtime->forest->perform_versioning_analysis(this, offset + idx,
                                                      dst_requirements[idx],
                                                      dst_versions[idx],
-                                                     preconditions);
+                                                     preconditions,
+                                                     map_applied_conditions);
         // Switch the privileges back when we are done
         if (is_reduce_req)
           dst_requirements[idx].privilege = REDUCE;
@@ -3630,7 +3633,8 @@ namespace Legion {
           runtime->forest->perform_versioning_analysis(this, offset + idx,
                                                  src_indirect_requirements[idx],
                                                  gather_versions[idx],
-                                                 preconditions);
+                                                 preconditions,
+                                                 map_applied_conditions);
       }
       if (!dst_indirect_requirements.empty())
       {
@@ -3639,7 +3643,8 @@ namespace Legion {
           runtime->forest->perform_versioning_analysis(this, offset + idx,
                                                  dst_indirect_requirements[idx],
                                                  scatter_versions[idx],
-                                                 preconditions);
+                                                 preconditions,
+                                                 map_applied_conditions);
       }
       if (!preconditions.empty())
         enqueue_ready_operation(Runtime::merge_events(preconditions));
@@ -5546,7 +5551,8 @@ namespace Legion {
       std::set<RtEvent> preconditions;
       for (unsigned idx = 0; idx < src_requirements.size(); idx++)
         runtime->forest->perform_versioning_analysis(this, idx,
-            src_requirements[idx], src_versions[idx], preconditions);
+            src_requirements[idx], src_versions[idx], 
+            preconditions, map_applied_conditions);
       for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
       {
         const bool is_reduce_req = IS_REDUCE(dst_requirements[idx]);
@@ -5556,7 +5562,7 @@ namespace Legion {
           dst_requirements[idx].privilege = READ_WRITE;
         runtime->forest->perform_versioning_analysis(this,
             src_requirements.size() + idx, dst_requirements[idx],
-            dst_versions[idx], preconditions);
+            dst_versions[idx], preconditions, map_applied_conditions);
         // Switch the privileges back when we are done
         if (is_reduce_req)
           dst_requirements[idx].privilege = REDUCE;
@@ -5566,7 +5572,8 @@ namespace Legion {
         const size_t offset = src_requirements.size() + dst_requirements.size();
         for (unsigned idx = 0; idx < src_indirect_requirements.size(); idx++)
           runtime->forest->perform_versioning_analysis(this, offset + idx, 
-           src_indirect_requirements[idx], gather_versions[idx], preconditions);
+           src_indirect_requirements[idx], gather_versions[idx], 
+           preconditions, map_applied_conditions);
       }
       if (!dst_indirect_requirements.empty())
       {
@@ -5574,7 +5581,8 @@ namespace Legion {
           dst_requirements.size() + src_indirect_requirements.size();
         for (unsigned idx = 0; idx < dst_indirect_requirements.size(); idx++)
           runtime->forest->perform_versioning_analysis(this, offset + idx, 
-           dst_indirect_requirements[idx], scatter_versions[idx],preconditions);
+           dst_indirect_requirements[idx], scatter_versions[idx],
+           preconditions, map_applied_conditions);
       }
       // Then put ourselves in the queue of operations ready to map
       if (!preconditions.empty())
@@ -6803,7 +6811,8 @@ namespace Legion {
       runtime->forest->perform_versioning_analysis(this, 0/*idx*/,
                                                    requirement,
                                                    version_info,
-                                                   preconditions);
+                                                   preconditions,
+                                                   map_applied_conditions);
       if (!preconditions.empty())
         enqueue_ready_operation(Runtime::merge_events(preconditions));
       else
@@ -7319,7 +7328,8 @@ namespace Legion {
       runtime->forest->perform_versioning_analysis(this, 0/*idx*/,
                                                    requirement,
                                                    version_info,
-                                                   preconditions);
+                                                   preconditions,
+                                                   map_applied_conditions);
       if (!preconditions.empty())
         enqueue_ready_operation(Runtime::merge_events(preconditions));
       else
@@ -8006,7 +8016,8 @@ namespace Legion {
       runtime->forest->perform_versioning_analysis(this, 0/*idx*/,
                                                    requirement,
                                                    version_info,
-                                                   preconditions);
+                                                   preconditions,
+                                                   map_applied_conditions);
       if (!preconditions.empty())
         enqueue_ready_operation(Runtime::merge_events(preconditions));
       else
@@ -11112,7 +11123,8 @@ namespace Legion {
         runtime->forest->perform_versioning_analysis(this, 0/*idx*/,
                                                      requirement,
                                                      version_info,
-                                                     preconditions);
+                                                     preconditions,
+                                                     map_applied_conditions);
         // Give these operations slightly higher priority since
         // they are likely needed for other operations
         if (!preconditions.empty())
@@ -11779,7 +11791,7 @@ namespace Legion {
       // Perform the version analysis for our point
       std::set<RtEvent> preconditions;
       runtime->forest->perform_versioning_analysis(this, 0/*idx*/,
-                        requirement, version_info, preconditions);
+            requirement, version_info, preconditions, map_applied_conditions);
       // Then put ourselves in the queue of operations ready to map
       if (!preconditions.empty())
         enqueue_ready_operation(Runtime::merge_events(preconditions));
@@ -12144,7 +12156,8 @@ namespace Legion {
       runtime->forest->perform_versioning_analysis(this, 0/*idx*/,
                                                    requirement,
                                                    version_info,
-                                                   preconditions);
+                                                   preconditions,
+                                                   map_applied_conditions);
       if (!preconditions.empty())
         enqueue_ready_operation(Runtime::merge_events(preconditions));
       else
@@ -13001,7 +13014,7 @@ namespace Legion {
       // Perform the version info
       std::set<RtEvent> preconditions;
       runtime->forest->perform_versioning_analysis(this, 0/*idx*/,
-                        requirement, version_info, preconditions);
+            requirement, version_info, preconditions, map_applied_conditions);
       if (!preconditions.empty())
         enqueue_ready_operation(Runtime::merge_events(preconditions));
       else
@@ -13302,7 +13315,8 @@ namespace Legion {
       runtime->forest->perform_versioning_analysis(this, 0/*idx*/,
                                                    requirement,
                                                    version_info,
-                                                   preconditions);
+                                                   preconditions,
+                                                   map_applied_conditions);
       if (!preconditions.empty())
         enqueue_ready_operation(Runtime::merge_events(preconditions));
       else
@@ -13706,6 +13720,7 @@ namespace Legion {
       privilege_path.clear();
       version_info.clear();
       restrict_info.clear();
+      map_applied_conditions.clear();
       result = Future(); // clear any references on the future
       runtime->free_detach_op(this);
     }
@@ -13778,7 +13793,8 @@ namespace Legion {
       runtime->forest->perform_versioning_analysis(this, 0/*idx*/,
                                                    requirement, 
                                                    version_info,
-                                                   preconditions);
+                                                   preconditions,
+                                                   map_applied_conditions);
       if (!preconditions.empty())
         enqueue_ready_operation(Runtime::merge_events(preconditions));
       else
@@ -13804,18 +13820,17 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(!manager->is_reduction_manager()); 
 #endif
-      std::set<RtEvent> applied_conditions;
       ApEvent detach_event = 
         runtime->forest->detach_external(requirement, this, 0/*idx*/, 
-                                     version_info,reference,applied_conditions);
-      version_info.apply_mapping(applied_conditions);
+                     version_info, reference, map_applied_conditions);
+      version_info.apply_mapping(map_applied_conditions);
       // Also tell the runtime to detach the external instance from memory
       // This has to be done before we can consider this mapped
       RtEvent detached_event = manager->detach_external_instance();
       if (detached_event.exists())
-        applied_conditions.insert(detached_event);
-      if (!applied_conditions.empty())
-        complete_mapping(Runtime::merge_events(applied_conditions));
+        map_applied_conditions.insert(detached_event);
+      if (!map_applied_conditions.empty())
+        complete_mapping(Runtime::merge_events(map_applied_conditions));
       else
         complete_mapping();
 

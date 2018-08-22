@@ -303,19 +303,8 @@ namespace Legion {
       void perform_versioning_analysis(Operation *op, unsigned idx,
                                        const RegionRequirement &req,
                                        VersionInfo &version_info,
-                                       std::set<RtEvent> &ready_events);
-      void advance_version_numbers(Operation *op, unsigned idx,
-                                   bool update_parent_state,
-                                   bool parent_is_upper_bound,
-                                   UniqueID logical_ctx_uid,
-                                   bool dedup_opens, bool dedup_advances, 
-                                   ProjectionEpochID open_epoch,
-                                   ProjectionEpochID advance_epoch,
-                                   RegionTreeNode *parent, 
-                                   const RegionTreePath &path,
-                                   const FieldMask &advance_mask,
-             const LegionMap<unsigned,FieldMask>::aligned &dirty_previous,
-                                   std::set<RtEvent> &ready_events);
+                                       std::set<RtEvent> &ready_events,
+                                       std::set<RtEvent> &applied_events);
       void invalidate_versions(RegionTreeContext ctx, LogicalRegion handle);
       void invalidate_all_versions(RegionTreeContext ctx);
     public:
@@ -324,8 +313,6 @@ namespace Legion {
                     ApEvent term_event, InnerContext *context, unsigned index,
                     std::map<PhysicalManager*,InstanceView*> &top_views,
                     std::set<RtEvent> &applied_events);
-      void initialize_virtual_context(RegionTreeContext ctx,
-                                      const RegionRequirement &req);
       void invalidate_current_context(RegionTreeContext ctx, bool users_only,
                                       LogicalRegion handle);
       bool match_instance_fields(const RegionRequirement &req1,
@@ -2443,8 +2430,6 @@ namespace Legion {
                          RtUserEvent ready = RtUserEvent::NO_RT_USER_EVENT) = 0;
     public:
       // Logical traversal operations
-      void initialize_logical_state(ContextID ctx,
-                                    const FieldMask &init_dirty_mask);
       void register_logical_user(ContextID ctx,
                                  const LogicalUser &user,
                                  RegionTreePath &path,
@@ -2461,7 +2446,7 @@ namespace Legion {
                                 const LegionColor next_child);
       void close_logical_node(LogicalCloser &closer,
                               const FieldMask &closing_mask,
-                              bool read_only_close);
+                              const bool read_only_close);
       void siphon_logical_children(LogicalCloser &closer,
                                    LogicalState &state,
                                    const FieldMask &closing_mask,
@@ -2531,31 +2516,13 @@ namespace Legion {
       static void handle_logical_state_return(Runtime *runtime,
                               Deserializer &derez, AddressSpaceID source);
     public:
-      void compute_version_numbers(ContextID ctx, 
-                                   const RegionTreePath &path,
-                                   const RegionUsage &usage,
-                                   const FieldMask &version_mask,
-                                   FieldMask &unversioned_mask,
-                                   Operation *op, unsigned idx,
-                                   InnerContext *parent_ctx,
-                                   VersionInfo &version_info,
-                                   std::set<RtEvent> &ready_events,
-                                   bool partial_traversal,
-                                   bool disjoint_close,
-                                   UniqueID logical_context_uid,
-        const LegionMap<ProjectionEpochID,FieldMask>::aligned *advance_epochs);
-      void advance_version_numbers(ContextID ctx,
-                                   const RegionTreePath &path,
-                                   const FieldMask &advance_mask,
-                                   InnerContext *parent_ctx,
-                                   bool update_parent_state,
-                                   bool skip_update_parent,
-                                   UniqueID logical_context_uid,
-                                   bool dedup_opens, bool dedup_advances, 
-                                   ProjectionEpochID open_epoch,
-                                   ProjectionEpochID advance_epoch,
-            const LegionMap<unsigned,FieldMask>::aligned &dirty_previous,
-                                   std::set<RtEvent> &ready_events);
+      void perform_versioning_analysis(ContextID ctx,
+                                       const RegionUsage &usage,
+                                       const FieldMask &version_mask,
+                                       InnerContext *parent_ctx,
+                                       VersionInfo &version_info,
+                                       std::set<RtEvent> &ready_events,
+                                       std::set<RtEvent> &applied_events);
     public:
       void initialize_current_state(ContextID ctx);
       void invalidate_current_state(ContextID ctx, bool users_only);
@@ -2766,7 +2733,7 @@ namespace Legion {
           bool validates_regions, Operation *to_skip = NULL, 
           GenerationID skip_gen = 0);
       template<AllocationType ALLOC>
-      static void perform_closing_checks(LogicalCloser &closer, bool read_only,
+      static void perform_closing_checks(LogicalCloser &closer,
           typename LegionList<LogicalUser, ALLOC>::track_aligned &users, 
           const FieldMask &check_mask);
     public:

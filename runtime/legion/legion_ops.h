@@ -2737,6 +2737,7 @@ namespace Legion {
       VersionInfo version_info;
       RestrictInfo restrict_info;
       unsigned parent_req_index;
+      std::set<RtEvent> map_applied_conditions;
       Future result;
     };
 

@@ -1925,7 +1925,7 @@ namespace Legion {
         if (version_info.has_physical_states())
           continue;
         runtime->forest->perform_versioning_analysis(this, *it, regions[*it],
-                                          version_info, version_ready_events);
+                      version_info, version_ready_events, applied_conditions);
       }
       Mapper::PremapTaskInput input;
       Mapper::PremapTaskOutput output;
@@ -4907,7 +4907,7 @@ namespace Legion {
           if (version_info.has_physical_states())
             continue;
           runtime->forest->perform_versioning_analysis(this, idx, regions[idx],
-                                                    version_info, ready_events);
+                            version_info, ready_events, map_applied_conditions);
         }
       }
       else
@@ -4920,7 +4920,7 @@ namespace Legion {
           if (version_info.has_physical_states())
             continue;
           runtime->forest->perform_versioning_analysis(this, idx, regions[idx],
-                                                   version_info, ready_events);
+                           version_info, ready_events, map_applied_conditions);
         }
       }
       if (!ready_events.empty())
@@ -5803,8 +5803,8 @@ namespace Legion {
 #endif
       version_infos.resize(regions.size());
       for (unsigned idx = 0; idx < regions.size(); idx++)
-        runtime->forest->perform_versioning_analysis(this, idx,
-                regions[idx], version_infos[idx], ready_events);
+        runtime->forest->perform_versioning_analysis(this, idx, regions[idx], 
+                    version_infos[idx], ready_events, map_applied_conditions);
     }
 
     //--------------------------------------------------------------------------

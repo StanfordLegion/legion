@@ -1411,16 +1411,11 @@ namespace Legion {
       top_node->send_back_logical_state(ctx.get_id(), context_uid, target);
     }
 
-#if 0
     //--------------------------------------------------------------------------
-    void RegionTreeForest::perform_versioning_analysis(Operation *op, 
-                        unsigned idx, const RegionRequirement &req,
-                        const RegionTreePath &path, VersionInfo &version_info,
-                        std::set<RtEvent> &ready_events, bool partial_traversal,
-                        bool disjoint_close, FieldMask *filter_mask,
-                        RegionTreeNode *parent_node, UniqueID logical_ctx_uid,
-          const LegionMap<ProjectionEpochID,FieldMask>::aligned *advance_epochs,
-                        bool skip_parent_check)
+    void RegionTreeForest::perform_versioning_analysis(Operation *op,
+                     unsigned idx, const RegionRequirement &req,
+                     VersionInfo &version_info, std::set<RtEvent> &ready_events,
+                     std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, REGION_TREE_VERSIONING_ANALYSIS_CALL);
@@ -1430,67 +1425,14 @@ namespace Legion {
       RegionTreeContext ctx = context->get_context(); 
 #ifdef DEBUG_LEGION
       assert(ctx.exists());
+      assert(req.handle_type == SINGULAR);
 #endif
-      RegionUsage usage(req); 
-      if (parent_node == NULL)
-        parent_node = get_node(req.parent);
+      RegionUsage usage(req);
+      RegionNode *region_node = get_node(req.region);
       FieldMask user_mask = 
-        parent_node->column_source->get_field_mask(req.privilege_fields);
-      // If we have a filter mask, then apply it
-      if (filter_mask != NULL)
-        user_mask &= *filter_mask;
-      // If this is not the top of the tree, see if we have to get
-      // any version infromation from our parent context (e.g. because
-      // it virtually mapped above where we have privileges)
-      const unsigned depth = parent_node->get_depth();
-      if (!skip_parent_check && (depth > 0))
-      {
-        TaskContext *parent_ctx = op->get_context();
-        unsigned parent_req_index = op->find_parent_index(idx);
-        parent_ctx->find_parent_version_info(parent_req_index, depth, 
-                                             user_mask, context, 
-                                             version_info, ready_events);
-      }
-      // Keep track of any unversioned fields
-      FieldMask unversioned_mask = user_mask;
-      // Do the traversal to compute the version numbers
-      parent_node->compute_version_numbers(ctx.get_id(), path, usage,
-                                           user_mask, unversioned_mask,
-                                           op, idx, context, version_info, 
-                                           ready_events, partial_traversal,
-                                           disjoint_close, logical_ctx_uid,
-                                           advance_epochs);
-    }
-#endif
-
-    //--------------------------------------------------------------------------
-    void RegionTreeForest::advance_version_numbers(Operation *op, unsigned idx,
-                                                bool update_parent_state,
-                                                bool parent_is_upper_bound,
-                                                UniqueID logical_ctx_uid,
-                                                bool dedup_opens, 
-                                                bool dedup_advances, 
-                                                ProjectionEpochID open_epoch, 
-                                                ProjectionEpochID advance_epoch,
-                                                RegionTreeNode *parent, 
-                                                const RegionTreePath &path,
-                                                const FieldMask &advance_mask, 
-                  const LegionMap<unsigned,FieldMask>::aligned &dirty_previous,
-                                                std::set<RtEvent> &ready_events)
-    //--------------------------------------------------------------------------
-    {
-      DETAILED_PROFILER(runtime, REGION_TREE_ADVANCE_VERSION_NUMBERS_CALL);
-      InnerContext *context = op->find_physical_context(idx);
-      RegionTreeContext ctx = context->get_context(); 
-#ifdef DEBUG_LEGION
-      assert(ctx.exists());
-#endif
-      parent->advance_version_numbers(ctx.get_id(), path, advance_mask,
-                                      context, update_parent_state,
-                                      parent_is_upper_bound, logical_ctx_uid,
-                                      dedup_opens, dedup_advances, open_epoch, 
-                                      advance_epoch, dirty_previous, 
-                                      ready_events);
+        region_node->column_source->get_field_mask(req.privilege_fields);
+      region_node->perform_versioning_analysis(ctx.get_id(), usage, user_mask,
+                         context, version_info, ready_events, applied_events); 
     }
 
     //--------------------------------------------------------------------------
@@ -1546,10 +1488,6 @@ namespace Legion {
       RegionUsage usage(req);
       FieldMask user_mask = 
         top_node->column_source->get_field_mask(req.privilege_fields);
-      // If we're writing, update the logical state with the dirty fields
-      // Even mark reads as dirty since we'll assume they are initialized
-      if (!IS_REDUCE(req))
-        top_node->initialize_logical_state(ctx.get_id(), user_mask);
       // Now we update the physical state
       std::vector<LogicalView*> corresponding(sources.size());
       const AddressSpaceID local_space = context->runtime->address_space;
@@ -1617,25 +1555,6 @@ namespace Legion {
       // Now we can register all these instances
       top_node->seed_state(ctx.get_id(), term_event, usage, user_mask, 
                  sources, context, init_index, corresponding, applied_events); 
-    }
-
-    //--------------------------------------------------------------------------
-    void RegionTreeForest::initialize_virtual_context(RegionTreeContext ctx,
-                                                  const RegionRequirement &req)
-    //--------------------------------------------------------------------------
-    {
-      DETAILED_PROFILER(runtime, REGION_TREE_INITIALIZE_CONTEXT_CALL);
-#ifdef DEBUG_LEGION
-      assert(req.handle_type == SINGULAR);
-      assert(!IS_REDUCE(req));
-#endif
-      RegionNode *top_node = get_node(req.region);
-      RegionUsage usage(req);
-      FieldMask user_mask = 
-        top_node->column_source->get_field_mask(req.privilege_fields);
-      // Mark that it has these fields dirty so they are included
-      // in all the analysis
-      top_node->initialize_logical_state(ctx.get_id(), user_mask);
     }
 
     //--------------------------------------------------------------------------
@@ -10775,15 +10694,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeNode::initialize_logical_state(ContextID ctx,
-                                                  const FieldMask &init_dirty)
-    //--------------------------------------------------------------------------
-    {
-      LogicalState &state = get_logical_state(ctx);
-      state.write_fields |= init_dirty;
-    }
-
-    //--------------------------------------------------------------------------
     void RegionTreeNode::register_logical_user(ContextID ctx, 
                                              const LogicalUser &user,
                                              RegionTreePath &path,
@@ -10809,8 +10719,7 @@ namespace Legion {
       {
         // Close up any children which we may have dependences on below
         const bool captures_closes = true;
-        LogicalCloser closer(ctx, user, this, 
-                             arrived/*validates*/, captures_closes);
+        LogicalCloser closer(ctx, user, this, arrived/*validates*/);
         // Special siphon operation for arrived projecting functions
         if (arrived && proj_info.is_projecting())
         {
@@ -10904,24 +10813,14 @@ namespace Legion {
         // If we're projecting, record any split fields and projection epochs
         if (proj_info.is_projecting())
         {
-          // Record our projection epochs and split masks
-          state.capture_projection_epochs(user.field_mask, proj_info);
           // If we're writing, then record our projection info in 
-          // the current projection epoch
-          if (IS_WRITE(user.usage))
-            state.update_write_projection_epochs(user.field_mask, 
-                                                 user, proj_info);
+          // the current projection epoch else do the same for non-writes
+          state.update_projection_epochs(user.field_mask, proj_info);
         }
         else if (user.usage.redop > 0)
         {
           // Not projecting and doing a reduction of some kind so record it
           record_logical_reduction(state, user.usage.redop, user.field_mask);
-        }
-        else if (IS_WRITE(user.usage))
-        {
-          // If we're not projecting and writing, indicating that
-          // we have written this logical region
-          state.update_write_fields(user.field_mask);
         }
       }
       else 
@@ -10997,20 +10896,19 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void RegionTreeNode::close_logical_node(LogicalCloser &closer,
                                             const FieldMask &closing_mask,
-                                            bool read_only_close)
+                                            const bool read_only_close)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(context->runtime, REGION_NODE_CLOSE_LOGICAL_NODE_CALL);
       LogicalState &state = get_logical_state(closer.ctx);
       // Perform closing checks on both the current epoch users
       // as well as the previous epoch users
-      perform_closing_checks<CURR_LOGICAL_ALLOC>(closer, read_only_close,
-                                     state.curr_epoch_users, closing_mask);
-      perform_closing_checks<PREV_LOGICAL_ALLOC>(closer, read_only_close,
-                                     state.prev_epoch_users, closing_mask);
+      perform_closing_checks<CURR_LOGICAL_ALLOC>(closer, state.curr_epoch_users,
+                                                 closing_mask);
+      perform_closing_checks<PREV_LOGICAL_ALLOC>(closer, state.prev_epoch_users,
+                                                 closing_mask);
       if (!state.field_states.empty())
       {
-        closer.begin_close_children(closing_mask, this, state); 
         // Recursively traverse any open children and close them as well
         for (std::list<FieldState>::iterator it = state.field_states.begin();
               it != state.field_states.end(); /*nothing*/)
@@ -11050,29 +10948,11 @@ namespace Legion {
           else
             it++;
         }
-        closer.end_close_children(closing_mask, this); 
       }
-      // No children, so just update any local writes
-      else
-      {
-        closer.update_close_writes(closing_mask, this, state);
-        // We can clear out our dirty fields 
-        if (!!state.write_fields)
-          state.write_fields -= closing_mask;
-        // Filter out any partial writes that we have too
-        if (!state.partial_writes.empty())
-          state.partial_writes.filter(closing_mask);
-        // Clear out any projection inforamtion also
-        if (!!state.projection_write_fields)
-          state.projection_write_fields -= closing_mask;
-        if (!state.projection_partial_writes.empty())
-          state.projection_partial_writes.filter(closing_mask);
-      }
+      // No children, so nothing to do
       // We can clear out our reduction fields
       if (!!state.reduction_fields)
         state.reduction_fields -= closing_mask;
-      // We can also mark that there is no longer any dirty data below
-      state.dirty_below -= closing_mask;
       // We can also clear any outstanding reduction fields
       if (!(state.reduction_fields * closing_mask))
         clear_logical_reduction_fields(state, closing_mask);
@@ -12490,8 +12370,7 @@ namespace Legion {
         if (!!check_mask)
         {
           // Perform any close operations
-          LogicalCloser closer(ctx, user, this,
-                               false/*validates*/, true/*capture*/);
+          LogicalCloser closer(ctx, user, this, false/*validates*/);
           siphon_logical_deletion(closer, state, check_mask, next_child, 
                               open_below, ((depth+1) == path.get_max_depth()));
           if (closer.has_close_operations())
@@ -12738,18 +12617,6 @@ namespace Legion {
           rez.serialize<bool>(false);
           rez.serialize(as_partition_node()->handle);
         }
-        rez.serialize(state.dirty_below);
-        rez.serialize(state.write_fields);
-        rez.serialize<size_t>(state.partial_writes.size());
-        if (!state.partial_writes.empty())
-        {
-          for (WriteSet::const_iterator it = state.partial_writes.begin();
-                it != state.partial_writes.end(); it++)
-          {
-            it->first->pack_expression(rez, target);
-            rez.serialize(it->second);
-          }
-        }
         rez.serialize(state.reduction_fields);
         rez.serialize<size_t>(state.outstanding_reductions.size());
         for (LegionMap<ReductionOpID,FieldMask>::aligned::const_iterator it = 
@@ -12777,15 +12644,6 @@ namespace Legion {
                   fit->second.begin(); it != fit->second.end(); it++)
               rez.serialize((*it)->handle);
           }
-        }
-        rez.serialize(state.projection_write_fields);
-        rez.serialize<size_t>(state.projection_partial_writes.size());
-        for (WriteSet::const_iterator it = 
-              state.projection_partial_writes.begin(); it != 
-              state.projection_partial_writes.end(); it++)
-        {
-          it->first->pack_expression(rez, target);
-          rez.serialize(it->second);
         }
         rez.serialize<size_t>(state.field_states.size());
         for (LegionList<FieldState>::aligned::const_iterator fit = 
@@ -12833,18 +12691,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       LogicalState &state = get_logical_state(ctx);
-      derez.deserialize(state.dirty_below);
-      derez.deserialize(state.write_fields);
-      size_t num_partial;
-      derez.deserialize(num_partial);
-      for (unsigned idx = 0; idx < num_partial; idx++)
-      {
-        IndexSpaceExpression *expr = 
-          IndexSpaceExpression::unpack_expression(derez, context, source);
-        FieldMask expr_mask;
-        derez.deserialize(expr_mask);
-        state.partial_writes.insert(expr, expr_mask);
-      }
       derez.deserialize(state.reduction_fields);
       size_t num_reductions;
       derez.deserialize(num_reductions);
@@ -12882,17 +12728,6 @@ namespace Legion {
             spaces.insert(context->get_node(handle));
           }
         }
-      }
-      derez.deserialize(state.projection_write_fields);
-      size_t num_proj_partial;
-      derez.deserialize(num_proj_partial);
-      for (unsigned idx = 0; idx < num_proj_partial; idx++)
-      {
-        IndexSpaceExpression *expr = 
-          IndexSpaceExpression::unpack_expression(derez, context, source);
-        FieldMask expr_mask;
-        derez.deserialize(expr_mask);
-        state.projection_partial_writes.insert(expr, expr_mask);
       }
       size_t num_field_states;
       derez.deserialize(num_field_states);
@@ -12952,6 +12787,22 @@ namespace Legion {
                                          derez, source);
     }
 
+    //--------------------------------------------------------------------------
+    void RegionTreeNode::perform_versioning_analysis(ContextID ctx,
+                                              const RegionUsage &usage,
+                                              const FieldMask &version_mask,
+                                              InnerContext *parent_ctx,
+                                              VersionInfo &version_info,
+                                              std::set<RtEvent> &ready_events,
+                                              std::set<RtEvent> &applied_events)
+    //--------------------------------------------------------------------------
+    {
+      VersionManager &manager = get_current_version_manager(ctx);
+      manager.perform_versioning_analysis(usage, version_mask, parent_ctx,
+                                version_info, ready_events, applied_events);
+    }
+
+#if 0
     //--------------------------------------------------------------------------
     void RegionTreeNode::compute_version_numbers(ContextID ctx,
                                                const RegionTreePath &path,
@@ -13024,67 +12875,6 @@ namespace Legion {
       }
     }
 
-    //--------------------------------------------------------------------------
-    void RegionTreeNode::advance_version_numbers(ContextID ctx,
-                                               const RegionTreePath &path,
-                                               const FieldMask &advance_mask,
-                                               InnerContext *parent_ctx, 
-                                               bool update_parent_state,
-                                               bool skip_update_parent,
-                                               UniqueID logical_context_uid,
-                                               bool dedup_opens, 
-                                               bool dedup_advances, 
-                                               ProjectionEpochID open_epoch,
-                                               ProjectionEpochID advance_epoch,
-                  const LegionMap<unsigned,FieldMask>::aligned &dirty_previous,
-                                               std::set<RtEvent> &ready_events)
-    //--------------------------------------------------------------------------
-    {
-      VersionManager &manager = get_current_version_manager(ctx);
-      // Perform the advance
-      const bool local_update_parent = update_parent_state && 
-                                       !skip_update_parent;
-      const unsigned depth = get_depth();
-      const bool arrived = !path.has_child(depth);
-      // As long as we are advancing in the middle of the tree
-      // then we have no initial state
-      bool still_need_advance = true;
-      if (!dirty_previous.empty())
-      {
-        LegionMap<unsigned,FieldMask>::aligned::const_iterator finder = 
-          dirty_previous.find(depth);
-        if (finder != dirty_previous.end())
-        {
-          const FieldMask dirty_prev = finder->second & advance_mask;
-          if (!!dirty_prev)
-          {
-            manager.advance_versions(advance_mask, logical_context_uid,
-                          parent_ctx, local_update_parent,
-                          ready_events, dedup_opens, open_epoch, 
-                          dedup_advances, advance_epoch, &dirty_prev);
-            still_need_advance = false;
-          }
-        }
-      }
-      if (still_need_advance)
-        manager.advance_versions(advance_mask, logical_context_uid,
-              parent_ctx, local_update_parent, ready_events, 
-              dedup_opens, open_epoch, dedup_advances, advance_epoch);
-      // Continue the traversal, 
-      // wonder if we get tail call recursion optimization
-      if (!arrived)
-      {
-        RegionTreeNode *child = get_tree_child(path.get_child(depth));
-        child->advance_version_numbers(ctx, path, advance_mask, 
-                                       parent_ctx, update_parent_state, 
-                                       false/*update*/, logical_context_uid,
-                                       dedup_opens, dedup_advances, 
-                                       open_epoch, advance_epoch, 
-                                       dirty_previous, ready_events);
-      }
-    }
-
-#if 0
     //--------------------------------------------------------------------------
     void RegionTreeNode::find_valid_instance_views(ContextID ctx,
                                                    PhysicalState *state,
@@ -14785,7 +14575,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<AllocationType ALLOC>
     /*static*/ void RegionTreeNode::perform_closing_checks(
-        LogicalCloser &closer, bool read_only_close,
+        LogicalCloser &closer,
         typename LegionList<LogicalUser, ALLOC>::track_aligned &users, 
         const FieldMask &check_mask)
     //--------------------------------------------------------------------------
@@ -14820,78 +14610,32 @@ namespace Legion {
             it++;
           continue;
         }
-
-        if (closer.capture_users)
-        {
-          // Record that we closed this user
-          // Update the field mask and the privilege
-          closer.record_closed_user(*it, overlap, read_only_close); 
-          // Remove the closed set of fields from this user
-          it->field_mask -= overlap;
-          // If it's empty, remove it from the list and let
-          // the mapping reference go up the tree with it
-          // Otherwise add a new mapping reference
-          if (!it->field_mask)
-            it = users.erase(it);
-          else
-          {
-#ifdef LEGION_SPY
-            // Always add the reference for Legion Spy
-            it->op->add_mapping_reference(it->gen);
-            it++;
-#else
-            // If not Legion Spy we can prune the user if it's done
-            if (!it->op->add_mapping_reference(it->gen))
-            {
-              closer.pop_closed_user(read_only_close);
-              it = users.erase(it);
-            }
-            else
-              it++;
-#endif
-          }
-        }
+        // Record that we closed this user
+        // Update the field mask and the privilege
+        closer.record_closed_user(*it, overlap);
+        // Remove the closed set of fields from this user
+        it->field_mask -= overlap;
+        // If it's empty, remove it from the list and let
+        // the mapping reference go up the tree with it
+        // Otherwise add a new mapping reference
+        if (!it->field_mask)
+          it = users.erase(it);
         else
         {
-          // If we're not capturing the users, then we actually
-          // have to do the dependence analysis with respect to 
-          // the closing user
-          DependenceType dtype = check_dependence_type(it->usage, 
-                                                     closer.user.usage);
 #ifdef LEGION_SPY
-          if (dtype != NO_DEPENDENCE)
-            LegionSpy::log_mapping_dependence(
-                closer.user.op->get_context()->get_unique_id(),
-                it->uid, it->idx, closer.user.uid, closer.user.idx, dtype);
-#endif
-          // Register the dependence 
-          if (closer.user.op->register_region_dependence(closer.user.idx, 
-                                                         it->op, it->gen, 
-                                                         it->idx, dtype,
-                                                         closer.validates,
-                                                         overlap))
+          // Always add the reference for Legion Spy
+          it->op->add_mapping_reference(it->gen);
+          it++;
+#else
+          // If not Legion Spy we can prune the user if it's done
+          if (!it->op->add_mapping_reference(it->gen))
           {
-#ifndef LEGION_SPY
-            it = users.erase(it);
-            continue;
-#endif
-          }
-          else
-          {
-            // it hasn't committed, reset timeout
-            it->timeout = LogicalUser::TIMEOUT;
-          }
-          // Remove the closed set of fields from this user
-          it->field_mask -= overlap;
-          // Otherwise, if we can remote it, then remove it's
-          // mapping reference from the logical tree.
-          if (!it->field_mask)
-          {
-            it->op->remove_mapping_reference(it->gen);
+            closer.pop_closed_user();
             it = users.erase(it);
           }
           else
             it++;
+#endif
         }
       }
     }
@@ -16538,12 +16282,6 @@ namespace Legion {
     {
       // Open Field States 
       {
-        // Dirty Fields
-        {
-          char *mask_string = state.write_fields.to_string();
-          logger->log("Write Field Mask %s", mask_string);
-          free(mask_string);
-        }
         {
           char *mask_string = state.reduction_fields.to_string();
           logger->log("Reduction Mask %s", mask_string);
@@ -16563,11 +16301,6 @@ namespace Legion {
             free(mask_string);
           }
           logger->up();
-        }
-        {
-          char *mask_string = state.dirty_below.to_string();
-          logger->log("Dirty Below Mask %s", mask_string);
-          free(mask_string);
         }
         logger->log("Open Field States (%ld)", state.field_states.size());
         logger->down();
@@ -17440,11 +17173,6 @@ namespace Legion {
     {
       // Dirty Fields
       {
-        char *mask_string = state.write_fields.to_string();
-        logger->log("Write Field Mask %s", mask_string);
-        free(mask_string);
-      }
-      {
         char *mask_string = state.reduction_fields.to_string();
         logger->log("Reduction Mask %s", mask_string);
         free(mask_string);
@@ -17463,11 +17191,6 @@ namespace Legion {
           free(mask_string);
         }
         logger->up();
-      }
-      {
-        char *mask_string = state.dirty_below.to_string();
-        logger->log("Dirty Below Mask %s", mask_string);
-        free(mask_string);
       }
       // Open Field States
       {

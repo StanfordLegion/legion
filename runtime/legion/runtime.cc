@@ -6210,6 +6210,18 @@ namespace Legion {
               runtime->handle_version_owner_response(derez);
               break;
             }
+          case SEND_EQUIVALENCE_SET_REQUEST:
+            {
+              runtime->handle_equivalence_set_request(derez, 
+                                      remote_address_space);
+              break;
+            }
+          case SEND_EQUIVALENCE_SET_RESPONSE:
+            {
+              runtime->handle_equivalence_set_response(derez,
+                                                       remote_address_space);
+              break;
+            }
           case SEND_VERSION_STATE_REQUEST:
             {
               runtime->handle_version_state_request(derez,remote_address_space);
@@ -6237,16 +6249,6 @@ namespace Legion {
                                                  remote_address_space);
               break;
             }
-          case SEND_VERSION_MANAGER_ADVANCE:
-            {
-              runtime->handle_version_manager_advance(derez);
-              break;
-            }
-          case SEND_VERSION_MANAGER_INVALIDATE:
-            {
-              runtime->handle_version_manager_invalidate(derez);
-              break;
-            }
           case SEND_VERSION_MANAGER_REQUEST:
             {
               runtime->handle_version_manager_request(derez,
@@ -6256,17 +6258,6 @@ namespace Legion {
           case SEND_VERSION_MANAGER_RESPONSE:
             {
               runtime->handle_version_manager_response(derez);
-              break;
-            }
-          case SEND_VERSION_MANAGER_UNVERSIONED_REQUEST:
-            {
-              runtime->handle_version_manager_unversioned_request(derez,
-                                                  remote_address_space);
-              break;
-            }
-          case SEND_VERSION_MANAGER_UNVERSIONED_RESPONSE:
-            {
-              runtime->handle_version_manager_unversioned_response(derez);
               break;
             }
           case SEND_INSTANCE_REQUEST:
@@ -14169,6 +14160,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_equivalence_set_response(AddressSpaceID target,
+                                                Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_EQUIVALENCE_SET_RESPONSE,
+                    VERSION_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_version_state_response(AddressSpaceID target,
                                               Serializer &rez)
     //--------------------------------------------------------------------------
@@ -14209,26 +14209,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_version_manager_advance(AddressSpaceID target,
-                                               Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message(rez, SEND_VERSION_MANAGER_ADVANCE,
-                                      ANALYSIS_VIRTUAL_CHANNEL, true/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::send_version_manager_invalidate(AddressSpaceID target,
-                                                  Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      // This comes back on the version manager channel so that it is 
-      // properly ordered with respect to the version manager responses
-      find_messenger(target)->send_message(rez, SEND_VERSION_MANAGER_INVALIDATE,
-                                VERSION_MANAGER_VIRTUAL_CHANNEL, true/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
     void Runtime::send_version_manager_request(AddressSpaceID target,
                                                Serializer &rez)
     //--------------------------------------------------------------------------
@@ -14250,26 +14230,6 @@ namespace Legion {
              VERSION_MANAGER_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
     }
 
-    //--------------------------------------------------------------------------
-    void Runtime::send_version_manager_unversioned_request(
-                                         AddressSpaceID target, Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message(rez, 
-          SEND_VERSION_MANAGER_UNVERSIONED_REQUEST, 
-          VERSION_MANAGER_VIRTUAL_CHANNEL, true/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::send_version_manager_unversioned_response(
-                                         AddressSpaceID target, Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message(rez, 
-          SEND_VERSION_MANAGER_UNVERSIONED_RESPONSE, 
-          VERSION_MANAGER_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
-    }
-    
     //--------------------------------------------------------------------------
     void Runtime::send_instance_request(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
@@ -15298,6 +15258,22 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::handle_equivalence_set_request(Deserializer &derez,
+                                                 AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      EquivalenceSet::handle_equivalence_set_request(derez, this, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_equivalence_set_response(Deserializer &derez,
+                                                  AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      EquivalenceSet::handle_equivalence_set_response(derez, this, source);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::handle_version_state_request(Deserializer &derez,
                                                AddressSpaceID source)
     //--------------------------------------------------------------------------
@@ -15336,20 +15312,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_version_manager_advance(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      VersionManager::handle_remote_advance(derez, this);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_version_manager_invalidate(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      VersionManager::handle_remote_invalidate(derez, this);
-    }
-
-    //--------------------------------------------------------------------------
     void Runtime::handle_version_manager_request(Deserializer &derez,
                                                  AddressSpaceID source)
     //--------------------------------------------------------------------------
@@ -15364,22 +15326,6 @@ namespace Legion {
       VersionManager::handle_response(derez);
     }
 
-    //--------------------------------------------------------------------------
-    void Runtime::handle_version_manager_unversioned_request(
-                                     Deserializer &derez, AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      VersionManager::handle_unversioned_request(derez, this, source);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_version_manager_unversioned_response(
-                                                            Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      VersionManager::handle_unversioned_response(derez, this);
-    }
-    
     //--------------------------------------------------------------------------
     void Runtime::handle_instance_request(Deserializer &derez, 
                                           AddressSpaceID source)
@@ -16286,6 +16232,18 @@ namespace Legion {
                                                                         ready);
       // Have to static cast since the memory might not have been initialized
       return static_cast<VersionState*>(dc);
+    }
+
+    //--------------------------------------------------------------------------
+    EquivalenceSet* Runtime::find_or_request_equivalence_set(DistributedID did,
+                                                             RtEvent &ready)
+    //--------------------------------------------------------------------------
+    {
+      DistributedCollectable *dc = find_or_request_distributed_collectable<
+        EquivalenceSet, SEND_EQUIVALENCE_SET_REQUEST, VERSION_VIRTUAL_CHANNEL>(
+                                                                    did, ready);
+      // Have to static cast since the memory might not have been initialized
+      return static_cast<EquivalenceSet*>(dc);
     }
 
     //--------------------------------------------------------------------------
@@ -18086,6 +18044,8 @@ namespace Legion {
           return "Version Manager";
         case PHYSICAL_STATE_ALLOC:
           return "Physical State";
+        case EQUIVALENCE_SET_ALLOC:
+          return "Equivalence Set";
         case VERSION_STATE_ALLOC:
           return "Version State";
         case AGGREGATE_VERSION_ALLOC:
@@ -19856,6 +19816,11 @@ namespace Legion {
             runtime->activate_context(dargs->parent_ctx);
             break;
           }
+        case LG_DEFER_VERSION_MANAGER_TASK_ID:
+          {
+            VersionManager::handle_deferred_request(args);
+            break;
+          }
         case LG_SEND_VERSION_STATE_UPDATE_TASK_ID:
           {
             VersionState::SendVersionStateArgs *vargs = 
@@ -20051,16 +20016,6 @@ namespace Legion {
               (const VersioningSetRefArgs*)args;
             LocalReferenceMutator mutator;
             ref_args->state->add_base_valid_ref(ref_args->kind, &mutator);
-            break;
-          }
-        case LG_VERSION_STATE_CAPTURE_DIRTY_TASK_ID:
-          {
-            VersionManager::process_capture_dirty(args);
-            break;
-          }
-        case LG_VERSION_STATE_PENDING_ADVANCE_TASK_ID:
-          {
-            VersionManager::process_pending_advance(args);
             break;
           }
         case LG_DEFER_MATERIALIZED_VIEW_TASK_ID:

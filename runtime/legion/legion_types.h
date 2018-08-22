@@ -294,6 +294,7 @@ namespace Legion {
       LG_SPACE_INDEPENDENCE_TASK_ID,
       LG_PENDING_CHILD_TASK_ID,
       LG_POST_DECREMENT_TASK_ID,
+      LG_DEFER_VERSION_MANAGER_TASK_ID,
       LG_SEND_VERSION_STATE_UPDATE_TASK_ID,
       LG_UPDATE_VERSION_STATE_REDUCE_TASK_ID,
       LG_ISSUE_FRAME_TASK_ID,
@@ -321,8 +322,6 @@ namespace Legion {
       LG_DEFER_LAUNCH_TASK_ID,
       LG_DEFER_MAP_AND_LAUNCH_TASK_ID,
       LG_ADD_VERSIONING_SET_REF_TASK_ID,
-      LG_VERSION_STATE_CAPTURE_DIRTY_TASK_ID,
-      LG_VERSION_STATE_PENDING_ADVANCE_TASK_ID,
       LG_DEFER_MATERIALIZED_VIEW_TASK_ID,
       LG_MISSPECULATE_TASK_ID,
       LG_DEFER_PHI_VIEW_REF_TASK_ID,
@@ -376,6 +375,7 @@ namespace Legion {
         "Index Space Independence Test",                          \
         "Remove Pending Child",                                   \
         "Post Decrement Task",                                    \
+        "Defer Version Manager Request",                          \
         "Send Version State Update",                              \
         "Update Version State Reduce",                            \
         "Issue Frame",                                            \
@@ -403,8 +403,6 @@ namespace Legion {
         "Defer Task Launch",                                      \
         "Defer Task Map and Launch",                              \
         "Defer Versioning Set Reference",                         \
-        "Version State Capture Dirty",                            \
-        "Version State Reclaim Pending Advance",                  \
         "Defer Materialized View Creation",                       \
         "Handle Mapping Misspeculation",                          \
         "Defer Phi View Reference",                               \
@@ -670,17 +668,15 @@ namespace Legion {
       SEND_REMOTE_CONTEXT_PHYSICAL_RESPONSE,
       SEND_VERSION_OWNER_REQUEST,
       SEND_VERSION_OWNER_RESPONSE,
+      SEND_EQUIVALENCE_SET_REQUEST,
+      SEND_EQUIVALENCE_SET_RESPONSE,
       SEND_VERSION_STATE_REQUEST,
       SEND_VERSION_STATE_RESPONSE,
       SEND_VERSION_STATE_UPDATE_REQUEST,
       SEND_VERSION_STATE_UPDATE_RESPONSE,
       SEND_VERSION_STATE_VALID_NOTIFICATION,
-      SEND_VERSION_MANAGER_ADVANCE,
-      SEND_VERSION_MANAGER_INVALIDATE,
       SEND_VERSION_MANAGER_REQUEST,
       SEND_VERSION_MANAGER_RESPONSE,
-      SEND_VERSION_MANAGER_UNVERSIONED_REQUEST,
-      SEND_VERSION_MANAGER_UNVERSIONED_RESPONSE,
       SEND_INSTANCE_REQUEST,
       SEND_INSTANCE_RESPONSE,
       SEND_EXTERNAL_DETACH,
@@ -809,17 +805,15 @@ namespace Legion {
         "Send Remote Context Physical Response",                      \
         "Send Version Owner Request",                                 \
         "Send Version Owner Response",                                \
+        "Send Equivalence Set Request",                               \
+        "Send Equivalence Set Response",                              \
         "Send Version State Request",                                 \
         "Send Version State Response",                                \
         "Send Version State Update Request",                          \
         "Send Version State Update Response",                         \
         "Send Version State Valid Notification",                      \
-        "Send Version Manager Advance",                               \
-        "Send Version Manager Invalidate",                            \
         "Send Version Manager Request",                               \
         "Send Version Manager Response",                              \
-        "Send Version Manager Unversioned Request",                   \
-        "Send Version Manager Unversioned Response",                  \
         "Send Instance Request",                                      \
         "Send Instance Response",                                     \
         "Send External Detach",                                       \
@@ -1390,6 +1384,7 @@ namespace Legion {
     class ProjectionEpoch;
     class LogicalState;
     class PhysicalState;
+    class EquivalenceSet;
     class VersionState;
     class VersionInfo;
     class RestrictInfo;

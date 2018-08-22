@@ -1776,7 +1776,8 @@ namespace Legion {
         runtime->forest->perform_versioning_analysis(this, idx,
                                                      requirements[idx],
                                                      version_infos[idx],
-                                                     preconditions);
+                                                     preconditions,
+                                                     map_applied_conditions);
       if (!preconditions.empty())
         enqueue_ready_operation(Runtime::merge_events(preconditions));
       else
@@ -2098,6 +2099,7 @@ namespace Legion {
       return Runtime::merge_events(NULL, all_events);
     }
 
+#if 0
     //--------------------------------------------------------------------------
     /*static*/ bool PhysicalTemplate::check_logical_open(RegionTreeNode *node,
                                                          ContextID ctx,
@@ -2185,7 +2187,6 @@ namespace Legion {
       return projs.size() == 0;
     }
 
-#if 0
     //--------------------------------------------------------------------------
     bool PhysicalTemplate::check_preconditions(void)
     //--------------------------------------------------------------------------

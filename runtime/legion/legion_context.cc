@@ -5941,11 +5941,6 @@ namespace Legion {
                 runtime->forest->create_coherence_restriction(regions[idx],
                                                   physical_instances[idx]));
         }
-        else
-        {
-          runtime->forest->initialize_virtual_context(tree_context,
-                                          clone_requirements[idx]);
-        }
       }
     }
 
