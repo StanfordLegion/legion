@@ -44,9 +44,9 @@ VariantID preregister_python_task_variant(
     registrar.task_variant_name);
 }
 
-void init_task(const Task *task,
-               const std::vector<PhysicalRegion> &regions,
-               Context ctx, Runtime *runtime)
+int64_t init_task(const Task *task,
+                  const std::vector<PhysicalRegion> &regions,
+                  Context ctx, Runtime *runtime)
 {
   const FieldAccessor<READ_WRITE,double,2> acc(regions[0], X_FIELD_ID);
 
@@ -58,6 +58,8 @@ void init_task(const Task *task,
     double value = (double)((*pir)[0]*(rect.hi.y - rect.lo.y + 1) + (*pir)[1]);
     acc[*pir] = value;
   }
+
+  return 123;
 }
 
 void top_level_task(const Task *task,
@@ -103,7 +105,7 @@ int main(int argc, char **argv)
   {
     TaskVariantRegistrar registrar(INIT_TASK_ID, "init_task");
     registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
-    Runtime::preregister_task_variant<init_task>(registrar, "init_task");
+    Runtime::preregister_task_variant<int64_t, init_task>(registrar, "init_task");
   }
 
   {
