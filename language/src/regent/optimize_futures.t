@@ -297,11 +297,6 @@ function analyze_var_flow.stat_reduce(cx, node)
   flow_value_into(cx, lhs, rhs)
 end
 
-function analyze_var_flow.stat_parallel_prefix(cx, node)
-  local dir = analyze_var_flow.expr(cx, node.dir)
-  flow_future_into(cx, dir)
-end
-
 function analyze_var_flow.stat(cx, node)
   if node:is(ast.typed.stat.If) then
     return analyze_var_flow.stat_if(cx, node)
@@ -358,7 +353,7 @@ function analyze_var_flow.stat(cx, node)
     return
 
   elseif node:is(ast.typed.stat.ParallelPrefix) then
-    return analyze_var_flow.stat_parallel_prefix(cx, node)
+    return
 
   else
     assert(false, "unexpected node type " .. tostring(node:type()))
