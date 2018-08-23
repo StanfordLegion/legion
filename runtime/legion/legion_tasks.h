@@ -313,13 +313,6 @@ namespace Legion {
       void enqueue_ready_task(bool use_target_processor,
                               RtEvent wait_on = RtEvent::NO_RT_EVENT);
     protected:
-      void pack_version_infos(Serializer &rez,
-                              std::vector<VersionInfo> &infos,
-                              const std::vector<bool> &full_version_info);
-      void unpack_version_infos(Deserializer &derez,
-                                std::vector<VersionInfo> &infos,
-                                std::set<RtEvent> &ready_events);
-    protected:
       void pack_restrict_infos(Serializer &rez, 
                                std::vector<RestrictInfo> &infos);
       void unpack_restrict_infos(Deserializer &derez,

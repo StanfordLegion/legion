@@ -1805,8 +1805,6 @@ namespace Legion {
                                                 , unique_op_id
 #endif
                                                 );
-      for (unsigned idx = 0; idx < requirements.size(); ++idx)
-        version_infos[idx].apply_mapping(map_applied_conditions);
       if (!map_applied_conditions.empty())
         complete_mapping(Runtime::merge_events(map_applied_conditions));
       else

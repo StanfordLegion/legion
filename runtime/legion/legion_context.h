@@ -341,9 +341,6 @@ namespace Legion {
                                           LogicalRegion *handle = NULL) = 0;
       // No-op for most contexts except remote ones
       virtual void record_using_physical_context(LogicalRegion handle) { }
-      virtual void find_parent_version_info(unsigned index, unsigned depth, 
-                const FieldMask &version_mask, InnerContext *context,
-                VersionInfo &version_info, std::set<RtEvent> &ready_events) = 0;
       // Override by RemoteTask and TopLevelTask
       virtual InnerContext* find_outermost_local_context(
                           InnerContext *previous = NULL) = 0;
@@ -978,9 +975,6 @@ namespace Legion {
       virtual InnerContext* find_parent_logical_context(unsigned index);
       virtual InnerContext* find_parent_physical_context(unsigned index,
                                           LogicalRegion *handle = NULL);
-      virtual void find_parent_version_info(unsigned index, unsigned depth, 
-                  const FieldMask &version_mask, InnerContext *context,
-                  VersionInfo &version_info, std::set<RtEvent> &ready_events);
     public:
       // Override by RemoteTask and TopLevelTask
       virtual InnerContext* find_outermost_local_context(
@@ -1195,8 +1189,6 @@ namespace Legion {
       virtual void add_to_post_task_queue(TaskContext *ctx, RtEvent wait_on,
                      const void *result, size_t size, PhysicalInstance inst);
     public:
-      virtual VersionInfo& get_version_info(unsigned idx);
-      virtual const std::vector<VersionInfo>* get_version_infos(void);
       virtual AddressSpaceID get_version_owner(RegionTreeNode *node,
                                                AddressSpaceID source);
     protected:
@@ -1288,13 +1280,8 @@ namespace Legion {
                           InnerContext *previous = NULL);
       virtual InnerContext* find_top_context(void);
     public:
-      virtual VersionInfo& get_version_info(unsigned idx);
-      virtual const std::vector<VersionInfo>* get_version_infos(void);
       virtual AddressSpaceID get_version_owner(RegionTreeNode *node,
                                                AddressSpaceID source);
-      virtual void find_parent_version_info(unsigned index, unsigned depth, 
-                  const FieldMask &version_mask, InnerContext *context,
-                  VersionInfo &version_info, std::set<RtEvent> &ready_events);
       virtual InnerContext* find_parent_physical_context(unsigned index,
                                                 LogicalRegion *handle = NULL);
       virtual void record_using_physical_context(LogicalRegion handle);
@@ -1319,7 +1306,6 @@ namespace Legion {
     protected:
       int depth;
       ApEvent remote_completion_event;
-      std::vector<VersionInfo> version_infos;
       bool top_level_context;
       RemoteTask remote_task;
     protected:
@@ -1603,9 +1589,6 @@ namespace Legion {
       virtual InnerContext* find_parent_logical_context(unsigned index);
       virtual InnerContext* find_parent_physical_context(unsigned index,
                                           LogicalRegion *handle = NULL);
-      virtual void find_parent_version_info(unsigned index, unsigned depth, 
-                  const FieldMask &version_mask, InnerContext *context,
-                  VersionInfo &version_info, std::set<RtEvent> &ready_events);
       virtual InnerContext* find_outermost_local_context(
                           InnerContext *previous = NULL);
       virtual InnerContext* find_top_context(void);
@@ -1921,9 +1904,6 @@ namespace Legion {
       virtual InnerContext* find_parent_logical_context(unsigned index);
       virtual InnerContext* find_parent_physical_context(unsigned index,
                                           LogicalRegion *handle = NULL);
-      virtual void find_parent_version_info(unsigned index, unsigned depth, 
-                  const FieldMask &version_mask, InnerContext *context,
-                  VersionInfo &version_info, std::set<RtEvent> &ready_events);
       // Override by RemoteTask and TopLevelTask
       virtual InnerContext* find_outermost_local_context(
                           InnerContext *previous = NULL);

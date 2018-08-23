@@ -528,6 +528,7 @@ namespace Legion {
                         outstanding_gc_events.end());
     } 
 
+#if 0
     //--------------------------------------------------------------------------
     void MaterializedView::find_copy_preconditions(ReductionOpID redop, 
                                                bool reading, 
@@ -1496,6 +1497,7 @@ namespace Legion {
          versions, op_id, index, user_mask, source, applied_events, trace_info);
       // No need to launch a collect user task, the child takes care of that
     }
+#endif
 
     //--------------------------------------------------------------------------
     void MaterializedView::add_initial_user(ApEvent term_event,
@@ -1650,6 +1652,7 @@ namespace Legion {
       }
     }    
 
+#if 0
     //--------------------------------------------------------------------------
     void MaterializedView::filter_invalid_fields(FieldMask &to_filter,
                                                  VersionInfo &version_info)
@@ -1793,6 +1796,7 @@ namespace Legion {
         add_only[next_number] = overlap;
       }
     }
+#endif
 
     //--------------------------------------------------------------------------
     void MaterializedView::apply_version_updates(FieldMask &filter_mask,
@@ -1914,6 +1918,7 @@ namespace Legion {
         current_versions[it->first] |= it->second;
     }
 
+#if 0
     //--------------------------------------------------------------------------
     bool MaterializedView::update_version_numbers(const FieldMask &user_mask,
                                            const FieldVersions &target_versions,
@@ -2023,6 +2028,7 @@ namespace Legion {
         send_invalidations(invalidate_mask, source, applied_events);
       return need_check_above;
     }
+#endif
 
 #ifdef DEBUG_LEGION
     //--------------------------------------------------------------------------
@@ -3399,6 +3405,7 @@ namespace Legion {
       view->register_with_runtime(NULL/*remote registration not needed*/);
     }
 
+#if 0
     //--------------------------------------------------------------------------
     void MaterializedView::perform_remote_valid_check(
                   const FieldMask &check_mask, VersionTracker *versions,
@@ -3588,6 +3595,7 @@ namespace Legion {
       else // Reading at the base invalidates all remote leases
         send_invalidations(check_mask, source, applied_events);
     }
+#endif
 
     //--------------------------------------------------------------------------
     void MaterializedView::send_invalidations(const FieldMask &invalidate_mask,
@@ -3975,6 +3983,7 @@ namespace Legion {
       Runtime::trigger_event(done_event);
     }
 
+#if 0
     //--------------------------------------------------------------------------
     void MaterializedView::process_remote_update(Deserializer &derez,
                                                  AddressSpaceID source,
@@ -4084,6 +4093,7 @@ namespace Legion {
       else
         Runtime::trigger_event(update_event);
     }
+#endif
 
     //--------------------------------------------------------------------------
     void MaterializedView::process_remote_invalidate(
@@ -8451,6 +8461,7 @@ namespace Legion {
       return *this;
     }
 
+#if 0
     //--------------------------------------------------------------------------
     void ReductionView::perform_reduction(InstanceView *target,
                                           const FieldMask &reduce_mask,
@@ -8997,6 +9008,7 @@ namespace Legion {
       // Return our result
       return Runtime::merge_events(&trace_info, wait_on);
     }
+#endif
 
     //--------------------------------------------------------------------------
     void ReductionView::find_reducing_preconditions(const FieldMask &user_mask,

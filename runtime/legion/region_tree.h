@@ -2373,15 +2373,6 @@ namespace Legion {
     public:
       static AddressSpaceID get_owner_space(RegionTreeID tid, Runtime *rt);
     public:
-      inline PhysicalState* get_physical_state(VersionInfo &info)
-      {
-        // First check to see if the version info already has a state
-        PhysicalState *result = info.find_physical_state(this);  
-#ifdef DEBUG_LEGION
-        assert(result != NULL);
-#endif
-        return result;
-      }
       inline LogicalState& get_logical_state(ContextID ctx)
       {
         return *(logical_states.lookup_entry(ctx, this, ctx));
@@ -2575,6 +2566,7 @@ namespace Legion {
                                       MaterializedView *&src_instance,
                                       DeferredView *&deferred_instance);
       // Issue copies for fields with the same event preconditions and masks
+#if 0
       void issue_grouped_copies(const TraversalInfo &info,
                                 MaterializedView *dst, bool restrict_out,
                                 PredEvent predicate_guard,
@@ -2608,6 +2600,7 @@ namespace Legion {
                                 CopyAcrossHelper *across_helper,
                                 RegionTreeNode *intersect,
                                 IndexSpaceExpression *mask);
+#endif
       void issue_update_reductions(LogicalView *target,
                                    const FieldMask &update_mask,
                                    VersionInfo &version_info,

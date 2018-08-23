@@ -2280,17 +2280,13 @@ namespace Legion {
 #endif
                                                 );
       }
+#ifdef DEBUG_LEGION
       if (!IS_NO_ACCESS(requirement) && !requirement.privilege_fields.empty())
       {
-#ifdef DEBUG_LEGION
         assert(!mapped_instances.empty());
-#endif 
-        // We're done so apply our mapping changes
-        version_info.apply_mapping(map_applied_conditions);
-#ifdef DEBUG_LEGION
         dump_physical_state(&requirement, 0);
-#endif
       }
+#endif 
       // If we have any wait preconditions from phase barriers or 
       // grants then we can add them to the mapping preconditions
       if (!wait_barriers.empty() || !grants.empty())
@@ -3867,15 +3863,10 @@ namespace Legion {
             tpl->record_trigger_event(local_completion, across_done);
           }
         }
-        // Apply our changes to the version states
-        // Don't apply changes to the source if we have a composite instance
-        // because it is unsound to mutate the region tree that way
-        if (src_composite == -1)
-          src_versions[idx].apply_mapping(map_applied_conditions);
-        dst_versions[idx].apply_mapping(map_applied_conditions); 
 #ifdef DEBUG_LEGION
-      dump_physical_state(&src_requirements[idx], idx);
-      dump_physical_state(&dst_requirements[idx], idx + src_requirements.size());
+        dump_physical_state(&src_requirements[idx], idx);
+        dump_physical_state(&dst_requirements[idx], 
+                            idx + src_requirements.size());
 #endif
       }
       ApEvent copy_complete_event = 
@@ -7360,7 +7351,6 @@ namespace Legion {
                                               , unique_op_id
 #endif
                                               );
-      version_info.apply_mapping(map_applied_conditions);
 #ifdef DEBUG_LEGION
       dump_physical_state(&requirement, 0);
 #endif
@@ -8047,7 +8037,6 @@ namespace Legion {
                                               , unique_op_id
 #endif
                                               );
-      version_info.apply_mapping(map_applied_conditions);
 #ifdef DEBUG_LEGION
       dump_physical_state(&requirement, 0);
 #endif
@@ -11174,8 +11163,6 @@ namespace Legion {
                                               );
       ApEvent done_event = trigger_thunk(requirement.region.get_index_space(),
                                          mapped_instances, trace_info);
-      // Apply our changes to the version state
-      version_info.apply_mapping(map_applied_conditions);
       // Once we are done running these routines, we can mark
       // that the handles have all been completed
       if (!map_applied_conditions.empty())
@@ -12215,7 +12202,6 @@ namespace Legion {
                                           completion_event);
 #endif
         }
-        version_info.apply_mapping(map_applied_conditions);
 #ifdef DEBUG_LEGION
         dump_physical_state(&requirement, 0);
 #endif
@@ -12305,7 +12291,6 @@ namespace Legion {
       LegionSpy::log_operation_events(unique_op_id, done_event,
                                       completion_event);
 #endif
-      version_info.apply_mapping(map_applied_conditions);
 #ifdef DEBUG_LEGION
       dump_physical_state(&requirement, 0);
 #endif
@@ -13339,7 +13324,6 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(result.has_ref());
 #endif
-      version_info.apply_mapping(map_applied_conditions);
       // This operation is ready once the file is attached
       region.impl->set_reference(result);
       // Once we have created the instance, then we are done
@@ -13823,7 +13807,6 @@ namespace Legion {
       ApEvent detach_event = 
         runtime->forest->detach_external(requirement, this, 0/*idx*/, 
                      version_info, reference, map_applied_conditions);
-      version_info.apply_mapping(map_applied_conditions);
       // Also tell the runtime to detach the external instance from memory
       // This has to be done before we can consider this mapped
       RtEvent detached_event = manager->detach_external_instance();

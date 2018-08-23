@@ -121,6 +121,7 @@ namespace Legion {
       virtual Memory get_location(void) const = 0;
       virtual bool has_space(const FieldMask &space_mask) const = 0;
     public:
+#if 0
       // Entry point functions for doing physical dependence analysis
       virtual void find_copy_preconditions(ReductionOpID redop, bool reading,
                                            bool single_copy/*only for writing*/,
@@ -167,6 +168,7 @@ namespace Legion {
                                    std::set<RtEvent> &applied_events,
                                    const PhysicalTraceInfo &trace_info,
                                    bool update_versions = true) = 0;
+#endif
       virtual void add_initial_user(ApEvent term_event,
                                     const RegionUsage &usage,
                                     const FieldMask &user_mask,
@@ -325,6 +327,7 @@ namespace Legion {
       virtual LogicalView* get_subview(const LegionColor c);
       virtual Memory get_location(void) const;
     public:
+#if 0
       virtual void find_copy_preconditions(ReductionOpID redop, bool reading,
                                            bool single_copy/*only for writing*/,
                                            bool restrict_out,
@@ -507,6 +510,7 @@ namespace Legion {
                                 std::set<RtEvent> &applied_events,
                                 const PhysicalTraceInfo &trace_info,
                                 const bool need_version_update);
+#endif
     public:
       virtual void add_initial_user(ApEvent term_event,
                                     const RegionUsage &usage,
@@ -531,6 +535,7 @@ namespace Legion {
       // These first two methods do two-phase updates for copies
       // These methods must be called while holding the lock
       // in non-exclusive and exclusive mode respectively
+#if 0
       void find_copy_version_updates(const FieldMask &copy_mask,
                                      VersionTracker *version_tracker,
                                      FieldMask &write_skip_mask,
@@ -538,16 +543,19 @@ namespace Legion {
                             LegionMap<VersionID,FieldMask>::aligned &advance,
                             LegionMap<VersionID,FieldMask>::aligned &add_only,
                               bool is_reducing, bool restrict_out, bool base);
+#endif
       void apply_version_updates(FieldMask &filter_mask,
                       const LegionMap<VersionID,FieldMask>::aligned &advance,
                       const LegionMap<VersionID,FieldMask>::aligned &add_only,
                       AddressSpaceID source, std::set<RtEvent> &applied_events);
       // This method does one phase update and advance for users
       // This one will take it's own lock
+#if 0
       bool update_version_numbers(const FieldMask &user_mask,
                                   const FieldVersions &field_versions,
                                   const AddressSpaceID source,
                                   std::set<RtEvent> &applied_events);
+#endif
     protected:
       void filter_and_add(FieldMask &filter_mask,
                 const LegionMap<VersionID,FieldMask>::aligned &add_versions);
@@ -672,6 +680,7 @@ namespace Legion {
                                                   MaterializedView *parent,
                                                   UniqueID context_uid);
     public:
+#if 0
       void perform_remote_valid_check(const FieldMask &check_mask,
                                       VersionTracker *version_tracker,
                                       bool reading,
@@ -680,6 +689,7 @@ namespace Legion {
                                       VersionTracker *version_tracker,
                                       const AddressSpaceID source,
                                       std::set<RtEvent> &applied_events);
+#endif
       void send_invalidations(const FieldMask &invalidate_mask,
                               const AddressSpaceID can_skip,
                               std::set<RtEvent> &applied_events);
@@ -813,6 +823,7 @@ namespace Legion {
     public:
       ReductionView& operator=(const ReductionView&rhs);
     public:
+#if 0
       void perform_reduction(InstanceView *target, const FieldMask &copy_mask, 
                              VersionTracker *version_tracker, 
                              Operation *op, unsigned index,
@@ -832,6 +843,7 @@ namespace Legion {
                                          std::set<RtEvent> &map_applied_events,
                                          const PhysicalTraceInfo &trace_info,
                                          IndexSpaceExpression *&reduce_expr);
+#endif
     public:
       virtual bool has_manager(void) const { return true; } 
       virtual PhysicalManager* get_manager(void) const;
@@ -843,6 +855,7 @@ namespace Legion {
       virtual bool has_space(const FieldMask &space_mask) const
         { return false; }
     public:
+#if 0
       virtual void find_copy_preconditions(ReductionOpID redop, bool reading,
                                            bool single_copy/*only for writing*/,
                                            bool restrict_out,
@@ -888,6 +901,7 @@ namespace Legion {
                                    std::set<RtEvent> &applied_events,
                                    const PhysicalTraceInfo &trace_info,
                                    bool update_versions = true);
+#endif
       virtual void add_initial_user(ApEvent term_event,
                                     const RegionUsage &usage,
                                     const FieldMask &user_mask,
@@ -1132,7 +1146,6 @@ namespace Legion {
      * but it seems to work.
      */
     class PhiView : public DeferredView, 
-                    public VersionTracker,
                     public LegionHeapify<PhiView> {
     public:
       static const AllocationType alloc_type = PHI_VIEW_ALLOC;
@@ -1186,17 +1199,6 @@ namespace Legion {
       virtual void send_view(AddressSpaceID target);
       virtual InnerContext* get_context(void) const
         { return owner_context; }
-    public:
-      virtual bool is_upper_bound_node(RegionTreeNode *node) const;
-      virtual void get_field_versions(RegionTreeNode *node, bool split_prev, 
-                                      const FieldMask &needed_fields,
-                                      FieldVersions &field_versions);
-      virtual void get_advance_versions(RegionTreeNode *node, bool base,
-                                        const FieldMask &needed_fields,
-                                        FieldVersions &field_versions);
-      virtual void get_split_mask(RegionTreeNode *node, 
-                                  const FieldMask &needed_fields,
-                                  FieldMask &split);
     public:
       virtual void issue_deferred_copies(const TraversalInfo &info,
                                          MaterializedView *dst,

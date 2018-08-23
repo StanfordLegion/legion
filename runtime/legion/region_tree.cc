@@ -1973,7 +1973,6 @@ namespace Legion {
                                     defer_add_users, targets, proj_info);
       }
     }
-#endif
 
     //--------------------------------------------------------------------------
     void RegionTreeForest::physical_register_users(
@@ -2134,6 +2133,7 @@ namespace Legion {
         }
       }
     }
+#endif
 
     //--------------------------------------------------------------------------
     ApEvent RegionTreeForest::physical_close_context(RegionTreeContext ctx,
@@ -2188,7 +2188,7 @@ namespace Legion {
       return Runtime::merge_events(&trace_info, closed_events);
     }
 
-
+#if 0
     //--------------------------------------------------------------------------
     ApEvent RegionTreeForest::copy_across(
                                         const RegionRequirement &src_req,
@@ -2564,6 +2564,7 @@ namespace Legion {
       }
       return Runtime::merge_events(&trace_info, result_events);
     }
+#endif
 
     //--------------------------------------------------------------------------
     int RegionTreeForest::physical_convert_mapping(Operation *op,
@@ -13035,7 +13036,6 @@ namespace Legion {
       sort_copy_instances(info, target, copy_mask, valid_views,
                           src_instances, deferred_instances);
     }
-#endif
 
     //--------------------------------------------------------------------------
     void RegionTreeNode::issue_update_copies(const TraversalInfo &info,
@@ -13187,6 +13187,7 @@ namespace Legion {
         }
       }
     }
+#endif
 
     //--------------------------------------------------------------------------
     void RegionTreeNode::sort_copy_instances(const TraversalInfo &info,
@@ -13488,6 +13489,7 @@ namespace Legion {
       return false;
     }
 
+#if 0
     //--------------------------------------------------------------------------
     void RegionTreeNode::issue_grouped_copies(const TraversalInfo &info,
                                               MaterializedView *dst,
@@ -13716,7 +13718,6 @@ namespace Legion {
       }
     }
 
-#if 0
     //--------------------------------------------------------------------------
     void RegionTreeNode::invalidate_instance_views(PhysicalState *state,
                                                   const FieldMask &invalid_mask)

@@ -1356,45 +1356,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TaskOp::pack_version_infos(Serializer &rez,
-                                    std::vector<VersionInfo> &infos,
-                                    const std::vector<bool> &full_version_infos)
-    //--------------------------------------------------------------------------
-    {
-      RezCheck z(rez);
-#ifdef DEBUG_LEGION
-      assert(infos.size() == regions.size());
-#endif
-      for (unsigned idx = 0; idx < infos.size(); idx++)
-      {
-        rez.serialize<bool>(full_version_infos[idx]);
-        if (full_version_infos[idx])
-          infos[idx].pack_version_info(rez);
-        else
-          infos[idx].pack_version_numbers(rez);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void TaskOp::unpack_version_infos(Deserializer &derez,
-                                      std::vector<VersionInfo> &infos,
-                                      std::set<RtEvent> &ready_events)
-    //--------------------------------------------------------------------------
-    {
-      DerezCheck z(derez);
-      infos.resize(regions.size());
-      for (unsigned idx = 0; idx < regions.size(); idx++)
-      {
-        bool full_info;
-        derez.deserialize(full_info);
-        if (full_info)
-          infos[idx].unpack_version_info(derez, runtime, ready_events);
-        else
-          infos[idx].unpack_version_numbers(derez, runtime->forest);
-      }
-    }
-
-    //--------------------------------------------------------------------------
     void TaskOp::pack_restrict_infos(Serializer &rez,
                                      std::vector<RestrictInfo> &infos)
     //--------------------------------------------------------------------------
@@ -1922,7 +1883,7 @@ namespace Legion {
             it != must_premap.end(); it++)
       {
         VersionInfo &version_info = get_version_info(*it); 
-        if (version_info.has_physical_states())
+        if (version_info.has_version_info())
           continue;
         runtime->forest->perform_versioning_analysis(this, *it, regions[*it],
                       version_info, version_ready_events, applied_conditions);
@@ -2110,8 +2071,6 @@ namespace Legion {
                               , get_logging_name(), unique_op_id
 #endif
                               );
-        // Now apply our mapping
-        version_info.apply_mapping(applied_conditions);
       }
     }
 
@@ -4904,7 +4863,7 @@ namespace Legion {
           if (early_mapped_regions.find(idx) != early_mapped_regions.end())
             continue;
           VersionInfo &version_info = version_infos[idx];
-          if (version_info.has_physical_states())
+          if (version_info.has_version_info())
             continue;
           runtime->forest->perform_versioning_analysis(this, idx, regions[idx],
                             version_info, ready_events, map_applied_conditions);
@@ -4917,7 +4876,7 @@ namespace Legion {
           if (early_mapped_regions.find(idx) != early_mapped_regions.end())
             continue;
           VersionInfo &version_info = version_infos[idx];
-          if (version_info.has_physical_states())
+          if (version_info.has_version_info())
             continue;
           runtime->forest->perform_versioning_analysis(this, idx, regions[idx],
                            version_info, ready_events, map_applied_conditions);
@@ -5059,15 +5018,10 @@ namespace Legion {
       map_all_regions(get_task_completion(), must_epoch_owner);
       // If we mapped, then we are no longer stealable
       stealable = false;
-      // Also flush out physical regions
-      for (unsigned idx = 0; idx < version_infos.size(); idx++)
-      {
-        if (!virtual_mapped[idx] && !no_access_regions[idx])
-          version_infos[idx].apply_mapping(map_applied_conditions);
 #ifdef DEBUG_LEGION
+      for (unsigned idx = 0; idx < version_infos.size(); idx++)
         dump_physical_state(&regions[idx], idx);
 #endif
-      }
       // We can now apply any arrives or releases
       if (!arrive_barriers.empty() || !grants.empty())
       {
@@ -5436,14 +5390,6 @@ namespace Legion {
       rez.serialize(remote_unique_id);
       rez.serialize(remote_owner_uid);
       rez.serialize(top_level_task);
-      if (!is_origin_mapped())
-      {
-        // have to pack all version info (e.g. split masks)
-        std::vector<bool> full_version_infos(regions.size(), true);
-        pack_version_infos(rez, version_infos, full_version_infos);
-      }
-      else
-        pack_version_infos(rez, version_infos, virtual_mapped);
       pack_restrict_infos(rez, restrict_infos);
       if (predicate_false_future.impl != NULL)
         rez.serialize(predicate_false_future.impl->did);
@@ -5474,7 +5420,6 @@ namespace Legion {
       set_current_proc(current);
       derez.deserialize(remote_owner_uid);
       derez.deserialize(top_level_task);
-      unpack_version_infos(derez, version_infos, ready_events);
       unpack_restrict_infos(derez, restrict_infos, ready_events);
       // Quick check to see if we've been sent back to our original node
       if (!is_remote())
@@ -5905,15 +5850,10 @@ namespace Legion {
       // the completion event is therefore not guaranteed to survive
       // the length of the task's execution
       map_all_regions(point_termination, must_epoch_owner);
-      // Flush out the state for any mapped region requirements
-      for (unsigned idx = 0; idx < version_infos.size(); idx++)
-      {
-        if (!virtual_mapped[idx] && !no_access_regions[idx])
-          version_infos[idx].apply_mapping(map_applied_conditions);
 #ifdef DEBUG_LEGION
+      for (unsigned idx = 0; idx < version_infos.size(); idx++)
         dump_physical_state(&regions[idx], idx);
 #endif
-      }
       // If we succeeded in mapping and had no virtual mappings
       // then we are done mapping
       if (is_leaf() && !has_virtual_instances()) 
@@ -6132,7 +6072,6 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(is_origin_mapped()); // should be origin mapped if we're here
 #endif
-      pack_version_infos(rez, version_infos, virtual_mapped);
       // Return false since point tasks should always be deactivated
       // once they are sent to a remote node
       return false;
@@ -6147,7 +6086,6 @@ namespace Legion {
       DerezCheck z(derez);
       unpack_single_task(derez, ready_events);
       derez.deserialize(point_termination);
-      unpack_version_infos(derez, version_infos, ready_events);
       set_current_proc(current);
       // Get the context information from our slice owner
       parent_ctx = slice_owner->get_context();
@@ -7947,21 +7885,6 @@ namespace Legion {
       rez.serialize(origin_mapped);
       rez.serialize(remote_owner_uid);
       rez.serialize(internal_space);
-      if (is_origin_mapped())
-      {
-        // If we've mapped everything and there are no virtual mappings
-        // then we can just send the version numbers
-        std::vector<bool> full_version_infos(regions.size(), false);
-        pack_version_infos(rez, version_infos, full_version_infos);
-      }
-      else
-      {
-        // Otherwise we have to send all the version infos, we could try
-        // and figure out which subset of region requirements have full
-        // or partial virtual mappings, but that might be expensive
-        std::vector<bool> full_version_infos(regions.size(), true);
-        pack_version_infos(rez, version_infos, full_version_infos);
-      }
       if (is_remote())
         pack_restrict_infos(rez, restrict_infos);
       else
@@ -8022,7 +7945,6 @@ namespace Legion {
       derez.deserialize(origin_mapped);
       derez.deserialize(remote_owner_uid);
       derez.deserialize(internal_space);
-      unpack_version_infos(derez, version_infos, ready_events);
       unpack_restrict_infos(derez, restrict_infos, ready_events);
       if (runtime->legion_spy_enabled)
         LegionSpy::log_slice_slice(remote_unique_id, get_unique_id());

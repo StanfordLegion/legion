@@ -190,104 +190,27 @@ namespace Legion {
       const ReferenceSource kind;
     };
 
-    // Small typedef to define field versions
-    typedef LegionMap<VersionID,FieldMask>::aligned FieldVersions;
-    /**
-     * \class VersionTracker
-     * This class provides a single abstract method for getting
-     * the version numbers associated with a given node in the 
-     * region tree. It is implemented by the VersionInfo class
-     * and by the CompositeView class.
-     */
-    class VersionTracker {
-    public:
-      virtual bool is_upper_bound_node(RegionTreeNode *node) const = 0;
-      virtual void get_field_versions(RegionTreeNode *node, bool split_prev, 
-                                      const FieldMask &needed_fields,
-                                      FieldVersions &field_versions) = 0;
-      virtual void get_advance_versions(RegionTreeNode *node, bool base,
-                                        const FieldMask &needed_fields,
-                                        FieldVersions &field_versions) = 0;
-      virtual void get_split_mask(RegionTreeNode *node, 
-                                  const FieldMask &needed_fields,
-                                  FieldMask &split) = 0;
-    };
-
     /**
      * \class VersionInfo
      * A class for tracking version information about region usage
      */
-    class VersionInfo : public VersionTracker {
+    class VersionInfo {
     public:
       VersionInfo(void);
       VersionInfo(const VersionInfo &rhs);
       virtual ~VersionInfo(void);
-    public:
+    protected:
       VersionInfo& operator=(const VersionInfo &rhs);
     public:
-      void record_split_fields(RegionTreeNode *node, const FieldMask &split,
-                               unsigned offset = 0);
-      void add_current_version(VersionState *state, 
-                               const FieldMask &state_mask, bool path_only);
-      void add_advance_version(VersionState *state, 
-                               const FieldMask &state_mask, bool path_only);
+      inline bool has_version_info(void) const 
+        { return !equivalence_sets.empty(); }
     public:
-      inline bool is_upper_bound_set(void) const 
-        { return (upper_bound_node != NULL); }
-      virtual bool is_upper_bound_node(RegionTreeNode *node) const
-        { return (node == upper_bound_node); }
-      inline RegionTreeNode* get_upper_bound_node(void) const 
-        { return upper_bound_node; }
-      void set_upper_bound_node(RegionTreeNode *node);
-      bool has_physical_states(void) const; 
-    public:
-      // The copy through parameter is useful for mis-speculated
-      // operations that still need to copy state from one 
-      // version number to the next even though they didn't
-      // modify the physical state object
-      void apply_mapping(std::set<RtEvent> &applied_conditions,
-                         bool copy_through = false);
-      void resize(size_t max_depth);
-      void resize(size_t path_depth, HandleType req_handle,
-                  ProjectionFunction *function);
+      void record_equivalence_set(EquivalenceSet *set);
+      void make_ready(const RegionUsage &usage, const FieldMask &mask,
+          std::set<RtEvent> &ready_events, std::set<RtEvent> &applied_events);
       void clear(void);
-      void sanity_check(unsigned depth);
-      // Cloning logical state for internal opeations
-      void clone_logical(const VersionInfo &rhs, const FieldMask &mask,
-                         RegionTreeNode *to_node);
-      void copy_to(VersionInfo &rhs);
-      // Cloning information for virtual mappings
-      void clone_to_depth(unsigned depth, const FieldMask &mask,
-                          InnerContext *context, VersionInfo &target_info,
-                          std::set<RtEvent> &ready_events) const;
-    public:
-      PhysicalState* find_physical_state(RegionTreeNode *node); 
-      const FieldMask& get_split_mask(unsigned depth) const;
-      virtual void get_split_mask(RegionTreeNode *node, 
-                                  const FieldMask &needed_fields,
-                                  FieldMask &split);
-      virtual void get_field_versions(RegionTreeNode *node, bool split_prev,
-                                      const FieldMask &needed_fields,
-                                      FieldVersions &field_versions);
-      virtual void get_advance_versions(RegionTreeNode *node, bool base,
-                                        const FieldMask &needed_fields,
-                                        FieldVersions &field_versions);
-    public:
-      void pack_version_info(Serializer &rez) const;
-      void unpack_version_info(Deserializer &derez, Runtime *runtime,
-                               std::set<RtEvent> &ready_events);
-      void pack_version_numbers(Serializer &rez) const;
-      void unpack_version_numbers(Deserializer &derez,RegionTreeForest *forest);
     protected:
-      void pack_upper_bound_node(Serializer &rez) const;
-      void unpack_upper_bound_node(Deserializer &derez, 
-                                   RegionTreeForest *forest);
-    protected:
-      RegionTreeNode                   *upper_bound_node;
-      // All of these are indexed by depth in the region tree
-      std::vector<PhysicalState*>      physical_states;
-      std::vector<FieldVersions>       field_versions;
-      LegionVector<FieldMask>::aligned split_masks;
+      std::set<EquivalenceSet*> equivalence_sets;
     };
 
     /**
@@ -836,6 +759,8 @@ namespace Legion {
                                        VersionInfo &version_info,
                                        std::set<RtEvent> &ready_events,
                                        std::set<RtEvent> &applied_events);
+      void request_valid_copy(const FieldMask &field_mask, bool exclusive,
+          std::set<RtEvent> &read_events, std::set<RtEvent> &applied_events);
     protected:
       void send_equivalence_set(AddressSpaceID target);
     public:
@@ -856,7 +781,10 @@ namespace Legion {
     protected:
       // If we have sub sets then we track those here
       // If this data structure is not empty, everything above is invalid
-      std::set<EquivalenceSet*> subsets;
+      // except for the remainder expression which is just waiting until
+      // someone else decides that they need to access it
+      std::vector<EquivalenceSet*> subsets;
+      IndexSpaceExpression *remainder;
     protected:
       // Used for tracking which fields have valid data here
       // The owner node starts with all the valid fields
@@ -924,7 +852,7 @@ namespace Legion {
                                        std::set<RtEvent> &ready_events,
                                        std::set<RtEvent> &applied_events);
     protected:
-      void compute_equivalence_sets(void);
+      void compute_equivalence_sets(AddressSpaceID source);
     public:
       void print_physical_state(RegionTreeNode *node,
                                 const FieldMask &capture_mask,

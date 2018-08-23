@@ -2181,27 +2181,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InnerContext::find_parent_version_info(unsigned index, unsigned depth,
-                     const FieldMask &version_mask, InnerContext *context,
-                     VersionInfo &version_info, std::set<RtEvent> &ready_events)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(owner_task != NULL);
-      assert(regions.size() == virtual_mapped.size()); 
-#endif
-      // If this isn't one of our original region requirements then 
-      // we don't have any versions that the child won't discover itself
-      // Same if the region was not virtually mapped
-      if ((index >= virtual_mapped.size()) || !virtual_mapped[index])
-        return;
-      // We now need to clone any version info from the parent into the child
-      const VersionInfo &parent_info = owner_task->get_version_info(index);  
-      parent_info.clone_to_depth(depth, version_mask, context, 
-                                 version_info, ready_events);
-    }
-
-    //--------------------------------------------------------------------------
     InnerContext* InnerContext::find_outermost_local_context(
                                                          InnerContext *previous)
     //--------------------------------------------------------------------------
@@ -2251,21 +2230,6 @@ namespace Legion {
       rez.serialize<size_t>(virtual_indexes.size());
       for (unsigned idx = 0; idx < virtual_indexes.size(); idx++)
         rez.serialize(virtual_indexes[idx]);
-      // Pack up the version numbers only 
-      const std::vector<VersionInfo> *version_infos = 
-        owner_task->get_version_infos();
-#ifdef DEBUG_LEGION
-      assert(version_infos->size() == regions.size());
-#endif
-      for (unsigned idx = 0; idx < regions.size(); idx++)
-      {
-        const VersionInfo &info = (*version_infos)[idx];
-        // If we're virtually mapped, we need all the information
-        if (virtual_mapped[idx])
-          info.pack_version_info(rez);
-        else
-          info.pack_version_numbers(rez);
-      }
       rez.serialize(owner_task->get_task_completion());
       rez.serialize(find_parent_context()->get_context_uid());
       // Finally pack the local field infos
@@ -7053,24 +7017,6 @@ namespace Legion {
       return this;
     }
 
-    //--------------------------------------------------------------------------
-    VersionInfo& TopLevelContext::get_version_info(unsigned idx)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *new VersionInfo();
-    }
-
-    //--------------------------------------------------------------------------
-    const std::vector<VersionInfo>* TopLevelContext::get_version_infos(void)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return NULL;
-    }
-
     /////////////////////////////////////////////////////////////
     // Remote Task 
     /////////////////////////////////////////////////////////////
@@ -7245,27 +7191,6 @@ namespace Legion {
     }
     
     //--------------------------------------------------------------------------
-    VersionInfo& RemoteContext::get_version_info(unsigned idx)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(!top_level_context);
-      assert(idx < version_infos.size());
-#endif
-      return version_infos[idx];
-    }
-
-    //--------------------------------------------------------------------------
-    const std::vector<VersionInfo>* RemoteContext::get_version_infos(void)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(!top_level_context);
-#endif
-      return &version_infos;
-    }
-
-    //--------------------------------------------------------------------------
     TaskContext* RemoteContext::find_parent_context(void)
     //--------------------------------------------------------------------------
     {
@@ -7357,27 +7282,6 @@ namespace Legion {
       assert(finder != region_tree_owners.end());
 #endif
       return finder->second.first;
-    }
-
-    //--------------------------------------------------------------------------
-    void RemoteContext::find_parent_version_info(unsigned index, unsigned depth,
-                     const FieldMask &version_mask, InnerContext *context,
-                     VersionInfo &version_info, std::set<RtEvent> &ready_events)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(regions.size() == virtual_mapped.size()); 
-#endif
-      // If this isn't one of our original region requirements then 
-      // we don't have any versions that the child won't discover itself
-      // Same if the region was not virtually mapped
-      if ((index >= virtual_mapped.size()) || !virtual_mapped[index])
-        return;
-#ifdef DEBUG_LEGION
-      assert(index < version_infos.size());
-#endif
-      version_infos[index].clone_to_depth(depth, version_mask, context,
-                                          version_info, ready_events);
     }
 
     //--------------------------------------------------------------------------
@@ -7558,14 +7462,6 @@ namespace Legion {
         unsigned index;
         derez.deserialize(index);
         local_virtual_mapped[index] = true;
-      }
-      version_infos.resize(regions.size());
-      for (unsigned idx = 0; idx < regions.size(); idx++)
-      {
-        if (virtual_mapped[idx])
-          version_infos[idx].unpack_version_info(derez, runtime, preconditions);
-        else
-          version_infos[idx].unpack_version_numbers(derez, runtime->forest);
       }
       derez.deserialize(remote_completion_event);
       derez.deserialize(parent_context_uid);
@@ -8815,15 +8711,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LeafContext::find_parent_version_info(unsigned index, unsigned depth,
-                     const FieldMask &version_mask, InnerContext *context,
-                     VersionInfo &version_info, std::set<RtEvent> &ready_events)
-    //--------------------------------------------------------------------------
-    {
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
     InnerContext* LeafContext::find_outermost_local_context(InnerContext *prev)
     //--------------------------------------------------------------------------
     {
@@ -10006,16 +9893,6 @@ namespace Legion {
 #endif
       return enclosing->find_parent_physical_context(parent_req_indexes[index],
                                                      handle);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::find_parent_version_info(unsigned index, unsigned depth,
-                     const FieldMask &version_mask, InnerContext *context,
-                     VersionInfo &version_info, std::set<RtEvent> &ready_events)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->find_parent_version_info(index, depth, version_mask, 
-                                          context, version_info, ready_events);
     }
 
     //--------------------------------------------------------------------------
