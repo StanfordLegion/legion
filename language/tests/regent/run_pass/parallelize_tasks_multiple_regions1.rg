@@ -14,8 +14,7 @@
 
 import "regent"
 
--- [["-ll:cpu", "4", "-fbounds-checks", "1", "-fdebug", "1",
---   "-fparallelize-dop", "9"]]
+-- [["-ll:cpu", "4", "-fbounds-checks", "1", "-fparallelize-dop", "9"]]
 
 -- This code has not been optimized and is not high performance.
 
