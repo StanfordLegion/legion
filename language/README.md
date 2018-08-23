@@ -26,7 +26,7 @@ Regent also has a number of transitive dependencies via Legion:
   * A C++ 98 or newer compiler (GCC, Clang, Intel, or PGI) and GNU Make
   * *Optional*: CUDA 5.0 or newer (for NVIDIA GPUs)
   * *Optional*: [GASNet](https://gasnet.lbl.gov/) (for networking)
-  * *Optional*: LLVM 3.5 (for dynamic code generation)
+  * *Optional*: LLVM 3.5-3.9 (for dynamic code generation)
   * *Optional*: HDF5 (for file I/O)
 
 ## Installing
