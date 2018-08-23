@@ -3550,6 +3550,21 @@ function type_check.stat_parallelize_with(cx, node)
   }
 end
 
+function type_check.stat_parallel_prefix(cx, node)
+  local lhs = type_check.expr_region_root(cx, node.lhs)
+  local rhs = type_check.expr_region_root(cx, node.rhs)
+  local op = node.op
+  local dir = type_check.expr(cx, node.dir)
+  return ast.typed.stat.ParallelPrefix {
+    lhs = lhs,
+    rhs = rhs,
+    op = op,
+    dir = dir,
+    annotations = node.annotations,
+    span = node.span,
+  }
+end
+
 local type_check_stat_node = {
   [ast.specialized.stat.If]              = type_check.stat_if,
   [ast.specialized.stat.While]           = type_check.stat_while,
@@ -3568,6 +3583,7 @@ local type_check_stat_node = {
   [ast.specialized.stat.RawDelete]       = type_check.stat_raw_delete,
   [ast.specialized.stat.Fence]           = type_check.stat_fence,
   [ast.specialized.stat.ParallelizeWith] = type_check.stat_parallelize_with,
+  [ast.specialized.stat.ParallelPrefix]  = type_check.stat_parallel_prefix,
 
   [ast.specialized.stat.Elseif] = unreachable,
 }

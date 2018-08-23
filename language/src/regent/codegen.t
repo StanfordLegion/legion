@@ -8997,6 +8997,10 @@ function codegen.stat_parallelize_with(cx, node)
   return quote [codegen.block(cx, node.block)] end
 end
 
+function codegen.stat_parallel_prefix(cx, node)
+  return quote end
+end
+
 function codegen.stat(cx, node)
   manual_gc()
 
@@ -9077,6 +9081,9 @@ function codegen.stat(cx, node)
 
   elseif node:is(ast.typed.stat.ParallelizeWith) then
     return codegen.stat_parallelize_with(cx, node)
+
+  elseif node:is(ast.typed.stat.ParallelPrefix) then
+    return codegen.stat_parallel_prefix(cx, node)
 
   else
     assert(false, "unexpected node type " .. tostring(node:type()))

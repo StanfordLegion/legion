@@ -300,6 +300,7 @@ ast.unspecialized.stat:leaf("Escape", {"expr"})
 ast.unspecialized.stat:leaf("RawDelete", {"value"})
 ast.unspecialized.stat:leaf("Fence", {"kind", "blocking"})
 ast.unspecialized.stat:leaf("ParallelizeWith", {"hints", "block"})
+ast.unspecialized.stat:leaf("ParallelPrefix", {"lhs", "rhs", "op", "dir"})
 
 ast.unspecialized:inner("top", {"annotations"})
 ast.unspecialized.top:leaf("Task", {"name", "params", "return_type_expr",
@@ -419,6 +420,7 @@ ast.specialized.stat:leaf("Expr", {"expr"})
 ast.specialized.stat:leaf("RawDelete", {"value"})
 ast.specialized.stat:leaf("Fence", {"kind", "blocking"})
 ast.specialized.stat:leaf("ParallelizeWith", {"hints", "block"})
+ast.specialized.stat:leaf("ParallelPrefix", {"lhs", "rhs", "op", "dir"})
 
 ast.specialized:inner("top", {"annotations"})
 ast.specialized.top:leaf("Task", {"name", "params", "return_type",
@@ -537,6 +539,7 @@ ast.typed.stat:leaf("Expr", {"expr"})
 ast.typed.stat:leaf("RawDelete", {"value"})
 ast.typed.stat:leaf("Fence", {"kind", "blocking"})
 ast.typed.stat:leaf("ParallelizeWith", {"hints", "block"})
+ast.typed.stat:leaf("ParallelPrefix", {"lhs", "rhs", "op", "dir"})
 ast.typed.stat:leaf("BeginTrace", {"trace_id"})
 ast.typed.stat:leaf("EndTrace", {"trace_id"})
 ast.typed.stat:leaf("MapRegions", {"region_types"})
