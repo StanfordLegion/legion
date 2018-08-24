@@ -285,7 +285,7 @@ class FutureMap(object):
         domain_point = DomainPoint(_IndexValue(point))
         return Future.from_cdata(
             c.legion_future_map_get_future(self.handle, domain_point.raw_value()),
-            value_type=value_type)
+            value_type=self.value_type)
 
 class Type(object):
     __slots__ = ['numpy_type', 'cffi_type', 'size']
