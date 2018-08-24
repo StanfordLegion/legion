@@ -8998,7 +8998,131 @@ function codegen.stat_parallelize_with(cx, node)
 end
 
 function codegen.stat_parallel_prefix(cx, node)
-  return quote end
+  local cuda = cx.variant:is_cuda()
+  assert(not cuda)
+
+  -- Generate AST nodes for the following snippet of code:
+  --
+  --   var start_i = rhs.bounds.lo
+  --   var end_i = rhs.bounds.hi
+  --   var index, prev_index
+  --   if dir > 0 then
+  --    index = start_i
+  --   else
+  --    index = end_i
+  --   end
+  --   lhs[index] = rhs[index]
+  --   prev_index = index
+  --   index = index + dir
+  --
+  --   while start_i <= index and index <= end_i do
+  --     lhs[index] = op(rhs[index], lhs[prev_index])
+  --     prev_index = index
+  --     index = index + dir
+  --   end
+  --
+
+  local index_type = std.as_read(node.dir.expr_type)
+  local dir = codegen.expr(cx, node.dir):read(cx)
+  local start_i = terralib.newsymbol(index_type, "start_i")
+  local end_i = terralib.newsymbol(index_type, "end_i")
+
+  local rhs_type = std.as_read(node.rhs.expr_type)
+  assert(std.is_region(rhs_type))
+  local bounds = cx:ispace(rhs_type:ispace()).bounds
+
+  local index = std.newsymbol(index_type, "index")
+  local prev_index = std.newsymbol(index_type, "prev_index")
+  local index_value = index:getsymbol()
+  local prev_index_value = prev_index:getsymbol()
+  local index_expr = ast.typed.expr.ID {
+    value = index,
+    expr_type = std.rawref(&index_type),
+    span = node.dir.span,
+    annotations = node.dir.annotations,
+  }
+  local prev_index_expr = ast.typed.expr.ID {
+    value = prev_index,
+    expr_type = std.rawref(&index_type),
+    span = node.dir.span,
+    annotations = node.dir.annotations,
+  }
+
+  local region_roots = terralib.newlist { node.lhs, node.lhs, node.rhs }
+  local index_exprs = terralib.newlist { index_expr, prev_index_expr, index_expr }
+  local index_access_exprs = data.zip(region_roots, index_exprs):map(function(pair)
+    local region_root, index_expr = unpack(pair)
+    local region = region_root.region
+    local region_type = std.as_read(region.expr_type)
+    local region_symbol
+    if region:is(ast.typed.expr.ID) then
+      region_symbol = region.value
+    else
+      region_symbol = terralib.newsymbol(region_type)
+    end
+    return ast.typed.expr.IndexAccess {
+      value = region,
+      index = index_expr,
+      expr_type = std.ref(index_type(region_type:fspace(), region_symbol)),
+      span = region.span,
+      annotations = region.annotations,
+    }
+  end)
+  local field_access_exprs = data.zip(region_roots, index_access_exprs):map(function(pair)
+    local region_root, index_access_expr = unpack(pair)
+    assert(#region_root.fields == 1)
+    local field_path = region_root.fields[1]
+    local field_expr = index_access_expr
+    for i = 1, #field_path do
+      local value_type = field_expr.expr_type
+      assert(std.is_ref(value_type))
+      field_expr = ast.typed.expr.FieldAccess {
+        value = field_expr,
+        field_name = field_path[i],
+        expr_type = std.get_field(value_type, field_path[i]),
+        span = region_root.region.span,
+        annotations = region_root.region.annotations,
+      }
+    end
+    return field_expr
+  end)
+
+  local lhs_value = codegen.expr(cx, field_access_exprs[1])
+  local rhs_value = codegen.expr(cx, field_access_exprs[3])
+
+  local op_expr = ast.typed.expr.Binary {
+    op = node.op,
+    lhs = field_access_exprs[3],
+    rhs = field_access_exprs[2],
+    expr_type = std.as_read(field_access_exprs[2].expr_type),
+    span = node.span,
+    annotations = node.annotations,
+  }
+  local op_value = codegen.expr(cx, op_expr)
+
+  local lhs_write_init = lhs_value:write(cx, rhs_value)
+  local lhs_write_loop = lhs_value:write(cx, op_value)
+
+  local actions = quote
+    [dir.actions];
+    var [start_i], [end_i] = [bounds].lo, [bounds].hi
+    var [index_value], [prev_index_value]
+    if [dir.value] >= [index_type:zero()] then
+      [index_value] = [start_i]
+    else
+      [index_value] = [end_i]
+    end
+    [lhs_write_init.actions];
+    [prev_index_value] = [index_value]
+    [index_value] = [index_value] + [dir.value]
+    while [start_i] <= [index_value] and [index_value] <= [end_i] do
+      [lhs_write_loop.actions];
+      [prev_index_value] = [index_value]
+      [index_value] = [index_value] + [dir.value]
+    end
+    [emit_debuginfo(node)]
+  end
+  return actions
 end
 
 function codegen.stat(cx, node)
