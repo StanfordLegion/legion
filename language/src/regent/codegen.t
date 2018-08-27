@@ -8997,11 +8997,8 @@ function codegen.stat_parallelize_with(cx, node)
   return quote [codegen.block(cx, node.block)] end
 end
 
-function codegen.stat_parallel_prefix(cx, node)
-  local cuda = cx.variant:is_cuda()
-  assert(not cuda)
-
-  -- Generate AST nodes for the following snippet of code:
+local function generate_parallel_prefix_cpu(cx, node)
+  -- Generate the following snippet of code:
   --
   --   var start_i = rhs.bounds.lo
   --   var end_i = rhs.bounds.hi
@@ -9022,14 +9019,21 @@ function codegen.stat_parallel_prefix(cx, node)
   --   end
   --
 
-  local index_type = std.as_read(node.dir.expr_type)
+  assert(#node.lhs.fields == 1)
+  assert(#node.rhs.fields == 1)
+  local lhs_field = node.lhs.fields[1]
+  local rhs_field = node.rhs.fields[1]
+  local lhs_type = std.as_read(node.lhs.expr_type)
+  local rhs_type = std.as_read(node.rhs.expr_type)
+  assert(std.is_region(lhs_type))
+  assert(std.is_region(rhs_type))
+  assert(not (std.type_eq(lhs_type, rhs_type) and lhs_field == rhs_field))
+  local bounds = cx:ispace(rhs_type:ispace()).bounds
+
+  local index_type = rhs_type:ispace().index_type
   local dir = codegen.expr(cx, node.dir):read(cx)
   local start_i = terralib.newsymbol(index_type, "start_i")
   local end_i = terralib.newsymbol(index_type, "end_i")
-
-  local rhs_type = std.as_read(node.rhs.expr_type)
-  assert(std.is_region(rhs_type))
-  local bounds = cx:ispace(rhs_type:ispace()).bounds
 
   local index = std.newsymbol(index_type, "index")
   local prev_index = std.newsymbol(index_type, "prev_index")
@@ -9070,7 +9074,6 @@ function codegen.stat_parallel_prefix(cx, node)
   end)
   local field_access_exprs = data.zip(region_roots, index_access_exprs):map(function(pair)
     local region_root, index_access_expr = unpack(pair)
-    assert(#region_root.fields == 1)
     local field_path = region_root.fields[1]
     local field_expr = index_access_expr
     for i = 1, #field_path do
@@ -9107,7 +9110,7 @@ function codegen.stat_parallel_prefix(cx, node)
     [dir.actions];
     var [start_i], [end_i] = [bounds].lo, [bounds].hi
     var [index_value], [prev_index_value]
-    if [dir.value] >= [index_type:zero()] then
+    if [index_type]([dir.value]) >= [index_type:zero()] then
       [index_value] = [start_i]
     else
       [index_value] = [end_i]
@@ -9123,6 +9126,170 @@ function codegen.stat_parallel_prefix(cx, node)
     [emit_debuginfo(node)]
   end
   return actions
+end
+
+local function generate_parallel_prefix_gpu(cx, node)
+  -- Generate the following snippet of code:
+  --
+  -- host side:
+  --
+  --   parallel_prefix<<rhs.bounds:size() / 2>>(lhs, rhs, rhs.bounds:size(), dir)
+  --
+  -- device side:
+  --
+  --   terra parallel_prefix(lhs, rhs, n, dir)
+  --
+  --     var tmp = __shared_memory()
+  --     var t = tid()
+  --     var lr = [int](dir >= 0)
+  --     var oa = 2 * t + 1
+  --     var ob = 2 * t + 2 * lr
+  --
+  --     tmp[2 * t] = rhs[2 * t]
+  --     tmp[2 * t + 1] = rhs[2 * t + 1]
+  --
+  --     var d = n >> 1
+  --     var offset = 1
+  --     while d > 0 do
+  --       __barrier()
+  --       if t * dir < d * dir then
+  --         var ai = offset * oa - lr
+  --         var bi = offset * ob - lr
+  --         tmp[bi] = op(tmp[ai], tmp[bi])
+  --       end
+  --       offset = offset << 1
+  --       d = d >> 1
+  --     end
+  --     if t == 0 then tmp[(n - lr) % n] = identity end
+  --     d = 1
+  --     while d < n do
+  --        offset = offset >> 1
+  --       __barrier()
+  --        if t * dir < d * dir then
+  --          var ai = offset * oa - lr
+  --          var bi = offset * ob - lr
+  --          var x = tmp[ai]
+  --          tmp[ai] = tmp[bi]
+  --          tmp[bi] = op(t, tmp[bi])
+  --        end
+  --        d = d << 1
+  --     end
+  --     __barrier()
+  --
+  --     lhs[2 * t] = op(rhs[2 * t], tmp[2 * t])
+  --     lhs[2 * t + 1] = op(rhs[2 * t + 1], tmp[2 * t + 1])
+  --   end
+  --
+
+  assert(#node.lhs.fields == 1)
+  assert(#node.rhs.fields == 1)
+  local lhs_field = node.lhs.fields[1]
+  local rhs_field = node.rhs.fields[1]
+  local lhs_type = std.as_read(node.lhs.expr_type)
+  local rhs_type = std.as_read(node.rhs.expr_type)
+  assert(std.is_region(lhs_type))
+  assert(std.is_region(rhs_type))
+  assert(not (std.type_eq(lhs_type, rhs_type) and lhs_field == rhs_field))
+  local bounds = cx:ispace(rhs_type:ispace()).bounds
+
+  local index_type = rhs_type:ispace().index_type
+  local dir_value = codegen.expr(cx, node.dir):read(cx)
+
+  local elem_type = std.get_field_path(lhs_type:fspace(), lhs_field)
+  assert(std.type_eq(elem_type, std.get_field_path(rhs_type:fspace(), rhs_field)))
+
+  local idx = std.newsymbol(index_type, "idx")
+  local res = std.newsymbol(elem_type, "res")
+  local idx_expr = ast.typed.expr.ID {
+    value = idx,
+    expr_type = std.rawref(&index_type),
+    span = node.dir.span,
+    annotations = node.dir.annotations,
+  }
+  local res_expr = ast.typed.expr.ID {
+    value = res,
+    expr_type = std.rawref(&elem_type),
+    span = node.dir.span,
+    annotations = node.dir.annotations,
+  }
+
+  local region_roots = terralib.newlist { node.lhs, node.rhs }
+  local index_access_exprs = region_roots:map(function(region_root)
+    local region = region_root.region
+    local region_type = std.as_read(region.expr_type)
+    local region_symbol
+    if region:is(ast.typed.expr.ID) then
+      region_symbol = region.value
+    else
+      region_symbol = terralib.newsymbol(region_type)
+    end
+    return ast.typed.expr.IndexAccess {
+      value = region,
+      index = idx_expr,
+      expr_type = std.ref(index_type(region_type:fspace(), region_symbol)),
+      span = region.span,
+      annotations = region.annotations,
+    }
+  end)
+  local field_access_exprs = data.zip(region_roots, index_access_exprs):map(function(pair)
+    local region_root, index_access_expr = unpack(pair)
+    local field_path = region_root.fields[1]
+    local field_expr = index_access_expr
+    for i = 1, #field_path do
+      local value_type = field_expr.expr_type
+      assert(std.is_ref(value_type))
+      field_expr = ast.typed.expr.FieldAccess {
+        value = field_expr,
+        field_name = field_path[i],
+        expr_type = std.get_field(value_type, field_path[i]),
+        span = region_root.region.span,
+        annotations = region_root.region.annotations,
+      }
+    end
+    return field_expr
+  end)
+
+  local lhs_value = codegen.expr(cx, field_access_exprs[1])
+  local rhs_value = codegen.expr(cx, field_access_exprs[2])
+  local res_value = codegen.expr(cx, res_expr)
+
+  local rhs = rhs_value:read(cx)
+  local lhs = lhs_value:write(cx, res_value)
+
+  local n = terralib.newsymbol(c.size_t, "n")
+  local dir = terralib.newsymbol(std.as_read(node.dir.expr_type), "dir")
+
+  local lhs_base_pointer = cx:region(lhs_type):base_pointer(lhs_field)
+  local rhs_base_pointer = cx:region(rhs_type):base_pointer(rhs_field)
+
+  local prescan =
+    cudahelper.generate_parallel_prescan(lhs, rhs, lhs_base_pointer, rhs_base_pointer,
+        res:getsymbol(), idx:getsymbol(), n, dir, node.op, elem_type)
+  local kernel_id = cx.task_meta:get_cuda_variant():add_cuda_kernel(prescan)
+  local shared_mem_size = cudahelper.compute_prefix_op_buffer_size(elem_type)
+
+  local args = terralib.newlist()
+  args:insertall({lhs_base_pointer, rhs_base_pointer, n, dir})
+
+  local count = terralib.newsymbol(c.size_t, "count")
+  local kernel_call =
+    cudahelper.codegen_kernel_call(kernel_id, count, args, shared_mem_size)
+
+  return quote
+    [dir_value.actions]
+    var [dir] = [dir_value.value]
+    var [n] = [bounds]:size()
+    var [count] = ([n] + 1) / 2
+    [kernel_call]
+  end
+end
+
+function codegen.stat_parallel_prefix(cx, node)
+  if cx.variant:is_cuda() then
+    return generate_parallel_prefix_gpu(cx, node)
+  else
+    return generate_parallel_prefix_cpu(cx, node)
+  end
 end
 
 function codegen.stat(cx, node)

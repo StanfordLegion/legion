@@ -269,12 +269,6 @@ local supported_scalar_red_ops = {
 }
 
 function cudahelper.global_thread_id()
-  --local bid = `(bid_x() + n_bid_x() * bid_y() + n_bid_x() * n_bid_y() * bid_z())
-  --local num_threads = `(n_tid_x() * n_tid_y() * n_tid_z())
-  --return `([bid] * [num_threads] +
-  --         tid_x() +
-  --         n_tid_x() * tid_y() +
-  --         n_tid_x() * n_tid_y() * tid_z())
   local bid = `(bid_x() + n_bid_x() * bid_y() + n_bid_x() * n_bid_y() * bid_z())
   local num_threads = `(n_tid_x())
   return `([bid] * [num_threads] + tid_x())
@@ -509,6 +503,76 @@ function cudahelper.generate_reduction_postamble(reductions, device_ptrs_map)
   end
   if postamble == nil then postamble = quote end end
   return postamble
+end
+
+function cudahelper.compute_prefix_op_buffer_size(elem_type)
+  return THREAD_BLOCK_SIZE * terralib.sizeof(elem_type)
+end
+
+-- This function expects lhs and rhs to be the values from the following expressions.
+--
+--   * lhs: lhs[idx] = res
+--   * rhs: rhs[idx]
+--
+-- The code generator below captures 'idx' and 'res' to change the meaning of these values
+function cudahelper.generate_parallel_prescan(lhs, rhs, lhs_ptr, rhs_ptr, res, idx, n, dir, op, elem_type)
+  local tmp = cudalib.sharedmemory(elem_type, THREAD_BLOCK_SIZE)
+  local init = std_base.reduction_op_init[op][elem_type]
+  local prescan
+  terra prescan([lhs_ptr], [rhs_ptr], [n], [dir])
+      var [idx]
+      var t = tid_x()
+      if 2 * t + 1 > [n] then return end
+      var lr = [int]([dir] >= 0)
+      var oa = 2 * t + 1
+      var ob = 2 * t + 2 * lr
+
+      [idx].__ptr = 2 * t
+      [rhs.actions]
+      [tmp][ [idx].__ptr ] = [rhs.value]
+      [idx].__ptr = [idx].__ptr + 1
+      [rhs.actions]
+      [tmp][ [idx].__ptr ] = [rhs.value]
+
+      var d : int = n >> 1
+      var offset = 1
+      while d > 0 do
+        barrier()
+        if t  < d then
+          var ai : int = offset * oa - lr
+          var bi : int = offset * ob - lr
+          tmp[bi] = [std_base.quote_binary_op(op, `([tmp][ai]), `([tmp][bi]))]
+        end
+        offset = offset << 1
+        d = d >> 1
+      end
+      if t == 0 then tmp[(n - lr) % n] = [init] end
+      d = 1
+      while d < n do
+        offset = offset >> 1
+        barrier()
+        if t < d then
+          var ai = offset * oa - lr
+          var bi = offset * ob - lr
+          var x = tmp[ai]
+          tmp[ai] = tmp[bi]
+          tmp[bi] = [std_base.quote_binary_op(op, x, `([tmp][bi]))]
+        end
+        d = d << 1
+      end
+      barrier()
+
+      var [res]
+      [idx].__ptr = 2 * t
+      [rhs.actions]
+      [res] = [std_base.quote_binary_op(op, `([tmp][ [idx].__ptr ]), rhs.value)]
+      [lhs.actions]
+      [idx].__ptr = [idx].__ptr + 1
+      [rhs.actions]
+      [res] = [std_base.quote_binary_op(op, `([tmp][ [idx].__ptr ]), rhs.value)]
+      [lhs.actions]
+  end
+  return prescan
 end
 
 function cudahelper.codegen_kernel_call(kernel_id, count, args, shared_mem_size)
