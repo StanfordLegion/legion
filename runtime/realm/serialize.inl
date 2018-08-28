@@ -67,6 +67,11 @@ namespace Realm {
     // class FixedBufferSerializer
     //
 
+    inline FixedBufferSerializer::FixedBufferSerializer(void)
+      : pos(0)
+      , limit(0)
+    {}
+
     inline FixedBufferSerializer::FixedBufferSerializer(void *buffer, size_t size)
       : pos(static_cast<char *>(buffer)),
 	limit(static_cast<char *>(buffer) + size)
@@ -79,6 +84,18 @@ namespace Realm {
 
     inline FixedBufferSerializer::~FixedBufferSerializer(void)
     {}
+
+    inline void FixedBufferSerializer::reset(void *buffer, size_t size)
+    {
+      pos = static_cast<char *>(buffer);
+      limit = static_cast<char *>(buffer) + size;
+    }
+
+    inline void FixedBufferSerializer::reset(ByteArray& array)
+    {
+      pos = static_cast<char *>(array.base());
+      limit = static_cast<char *>(array.base()) + array.size();
+    }
 
     inline ptrdiff_t FixedBufferSerializer::bytes_left(void) const
     {
