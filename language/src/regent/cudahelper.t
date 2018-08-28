@@ -278,6 +278,10 @@ function cudahelper.global_block_id()
   return `(bid_x() + n_bid_x() * bid_y() + n_bid_x() * n_bid_y() * bid_z())
 end
 
+function cudahelper.get_thread_block_size()
+  return THREAD_BLOCK_SIZE
+end
+
 -- Slow atomic operation implementations (copied and modified from Ebb)
 local terra cas_uint64(address : &uint64, compare : uint64, value : uint64)
   return terralib.asm(terralib.types.uint64,
@@ -506,7 +510,7 @@ function cudahelper.generate_reduction_postamble(reductions, device_ptrs_map)
 end
 
 function cudahelper.compute_prefix_op_buffer_size(elem_type)
-  return THREAD_BLOCK_SIZE * terralib.sizeof(elem_type)
+  return THREAD_BLOCK_SIZE * 2 * terralib.sizeof(elem_type)
 end
 
 -- This function expects lhs and rhs to be the values from the following expressions.
@@ -515,62 +519,75 @@ end
 --   * rhs: rhs[idx]
 --
 -- The code generator below captures 'idx' and 'res' to change the meaning of these values
-function cudahelper.generate_parallel_prescan(lhs, rhs, lhs_ptr, rhs_ptr, res, idx, n, dir, op, elem_type)
-  local tmp = cudalib.sharedmemory(elem_type, THREAD_BLOCK_SIZE)
+function cudahelper.generate_parallel_prescan(lhs, rhs, lhs_ptr, rhs_ptr, res, idx,
+                                              num_elmts, num_leaves, dir, op, elem_type)
+  local tmp = cudalib.sharedmemory(elem_type, THREAD_BLOCK_SIZE * 2)
   local init = std_base.reduction_op_init[op][elem_type]
   local prescan
-  terra prescan([lhs_ptr], [rhs_ptr], [n], [dir])
-      var [idx]
-      var t = tid_x()
-      if 2 * t + 1 > [n] then return end
-      var lr = [int]([dir] >= 0)
-      var oa = 2 * t + 1
-      var ob = 2 * t + 2 * lr
+  terra prescan([lhs_ptr], [rhs_ptr], [num_elmts], [num_leaves], [dir])
+    var [idx]
+    var t = tid_x()
+    var bid = [cudahelper.global_block_id()]
+    [lhs_ptr] = &([lhs_ptr][bid * [THREAD_BLOCK_SIZE * 2]])
+    [rhs_ptr] = &([rhs_ptr][bid * [THREAD_BLOCK_SIZE * 2]])
+    var lr = [int]([dir] >= 0)
+    var oa = 2 * t + 1
+    var ob = 2 * t + 2 * lr
 
-      [idx].__ptr = 2 * t
+    [idx].__ptr = 2 * t
+    [tmp][ [idx].__ptr ] = [init]
+    if [idx].__ptr < [num_elmts] then
       [rhs.actions]
       [tmp][ [idx].__ptr ] = [rhs.value]
-      [idx].__ptr = [idx].__ptr + 1
+    end
+    [idx].__ptr = [idx].__ptr + 1
+    [tmp][ [idx].__ptr ] = [init]
+    if [idx].__ptr < [num_elmts] then
       [rhs.actions]
       [tmp][ [idx].__ptr ] = [rhs.value]
+    end
 
-      var d : int = n >> 1
-      var offset = 1
-      while d > 0 do
-        barrier()
-        if t  < d then
-          var ai : int = offset * oa - lr
-          var bi : int = offset * ob - lr
-          tmp[bi] = [std_base.quote_binary_op(op, `([tmp][ai]), `([tmp][bi]))]
-        end
-        offset = offset << 1
-        d = d >> 1
-      end
-      if t == 0 then tmp[(n - lr) % n] = [init] end
-      d = 1
-      while d < n do
-        offset = offset >> 1
-        barrier()
-        if t < d then
-          var ai = offset * oa - lr
-          var bi = offset * ob - lr
-          var x = tmp[ai]
-          tmp[ai] = tmp[bi]
-          tmp[bi] = [std_base.quote_binary_op(op, x, `([tmp][bi]))]
-        end
-        d = d << 1
-      end
+    var d : int = [num_leaves] >> 1
+    var offset = 1
+    while d > 0 do
       barrier()
+      if t  < d then
+        var ai : int = offset * oa - lr
+        var bi : int = offset * ob - lr
+        tmp[bi] = [std_base.quote_binary_op(op, `([tmp][ai]), `([tmp][bi]))]
+      end
+      offset = offset << 1
+      d = d >> 1
+    end
+    if t == 0 then tmp[(num_leaves - lr) % num_leaves] = [init] end
+    d = 1
+    while d <= [num_leaves] do
+      offset = offset >> 1
+      barrier()
+      if t < d and offset > 0 then
+        var ai = offset * oa - lr
+        var bi = offset * ob - lr
+        var x = tmp[ai]
+        tmp[ai] = tmp[bi]
+        tmp[bi] = [std_base.quote_binary_op(op, x, `([tmp][bi]))]
+      end
+      d = d << 1
+    end
+    barrier()
 
-      var [res]
-      [idx].__ptr = 2 * t
+    var [res]
+    [idx].__ptr = 2 * t
+    if [idx].__ptr < [num_elmts] then
       [rhs.actions]
       [res] = [std_base.quote_binary_op(op, `([tmp][ [idx].__ptr ]), rhs.value)]
       [lhs.actions]
-      [idx].__ptr = [idx].__ptr + 1
+    end
+    [idx].__ptr = [idx].__ptr + 1
+    if [idx].__ptr < [num_elmts] then
       [rhs.actions]
       [res] = [std_base.quote_binary_op(op, `([tmp][ [idx].__ptr ]), rhs.value)]
       [lhs.actions]
+    end
   end
   return prescan
 end
@@ -596,7 +613,11 @@ function cudahelper.codegen_kernel_call(kernel_id, count, args, shared_mem_size)
   end
 
   local launch_domain_init = quote
-    [block].x, [block].y, [block].z = THREAD_BLOCK_SIZE, 1, 1
+    if [count] <= THREAD_BLOCK_SIZE then
+      [block].x, [block].y, [block].z = [count], 1, 1
+    else
+      [block].x, [block].y, [block].z = THREAD_BLOCK_SIZE, 1, 1
+    end
     var num_blocks = [round_exp(count, THREAD_BLOCK_SIZE)]
     if num_blocks <= MAX_NUM_BLOCK then
       [grid].x, [grid].y, [grid].z = num_blocks, 1, 1

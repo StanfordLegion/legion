@@ -9256,7 +9256,8 @@ local function generate_parallel_prefix_gpu(cx, node)
   local rhs = rhs_value:read(cx)
   local lhs = lhs_value:write(cx, res_value)
 
-  local n = terralib.newsymbol(c.size_t, "n")
+  local num_elmts = terralib.newsymbol(c.size_t, "num_elmts")
+  local num_leaves = terralib.newsymbol(c.size_t, "num_leaves")
   local dir = terralib.newsymbol(std.as_read(node.dir.expr_type), "dir")
 
   local lhs_base_pointer = cx:region(lhs_type):base_pointer(lhs_field)
@@ -9264,12 +9265,12 @@ local function generate_parallel_prefix_gpu(cx, node)
 
   local prescan =
     cudahelper.generate_parallel_prescan(lhs, rhs, lhs_base_pointer, rhs_base_pointer,
-        res:getsymbol(), idx:getsymbol(), n, dir, node.op, elem_type)
+        res:getsymbol(), idx:getsymbol(), num_elmts, num_leaves, dir, node.op, elem_type)
   local kernel_id = cx.task_meta:get_cuda_variant():add_cuda_kernel(prescan)
   local shared_mem_size = cudahelper.compute_prefix_op_buffer_size(elem_type)
 
   local args = terralib.newlist()
-  args:insertall({lhs_base_pointer, rhs_base_pointer, n, dir})
+  args:insertall({lhs_base_pointer, rhs_base_pointer, num_elmts, num_leaves, dir})
 
   local count = terralib.newsymbol(c.size_t, "count")
   local kernel_call =
@@ -9278,8 +9279,12 @@ local function generate_parallel_prefix_gpu(cx, node)
   return quote
     [dir_value.actions]
     var [dir] = [dir_value.value]
-    var [n] = [bounds]:size()
-    var [count] = ([n] + 1) / 2
+    var [num_elmts] = [bounds]:size()
+    var [num_leaves] = [cudahelper.get_thread_block_size()] * 2
+    while [num_leaves] / 2 > [num_elmts] do
+      [num_leaves] = [num_leaves] / 2
+    end
+    var [count] = [num_leaves] / 2
     [kernel_call]
   end
 end
