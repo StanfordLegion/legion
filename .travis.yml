@@ -11,7 +11,7 @@ compiler:
 env:
   global:
   - WARN_AS_ERROR=1
-  - MAKEFLAGS="-s"
+    #- MAKEFLAGS="-s"
   - REALM_SYNTHETIC_CORE_MAP=""
   - REALM_BACKTRACE=1
   - TEST_FUZZER=0
