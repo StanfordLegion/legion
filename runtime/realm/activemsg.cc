@@ -2458,6 +2458,119 @@ static void handle_flip_ack(gasnet_token_t token,
   endpoint_manager->handle_flip_ack(src, ack_buffer);
 }
 
+class IncomingMessageNew : public IncomingMessage {
+ public:
+  IncomingMessageNew(NodeID _src, void *_buf, size_t _nbytes,
+		     ActiveMessageHandlerTable::MessageHandler _handler);
+
+  virtual void run_handler(void);
+
+  virtual int get_peer(void);
+  virtual int get_msgid(void);
+  virtual size_t get_msgsize(void);
+
+  NodeID src;
+  void *buf;
+  size_t nbytes;
+  ActiveMessageHandlerTable::MessageHandler handler;
+  union {
+    struct {
+      BaseMedium base;
+      unsigned short msgid;
+      unsigned short sender;
+      unsigned payload_len;
+    } hdr;
+    gasnet_handlerarg_t args[16];
+  } header;
+};
+
+IncomingMessageNew::IncomingMessageNew(NodeID _src, void *_buf, size_t _nbytes,
+				       ActiveMessageHandlerTable::MessageHandler _handler)
+  : src(_src)
+  , buf(_buf)
+  , nbytes(_nbytes)
+  , handler(_handler)
+{}
+
+void IncomingMessageNew::run_handler(void)
+{
+  (*handler)(header.hdr.sender, header.args+6, buf, nbytes);
+  handle_long_msgptr(src, buf);
+}
+
+int IncomingMessageNew::get_peer(void)
+{
+  return src;
+}
+
+int IncomingMessageNew::get_msgid(void)
+{
+  return header.hdr.msgid;
+}
+
+size_t IncomingMessageNew::get_msgsize(void)
+{
+  return nbytes;
+}
+
+static void handle_new_activemsg(gasnet_token_t token,
+				 void *buf, size_t nbytes,
+				 gasnet_handlerarg_t arg0,
+				 gasnet_handlerarg_t arg1,
+				 gasnet_handlerarg_t arg2,
+				 gasnet_handlerarg_t arg3,
+				 gasnet_handlerarg_t arg4,
+				 gasnet_handlerarg_t arg5,
+				 gasnet_handlerarg_t arg6,
+				 gasnet_handlerarg_t arg7,
+				 gasnet_handlerarg_t arg8,
+				 gasnet_handlerarg_t arg9,
+				 gasnet_handlerarg_t arg10,
+				 gasnet_handlerarg_t arg11,
+				 gasnet_handlerarg_t arg12,
+				 gasnet_handlerarg_t arg13,
+				 gasnet_handlerarg_t arg14,
+				 gasnet_handlerarg_t arg15)
+{
+  NodeID src = get_message_source(token);
+  bool handle_now = adjust_long_msgsize(src, buf, nbytes, arg0, arg1);
+  if(handle_now) {
+    unsigned short msgid = arg4 & 0xffff;
+
+    ActiveMessageHandlerTable::MessageHandler handler = activemsg_handler_table.lookup_message_handler(msgid);
+
+    IncomingMessageNew *imsg = new IncomingMessageNew(src, buf, nbytes, handler);
+    imsg->header.args[0] = arg0;
+    imsg->header.args[1] = arg1;
+    imsg->header.args[2] = arg2;
+    imsg->header.args[3] = arg3;
+    imsg->header.args[4] = arg4;
+    imsg->header.args[5] = arg5;
+    imsg->header.args[6] = arg6;
+    imsg->header.args[7] = arg7;
+    imsg->header.args[8] = arg8;
+    imsg->header.args[9] = arg9;
+    imsg->header.args[10] = arg10;
+    imsg->header.args[11] = arg11;
+    imsg->header.args[12] = arg12;
+    imsg->header.args[13] = arg13;
+    imsg->header.args[14] = arg14;
+    imsg->header.args[15] = arg15;
+    /* save a copy of the srcptr - imsg may be freed any time*/
+    /*  after we enqueue it */
+    uint64_t srcptr = reinterpret_cast<uintptr_t>(imsg->header.hdr.base.srcptr);
+    enqueue_incoming(src, imsg);
+    /* we can (and should) release the srcptr immediately */
+    if(srcptr) {
+      assert(nbytes > 0);
+      record_message(src, true);
+      send_srcptr_release(token, srcptr);
+    } else
+      record_message(src, false);
+  } else
+    record_message(src, false);
+}
+
 static const int MAX_HANDLERS = 128;
 static gasnet_handlerentry_t handlers[MAX_HANDLERS];
 static int hcount = 0;
@@ -2539,7 +2652,10 @@ void init_endpoints(int gasnet_mem_size_in_mb,
   }
 #endif
 
-  assert(hcount < (MAX_HANDLERS - 3));
+  assert(hcount < (MAX_HANDLERS - 4));
+  handlers[hcount].index = MSGID_NEW_ACTIVEMSG;
+  handlers[hcount].fnptr = (void (*)())handle_new_activemsg;
+  hcount++;
   handlers[hcount].index = MSGID_FLIP_REQ;
   handlers[hcount].fnptr = (void (*)())handle_flip_req;
   hcount++;
@@ -2554,6 +2670,8 @@ void init_endpoints(int gasnet_mem_size_in_mb,
   record_am_handler(MSGID_FLIP_ACK, "Flip Acknowledgement AM");
   record_am_handler(MSGID_RELEASE_SRCPTR, "Release Source Pointer AM");
 #endif
+
+  activemsg_handler_table.construct_handler_table();
 
   CHECK_GASNET( gasnet_attach(handlers, hcount,
 			      attach_size, 0) );
@@ -2987,3 +3105,51 @@ void stop_activemsg_threads(void)
 }
 
 #endif
+
+
+////////////////////////////////////////////////////////////////////////
+//
+// class ActiveMessageHandlerTable
+//
+
+ActiveMessageHandlerTable::ActiveMessageHandlerTable(void)
+{}
+
+ActiveMessageHandlerTable::~ActiveMessageHandlerTable(void)
+{}
+
+ActiveMessageHandlerTable::MessageHandler ActiveMessageHandlerTable::lookup_message_handler(ActiveMessageHandlerTable::MessageID id)
+{
+  assert(id < handlers.size());
+  return handlers[id].handler;
+}
+
+/*static*/ void ActiveMessageHandlerTable::append_handler_reg(ActiveMessageHandlerRegBase *new_reg)
+{
+  new_reg->next_handler = pending_handlers;
+  pending_handlers = new_reg;
+}
+
+static inline bool hash_less(const ActiveMessageHandlerTable::HandlerEntry &a,
+			     const ActiveMessageHandlerTable::HandlerEntry &b)
+{
+  return (a.hash < b.hash);
+}
+
+void ActiveMessageHandlerTable::construct_handler_table(void)
+{
+  for(ActiveMessageHandlerRegBase *nextreg = pending_handlers;
+      nextreg;
+      nextreg = nextreg->next_handler) {
+    HandlerEntry e;
+    e.hash = nextreg->hash;
+    e.handler = nextreg->get_handler();
+    handlers.push_back(e);
+  }
+
+  std::sort(handlers.begin(), handlers.end(), hash_less);
+}
+
+/*static*/ ActiveMessageHandlerRegBase *ActiveMessageHandlerTable::pending_handlers = 0;
+
+/*extern*/ ActiveMessageHandlerTable activemsg_handler_table;

@@ -873,4 +873,125 @@ inline size_t get_lmb_size(int target_node) { return 0; }
 
     typedef AutoLock<GASNetHSL> AutoHSLLock;
 
+//////////////////////////////////////////////////////////////////////////
+
+enum { MSGID_NEW_ACTIVEMSG = 251 };
+
+#include "realm/serialize.h"
+#include "realm/nodeset.h"
+
+template <typename T>
+class ActiveMessage {
+public:
+  // construct a new active message for either a single recipient or a mask
+  //  of recipients
+  // in addition to the header struct (T), a message can include a variable
+  //  payload which can be delivered to a particular destination address
+  ActiveMessage(NodeID _target,
+		size_t _max_payload_size = 0, void *_dest_payload_addr = 0);
+  ActiveMessage(const Realm::NodeSet &_targets, size_t _max_payload_size = 0);
+  ~ActiveMessage(void);
+
+  // operator-> gives access to the header structure
+  T *operator->(void);
+
+  // variable payload can be written to in three ways:
+  //  (a) Realm-style serialization (currently eager)
+  template <typename T2>
+  bool operator<<(const T2& to_append);
+  //  (b) old memcpy-like behavior (using the various payload modes)
+  void add_payload(const void *data, size_t datalen,
+		   int payload_mode = PAYLOAD_COPY);
+  //  (c) request for a pointer to write into (writes must be completed before
+  //       call to commit or cancel)
+  void *payload_ptr(size_t datalen);
+
+  // every active message must eventually be commit()'ed or cancel()'ed
+  void commit(void);
+  void cancel(void);
+
+protected:
+  bool valid;
+  NodeID target;
+  Realm::NodeSet targets;
+  bool is_multicast;
+  struct FullHeader : public BaseMedium {
+    unsigned short msgid;
+    unsigned short sender;
+    unsigned payload_len;
+    T header;
+  };
+  FullHeader args;
+  char *payload;
+  size_t max_payload_size;
+  void *dest_payload_addr;
+  Realm::Serialization::FixedBufferSerializer fbs;
+};
+
+class ActiveMessageHandlerRegBase;
+
+// singleton class that can convert message type->ID and ID->handler
+class ActiveMessageHandlerTable {
+public:
+  ActiveMessageHandlerTable(void);
+  ~ActiveMessageHandlerTable(void);
+
+  typedef unsigned short MessageID;
+  typedef void (*MessageHandler)(NodeID sender, const void *header,
+				 const void *payload, size_t payload_size);
+
+  template <typename T>
+  MessageID lookup_message_id(void) const;
+
+  MessageHandler lookup_message_handler(MessageID id);
+
+  static void append_handler_reg(ActiveMessageHandlerRegBase *new_reg);
+
+  void construct_handler_table(void);
+
+  typedef unsigned TypeHash;
+
+  struct HandlerEntry {
+    TypeHash hash;
+    MessageHandler handler;
+  };
+
+protected:
+  static ActiveMessageHandlerRegBase *pending_handlers;
+
+  std::vector<HandlerEntry> handlers;
+};
+
+extern ActiveMessageHandlerTable activemsg_handler_table;
+
+class ActiveMessageHandlerRegBase {
+public:
+  virtual ~ActiveMessageHandlerRegBase(void) {}
+  virtual ActiveMessageHandlerTable::MessageHandler get_handler(void) const = 0;
+
+  ActiveMessageHandlerTable::TypeHash hash;
+  ActiveMessageHandlerRegBase *next_handler;
+};
+
+template <typename T, typename T2 = T>
+class ActiveMessageHandlerReg : public ActiveMessageHandlerRegBase {
+public:
+  ActiveMessageHandlerReg(void);
+  virtual ActiveMessageHandlerTable::MessageHandler get_handler(void) const;
+
+  // this method does nothing, but can be called to force the instantiation
+  //  of a handler registration object (needed when things are inside templates)
+  void force_instantiation(void) {}
+
+protected:
+  static void handler_wrapper(NodeID sender, const void *header,
+			      const void *payload, size_t payload_size);
+};
+
+template <typename T, typename OLDHDLR>
+class ActiveMessageHandlerCompatReg;
+
+#include "realm/activemsg.inl"
+
 #endif
+
