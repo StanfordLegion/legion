@@ -18,7 +18,9 @@
 #ifndef REALM_TIMERS_H
 #define REALM_TIMERS_H
 
+#ifdef DETAILED_TIMING
 #include "realm/activemsg.h"
+#endif
 
 #include <stdio.h>
 #include <map>
@@ -34,8 +36,6 @@ enum {
   TIME_SYSTEM,
   TIME_AM,
 };
-
-extern pthread_key_t thread_timer_key;
 
 namespace Realm {
 
@@ -136,6 +136,7 @@ namespace Realm {
 
   // active messages
 
+#ifdef DETAILED_TIMING
   struct ClearTimersMessage {
     struct RequestArgs {
       int sender;
@@ -181,6 +182,7 @@ namespace Realm {
     static void send_request(NodeID target, void *rollup_ptr,
 			     const void *data, size_t datalen, int payload_mode);
   };
+#endif
   
 }; // namespace Realm
 

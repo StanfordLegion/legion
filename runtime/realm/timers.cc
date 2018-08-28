@@ -16,6 +16,7 @@
 // clocks, timers for Realm
 
 #include "realm/timers.h"
+#include "realm/activemsg.h"
 
 #include <string.h>
 #include <list>
@@ -27,6 +28,7 @@ namespace Realm {
   // if set_zero_time() is not called, relative time will equal absolute time
   /*static*/ long long Clock::zero_time = 0;
 
+#ifdef DETAILED_TIMERS
   ////////////////////////////////////////////////////////////////////////
   //
   // class MultiNodeRollUp
@@ -95,6 +97,7 @@ namespace Realm {
       if(count_left == 0)
 	condvar.signal();
     }
+#endif
 
 
   ////////////////////////////////////////////////////////////////////////
@@ -275,7 +278,7 @@ namespace Realm {
       }
       printf("END OF DETAILED TIMING SUMMARY\n");
     }
-#endif
+
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -361,6 +364,6 @@ namespace Realm {
     args.rollup_ptr = rollup_ptr;
     Message::request(target, args, data, datalen, payload_mode);
   }
-  
+#endif  
 
 }; // namespace Realm
