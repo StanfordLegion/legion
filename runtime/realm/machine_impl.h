@@ -397,6 +397,15 @@ namespace Realm {
     static void await_all_announcements(void);
   };
 
+  struct NodeAnnounceMessageNew {
+    unsigned num_procs;
+    unsigned num_memories;
+    unsigned num_ib_memories;
+
+    static void handle_message(NodeID sender, const NodeAnnounceMessageNew &msg,
+			       const void *data, size_t datalen);
+  };
+
 	
 }; // namespace Realm
 

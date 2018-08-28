@@ -104,16 +104,6 @@ namespace Realm {
     template <int N, typename T>
     void sparsity_map_ready(SparsityMapImpl<N,T> *sparsity, bool precise);
 
-    enum Opcode {
-      UOPCODE_INVALID,
-      UOPCODE_BY_FIELD,
-      UOPCODE_IMAGE,
-      UOPCODE_PREIMAGE,
-      UOPCODE_UNION,
-      UOPCODE_INTERSECTION,
-      UOPCODE_DIFFERENCE,
-    };
-
   protected:
     PartitioningMicroOp(NodeID _requestor, AsyncMicroOp *_async_microop);
 
@@ -203,86 +193,30 @@ namespace Realm {
   // active messages
 
 
+  template <typename T>
   struct RemoteMicroOpMessage {
-    struct RequestArgs : public BaseMedium {
-      NodeID sender;
-      DynamicTemplates::TagType type_tag;
-      PartitioningMicroOp::Opcode opcode;
-      PartitioningOperation *operation;
-      AsyncMicroOp *async_microop;
-    };
+    PartitioningOperation *operation;
+    AsyncMicroOp *async_microop;
 
-    // each different type of microop needs a different demux helper because they
-    //  use differing numbers of template arguments
-    struct ByFieldDecoder {
-      template <typename NT, typename T, typename FT>
-      static void demux(const RequestArgs *args, const void *data, size_t datalen);
-    };
-    struct ImageDecoder {
-      template <typename NT, typename T, typename N2T, typename T2>
-      static void demux(const RequestArgs *args, const void *data, size_t datalen);
-    };
-    struct PreimageDecoder {
-      template <typename NT, typename T, typename N2T, typename T2>
-      static void demux(const RequestArgs *args, const void *data, size_t datalen);
-    };
-    struct UnionDecoder {
-      template <typename NT, typename T>
-      static void demux(const RequestArgs *args, const void *data, size_t datalen);
-    };
-    struct IntersectionDecoder {
-      template <typename NT, typename T>
-      static void demux(const RequestArgs *args, const void *data, size_t datalen);
-    };
-    struct DifferenceDecoder {
-      template <typename NT, typename T>
-      static void demux(const RequestArgs *args, const void *data, size_t datalen);
-    };
-
-    static void handle_request(RequestArgs args, const void *data, size_t datalen);
-
-    typedef ActiveMessageMediumNoReply<REMOTE_MICROOP_MSGID,
-                                       RequestArgs,
-                                       handle_request> Message;
-
-    template <typename T>
-    static void send_request(NodeID target, PartitioningOperation *operation,
-			     const T& microop);
+    static void handle_message(NodeID sender,
+			       const RemoteMicroOpMessage<T> &msg,
+			       const void *data, size_t datalen)
+    {
+      Serialization::FixedBufferDeserializer fbd(data, datalen);
+      T *uop = new T(sender, msg.async_microop, fbd);
+      uop->dispatch(msg.operation, false /*not ok to run in this thread*/);
+    }
   };
 
-  template <typename T>
-  /*static*/ void RemoteMicroOpMessage::send_request(NodeID target, 
-						     PartitioningOperation *operation,
-						     const T& microop)
-  {
-    RequestArgs args;
-
-    args.sender = my_node_id;
-    args.type_tag = T::type_tag();
-    args.opcode = T::OPCODE;
-    args.operation = operation;
-    args.async_microop = microop.async_microop;
-
-    Serialization::DynamicBufferSerializer dbs(256);
-    microop.serialize_params(dbs);
-    ByteArray b = dbs.detach_bytearray();
-
-    Message::request(target, args, b.base(), b.size(), PAYLOAD_FREE);
-    b.detach();
-  }
 
   struct RemoteMicroOpCompleteMessage {
-    struct RequestArgs {
-      AsyncMicroOp *async_microop;
-    };
+    AsyncMicroOp *async_microop;
 
-    static void handle_request(RequestArgs args);
+    static void handle_message(NodeID sender,
+			       const RemoteMicroOpCompleteMessage &msg,
+			       const void *data, size_t datalen);
 
-    typedef ActiveMessageShortNoReply<REMOTE_MICROOP_COMPLETE_MSGID,
-                                      RequestArgs,
-                                      handle_request> Message;
-
-    static void send_request(NodeID target, AsyncMicroOp *async_microop);
+    static ActiveMessageHandlerReg<RemoteMicroOpCompleteMessage> areg;
   };
 
 

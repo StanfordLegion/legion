@@ -59,12 +59,6 @@ namespace Realm {
   // class ByFieldMicroOp<N,T,FT>
 
   template <int N, typename T, typename FT>
-  inline /*static*/ DynamicTemplates::TagType ByFieldMicroOp<N,T,FT>::type_tag(void)
-  {
-    return NTF_TemplateHelper::encode_tag<N,T,FT>();
-  }
-
-  template <int N, typename T, typename FT>
   ByFieldMicroOp<N,T,FT>::ByFieldMicroOp(IndexSpace<N,T> _parent_space,
 					 IndexSpace<N,T> _inst_space,
 					 RegionInstance _inst,
@@ -75,7 +69,9 @@ namespace Realm {
     , field_offset(_field_offset)
     , value_range_valid(false)
     , value_set_valid(false)
-  {}
+  {
+    areg.force_instantiation();
+  }
 
   template <int N, typename T, typename FT>
   ByFieldMicroOp<N,T,FT>::~ByFieldMicroOp(void)
@@ -213,7 +209,12 @@ namespace Realm {
       async_microop = new AsyncMicroOp(op, this);
       op->add_async_work_item(async_microop);
 
-      RemoteMicroOpMessage::send_request(exec_node, op, *this);
+      ActiveMessage<RemoteMicroOpMessage<ByFieldMicroOp<N,T,FT> > > msg(exec_node, 4096);
+      msg->operation = op;
+      msg->async_microop = async_microop;
+      this->serialize_params(msg);
+      msg.commit();
+
       delete this;
       return;
     }
@@ -259,6 +260,9 @@ namespace Realm {
 	       (s >> sparsity_outputs));
     assert(ok);
   }
+
+  template <int N, typename T, typename FT>
+  ActiveMessageHandlerReg<RemoteMicroOpMessage<ByFieldMicroOp<N,T,FT> > > ByFieldMicroOp<N,T,FT>::areg;
 
 
   ////////////////////////////////////////////////////////////////////////
@@ -324,7 +328,6 @@ namespace Realm {
   {
     os << "ByFieldOperation(" << parent << ")";
   }
-
 
 #define DOIT(N,T,F) \
   template class ByFieldMicroOp<N,T,F>; \

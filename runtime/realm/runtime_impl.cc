@@ -1321,11 +1321,11 @@ namespace Realm {
       UpdateBytesReadMessage::Message::add_handler_entries("Update Bytes Read AM");
       RegisterTaskMessage::Message::add_handler_entries("Register Task AM");
       RegisterTaskCompleteMessage::Message::add_handler_entries("Register Task Complete AM");
-      RemoteMicroOpMessage::Message::add_handler_entries("Remote Micro Op AM");
-      RemoteMicroOpCompleteMessage::Message::add_handler_entries("Remote Micro Op Complete AM");
+      //RemoteMicroOpMessage::Message::add_handler_entries("Remote Micro Op AM");
+      //RemoteMicroOpCompleteMessage::Message::add_handler_entries("Remote Micro Op Complete AM");
       RemoteSparsityContribMessage::Message::add_handler_entries("Remote Sparsity Contrib AM");
       RemoteSparsityRequestMessage::Message::add_handler_entries("Remote Sparsity Request AM");
-      ApproxImageResponseMessage::Message::add_handler_entries("Approx Image Response AM");
+      //ApproxImageResponseMessage::Message::add_handler_entries("Approx Image Response AM");
       SetContribCountMessage::Message::add_handler_entries("Set Contrib Count AM");
       RemoteIDRequestMessage::Message::add_handler_entries("Remote ID Request AM");
       RemoteIDResponseMessage::Message::add_handler_entries("Remote ID Response AM");
@@ -1823,6 +1823,7 @@ namespace Realm {
 #endif
 
 	// now announce ourselves to everyone else
+#if 0
 	for(NodeID i = 0; i <= max_node_id; i++)
 	  if(i != my_node_id)
 	    NodeAnnounceMessage::send_request(i,
@@ -1832,6 +1833,19 @@ namespace Realm {
 					      dbs.get_buffer(),
 					      dbs.bytes_used(),
 					      PAYLOAD_COPY);
+#else
+	NodeSet targets;
+	for(NodeID i = 0; i <= max_node_id; i++)
+	  if(i != my_node_id)
+	    targets.add(i);
+
+	ActiveMessage<NodeAnnounceMessageNew> amsg(targets, dbs.bytes_used());
+	amsg->num_procs = num_procs;
+	amsg->num_memories = num_memories;
+	amsg->num_ib_memories = num_ib_memories;
+	amsg.add_payload(dbs.get_buffer(), dbs.bytes_used());
+	amsg.commit();
+#endif
 
 	NodeAnnounceMessage::await_all_announcements();
 

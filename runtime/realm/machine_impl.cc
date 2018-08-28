@@ -3058,5 +3058,18 @@ namespace Realm {
 
     log_annc.info("node %d has received all of its announcements", my_node_id);
   }
+  
+  /*static*/ void NodeAnnounceMessageNew::handle_message(NodeID sender, const NodeAnnounceMessageNew &msg,
+							 const void *data, size_t datalen)
+  {
+    NodeAnnounceMessage::RequestArgs args;
+    args.node_id = sender;
+    args.num_procs = msg.num_procs;
+    args.num_memories = msg.num_memories;
+    args.num_ib_memories = msg.num_ib_memories;
+    NodeAnnounceMessage::handle_request(args, data, datalen);
+  }
+
+  ActiveMessageHandlerReg<NodeAnnounceMessageNew> foo;
 
 }; // namespace Realm
