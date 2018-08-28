@@ -1391,7 +1391,7 @@ namespace Realm {
 			    *core_reservations,
 			    stack_size_in_mb << 20);
 
-#ifdef USE_GASNET
+#if defined(USE_GASNET) && (((GEX_SPEC_VERSION_MAJOR << 8) + GEX_SPEC_VERSION_MINOR) < 5)
       // this needs to happen after init_endpoints
       gasnet_coll_init(0, 0, 0, 0, 0);
 #endif
