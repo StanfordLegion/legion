@@ -54,6 +54,7 @@ namespace Legion {
       // Get the location of this physical instance
       Memory get_location(void) const;
       unsigned long get_instance_id(void) const;
+      size_t get_instance_size(void) const;
       // Adds all fields that exist in instance to 'fields', unless
       //  instance is virtual
       void get_fields(std::set<FieldID> &fields) const;
@@ -1654,7 +1655,7 @@ namespace Legion {
     public:
       //------------------------------------------------------------------------
       // Methods for managing access to mapper state in the concurrent model
-      // These calls are no-ops in the serialized mapper model 
+      // These calls are illegal in the serialized mapper model 
       //------------------------------------------------------------------------
       bool is_locked(MapperContext ctx) const;
       void lock_mapper(MapperContext ctx, 
@@ -1663,7 +1664,7 @@ namespace Legion {
     public:
       //------------------------------------------------------------------------
       // Methods for managing the re-entrant state in the serialized model
-      // These calls are no-ops in the concurrent mapper model
+      // These calls are illegal in the concurrent mapper model
       //------------------------------------------------------------------------
       bool is_reentrant(MapperContext ctx) const;
       void enable_reentrant(MapperContext ctx) const;
@@ -1754,6 +1755,8 @@ namespace Legion {
                              const TaskLayoutConstraintSet &layout_constraints,
                              TaskID generator_tid, VariantID generator_vid, 
                              Processor generator_processor, bool &created) const;
+      const char* find_task_variant_name(MapperContext ctx,
+                                         TaskID task_id, VariantID vid) const;
       bool is_leaf_variant(MapperContext ctx, TaskID task_id,
                                      VariantID variant_id) const;
       bool is_inner_variant(MapperContext ctx, TaskID task_id,
@@ -1913,6 +1916,9 @@ namespace Legion {
 
       Color get_index_space_color(MapperContext ctx, 
                                             IndexSpace handle) const;
+
+      DomainPoint get_index_space_color_point(MapperContext ctx,
+                                              IndexSpace handle) const;
 
       Color get_index_partition_color(MapperContext ctx, 
                                                 IndexPartition handle) const;

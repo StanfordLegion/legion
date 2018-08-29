@@ -1516,6 +1516,18 @@ namespace Legion {
     }
     
     //--------------------------------------------------------------------------
+    const char* MapperManager::find_task_variant_name(
+                     MappingCallInfo *ctx, TaskID task_id, VariantID variant_id)
+    //--------------------------------------------------------------------------
+    {
+      pause_mapper_call(ctx);
+      VariantImpl *impl = runtime->find_variant_impl(task_id, variant_id);
+      const char *name = impl->get_name();
+      resume_mapper_call(ctx);
+      return name;
+    }
+
+    //--------------------------------------------------------------------------
     bool MapperManager::is_leaf_variant(MappingCallInfo *ctx,
                                         TaskID task_id, VariantID variant_id)
     //--------------------------------------------------------------------------
@@ -2577,6 +2589,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    DomainPoint MapperManager::get_index_space_color_point(MappingCallInfo *ctx,
+                                                           IndexSpace handle)
+    //--------------------------------------------------------------------------
+    {
+      pause_mapper_call(ctx);
+      DomainPoint result = runtime->get_index_space_color_point(handle);
+      resume_mapper_call(ctx);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
     Color MapperManager::get_index_partition_color(MappingCallInfo *ctx,
                                                    IndexPartition handle)
     //--------------------------------------------------------------------------
@@ -3112,14 +3135,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Acquire the lock as the precondition
-      DeferMessageArgs args;
-      args.manager = this;
-      args.sender = message->sender;
-      args.kind = message->kind;
-      args.size = message->size;
-      args.message = malloc(args.size);
+      DeferMessageArgs args(this, message->sender, message->kind, 
+                            malloc(message->size), message->size,
+                            message->broadcast);
       memcpy(args.message, message->message, args.size);
-      args.broadcast = message->broadcast;
       runtime->issue_runtime_meta_task(args, LG_RESOURCE_PRIORITY);
     }
 
@@ -3252,14 +3271,20 @@ namespace Legion {
     void SerializingManager::lock_mapper(MappingCallInfo *info, bool read_only)
     //--------------------------------------------------------------------------
     {
-      // Nothing to do
+      REPORT_LEGION_ERROR(ERROR_MAPPER_SYNCHRONIZATION,
+                          "Illegal 'lock_mapper' call performed in mapper %s "
+                          "with the serialized synchronization model. Use the "
+                          "'disable_reentrant' call instead.",get_mapper_name())
     }
 
     //--------------------------------------------------------------------------
     void SerializingManager::unlock_mapper(MappingCallInfo *info)
     //--------------------------------------------------------------------------
     {
-      // Nothing to do
+      REPORT_LEGION_ERROR(ERROR_MAPPER_SYNCHRONIZATION,
+                          "Illegal 'unlock_mapper' call performed in mapper %s "
+                          "with the serialized synchronization model. Use the "
+                          "'enable_reentrant' call instead.", get_mapper_name())
     }
 
     //--------------------------------------------------------------------------
@@ -3294,24 +3319,46 @@ namespace Legion {
       // No need to hold the lock since we know we are exclusive
       if (permit_reentrant)
       {
+        // We're going to pretent to do a pause here
+        pending_pause_call = true; 
         // If there are paused calls, we need to wait for them all 
         // to finish before we can continue execution 
-        if (paused_calls > 0)
+        RtUserEvent to_trigger;
+        RtEvent ready_event;
         {
+          AutoLock m_lock(mapper_lock);
+          if (pending_pause_call)
+            to_trigger = complete_pending_pause_mapper_call();
 #ifdef DEBUG_LEGION
-          assert(!info->resume.exists());
+          assert(paused_calls > 0);
+          assert(!info->resume.exists() || info->resume.has_triggered());
 #endif
-          RtUserEvent ready_event = Runtime::create_rt_user_event();
-          info->resume = ready_event;
-          non_reentrant_calls.push_back(info);
-          ready_event.wait();
-          // When we wake up, we should be non-reentrant
-#ifdef DEBUG_LEGION
-          assert(!permit_reentrant);
-#endif
+          // remove our pretend pause call
+          paused_calls--;
+          // If there are any paused calls or an already executing call or 
+          // then we can't run since we need everything to be done
+          if ((paused_calls > 0) || (executing_call != NULL))
+          {
+            info->resume = Runtime::create_rt_user_event();
+            ready_event = info->resume;
+            non_reentrant_calls.push_back(info);
+          }
+          else // There are no more outstanding calls other than us
+          {
+            executing_call = info;
+            permit_reentrant = false;
+          }
         }
-        else
-          permit_reentrant = false;
+        // If we have an event to trigger do that first
+        if (to_trigger.exists())
+          Runtime::trigger_event(to_trigger);
+        // Then wait if we have to in order to be notified we can run
+        if (ready_event.exists())
+          ready_event.wait();
+        // At this point we should be non-reentrant
+#ifdef DEBUG_LEGION
+        assert(!permit_reentrant);
+#endif
       }
     }
 
@@ -3651,14 +3698,20 @@ namespace Legion {
     void ConcurrentManager::enable_reentrant(MappingCallInfo *info)
     //--------------------------------------------------------------------------
     {
-      // Nothing to do 
+      REPORT_LEGION_ERROR(ERROR_MAPPER_SYNCHRONIZATION,
+                          "Illegal 'enable_reentrant' call performed in mapper "
+                          "%s with the concurrent synchronization model. Use "
+                          "the 'unlock_mapper' call instead.",get_mapper_name())
     }
 
     //--------------------------------------------------------------------------
     void ConcurrentManager::disable_reentrant(MappingCallInfo *info)
     //--------------------------------------------------------------------------
     {
-      // Nothing to do
+      REPORT_LEGION_ERROR(ERROR_MAPPER_SYNCHRONIZATION,
+                          "Illegal 'disable_reentrant' call performed in mapper"
+                          " %s with the concurrent synchronization model. Use "
+                          "the 'lock_mapper' call instead.", get_mapper_name())
     }
 
     //--------------------------------------------------------------------------
@@ -3770,7 +3823,7 @@ namespace Legion {
                                    Operation *op)
     //--------------------------------------------------------------------------
     {
-      ContinuationArgs args((op == NULL) ? task_profiling_provenance :
+      ContinuationArgs args((op == NULL) ? implicit_provenance :
                               op->get_unique_op_id(), this);
       // Give this resource priority in case we are holding the mapper lock
       RtEvent wait_on = runtime->issue_runtime_meta_task(args,

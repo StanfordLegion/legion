@@ -50,7 +50,7 @@ list(APPEND REGENT_SRC
 add_library(Regent ${REGENT_SRC})
 target_link_libraries(Regent PUBLIC Legion::Legion)
 set_target_properties(Regent PROPERTIES POSITION_INDEPENDENT_CODE ON)
-set_target_properties(Regent PROPERTIES OUTPUT_NAME regent)
+set_target_properties(Regent PROPERTIES OUTPUT_NAME "regent${INSTALL_SUFFIX}")
 set_target_properties(Regent PROPERTIES SOVERSION ${SOVERSION})
 
 install(TARGETS Regent EXPORT LegionTargets

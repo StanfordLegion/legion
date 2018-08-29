@@ -21,7 +21,7 @@ import legion
 import numpy
 
 # This task is defined in C++. See init_task in python_interop.cc.
-init = legion.extern_task(task_id=3, privileges=[legion.RW])
+init = legion.extern_task(task_id=3, privileges=[legion.RW], return_type=legion.int64)
 
 @legion.task
 def hello(i, j):
@@ -54,12 +54,18 @@ def main_task():
 
     # Create a region from I and F and launch two tasks.
     R = legion.Region.create(I, F)
-    init(R)
+    init_result = init(R)
     child_result = inc(R, 1)
+
+    # Check task results:
+    print("init task returned", init_result.get())
+    assert init_result.get() == 123
     print("child task returned", child_result.get())
-    print("main_task done")
+    assert child_result.get() == 42
 
     values = 'abc'
     for i in legion.IndexLaunch([3]):
         print('queue %s' % i)
         hello(i, values[i])
+
+    print("main_task done")

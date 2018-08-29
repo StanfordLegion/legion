@@ -27,6 +27,7 @@
 #define STATIC_STEALING_ENABLED       false
 #define STATIC_MAX_SCHEDULE_COUNT     8
 #define STATIC_MEMOIZE                false
+#define STATIC_MAP_LOCALLY            false
 
 // This is the default implementation of the mapper interface for 
 // the general low level runtime
@@ -67,7 +68,8 @@ namespace Legion {
         breadth_first_traversal(STATIC_BREADTH_FIRST),
         stealing_enabled(STATIC_STEALING_ENABLED),
         max_schedule_count(STATIC_MAX_SCHEDULE_COUNT),
-        memoize(STATIC_MEMOIZE)
+        memoize(STATIC_MEMOIZE),
+        map_locally(STATIC_MAP_LOCALLY)
     //--------------------------------------------------------------------------
     {
       log_mapper.spew("Initializing the default mapper for "
@@ -96,6 +98,7 @@ namespace Legion {
           BOOL_ARG("-dm:bft", breadth_first_traversal);
           INT_ARG("-dm:sched", max_schedule_count);
           BOOL_ARG("-dm:memoize", memoize);
+          BOOL_ARG("-dm:map_locally", map_locally);
 #undef BOOL_ARG
 #undef INT_ARG
         }
@@ -355,7 +358,7 @@ namespace Legion {
       output.stealable = stealing_enabled; 
       // This is the best choice for the default mapper assuming
       // there is locality in the remote mapped tasks
-      output.map_locally = false;
+      output.map_locally = map_locally;
     }
 
     //--------------------------------------------------------------------------
@@ -2232,6 +2235,8 @@ namespace Legion {
       LogicalRegion target_region = 
         default_policy_select_instance_region(ctx, target_memory, req,
                                               constraints, force_new, meets);
+      bool tight_region_bounds = (req.tag & DefaultMapper::EXACT_REGION) != 0;
+
       // TODO: deal with task layout constraints that require multiple
       // region requirements to be mapped to the same instance
       std::vector<LogicalRegion> target_regions(1, target_region);
@@ -2241,7 +2246,8 @@ namespace Legion {
           return false;
       } else {
         if (!runtime->find_or_create_physical_instance(ctx, 
-              target_memory, constraints, target_regions, result, created))
+              target_memory, constraints, target_regions, result, created,
+              true/*acquire*/, 0/*priority*/, tight_region_bounds))
           return false;
       }
       if (created)

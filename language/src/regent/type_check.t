@@ -742,11 +742,21 @@ function type_check.expr_index_access(cx, node)
     end
   else
     -- Ask the Terra compiler to kindly tell us what type this operator returns.
-    local function test()
-      local terra query(a : value_type, i : index_type)
-        return a[i]
+    local test
+    if regentlib.is_regent_array(value_type) then
+      test = function()
+        local terra query(a : value_type, i : index_type)
+          return a.impl[i]
+        end
+        return query:gettype().returntype
       end
-      return query:gettype().returntype
+    else
+      test = function()
+        local terra query(a : value_type, i : index_type)
+          return a[i]
+        end
+        return query:gettype().returntype
+      end
     end
     local valid, result_type = pcall(test)
 

@@ -193,12 +193,16 @@ class Future(object):
         if value is None:
             self.handle = None
         elif isinstance(value, Future):
+            value.resolve_handle()
             self.handle = c.legion_future_copy(value.handle)
             if value_type is None:
                 value_type = value.value_type
         elif value_type is not None:
-            value_ptr = ffi.new(ffi.getctype(value_type.cffi_type, '*'), value)
-            value_size = ffi.sizeof(value_type.cffi_type)
+            if value_type.size > 0:
+                value_ptr = ffi.new(ffi.getctype(value_type.cffi_type, '*'), value)
+            else:
+                value_ptr = ffi.NULL
+            value_size = value_type.size
             self.handle = c.legion_future_from_untyped_pointer(_my.ctx.runtime, value_ptr, value_size)
         else:
             value_str = pickle.dumps(value, protocol=_pickle_version)
@@ -248,6 +252,8 @@ class Future(object):
             value_str = ffi.unpack(ffi.cast('char *', value_ptr), value_size)
             value = pickle.loads(value_str)
             return value
+        elif self.value_type.size == 0:
+            c.legion_future_get_void_result(self.handle)
         else:
             expected_size = ffi.sizeof(self.value_type.cffi_type)
 
@@ -267,29 +273,34 @@ class Future(object):
         return ffi.buffer(value_ptr, value_size)
 
 class FutureMap(object):
-    __slots__ = ['handle']
-    def __init__(self, handle):
+    __slots__ = ['handle', 'value_type']
+    def __init__(self, handle, value_type=None):
         self.handle = c.legion_future_map_copy(handle)
+        self.value_type = value_type
 
     def __del__(self):
         c.legion_future_map_destroy(self.handle)
 
     def __getitem__(self, point):
         domain_point = DomainPoint(_IndexValue(point))
-        return Future.from_cdata(c.legion_future_map_get_future(self.handle, domain_point.raw_value()))
+        return Future.from_cdata(
+            c.legion_future_map_get_future(self.handle, domain_point.raw_value()),
+            value_type=self.value_type)
 
 class Type(object):
     __slots__ = ['numpy_type', 'cffi_type', 'size']
 
     def __init__(self, numpy_type, cffi_type):
+        assert (numpy_type is None) == (cffi_type is None)
         self.numpy_type = numpy_type
         self.cffi_type = cffi_type
-        self.size = numpy.dtype(numpy_type).itemsize
+        self.size = numpy.dtype(numpy_type).itemsize if numpy_type is not None else 0
 
     def __reduce__(self):
         return (Type, (self.numpy_type, self.cffi_type))
 
 # Pre-defined Types
+void = Type(None, None)
 float16 = Type(numpy.float16, 'short float')
 float32 = Type(numpy.float32, 'float')
 float64 = Type(numpy.float64, 'double')
@@ -586,12 +597,13 @@ class _RegionNdarray(object):
         }
 
 class ExternTask(object):
-    __slots__ = ['privileges', 'calling_convention', 'task_id']
+    __slots__ = ['privileges', 'return_type', 'calling_convention', 'task_id']
 
-    def __init__(self, task_id, privileges=None):
+    def __init__(self, task_id, privileges=None, return_type=void):
         if privileges is not None:
             privileges = [(x if x is not None else N) for x in privileges]
         self.privileges = privileges
+        self.return_type = return_type
         self.calling_convention = None
         assert isinstance(task_id, int)
         self.task_id = task_id
@@ -633,7 +645,7 @@ def get_qualname(fn):
     return [fn.__name__]
 
 class Task (object):
-    __slots__ = ['body', 'privileges', 'leaf', 'inner', 'idempotent', 'calling_convention', 'task_id', 'registered']
+    __slots__ = ['body', 'privileges', 'return_type', 'leaf', 'inner', 'idempotent', 'calling_convention', 'task_id', 'registered']
 
     def __init__(self, body, privileges=None,
                  leaf=False, inner=False, idempotent=False,
@@ -642,6 +654,7 @@ class Task (object):
         if privileges is not None:
             privileges = [(x if x is not None else N) for x in privileges]
         self.privileges = privileges
+        self.return_type = None # currently all Python tasks return Pickle-encoded data
         self.leaf = bool(leaf)
         self.inner = bool(inner)
         self.idempotent = bool(idempotent)
@@ -807,11 +820,12 @@ def task(body=None, **kwargs):
     return Task(body, **kwargs)
 
 class _TaskLauncher(object):
-    __slots__ = ['task_id', 'privileges', 'calling_convention']
+    __slots__ = ['task_id', 'privileges', 'return_type', 'calling_convention']
 
-    def __init__(self, task_id, privileges, calling_convention):
+    def __init__(self, task_id, privileges, return_type, calling_convention):
         self.task_id = task_id
         self.privileges = privileges
+        self.return_type = return_type
         self.calling_convention = calling_convention
 
     def preprocess_args(self, args):
@@ -884,19 +898,20 @@ class _TaskLauncher(object):
         c.legion_task_launcher_destroy(launcher)
 
         # Build future of result.
-        future = Future.from_cdata(result)
+        future = Future.from_cdata(result, value_type=self.return_type)
         c.legion_future_destroy(result)
         return future
 
 class _IndexLauncher(_TaskLauncher):
-    __slots__ = ['task_id', 'privileges', 'calling_convention',
-                 'domain', 'local_args', 'future_map']
+    __slots__ = ['task_id', 'privileges', 'return_type', 'calling_convention',
+                 'domain', 'local_args', 'future_args', 'future_map']
 
-    def __init__(self, task_id, privileges, calling_convention, domain):
+    def __init__(self, task_id, privileges, return_type, calling_convention, domain):
         super(_IndexLauncher, self).__init__(
-            task_id, privileges, calling_convention)
+            task_id, privileges, return_type, calling_convention)
         self.domain = domain
         self.local_args = c.legion_argument_map_create()
+        self.future_args = []
         self.future_map = None
 
     def __del__(self):
@@ -907,10 +922,12 @@ class _IndexLauncher(_TaskLauncher):
 
     def attach_local_args(self, index, *args):
         point = DomainPoint(index)
-        args = self.preprocess_args(args)
         task_args, _ = self.encode_args(args)
         c.legion_argument_map_set_point(
             self.local_args, point.raw_value(), task_args[0], False)
+
+    def attach_future_args(self, *args):
+        self.future_args = args
 
     def launch(self):
         # All arguments are passed as local, so global is NULL.
@@ -923,6 +940,9 @@ class _IndexLauncher(_TaskLauncher):
             self.task_id, self.domain.raw_value(),
             global_args[0], self.local_args,
             c.legion_predicate_true(), False, 0, 0)
+
+        for arg in self.future_args:
+            c.legion_index_launcher_add_future(launcher, arg.handle)
 
         # Launch the task.
         result = c.legion_index_launcher_execute(
@@ -939,6 +959,7 @@ class TaskLaunch(object):
         launcher = _TaskLauncher(
             task_id=task.task_id,
             privileges=task.privileges,
+            return_type=task.return_type,
             calling_convention=task.calling_convention)
         return launcher.spawn_task(*args)
 
@@ -1002,6 +1023,7 @@ class IndexLaunch(object):
             self.launcher = _IndexLauncher(
                 task_id=task.task_id,
                 privileges=task.privileges,
+                return_type=task.return_type,
                 calling_convention=task.calling_convention,
                 domain=self.domain)
 
@@ -1010,9 +1032,13 @@ class IndexLaunch(object):
         #   * Only one task can be launched.
         #   * The arguments must be compatible:
         #       * At a given argument position, the value must always
-        #         be a region, or always not.
+        #         be a special value, or always not.
+        #       * Special values include: regions and futures.
         #       * If a region, the value must be symbolic (i.e. able
         #         to be analyzed as a function of the index expression).
+        #       * If a future, the values must be literally identical
+        #         (i.e. each argument slot in the launch can only
+        #         accept a single future value.)
 
         if self.saved_task is None:
             self.saved_task = task
@@ -1025,13 +1051,18 @@ class IndexLaunch(object):
             # TODO: Add support for region arguments
             if isinstance(arg, Region) or isinstance(arg, RegionField):
                 raise Exception('TODO: Support region arguments to an IndexLaunch')
+            elif isinstance(arg, Future):
+                if arg != saved_arg:
+                    raise Exception('Future argument to IndexLaunch does not match previous value at this position')
 
     def spawn_task(self, task, *args):
         self.ensure_launcher(task)
         self.check_compatibility(task, *args)
+        args = self.launcher.preprocess_args(args)
+        args, futures = self.launcher.gather_futures(args)
         self.launcher.attach_local_args(self.point, *args)
+        self.launcher.attach_future_args(*futures)
         # TODO: attach region args
-        # TODO: attach future args
         return _FuturePoint(self.launcher, int(self.point))
 
     def launch(self):
@@ -1064,7 +1095,7 @@ class Tunable(object):
     def select(tunable_id):
         result = c.legion_runtime_select_tunable_value(
             _my.ctx.runtime, _my.ctx.context, tunable_id, 0, 0)
-        future = Future.from_cdata(result, value_type=uint64_t)
+        future = Future.from_cdata(result, value_type=uint64)
         c.legion_future_destroy(result)
         return future
 

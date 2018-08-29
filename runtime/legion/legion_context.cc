@@ -1736,7 +1736,7 @@ namespace Legion {
       implicit_context = this;
       implicit_runtime = this->runtime;
       rt = this->runtime->external;
-      task_profiling_provenance = owner_task->get_unique_op_id();
+      implicit_provenance = owner_task->get_unique_op_id();
       if (overhead_tracker != NULL)
         previous_profiling_time = Realm::Clock::current_time_in_nanoseconds();
       // Switch over the executing processor to the one
@@ -1833,36 +1833,20 @@ namespace Legion {
                       "task %s (UID %lld). Static traces must perfectly "
                       "manage their physical mappings with no runtime help.",
                       get_task_name(), get_unique_id())
-      if (unmapped_regions.size() == 1)
+      std::set<ApEvent> mapped_events;
+      for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
       {
-        MapOp *op = runtime->get_available_map_op();
-        op->initialize(this, unmapped_regions[0]);
-        ApEvent mapped_event = op->get_completion_event();
-        runtime->add_to_dependence_queue(this, executing_processor, op);
-        if (mapped_event.has_triggered())
-          return;
-        begin_task_wait(true/*from runtime*/);
-        mapped_event.wait();
-        end_task_wait();
+        const ApEvent ready = remap_region(unmapped_regions[idx]);
+        if (ready.exists())
+          mapped_events.insert(ready);
       }
-      else
-      {
-        std::set<ApEvent> mapped_events;
-        for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
-        {
-          MapOp *op = runtime->get_available_map_op();
-          op->initialize(this, unmapped_regions[idx]);
-          mapped_events.insert(op->get_completion_event());
-          runtime->add_to_dependence_queue(this, executing_processor, op);
-        }
-        // Wait for all the re-mapping operations to complete
-        ApEvent mapped_event = Runtime::merge_events(mapped_events);
-        if (mapped_event.has_triggered())
-          return;
-        begin_task_wait(true/*from runtime*/);
-        mapped_event.wait();
-        end_task_wait();
-      }
+      // Wait for all the re-mapping operations to complete
+      const ApEvent mapped_event = Runtime::merge_events(mapped_events);
+      if (mapped_event.has_triggered())
+        return;
+      begin_task_wait(true/*from runtime*/);
+      mapped_event.wait();
+      end_task_wait();
     }
 
     //--------------------------------------------------------------------------
@@ -3919,18 +3903,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InnerContext::remap_region(PhysicalRegion region)
+    ApEvent InnerContext::remap_region(PhysicalRegion region)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
       // Check to see if the region is already mapped,
       // if it is then we are done
       if (region.is_mapped())
-        return;
+        return ApEvent::NO_AP_EVENT;
       MapOp *map_op = runtime->get_available_map_op();
       map_op->initialize(this, region);
       register_inline_mapped_region(region);
+      const ApEvent result = map_op->get_completion_event();
       runtime->add_to_dependence_queue(this, executing_processor, map_op);
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -5680,8 +5666,7 @@ namespace Legion {
       {
         if (need_deferral)
         {
-          PostDecrementArgs post_decrement_args;
-          post_decrement_args.parent_ctx = this;
+          PostDecrementArgs post_decrement_args(this);
           RtEvent done = runtime->issue_runtime_meta_task(post_decrement_args,
               LG_LATENCY_WORK_PRIORITY, wait_on); 
           Runtime::trigger_event(to_trigger, done);
@@ -6258,12 +6243,7 @@ namespace Legion {
       // know it's possible for the update channel to block waiting on
       // the view virtual channel (paging views), so to avoid the cycle
       // we have to launch a meta-task and record when it is done
-      RemoteCreateViewArgs args;
-      args.proxy_this = context;
-      args.manager = manager;
-      args.target = target;
-      args.to_trigger = to_trigger;
-      args.source = source;
+      RemoteCreateViewArgs args(context, manager, target, to_trigger, source);
       runtime->issue_runtime_meta_task(args, LG_LATENCY_DEFERRED_PRIORITY);
     }
 
@@ -7710,13 +7690,8 @@ namespace Legion {
       derez.deserialize(to_trigger);
 
       // Always defer this in case it blocks, we can't block the virtual channel
-      RemotePhysicalRequestArgs args;
-      args.context_uid = context_uid;
-      args.target = target;
-      args.index = index;
-      args.source = source;
-      args.to_trigger = to_trigger;
-      args.runtime = runtime;
+      RemotePhysicalRequestArgs args(context_uid, target, index, 
+                                     source, to_trigger, runtime);
       runtime->issue_runtime_meta_task(args, LG_LATENCY_DEFERRED_PRIORITY);
     }
 
@@ -7787,12 +7762,7 @@ namespace Legion {
       {
         // Launch a continuation in case we need to page in the context
         // We obviously can't block the virtual channel
-        RemotePhysicalResponseArgs args;
-        args.target = target;
-        args.index = index;
-        args.result_uid = result_uid;
-        args.handle = handle;
-        args.runtime = runtime;
+        RemotePhysicalResponseArgs args(target,index,result_uid,handle,runtime);
         RtEvent done = 
           runtime->issue_runtime_meta_task(args, LG_LATENCY_DEFERRED_PRIORITY);
         Runtime::trigger_event(to_trigger, done);
@@ -8430,12 +8400,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LeafContext::remap_region(PhysicalRegion region)
+    ApEvent LeafContext::remap_region(PhysicalRegion region)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_REMAP_OPERATION,
         "Illegal remap operation performed in leaf task %s "
                      "(ID %lld)", get_task_name(), get_unique_id())
+      return ApEvent::NO_AP_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -9684,10 +9655,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InlineContext::remap_region(PhysicalRegion region)
+    ApEvent InlineContext::remap_region(PhysicalRegion region)
     //--------------------------------------------------------------------------
     {
-      enclosing->remap_region(region);
+      return enclosing->remap_region(region);
     }
 
     //--------------------------------------------------------------------------

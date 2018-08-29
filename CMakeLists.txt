@@ -38,6 +38,8 @@ endif()
 #library api version, bump from time to time
 set(SOVERSION 1)
 
+set(INSTALL_SUFFIX "" CACHE STRING "Suffix to add to installed libraries and binaries")
+
 #------------------------------------------------------------------------------#
 # Build type and shared vs static library
 #------------------------------------------------------------------------------#
@@ -177,6 +179,8 @@ if(Legion_USE_Python)
   string(REPLACE "." ";" PYTHON_VERSION_SPLIT ${PYTHONLIBS_VERSION_STRING})
   list(GET PYTHON_VERSION_SPLIT 0 PYTHON_VERSION_MAJOR)
 endif()
+
+set(BINDINGS_DEFAULT_MODULE "" CACHE STRING "module to load by default in Python bindings, if any")
 
 #------------------------------------------------------------------------------#
 # CUDA configuration

@@ -31,6 +31,21 @@ def show_buffer(f):
     value = codecs.decode(f.get_buffer(), 'utf-8')
     print(value)
 
+@task
+def show_nested(f):
+    print("nested: %s" % f)
+    show(f)
+
+@task
+def show_index(i, f):
+    print("at index %s: %s" % (i, f.get()))
+
+@task
+def return_void():
+    # this task doesn't literally return void, but we can ignore the
+    # value and pretend it does
+    pass
+
 @task(top_level=True)
 def main():
     # No explicit type specified, value is pickled
@@ -40,7 +55,7 @@ def main():
 
     # Explicit type specified, value not pickled
     g = Future(123, legion.int64)
-    print("value of f.get() is %s" % g.get())
+    print("value of g.get() is %s" % g.get())
     assert g.get() == 123
 
     # Using a buffer object to pass raw bytes
@@ -49,6 +64,14 @@ def main():
     print("value of h.get_raw() is %s" % h_value)
     assert h_value == 'asdf'
 
+    i = Future(return_void(), value_type=legion.void)
+    print("value of i.get() is %s" % i.get())
+
     show(f)
     show(g)
     show_buffer(h)
+
+    show_nested(f)
+
+    for i in legion.IndexLaunch([3]):
+        show_index(i, f)

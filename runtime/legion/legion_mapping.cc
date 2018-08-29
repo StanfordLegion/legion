@@ -116,6 +116,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    size_t PhysicalInstance::get_instance_size(void) const
+    //--------------------------------------------------------------------------
+    {
+      if (impl == NULL)
+        return 0;
+      return impl->get_instance_size();
+    }
+
+    //--------------------------------------------------------------------------
     LogicalRegion PhysicalInstance::get_logical_region(void) const
     //--------------------------------------------------------------------------
     {
@@ -503,6 +512,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       ctx->manager->find_valid_variants(ctx,task_id,valid_variants,kind);
+    }
+
+    //--------------------------------------------------------------------------
+    const char* MapperRuntime::find_task_variant_name(MapperContext ctx,
+                                     TaskID task_id, VariantID variant_id) const
+    //--------------------------------------------------------------------------
+    {
+      return ctx->manager->find_task_variant_name(ctx, task_id, variant_id);
     }
 
     //--------------------------------------------------------------------------
@@ -937,6 +954,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return ctx->manager->get_index_space_color(ctx, handle);
+    }
+
+    //--------------------------------------------------------------------------
+    DomainPoint MapperRuntime::get_index_space_color_point(MapperContext ctx, 
+                                                        IndexSpace handle) const
+    //--------------------------------------------------------------------------
+    {
+      return ctx->manager->get_index_space_color_point(ctx, handle);
     }
 
     //--------------------------------------------------------------------------

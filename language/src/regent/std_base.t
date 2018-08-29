@@ -581,6 +581,10 @@ function base.types.is_dynamic_collective(t)
   return terralib.types.istype(t) and rawget(t, "is_dynamic_collective") or false
 end
 
+function base.types.is_regent_array(t)
+  return terralib.types.istype(t) and rawget(t, "is_regent_array") or false
+end
+
 function base.types.is_unpack_result(t)
   return terralib.types.istype(t) and rawget(t, "is_unpack_result") or false
 end
@@ -621,7 +625,7 @@ function base.types.flatten_struct_fields(struct_type)
   end
 
   if (struct_type:isstruct() or base.types.is_fspace_instance(struct_type)) and
-     not is_geometric_type(struct_type) then
+     not (is_geometric_type(struct_type) or base.types.is_regent_array(struct_type)) then
     local entries = struct_type:getentries()
     for _, entry in ipairs(entries) do
       local entry_name = entry[1] or entry.field
@@ -930,6 +934,22 @@ function base.variant:__tostring()
   return tostring(self.task:get_name()) .. '_' .. self:get_name()
 end
 
+function base.variant:add_layout_constraint(constraint)
+  if not self.layout_constraints then
+    self.layout_constraints = terralib.newlist()
+  end
+  self.layout_constraints:insert(constraint)
+end
+
+function base.variant:has_layout_constraints()
+  return self.layout_constraints
+end
+
+function base.variant:get_layout_constraints()
+  assert(self.layout_constraints)
+  return self.layout_constraints
+end
+
 do
   function base.new_variant(task, name)
     assert(base.is_task(task))
@@ -946,6 +966,7 @@ do
       inline = false,
       cudakernels = false,
       config_options = false,
+      layout_constraints = false,
     }, base.variant)
 
     task.variants:insert(variant)
@@ -1197,6 +1218,20 @@ function base.task:get_variants()
   return self.variants
 end
 
+function base.task:get_variant(name)
+  local variant = nil
+  for i = 1, #self.variants do
+    if self.variants[i]:get_name() == name then
+      variant = self.variants[i]
+      break
+    end
+  end
+  if variant == nil then
+    error("variant '" .. name .. "' does not exist")
+  end
+  return variant
+end
+
 function base.task:set_primary_variant(task)
   assert(not self.primary_variant)
   self.primary_variant = task
@@ -1236,19 +1271,21 @@ end
 
 function base.task:make_variant(name)
   assert(not self.is_complete)
-  return base.new_variant(self, name)
+  local variant = base.new_variant(self, name)
+  return variant
 end
 
-function base.task:add_complete_thunk(complete_thunk)
+function base.task:set_compile_thunk(compile_thunk)
   assert(not self.is_complete)
-  self.complete_thunks:insert(complete_thunk)
+  self.compile_thunk = compile_thunk
 end
 
 function base.task:complete()
   if not self.is_complete then
     self.is_complete = true
-    for _, thunk in ipairs(self.complete_thunks) do
-      thunk()
+    if not self.compile_thunk then return end
+    for _, variant in ipairs(self.variants) do
+      self.compile_thunk(variant)
     end
   end
   return self
@@ -1306,7 +1343,7 @@ do
       parallel_task = false,
 
       -- Compilation continuations:
-      complete_thunks = terralib.newlist(),
+      compile_thunk = false,
       is_complete = false,
     }, base.task)
   end

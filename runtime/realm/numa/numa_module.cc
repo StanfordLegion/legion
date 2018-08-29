@@ -235,6 +235,8 @@ namespace Realm {
 	Memory m = runtime->next_local_memory_id();
 	LocalCPUMemory *numamem = new LocalCPUMemory(m,
 						     mem_size,
+                                                     it->first/*numa node*/,
+                                                     Memory::SOCKET_MEM,
 						     base_ptr,
 						     false /*!registered*/);
 	runtime->add_memory(numamem);
@@ -269,34 +271,19 @@ namespace Realm {
 	      it2 != local_mems.end();
 	      ++it2) {
 	    Memory::Kind kind = (*it2)->get_kind();
-	    if((kind != Memory::SYSTEM_MEM) && (kind != Memory::REGDMA_MEM))
+	    if((kind != Memory::SYSTEM_MEM) && (kind != Memory::REGDMA_MEM) &&
+               (kind != Memory::SOCKET_MEM) && (kind != Memory::Z_COPY_MEM))
 	      continue;
 
 	    Machine::ProcessorMemoryAffinity pma;
 	    pma.p = p;
 	    pma.m = (*it2)->me;
 
-	    int mem_node = -1;
-	    for(std::map<int, MemoryImpl *>::const_iterator it3 = memories.begin();
-		it3 != memories.end();
-		++it3)
-	      if(it3->second == *it2) {
-		mem_node = it3->first;
-		break;
-	      }
-
-	    if(mem_node == -1) {
-	      // not one of our memories - use the same made-up numbers as in
-	      //  runtime_impl.cc
-	      if(kind == Memory::SYSTEM_MEM) {
-		pma.bandwidth = 100;  // "large"
-		pma.latency = 5;      // "small"
-	      } else {
-		pma.bandwidth = 80;   // "large"
-		pma.latency = 10;     // "small"
-	      }
-	    } else {
-	      int d = numasysif_get_distance(cpu_node, mem_node);
+            if (kind == Memory::SOCKET_MEM) {
+              LocalCPUMemory *cpu_mem = static_cast<LocalCPUMemory*>(*it2);
+              int mem_node = cpu_mem->numa_node;
+              assert(mem_node != -1);
+              int d = numasysif_get_distance(cpu_node, mem_node);
 	      if(d >= 0) {
 		pma.bandwidth = 150 - d;
 		pma.latency = d / 10;     // Linux uses a cost of ~10/hop
@@ -305,7 +292,19 @@ namespace Realm {
 		pma.bandwidth = 100;
 		pma.latency = 5;
 	      }
-	    }
+            } else if(kind == Memory::SYSTEM_MEM) {
+	      // not one of our memories - use the same made-up numbers as in
+	      //  runtime_impl.cc
+              pma.bandwidth = 100;  // "large"
+              pma.latency = 5;      // "small"
+            } else if (kind == Memory::Z_COPY_MEM) {
+              pma.bandwidth = 40; // "large"
+              pma.latency = 3; // "small"
+            } else {
+              // Regdma_mem
+              pma.bandwidth = 80;   // "large"
+              pma.latency = 10;     // "small"
+            }
 	    
 	    runtime->add_proc_mem_affinity(pma);
 	  }

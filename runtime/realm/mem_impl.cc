@@ -480,10 +480,11 @@ namespace Realm {
   // class LocalCPUMemory
   //
 
-  LocalCPUMemory::LocalCPUMemory(Memory _me, size_t _size,
+  LocalCPUMemory::LocalCPUMemory(Memory _me, size_t _size, 
+                                 int _numa_node, Memory::Kind _lowlevel_kind,
 				 void *prealloc_base /*= 0*/, bool _registered /*= false*/) 
-    : MemoryImpl(_me, _size, MKIND_SYSMEM, ALIGNMENT, 
-		 (_registered ? Memory::REGDMA_MEM : Memory::SYSTEM_MEM))
+    : MemoryImpl(_me, _size, MKIND_SYSMEM, ALIGNMENT, _lowlevel_kind),
+      numa_node(_numa_node)
   {
     if(prealloc_base) {
       base = (char *)prealloc_base;

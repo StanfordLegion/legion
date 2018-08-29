@@ -166,7 +166,7 @@ namespace Realm {
     public:
       static const size_t ALIGNMENT = 256;
 
-      LocalCPUMemory(Memory _me, size_t _size,
+      LocalCPUMemory(Memory _me, size_t _size, int numa_node, Memory::Kind _lowlevel_kind,
 		     void *prealloc_base = 0, bool _registered = false);
 
       virtual ~LocalCPUMemory(void);
@@ -179,6 +179,8 @@ namespace Realm {
       virtual int get_home_node(off_t offset, size_t size);
       virtual void *local_reg_base(void);
 
+    public:
+      const int numa_node;
     public: //protected:
       char *base, *base_orig;
       bool prealloced, registered;

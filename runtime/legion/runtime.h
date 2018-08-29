@@ -197,9 +197,13 @@ namespace Legion {
       public:
         static const LgTaskID TASK_ID = LG_CONTRIBUTE_COLLECTIVE_ID;
       public:
-        FutureImpl *impl;
-        DynamicCollective dc;
-        unsigned count;
+        ContributeCollectiveArgs(FutureImpl *i, DynamicCollective d, unsigned c)
+          : LgTaskArgs<ContributeCollectiveArgs>(implicit_provenance),
+            impl(i), dc(d), count(c) { }
+      public:
+        FutureImpl *const impl;
+        const DynamicCollective dc;
+        const unsigned count;
       };
     public:
       FutureImpl(Runtime *rt, bool register_future, DistributedID did, 
@@ -559,16 +563,24 @@ namespace Legion {
       public:
         static const LgTaskID TASK_ID = LG_SCHEDULER_ID;
       public:
-        Processor proc;
+        SchedulerArgs(Processor p)
+          : LgTaskArgs<SchedulerArgs>(0), proc(p) { }
+      public:
+        const Processor proc;
       }; 
       struct DeferMapperSchedulerArgs : 
         public LgTaskArgs<DeferMapperSchedulerArgs> {
       public:
         static const LgTaskID TASK_ID = LG_DEFER_MAPPER_SCHEDULER_TASK_ID;
       public:
-        ProcessorManager *proxy_this;
-        MapperID map_id;
-        RtEvent deferral_event;
+        DeferMapperSchedulerArgs(ProcessorManager *proxy,
+                                 MapperID mid, RtEvent defer)
+          : LgTaskArgs<DeferMapperSchedulerArgs>(implicit_provenance),
+            proxy_this(proxy), map_id(mid), deferral_event(defer) { }
+      public:
+        ProcessorManager *const proxy_this;
+        const MapperID map_id;
+        const RtEvent deferral_event;
       };
       struct MapperMessage {
       public:
@@ -968,7 +980,10 @@ namespace Legion {
       public:
         static const LgTaskID TASK_ID = LG_RETRY_SHUTDOWN_TASK_ID;
       public:
-        ShutdownPhase phase;
+        RetryShutdownArgs(ShutdownPhase p)
+          : LgTaskArgs<RetryShutdownArgs>(0), phase(p) { }
+      public:
+        const ShutdownPhase phase;
       };
     public:
       ShutdownManager(ShutdownPhase phase, Runtime *rt, AddressSpaceID source,
@@ -1013,7 +1028,10 @@ namespace Legion {
       public:
         static const LgTaskID TASK_ID = LG_DEFERRED_COLLECT_ID;
       public:
-        GarbageCollectionEpoch *epoch;
+        GarbageCollectionArgs(GarbageCollectionEpoch *e)
+          : LgTaskArgs<GarbageCollectionArgs>(0), epoch(e) { }
+      public:
+        GarbageCollectionEpoch *const epoch;
         LogicalView *view;
       };
     public:
@@ -1107,9 +1125,13 @@ namespace Legion {
       public:
         static const LgTaskID TASK_ID = LG_TASK_IMPL_SEMANTIC_INFO_REQ_TASK_ID;
       public:
-        TaskImpl *proxy_this;
-        SemanticTag tag;
-        AddressSpaceID source;
+        SemanticRequestArgs(TaskImpl *proxy, SemanticTag t, AddressSpaceID src)
+          : LgTaskArgs<SemanticRequestArgs>(implicit_provenance),
+            proxy_this(proxy), tag(t), source(src) { }
+      public:
+        TaskImpl *const proxy_this;
+        const SemanticTag tag;
+        const AddressSpaceID source;
       };
     public:
       TaskImpl(TaskID tid, Runtime *rt, const char *name = NULL);
@@ -1515,37 +1537,50 @@ namespace Legion {
       public:
         static const LgTaskID TASK_ID = LG_DEFERRED_RECYCLE_ID;
       public:
-        DistributedID did;
+        DeferredRecycleArgs(DistributedID id)
+          : LgTaskArgs<DeferredRecycleArgs>(implicit_provenance), did(id) { }
+      public:
+        const DistributedID did;
       }; 
       struct TopFinishArgs : public LgTaskArgs<TopFinishArgs> {
       public:
         static const LgTaskID TASK_ID = LG_TOP_FINISH_TASK_ID;
       public:
-        TopLevelContext *ctx;
+        TopFinishArgs(TopLevelContext *c)
+          : LgTaskArgs<TopFinishArgs>(0), ctx(c) { }
+      public:
+        TopLevelContext *const ctx;
       };
       struct MapperTaskArgs : public LgTaskArgs<MapperTaskArgs> {
       public:
         static const LgTaskID TASK_ID = LG_MAPPER_TASK_ID;
       public:
-        FutureImpl *future;
-        MapperID map_id;
-        Processor proc;
-        ApEvent event;
-        TopLevelContext *ctx;
+        MapperTaskArgs(FutureImpl *f, MapperID mid, Processor p,
+                       ApEvent ae, TopLevelContext *c)
+          : LgTaskArgs<MapperTaskArgs>(implicit_provenance),
+            future(f), map_id(mid), proc(p), event(ae), ctx(c) { }
+      public:
+        FutureImpl *const future;
+        const MapperID map_id;
+        const Processor proc;
+        const ApEvent event;
+        TopLevelContext *const ctx;
       }; 
       struct SelectTunableArgs : public LgTaskArgs<SelectTunableArgs> {
       public:
         static const LgTaskID TASK_ID = LG_SELECT_TUNABLE_TASK_ID;
       public:
-        SelectTunableArgs(UniqueID uid)
-          : LgTaskArgs<SelectTunableArgs>(uid) { }
+        SelectTunableArgs(UniqueID uid, MapperID mid, MappingTagID t,
+                          TunableID tune, TaskContext *c, FutureImpl *f)
+          : LgTaskArgs<SelectTunableArgs>(uid), mapper_id(mid), tag(t),
+            tunable_id(tune), ctx(c), result(f) { }
       public:
-        MapperID mapper_id;
-        MappingTagID tag;
-        TunableID tunable_id;
+        const MapperID mapper_id;
+        const MappingTagID tag;
+        const TunableID tunable_id;
         unsigned tunable_index; // only valid for LegionSpy
-        TaskContext *ctx;
-        FutureImpl *result;
+        TaskContext *const ctx;
+        FutureImpl *const result;
       }; 
     public:
       struct ProcessorGroupInfo {

@@ -95,6 +95,7 @@ function context:new_local_scope(divergence, must_epoch, must_epoch_point, break
     variant = self.variant,
     expected_return_type = self.expected_return_type,
     constraints = self.constraints,
+    orderings = self.orderings,
     task = self.task,
     task_meta = self.task_meta,
     leaf = self.leaf,
@@ -111,12 +112,13 @@ function context:new_local_scope(divergence, must_epoch, must_epoch_point, break
   }, context)
 end
 
-function context:new_task_scope(expected_return_type, constraints, leaf, task_meta, task, ctx, runtime)
+function context:new_task_scope(expected_return_type, constraints, orderings, leaf, task_meta, task, ctx, runtime)
   assert(expected_return_type and task and ctx and runtime)
   return setmetatable({
     variant = self.variant,
     expected_return_type = expected_return_type,
     constraints = constraints,
+    orderings = orderings,
     task = task,
     task_meta = task_meta,
     leaf = leaf,
@@ -443,32 +445,68 @@ function context:get_cleanup_items()
   return quote [items] end
 end
 
-local function physical_region_get_base_pointer_setup(index_type, field_type,
+local function physical_region_get_base_pointer_setup(index_type, field_type, fastest_index, expected_stride,
                                                       runtime, physical_region, field_id)
   assert(index_type and field_type and runtime and physical_region and field_id)
-  local accessor_args = terralib.newlist({physical_region, field_id})
 
-  local base_pointer = terralib.newsymbol(&field_type, "base_pointer")
-  do -- Used to be `index_type:is_opaque()`. Now all cases are structured.
-    local dim = data.max(index_type.dim, 1)
-    local expected_stride = terralib.sizeof(field_type)
+  local dim = data.max(index_type.dim, 1)
+  local elem_type
+  if regentlib.is_regent_array(field_type) then
+    elem_type = field_type.elem_type
+  else
+    elem_type = field_type
+  end
 
-    local dims = data.range(2, dim + 1)
-    local strides = terralib.newlist()
-    strides:insert(expected_stride)
-    for i = 2, dim do
+  local dims = data.range(1, dim + 1)
+  local strides = terralib.newlist()
+  for i = 1, dim do
+    if fastest_index == i then
+      strides:insert(expected_stride)
+    else
       strides:insert(terralib.newsymbol(c.size_t, "stride" .. tostring(i)))
     end
+  end
 
-    local get_accessor = c["legion_physical_region_get_field_accessor_array_" .. tostring(dim) .. "d"]
-    local destroy_accessor = c["legion_accessor_array_" .. tostring(dim) .. "d_destroy"]
-    local raw_rect_ptr = c["legion_accessor_array_" .. tostring(dim) .. "d_raw_rect_ptr"]
+  local get_accessor = c["legion_physical_region_get_field_accessor_array_" .. tostring(dim) .. "d"]
+  local destroy_accessor = c["legion_accessor_array_" .. tostring(dim) .. "d_destroy"]
+  local raw_rect_ptr = c["legion_accessor_array_" .. tostring(dim) .. "d_raw_rect_ptr"]
 
-    local rect_t = c["legion_rect_" .. tostring(dim) .. "d_t"]
-    local domain_get_bounds = c["legion_domain_get_bounds_" .. tostring(dim) .. "d"]
+  local rect_t = c["legion_rect_" .. tostring(dim) .. "d_t"]
+  local domain_get_bounds = c["legion_domain_get_bounds_" .. tostring(dim) .. "d"]
 
-    local actions = quote
-      var accessor = [get_accessor]([accessor_args])
+  local base_pointer
+  local p_base_pointer
+  local num_fields
+  local actions
+  if regentlib.is_regent_array(field_type) then
+    base_pointer = terralib.newsymbol((&elem_type)[field_type.N], "base_pointer")
+    p_base_pointer = terralib.newsymbol(&&elem_type, "p_base_pointer")
+    num_fields = field_type.N
+    actions = quote
+      var [base_pointer]
+      var [p_base_pointer] = [&&elem_type]([base_pointer])
+    end
+  else
+    base_pointer = terralib.newsymbol(&field_type, "base_pointer")
+    p_base_pointer = terralib.newsymbol(&&field_type, "p_base_pointer")
+    num_fields = 1
+    actions = quote
+      var [base_pointer]
+      var [p_base_pointer] = &[base_pointer]
+    end
+  end
+
+  actions = quote
+    [actions];
+    [dims:map(function(i)
+      if fastest_index ~= i then
+        return quote var [ strides[i] ] end
+      else
+        return quote end
+      end
+    end)];
+    for idx = 0, [num_fields] do
+      var accessor = [get_accessor](physical_region, field_id + [idx])
 
       var region = c.legion_physical_region_get_logical_region([physical_region])
       var domain = c.legion_index_space_get_domain([runtime], region.index_space)
@@ -476,12 +514,11 @@ local function physical_region_get_base_pointer_setup(index_type, field_type,
 
       var subrect : rect_t
       var offsets : c.legion_byte_offset_t[dim]
-      var [base_pointer] = [&field_type]([raw_rect_ptr](
-          accessor, rect, &subrect, &(offsets[0])))
+      [p_base_pointer][idx] =
+        [&elem_type]([raw_rect_ptr](accessor, rect, &subrect, &(offsets[0])))
 
       -- Sanity check the outputs.
-      std.assert(base_pointer ~= nil or
-                 c.legion_domain_get_volume(domain) <= 1,
+      std.assert([p_base_pointer][idx] ~= nil or c.legion_domain_get_volume(domain) <= 1,
                  "base pointer is nil")
       [data.range(dim):map(
          function(i)
@@ -491,15 +528,9 @@ local function physical_region_get_base_pointer_setup(index_type, field_type,
            end
          end)]
 
-      -- WARNING: The compiler assumes SOA, so the first stride should
-      -- be equal to the element size. However, the runtime gets
-      -- confused on instances with only a single element, and may
-      -- return a different value. In those cases, force the stride to
-      -- its expected value to avoid problems downstream.
-      std.assert(offsets[0].offset == [expected_stride] or
+      std.assert(offsets[ [fastest_index - 1] ].offset == [expected_stride] or
                  c.legion_domain_get_volume(domain) <= 1,
                  "stride does not match expected value")
-      offsets[0].offset = [expected_stride]
 
       -- Fix up the base pointer so it points to the origin (zero),
       -- regardless of where rect is located. This allows us to do
@@ -508,22 +539,26 @@ local function physical_region_get_base_pointer_setup(index_type, field_type,
       [data.range(dim):map(
          function(i)
            return quote
-             [base_pointer] = [&field_type](([&int8]([base_pointer])) - rect.lo.x[i] * offsets[i].offset)
+             [p_base_pointer][idx] = [&elem_type](([&int8]([p_base_pointer][idx])) - rect.lo.x[i] * offsets[i].offset)
            end
          end)]
 
       [dims:map(
          function(i)
-           return quote var [ strides[i] ] = offsets[i-1].offset end
+           if fastest_index ~= i then
+             return quote [ strides[i] ] = offsets[i-1].offset end
+           else
+             return quote end
+           end
          end)]
       [destroy_accessor](accessor)
     end
-    return actions, base_pointer, strides
   end
+  return actions, base_pointer, strides
 end
 
 local physical_region_get_base_pointer_thunk = terralib.memoize(
-  function(index_type, field_type)
+  function(index_type, field_type, fastest_index, expected_stride)
     assert(index_type and field_type)
 
     local runtime = terralib.newsymbol(c.legion_runtime_t, "runtime")
@@ -531,7 +566,7 @@ local physical_region_get_base_pointer_thunk = terralib.memoize(
     local field_id = terralib.newsymbol(c.legion_field_id_t, "field_id")
 
     local actions, base_pointer, strides = physical_region_get_base_pointer_setup(
-      index_type, field_type, runtime, physical_region, field_id)
+      index_type, field_type, fastest_index, expected_stride, runtime, physical_region, field_id)
 
     local terra get_base_pointer([runtime], [physical_region], [field_id])
       [actions]
@@ -541,17 +576,35 @@ local physical_region_get_base_pointer_thunk = terralib.memoize(
     return terralib.newlist({get_base_pointer, strides})
   end)
 
-local function physical_region_get_base_pointer(cx, index_type, field_type,
-                                                physical_region, field_id)
+local function physical_region_get_base_pointer(cx, region_type, index_type, field_type,
+                                                field_path, physical_region, field_id)
+  local fastest_index = 1
+  local expected_stride
+  if regentlib.is_regent_array(field_type) then
+    expected_stride = terralib.sizeof(field_type.elem_type)
+  else
+    expected_stride = terralib.sizeof(field_type)
+  end
+  if cx.orderings[region_type] and cx.orderings[region_type][field_path] then
+    local ordering, stride = unpack(cx.orderings[region_type][field_path])
+    assert(#ordering > 0)
+    fastest_index = ordering[1]
+    expected_stride = stride
+  end
   -- FIXME: The opt-compile-time code path improves compile time and
   -- has the same runtime performance, but has potential issues on
   -- non-x86 due to its use of an aggregate return value, so we can't
   -- make it the default just yet.
   if std.config["opt-compile-time"] then
     local thunk, expected_strides = unpack(physical_region_get_base_pointer_thunk(
-      index_type, field_type))
+      index_type, field_type, fastest_index, expected_stride))
 
-    local base_pointer = terralib.newsymbol(&field_type, "base_pointer")
+    local base_pointer
+    if regentlib.is_regent_array(field_type) then
+      base_pointer = terralib.newsymbol((&field_type.elem_type)[field_type.N], "base_pointer")
+    else
+      base_pointer = terralib.newsymbol(&field_type, "base_pointer")
+    end
     local computed_strides = data.mapi(
       function(i, _)
         return terralib.newsymbol(c.size_t, "stride" .. tostring(i))
@@ -577,7 +630,7 @@ local function physical_region_get_base_pointer(cx, index_type, field_type,
     return actions, base_pointer, result_strides
   else
     return physical_region_get_base_pointer_setup(
-      index_type, field_type, cx.runtime, physical_region, field_id)
+      index_type, field_type, fastest_index, expected_stride, cx.runtime, physical_region, field_id)
   end
 end
 
@@ -897,12 +950,21 @@ end
 local ref = setmetatable({}, { __index = value })
 ref.__index = ref
 
+local aref = setmetatable({}, { __index = value })
+aref.__index = aref
+
 function values.ref(node, value_expr, value_type, field_path)
   if not terralib.types.istype(value_type) or
     not (std.is_bounded_type(value_type) or std.is_vptr(value_type)) then
     error("ref requires a legion ptr type", 2)
   end
-  return setmetatable(values.value(node, value_expr, value_type, field_path), ref)
+  local meta
+  if std.is_regent_array(std.as_read(node.expr_type)) then
+    meta = aref
+  else
+    meta = ref
+  end
+  return setmetatable(values.value(node, value_expr, value_type, field_path), meta)
 end
 
 function ref:new(node, value_expr, value_type, field_path)
@@ -910,7 +972,7 @@ function ref:new(node, value_expr, value_type, field_path)
 end
 
 local function get_element_pointer(cx, node, region_types, index_type, field_type,
-                                   base_pointer, strides, index)
+                                   base_pointer, strides, field_path, index)
   if bounds_checks then
     local terra check(runtime : c.legion_runtime_t,
                       ctx : c.legion_context_t,
@@ -943,48 +1005,82 @@ local function get_element_pointer(cx, node, region_types, index_type, field_typ
     end
   end
 
+  local ordering
+  local expected_stride
+
+  for i = 1, #region_types do
+    local region_type = region_types[i]
+    if cx.orderings[region_type] and cx.orderings[region_type][field_path] then
+      local region_ordering, stride = unpack(cx.orderings[region_type][field_path])
+      assert(#region_ordering > 0)
+      if ordering then
+        --- TODO: all bounds in a bounded type must have the same layout for now
+        data.zip(ordering, region_ordering):map(function(pair)
+          local o1, o2 = unpack(pair)
+          assert(o1 == o2)
+        end)
+        assert(expected_stride == stride)
+      else
+        ordering = region_ordering
+        expected_stride = stride
+      end
+    else
+      ordering = std.layout.make_index_ordering_from_constraint(
+          std.layout.default_layout(region_type:ispace().index_type))
+      expected_stride = terralib.sizeof(field_type)
+    end
+  end
+  assert(#ordering == ((not index_type.fields and 1) or #index_type.fields))
+
   -- Note: This code is performance-critical and tends to be sensitive
   -- to small changes. Please thoroughly performance-test any changes!
+  local index_value
   if std.is_bounded_type(index_type) then
-    if not index_type.fields then
-      -- Assumes stride[1] == terralib.sizeof(field_type)
-      return `(@[&field_type](&base_pointer[ [index].__ptr.__ptr ]))
-    elseif #index_type.fields == 1 then
-      -- Assumes stride[1] == terralib.sizeof(field_type)
-      local field = index_type.fields[1]
-      return `(@[&field_type](&base_pointer[ [index].__ptr.__ptr.[field] ]))
-    else
-      local offset
-      for i, field in ipairs(index_type.fields) do
-        if offset then
-          offset = `(offset + [index].__ptr.__ptr.[ field ] * [ strides[i] ])
-        else
-          offset = `([index].__ptr.__ptr.[ field ] * [ strides[i] ])
-        end
-      end
-      return `(@([&field_type]([&int8](base_pointer) + offset)))
-    end
+    index_value = `([index].__ptr.__ptr)
   elseif std.is_index_type(index_type) then
+    index_value = `([index].__ptr)
+  else
+    assert(false)
+  end
+
+  if expected_stride == terralib.sizeof(field_type) then
     if not index_type.fields then
       -- Assumes stride[1] == terralib.sizeof(field_type)
-      return `(@[&field_type](&base_pointer[ [index].__ptr ]))
+      return `(@[&field_type](&base_pointer[ [index_value] ]))
     elseif #index_type.fields == 1 then
       -- Assumes stride[1] == terralib.sizeof(field_type)
-      local field = index_type.fields[1]
-      return `(@[&field_type](&base_pointer[ [index].__ptr.[field] ]))
+      local field = index_type.fields[ ordering[1] ]
+      return `(@[&field_type](&base_pointer[ [index_value].[field] ]))
     else
       local offset
       for i, field in ipairs(index_type.fields) do
         if offset then
-          offset = `(offset + [index].__ptr.[ field ] * [ strides[i] ])
+          offset = `(offset + [index_value].[ field ] * [ strides[i] ])
         else
-          offset = `([index].__ptr.[ field ] * [ strides[i] ])
+          offset = `([index_value].[ field ] * [ strides[i] ])
         end
       end
       return `(@([&field_type]([&int8](base_pointer) + offset)))
     end
   else
-    assert(false)
+    -- Assumes more than one field contiguously locate
+    local access_type = int8[expected_stride]
+    if not index_type.fields then
+      return `(@[&field_type](&([&access_type](base_pointer))[ [index_value] ]))
+    elseif #index_type.fields == 1 then
+      local field = index_type.fields[ ordering[1] ]
+      return `(@[&field_type](&([&access_type](base_pointer))[ [index_value].[field] ]))
+    else
+      local offset
+      for i, field in ipairs(index_type.fields) do
+        if offset then
+          offset = `(offset + [index_value].[ field ] * [ strides[i] ])
+        else
+          offset = `([index_value].[ field ] * [ strides[i] ])
+        end
+      end
+      return `(@([&field_type]([&int8](base_pointer) + offset)))
+    end
   end
 end
 
@@ -1073,23 +1169,23 @@ function ref:__ref(cx, expr_type)
 
   local values
   if not expr_type or std.type_maybe_eq(std.as_read(expr_type), value_type) then
-    values = data.zip(field_types, base_pointers, strides):map(
+    values = data.zip(field_types, base_pointers, strides, absolute_field_paths):map(
       function(field)
-        local field_type, base_pointer, stride = unpack(field)
-        return get_element_pointer(cx, self.node, region_types, self.value_type, field_type, base_pointer, stride, value)
+        local field_type, base_pointer, stride, field_path = unpack(field)
+        return get_element_pointer(cx, self.node, region_types, self.value_type, field_type, base_pointer, stride, field_path, value)
       end)
   else
     assert(expr_type:isvector() or std.is_vptr(expr_type) or std.is_sov(expr_type))
-    values = data.zip(field_types, base_pointers, strides):map(
+    values = data.zip(field_types, base_pointers, strides, absolute_field_paths):map(
       function(field)
-        local field_type, base_pointer, stride = unpack(field)
+        local field_type, base_pointer, stride, field_path = unpack(field)
         local vec
         if std.type_eq(field_type, std.ptr) then
           vec = expr_type.impl_type
         else
           vec = vector(field_type, std.as_read(expr_type).N)
         end
-        return `(@[&vec](&[get_element_pointer(cx, self.node, region_types, self.value_type, field_type, base_pointer, stride, value)]))
+        return `(@[&vec](&[get_element_pointer(cx, self.node, region_types, self.value_type, field_type, base_pointer, stride, field_path, value)]))
       end)
     value_type = expr_type
   end
@@ -1266,6 +1362,132 @@ function ref:get_index(cx, node, index, result_type)
   assert(not std.is_list(value_type)) -- Shouldn't be an l-value anyway.
   local result = expr.just(quote [actions] end, `([value][ [index.value] ]))
   return values.rawref(node, result, &result_type, data.newtuple())
+end
+
+function aref:__ref(cx, index)
+  assert(index ~= nil)
+  local actions = self.expr.actions
+  local value = self.expr.value
+
+  local value_type = std.as_read(
+    std.get_field_path(self.value_type.points_to_type, self.field_path))
+  local field_type = value_type
+  local absolute_field_path = self.field_path
+
+  local region_types = self.value_type:bounds()
+  local base_pointers_by_region = region_types:map(
+    function(region_type)
+      return cx:region(region_type):base_pointer(absolute_field_path)
+    end)
+  local strides_by_region = region_types:map(
+    function(region_type)
+      return cx:region(region_type):stride(absolute_field_path)
+    end)
+
+  local base_pointer, strides
+  local field_paths = terralib.newlist { absolute_field_path }
+  if cx.check_divergence(region_types, field_paths) or #region_types == 1 then
+    base_pointer = base_pointers_by_region[1]
+    strides = strides_by_region[1]
+  else
+    base_pointer = terralib.newsymbol(&field_type, "base_pointer_" .. absolute_field_path:hash())
+    strides = cx:region(region_types[1]):stride(absolute_field_path):map(
+      function(_)
+        return terralib.newsymbol(c.size_t, "stride_" .. field_path:hash())
+      end)
+
+    local cases
+    for i = #region_types, 1, -1 do
+      local region_base_pointer = base_pointers_by_region[i]
+      local region_strides = strides_by_region[i]
+
+      local case = quote
+        [base_pointer] = [region_base_pointer]
+      end
+      for i, stride in ipairs(strides) do
+        local region_stride = region_strides[i]
+        setup = quote [case]; [stride] = [region_stride] end
+      end
+
+      if cases then
+        cases = quote
+          if [value].__index == [i] then
+            [case]
+          else
+            [cases]
+          end
+        end
+      else
+        cases = case
+      end
+    end
+
+    actions = quote
+      [actions];
+      var [base_pointer];
+      [strides:map(
+         function(stride) return quote var [stride] end end)];
+      [cases]
+    end
+  end
+
+  base_pointer = `([base_pointer][ [index] ])
+
+  value = get_element_pointer(cx, self.node, region_types, self.value_type, field_type.elem_type, base_pointer, strides, absolute_field_path, value)
+
+  return actions, value
+end
+
+function aref:get_index(cx, node, index, result_type)
+  local value_actions, value = self:__ref(cx, index.value)
+
+  local actions = terralib.newlist({value_actions, index.actions})
+  local value_type = std.as_read(self.node.expr_type)
+  if bounds_checks then
+    actions:insert(
+      quote
+        std.assert_error([index.value] >= 0 and [index.value] < [value_type.N],
+          [get_source_location(node) .. ": array access to " .. tostring(value_type) .. " is out-of-bounds"])
+      end)
+  end
+  assert(not std.is_list(value_type)) -- Shouldn't be an l-value anyway.
+  local result = expr.just(quote [actions] end, value)
+  return values.rawref(node, result, &result_type, data.newtuple())
+end
+
+function aref:read(cx, expr_type)
+  local value_type = std.as_read(self.node.expr_type)
+  assert(std.type_eq(value_type, std.as_read(expr_type)))
+
+  local value = terralib.newsymbol(value_type)
+  local index = terralib.newsymbol(int32)
+  local elem_actions, elem_value = self:__ref(cx, index)
+  local actions = quote
+    var [value];
+    for [index] = 0, [value_type.N] do
+      [elem_actions];
+      [value].impl[ [index] ] = [elem_value]
+    end
+  end
+
+  return expr.just(actions, value)
+end
+
+function aref:write(cx, value, expr_type)
+  local value_type = std.as_read(self.node.expr_type)
+  assert(std.type_eq(value_type, std.as_read(expr_type)))
+  local index = terralib.newsymbol(int32)
+  local value_expr = value:read(cx, expr_type)
+  local elem_actions, elem_value = self:__ref(cx, index)
+  local actions = quote
+    [value_expr.actions];
+    for [index] = 0, [value_type.N] do
+      [elem_actions];
+      [elem_value] = [value_expr.value].impl[ [index] ]
+    end
+  end
+
+  return expr.just(actions, quote end)
 end
 
 local vref = setmetatable({}, { __index = value })
@@ -1718,6 +1940,10 @@ function rawref:get_index(cx, node, index, result_type)
     result = expr.just(
       quote [actions] end,
       `([value_type:data(ref_expr.value)][ [index.value] ]))
+  elseif std.is_regent_array(value_type) then
+    result = expr.just(
+      quote [actions] end,
+      `([ref_expr.value].impl[ [index.value] ]))
   else
     result = expr.just(
       quote [actions] end,
@@ -2547,12 +2773,22 @@ local function expr_call_setup_region_arg(
     args_setup:insert(
       quote
         var [requirement] = [add_requirement]([requirement_args])
-        [field_paths:map(
-           function(field_path)
+        [data.zip(field_paths, field_types):map(
+           function(field)
+             local field_path, field_type = unpack(field)
              local field_id = cx:region(arg_type):field_id(field_path)
-             return quote
-               add_field(
-                 [launcher], [requirement], [field_id], true)
+             if std.is_regent_array(field_type) then
+               return quote
+                 for idx = 0, [field_type.N] do
+                   add_field(
+                     [launcher], [requirement], [field_id] + idx, true)
+                 end
+               end
+             else
+               return quote
+                 add_field(
+                   [launcher], [requirement], [field_id], true)
+               end
              end
            end)]
         [add_flags]([launcher], [requirement], [flag])
@@ -2562,7 +2798,7 @@ end
 
 local function setup_list_of_regions_add_region(
     cx, param_type, container_type, value_type, value,
-    region, parent, field_paths, add_requirement, get_requirement,
+    region, parent, field_paths, field_types, add_requirement, get_requirement,
     add_field, has_field, add_flags, intersect_flags, requirement_args, flag, launcher)
   return quote
     var [region] = [raise_privilege_depth(cx, `([value].impl), param_type, field_paths, true)]
@@ -2574,12 +2810,23 @@ local function setup_list_of_regions_add_region(
     else
       [intersect_flags]([launcher], requirement, [flag])
     end
-    [field_paths:map(
-       function(field_path)
+    [data.zip(field_paths, field_types):map(
+       function(field)
+         local field_path, field_type = unpack(field)
          local field_id = cx:list_of_regions(container_type):field_id(field_path)
-         return quote
-           if not [has_field]([launcher], requirement, [field_id]) then
-             [add_field]([launcher], requirement, [field_id], true)
+         if std.is_regent_array(field_type) then
+           return quote
+             if not [has_field]([launcher], requirement, [field_id]) then
+               for idx = 0, [field_type.N] do
+                 [add_field]([launcher], requirement, [field_id] + idx, true)
+               end
+             end
+           end
+         else
+           return quote
+             if not [has_field]([launcher], requirement, [field_id]) then
+               [add_field]([launcher], requirement, [field_id], true)
+             end
            end
          end
        end)]
@@ -2588,7 +2835,7 @@ end
 
 local function setup_list_of_regions_add_list(
     cx, param_type, container_type, value_type, value,
-    region, parent, field_paths, add_requirement, get_requirement,
+    region, parent, field_paths, field_types, add_requirement, get_requirement,
     add_field, has_field, add_flags, intersect_flags, requirement_args, flag, launcher)
   local element = terralib.newsymbol(value_type.element_type)
   if std.is_list(value_type.element_type) then
@@ -2597,7 +2844,7 @@ local function setup_list_of_regions_add_list(
         var [element] = [value_type:data(value)][i]
         [setup_list_of_regions_add_list(
            cx, param_type, container_type, value_type.element_type, element,
-           region, parent, field_paths, add_requirement, get_requirement,
+           region, parent, field_paths, field_types, add_requirement, get_requirement,
            add_field, has_field, add_flags, intersect_flags, requirement_args, flag, launcher)]
       end
     end
@@ -2607,7 +2854,7 @@ local function setup_list_of_regions_add_list(
         var [element] = [value_type:data(value)][i]
         [setup_list_of_regions_add_region(
            cx, param_type, container_type, value_type.element_type, element,
-           region, parent, field_paths, add_requirement, get_requirement,
+           region, parent, field_paths, field_types, add_requirement, get_requirement,
            add_field, has_field, add_flags, intersect_flags, requirement_args, flag, launcher)]
       end
     end
@@ -2703,7 +2950,7 @@ local function expr_call_setup_list_of_regions_arg(
     args_setup:insert(
       setup_list_of_regions_add_list(
         cx, param_type, arg_type, arg_type, list,
-        region, parent, field_paths, add_requirement, get_requirement,
+        region, parent, field_paths, field_types, add_requirement, get_requirement,
         add_field, has_field, add_flags, intersect_flags, requirement_args, flag, launcher))
   end
 end
@@ -2763,12 +3010,22 @@ local function expr_call_setup_partition_arg(
       quote
       var [requirement] =
         [add_requirement]([requirement_args])
-        [field_paths:map(
-           function(field_path)
+        [data.zip(field_paths, field_types):map(
+           function(field)
+             local field_path, field_type = unpack(field)
              local field_id = cx:region(arg_type):field_id(field_path)
-             return quote
-               c.legion_index_launcher_add_field(
-                 [launcher], [requirement], [field_id], true)
+             if regentlib.is_regent_array(field_type) then
+               return quote
+                 for idx = 0, [field_type.N] do
+                   c.legion_index_launcher_add_field(
+                     [launcher], [requirement], [field_id] + idx, true)
+                 end
+               end
+             else
+               return quote
+                 c.legion_index_launcher_add_field(
+                   [launcher], [requirement], [field_id], true)
+               end
              end
            end)]
       c.legion_index_launcher_add_flags([launcher], [requirement], [flag])
@@ -3546,20 +3803,25 @@ function codegen.expr_region(cx, node)
   local field_paths, field_types = std.flatten_struct_fields(fspace_type)
   local field_privileges = field_paths:map(function(_) return "reads_writes" end)
   local field_id = 100
-  local field_ids = field_paths:map(
-    function(_)
+  local field_ids = data.zip(field_paths, field_types):map(
+    function(pair)
       field_id = field_id + 1
-      return field_id
+      local my_field_id = field_id
+      local field_path, field_type = unpack(pair)
+      if std.is_regent_array(field_type) then
+        field_id = field_id + field_type.N - 1
+      end
+      return my_field_id
     end)
   local fields_are_scratch = field_paths:map(function(_) return false end)
   local physical_regions = field_paths:map(function(_) return pr end)
 
   local pr_actions, base_pointers, strides = unpack(data.zip(unpack(
-    data.zip(field_types, field_ids, field_privileges):map(
+    data.zip(field_types, field_paths, field_ids, field_privileges):map(
       function(field)
-        local field_type, field_id, field_privilege = unpack(field)
+        local field_type, field_path, field_id, field_privilege = unpack(field)
         return terralib.newlist({
-          physical_region_get_base_pointer(cx, index_type, field_type, pr, field_id)})
+          physical_region_get_base_pointer(cx, region_type, index_type, field_type, field_path, pr, field_id)})
   end))))
   pr_actions = pr_actions or terralib.newlist()
   base_pointers = base_pointers or terralib.newlist()
@@ -3580,13 +3842,24 @@ function codegen.expr_region(cx, node)
   if fspace_type:isstruct() then
     fs_naming_actions = quote
       c.legion_field_space_attach_name([cx.runtime], [fs], [fspace_type.name], false)
-      [data.zip(field_paths, field_ids):map(
+      [data.flatmap(
          function(field)
-           local field_path, field_id = unpack(field)
+           local field_path, field_type, field_id = unpack(field)
            local field_name = field_path:mkstring("", ".", "")
-           return `(c.legion_field_id_attach_name(
-                      [cx.runtime], [fs], field_id, field_name, false))
-         end)]
+           if regentlib.is_regent_array(field_type) then
+             local attach_names = terralib.newlist()
+             for idx = 0, field_type.N - 1 do
+               local elem_name = field_name .. "[" .. tostring(idx) .. "]"
+               attach_names:insert(`(c.legion_field_id_attach_name(
+                          [cx.runtime], [fs], field_id + [idx], [elem_name], false)))
+             end
+             return attach_names
+           else
+             return `(c.legion_field_id_attach_name(
+                        [cx.runtime], [fs], field_id, field_name, false))
+           end
+         end,
+         data.zip(field_paths, field_types, field_ids))]
     end
   else
     fs_naming_actions = quote end
@@ -3598,12 +3871,23 @@ function codegen.expr_region(cx, node)
     var [is] = [ispace.value].impl
     var [fs] = c.legion_field_space_create([cx.runtime], [cx.context])
     var fsa = c.legion_field_allocator_create([cx.runtime], [cx.context],  [fs]);
-    [data.zip(field_types, field_ids):map(
+    [data.flatmap(
        function(field)
          local field_type, field_id = unpack(field)
-         return `(c.legion_field_allocator_allocate_field(
-                    fsa, terralib.sizeof([field_type]), [field_id]))
-       end)]
+         if regentlib.is_regent_array(field_type) then
+           local allocate_fields = terralib.newlist()
+           return quote
+             for idx = 0, [field_type.N] do
+               c.legion_field_allocator_allocate_field(
+                 fsa, terralib.sizeof([field_type.elem_type]), [field_id] + idx)
+             end
+           end
+         else
+           return `(c.legion_field_allocator_allocate_field(
+                      fsa, terralib.sizeof([field_type]), [field_id]))
+         end
+       end,
+       data.zip(field_types, field_ids))]
     [fs_naming_actions];
     c.legion_field_allocator_destroy(fsa)
     var [lr] = c.legion_logical_region_create([cx.runtime], [cx.context], [is], [fs], true)
@@ -3617,9 +3901,18 @@ function codegen.expr_region(cx, node)
       [codegen_hooks.gen_update_mapping_tag(tag, cx.task)]
       var il = c.legion_inline_launcher_create_logical_region(
         [lr], c.READ_WRITE, c.EXCLUSIVE, [lr], 0, false, 0, [tag]);
-      [field_ids:map(
-         function(field_id)
-           return `(c.legion_inline_launcher_add_field(il, [field_id], true))
+      [data.zip(field_ids, field_types):map(
+         function(field)
+           local field_id, field_type = unpack(field)
+           if regentlib.is_regent_array(field_type) then
+             return quote
+               for idx = 0, [field_type.N] do
+                 c.legion_inline_launcher_add_field(il, [field_id] + idx, true)
+               end
+             end
+           else
+             return `(c.legion_inline_launcher_add_field(il, [field_id], true))
+           end
          end)]
       var [pr] = c.legion_inline_launcher_execute([cx.runtime], [cx.context], il)
       c.legion_inline_launcher_destroy(il)
@@ -7099,7 +7392,8 @@ function codegen.stat_for_list(cx, node)
   local cleanup_actions = quote end
 
   local iterator_has_next, iterator_next_span -- For unstructured
-  local domain -- For structured
+  local rect_it, rect_it_create, rect_it_destroy -- For structured
+  local rect_it_valid, rect_it_step, rect_it_get, domain -- For structured
   if ispace_type.dim == 0 then
     if it and cache_index_iterator then
       iterator_has_next = c.legion_terra_cached_index_iterator_has_next
@@ -7122,9 +7416,26 @@ function codegen.stat_for_list(cx, node)
     end
   else
     domain = terralib.newsymbol(c.legion_domain_t, "domain")
+    local rect_it_type =
+      c["legion_rect_in_domain_iterator_" .. tostring(ispace_type.dim) .. "d_t"]
+    rect_it = terralib.newsymbol(rect_it_type, "rect_it")
+    rect_it_create =
+      c["legion_rect_in_domain_iterator_create_" .. tostring(ispace_type.dim) .. "d"]
+    rect_it_destroy =
+      c["legion_rect_in_domain_iterator_destroy_" .. tostring(ispace_type.dim) .. "d"]
+    rect_it_valid =
+      c["legion_rect_in_domain_iterator_valid_" .. tostring(ispace_type.dim) .. "d"]
+    rect_it_step =
+      c["legion_rect_in_domain_iterator_step_" .. tostring(ispace_type.dim) .. "d"]
+    rect_it_get =
+      c["legion_rect_in_domain_iterator_get_rect_" .. tostring(ispace_type.dim) .. "d"]
     actions = quote
       [actions]
       var [domain] = c.legion_index_space_get_domain([cx.runtime], [is])
+      var [rect_it] = [rect_it_create]([domain])
+    end
+    cleanup_actions = quote
+      [rect_it_destroy]([rect_it])
     end
   end
 
@@ -7236,8 +7547,11 @@ function codegen.stat_for_list(cx, node)
           end
           return quote
             [actions]
-            var [rect] = [domain_get_rect]([domain])
-            [body]
+            while [rect_it_valid]([rect_it]) do
+              var [rect] = [rect_it_get]([rect_it])
+              [body]
+              [rect_it_step]([rect_it])
+            end
             ::[break_label]::
             [cleanup_actions]
           end
@@ -7296,12 +7610,15 @@ function codegen.stat_for_list(cx, node)
         if not openmp then
           return quote
             [actions]
-            var rect = c.legion_domain_get_rect_1d([domain])
-            for i = rect.lo.x[0], rect.hi.x[0] + 1 do
-              var [symbol] = [symbol.type]{ __ptr = i }
-              do
-                [block]
+            while [rect_it_valid]([rect_it]) do
+              var rect = [rect_it_get]([rect_it])
+              for i = rect.lo.x[0], rect.hi.x[0] + 1 do
+                var [symbol] = [symbol.type]{ __ptr = i }
+                do
+                  [block]
+                end
               end
+              [rect_it_step]([rect_it])
             end
             ::[break_label]::
             [cleanup_actions]
@@ -8824,8 +9141,58 @@ function codegen.top_task(cx, node)
   local params_map_symbol = task:has_params_map_symbol() and
     task:get_params_map_symbol()
 
+  local orderings = data.newmap()
+  if variant:has_layout_constraints() then
+    local region_types = data.newmap()
+    data.filter(
+      function(symbol)
+        return std.is_region(symbol:gettype())
+      end, task:get_param_symbols()):map(
+      function(symbol)
+        region_types[symbol:getname()] = symbol:gettype()
+      end)
+    variant:get_layout_constraints():map(function(constraint)
+      local ordering = std.layout.make_index_ordering_from_constraint(constraint)
+
+      local dimensions = constraint.dimensions
+      local field_constraint_i = data.filteri(function(dimension)
+        return dimension:is(ast.layout.Field)
+      end, dimensions)
+      if #field_constraint_i > 1 or #field_constraint_i == 0 then
+        error("there must be one field constraint in the annotation")
+      end
+      local field_constraint = dimensions[field_constraint_i[1]]
+
+      local region_type = region_types[field_constraint.region_name]
+      if not orderings[region_type] then
+        orderings[region_type] = data.newmap()
+      end
+
+      local absolute_field_paths =
+        std.get_absolute_field_paths(region_type:fspace(), field_constraint.field_paths)
+
+      if field_constraint_i[1] ~= 1 then
+        absolute_field_paths:map(function(field_path)
+          local field_type = std.get_field_path(region_type:fspace(), field_path)
+          local expected_stride = terralib.sizeof(field_type)
+          orderings[region_type][field_path] = data.newtuple(ordering, expected_stride)
+        end)
+      else
+        local struct_size = data.reduce(function(a, b) return a + b end,
+          absolute_field_paths:map(function(field_path)
+            return terralib.sizeof(std.get_field_path(region_type:fspace(), field_path))
+          end),
+          0)
+        absolute_field_paths:map(function(field_path)
+          orderings[region_type][field_path] = data.newtuple(ordering, struct_size)
+        end)
+      end
+    end)
+  end
+
   local cx = cx:new_task_scope(return_type,
                                task:get_constraints(),
+                               orderings,
                                variant:get_config_options().leaf,
                                task, c_task, c_context, c_runtime)
 
@@ -8972,7 +9339,7 @@ function codegen.top_task(cx, node)
               local field_path, field_type = unpack(field)
               local field_id = field_ids_by_field_path[field_path:hash()]
               return terralib.newlist({
-                physical_region_get_base_pointer(cx, index_type, field_type, physical_region, field_id)})
+                physical_region_get_base_pointer(cx, region_type, index_type, field_type, field_path, physical_region, field_id)})
         end))))
 
         physical_region_actions:insertall(pr_actions or {})
@@ -9221,46 +9588,30 @@ function codegen.top(cx, node)
 
     if not node.body then return task end
 
-    if not (node.annotations.cuda:is(ast.annotation.Demand) and
-            cudahelper.check_cuda_available())
-    then
-      if node.annotations.cuda:is(ast.annotation.Demand) then
+    task:set_compile_thunk(
+      function(variant)
+        local cx = context.new_global_scope(variant)
+        return codegen.top_task(cx, node)
+    end)
+
+    local cpu_variant = task:get_primary_variant()
+    cpu_variant:set_ast(node)
+    std.register_variant(cpu_variant)
+
+    if node.annotations.cuda:is(ast.annotation.Demand) then 
+      if not cudahelper.check_cuda_available() then
         report.warn(node,
           "ignoring demand pragma at " .. node.span.source ..
           ":" .. tostring(node.span.start.line) ..
           " since the CUDA compiler is unavailable")
+      else
+        local cuda_variant = task:make_variant("cuda")
+        cuda_variant:set_is_cuda(true)
+        std.register_variant(cuda_variant)
+        task:set_cuda_variant(cuda_variant)
       end
-      local cpu_variant = task:get_primary_variant()
-      cpu_variant:set_ast(node)
-      task:add_complete_thunk(
-        function()
-          local cx = context.new_global_scope(cpu_variant)
-          return codegen.top_task(cx, node)
-      end)
-      std.register_variant(cpu_variant)
-      return task
-    else
-      local cpu_variant = task:get_primary_variant()
-      cpu_variant:set_ast(node)
-      task:add_complete_thunk(
-        function()
-          local cx = context.new_global_scope(cpu_variant)
-          return codegen.top_task(cx, node)
-      end)
-      std.register_variant(cpu_variant)
-
-      local cuda_variant = task:make_variant("cuda")
-      cuda_variant:set_is_cuda(true)
-      task:add_complete_thunk(
-        function()
-          local cx = context.new_global_scope(cuda_variant)
-          return codegen.top_task(cx, node)
-      end)
-      std.register_variant(cuda_variant)
-      task:set_cuda_variant(cuda_variant)
-
-      return task
     end
+    return task
 
   elseif node:is(ast.typed.top.Fspace) then
     return codegen.top_fspace(cx, node)

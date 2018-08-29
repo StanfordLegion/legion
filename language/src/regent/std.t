@@ -1192,6 +1192,15 @@ function std.get_field_path(value_type, field_path)
   return field_type
 end
 
+function std.get_absolute_field_paths(fspace_type, prefixes)
+  return data.flatmap(function(prefix)
+    local field_type = std.get_field_path(fspace_type, prefix)
+    return std.flatten_struct_fields(field_type):map(function(suffix)
+        return prefix .. suffix
+      end)
+    end, prefixes)
+end
+
 local function type_requires_force_cast(a, b)
   return (std.is_ispace(a) and std.is_ispace(b)) or
     (std.is_region(a) and std.is_region(b)) or
@@ -3007,6 +3016,29 @@ std.dynamic_collective = terralib.memoize(function(result_type)
   return st
 end)
 
+std.array = terralib.memoize(function(elem_type, N)
+  if not (terralib.types.istype(elem_type) and elem_type:isprimitive()) then
+    error("array expected a primitive type as argument 1, got " .. tostring(elem_type))
+  end
+  if not (type(N) == "number" and terralib.isintegral(N)) then
+    error("array expected an integer as argument 2, got " .. tostring(N))
+  end
+  local st = terralib.types.newstruct("regent_array")
+  st.entries = terralib.newlist({
+      { "impl", elem_type[N] }
+  })
+
+  st.is_regent_array = true
+  st.elem_type = elem_type
+  st.N = N
+
+  function st.metamethods.__typename(st)
+    return "regent_array(" .. tostring(st.elem_type) .. ", " .. tostring(N) .. ")"
+  end
+
+  return st
+end)
+
 do
   local function field_name(field)
     local field_name = field["field"] or field[1]
@@ -3365,6 +3397,124 @@ local function make_reduction_layout(dim, op_id)
   end
 end
 
+local function make_ordering_constraint_from_annotation(layout, dimensions)
+  local dim = #dimensions - 1
+  assert(1 <= dim and dim <= 3)
+  local result = terralib.newlist()
+
+  local dims = terralib.newsymbol(c.legion_dimension_kind_t[dim+1], "dims")
+  result:insert(quote var [dims] end)
+  for i, d in ipairs(dimensions) do
+    result:insert(quote [dims][ [i - 1] ] = [d.index] end)
+  end
+  result:insert(quote
+    c.legion_layout_constraint_set_add_ordering_constraint([layout], [dims], [dim+1], true)
+  end)
+
+  return result
+end
+
+-- TODO: Field IDs should really be dynamic
+local generate_static_field_ids = terralib.memoize(function(region_type)
+  local field_ids = data.newmap()
+  -- XXX: The following code must be consisten with 'codegen.expr_region'
+  local field_paths, field_types = std.flatten_struct_fields(region_type:fspace())
+  local field_id = 100
+  data.zip(field_paths, field_types):map(
+    function(pair)
+      field_id = field_id + 1
+      local my_field_id = field_id
+      local field_path, field_type = unpack(pair)
+      if std.is_regent_array(field_type) then
+        field_id = field_id + field_type.N - 1
+      end
+      field_ids[field_path] = field_id
+    end)
+  return field_ids
+end)
+
+local function make_field_constraint_from_annotation(layout, region_type, field_constraint)
+  local result = terralib.newlist()
+  local field_ids = generate_static_field_ids(region_type)
+
+  local absolute_field_paths =
+    std.get_absolute_field_paths(region_type:fspace(), field_constraint.field_paths)
+  local num_fields = #absolute_field_paths
+
+  local fields = terralib.newsymbol(c.legion_field_id_t[num_fields], "fields")
+  result:insert(quote var [fields] end)
+  for i, field_path in ipairs(absolute_field_paths) do
+    result:insert(quote [fields][ [i - 1] ] = [ field_ids[field_path] ] end)
+  end
+  result:insert(quote
+    c.legion_layout_constraint_set_add_field_constraint([layout], [fields], [num_fields],
+      true, -- contiguous
+      true  -- inorder
+    )
+  end)
+
+  return result
+end
+
+local function make_layout_constraints_from_annotation(region_types, annotation)
+  local layout_id = terralib.newsymbol(c.legion_layout_constraint_id_t, "layout_id")
+  -- TODO: We only support ordering and field constraints for now
+  assert(annotation:is(ast.layout.Ordering))
+  local dimensions = annotation.dimensions:map(function(dim) return dim end)
+
+  local field_constraint_i = data.filteri(function(dimension)
+    return dimension:is(ast.layout.Field)
+  end, dimensions)
+  if #field_constraint_i > 1 or #field_constraint_i == 0 then
+    error("there must be one field constraint in the annotation")
+  end
+
+  local field_constraint = dimensions[field_constraint_i[1]]
+  dimensions[field_constraint_i[1]] = std.layout.dimf
+
+  local region_type = region_types[field_constraint.region_name]
+  assert(region_type ~= nil)
+
+  local layout_registration = quote
+    var layout = c.legion_layout_constraint_set_create()
+
+    [make_ordering_constraint_from_annotation(layout, dimensions)]
+
+    [make_field_constraint_from_annotation(layout, region_type, field_constraint)]
+
+    var [layout_id] = c.legion_layout_constraint_set_preregister(layout, "hybrid")
+    c.legion_layout_constraint_set_destroy(layout)
+  end
+
+  return region_type, layout_id, layout_registration
+end
+
+local function make_layout_constraints_from_annotations(variant)
+  local layouts = data.newmap()
+  local layout_registrations = terralib.newlist()
+  if variant:has_layout_constraints() then
+    local task = variant.task
+    local region_types = data.newmap()
+    data.filter(
+      function(symbol)
+        return std.is_region(symbol:gettype())
+      end, task:get_param_symbols()):map(
+      function(symbol)
+        region_types[symbol:getname()] = symbol:gettype()
+      end)
+    variant:get_layout_constraints():map(function(annotation)
+      local region_type, layout_id, layout_registration =
+        make_layout_constraints_from_annotation(region_types, annotation)
+      if not layouts[region_type] then
+        layouts[region_type] = terralib.newlist()
+      end
+      layouts[region_type]:insert(layout_id)
+      layout_registrations:insert(layout_registration)
+    end)
+  end
+  return layouts, layout_registrations
+end
+
 function std.setup(main_task, extra_setup_thunk, task_wrappers, registration_name)
   assert(not main_task or std.is_task(main_task))
 
@@ -3480,6 +3630,9 @@ function std.setup(main_task, extra_setup_thunk, task_wrappers, registration_nam
       local layout_constraints = terralib.newsymbol(
         c.legion_task_layout_constraint_set_t, "layout_constraints")
       local layout_constraint_actions = terralib.newlist()
+      local layouts_from_annotations, layout_registrations_from_annotations =
+        make_layout_constraints_from_annotations(variant)
+      layout_registrations:insertall(layout_registrations_from_annotations)
       if std.config["layout-constraints"] then
         local fn_type = task:get_type()
         local param_types = fn_type.parameters
@@ -3492,22 +3645,23 @@ function std.setup(main_task, extra_setup_thunk, task_wrappers, registration_nam
           for i, privilege in ipairs(privileges) do
             local field_types = privilege_field_types[i]
 
-            local layout = layout_normal[dim]
+            local layouts = layouts_from_annotations[param_type] or terralib.newlist { layout_normal[dim] }
             if std.is_reduction_op(privilege) then
               local op = std.get_reduction_op(privilege)
               assert(#field_types == 1)
               local field_type = field_types[1]
-              layout = layout_reduction[dim][op][field_type]
+              layouts = terralib.newlist { layout_reduction[dim][op][field_type] }
             end
             if options.inner or variant:is_external() then
               -- No layout constraints for inner tasks
-              layout = layout_unconstrained
+              layouts = terralib.newlist { layout_unconstrained }
             end
-            layout_constraint_actions:insert(
-              quote
+            layout_constraint_actions:insertall(layouts:map(function(layout)
+              return quote
                 c.legion_task_layout_constraint_set_add_layout_constraint(
                   [layout_constraints], [region_i], [layout])
-              end)
+              end
+            end))
             region_i = region_i + 1
           end
         end
@@ -3529,6 +3683,7 @@ function std.setup(main_task, extra_setup_thunk, task_wrappers, registration_nam
           c.legion_runtime_preregister_task_variant_fnptr(
             [task:get_task_id()],
             [task:get_name():concat(".")],
+            [variant:get_name()],
             execution_constraints, layout_constraints, options,
             [task_wrappers[variant:wrapper_name()]], nil, 0)
           c.legion_execution_constraint_set_destroy(execution_constraints)
@@ -4233,5 +4388,58 @@ do
     return true
   end
 end
+
+-- #####################################
+-- ## Layout Constraints
+-- #################
+
+std.layout = {}
+std.layout.dimx = ast.layout.Dim { index = c.DIM_X }
+std.layout.dimy = ast.layout.Dim { index = c.DIM_Y }
+std.layout.dimz = ast.layout.Dim { index = c.DIM_Z }
+std.layout.dimf = ast.layout.Dim { index = c.DIM_F }
+
+function std.layout.field_path(...)
+  return data.newtuple(...)
+end
+
+function std.layout.field_constraint(region_name, field_paths)
+  return ast.layout.Field {
+    region_name = region_name,
+    field_paths = field_paths,
+  }
+end
+
+function std.layout.ordering_constraint(dimensions)
+  return ast.layout.Ordering { dimensions = dimensions }
+end
+
+function std.layout.make_index_ordering_from_constraint(constraint)
+  assert(constraint:is(ast.layout.Ordering))
+  local ordering = terralib.newlist()
+  constraint.dimensions:map(function(dimension)
+      if dimension == std.layout.dimx then
+        ordering:insert(1)
+      elseif dimension == std.layout.dimy then
+        ordering:insert(2)
+      elseif dimension == std.layout.dimz then
+        ordering:insert(3)
+      end
+    end)
+  assert(#ordering == #constraint.dimensions - 1)
+  return ordering
+end
+
+std.layout.default_layout = terralib.memoize(function(index_type)
+  local dimensions = terralib.newlist { std.layout.dimx }
+  if index_type.dim > 1 then
+    dimensions:insert(std.layout.dimy)
+  end
+  if index_type.dim > 2 then
+    dimensions:insert(std.layout.dimz)
+  end
+  dimensions:insert(std.layout.dimf)
+  return std.layout.ordering_constraint(dimensions)
+end)
 
 return std

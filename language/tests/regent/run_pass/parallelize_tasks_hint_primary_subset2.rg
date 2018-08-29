@@ -14,7 +14,7 @@
 
 -- runs-with:
 -- [
---  ["-ll:cpu", "4", "-fbounds-checks", "1", "-fdebug", "1"],
+--  ["-ll:cpu", "4", "-fbounds-checks", "1"],
 --  ["-ll:cpu", "4"]
 -- ]
 
