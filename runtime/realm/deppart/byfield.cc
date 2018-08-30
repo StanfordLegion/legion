@@ -205,7 +205,7 @@ namespace Realm {
   void ByFieldMicroOp<N,T,FT>::dispatch(PartitioningOperation *op, bool inline_ok)
   {
     // a ByFieldMicroOp should always be executed on whichever node the field data lives
-    NodeID exec_node = ID(inst).sparsity.creator_node;
+    NodeID exec_node = ID(inst).instance.owner_node;
 
     if(exec_node != my_node_id) {
       // we're going to ship it elsewhere, which means we always need an AsyncMicroOp to
@@ -291,7 +291,7 @@ namespace Realm {
     subspace.bounds = parent.bounds;
 
     // get a sparsity ID by round-robin'ing across the nodes that have field data
-    int target_node = ID(field_data[colors.size() % field_data.size()].inst).sparsity.creator_node;
+    int target_node = ID(field_data[colors.size() % field_data.size()].inst).instance.owner_node;
     SparsityMap<N,T> sparsity = get_runtime()->get_available_sparsity_impl(target_node)->me.convert<SparsityMap<N,T> >();
     subspace.sparsity = sparsity;
 
