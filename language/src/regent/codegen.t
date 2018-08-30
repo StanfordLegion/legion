@@ -3241,20 +3241,135 @@ function codegen.expr_call(cx, node)
   end
 end
 
-function codegen.expr_cast(cx, node)
-  local fn = codegen.expr(cx, node.fn):read(cx)
-  local arg = codegen.expr(cx, node.arg):read(cx, node.arg.expr_type)
+local lift_cast_to_futures = terralib.memoize(
+  function (arg_type, expr_type)
+    assert(terralib.types.istype(arg_type) and
+             terralib.types.istype(expr_type))
+    if std.is_future(arg_type) then
+      arg_type = arg_type.result_type
+    end
+    if std.is_future(expr_type) then
+      expr_type = expr_type.result_type
+    end
 
-  local actions = quote
-    [fn.actions];
-    [arg.actions];
-    [emit_debuginfo(node)]
-  end
+    local name = data.newtuple(
+      "__cast_" .. tostring(arg_type) .. "_" .. tostring(expr_type))
+    local arg_symbol = std.newsymbol(arg_type, "arg")
+    local task = std.new_task(name)
+    local variant = task:make_variant("primary")
+    task:set_primary_variant(variant)
+    local node = ast.typed.top.Task {
+      name = name,
+      params = terralib.newlist({
+          ast.typed.top.TaskParam {
+            symbol = arg_symbol,
+            param_type = arg_type,
+            future = false,
+            annotations = ast.default_annotations(),
+            span = ast.trivial_span(),
+          },
+      }),
+      return_type = expr_type,
+      privileges = terralib.newlist(),
+      coherence_modes = data.newmap(),
+      flags = data.newmap(),
+      conditions = {},
+      constraints = terralib.newlist(),
+      body = ast.typed.Block {
+        stats = terralib.newlist({
+            ast.typed.stat.Return {
+              value = ast.typed.expr.Cast {
+                fn = ast.typed.expr.Function {
+                  value = expr_type,
+                  expr_type = terralib.types.functype(
+                    terralib.newlist({std.untyped}), expr_type, false),
+                  annotations = ast.default_annotations(),
+                  span = ast.trivial_span(),
+                },
+                arg = ast.typed.expr.ID {
+                  value = arg_symbol,
+                  expr_type = arg_type,
+                  annotations = ast.default_annotations(),
+                  span = ast.trivial_span(),
+                },
+                expr_type = expr_type,
+                annotations = ast.default_annotations(),
+                span = ast.trivial_span(),
+              },
+              annotations = ast.default_annotations(),
+              span = ast.trivial_span(),
+            },
+        }),
+        span = ast.trivial_span(),
+      },
+      config_options = ast.TaskConfigOptions {
+        leaf = true,
+        inner = false,
+        idempotent = true,
+      },
+      region_divergence = false,
+      prototype = task,
+      annotations = ast.default_annotations(),
+      span = ast.trivial_span(),
+    }
+    task:set_type(
+      terralib.types.functype(
+        node.params:map(function(param) return param.param_type end),
+        node.return_type,
+        false))
+    task:set_privileges(node.privileges)
+    task:set_conditions({})
+    task:set_param_constraints(node.constraints)
+    task:set_constraints({})
+    task:set_region_universe(data.newmap())
+    return codegen.entry(node)
+  end)
+
+function codegen.expr_cast(cx, node)
   local expr_type = std.as_read(node.expr_type)
-  return values.value(
-    node,
-    expr.once_only(actions, `([fn.value]([arg.value])), expr_type),
-    expr_type)
+  if std.is_future(expr_type) then
+    local arg_type = std.as_read(node.arg.expr_type)
+    local task = lift_cast_to_futures(arg_type, expr_type)
+
+    -- Assuming the following assertion holds, it is safe to throw
+    -- away the result of this expression (i.e. the actions won't
+    -- actually do anything).
+    --
+    -- FIXME: It's probably better to have node.fn not be an
+    -- expression at all, since we always know it statically.
+    local fn = codegen.expr(cx, node.fn):read(cx)
+    assert(fn.value == expr_type.result_type)
+
+    local call = ast.typed.expr.Call {
+      fn = ast.typed.expr.Function {
+        value = task,
+        expr_type = task:get_type(),
+        annotations = ast.default_annotations(),
+        span = node.span,
+      },
+      args = terralib.newlist({node.arg}),
+      conditions = terralib.newlist(),
+      replicable = false,
+      expr_type = expr_type,
+      annotations = node.annotations,
+      span = node.span,
+    }
+    return codegen.expr(cx, call)
+  else
+    local fn = codegen.expr(cx, node.fn):read(cx)
+    local arg = codegen.expr(cx, node.arg):read(cx, node.arg.expr_type)
+
+    local actions = quote
+      [fn.actions];
+      [arg.actions];
+      [emit_debuginfo(node)]
+    end
+    local expr_type = std.as_read(node.expr_type)
+    return values.value(
+      node,
+      expr.once_only(actions, `([fn.value]([arg.value])), expr_type),
+      expr_type)
+  end
 end
 
 function codegen.expr_ctor_list_field(cx, node)

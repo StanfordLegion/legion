@@ -503,10 +503,18 @@ end
 
 function optimize_futures.expr_cast(cx, node)
   local fn = concretize(optimize_futures.expr(cx, node.fn))
-  local arg = concretize(optimize_futures.expr(cx, node.arg))
+  local arg = optimize_futures.expr(cx, node.arg)
+  local arg_type = std.as_read(arg.expr_type)
+
+  local expr_type = node.expr_type
+  if std.is_future(arg_type) then
+    expr_type = std.future(expr_type)
+  end
+
   return node {
     fn = fn,
     arg = arg,
+    expr_type = expr_type,
   }
 end
 
