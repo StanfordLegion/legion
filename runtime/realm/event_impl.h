@@ -251,138 +251,86 @@ namespace Realm {
   // active messages
 
   struct EventSubscribeMessage {
-    struct RequestArgs {
-      NodeID node;
-      Event event;
-      EventImpl::gen_t previous_subscribe_gen;
-    };
+    Event event;
+    EventImpl::gen_t previous_subscribe_gen;
 
-    static void handle_request(RequestArgs args);
+    static void handle_message(NodeID sender, const EventSubscribeMessage &msg,
+			       const void *data, size_t datalen);
 
-    typedef ActiveMessageShortNoReply<EVENT_SUBSCRIBE_MSGID,
-				      RequestArgs,
-				      handle_request> Message;
-
-    static void send_request(NodeID target, Event event, EventImpl::gen_t previous_gen);
   };
 
-  // EventTriggerMessage is used by non-owner nodes to trigger an event
-  // EventUpdateMessage is used by the owner node to tell non-owner nodes about one or
-  //   more triggerings of an event
-
   struct EventTriggerMessage {
-    struct RequestArgs {
-      NodeID node;
-      Event event;
-      bool poisoned;
-    };
+    Event event;
+    bool poisoned;
 
-    static void handle_request(RequestArgs args);
+    static void handle_message(NodeID sender, const EventTriggerMessage &msg,
+			       const void *data, size_t datalen);
 
-    typedef ActiveMessageShortNoReply<EVENT_TRIGGER_MSGID,
-				       RequestArgs,
-				       handle_request> Message;
-
-    static void send_request(NodeID target, Event event, bool poisoned);
   };
 
   struct EventUpdateMessage {
-    struct RequestArgs : public BaseMedium {
-      Event event;
+    Event event;
 
-      void apply(NodeID target);
-    };
+    static void handle_message(NodeID sender, const EventUpdateMessage &msg,
+			       const void *data, size_t datalen);
 
-    static void handle_request(RequestArgs args, const void *data, size_t datalen);
-
-    typedef ActiveMessageMediumNoReply<EVENT_UPDATE_MSGID,
-				       RequestArgs,
-				       handle_request> Message;
-
-    static void send_request(NodeID target, Event event,
-			     int num_poisoned, const EventImpl::gen_t *poisoned_generations);
-    static void broadcast_request(const NodeSet& targets, Event event,
-				  int num_poisoned, const EventImpl::gen_t *poisoned_generations);
   };
 
-    struct BarrierAdjustMessage {
-      struct RequestArgs : public BaseMedium {
-	int sender;
-	//bool forwarded;  no room to store this, so encoded as: sender < 0
-	int delta;
-	Barrier barrier;
-        Event wait_on;
-      };
+  struct BarrierAdjustMessage {
+    //bool forwarded;  no room to store this, so encoded as: sender < 0
+    int forwarded;
+    int delta;
+    Barrier barrier;
+    Event wait_on;
 
-      static void handle_request(RequestArgs args, const void *data, size_t datalen);
-
-      typedef ActiveMessageMediumNoReply<BARRIER_ADJUST_MSGID,
-					 RequestArgs,
-					 handle_request> Message;
-
-      static void send_request(NodeID target, Barrier barrier, int delta, Event wait_on,
-			       NodeID sender, bool forwarded,
+    static void handle_message(NodeID sender, const BarrierAdjustMessage &msg,
 			       const void *data, size_t datalen);
+    static void send_request(NodeID target, Barrier barrier, int delta, Event wait_on,
+			     NodeID sender, bool forwarded,
+			     const void *data, size_t datalen);
     };
 
-    struct BarrierSubscribeMessage {
-      struct RequestArgs {
-	NodeID subscriber;
-	ID::IDType barrier_id;
-	EventImpl::gen_t subscribe_gen;
-	bool forwarded;
-      };
+  struct BarrierSubscribeMessage {
+    NodeID subscriber;
+    ID::IDType barrier_id;
+    EventImpl::gen_t subscribe_gen;
+    bool forwarded;
 
-      static void handle_request(RequestArgs args);
-
-      typedef ActiveMessageShortNoReply<BARRIER_SUBSCRIBE_MSGID,
-					RequestArgs,
-					handle_request> Message;
-
-      static void send_request(NodeID target, ID::IDType barrier_id,
-			       EventImpl::gen_t subscribe_gen,
-			       NodeID subscriber, bool forwarded);
-    };
-
-    struct BarrierTriggerMessage {
-      struct RequestArgs : public BaseMedium {
-	NodeID node;
-	ID::IDType barrier_id;
-	EventImpl::gen_t trigger_gen;
-	EventImpl::gen_t previous_gen;
-	EventImpl::gen_t first_generation;
-	ReductionOpID redop_id;
-	NodeID migration_target;
-	unsigned base_arrival_count;
-      };
-
-      static void handle_request(RequestArgs args, const void *data, size_t datalen);
-
-      typedef ActiveMessageMediumNoReply<BARRIER_TRIGGER_MSGID,
-					 RequestArgs,
-					 handle_request> Message;
-
-      static void send_request(NodeID target, ID::IDType barrier_id,
-			       EventImpl::gen_t trigger_gen, EventImpl::gen_t previous_gen,
-			       EventImpl::gen_t first_generation, ReductionOpID redop_id,
-			       NodeID migration_target, unsigned base_arrival_count,
+    static void handle_message(NodeID sender, const BarrierSubscribeMessage &msg,
 			       const void *data, size_t datalen);
-    };
 
-    struct BarrierMigrationMessage {
-      struct RequestArgs {
-	Barrier barrier;
-	NodeID current_owner;
-      };
+    static void send_request(NodeID target, ID::IDType barrier_id,
+			     EventImpl::gen_t subscribe_gen,
+			     NodeID subscriber, bool forwarded);
+  };
 
-      static void handle_request(RequestArgs args);
+  struct BarrierTriggerMessage {
+    ID::IDType barrier_id;
+    EventImpl::gen_t trigger_gen;
+    EventImpl::gen_t previous_gen;
+    EventImpl::gen_t first_generation;
+    ReductionOpID redop_id;
+    NodeID migration_target;
+    unsigned base_arrival_count;
 
-      typedef ActiveMessageShortNoReply<BARRIER_MIGRATE_MSGID,
-					RequestArgs,
-					handle_request> Message;
+    static void handle_message(NodeID sender, const BarrierTriggerMessage &msg,
+			       const void *data, size_t datalen);
 
-      static void send_request(NodeID target, Barrier barrier, NodeID owner);
-    };
+    static void send_request(NodeID target, ID::IDType barrier_id,
+			     EventImpl::gen_t trigger_gen, EventImpl::gen_t previous_gen,
+			     EventImpl::gen_t first_generation, ReductionOpID redop_id,
+			     NodeID migration_target, unsigned base_arrival_count,
+			     const void *data, size_t datalen);
+  };
+
+  struct BarrierMigrationMessage {
+    Barrier barrier;
+    NodeID current_owner;
+
+    static void handle_message(NodeID sender, const BarrierMigrationMessage &msg,
+			       const void *data, size_t datalen);
+    static void send_request(NodeID target, Barrier barrier, NodeID owner);
+  };
 	
 }; // namespace Realm
 

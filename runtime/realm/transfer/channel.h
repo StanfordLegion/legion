@@ -1002,41 +1002,32 @@ namespace Realm {
     };
 
     struct NotifyXferDesCompleteMessage {
-      struct RequestArgs {
-        XferDesFence* fence;
-      };
+      XferDesFence* fence;
 
-      static void handle_request(RequestArgs args)
+      static void handle_message(NodeID sender,
+				 const NotifyXferDesCompleteMessage &args,
+				 const void *data,
+				 size_t datalen)
       {
         args.fence->mark_finished(true/*successful*/);
       }
-
-      typedef ActiveMessageShortNoReply<XFERDES_NOTIFY_COMPLETION_MSGID,
-                                        RequestArgs,
-                                        handle_request> Message;
-
       static void send_request(NodeID target, XferDesFence* fence)
       {
-        RequestArgs args;
-        args.fence = fence;
-        Message::request(target, args);
+	ActiveMessage<NotifyXferDesCompleteMessage> amsg(target);
+	amsg->fence = fence;
+	amsg.commit();
       }
     };
 
     struct XferDesRemoteWriteMessage {
-      struct RequestArgs : public BaseMedium {
-        //void *dst_buf;
-        RemoteWriteRequest *req;
-        NodeID sender;
-	XferDesID next_xd_guid;
-	size_t span_start, span_size, pre_bytes_total;
-      };
+      RemoteWriteRequest *req;
+      XferDesID next_xd_guid;
+      size_t span_start, span_size, pre_bytes_total;
 
-      static void handle_request(RequestArgs args, const void *data, size_t datalen);
-
-      typedef ActiveMessageMediumNoReply<XFERDES_REMOTEWRITE_MSGID,
-                                         RequestArgs,
-                                         handle_request> Message;
+      static void handle_message(NodeID sender,
+				 const XferDesRemoteWriteMessage &args,
+				 const void *data,
+				 size_t datalen);
 
       static void send_request(NodeID target, void *dst_buf,
                                const void *src_buf, size_t nbytes,
@@ -1046,16 +1037,15 @@ namespace Realm {
 			       size_t span_size,
 			       size_t pre_bytes_total) 
       {
-        RequestArgs args;
-        //args.dst_buf = dst_buf;
-        args.req = req;
-	args.next_xd_guid = next_xd_guid;
-	args.span_start = span_start;
-	args.span_size = span_size;
-	args.pre_bytes_total = pre_bytes_total;
-        args.sender = my_node_id;
+	ActiveMessage<XferDesRemoteWriteMessage> amsg(target, nbytes, dst_buf);
+	amsg->req = req;
+	amsg->next_xd_guid = next_xd_guid;
+	amsg->span_start = span_start;
+	amsg->span_size = span_size;
+	amsg->pre_bytes_total = pre_bytes_total;
         //TODO: need to ask Sean what payload mode we should use
-        Message::request(target, args, src_buf, nbytes, PAYLOAD_KEEP, dst_buf);
+	amsg.add_payload(src_buf, nbytes, PAYLOAD_KEEP);
+	amsg.commit();
       }
 
       static void send_request(NodeID target,  void *dst_buf,
@@ -1066,44 +1056,39 @@ namespace Realm {
 			       size_t span_size,
 			       size_t pre_bytes_total) 
       {
-        RequestArgs args;
-	//args.dst_buf = dst_buf;
-	args.req = req;
-	args.next_xd_guid = next_xd_guid;
-	args.span_start = span_start;
-	args.span_size = span_size;
-	args.pre_bytes_total = pre_bytes_total;
-	args.sender = my_node_id;
+	size_t payload_size = nbytes*nlines;
+	ActiveMessage<XferDesRemoteWriteMessage> amsg(target, payload_size, dst_buf);
+	amsg->req = req;
+	amsg->next_xd_guid = next_xd_guid;
+	amsg->span_start = span_start;
+	amsg->span_size = span_size;
+	amsg->pre_bytes_total = pre_bytes_total;
         //TODO: need to ask Sean what payload mode we should use
-        Message::request(target, args, src_buf, nbytes, src_str, nlines,
-                         PAYLOAD_KEEP, dst_buf);
+	PayloadSource *payload_src = new TwoDPayload(src_buf, nbytes, nlines, src_str, PAYLOAD_KEEP);
+	payload_src->copy_data(amsg.payload_ptr(payload_size));
+	amsg.commit();
       }
     };
 
     struct XferDesRemoteWriteAckMessage {
-      struct RequestArgs {
-        RemoteWriteRequest* req;
-      };
+      RemoteWriteRequest* req;
 
-      static void handle_request(RequestArgs args);
-      typedef ActiveMessageShortNoReply<XFERDES_REMOTEWRITE_ACK_MSGID,
-                                        RequestArgs,
-                                        handle_request> Message;
-
+      static void handle_message(NodeID sender,
+				 const XferDesRemoteWriteAckMessage &args,
+				 const void *data,
+				 size_t datalen);
       static void send_request(NodeID target, RemoteWriteRequest* req)
       {
-        RequestArgs args;
-        args.req = req;
-        Message::request(target, args);
+	ActiveMessage<XferDesRemoteWriteAckMessage> amsg(target);
+        amsg->req = req;
+	amsg.commit();
       }
     };
 
     struct XferDesCreateMessage {
-      struct RequestArgs : public BaseMedium {
         RegionInstance inst;
         Memory src_mem, dst_mem;
         XferDesFence* fence;
-      };
 
       // TODO: replace with new serialization stuff
       struct Payload {
@@ -1124,11 +1109,10 @@ namespace Realm {
         OffsetsAndSize &oas_vec(int idx) { return *((&oas_vec_start)+idx); }
       };
 
-      static void handle_request(RequestArgs args, const void *data, size_t datalen);
-
-      typedef ActiveMessageMediumNoReply<XFERDES_CREATE_MSGID,
-                                         RequestArgs,
-                                         handle_request> Message;
+      static void handle_message(NodeID sender,
+				 const XferDesCreateMessage &args,
+				 const void *data,
+				 size_t datalen);
 
       static void send_request(NodeID target, DmaRequest* dma_request, NodeID launch_node,
                                XferDesID guid, XferDesID pre_xd_guid, XferDesID next_xd_guid,
@@ -1143,69 +1127,54 @@ namespace Realm {
     };
 
     struct XferDesDestroyMessage {
-      struct RequestArgs {
-        XferDesID guid;
-      };
-
-      static void handle_request(RequestArgs args);
-
-      typedef ActiveMessageShortNoReply<XFERDES_DESTROY_MSGID,
-                                        RequestArgs,
-                                        handle_request> Message;
-
+      XferDesID guid;
+      static void handle_message(NodeID sender,
+				 const XferDesDestroyMessage &args,
+				 const void *data,
+				 size_t datalen);
       static void send_request(NodeID target, XferDesID guid)
       {
-        RequestArgs args;
-        args.guid = guid;
-        Message::request(target, args);
+	ActiveMessage<XferDesDestroyMessage> amsg(target);
+        amsg->guid = guid;
+	amsg.commit();
       }
     };
 
     struct UpdateBytesWriteMessage {
-      struct RequestArgs {
-        XferDesID guid;
-	size_t span_start, span_size, pre_bytes_total;
-      };
-
-      static void handle_request(RequestArgs args);
-
-      typedef ActiveMessageShortNoReply<XFERDES_UPDATE_BYTES_WRITE_MSGID,
-                                        RequestArgs,
-                                        handle_request> Message;
-
+      XferDesID guid;
+      size_t span_start, span_size, pre_bytes_total;
+      static void handle_message(NodeID sender,
+				 const UpdateBytesWriteMessage &args,
+				 const void *data,
+				 size_t datalen);
       static void send_request(NodeID target, XferDesID guid,
 			       size_t span_start, size_t span_size,
 			       size_t pre_bytes_total)
       {
-        RequestArgs args;
-        args.guid = guid;
-	args.span_start = span_start;
-	args.span_size = span_size;
-	args.pre_bytes_total = pre_bytes_total;
-        Message::request(target, args);
+	ActiveMessage<UpdateBytesWriteMessage> amsg(target);
+        amsg->guid = guid;
+	amsg->span_start = span_start;
+	amsg->span_size = span_size;
+	amsg->pre_bytes_total = pre_bytes_total;
+	amsg.commit();
       }
     };
 
     struct UpdateBytesReadMessage {
-      struct RequestArgs {
-        XferDesID guid;
-	size_t span_start, span_size;
-      };
-
-      static void handle_request(RequestArgs args);
-
-      typedef ActiveMessageShortNoReply<XFERDES_UPDATE_BYTES_READ_MSGID,
-                                        RequestArgs,
-                                        handle_request> Message;
-
+      XferDesID guid;
+      size_t span_start, span_size;
+      static void handle_message(NodeID sender,
+				 const UpdateBytesReadMessage &args,
+				 const void *data,
+				 size_t datalen);
       static void send_request(NodeID target, XferDesID guid,
 			       size_t span_start, size_t span_size)
       {
-        RequestArgs args;
-        args.guid = guid;
-	args.span_start = span_start;
-	args.span_size = span_size;
-        Message::request(target, args);
+	ActiveMessage<UpdateBytesReadMessage> amsg(target);
+        amsg->guid = guid;
+	amsg->span_start = span_start;
+	amsg->span_size = span_size;
+	amsg.commit();
       }
     };
 

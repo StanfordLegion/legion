@@ -3006,18 +3006,18 @@ namespace Realm {
 
   static int announcements_received = 0;
 
-  /*static*/ void NodeAnnounceMessage::handle_request(RequestArgs args,
-						      const void *data,
-						      size_t datalen)
+  /*static*/ void NodeAnnounceMessage::handle_message(NodeID sender, const NodeAnnounceMessage &args,
+						      const void *data, size_t datalen)
+
   {
     DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
     log_annc.info("%d: received announce from %d (%d procs, %d memories)\n",
 		  my_node_id,
-		  args.node_id,
+		  sender,
 		  args.num_procs,
 		  args.num_memories);
     
-    Node *n = &(get_runtime()->nodes[args.node_id]);
+    Node *n = &(get_runtime()->nodes[sender]);
     n->processors.resize(args.num_procs);
     n->memories.resize(args.num_memories);
     n->ib_memories.resize(args.num_ib_memories);
@@ -3025,29 +3025,12 @@ namespace Realm {
     // do the parsing of this data inside a mutex because it touches common
     //  data structures
     {
-      get_machine()->parse_node_announce_data(args.node_id, args.num_procs,
+      get_machine()->parse_node_announce_data(sender, args.num_procs,
 					      args.num_memories, args.num_ib_memories,
 					      data, datalen, true);
 
       __sync_fetch_and_add(&announcements_received, 1);
     }
-  }
-
-  /*static*/ void NodeAnnounceMessage::send_request(NodeID target,
-						    unsigned num_procs,
-						    unsigned num_memories,
-						    unsigned num_ib_memories,
-						    const void *data,
-						    size_t datalen,
-						    int payload_mode)
-  {
-    RequestArgs args;
-
-    args.node_id = my_node_id;
-    args.num_procs = num_procs;
-    args.num_memories = num_memories;
-    args.num_ib_memories = num_ib_memories;
-    Message::request(target, args, data, datalen, payload_mode);
   }
 
   /*static*/ void NodeAnnounceMessage::await_all_announcements(void)
@@ -3059,17 +3042,7 @@ namespace Realm {
     log_annc.info("node %d has received all of its announcements", my_node_id);
   }
   
-  /*static*/ void NodeAnnounceMessageNew::handle_message(NodeID sender, const NodeAnnounceMessageNew &msg,
-							 const void *data, size_t datalen)
-  {
-    NodeAnnounceMessage::RequestArgs args;
-    args.node_id = sender;
-    args.num_procs = msg.num_procs;
-    args.num_memories = msg.num_memories;
-    args.num_ib_memories = msg.num_ib_memories;
-    NodeAnnounceMessage::handle_request(args, data, datalen);
-  }
 
-  ActiveMessageHandlerReg<NodeAnnounceMessageNew> foo;
+  ActiveMessageHandlerReg<NodeAnnounceMessage> node_announce_message;
 
 }; // namespace Realm

@@ -991,6 +991,53 @@ protected:
 template <typename T, typename OLDHDLR>
 class ActiveMessageHandlerCompatReg;
 
+class PayloadSource {
+public:
+  PayloadSource(void) { }
+  virtual ~PayloadSource(void) { }
+public:
+  virtual void copy_data(void *dest) = 0;
+  virtual void *get_contig_pointer(void) { assert(false); return 0; }
+  virtual int get_payload_mode(void) { return PAYLOAD_KEEP; }
+};
+
+class ContiguousPayload : public PayloadSource {
+public:
+  ContiguousPayload(void *_srcptr, size_t _size, int _mode);
+  virtual ~ContiguousPayload(void) { }
+  virtual void copy_data(void *dest);
+  virtual void *get_contig_pointer(void) { return srcptr; }
+  virtual int get_payload_mode(void) { return mode; }
+protected:
+  void *srcptr;
+  size_t size;
+  int mode;
+};
+
+class TwoDPayload : public PayloadSource {
+public:
+  TwoDPayload(const void *_srcptr, size_t _line_size, size_t _line_count,
+	      ptrdiff_t _line_stride, int _mode);
+  virtual ~TwoDPayload(void) { }
+  virtual void copy_data(void *dest);
+protected:
+  const void *srcptr;
+  size_t line_size, line_count;
+  ptrdiff_t line_stride;
+  int mode;
+};
+
+class SpanPayload : public PayloadSource {
+public:
+  SpanPayload(const SpanList& _spans, size_t _size, int _mode);
+  virtual ~SpanPayload(void) { }
+  virtual void copy_data(void *dest);
+protected:
+  SpanList spans;
+  size_t size;
+  int mode;
+};
+
 #include "realm/activemsg.inl"
 
 #endif

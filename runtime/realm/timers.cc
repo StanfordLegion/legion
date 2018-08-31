@@ -59,9 +59,13 @@ namespace Realm {
     {
       count_left = max_node_id;
 
+      NodeSet nodes;
       for(NodeID i = 0; i <= max_node_id; i++)
         if(i != my_node_id)
-	  TimerDataRequestMessage::send_request(i, this);
+	  nodes.add(i);
+      ActiveMessage<TimerDataRequestMessage> amsg(nodes);
+      amsg->rollup_ptr = (void*)this;
+      amsg.commit();
 
       // take the lock so that we can safely sleep until all the responses
       //  arrive
@@ -143,7 +147,7 @@ namespace Realm {
       pthread_key_create(&thread_timer_key,thread_timer_free);
     assert(ret == 0);
   }
-  
+
 #ifdef DETAILED_TIMING
     /*static*/ void DetailedTimer::clear_timers(bool all_nodes /*= true*/)
     {
@@ -162,12 +166,13 @@ namespace Realm {
 
       // if we've been asked to clear other nodes too, send a message
       if(all_nodes) {
-	ClearTimerRequestArgs args;
-	args.sender = my_node_id;
-
+	NodeSet nodes;
 	for(NodeID i = 0; i < max_node_id; i++)
 	  if(i != my_node_id)
-	    ClearTimerRequestMessage::request(i, args);
+	    nodes.add(i);
+	ActiveMessage<ClearTimersMessage> amsg(nodes);
+	amsg->dummy = 0;
+	amsg.commit();
       }
     }
 
@@ -285,27 +290,23 @@ namespace Realm {
   // class ClearTimersMessage
   //
 
-  /*static*/ void ClearTimersMessage::handle_request(RequestArgs args)
+  /*static*/ void ClearTimersMessage::handle_message(NodeID sender,
+						     const ClearTimerMessage &args,
+						     const void *data,
+						     size_t datalen)
   {
     DetailedTimer::clear_timers(false);
   }
 
-  /*static*/ void ClearTimersMessage::send_request(NodeID target)
-  {
-    RequestArgs args;
-
-    args.sender = my_node_id;
-    args.dummy = 0;
-    Message::request(target, args);
-  }
-
-  
   ////////////////////////////////////////////////////////////////////////
   //
   // class TimerDataRequestMessage
   //
 
-  /*static*/ void TimerDataRequestMessage::handle_request(RequestArgs args)
+  /*static*/ void TimerDataRequestMessage::handle_message(NodeID sender,
+							  const TimerDataRequestMessage &args,
+							  const void *data,
+							  size_t datalen)
   {
     std::map<int,double> timers;
     DetailedTimer::roll_up_timers(timers, true);
@@ -324,46 +325,30 @@ namespace Realm {
     }
     assert(count <= 200);
 
-    TimerDataResponseMessage::send_request(args.sender, args.rollup_ptr,
-					   return_data, count*sizeof(double),
-					   PAYLOAD_COPY);
+    ActiveMessage<TimerDataResponseMessage> amsg(sender, count*sizeof(double));
+    amsg->rollup_ptr = args.rollup_ptr;
+    amsg.add_payload(return_data, count*sizeof(double));
+    amsg.commit();
   }
-
-  /*static*/ void TimerDataRequestMessage::send_request(NodeID target,
-							void *rollup_ptr)
-  {
-    RequestArgs args;
-
-    args.sender = my_node_id;
-    args.rollup_ptr = rollup_ptr;
-    Message::request(target, args);
-  }
-  
 
   ////////////////////////////////////////////////////////////////////////
   //
   // class TimerDataResponseMessage
   //
 
-  /*static*/ void TimerDataResponseMessage::handle_request(RequestArgs args,
+  /*static*/ void TimerDataResponseMessage::handle_message(NodeID sender,
+							   const TimerDataResponseMessage &args,
 							   const void *data,
 							   size_t datalen)
+
   {
     ((MultiNodeRollUp *)args.rollup_ptr)->handle_data(data, datalen); 
   }
 
-  /*static*/ void TimerDataResponseMessage::send_request(NodeID target,
-							 void *rollup_ptr,
-							 const void *data,
-							 size_t datalen,
-							 int payload_mode)
-  {
-    RequestArgs args;
+  ActiveMessageHandlerReg<ClearTimersMessage> clear_timers_message_handler;
+  ActiveMessageHandlerReg<TimerDataRequestMessage> timers_data_request_message_handler;
+  ActiveMessageHandlerReg<TimerDataResponseMessage> timer_data_response_message_handler;
 
-    args.sender = my_node_id;
-    args.rollup_ptr = rollup_ptr;
-    Message::request(target, args, data, datalen, payload_mode);
-  }
 #endif  
 
 }; // namespace Realm

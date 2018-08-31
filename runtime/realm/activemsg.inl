@@ -161,7 +161,7 @@ void ActiveMessage<T>::commit(void)
   } else {
     enqueue_message(target, MSGID_NEW_ACTIVEMSG,
 		    &args, sizeof(args),
-		    payload, args.payload_len, PAYLOAD_FREE);
+		    payload, args.payload_len, PAYLOAD_FREE, dest_payload_addr);
   }
   valid = false;
 }
