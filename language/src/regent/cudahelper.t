@@ -513,6 +513,11 @@ end
 -- ## Code generation for parallel prefix operators
 -- #################
 
+local NUM_BANKS = 16
+local bank_offset = macro(function(e)
+  return `(e / [NUM_BANKS])
+end)
+
 local function generate_prefix_op_kernel(shmem, tid, num_leaves, op, init, left_to_right)
   return quote
     do
@@ -525,13 +530,16 @@ local function generate_prefix_op_kernel(shmem, tid, num_leaves, op, init, left_
         if [tid]  < d then
           var ai : int = offset * oa - [left_to_right]
           var bi : int = offset * ob - [left_to_right]
+          ai = ai + bank_offset(ai)
+          bi = bi + bank_offset(bi)
           [shmem][bi] = [std_base.quote_binary_op(op, `([shmem][ai]), `([shmem][bi]))]
         end
         offset = offset << 1
         d = d >> 1
       end
       if [tid] == 0 then
-        [shmem][ ([num_leaves] - [left_to_right]) % [num_leaves] ] = [init]
+        var idx = ([num_leaves] - [left_to_right]) % [num_leaves]
+        [shmem][idx + bank_offset(idx)] = [init]
       end
       d = 1
       while d <= [num_leaves] do
@@ -540,6 +548,8 @@ local function generate_prefix_op_kernel(shmem, tid, num_leaves, op, init, left_
         if [tid] < d and offset > 0 then
           var ai = offset * oa - [left_to_right]
           var bi = offset * ob - [left_to_right]
+          ai = ai + bank_offset(ai)
+          bi = bi + bank_offset(bi)
           var x = [shmem][ai]
           [shmem][ai] = [shmem][bi]
           [shmem][bi] = [std_base.quote_binary_op(op, x, `([shmem][bi]))]
@@ -565,23 +575,23 @@ local function generate_prefix_op_prescan(shmem, lhs, rhs, lhs_ptr, rhs_ptr, res
     [rhs_ptr] = &([rhs_ptr][ bid * [NUM_LEAVES] ])
     var lr = [int]([dir] >= 0)
 
-    [idx].__ptr = 2 * t
+    [idx].__ptr = t
     [rhs.actions]
-    [shmem][ [idx].__ptr ] = [rhs.value]
-    [idx].__ptr = [idx].__ptr + 1
+    [shmem][ [idx].__ptr + bank_offset([idx].__ptr)] = [rhs.value]
+    [idx].__ptr = [idx].__ptr + [THREAD_BLOCK_SIZE]
     [rhs.actions]
-    [shmem][ [idx].__ptr ] = [rhs.value]
+    [shmem][ [idx].__ptr + bank_offset([idx].__ptr)] = [rhs.value]
 
     [generate_prefix_op_kernel(shmem, t, NUM_LEAVES, op, init, lr)]
 
     var [res]
-    [idx].__ptr = 2 * t
+    [idx].__ptr = t
     [rhs.actions]
-    [res] = [std_base.quote_binary_op(op, `([shmem][ [idx].__ptr ]), rhs.value)]
+    [res] = [std_base.quote_binary_op(op, `([shmem][ [idx].__ptr + bank_offset([idx].__ptr) ]), rhs.value)]
     [lhs.actions]
-    [idx].__ptr = [idx].__ptr + 1
+    [idx].__ptr = [idx].__ptr + [THREAD_BLOCK_SIZE]
     [rhs.actions]
-    [res] = [std_base.quote_binary_op(op, `([shmem][ [idx].__ptr ]), rhs.value)]
+    [res] = [std_base.quote_binary_op(op, `([shmem][ [idx].__ptr + bank_offset([idx].__ptr) ]), rhs.value)]
     [lhs.actions]
   end
 
@@ -594,32 +604,30 @@ local function generate_prefix_op_prescan(shmem, lhs, rhs, lhs_ptr, rhs_ptr, res
     var t = tid_x()
     var lr = [int]([dir] >= 0)
 
-    [idx].__ptr = 2 * t
-    [shmem][ [idx].__ptr ] = [init]
+    [idx].__ptr = t
+    [rhs.actions]
+    [shmem][ [idx].__ptr + bank_offset([idx].__ptr)] = [rhs.value]
+    [idx].__ptr = [idx].__ptr + (num_leaves / 2)
     if [idx].__ptr < num_elmts then
       [rhs.actions]
-      [shmem][ [idx].__ptr ] = [rhs.value]
-    end
-    [idx].__ptr = [idx].__ptr + 1
-    [shmem][ [idx].__ptr ] = [init]
-    if [idx].__ptr < num_elmts then
-      [rhs.actions]
-      [shmem][ [idx].__ptr ] = [rhs.value]
+      [shmem][ [idx].__ptr + bank_offset([idx].__ptr) ] = [rhs.value]
+    else
+      [shmem][ [idx].__ptr + bank_offset([idx].__ptr) ] = [init]
     end
 
     [generate_prefix_op_kernel(shmem, t, num_leaves, op, init, lr)]
 
     var [res]
-    [idx].__ptr = 2 * t
+    [idx].__ptr = t
+    [rhs.actions]
+    [res] = [std_base.quote_binary_op(op,
+        `([shmem][ [idx].__ptr + bank_offset([idx].__ptr) ]), rhs.value)]
+    [lhs.actions]
+    [idx].__ptr = [idx].__ptr + (num_leaves / 2)
     if [idx].__ptr < num_elmts then
       [rhs.actions]
-      [res] = [std_base.quote_binary_op(op, `([shmem][ [idx].__ptr ]), rhs.value)]
-      [lhs.actions]
-    end
-    [idx].__ptr = [idx].__ptr + 1
-    if [idx].__ptr < num_elmts then
-      [rhs.actions]
-      [res] = [std_base.quote_binary_op(op, `([shmem][ [idx].__ptr ]), rhs.value)]
+      [res] = [std_base.quote_binary_op(op,
+          `([shmem][ [idx].__ptr + bank_offset([idx].__ptr) ]), rhs.value)]
       [lhs.actions]
     end
   end
@@ -640,31 +648,27 @@ local function generate_prefix_op_scan(shmem, lhs_wr, lhs_rd, lhs_ptr, res, idx,
     [lhs_ptr] = &([lhs_ptr][ bid * [offset] * [NUM_LEAVES] ])
     var lr = [int]([dir] >= 0)
 
-    var tidx = 2 * t
+    var tidx = t
     [idx].__ptr = (tidx + lr) * [offset] - lr
     [lhs_rd.actions]
-    [shmem][tidx] = [lhs_rd.value]
-    tidx = tidx + 1
+    [shmem][tidx + bank_offset(tidx)] = [lhs_rd.value]
+    tidx = tidx + [THREAD_BLOCK_SIZE]
     [idx].__ptr = (tidx + lr) * [offset] - lr
     [lhs_rd.actions]
-    [shmem][tidx] = [lhs_rd.value]
+    [shmem][tidx + bank_offset(tidx)] = [lhs_rd.value]
 
     [generate_prefix_op_kernel(shmem, t, NUM_LEAVES, op, init, lr)]
 
-    var rl = 1 - lr
     var [res]
-    tidx = 2 * t
-
+    tidx = t
     [idx].__ptr = (tidx + lr) * [offset] - lr
     [lhs_rd.actions]
-    [res] = [std_base.quote_binary_op(op, `([shmem][tidx]), lhs_rd.value)]
+    [res] = [std_base.quote_binary_op(op, `([shmem][tidx + bank_offset(tidx)]), lhs_rd.value)]
     [lhs_wr.actions]
-
-    tidx = tidx + 1
-
+    tidx = tidx + [THREAD_BLOCK_SIZE]
     [idx].__ptr = (tidx + lr) * [offset] - lr
     [lhs_rd.actions]
-    [res] = [std_base.quote_binary_op(op, `([shmem][tidx]), lhs_rd.value)]
+    [res] = [std_base.quote_binary_op(op, `([shmem][tidx + bank_offset(tidx)]), lhs_rd.value)]
     [lhs_wr.actions]
   end
 
@@ -678,39 +682,31 @@ local function generate_prefix_op_scan(shmem, lhs_wr, lhs_rd, lhs_ptr, res, idx,
     var lr = [int]([dir] >= 0)
 
     if lr == 1 then
-      var tidx = 2 * t
-      if tidx < [num_elmts] then
-        [idx].__ptr = (tidx + 1) * [offset] - 1
-        [lhs_rd.actions]
-        [shmem][tidx] = [lhs_rd.value]
-      else
-        [shmem][tidx] = [init]
-      end
+      var tidx = t
+      [idx].__ptr = (tidx + 1) * [offset] - 1
+      [lhs_rd.actions]
+      [shmem][tidx + bank_offset(tidx)] = [lhs_rd.value]
 
-      tidx = tidx + 1
+      tidx = t + num_leaves / 2
       if tidx < [num_elmts] then
         [idx].__ptr = (tidx + 1) * [offset] - 1
         [lhs_rd.actions]
-        [shmem][tidx] = [lhs_rd.value]
+        [shmem][tidx + bank_offset(tidx)] = [lhs_rd.value]
       else
-        [shmem][tidx] = [init]
+        [shmem][tidx + bank_offset(tidx)] = [init]
       end
     else
-      var tidx = 2 * t
+      var tidx = t
+      [idx].__ptr = tidx * [offset]
+      [lhs_rd.actions]
+      [shmem][tidx + bank_offset(tidx)] = [lhs_rd.value]
+      tidx = t + num_leaves / 2
       if tidx < [num_elmts] then
         [idx].__ptr = tidx * [offset]
         [lhs_rd.actions]
-        [shmem][tidx] = [lhs_rd.value]
+        [shmem][tidx + bank_offset(tidx)] = [lhs_rd.value]
       else
-        [shmem][tidx] = [init]
-      end
-      tidx = tidx + 1
-      if tidx < [num_elmts] then
-        [idx].__ptr = tidx * [offset]
-        [lhs_rd.actions]
-        [shmem][tidx] = [lhs_rd.value]
-      else
-        [shmem][tidx] = [init]
+        [shmem][tidx + bank_offset(tidx)] = [init]
       end
     end
 
@@ -718,33 +714,29 @@ local function generate_prefix_op_scan(shmem, lhs_wr, lhs_rd, lhs_ptr, res, idx,
 
     var [res]
     if lr == 1 then
-      var tidx = 2 * t
-      if tidx < [num_elmts] then
-        [idx].__ptr = (tidx + 1) * [offset] - 1
-        [lhs_rd.actions]
-        [res] = [std_base.quote_binary_op(op, `([shmem][tidx]), lhs_rd.value)]
-        [lhs_wr.actions]
-      end
-      tidx = tidx + 1
+      var tidx = t
+      [idx].__ptr = (tidx + 1) * [offset] - 1
+      [lhs_rd.actions]
+      [res] = [std_base.quote_binary_op(op, `([shmem][tidx + bank_offset(tidx)]), lhs_rd.value)]
+      [lhs_wr.actions]
+      tidx = tidx + num_leaves / 2
       if [tidx] < [num_elmts] then
         [idx].__ptr = (tidx + 1) * [offset] - 1
         [lhs_rd.actions]
-        [res] = [std_base.quote_binary_op(op, `([shmem][tidx]), lhs_rd.value)]
+        [res] = [std_base.quote_binary_op(op, `([shmem][tidx + bank_offset(tidx)]), lhs_rd.value)]
         [lhs_wr.actions]
       end
     else
-      var tidx = 2 * t
-      if tidx < [num_elmts] then
-        [idx].__ptr = tidx * [offset]
-        [lhs_rd.actions]
-        [res] = [std_base.quote_binary_op(op, `([shmem][tidx]), lhs_rd.value)]
-        [lhs_wr.actions]
-      end
-      tidx = tidx + 1
+      var tidx = t
+      [idx].__ptr = tidx * [offset]
+      [lhs_rd.actions]
+      [res] = [std_base.quote_binary_op(op, `([shmem][tidx + bank_offset(tidx)]), lhs_rd.value)]
+      [lhs_wr.actions]
+      tidx = tidx + num_leaves / 2
       if [tidx] < [num_elmts] then
         [idx].__ptr = tidx * [offset]
         [lhs_rd.actions]
-        [res] = [std_base.quote_binary_op(op, `([shmem][tidx]), lhs_rd.value)]
+        [res] = [std_base.quote_binary_op(op, `([shmem][tidx + bank_offset(tidx)]), lhs_rd.value)]
         [lhs_wr.actions]
       end
     end
