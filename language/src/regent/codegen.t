@@ -9254,38 +9254,26 @@ local function generate_parallel_prefix_gpu(cx, node)
   local res_value = codegen.expr(cx, res_expr)
 
   local rhs = rhs_value:read(cx)
-  local lhs = lhs_value:write(cx, res_value)
-
-  local num_elmts = terralib.newsymbol(c.size_t, "num_elmts")
-  local num_leaves = terralib.newsymbol(c.size_t, "num_leaves")
-  local dir = terralib.newsymbol(std.as_read(node.dir.expr_type), "dir")
+  local lhs_write = lhs_value:write(cx, res_value)
+  local lhs_read = lhs_value:read(cx)
 
   local lhs_base_pointer = cx:region(lhs_type):base_pointer(lhs_field)
   local rhs_base_pointer = cx:region(rhs_type):base_pointer(rhs_field)
 
-  local prescan =
-    cudahelper.generate_parallel_prescan(lhs, rhs, lhs_base_pointer, rhs_base_pointer,
-        res:getsymbol(), idx:getsymbol(), num_elmts, num_leaves, dir, node.op, elem_type)
-  local kernel_id = cx.task_meta:get_cuda_variant():add_cuda_kernel(prescan)
-  local shared_mem_size = cudahelper.compute_prefix_op_buffer_size(elem_type)
+  local dir = terralib.newsymbol(std.as_read(node.dir.expr_type), "dir")
+  local total = terralib.newsymbol(uint64, "total")
 
-  local args = terralib.newlist()
-  args:insertall({lhs_base_pointer, rhs_base_pointer, num_elmts, num_leaves, dir})
-
-  local count = terralib.newsymbol(c.size_t, "count")
-  local kernel_call =
-    cudahelper.codegen_kernel_call(kernel_id, count, args, shared_mem_size)
-
+  local launch_actions =
+    cudahelper.generate_parallel_prefix_op(cx.task_meta:get_cuda_variant(), total,
+                                           lhs_write, lhs_read, rhs, lhs_base_pointer, rhs_base_pointer,
+                                           res:getsymbol(), idx:getsymbol(), dir, node.op, elem_type)
   return quote
-    [dir_value.actions]
-    var [dir] = [dir_value.value]
-    var [num_elmts] = [bounds]:size()
-    var [num_leaves] = [cudahelper.get_thread_block_size()] * 2
-    while [num_leaves] / 2 > [num_elmts] do
-      [num_leaves] = [num_leaves] / 2
+    do
+      [dir_value.actions]
+      var [dir] = [dir_value.value]
+      var [total] = [uint64]([bounds]:size())
+      [launch_actions]
     end
-    var [count] = [num_leaves] / 2
-    [kernel_call]
   end
 end
 

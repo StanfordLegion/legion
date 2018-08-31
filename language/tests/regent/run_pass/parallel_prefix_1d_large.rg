@@ -31,8 +31,8 @@ function make_fs(ty)
   return fs
 end
 
-local types = terralib.newlist { double, uint32, int64 }
-local formats = terralib.newlist { "%lf", "%u", "%ld" }
+local types = terralib.newlist { uint32, int64 }
+local formats = terralib.newlist { "%u", "%ld" }
 
 local fs_types = {}
 local format_strings = {}
@@ -45,6 +45,7 @@ function make_tasks(ty)
   local init_task, prefix_task, check_task
   local fs_type = fs_types[ty]
 
+  __demand(__cuda)
   task init_task(r : region(ispace(int1d), fs_type))
   where
     reads writes(r)
@@ -65,8 +66,8 @@ function make_tasks(ty)
   do
     var dir1 = 1
     var dir2 = -1
-    __parallel_prefix(r.output_gpu.v_add1, r.input,   +, dir1)
-    __parallel_prefix(r.output_gpu.v_add2, r.input,   +, dir2)
+    __parallel_prefix(r.output_gpu.v_add1, r.input, +, dir1)
+    __parallel_prefix(r.output_gpu.v_add2, r.input, +, dir2)
   end
 
   task check_task(r : region(ispace(int1d), fs_type))
@@ -87,29 +88,17 @@ function make_tasks(ty)
 
     for e in r do
       [(function()
-        if DEBUG then
-          return rquote
+        if DEBUG then return rquote
             regentlib.c.printf([format_strings[ty] .. ", " .. format_strings[ty] .. ", " .. format_strings[ty] .. "\n"],
               e.input, e.temp.v_add1, e.output_gpu.v_add1)
+            regentlib.c.printf([format_strings[ty] .. ", " .. format_strings[ty] .. ", " .. format_strings[ty] .. "\n"],
+              e.input, e.temp.v_add2, e.output_gpu.v_add2)
           end
         else
           return rquote end
         end
       end)()];
       regentlib.assert(e.temp.v_add1 == e.output_gpu.v_add1, "test failed")
-    end
-
-    for e in r do
-      [(function()
-        if DEBUG then
-          return rquote
-            regentlib.c.printf([format_strings[ty] .. ", " .. format_strings[ty] .. ", " .. format_strings[ty] .. "\n"],
-              e.output_gpu.v_add1, e.temp.v_add2, e.output_gpu.v_add2)
-          end
-        else
-          return rquote end
-        end
-      end)()];
       regentlib.assert(e.temp.v_add2 == e.output_gpu.v_add2, "test failed")
     end
   end
@@ -147,11 +136,13 @@ task test(size : int64)
 end
 
 task main()
-  for i = 1, 32 do
-    test(i)
-  end
-  for i = 33, 256, 8 do
-    test(i)
+  for i = 1, 10, 3 do
+    for j = 1, 10, 2 do
+      for k = 1, 10 do
+        test(256 * 256 * i + 256 * j + k)
+        __fence(__execution, __block)
+      end
+    end
   end
 end
 
