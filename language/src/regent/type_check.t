@@ -3550,11 +3550,73 @@ function type_check.stat_parallelize_with(cx, node)
   }
 end
 
+local supported_parallel_prefix_ops = {
+  ["+"] = true,
+  ["*"] = true,
+  ["min"] = true,
+  ["max"] = true,
+}
+
 function type_check.stat_parallel_prefix(cx, node)
   local lhs = type_check.expr_region_root(cx, node.lhs)
   local rhs = type_check.expr_region_root(cx, node.rhs)
   local op = node.op
   local dir = type_check.expr(cx, node.dir)
+
+  local args = terralib.newlist({lhs, rhs})
+  local prev_field_type = nil
+  local prev_ispace_type = nil
+  for i = 1, #args do
+    local arg = args[i]
+    assert(std.is_region(arg.expr_type))
+    local prefix = "type mismatch in argument " .. tostring(i) .. ": "
+    if #arg.fields > 1 then
+      report.error(arg, prefix .. "expected one or no field path, but got " .. tostring(#arg.fields))
+    end
+
+    local field_type = arg.expr_type:fspace()
+    if #arg.fields > 0 then
+      field_type = std.get_field_path(field_type, arg.fields[1])
+    end
+    if not field_type:isprimitive() then
+      report.error(arg, prefix .. "expected a primitive type, but got " .. tostring(field_type))
+    end
+    if prev_field_type ~= nil and not std.type_eq(prev_field_type, field_type) then
+      report.error(arg,
+          prefix .. "expected " .. tostring(prev_field_type) .. ", but got " .. tostring(field_type))
+    end
+    prev_field_type = field_type
+
+    local ispace_type = arg.expr_type:ispace()
+    -- TODO: Need to extend the parallel prefix operator implementation to multi-dimensional regions
+    if ispace_type.dim ~= 1 then
+      report.error(arg,
+          prefix .. "expected a region of " .. tostring(ispace(int1d)) ..
+          ", but got a region of " .. tostring(ispace_type))
+    end
+    prev_ispace_type = ispace_type
+  end
+
+  local function field_eq(field1, field2)
+    if #field1 ~= #field2 then return false end
+    if #field1 == 0 then return true end
+    return #field1[1] == #field2[1]
+  end
+
+  if std.type_eq(lhs.expr_type, rhs.expr_type) and field_eq(lhs.fields, rhs.fields) then
+    report.error(node, "source and target of parallel prefix operator must be different")
+  end
+
+  if not supported_parallel_prefix_ops[node.op] then
+    report.error(node,
+        "type mismatch in argument 3: operator " .. node.op .. " is not a parallel prefix operator")
+  end
+
+  if not std.as_read(dir.expr_type):isintegral() then
+    report.error(node.dir,
+        "type mismatch in argument 4: expected an integer type, but got " .. tostring(dir.expr_type))
+  end
+
   return ast.typed.stat.ParallelPrefix {
     lhs = lhs,
     rhs = rhs,
