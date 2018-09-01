@@ -8997,6 +8997,31 @@ function codegen.stat_parallelize_with(cx, node)
   return quote [codegen.block(cx, node.block)] end
 end
 
+local function generate_parallel_prefix_bounds_checks(cx, node, lhs_region, rhs_region)
+  if not bounds_checks then
+    return quote end
+  else
+    local lhs_ispace = cx:ispace(lhs_region:ispace())
+    local rhs_ispace = cx:ispace(rhs_region:ispace())
+    local ispaces = terralib.newlist({lhs_ispace, rhs_ispace})
+    local dense_checks = ispaces:map(function(is)
+      return quote
+        do
+          var domain = c.legion_index_space_get_domain([cx.runtime], [is.index_space])
+          std.assert_error(c.legion_domain_is_dense(domain),
+              [get_source_location(node) .. ": parallel prefix operator supports only dense regions"])
+        end
+      end
+    end)
+    return quote
+      [dense_checks];
+      std.assert_error([lhs_ispace.bounds] == [rhs_ispace.bounds],
+          [get_source_location(node) ..
+          ": the source and the target of a parallel prefix operator must have the same size"])
+    end
+  end
+end
+
 local function generate_parallel_prefix_cpu(cx, node)
   -- Generate the following snippet of code:
   --
@@ -9107,23 +9132,26 @@ local function generate_parallel_prefix_cpu(cx, node)
   local lhs_write_loop = lhs_value:write(cx, op_value)
 
   local actions = quote
-    [dir.actions];
-    var [start_i], [end_i] = [bounds].lo, [bounds].hi
-    var [index_value], [prev_index_value]
-    if [index_type]([dir.value]) >= [index_type:zero()] then
-      [index_value] = [start_i]
-    else
-      [index_value] = [end_i]
-    end
-    [lhs_write_init.actions];
-    [prev_index_value] = [index_value]
-    [index_value] = [index_value] + [dir.value]
-    while [start_i] <= [index_value] and [index_value] <= [end_i] do
-      [lhs_write_loop.actions];
+    do
+      [generate_parallel_prefix_bounds_checks(cx, node, lhs_type, rhs_type)];
+      [dir.actions];
+      var [start_i], [end_i] = [bounds].lo, [bounds].hi
+      var [index_value], [prev_index_value]
+      if [index_type]([dir.value]) >= [index_type:zero()] then
+        [index_value] = [start_i]
+      else
+        [index_value] = [end_i]
+      end
+      [lhs_write_init.actions];
       [prev_index_value] = [index_value]
       [index_value] = [index_value] + [dir.value]
+      while [start_i] <= [index_value] and [index_value] <= [end_i] do
+        [lhs_write_loop.actions];
+        [prev_index_value] = [index_value]
+        [index_value] = [index_value] + [dir.value]
+      end
+      [emit_debuginfo(node)]
     end
-    [emit_debuginfo(node)]
   end
   return actions
 end
@@ -9269,6 +9297,7 @@ local function generate_parallel_prefix_gpu(cx, node)
                                            res:getsymbol(), idx:getsymbol(), dir, node.op, elem_type)
   return quote
     do
+      [generate_parallel_prefix_bounds_checks(cx, node, lhs_type, rhs_type)];
       [dir_value.actions]
       var [dir] = [dir_value.value]
       var [total] = [uint64]([bounds]:size())
