@@ -507,7 +507,7 @@ function cudahelper.generate_reduction_postamble(reductions, device_ptrs_map)
       end
     end
   end
-  if postamble == nil then postamble quote end end
+  if postamble == nil then postamble = quote end end
   return postamble
 end
 
