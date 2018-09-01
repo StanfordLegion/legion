@@ -484,10 +484,13 @@ function cudahelper.generate_reduction_kernel(reductions, device_ptrs_map)
 end
 
 function cudahelper.generate_reduction_postamble(reductions, device_ptrs_map)
-  local postamble = quote end
+  local postamble = nil
   for device_ptr, red_var in pairs(device_ptrs_map) do
     local red_op = reductions[red_var]
     local init = std_base.reduction_op_init[red_op][red_var.type]
+    if postamble == nil then
+      postamble = quote RuntimeAPI.cudaDeviceSynchronize() end
+    end
     postamble = quote
       [postamble]
       do
@@ -504,6 +507,7 @@ function cudahelper.generate_reduction_postamble(reductions, device_ptrs_map)
       end
     end
   end
+  if postamble == nil then postamble quote end end
   return postamble
 end
 
