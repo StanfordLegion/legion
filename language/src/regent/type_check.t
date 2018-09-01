@@ -3600,7 +3600,7 @@ function type_check.stat_parallel_prefix(cx, node)
   local function field_eq(field1, field2)
     if #field1 ~= #field2 then return false end
     if #field1 == 0 then return true end
-    return #field1[1] == #field2[1]
+    return field1[1] == field2[1]
   end
 
   if std.type_eq(lhs.expr_type, rhs.expr_type) and field_eq(lhs.fields, rhs.fields) then
